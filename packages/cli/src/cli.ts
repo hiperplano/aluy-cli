@@ -65,6 +65,14 @@ export type CliAction =
       json: boolean;
       which: 'models' | 'providers';
     }
+  // ADR-0134/0135 — `aluy telegram <sub>`: gestão do conector Telegram (login=token no
+  // keychain; allow/deny=allowlist de chat-ids no config; status). Sem rede nesta fatia.
+  | {
+      kind: 'telegram';
+      sub: 'login' | 'logout' | 'allow' | 'deny' | 'status';
+      token?: string;
+      chatId?: number;
+    }
   // EST-0970 (search) — `aluy mcp search <query>`: busca no REGISTRO OFICIAL ABERTO
   // (sem key). SÓ lista + sugere `aluy mcp add`; instalar é ato separado.
   | { kind: 'mcp-search'; query: string }
@@ -457,6 +465,14 @@ Comandos de auth:
            --deep/--test: ADICIONA o teste do tier ao vivo (1 chamada mínima ao
            modelo — opt-in, pois gasta). Sem --deep, NÃO chama o modelo.
 
+Conector Telegram (preparação — a bridge ainda NÃO está ativa):
+  telegram login [--token <t>]   Guarda o token do bot (@BotFather) no KEYCHAIN do SO
+                                 (nunca em arquivo). Sem --token, pede no prompt sem eco.
+  telegram allow <chat-id>       Autoriza um chat-id (a allowlist do dono — default fechado).
+  telegram deny <chat-id>        Remove um chat-id da allowlist.
+  telegram status                Mostra token (redigido), allowlist e o estado da bridge.
+  telegram logout                Apaga o token do bot do keychain.
+
 Agentes .md:
   agents   Lista os perfis de sub-agente .md que o aluy MAPEOU — GLOBAIS
            (~/.aluy/agents/*.md, config do dono) e de PROJETO (.claude/agents/*.md no
@@ -792,6 +808,38 @@ export function parseArgs(argv: readonly string[]): CliAction {
       else if (v === 'broker') scope = 'broker';
     }
     return { kind: 'models', scope, json, which: sub === 'providers' ? 'providers' : 'models' };
+  }
+
+  // ADR-0134/0135 — `aluy telegram <login|logout|allow|deny|status> [args]`. `--help` cai
+  // no help geral. Subcomando inválido/ausente ⇒ usage-error.
+  if (sub === 'telegram' && !argv.includes('-h') && !argv.includes('--help')) {
+    const tgSub = argv[1];
+    const valid = ['login', 'logout', 'allow', 'deny', 'status'] as const;
+    if (tgSub === undefined || !(valid as readonly string[]).includes(tgSub)) {
+      return {
+        kind: 'usage-error',
+        message: 'uso: aluy telegram <login|logout|allow|deny|status>',
+        exitCode: 2,
+      };
+    }
+    const rest = argv.slice(2);
+    if (tgSub === 'login') {
+      const token = flagValue(rest, 'token');
+      return { kind: 'telegram', sub: 'login', ...(token !== undefined ? { token } : {}) };
+    }
+    if (tgSub === 'allow' || tgSub === 'deny') {
+      const raw = rest.find((a) => !a.startsWith('-'));
+      const chatId = raw !== undefined && /^-?\d+$/.test(raw) ? Number(raw) : undefined;
+      if (chatId === undefined) {
+        return {
+          kind: 'usage-error',
+          message: `uso: aluy telegram ${tgSub} <chat-id>  (um inteiro)`,
+          exitCode: 2,
+        };
+      }
+      return { kind: 'telegram', sub: tgSub, chatId };
+    }
+    return { kind: 'telegram', sub: tgSub as 'logout' | 'status' };
   }
 
   // EST-0970 (search) — `aluy mcp search <query…>` PRIMEIRO (mais específico): busca no

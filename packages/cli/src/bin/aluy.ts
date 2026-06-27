@@ -279,6 +279,17 @@ async function main(): Promise<void> {
       process.exitCode = await runLogout();
       return;
     }
+    case 'telegram': {
+      // ADR-0134/0135 — gestão do conector Telegram (login=keychain; allow/deny=allowlist
+      // no config; status). Sem rede nesta fatia (a bridge segue inerte até `--telegram`).
+      const { runTelegram } = await import('../commands/telegram.js');
+      process.exitCode = await runTelegram({
+        sub: action.sub,
+        ...(action.token !== undefined ? { token: action.token } : {}),
+        ...(action.chatId !== undefined ? { chatId: action.chatId } : {}),
+      });
+      return;
+    }
     case 'whoami': {
       const { runWhoami } = await import('../commands/whoami.js');
       process.exitCode = await runWhoami();
