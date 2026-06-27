@@ -56,6 +56,7 @@ export function mcpCatalog(): McpEntry[] {
     { id: 'sequential-thinking', label: 'Sequential Thinking', hintPt: 'raciocínio passo-a-passo', hintEn: 'step-by-step reasoning', command: 'npx', args: ['-y', '@modelcontextprotocol/server-sequential-thinking'] },
     { id: 'memory', label: 'Memory', hintPt: 'grafo de conhecimento persistente', hintEn: 'persistent knowledge graph', command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] },
     { id: 'filesystem', label: 'Filesystem', hintPt: 'arquivos (escopo: sua home)', hintEn: 'files (scope: your home)', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', homedir()] },
+    { id: 'rpa', label: 'RPA (Aluy)', hintPt: 'automação visual de desktop — OCR/clica/digita · via uvx', hintEn: 'visual desktop automation — OCR/click/type · via uvx', command: 'uvx', args: ['aluy-mcp-rpa'] },
   ];
 }
 
@@ -103,7 +104,7 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
     { value: '__custom__', label: T('+ custom (OpenAI-compatível)', '+ custom (OpenAI-compatible)'), hint: T('ex.: TokenRouter, vLLM…', 'e.g. TokenRouter, vLLM…') },
   ];
   const sidecarOpts: Opt[] = [
-    { value: 'turbo', label: T('Turbo — instala tudo', 'Turbo — install all'), hint: 'ollama + mem0 + headroom' },
+    { value: 'turbo', label: T('Turbo — instala tudo', 'Turbo — install all'), hint: T('ollama + mem0 + headroom · pede máquina razoável', 'ollama + mem0 + headroom · needs a decent machine') },
     { value: 'leve', label: T('Leve — nada agora', 'Lite — nothing now'), hint: T('liga depois com aluy bootstrap', 'enable later with aluy bootstrap') },
   ];
 
@@ -374,7 +375,31 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
             pt={pt}
           />
         )}
-        {step === 'sidecars' && <Picker title={T('Sidecars', 'Sidecars')} opts={sidecarOpts} cursor={cursor} active={profile} />}
+        {step === 'sidecars' && (
+          <Box flexDirection="column">
+            <Picker title={T('Complementos (modo turbo)', 'Complements (turbo mode)')} opts={sidecarOpts} cursor={cursor} active={profile} />
+            <Box paddingTop={1} flexDirection="column">
+              <Role name="fgDim">
+                {T(
+                  'Turbo roda modelos locais (Ollama) + memória — pede uma máquina razoável:',
+                  'Turbo runs local models (Ollama) + memory — needs a decent machine:',
+                )}
+              </Role>
+              <Role name="fgDim">
+                {T(
+                  '  ~8GB+ de RAM, alguns GB de disco e uma boa conexão (baixa o Ollama + modelos).',
+                  '  ~8GB+ RAM, a few GB of disk and a good connection (downloads Ollama + models).',
+                )}
+              </Role>
+              <Role name="fgDim">
+                {T(
+                  '  Em máquina fraca, escolha Leve — o aluy funciona normal e você liga o turbo depois.',
+                  '  On a weak machine, pick Lite — aluy works fine and you can enable turbo later.',
+                )}
+              </Role>
+            </Box>
+          </Box>
+        )}
 
         {step === 'custom-id' && <TextRow label={T('id do provider (ex.: tokenrouter)', 'provider id (e.g. tokenrouter)')} value={buf} />}
         {step === 'custom-url' && <TextRow label={T('base URL (https, .../v1)', 'base URL (https, .../v1)')} value={buf} />}
@@ -475,8 +500,8 @@ function McpPicker(props: {
       <Box paddingTop={1}>
         <Role name="fgDim">
           {props.pt
-            ? 'ESPAÇO marca/desmarca · ENTER segue (pode seguir sem nenhum) · todos via npx'
-            : 'SPACE toggles · ENTER continues (none is fine) · all via npx'}
+            ? 'ESPAÇO marca/desmarca · ENTER segue (pode seguir sem nenhum) · baixam na 1ª vez (npx/uvx)'
+            : 'SPACE toggles · ENTER continues (none is fine) · fetched on first use (npx/uvx)'}
         </Role>
       </Box>
     </Box>

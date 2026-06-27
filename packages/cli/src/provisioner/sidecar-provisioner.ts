@@ -164,6 +164,41 @@ function checkPip(pythonPath: string): boolean {
  * Baixa um artefato, verifica o hash e salva. Retorna o caminho do arquivo salvo.
  * LANÇA se o hash não bater (CLI-SEC-H2).
  */
+/** Lê o corpo da resposta STREAMANDO, com progresso no stderr. Fallback p/
+ * `arrayBuffer()` quando nao ha body streamavel (mocks de teste). */
+async function readBodyWithProgress(resp: Response, label: string): Promise<Buffer> {
+  const body = resp.body as ReadableStream<Uint8Array> | null | undefined;
+  if (!body || typeof body.getReader !== 'function') {
+    return Buffer.from(await resp.arrayBuffer());
+  }
+  const total = Number(resp.headers?.get?.('content-length') ?? 0);
+  const reader = body.getReader();
+  const chunks: Buffer[] = [];
+  let received = 0;
+  let lastPct = -1;
+  const tty = Boolean(process.stderr.isTTY);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    chunks.push(Buffer.from(value));
+    received += value.length;
+    const mb = (received / 1e6).toFixed(1);
+    if (total > 0) {
+      const pct = Math.floor((received / total) * 100);
+      if (pct !== lastPct) {
+        lastPct = pct;
+        const tot = (total / 1e6).toFixed(1);
+        process.stderr.write(`${tty ? '\r' : ''}  baixando ${label}... ${pct}% (${mb}/${tot} MB)${tty ? '' : '\n'}`);
+      }
+    } else {
+      process.stderr.write(`${tty ? '\r' : ''}  baixando ${label}... ${mb} MB${tty ? '' : '\n'}`);
+    }
+  }
+  if (tty) process.stderr.write('\n');
+  return Buffer.concat(chunks);
+}
+
 async function downloadAndVerify(artifact: PinnedArtifact, destDir: string): Promise<string> {
   const destFile = join(destDir, artifact.label);
 
@@ -183,7 +218,7 @@ async function downloadAndVerify(artifact: PinnedArtifact, destDir: string): Pro
   if (!resp.ok) {
     throw new Error(`Download falhou: HTTP ${resp.status} — ${artifact.url}`);
   }
-  const body = Buffer.from(await resp.arrayBuffer());
+  const body = await readBodyWithProgress(resp, artifact.label);
 
   // Verifica hash.
   const actualHash = sha256Buffer(body);
@@ -459,14 +494,15 @@ async function pullAndVerifyModels(
   // Função auxiliar: faz pull e verifica o digest.
   async function pullAndCheck(model: string, expectedDigest: string): Promise<string | null> {
     // Faz o pull.
+    process.stderr.write(`  baixando modelo ${model} (ollama pull)...\n`);
     const pull = spawnSync(ollamaBin, ['pull', model], {
       timeout: OLLAMA_PULL_TIMEOUT_MS,
-      encoding: 'utf8',
+      stdio: 'inherit',
       env,
       cwd: binDir,
     });
     if (pull.status !== 0) {
-      return `Pull de "${model}" falhou (exit ${pull.status}): ${pull.stderr || pull.stdout || 'erro desconhecido'}`;
+      return `Pull de "${model}" falhou (exit ${pull.status}). Veja a saida acima.`;
     }
 
     // Verifica o digest pelo manifest no disco.
@@ -619,9 +655,10 @@ async function provisionMem0(): Promise<ProvisionTargetResult> {
     };
   }
 
+  process.stderr.write('  instalando mem0 (pip)...\n');
   const install = spawnSync(pipPath, ['install', ...MEM0_PIP_PACKAGES], {
     timeout: 300_000,
-    encoding: 'utf8',
+    stdio: 'inherit',
   });
 
   if (install.status !== 0) {
@@ -629,7 +666,7 @@ async function provisionMem0(): Promise<ProvisionTargetResult> {
       target: 'mem0',
       hashOk: false,
       installed: false,
-      message: `Falha ao instalar pacotes pip: ${install.stderr || install.stdout || 'erro desconhecido'}`,
+      message: `Falha ao instalar pacotes pip do mem0 (veja a saida acima).`,
     };
   }
 
@@ -719,16 +756,17 @@ async function provisionHeadroom(): Promise<ProvisionTargetResult> {
   }
 
   const pipPath = join(venvDir, 'bin', 'pip');
+  process.stderr.write('  instalando headroom (pip)...\n');
   const install = spawnSync(pipPath, ['install', ...HEADROOM_PIP_PACKAGES], {
     timeout: 300_000,
-    encoding: 'utf8',
+    stdio: 'inherit',
   });
   if (install.status !== 0) {
     return {
       target: 'headroom',
       hashOk: false,
       installed: false,
-      message: `Falha ao instalar ${HEADROOM_PIP_PACKAGES.join(', ')}: ${install.stderr || install.stdout || 'erro desconhecido'}`,
+      message: `Falha ao instalar ${HEADROOM_PIP_PACKAGES.join(', ')} (veja a saida acima).`,
     };
   }
 

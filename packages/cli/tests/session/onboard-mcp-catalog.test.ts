@@ -22,8 +22,8 @@ describe('onboard — catálogo de MCPs', () => {
       expect(m.label.trim()).not.toBe('');
       expect(m.command.trim()).not.toBe('');
       expect(m.args.length).toBeGreaterThan(0);
-      // os curados rodam via npx (sem instalação pesada).
-      expect(m.command).toBe('npx');
+      // os curados rodam via npx (Node) ou uvx (Python, ex.: RPA) — fetch na 1ª vez.
+      expect(['npx', 'uvx']).toContain(m.command);
     }
   });
 
