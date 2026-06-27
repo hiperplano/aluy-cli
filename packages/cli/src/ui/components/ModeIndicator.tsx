@@ -14,7 +14,7 @@
 
 import React from 'react';
 import { Box } from 'ink';
-import type { SessionMode } from '@aluy/cli-core';
+import type { SessionMode } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role } from '../theme/index.js';
 import { UnsafeBanner } from './UnsafeBanner.js';
 import { useI18n } from '../../i18n/index.js';

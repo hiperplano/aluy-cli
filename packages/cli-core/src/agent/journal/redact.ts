@@ -9,7 +9,7 @@
 // comando ANTES de exibir.
 //
 // PORTÁVEL (ADR-0053 §8): pura, sem `node:*`, sem I/O. Mora no cli-core (mecânica
-// de segurança reutilizável); a UX de `/undo` (@aluy/cli) a consome no aviso.
+// de segurança reutilizável); a UX de `/undo` (@hiperplano/aluy-cli) a consome no aviso.
 //
 // FILOSOFIA (fail-safe, conservadora): preferimos redigir DEMAIS a vazar. O
 // objetivo é IDENTIFICAR a barreira ("rodou um curl"), não reproduzir o comando

@@ -21,7 +21,7 @@ import {
   writeFileTool,
   readFileTool,
   type ToolPorts,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { NodeWorkspace } from '../../src/io/workspace.js';
 import { NodeFileSystemPort } from '../../src/io/fs-port.js';
 import { NodeSearchPort } from '../../src/io/search-port.js';

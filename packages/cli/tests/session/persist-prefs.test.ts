@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import type { CredentialStore, StoredCredential } from '@aluy/cli-core';
+import type { CredentialStore, StoredCredential } from '@hiperplano/aluy-cli-core';
 import { runSession } from '../../src/session/run.js';
 import { UserConfigStore } from '../../src/io/user-config.js';
 import { UserAgentsLoader } from '../../src/io/index.js';

@@ -12,7 +12,7 @@
 // (`▼ ao vivo`); o foco no log rola (offset). Esta projeção é DADO p/ o `<ActivityLog>`
 // (componente puro, só renderiza props — nada de I/O nem de FlowTree direto).
 
-import type { FlowSummary, FlowDrillIn, FlowPhase, FlowActivity, FlowKind } from '@aluy/cli-core';
+import type { FlowSummary, FlowDrillIn, FlowPhase, FlowActivity, FlowKind } from '@hiperplano/aluy-cli-core';
 
 /** Teto GLOBAL de eventos no anel (anti-crescimento — a spec: ex. 500). */
 export const MAX_LOG_EVENTS = 500;

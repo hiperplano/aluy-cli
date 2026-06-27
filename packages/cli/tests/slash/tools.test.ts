@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildToolsNote } from '../../src/slash/handlers.js';
 import { routeInput, NATIVE_COMMANDS } from '../../src/slash/commands.js';
-import type { McpListedServer } from '@aluy/cli-core';
+import type { McpListedServer } from '@hiperplano/aluy-cli-core';
 
 describe('F59 — /tools (inventário unificado)', () => {
   // ── Registro no slash-menu ──────────────────────────────────────────────

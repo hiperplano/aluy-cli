@@ -25,7 +25,7 @@
 
 import { join } from 'node:path';
 import { readdirSync, readFileSync, statSync, type Dirent } from 'node:fs';
-import { parseUserCommand, type UserCommand } from '@aluy/cli-core';
+import { parseUserCommand, type UserCommand } from '@hiperplano/aluy-cli-core';
 import type { WorkspacePort } from './workspace.js';
 import { classifyAttachPath } from '../attach/path-deny.js';
 

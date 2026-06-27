@@ -3,7 +3,7 @@
 // Destino não-loopback ⇒ RECUSA sem enviar UM byte. Resolver/fetch MOCKADOS.
 
 import { describe, expect, it, vi } from 'vitest';
-import type { HostResolver } from '@aluy/cli-core';
+import type { HostResolver } from '@hiperplano/aluy-cli-core';
 import { headroomFetch } from '../../src/model/headroom-fetch.js';
 import { compressViaHeadroom } from '../../src/model/headroom.js';
 import { makeHeadroomRetrieveTool } from '../../src/model/headroom-retrieve.js';

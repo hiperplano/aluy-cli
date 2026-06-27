@@ -1,4 +1,4 @@
-import type { CredentialStore, FetchLike, StoredCredential } from '@aluy/cli-core';
+import type { CredentialStore, FetchLike, StoredCredential } from '@hiperplano/aluy-cli-core';
 import type { TerminalIO } from '../../src/auth/io.js';
 
 /** Resposta mockada por path (ou fila de respostas em ordem). */

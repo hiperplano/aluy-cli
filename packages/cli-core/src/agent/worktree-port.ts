@@ -8,7 +8,7 @@
 //
 // FRONTEIRA (ADR-0053 §8): este módulo é PORTÁVEL — declara só o CONTRATO (o QUANDO
 // e o CICLO DE VIDA do isolamento) e um resolvedor PURO. O COMO (rodar `git worktree
-// add/remove`, construir ports confinados ao novo dir) é do locus concreto (@aluy/
+// add/remove`, construir ports confinados ao novo dir) é do locus concreto (@hiperplano/aluy-
 // cli), que injeta um `WorktreePort` real. Sem port injetado, o isolamento é INERTE
 // (todo filho usa as ports do pai, exatamente como hoje — não-regressão).
 //
@@ -45,7 +45,7 @@ export interface WorktreeHandle {
 /**
  * Porta de ISOLAMENTO por worktree (OPCIONAL em `SubAgentSpawner`). Quando injetada,
  * um filho com `isolation: 'worktree'` é rodado num worktree próprio. Tipada como
- * contrato estreito: o concreto (@aluy/cli) faz `git worktree add` num tmpdir, monta
+ * contrato estreito: o concreto (@hiperplano/aluy-cli) faz `git worktree add` num tmpdir, monta
  * `NodeWorkspace`/ports confinados ali e devolve o handle.
  */
 export interface WorktreePort {

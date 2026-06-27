@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { isLoggedOut } from '../../src/session/run.js';
-import type { LoginService, RedactedCredential } from '@aluy/cli-core';
+import type { LoginService, RedactedCredential } from '@hiperplano/aluy-cli-core';
 
 /** `login` fake: `whoami()` devolve `cred` (ou lança, p/ o caso de keychain ilegível). */
 function fakeLogin(cred: RedactedCredential | null | (() => never)): Pick<LoginService, 'whoami'> {

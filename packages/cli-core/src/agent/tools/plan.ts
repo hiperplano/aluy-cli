@@ -14,7 +14,7 @@
 // `seguranca` (AG-0008): a tool não tem efeito externo, então é seguro (estado de UI local).
 //
 // FRONTEIRA (ADR-0053 §8): a LÓGICA é pura/portável (normalização do input do modelo +
-// render do checklist). A SUPERFÍCIE (o painel `<Checklist>` na TUI) é do @aluy/cli e
+// render do checklist). A SUPERFÍCIE (o painel `<Checklist>` na TUI) é do @hiperplano/aluy-cli e
 // recebe o plano por uma PORTA opcional (`PlanPort`) — sem ela a tool segue útil
 // (devolve o checklist renderizado como observação), só não acende o painel.
 
@@ -60,7 +60,7 @@ export function flattenPlan(steps: readonly PlanStep[]): FlatPlanStep[] {
 }
 
 /**
- * Porta OPCIONAL: o locus concreto (@aluy/cli) liga ao estado da sessão para o painel
+ * Porta OPCIONAL: o locus concreto (@hiperplano/aluy-cli) liga ao estado da sessão para o painel
  * `<Checklist>` refletir o plano vivo. Ausente ⇒ a tool é igualmente funcional (só não
  * há painel). Recebe SEMPRE o plano inteiro (substitui — não faz merge) — o modelo
  * re-emite a lista completa a cada atualização, como o TodoWrite.

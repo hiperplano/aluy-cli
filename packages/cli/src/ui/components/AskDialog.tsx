@@ -19,7 +19,7 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { AskRequest } from '@aluy/cli-core';
+import type { AskRequest } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { highlightToSegments, resolveLanguage } from '../markdown/index.js';
 

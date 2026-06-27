@@ -3,7 +3,7 @@
 // Os verbos de controle sobre a árvore de fluxos (PARAR, INTERAGIR) são AÇÕES DO
 // USUÁRIO pela borda do CLI — não do modelo. CLI-SEC-10 exige que fiquem auditadas
 // com `actor_type=cli` e o NÓ-ALVO. Esta é a trilha (portável, sem I/O): um sink em
-// memória que o @aluy/cli LÊ (e, se quiser, persiste). VER (drill-in) é leitura pura
+// memória que o @hiperplano/aluy-cli LÊ (e, se quiser, persiste). VER (drill-in) é leitura pura
 // e NÃO gera evento (não é uma ação — GS-C3/GS-C4).
 //
 // PORTÁVEL (ADR-0053 §8): só estrutura + relógio injetável. Nenhum segredo trafega
@@ -43,7 +43,7 @@ export type AuditClock = () => number;
 const MAX_EVENTS = 256;
 
 /**
- * Trilha de auditoria do plano de controle (CLI-SEC-10). Em memória; o @aluy/cli a
+ * Trilha de auditoria do plano de controle (CLI-SEC-10). Em memória; o @hiperplano/aluy-cli a
  * consome (e pode persistir). Determinística, sem I/O, nunca lança.
  */
 export class ControlAudit {

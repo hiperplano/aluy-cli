@@ -2,7 +2,7 @@
 //
 // O `looksOutsideWorkspace` textual da EST-0945 (categories.ts) é a 1ª linha de
 // defesa — heurística sobre o TEXTO do path. O confinamento DURO mora AQUI, no
-// I/O concreto do @aluy/cli, e é o que realmente impede um efeito de escapar a
+// I/O concreto do @hiperplano/aluy-cli, e é o que realmente impede um efeito de escapar a
 // raiz do projeto:
 //
 //   - resolve o path absoluto e o CANONICALIZA (realpath quando o alvo existe;
@@ -16,7 +16,7 @@
 // o conforto do usuário vem depois.
 //
 // PORTÁVEL? NÃO — este arquivo é I/O concreto (Node `fs`/`path`), por isso mora
-// no @aluy/cli e não no core. É exatamente o "locus concreto" que a 0945 cita.
+// no @hiperplano/aluy-cli e não no core. É exatamente o "locus concreto" que a 0945 cita.
 //
 // EST-0982 · DIRETÓRIO DE TRABALHO DE SESSÃO (`sessionCwd`) — sem RELAXAR o
 // confinamento. O `NodeWorkspace` agora owna um `sessionCwd` (absoluto, default =
@@ -58,7 +58,7 @@
 import { realpathSync, statSync, lstatSync, readlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, resolve, relative, sep, dirname, parse as parsePath } from 'node:path';
-import type { CwdPort } from '@aluy/cli-core';
+import type { CwdPort } from '@hiperplano/aluy-cli-core';
 
 /** Erro de confinamento: o alvo resolvido escapa a raiz do workspace. */
 export class WorkspaceEscapeError extends Error {

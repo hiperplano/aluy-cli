@@ -4,7 +4,7 @@
 //
 // PORTÁVEL: sem Ink/IO. Só formata a partir do snapshot de `Room`.
 
-import type { Room } from '@aluy/cli-core';
+import type { Room } from '@hiperplano/aluy-cli-core';
 
 /** Tempo relativo curto ("agora", "12s", "3m", "2h", "1d") a partir de `ms` decorridos. */
 export function relTime(elapsedMs: number): string {

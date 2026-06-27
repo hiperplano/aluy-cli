@@ -41,7 +41,7 @@
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // PORTÁVEL (ADR-0053 §8): scheduler/contadores/abort + relógio/sleep injetáveis.
-// Sem Ink, sem I/O de terminal. O comando `/cycle` + a UI do laço vivo são do @aluy/cli.
+// Sem Ink, sem I/O de terminal. O comando `/cycle` + a UI do laço vivo são do @hiperplano/aluy-cli.
 
 import type { CycleCeilings } from './cycle-limits.js';
 import type { BudgetGate, LimitKind } from '../limits.js';
@@ -116,7 +116,7 @@ export interface CycleRunResult {
   readonly usage: { iterations: number; toolCalls: number; tokens: number };
 }
 
-/** Observador OPCIONAL do laço vivo (a UI do @aluy/cli pluga: ciclo N, parada). */
+/** Observador OPCIONAL do laço vivo (a UI do @hiperplano/aluy-cli pluga: ciclo N, parada). */
 export interface CycleObserver {
   /** Um ciclo VAI rodar (iteration 0-based). */
   onCycleStart?(iteration: number): void;

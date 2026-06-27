@@ -14,7 +14,7 @@ import {
   type SafeToolDecision,
   type SessionMode,
   type ToolCall,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import {
   usePermissionsPanel,
   type PermissionEngineControl,

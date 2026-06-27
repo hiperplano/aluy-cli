@@ -8,7 +8,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ATTACHMENT_TOOL_NAME, buildMessages, type NativeTool } from '@aluy/cli-core';
+import { ATTACHMENT_TOOL_NAME, buildMessages, type NativeTool } from '@hiperplano/aluy-cli-core';
 import { NodeWorkspace } from '../../src/io/workspace.js';
 import { NodeFileSystemPort } from '../../src/io/fs-port.js';
 import { AttachReader } from '../../src/attach/reader.js';

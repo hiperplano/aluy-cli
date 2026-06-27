@@ -4,7 +4,7 @@ Obrigado pelo interesse. Este guia cobre o essencial para abrir um PR.
 
 ## Ambiente
 
-Monorepo npm (`@aluy/cli-core` + `@aluy/cli`), TypeScript/Node, TUI em Ink.
+Monorepo npm (`@hiperplano/aluy-cli-core` + `@hiperplano/aluy-cli`), TypeScript/Node, TUI em Ink.
 
 ```bash
 npm install
@@ -25,10 +25,10 @@ node packages/cli/dist/bin/aluy.js --help
 
 ## Fronteira modular
 
-`@aluy/cli-core` é a engine **portável** do agente — **não importa Ink nem faz
+`@hiperplano/aluy-cli-core` é a engine **portável** do agente — **não importa Ink nem faz
 I/O de terminal**. Isso é travado no eslint (`no-restricted-imports`) e no teste
 de fronteira (`packages/cli-core/tests/boundary.test.ts`). Toda a parte de TUI e
-o binário `aluy` vivem em `@aluy/cli`.
+o binário `aluy` vivem em `@hiperplano/aluy-cli`.
 
 ## Segurança
 

@@ -36,7 +36,7 @@ import {
   MEM0_PORT,
   SIDECAR_POLL_MAX_ATTEMPTS,
   resolveSidecarPaths,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 // ─── Fakes ───────────────────────────────────────────────────────────────
 

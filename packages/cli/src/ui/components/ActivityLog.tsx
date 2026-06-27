@@ -20,7 +20,7 @@ import { abbreviateCount, formatDuration } from '../../session/model.js';
 import { displayWidth } from '../../session/visual-lines.js';
 import { truncateToWidth } from '../markdown/table-layout.js';
 import type { LogSection, LogEvent } from '../../session/activity-log.js';
-import type { FlowPhase } from '@aluy/cli-core';
+import type { FlowPhase } from '@hiperplano/aluy-cli-core';
 
 export interface ActivityLogProps {
   /** As seções projetadas (uma por nó da árvore) — `buildActivityLog`. */

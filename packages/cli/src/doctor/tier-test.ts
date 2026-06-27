@@ -7,14 +7,14 @@
 // Constrói um `BrokerModelCaller` mínimo e DEDICADO (sessão própria, sem tools, prompt
 // curtíssimo, max_tokens baixo) — não toca a sessão do agente. Erro (broker fora / sem
 // crédito / provedor) ⇒ `responded:false` com a causa; nunca lança. PORTÁVEL nos limites
-// do `@aluy/cli` (usa o login + broker config da máquina; fetch injetável p/ teste).
+// do `@hiperplano/aluy-cli` (usa o login + broker config da máquina; fetch injetável p/ teste).
 
 import {
   BrokerModelCaller,
   createBrokerModelClient,
   type LoginService,
   type StreamFetch,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { loadBrokerConfig } from '../model/config.js';
 import type { TierFact } from './checks.js';
 

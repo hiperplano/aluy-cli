@@ -12,7 +12,7 @@
 // namespace, remonta, ou lê a memória da mãe). Cada um DEVE falhar com EPERM.
 //
 // ESTE MÓDULO É PURO E PORTÁVEL: gera o PROGRAMA BPF (bytes) que o lançador
-// concreto (`@aluy/cli`) entrega ao `bwrap --seccomp <fd>`. Não toca o SO; é
+// concreto (`@hiperplano/aluy-cli`) entrega ao `bwrap --seccomp <fd>`. Não toca o SO; é
 // determinístico e testável byte-a-byte. A aplicação (instalar o filtro / passar
 // o fd) é do locus concreto.
 //

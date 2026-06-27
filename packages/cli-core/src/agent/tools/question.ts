@@ -19,7 +19,7 @@
 // processo NUNCA pendura. (≠ `ask`, cujo fail-safe é DENY.)
 //
 // PORTÁVEL (ADR-0053 §8): só tipos + lógica pura, sem Ink/IO. A UI (componente Ink) e
-// o resolver concreto vivem no @aluy/cli; aqui é só o contrato + a tool.
+// o resolver concreto vivem no @hiperplano/aluy-cli; aqui é só o contrato + a tool.
 
 import type { NativeTool, ToolPorts, ToolResult, ToolRunContext } from './types.js';
 
@@ -75,7 +75,7 @@ export type QuestionAnswer =
   | { readonly kind: 'unavailable'; readonly reason: string };
 
 /**
- * Porta de PERGUNTA injetada pelo locus concreto (@aluy/cli liga ao `TuiQuestionResolver`).
+ * Porta de PERGUNTA injetada pelo locus concreto (@hiperplano/aluy-cli liga ao `TuiQuestionResolver`).
  * `ask` é ASSÍNCRONO (há I/O de terminal). `signal` propaga Ctrl-C/abort: ao abortar, a
  * porta DEVE resolver `{ kind:'unavailable' }` (nunca pendurar). Sem a porta em `ToolPorts`,
  * a tool é inerte (erro claro) — fail-safe.

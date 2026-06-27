@@ -19,8 +19,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { BwrapSandboxLauncher, detectSandboxCapability } from '../../src/sandbox/index.js';
-import type { SandboxConfinement } from '@aluy/cli-core';
-import { floorAvailable } from '@aluy/cli-core';
+import type { SandboxConfinement } from '@hiperplano/aluy-cli-core';
+import { floorAvailable } from '@hiperplano/aluy-cli-core';
 
 const cap = detectSandboxCapability();
 const FLOOR = floorAvailable(cap);

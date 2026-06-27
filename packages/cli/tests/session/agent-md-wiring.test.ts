@@ -6,8 +6,8 @@
 // o cabeçalho de projeto (não-regressão).
 
 import { describe, expect, it } from 'vitest';
-import type { BrokerModelClient, ChatMessage } from '@aluy/cli-core';
-import { PROJECT_INSTRUCTIONS_HEADER } from '@aluy/cli-core';
+import type { BrokerModelClient, ChatMessage } from '@hiperplano/aluy-cli-core';
+import { PROJECT_INSTRUCTIONS_HEADER } from '@hiperplano/aluy-cli-core';
 import { buildSession } from '../../src/session/wiring.js';
 
 /** Broker stub: captura as mensagens e emite um turno final mínimo via stream. */

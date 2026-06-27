@@ -22,7 +22,7 @@ import {
   type PinnedFetchArgs,
   type PinnedResponse,
   type RegistryFetch,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 // ───────────────────────── (1) parseMcpSlash ─────────────────────────
 

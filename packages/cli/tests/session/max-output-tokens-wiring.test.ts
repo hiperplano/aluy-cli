@@ -14,7 +14,7 @@
 // (são eixos diferentes) — guarda anti-confusão/anti-regressão.
 
 import { describe, expect, it } from 'vitest';
-import type { BrokerModelClient, ChatMessage } from '@aluy/cli-core';
+import type { BrokerModelClient, ChatMessage } from '@hiperplano/aluy-cli-core';
 import { buildSession } from '../../src/session/wiring.js';
 
 /** Broker stub: captura o `max_tokens` de cada request e emite um turno mínimo. */

@@ -18,7 +18,7 @@ import {
   type LockedCategory,
   type SafeToolDecision,
   type SessionMode,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { nextMode } from '../../session/controller.js';
 
 /**

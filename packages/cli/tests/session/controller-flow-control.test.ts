@@ -1,4 +1,4 @@
-// EST-0982 · ADR-0063 — CONTROLE/OBSERVABILIDADE no @aluy/cli: o SessionController
+// EST-0982 · ADR-0063 — CONTROLE/OBSERVABILIDADE no @hiperplano/aluy-cli: o SessionController
 // liga a FlowTree/ControlAudit/injeção ao loop + sub-agentes. A bateria do gate MÉDIO
 // (GS-C1..C5 + RES-C-1/2/3) na INTEGRAÇÃO real (pai + filhos paralelos, catraca, abort).
 
@@ -14,7 +14,7 @@ import {
   type FileSystemPort,
   type ShellPort,
   type SearchPort,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import type { SubAgentsBlock } from '../../src/session/model.js';
 

@@ -1,8 +1,8 @@
 // EST-0960a · ADR-0056 §4/R8 — porta MÍNIMA de confinamento de workspace que a
 // restauração do journal consome. É a MESMA forma do `WorkspacePort` concreto do
-// @aluy/cli (EST-0948, `NodeWorkspace`): resolve+canonicaliza um path contra a
+// @hiperplano/aluy-cli (EST-0948, `NodeWorkspace`): resolve+canonicaliza um path contra a
 // raiz e LANÇA se escapa (`..`/symlink/absoluto-fora). Declaramos a interface
-// AQUI (portável) p/ o core não depender do concreto — o @aluy/cli injeta o
+// AQUI (portável) p/ o core não depender do concreto — o @hiperplano/aluy-cli injeta o
 // `NodeWorkspace`, que já a satisfaz estruturalmente.
 //
 // R8/TOCTOU: a restauração resolve o alvo por ESTA porta NO MOMENTO DA ESCRITA —

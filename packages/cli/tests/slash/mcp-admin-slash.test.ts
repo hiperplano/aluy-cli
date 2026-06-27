@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseMcpAdminSlash, runMcpAdminSlash } from '../../src/slash/mcp-admin.js';
 import { setupMcp } from '../../src/mcp/setup.js';
-import { NATIVE_TOOLS, PolicyPermissionEngine, type McpTransport } from '@aluy/cli-core';
+import { NATIVE_TOOLS, PolicyPermissionEngine, type McpTransport } from '@hiperplano/aluy-cli-core';
 
 describe('parseMcpAdminSlash — parser puro dos subcomandos', () => {
   it('`add pw -- npx -y @playwright/mcp` ⇒ add com command/args após o --', () => {

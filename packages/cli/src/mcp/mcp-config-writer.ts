@@ -31,7 +31,7 @@ import {
   parseMcpConfig,
   type McpConfig,
   type McpServerConfig,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 /** Teto defensivo de tamanho do arquivo lido p/ merge (anti-arquivo-gigante adulterado). */
 const MAX_MCP_BYTES = 256 * 1024;

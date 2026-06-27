@@ -1,4 +1,4 @@
-// EST-0970 (search) — `aluy mcp search <query>` no @aluy/cli:
+// EST-0970 (search) — `aluy mcp search <query>` no @hiperplano/aluy-cli:
 //   (1) parser: `mcp search <query…>` ⇒ action `mcp-search` (sem tocar add/list/remove);
 //   (2) wiring: `createRegistryFetch` confina o egress ao host FIXO do registro
 //       oficial e reusa o safeFetch (anti-SSRF) com SOCKET MOCKADO (sem rede real);
@@ -18,7 +18,7 @@ import {
   type PinnedFetchArgs,
   type PinnedResponse,
   type RegistryFetch,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 // ───────────────────────── (1) parser ─────────────────────────
 

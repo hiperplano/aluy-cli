@@ -13,7 +13,7 @@
 //
 // ESTE MÓDULO É PORTÁVEL (ADR-0053 §8): só TIPOS + LÓGICA PURA (detecção de
 // fail-mode, política de seccomp). NÃO toca `node:child_process`/`node:os` — o
-// LANÇADOR concreto (`bwrap`/userns + spawn + fd) mora em `@aluy/cli`
+// LANÇADOR concreto (`bwrap`/userns + spawn + fd) mora em `@hiperplano/aluy-cli`
 // (`src/sandbox/`), o "locus concreto" que injeta a primitiva. Assim a fronteira
 // atravessa-loci (§8-bis): quando a engine for re-hospedada server-side, o modelo
 // de confinamento viaja junto da catraca — o piso de SO não é do front.
@@ -34,7 +34,7 @@ export type SandboxEnv = 'dev' | 'staging' | 'prod';
  * SUPORTE de SO detectado para o sandbox (capability probe — D-SB-1/feita pelo
  * locus concreto no boot; o `/doctor` pode reportar — FU). PURO/serializável: a
  * detecção concreta (executar `bwrap --version`, ler `/proc/.../userns`, abrir
- * Landlock) é do `@aluy/cli`; aqui é só a FORMA do resultado, que a lógica de
+ * Landlock) é do `@hiperplano/aluy-cli`; aqui é só a FORMA do resultado, que a lógica de
  * fail-mode consome sem tocar o SO.
  */
 export interface SandboxCapability {
@@ -224,7 +224,7 @@ export const DEFAULT_RESOURCE_LIMITS: Required<SandboxResourceLimits> = Object.f
  * Resultado de um lançamento confinado. Estende o que o locus precisa p/ esperar
  * o processo + abortá-lo (EST-1010/1011 ligam isto ao `ShellPort`/transporte MCP).
  * O TIPO do handle de processo é abstrato aqui (portável) — o concreto é o
- * `ChildProcess` do Node, no `@aluy/cli`.
+ * `ChildProcess` do Node, no `@hiperplano/aluy-cli`.
  */
 export interface SandboxSpawnResult<Proc = unknown> {
   /** A decisão de fail-mode aplicada (p/ o locus auditar/avisar). */
@@ -250,7 +250,7 @@ export interface SandboxSpawnResult<Proc = unknown> {
  * sandbox. Genérico no tipo de processo p/ o core não acoplar ao `child_process`.
  *
  * Esta interface é o CONTRATO estável que 1010/1011 consomem; a implementação
- * `bwrap` vive em `@aluy/cli`. O core a EXPÕE (tipo) mas não a IMPLEMENTA.
+ * `bwrap` vive em `@hiperplano/aluy-cli`. O core a EXPÕE (tipo) mas não a IMPLEMENTA.
  */
 export interface SandboxLauncher<Proc = unknown, SpawnOpts = unknown> {
   /** A capability detectada (imutável após o boot). */

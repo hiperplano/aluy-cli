@@ -1,6 +1,6 @@
 // EST-0968 · CLI-SEC-3 — a API SEGURA de mutacao de estado da catraca, p/ o painel
-// interativo `/permissions` do `@aluy/cli`. ESTE arquivo e a FRONTEIRA: o painel
-// (UI no `@aluy/cli`) so altera a catraca PELO QUE ESTA EXPOSTO AQUI. Nada que
+// interativo `/permissions` do `@hiperplano/aluy-cli`. ESTE arquivo e a FRONTEIRA: o painel
+// (UI no `@hiperplano/aluy-cli`) so altera a catraca PELO QUE ESTA EXPOSTO AQUI. Nada que
 // passe por aqui pode setar uma categoria sempre-ask (destrutivo/rede/sudo/escrita-
 // fora/segredo) p/ `allow` — essa e a proteca anti-injecao do menu (a estoria diz:
 // o painel NAO e bypass do CLI-SEC-3; o UNICO bypass total continua sendo `--unsafe`,

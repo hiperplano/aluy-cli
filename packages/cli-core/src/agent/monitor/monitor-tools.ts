@@ -13,7 +13,7 @@ import type { NativeTool, ToolResult } from '../tools/types.js';
 /**
  * Constrói os 4 tools do monitor (`monitor` / `monitors` / `monitor_cancel` /
  * `watch_command`) ligados ao `store` + `queue` da sessão. `now` é a fonte de
- * timestamp (injetável p/ teste). `spawnFn` é injetado pelo `@aluy/cli` (o
+ * timestamp (injetável p/ teste). `spawnFn` é injetado pelo `@hiperplano/aluy-cli` (o
  * `cli-core` NÃO importa `child_process`).
  */
 export function buildMonitorTools(

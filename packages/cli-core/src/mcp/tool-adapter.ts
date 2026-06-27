@@ -15,7 +15,7 @@
 // canal cercado pela montagem de contexto — context.ts). O adapter a repassa
 // MARCADA como vinda de MCP de terceiro, p/ o modelo saber a proveniência.
 //
-// PORTÁVEL: sem `node:*`. Usa só o transport injetado (que mora no @aluy/cli).
+// PORTÁVEL: sem `node:*`. Usa só o transport injetado (que mora no @hiperplano/aluy-cli).
 
 import type { NativeTool, ToolPorts, ToolResult } from '../agent/tools/types.js';
 import type { DiscoveredMcpTool } from './client.js';

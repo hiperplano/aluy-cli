@@ -21,7 +21,7 @@ import { Box, Text } from 'ink';
 import { Glyph, Role } from '../theme/index.js';
 import { ProgressBar } from './ProgressBar.js';
 import { formatElapsed } from '../../session/model.js';
-import type { TestScore } from '@aluy/cli-core';
+import type { TestScore } from '@hiperplano/aluy-cli-core';
 
 export interface TestRunBlockProps {
   /** Placar corrente (snapshot imutável do acumulador). */

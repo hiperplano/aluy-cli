@@ -2,13 +2,13 @@
 //
 // A MECÂNICA do journal (pilha undo/redo por sessão, captura do `antes`, fronteira
 // do reversível `edit_file`↔`run_command`, detecção de edição concorrente, e a API
-// que a EST-0960b consome) é CÓDIGO PORTÁVEL — mora aqui no @aluy/cli-core. O I/O
+// que a EST-0960b consome) é CÓDIGO PORTÁVEL — mora aqui no @hiperplano/aluy-cli-core. O I/O
 // CONCRETO (escrever blobs em `~/.aluy/undo/<session>/` com `0600`/`0700` atômico,
 // GC, teto de retenção, unlink real) é injetado por uma PORTA — `JournalStorePort`
-// — cujo concreto mora em @aluy/cli (estilo `FileSystemPort`/`ShellPort`, §6 do ADR).
+// — cujo concreto mora em @hiperplano/aluy-cli (estilo `FileSystemPort`/`ShellPort`, §6 do ADR).
 //
 // PORTÁVEL: nenhum `node:fs`/`node:path` aqui — só tipos e a porta. O store
-// concreto (NodeJournalStore, @aluy/cli) é quem toca o filesystem.
+// concreto (NodeJournalStore, @hiperplano/aluy-cli) é quem toca o filesystem.
 
 import type { WorkspacePort } from './workspace-port.js';
 import type { JournalCipher } from './cipher.js';
@@ -77,7 +77,7 @@ export interface RestoreOutcome {
 }
 
 /**
- * PORTA da ESCRITA de restauração (I/O concreto, @aluy/cli). Resolve o alvo pelo
+ * PORTA da ESCRITA de restauração (I/O concreto, @hiperplano/aluy-cli). Resolve o alvo pelo
  * `WorkspacePort` NO MOMENTO DA ESCRITA (R8/TOCTOU) e só então escreve/remove —
  * rejeita `..`/symlink/absoluto-fora plantado depois da captura. O core ORQUESTRA
  * (lê blob, checa concorrência) mas NÃO toca o filesystem: a resolução+escrita
@@ -110,7 +110,7 @@ export interface CurrentReaderPort {
 }
 
 /**
- * PORTA do store do journal — o I/O concreto (mora em @aluy/cli). Tudo o que toca
+ * PORTA do store do journal — o I/O concreto (mora em @hiperplano/aluy-cli). Tudo o que toca
  * `~/.aluy/` passa por aqui. Garantias do CONTRATO (o concreto DEVE honrar; o
  * gate do `seguranca` reconfere):
  *   - `putBlob`: cria o blob com `0600` ATÔMICO (O_CREAT|O_EXCL + mode), o dir da
@@ -162,7 +162,7 @@ export interface SnapshotJournalOptions {
    */
   readonly workspace: WorkspacePort;
   /**
-   * Escritor de restauração confinado (I/O concreto, @aluy/cli). A 0960b chama
+   * Escritor de restauração confinado (I/O concreto, @hiperplano/aluy-cli). A 0960b chama
    * `restore`, que delega a escrita/remoção a este port — que resolve o alvo
    * pelo WorkspacePort NO MOMENTO DA ESCRITA (R8). Opcional: sem ele, a captura
    * funciona mas `restore` lança (a 0960b sempre o injeta).

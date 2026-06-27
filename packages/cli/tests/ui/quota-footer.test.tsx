@@ -5,7 +5,7 @@
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
-import type { Quota, ServerLimits } from '@aluy/cli-core';
+import type { Quota, ServerLimits } from '@hiperplano/aluy-cli-core';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { QuotaFooter } from '../../src/ui/components/QuotaFooter.js';

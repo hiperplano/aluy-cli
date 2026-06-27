@@ -1,7 +1,7 @@
 // ADR-0120 / EST-1114 — store de tokens OAuth (refresh automático + single-flight).
 import { describe, expect, it, vi } from 'vitest';
 import { OAuthTokenStore } from '../../../src/model/local/oauth-store.js';
-import type { OAuthFetch, OAuthProviderConfig } from '@aluy/cli-core';
+import type { OAuthFetch, OAuthProviderConfig } from '@hiperplano/aluy-cli-core';
 
 const config: OAuthProviderConfig = {
   authorizeUrl: 'https://prov.test/authorize',

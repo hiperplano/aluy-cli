@@ -25,7 +25,7 @@ OpenAI, com a sua própria credencial — direto, sem intermediário e sem meter
 ## Instalação
 
 ```bash
-npm install -g @aluy/cli
+npm install -g @hiperplano/aluy-cli
 aluy onboard      # configura idioma, provider, modelo e (opcional) os complementos
 aluy              # abre a sessão
 ```
@@ -88,8 +88,8 @@ commands e skills.
 
 | Pacote | Papel |
 |---|---|
-| **`@aluy/cli-core`** | Engine **portável** do agente (loop · tools · permissão). Sem Ink, sem I/O de terminal. Hospeda o ponto único de interceptação de tool-calls. |
-| **`@aluy/cli`** | TUI (**Ink**) + binário **`aluy`** + wiring. Consome `@aluy/cli-core`. |
+| **`@hiperplano/aluy-cli-core`** | Engine **portável** do agente (loop · tools · permissão). Sem Ink, sem I/O de terminal. Hospeda o ponto único de interceptação de tool-calls. |
+| **`@hiperplano/aluy-cli`** | TUI (**Ink**) + binário **`aluy`** + wiring. Consome `@hiperplano/aluy-cli-core`. |
 
 Lema: **core modular, entrega monolítica**. A fronteira `core × TUI` é explícita e
 testada (o core não importa Ink).

@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { HostResolver, PinnedFetcher, PinnedResponse } from '@aluy/cli-core';
+import type { HostResolver, PinnedFetcher, PinnedResponse } from '@hiperplano/aluy-cli-core';
 import { Mem0MemoryEngine } from '../../src/io/mem0-memory-engine.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────

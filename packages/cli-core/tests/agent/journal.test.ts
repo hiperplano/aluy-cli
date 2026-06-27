@@ -6,7 +6,7 @@
 // na ordem), T5 (barreira run_command), T6 (before_hash diverge), restauração
 // confinada (R8 — delega ao writer que resolve no momento da escrita) e teto com
 // unlink REAL (T11/§3). A parte de I/O concreto (0600 atômico, fora do workspace,
-// GC pós-crash, path-deny) está nos testes do @aluy/cli e da permissão.
+// GC pós-crash, path-deny) está nos testes do @hiperplano/aluy-cli e da permissão.
 
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';

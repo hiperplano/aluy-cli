@@ -8,7 +8,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MAX_PROJECT_INSTRUCTIONS_CHARS } from '@aluy/cli-core';
+import { MAX_PROJECT_INSTRUCTIONS_CHARS } from '@hiperplano/aluy-cli-core';
 import { NodeWorkspace } from '../../src/io/workspace.js';
 import { NodeFileSystemPort } from '../../src/io/fs-port.js';
 import {

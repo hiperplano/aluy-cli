@@ -3,7 +3,7 @@
 // PORTÁVEL (ADR-0053 §8): toda a lógica anti-SSRF (resolve→valida→pina, denylist
 // dura de IP, canonicalização de IP-literal) é dado/string puro, testável no core
 // com resolver/fetcher MOCK. A rede CONCRETA (DNS + socket pinado) é a `WebPort`
-// injetada pelo @aluy/cli.
+// injetada pelo @hiperplano/aluy-cli.
 export {
   classifyIp,
   isLoopbackIp,

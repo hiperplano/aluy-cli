@@ -3,7 +3,7 @@ import { runLogin } from '../../src/commands/login.js';
 import { runLogout } from '../../src/commands/logout.js';
 import { runWhoami } from '../../src/commands/whoami.js';
 import { FakeIO, InMemoryStore, makeMockFetch } from './helpers.js';
-import type { CredentialStore, StoredCredential } from '@aluy/cli-core';
+import type { CredentialStore, StoredCredential } from '@hiperplano/aluy-cli-core';
 
 const HEX = 'deadbeefdeadbeefdeadbeefdeadbeef';
 const PAT = `pat_${HEX}_TOPSECRETvalue`;

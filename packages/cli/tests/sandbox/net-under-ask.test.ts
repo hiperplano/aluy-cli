@@ -24,7 +24,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SandboxConfinement, SandboxDecision, SandboxSpawnResult } from '@aluy/cli-core';
+import type { SandboxConfinement, SandboxDecision, SandboxSpawnResult } from '@hiperplano/aluy-cli-core';
 import { NodeShellPort } from '../../src/io/shell-port.js';
 import { NodeWorkspace } from '../../src/io/workspace.js';
 import { EgressAllowlist } from '../../src/io/egress.js';

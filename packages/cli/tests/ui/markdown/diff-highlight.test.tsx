@@ -5,7 +5,7 @@
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
-import type { AskRequest } from '@aluy/cli-core';
+import type { AskRequest } from '@hiperplano/aluy-cli-core';
 import { ThemeProvider } from '../../../src/ui/theme/context.js';
 import { resolveTheme } from '../../../src/ui/theme/theme.js';
 import { AskDialog } from '../../../src/ui/components/AskDialog.js';
@@ -20,7 +20,7 @@ function diffAsk(): AskRequest {
       exact: [
         '--- src/auth/session.ts',
         '-import { httpClient } from "../net/http"',
-        '+import { broker } from "@aluy/cli-core"',
+        '+import { broker } from "@hiperplano/aluy-cli-core"',
       ].join('\n'),
     },
     category: 'default',
@@ -47,7 +47,7 @@ describe('AskDialog diff — highlight sem perder ‹/› nem cores do sinal', (
     expect(out).toContain('›');
     // efeito EXATO continua visível (CLI-SEC-9)
     expect(out).toContain('httpClient');
-    expect(out).toContain('@aluy/cli-core');
+    expect(out).toContain('@hiperplano/aluy-cli-core');
     // sinal de remoção em danger (#E5897C) e adição em success (#82CF9E)
     expect(out).toContain('229;137;124');
     expect(out).toContain('130;207;158');

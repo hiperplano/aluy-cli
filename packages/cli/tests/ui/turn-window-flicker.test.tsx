@@ -31,7 +31,7 @@ const HUGE = Array.from({ length: 12000 }, (_, i) => `linha ${i + 1}`).join('\n'
 describe('F61 — output grande streamado não reprocessa o texto inteiro por tick', () => {
   it('PROVA (spy): a limpeza pesada recebe input BOUNDED (≤ cap), não o texto inteiro', async () => {
     // Espiona `cleanAluyForDisplay` no MÓDULO core — é o que varre o texto inteiro.
-    const core = await import('@aluy/cli-core');
+    const core = await import('@hiperplano/aluy-cli-core');
     const spy = vi.spyOn(core, 'cleanAluyForDisplay');
     try {
       frame(<AluyBlock text={HUGE} streaming maxLines={6} columns={80} frame={0} />);
@@ -69,7 +69,7 @@ describe('F61 — output grande streamado não reprocessa o texto inteiro por ti
   it('FINALIZADO (streaming=false): NÃO corta o raw — o bloco inteiro vai p/ o Static', async () => {
     // Texto além do cap, mas FINALIZADO: a limpeza recebe o texto INTEIRO (sem clamp),
     // pois o bloco desce inteiro p/ o scrollback (nada se perde).
-    const core = await import('@aluy/cli-core');
+    const core = await import('@hiperplano/aluy-cli-core');
     const spy = vi.spyOn(core, 'cleanAluyForDisplay');
     try {
       frame(<AluyBlock text={HUGE} streaming={false} columns={80} />);

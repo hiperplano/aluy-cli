@@ -11,7 +11,7 @@ import {
   McpWriteError,
   serializeMcpConfig,
 } from '../../src/mcp/mcp-config-writer.js';
-import { parseMcpConfig } from '@aluy/cli-core';
+import { parseMcpConfig } from '@hiperplano/aluy-cli-core';
 
 describe('McpConfigWriter — escrita/merge confinada', () => {
   let base: string;

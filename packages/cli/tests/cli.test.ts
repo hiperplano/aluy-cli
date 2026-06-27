@@ -786,7 +786,7 @@ describe('textos', () => {
   it('versionText inclui o binário e o engine', () => {
     const t = versionText();
     expect(t).toMatch(/^aluy \d+\.\d+\.\d+/);
-    expect(t).toContain('@aluy/cli-core');
+    expect(t).toContain('@hiperplano/aluy-cli-core');
   });
 
   it('HELP_TEXT cita uso e opções', () => {

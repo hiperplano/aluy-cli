@@ -1,4 +1,4 @@
-// EST-0969 · ADR-0057 (E-A1/E-A2/E-A3) · CLI-SEC-11 — integração no @aluy/cli:
+// EST-0969 · ADR-0057 (E-A1/E-A2/E-A3) · CLI-SEC-11 — integração no @hiperplano/aluy-cli:
 // o SessionController liga o loop do PAI ao SubAgentSpawner, compartilhando UM
 // budget (E-A2), com `spawn_agent` SÓ no toolset do pai (E-A1), atrás da catraca.
 
@@ -12,7 +12,7 @@ import {
   type FileSystemPort,
   type ShellPort,
   type SearchPort,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import type { SessionBlock, SubAgentsBlock } from '../../src/session/model.js';
 import { splitBlocks } from '../../src/session/render-split.js';

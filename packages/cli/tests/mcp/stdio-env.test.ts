@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildServerEnv } from '../../src/mcp/stdio-transport.js';
-import type { McpServerConfig } from '@aluy/cli-core';
+import type { McpServerConfig } from '@hiperplano/aluy-cli-core';
 
 const server: McpServerConfig = {
   name: 'fs',

@@ -20,7 +20,7 @@
 //
 // PORTÁVEL (ADR-0053 §8): só dado + aritmética de string/bits. SEM `node:dns`,
 // SEM `node:net`, SEM I/O. O resolver concreto (DNS real) e o connect-pinado são
-// PORTAS injetadas pelo locus (@aluy/cli). Aqui está a LÓGICA testável com um
+// PORTAS injetadas pelo locus (@hiperplano/aluy-cli). Aqui está a LÓGICA testável com um
 // resolver mock (incl. o mock de TTL0 da bateria CA-C1).
 
 /** O resultado de classificar um IP contra a denylist dura. */

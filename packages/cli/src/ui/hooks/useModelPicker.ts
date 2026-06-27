@@ -40,14 +40,14 @@ import type {
   TierCatalogEntry,
   EffortOption,
   EffortChoice,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import {
   effortOptions,
   clampEffortIndex,
   effortChoiceAt,
   effortChoiceFromCustom,
   validateCustomEffort,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { FALLBACK_TIERS } from '../../model/catalog.js';
 
 /** Chave do tier Custom (ADR-0030 §3) — a ÚNICA via que carrega `model`. */

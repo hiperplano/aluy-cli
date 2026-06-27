@@ -16,7 +16,7 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { buildAgentsNote } from '@aluy/cli-core';
+import { buildAgentsNote } from '@hiperplano/aluy-cli-core';
 import { UserAgentsLoader, AGENTS_DIRNAME, type AgentLoadResult } from '../io/user-agents.js';
 import { ProjectAgentsLoader } from '../io/project-agents.js';
 import { NodeWorkspace } from '../io/workspace.js';

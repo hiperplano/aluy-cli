@@ -1,8 +1,8 @@
 // EST-0981 · ADR-0062 (APR-0067) · CLI-SEC-14 — barrel de `/cycle` (autonomia
 // REPETIDA). A MECÂNICA (scheduler de re-disparo · contadores duração/iterações ·
 // portão do budget AGREGADO atômico · anti-loop-vazio · parável por abort) vive no
-// `@aluy/cli-core` (portável — ADR-0053 §8); o comando `/cycle` + a UI do laço vivo
-// (ciclo N, parar) são do `@aluy/cli`, que CONSOME isto.
+// `@hiperplano/aluy-cli-core` (portável — ADR-0053 §8); o comando `/cycle` + a UI do laço vivo
+// (ciclo N, parar) são do `@hiperplano/aluy-cli`, que CONSOME isto.
 //
 // Reuso (não reinventa): SharedBudget/E-A2 (EST-0969) p/ o budget agregado atômico;
 // AbortSignal/freio (EST-0948/0982) p/ a parada; AgentLoop (EST-0944) por-ciclo via

@@ -1,8 +1,8 @@
 // EST-1133 · ADR-0123 §2.2-ter — PROVISIONADOR DE SIDECARS (implementação concreta).
 //
-// Implementa `SidecarProvisioner` do `@aluy/cli-core`. Faz I/O real:
+// Implementa `SidecarProvisioner` do `@hiperplano/aluy-cli-core`. Faz I/O real:
 // download, verificação de hash, extração, venv, pull de modelos.
-// Roda no `@aluy/cli` (locus concreto com fs/child_process/net).
+// Roda no `@hiperplano/aluy-cli` (locus concreto com fs/child_process/net).
 //
 // Travas DURAS (G2 + CLI-SEC-H2):
 //   - Proveniência/integridade: hash PINADO. Recusa se não bater.
@@ -54,7 +54,7 @@ import {
   isRoot,
   shouldProvision,
   resolveSidecarToggles,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 // ─── Constantes ────────────────────────────────────────────────────────────
 
@@ -219,7 +219,7 @@ const MEM0_SERVER_SCRIPT = 'aluy-mem0-server.py';
  * `packages/cli/assets/mem0/aluy-mem0-server.py`.
  *
  * Após compilação (tsc), o .js está em `dist/provisioner/` e o asset
- * em `assets/mem0/` — ambos dentro da raiz do pacote `@aluy/cli`.
+ * em `assets/mem0/` — ambos dentro da raiz do pacote `@hiperplano/aluy-cli`.
  *
  * Tenta: 1) `<__dirname>/../../assets/mem0/${script}` (cobre dev + dist).
  *        2) `<__dirname>/../../../assets/mem0/${script}` (cobre bundling).

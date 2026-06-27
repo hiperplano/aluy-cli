@@ -3,7 +3,7 @@
 // macOS Keychain · Windows Credential Manager · Linux Secret Service — via
 // `@napi-rs/keyring` (MIT, mantido; substitui o `keytar` arquivado). Esta é a
 // METADE-DE-I/O do armazenamento: a lógica portável (serialização, redação) vive
-// em @aluy/cli-core. Aqui só a ponte com a dep nativa.
+// em @hiperplano/aluy-cli-core. Aqui só a ponte com a dep nativa.
 //
 // REGRAS CLI-SEC-2 (não negociáveis):
 //   - NUNCA grava a credencial em arquivo texto no repo/cwd, em
@@ -19,8 +19,8 @@ import {
   KEYCHAIN_ACCOUNT,
   KEYCHAIN_SERVICE,
   type CredentialStore,
-} from '@aluy/cli-core';
-import type { StoredCredential } from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
+import type { StoredCredential } from '@hiperplano/aluy-cli-core';
 
 /**
  * Lançado quando NÃO há keychain/secret-store do SO disponível (ex.: Linux sem

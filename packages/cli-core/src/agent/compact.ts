@@ -10,7 +10,7 @@
 // FRONTEIRA (ADR-0053 §8): esta é a LÓGICA PORTÁVEL — pura, determinística,
 // testável sem Ink/IO. A seleção (o que vira sumário, o que se preserva) é
 // determinística; o TEXTO do sumário é gerado pelo modelo via broker
-// (CLI-SEC-7), com TETO próprio (CLI-SEC-8). O comando/UI vive no @aluy/cli.
+// (CLI-SEC-7), com TETO próprio (CLI-SEC-8). O comando/UI vive no @hiperplano/aluy-cli.
 //
 // INVARIANTES que este arquivo guarda:
 //  - CLI-SEC-4 (separação de canais): o sumário é HISTÓRICO DA PRÓPRIA CONVERSA,
@@ -500,7 +500,7 @@ export class Compactor {
 
   /**
    * TETO de tokens da chamada de resumo (CLI-SEC-8). Exposto p/ o locus concreto
-   * (@aluy/cli) configurar o `ModelCaller` DEDICADO da compactação com ESTE teto —
+   * (@hiperplano/aluy-cli) configurar o `ModelCaller` DEDICADO da compactação com ESTE teto —
    * a chamada do resumo tem orçamento próprio, independente do budget da sessão que
    * estourou. Fica no Compactor p/ ser fonte única da verdade do teto do resumo.
    */

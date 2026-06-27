@@ -16,7 +16,7 @@
 // Devolve caminhos RELATIVOS à raiz (o que o usuário vê no chip `@caminho`). O
 // path-deny do canal (path-deny.ts, CLI-SEC-6) é aplicado por QUEM CONSOME o
 // índice (o picker `useFilePicker.loadIndex` filtra por `isPickable`) — aqui só
-// listamos. PORTÁVEL? NÃO — I/O concreto (Node fs/git), mora no @aluy/cli.
+// listamos. PORTÁVEL? NÃO — I/O concreto (Node fs/git), mora no @hiperplano/aluy-cli.
 
 import { readdir, lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';

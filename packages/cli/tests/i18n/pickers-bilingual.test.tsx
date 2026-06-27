@@ -19,7 +19,7 @@ import { ModelPicker } from '../../src/ui/components/ModelPicker.js';
 import { HistoryPicker } from '../../src/ui/components/HistoryPicker.js';
 import { FilePicker } from '../../src/ui/components/FilePicker.js';
 import { CommandPalette } from '../../src/ui/components/CommandPalette.js';
-import type { TierCatalogEntry } from '@aluy/cli-core';
+import type { TierCatalogEntry } from '@hiperplano/aluy-cli-core';
 import type { SessionSummary } from '../../src/io/index.js';
 import type { FuzzyHit } from '../../src/attach/index.js';
 import type { PaletteHit } from '../../src/slash/commands.js';

@@ -20,7 +20,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { BrokerModelClient, CredentialStore, StoredCredential } from '@aluy/cli-core';
+import type { BrokerModelClient, CredentialStore, StoredCredential } from '@hiperplano/aluy-cli-core';
 import { runSession } from '../../src/session/run.js';
 import { SessionStore } from '../../src/io/index.js';
 

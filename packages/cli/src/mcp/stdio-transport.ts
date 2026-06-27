@@ -53,8 +53,8 @@ import type {
   McpServerConfig,
   McpToolDescriptor,
   McpTransport,
-} from '@aluy/cli-core';
-import { CORE_VERSION } from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
+import { CORE_VERSION } from '@hiperplano/aluy-cli-core';
 import type { BwrapSandboxLauncher, ConfinedInvocation } from '../sandbox/index.js';
 
 /** Sentinela do watchdog de `callTool` (EST-1010): distingue "estourou o teto" de

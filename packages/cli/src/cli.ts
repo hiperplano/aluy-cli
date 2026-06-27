@@ -1,4 +1,4 @@
-import { CORE_VERSION, type SessionMode } from '@aluy/cli-core';
+import { CORE_VERSION, type SessionMode } from '@hiperplano/aluy-cli-core';
 import { CLI_VERSION } from './version.js';
 
 // Parser fino do binário `aluy`. Resolve --version/--help, os subcomandos de
@@ -428,7 +428,7 @@ Variáveis de ambiente (web):
                   rede tem teto de bytes próprio (a porta para de ler no limite).
 
 Instalação:
-  onboard  Instalador guiado (TUI) — o passo 1 (\`npm i -g @aluy/cli && aluy onboard\`).
+  onboard  Instalador guiado (TUI) — o passo 1 (\`npm i -g @hiperplano/aluy-cli && aluy onboard\`).
            Configura idioma, provider/modelo (BYO; faz um TESTE de conectividade real
            antes de prosseguir) e, opcionalmente, MCPs e os complementos. Substitui
            o setup manual. Funciona em Linux, macOS e Windows.
@@ -572,7 +572,7 @@ function shortFlagValue(argv: readonly string[], name: string): string | undefin
 
 export function versionText(): string {
   // Expõe as duas versões (binário + engine) — o engine é pacote separado.
-  return `aluy ${CLI_VERSION} (@aluy/cli-core ${CORE_VERSION})`;
+  return `aluy ${CLI_VERSION} (@hiperplano/aluy-cli-core ${CORE_VERSION})`;
 }
 
 /** Resolve, a partir dos argumentos (sem o `node` e o script), o que fazer. */

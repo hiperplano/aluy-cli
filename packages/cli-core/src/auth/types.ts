@@ -1,7 +1,7 @@
 // Contrato TS da auth headless (lado cliente) — EST-0942 / CLI-SEC-1.
 //
 // PORTÁVEL: só tipos + (mais adiante) lógica de rede/estado. Sem I/O de
-// terminal, sem keychain nativo (esses moram em @aluy/cli). Estes tipos
+// terminal, sem keychain nativo (esses moram em @hiperplano/aluy-cli). Estes tipos
 // espelham o contrato dos endpoints da EST-0940 no aluy-identity:
 //   POST /identity/device/authorize            (DeviceAuthorizeResponse)
 //   POST /identity/token  (grant_type=device)  (HeadlessTokenResponse | OAuthError)

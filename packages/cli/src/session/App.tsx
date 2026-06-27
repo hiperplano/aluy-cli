@@ -79,8 +79,8 @@ import type {
   TierCatalogClient,
   ProvidersClient,
   Checkpoint,
-} from '@aluy/cli-core';
-import { formatQuota } from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
+import { formatQuota } from '@hiperplano/aluy-cli-core';
 import { DEFAULT_TIER } from './wiring.js';
 import { tierDisplayName } from '../model/catalog.js';
 import type { SessionController } from './controller.js';

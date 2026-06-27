@@ -29,7 +29,7 @@ import {
   type McpConfig,
   type McpServerConfig,
   type McpSource,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
 import { McpConfigStore } from './../mcp/mcp-config-store.js';
 import { CodexMcpConfigStore } from './../mcp/codex-mcp-config.js';

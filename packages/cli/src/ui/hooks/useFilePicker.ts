@@ -12,7 +12,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { filterFuzzy, isPickable, type FuzzyHit } from '../../attach/index.js';
 import type { FileIndexPort } from '../../io/index.js';
 import type { AttachReader } from '../../attach/index.js';
-import type { HistoryItem } from '@aluy/cli-core';
+import type { HistoryItem } from '@hiperplano/aluy-cli-core';
 
 /** Um arquivo anexado ao turno (chip + o item rotulado p/ o loop). */
 export interface Attachment {

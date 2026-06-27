@@ -1,6 +1,6 @@
 // EST-0971 · CLI-SEC-13 — o ORQUESTRADOR anti-SSRF: resolve → valida → pina →
 // conecta, re-aplicando TUDO a cada redirect. PORTÁVEL: a lógica vive aqui; o DNS
-// real e o socket pinado são PORTAS injetadas (@aluy/cli). Testável de ponta a
+// real e o socket pinado são PORTAS injetadas (@hiperplano/aluy-cli). Testável de ponta a
 // ponta com um resolver/fetcher mock (incl. o mock de TTL0 da bateria CA-C1).
 //
 // FLUXO (cada hop, incl. redirects):
@@ -123,7 +123,7 @@ export const MAX_OBSERVATION_CHARS_CEILING = 500_000;
 /**
  * EST-0970 (fix OOM) — resolve o teto EFETIVO de caracteres da observação do
  * `web_fetch` (o blob que entra no contexto), com precedência FLAG/ENV > DEFAULT,
- * VALIDADO e CLAMPADO em `[MIN, CEILING]`. Puro (env como dado): o @aluy/cli lê
+ * VALIDADO e CLAMPADO em `[MIN, CEILING]`. Puro (env como dado): o @hiperplano/aluy-cli lê
  * `ALUY_WEB_FETCH_MAX_CHARS` e passa aqui. Entrada inválida (NaN/≤0/lixo) ⇒ default.
  * O CLAMP é o que preserva o anti-OOM mesmo sob config errada/maliciosa — `0` ou
  * `999999999` NÃO desligam o teto: caem no piso/teto-teto.

@@ -15,7 +15,7 @@ import { Box } from 'ink';
 import { Role } from '../theme/index.js';
 import { useI18n } from '../../i18n/index.js';
 import type { I18nKey } from '../../i18n/index.js';
-import type { Checkpoint } from '@aluy/cli-core';
+import type { Checkpoint } from '@hiperplano/aluy-cli-core';
 import { formatRewindEntry, type RewindAction } from '../../session/rewind.js';
 import { displayWidth } from '../../session/visual-lines.js';
 import { windowAround } from '../window.js';

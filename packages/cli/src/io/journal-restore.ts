@@ -8,10 +8,10 @@
 // rejeitado AQUI (lança `WorkspaceEscapeError`), não desvia a escrita p/ fora
 // (R8/TOCTOU). O core orquestra; o byte só sai por este módulo.
 //
-// PORTÁVEL? NÃO — `node:fs` concreto, por isso mora no @aluy/cli (locus concreto).
+// PORTÁVEL? NÃO — `node:fs` concreto, por isso mora no @hiperplano/aluy-cli (locus concreto).
 
 import { writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
-import type { CurrentReaderPort, RestoreWriterPort } from '@aluy/cli-core';
+import type { CurrentReaderPort, RestoreWriterPort } from '@hiperplano/aluy-cli-core';
 import type { WorkspacePort } from './workspace.js';
 
 export interface NodeRestoreWriterOptions {

@@ -35,7 +35,7 @@
 // ESCOPO/SEGURANÇA: a transformação é PURA sobre os bytes do frame — NÃO toca o
 // conteúdo/redação (o texto já vem redigido a montante; CLI-SEC-6 intacta) e NÃO
 // reordena nada. Os writes do `<Static>` são APPENDS ao scrollback (sem prefixo de
-// erase) ⇒ não casam o padrão ⇒ passam CRUS. Só a camada Ink de `@aluy/cli`; NÃO toca
+// erase) ⇒ não casam o padrão ⇒ passam CRUS. Só a camada Ink de `@hiperplano/aluy-cli`; NÃO toca
 // engine, catraca, egress, broker nem auth.
 
 /** BSU — Begin Synchronized Update (DECSET 2026). Abre o frame atômico. */

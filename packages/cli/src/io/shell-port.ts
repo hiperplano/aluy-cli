@@ -30,7 +30,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
-import type { ShellChunk, ShellExecOptions, ShellPort, ShellResult } from '@aluy/cli-core';
+import type { ShellChunk, ShellExecOptions, ShellPort, ShellResult } from '@hiperplano/aluy-cli-core';
 import type { WorkspacePort } from './workspace.js';
 import type { BwrapSandboxLauncher } from '../sandbox/index.js';
 

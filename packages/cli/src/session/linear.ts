@@ -5,7 +5,7 @@
 // o AskResolver nega por fail-safe (deny por inação); o agente segue e a linha
 // registra a recusa.
 
-import { cleanAluyForDisplay, type HistoryItem, type TierCatalogEntry } from '@aluy/cli-core';
+import { cleanAluyForDisplay, type HistoryItem, type TierCatalogEntry } from '@hiperplano/aluy-cli-core';
 import type { SessionController } from './controller.js';
 import type { SessionBlock } from './model.js';
 import { parseAtMentions, stripMentions, type AttachReader } from '../attach/index.js';
@@ -17,7 +17,7 @@ import { parseTodoCommand, runTodoCommand } from '../slash/todo.js';
 import { parseClearCommand, runClearCommand, isDestructiveClear } from '../slash/clear.js';
 import type { ThemeName } from '../ui/theme/themes.js';
 import type { Lang } from '../i18n/index.js';
-import type { AgentMemory } from '@aluy/cli-core';
+import type { AgentMemory } from '@hiperplano/aluy-cli-core';
 
 /** Saída mínima p/ a escrita linear — `process.stdout` ou um fake de teste. */
 export interface LinearOut {
@@ -778,7 +778,7 @@ export async function runMemoryLinear(
 export async function runTodoLinear(
   goal: string | undefined,
   out: LinearOut,
-  deps: { store: import('@aluy/cli-core').TodoStorePort; isPlan: boolean },
+  deps: { store: import('@hiperplano/aluy-cli-core').TodoStorePort; isPlan: boolean },
 ): Promise<boolean> {
   const line = (goal ?? '').trim();
   if (line !== '/todo' && !line.startsWith('/todo ')) return false;

@@ -15,7 +15,7 @@
 //   - SEM timeout por tempo aqui: uma pergunta pode esperar o usuário pensar. O abort
 //     (esc/Ctrl-C) é a saída; o controller também a cancela ao encerrar o turno.
 
-import type { QuestionAnswer, QuestionPort, QuestionSpec } from '@aluy/cli-core';
+import type { QuestionAnswer, QuestionPort, QuestionSpec } from '@hiperplano/aluy-cli-core';
 
 /** Estado de uma pergunta pendente, observável pela UI. */
 export interface PendingQuestionEntry {

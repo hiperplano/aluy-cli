@@ -24,7 +24,7 @@
 import { writeFile as fsWriteFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { FileReadMeta, FileSystemPort } from '@aluy/cli-core';
+import type { FileReadMeta, FileSystemPort } from '@hiperplano/aluy-cli-core';
 import type { WorkspacePort } from './workspace.js';
 import { readBounded } from './read-bounded.js';
 import { binaryNotice } from './binary-sniff.js';

@@ -5,7 +5,7 @@
 // injeta no canal `system` como CONFIG CONFIÁVEL (do dono, como o AGENT.md).
 //
 // PORTÁVEL (ADR-0053 §8): formatação de string PURA (sem `node:*`, sem I/O). O
-// caller (locus concreto, @aluy/cli) alimenta com `agentRegistry.list()` que já
+// caller (locus concreto, @hiperplano/aluy-cli) alimenta com `agentRegistry.list()` que já
 // filtrou os VÁLIDOS (os rejeitados RES-MD-3 NUNCA entram aqui).
 
 import type { AgentProfile } from './agent-profile.js';

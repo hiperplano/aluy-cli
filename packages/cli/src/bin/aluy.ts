@@ -11,7 +11,7 @@ import {
   yoloAuditEvent,
   type SessionMode,
   type YoloEntryVerdict,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { applyHeapLimit } from './heap-limit.js';
 
 // EST-1012 — HEAP-LIMIT EXPLÍCITO (backstop de OOM). Re-executa ESTE binário UMA vez

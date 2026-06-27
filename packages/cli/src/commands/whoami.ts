@@ -1,10 +1,10 @@
 // `aluy whoami` — mostra a credencial corrente REDIGIDA (sem o segredo) (CA-1).
 
-import { LoginService } from '@aluy/cli-core';
+import { LoginService } from '@hiperplano/aluy-cli-core';
 import { loadAuthConfig } from '../auth/config.js';
 import { NoKeychainError, KeychainCredentialStore } from '../auth/keychain-store.js';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
-import type { CredentialStore } from '@aluy/cli-core';
+import type { CredentialStore } from '@hiperplano/aluy-cli-core';
 
 export interface WhoamiDeps {
   readonly io?: TerminalIO;

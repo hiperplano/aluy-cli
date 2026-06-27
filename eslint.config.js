@@ -1,7 +1,7 @@
 // ESLint flat config (v9) — aluy-vau monorepo.
 // CI honesta: roda `eslint . --max-warnings=0` (ci-ts.yml). Warning = vermelho.
 //
-// Regra de fronteira modular (ADR-0053 §8): @aluy/cli-core é o engine PORTÁVEL
+// Regra de fronteira modular (ADR-0053 §8): @hiperplano/aluy-cli-core é o engine PORTÁVEL
 // (loop/tools/permissão) e NÃO pode importar Ink nem fazer I/O de terminal.
 // O `no-restricted-imports` abaixo BLOQUEIA, dentro de packages/cli-core/src,
 // qualquer import de `ink`, `react`, `readline`, `tty` e afins. Se o core
@@ -13,12 +13,12 @@ import tseslint from 'typescript-eslint';
 const TERMINAL_AND_TUI = [
   {
     name: 'ink',
-    message: 'cli-core é portável: sem Ink/TUI no engine (ADR-0053 §8). TUI mora em @aluy/cli.',
+    message: 'cli-core é portável: sem Ink/TUI no engine (ADR-0053 §8). TUI mora em @hiperplano/aluy-cli.',
   },
   { name: 'react', message: 'cli-core é portável: sem React/Ink no engine (ADR-0053 §8).' },
   {
     name: 'readline',
-    message: 'cli-core não faz I/O de terminal (ADR-0053 §8). I/O mora em @aluy/cli.',
+    message: 'cli-core não faz I/O de terminal (ADR-0053 §8). I/O mora em @hiperplano/aluy-cli.',
   },
   { name: 'readline/promises', message: 'cli-core não faz I/O de terminal (ADR-0053 §8).' },
   { name: 'tty', message: 'cli-core não faz I/O de terminal (ADR-0053 §8).' },

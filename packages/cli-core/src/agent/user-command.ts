@@ -17,7 +17,7 @@
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // PORTÁVEL (ADR-0053 §8): parser de string PURO (sem `node:*`, sem I/O). A LEITURA
-// confinada de `~/.aluy/commands/` (0700) é do locus concreto (@aluy/cli, io/).
+// confinada de `~/.aluy/commands/` (0700) é do locus concreto (@hiperplano/aluy-cli, io/).
 
 /** Frontmatter OPCIONAL (chave: valor) no topo de um comando `.md`, entre `---`. */
 export interface UserCommandMeta {

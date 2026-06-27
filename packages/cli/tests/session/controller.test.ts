@@ -18,8 +18,8 @@ import {
   type FileSystemPort,
   type ShellPort,
   type SearchPort,
-} from '@aluy/cli-core';
-import { BrokerError, DegenerateLoopError } from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
+import { BrokerError, DegenerateLoopError } from '@hiperplano/aluy-cli-core';
 import { SessionController, nextMode } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
 import type { StreamSink } from '../../src/session/streaming-caller.js';
@@ -88,7 +88,7 @@ function buildController(opts: {
   responses: readonly string[];
   files?: Record<string, string>;
   askResolver: TuiAskResolver | AskResolver;
-  limits?: import('@aluy/cli-core').SessionLimits;
+  limits?: import('@hiperplano/aluy-cli-core').SessionLimits;
   /** EST-0959 — engine pré-configurada (ex.: modo Plan/unsafe). Default: normal. */
   engine?: PolicyPermissionEngine;
   /** EST-0973 — caller DEDICADO da compactação (broker). Default: o `model` da sessão. */

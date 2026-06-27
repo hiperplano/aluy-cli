@@ -1,9 +1,9 @@
 // TRAVA de publish ingênuo.
 //
-// O `package.json` de DEV de @aluy/cli NÃO é o artefato publicável: ele declara
-// `@aluy/cli-core` (interno, `private`) como dep e ship `files:["dist"]` (com
+// O `package.json` de DEV de @hiperplano/aluy-cli NÃO é o artefato publicável: ele declara
+// `@hiperplano/aluy-cli-core` (interno, `private`) como dep e ship `files:["dist"]` (com
 // sourcemaps/.tsbuildinfo). Publicar ele direto (`npm publish` na pasta do
-// pacote) produziria um tarball QUEBRADO (import @aluy/cli-core não-resolvido) e
+// pacote) produziria um tarball QUEBRADO (import @hiperplano/aluy-cli-core não-resolvido) e
 // SUJO. A entrega monolítica passa pelo pipeline de release:
 //   npm run bundle && npm run make-publish-pkg  → publica `package.publish.json`.
 //
@@ -22,12 +22,12 @@ if (process.env.ALUY_ALLOW_RAW_PUBLISH === '1') {
 
 console.error(
   [
-    'ERRO: publish do package.json de DEV de @aluy/cli está BLOQUEADO (entrega monolítica).',
+    'ERRO: publish do package.json de DEV de @hiperplano/aluy-cli está BLOQUEADO (entrega monolítica).',
     '',
-    'Este package.json declara @aluy/cli-core (interno/private) e ship sourcemaps — o tarball sairia',
+    'Este package.json declara @hiperplano/aluy-cli-core (interno/private) e ship sourcemaps — o tarball sairia',
     'QUEBRADO e SUJO. O artefato publicável é gerado pelo pipeline de bundle:',
     '',
-    '  npm run scan-bundle      # embute @aluy/cli-core + scan do bundle',
+    '  npm run scan-bundle      # embute @hiperplano/aluy-cli-core + scan do bundle',
     '  npm run make-publish-pkg # gera package.publish.json (sem dep interna; README+LICENSE)',
     '  # publica usando package.publish.json',
   ].join('\n'),

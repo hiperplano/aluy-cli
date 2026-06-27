@@ -1,6 +1,6 @@
 // EST-0968 · CLI-SEC-3 — testes da API SEGURA do painel `/permissions`.
 //
-// O painel (UI no @aluy/cli) so altera a catraca PELO QUE ESTA EXPOSTO aqui. Estes
+// O painel (UI no @hiperplano/aluy-cli) so altera a catraca PELO QUE ESTA EXPOSTO aqui. Estes
 // testes provam a invariante central da estoria e o gate FORTE do `seguranca`:
 //   - trocar o MODO pelo painel funciona (delega ao setMode existente);
 //   - revogar um grant remove o allow-de-sessao;

@@ -17,7 +17,7 @@
 import type { SessionRecord, SessionStore, SessionSummary } from '../io/index.js';
 import { blocksToHistory } from '../io/index.js';
 import { abbreviateCwd } from './model.js';
-import type { HistoryItem } from '@aluy/cli-core';
+import type { HistoryItem } from '@hiperplano/aluy-cli-core';
 
 /**
  * Teto de sessões listadas no `/history` — as N mais RECENTES. A lista é uma ajuda de

@@ -2,7 +2,7 @@
 //
 // Aqui mora SÓ o que é portável (tipos + lógica pura): a forma da capability, a
 // decisão de fail-mode (D-SB-4) e a geração do filtro seccomp (bytes). O LANÇADOR
-// concreto (`bwrap`/userns + spawn) vive em `@aluy/cli` (`src/sandbox/`) e consome
+// concreto (`bwrap`/userns + spawn) vive em `@hiperplano/aluy-cli` (`src/sandbox/`) e consome
 // estes contratos. É a fronteira atravessa-loci (ADR-0053 §8/§8-bis): o modelo de
 // confinamento viaja junto da catraca no futuro split de locus.
 export type {

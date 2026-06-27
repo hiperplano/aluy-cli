@@ -9,7 +9,7 @@ import { render } from 'ink-testing-library';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { QuestionDialog, OTHER_INDEX } from '../../src/ui/components/QuestionDialog.js';
-import type { QuestionSpec } from '@aluy/cli-core';
+import type { QuestionSpec } from '@hiperplano/aluy-cli-core';
 
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');

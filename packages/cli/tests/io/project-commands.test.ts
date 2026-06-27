@@ -6,7 +6,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { UserCommand } from '@aluy/cli-core';
+import type { UserCommand } from '@hiperplano/aluy-cli-core';
 import { NodeWorkspace } from '../../src/io/workspace.js';
 import {
   ProjectCommandsLoader,

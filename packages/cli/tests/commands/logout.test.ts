@@ -5,8 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { runLogout } from '../../src/commands/logout.js';
 import { NoKeychainError } from '../../src/auth/keychain-store.js';
-import type { CredentialStore, StoredCredential } from '@aluy/cli-core';
-import type { FetchLike } from '@aluy/cli-core';
+import type { CredentialStore, StoredCredential } from '@hiperplano/aluy-cli-core';
+import type { FetchLike } from '@hiperplano/aluy-cli-core';
 
 // ---------------------------------------------------------------------------
 // Fakes

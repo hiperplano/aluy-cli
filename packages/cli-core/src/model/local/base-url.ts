@@ -90,7 +90,7 @@ export type PinResult =
  * vez de deixar o `globalThis.fetch` re-resolver o host na hora (DNS-rebinding).
  *
  * PORTÁVEL (ADR-0053 §8): só denylist (pura) + a porta `HostResolver` injetada.
- * O fetch pinado/streaming concreto mora no @aluy/cli (perto do `web-port.ts`).
+ * O fetch pinado/streaming concreto mora no @hiperplano/aluy-cli (perto do `web-port.ts`).
  *
  * Diferença do `validateProviderBaseUrl`: aqui DEVOLVE o IP pinado (o egress vai
  * conectar AO IP validado, não re-resolver) e re-aplica-se a CADA hop de redirect.

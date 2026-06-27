@@ -31,7 +31,7 @@ import {
   type RegistryFetchResult,
   type SafeFetcherPorts,
   type WebFetchPolicy,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { EgressAllowlist } from '../io/egress.js';
 import { NodeHostResolver, NodePinnedFetcher } from '../io/web-port.js';
 

@@ -6,7 +6,7 @@
 //
 // Fail-closed (§5.2): valor inválido ⇒ `memory` + aviso.
 // Seam ausente (§nota): `loopback`/`broker` são valores VÁLIDOS da chave,
-// mas a criação do store concreto é responsabilidade do wiring (@aluy/cli);
+// mas a criação do store concreto é responsabilidade do wiring (@hiperplano/aluy-cli);
 // o core só devolve o nome — o wiring decide se cria ou lança erro LOUD.
 
 /** Backends de sala reconhecidos (ADR-0121 §5.1). */

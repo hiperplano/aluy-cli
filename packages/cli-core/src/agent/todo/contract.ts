@@ -29,7 +29,7 @@ export interface TodoItem {
 
 /**
  * PORTA de I/O ESTREITA do backlog/TODO — o ÚNICO canal de escrita/leitura.
- * O locus concreto (@aluy/cli) a liga a `~/.aluy/todos.json` (0600, fail-safe).
+ * O locus concreto (@hiperplano/aluy-cli) a liga a `~/.aluy/todos.json` (0600, fail-safe).
  * A superfície NÃO tem `write(path, …)`: só operações de TODO.
  */
 export interface TodoStorePort {

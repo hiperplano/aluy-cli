@@ -26,7 +26,7 @@ export {
 } from './base-url.js';
 // ADR-0118 / EST-1118 — catálogo de providers LOCAIS como DADO (default embutido +
 // override do usuário). PURO (tipos + DADO + merge/sanitize; o load do JSON mora no
-// @aluy/cli). O `wireFormat` escolhe o adapter (código). CLI-SEC-7: só dado público.
+// @hiperplano/aluy-cli). O `wireFormat` escolhe o adapter (código). CLI-SEC-7: só dado público.
 export {
   type WireFormat,
   type LocalAuthMode,

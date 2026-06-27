@@ -37,7 +37,7 @@ import {
   statSync,
   constants as fsConstants,
 } from 'node:fs';
-import type { BlobRef, JournalEntry, JournalStorePort } from '@aluy/cli-core';
+import type { BlobRef, JournalEntry, JournalStorePort } from '@hiperplano/aluy-cli-core';
 
 /** Permissões restritas (R5): dir `0700`, blob `0600`. */
 const DIR_MODE = 0o700;

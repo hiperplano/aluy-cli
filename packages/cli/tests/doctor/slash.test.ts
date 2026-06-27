@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { routeInput, NATIVE_COMMANDS } from '../../src/slash/commands.js';
 import { runDoctorLive, type DoctorLiveState } from '../../src/doctor/slash.js';
-import type { LoginService } from '@aluy/cli-core';
+import type { LoginService } from '@hiperplano/aluy-cli-core';
 import type { DoctorFacts } from '../../src/doctor/checks.js';
 
 function baseFacts(): DoctorFacts {

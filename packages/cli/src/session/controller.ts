@@ -111,16 +111,16 @@ import {
   type MaestroPort,
   type ContinuationConfig,
   type MemoryEngine,
-} from '@aluy/cli-core';
-import { runSideQuery, summarizeLiveFlows } from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
+import { runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
 import {
   EventQueue,
   formatMonitorEventAsData,
   MonitorStore,
   buildMonitorTools,
-} from '@aluy/cli-core';
-import { MemoryRoomStore, buildRoomTools } from '@aluy/cli-core';
-import type { RoomStore, MeshPolicy } from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
+import { MemoryRoomStore, buildRoomTools } from '@hiperplano/aluy-cli-core';
+import type { RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
 import {
   formatRoomSummary,
   formatConversation,
@@ -131,9 +131,9 @@ import {
 } from './rooms/room-render.js';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { redactOutputSecrets } from '@aluy/cli-core';
+import { redactOutputSecrets } from '@hiperplano/aluy-cli-core';
 import type { StreamSink } from './streaming-caller.js';
-import type { ModelCaller } from '@aluy/cli-core';
+import type { ModelCaller } from '@hiperplano/aluy-cli-core';
 import { withToolReport, type ToolReporter } from './tool-reporter.js';
 import {
   abbreviateCwd,
@@ -155,7 +155,7 @@ import {
 type BangStatus = BangBlock['status'];
 import type { TuiAskResolver, PendingAskEntry } from '../ask/ask-resolver.js';
 import type { TuiQuestionResolver, PendingQuestionEntry } from '../ask/question-resolver.js';
-import type { AskResolver, QuestionAnswer, QuestionSpec } from '@aluy/cli-core';
+import type { AskResolver, QuestionAnswer, QuestionSpec } from '@hiperplano/aluy-cli-core';
 import { FlushThrottle, type FlushThrottleOptions } from './flush-throttle.js';
 import { backoffDelayMs, DEFAULT_BACKOFF, type BackoffPolicy } from './retry-backoff.js';
 import { isLiveBlock } from './render-split.js';
@@ -445,7 +445,7 @@ export interface SessionControllerOptions {
    * `resolveModelTier`), devolve um `ModelCaller` que manda AQUELE tier no request ao
    * broker (MESMO broker/credencial do pai, só varia a pista de tier — HG-2). O
    * controller só a REPASSA ao spawner; quem a constrói (reusando o BrokerModelCaller
-   * dos filhos parametrizado por tier) é o wiring (@aluy/cli — cli-core não conhece o
+   * dos filhos parametrizado por tier) é o wiring (@hiperplano/aluy-cli — cli-core não conhece o
    * broker concreto). Ausente ⇒ todos os filhos usam o `subAgentModel`/`model` do pai
    * (back-compat). O tier é DADO de catálogo (o broker valida — 422); nunca credencial.
    */
@@ -3224,7 +3224,7 @@ export class SessionController {
    * modelo a partir desse prefixo (turnos posteriores somem da tela e do contexto).
    * Reusa EXATAMENTE o caminho do `/history`-ao-vivo: `resetResumeContext()` esquece o
    * contexto de continuação da sessão corrente; `seedHistory(...)` prepara o prefixo
-   * como semente do próximo turno (o `toHistory` é o `blocksToHistory` do @aluy/cli —
+   * como semente do próximo turno (o `toHistory` é o `blocksToHistory` do @hiperplano/aluy-cli —
    * mantém os canais/envelope, CLI-SEC-4). Vai p/ `idle` (o composer reabre).
    *
    * GUARDA: só em REPOUSO (sem turno vivo / sub-agentes desacoplados) — rebobinar no
@@ -4484,7 +4484,7 @@ export class SessionController {
    * Encontra o último bloco `testrun` que ainda está `running` e atualiza seu `score`;
    * se não existir, empurra um novo. Coalescido por frame (`patchThrottled`).
    */
-  private upsertTestRunBlock(score: import('@aluy/cli-core').TestScore): void {
+  private upsertTestRunBlock(score: import('@hiperplano/aluy-cli-core').TestScore): void {
     const blocks = [...this.state.blocks];
     const idx = lastRunningTestRunIndex(blocks);
     const startedAt =
@@ -4789,7 +4789,7 @@ export class SessionController {
   }
 
   /** A UI chama p/ resolver o ask pendente (repassa à engine via resolver). */
-  resolveAsk(resolution: import('@aluy/cli-core').AskResolution): void {
+  resolveAsk(resolution: import('@hiperplano/aluy-cli-core').AskResolution): void {
     const pending = this.tuiResolver?.pending;
     if (!pending) return;
     // Registra um bloco de deny p/ o histórico (efeito recusado fica visível §2.9).

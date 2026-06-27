@@ -35,7 +35,7 @@ import {
   type McpTransport,
   type McpDiscoveryResult,
   type StreamFetch,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { themeByName } from '../ui/theme/themes.js';
 import {
   resolveMem0Url,

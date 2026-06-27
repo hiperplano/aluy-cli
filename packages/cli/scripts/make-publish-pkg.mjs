@@ -1,6 +1,6 @@
 // EST-0949 — gera o package.json de PUBLICAÇÃO a partir do de dev: aponta main/bin
-// p/ o dist-bundle, REMOVE @aluy/cli-core (embutido), mantém os externals. NÃO toca
-// o package.json de dev (workspaces precisam do @aluy/cli-core).
+// p/ o dist-bundle, REMOVE @hiperplano/aluy-cli-core (embutido), mantém os externals. NÃO toca
+// o package.json de dev (workspaces precisam do @hiperplano/aluy-cli-core).
 //
 // README/LICENSE: o monorepo guarda os dois na RAIZ (não em packages/cli/), então o
 // `npm publish` do pacote não os enxergaria e o tarball sairia SEM doc/licença (defeito
@@ -14,7 +14,7 @@ copyFileSync(join(repoRoot, 'LICENSE'), 'LICENSE');
 
 const dev = JSON.parse(readFileSync('package.json', 'utf8'));
 const deps = { ...dev.dependencies };
-delete deps['@aluy/cli-core']; // embutido no bundle
+delete deps['@hiperplano/aluy-cli-core']; // embutido no bundle
 const pub = {
   name: dev.name,
   version: dev.version,
@@ -38,5 +38,5 @@ const pub = {
 };
 writeFileSync('package.publish.json', JSON.stringify(pub, null, 2) + '\n');
 console.log(
-  '[publish-pkg] gerado package.publish.json (sem @aluy/cli-core; main/bin→dist-bundle; README+LICENSE copiados da raiz)',
+  '[publish-pkg] gerado package.publish.json (sem @hiperplano/aluy-cli-core; main/bin→dist-bundle; README+LICENSE copiados da raiz)',
 );

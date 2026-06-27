@@ -12,7 +12,7 @@
 
 import React from 'react';
 import { Box } from 'ink';
-import type { QuestionSpec } from '@aluy/cli-core';
+import type { QuestionSpec } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 
 /**

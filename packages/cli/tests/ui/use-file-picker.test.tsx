@@ -10,7 +10,7 @@ import { useFilePicker, type FilePickerController } from '../../src/ui/hooks/use
 import type { FileIndexPort } from '../../src/io/file-index.js';
 import { AttachReader } from '../../src/attach/reader.js';
 import type { WorkspacePort } from '../../src/io/workspace.js';
-import type { FileSystemPort } from '@aluy/cli-core';
+import type { FileSystemPort } from '@hiperplano/aluy-cli-core';
 
 const PATHS = ['src/auth/session.ts', 'src/auth/config.ts', 'README.md'];
 

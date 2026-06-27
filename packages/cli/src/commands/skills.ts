@@ -17,7 +17,7 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillsNote } from '@aluy/cli-core';
+import { buildSkillsNote } from '@hiperplano/aluy-cli-core';
 import { UserSkillsLoader, SKILLS_DIRNAME, type SkillLoadResult } from '../io/user-skills.js';
 import { ProjectSkillsLoader } from '../io/project-skills.js';
 import { NodeWorkspace } from '../io/workspace.js';

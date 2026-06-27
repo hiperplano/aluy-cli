@@ -4,7 +4,7 @@
 // LoginService vira o provedor de credencial do `BrokerModelClient`. É o ponto
 // de wiring que a EST-0944 (loop) e a EST-0948 (TUI) instanciam — uma vez por
 // sessão — para chamar o modelo. PORTÁVEL: não toca keychain (a LoginService
-// recebe o store já injetado pelo @aluy/cli).
+// recebe o store já injetado pelo @hiperplano/aluy-cli).
 
 import type { LoginService } from '../auth/login-service.js';
 import { BrokerModelClient, type StreamFetch } from './broker-client.js';

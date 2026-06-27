@@ -166,7 +166,7 @@ function ok(stdout = ''): ShellResult {
  * prefixo de string (sem fs). `setCwd('..'` no topo fica na raiz; um alvo que sai da
  * raiz é clampado; um nome inexistente lança (a tool reporta o erro). Suficiente p/
  * provar a SEMÂNTICA da tool `change_dir` (o confinamento REAL com fs/realpath é
- * provado no `workspace-session-cwd.test.ts` do @aluy/cli).
+ * provado no `workspace-session-cwd.test.ts` do @hiperplano/aluy-cli).
  */
 export class MemoryCwd implements CwdPort {
   private session: string;

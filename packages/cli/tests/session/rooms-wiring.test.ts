@@ -12,7 +12,7 @@ import {
   type FileSystemPort,
   type ShellPort,
   type SearchPort,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import { FileRoomStore } from '../../src/session/rooms/file-room-store.js';
 import { TuiQuestionResolver } from '../../src/ask/question-resolver.js';
@@ -212,7 +212,7 @@ describe('SessionController — roomReadPick (picker de leitura)', () => {
 });
 
 // ADR-0126(B) — visibilidade reforçada: roomList enriquecido + roomWatch ao vivo.
-import type { Room, RoomStore } from '@aluy/cli-core';
+import type { Room, RoomStore } from '@hiperplano/aluy-cli-core';
 
 /** Store FAKE com relógio/sleep determinísticos: o tempo avança SÓ no sleep injetado. */
 function makeWatchController(roomStore: RoomStore, clock: () => number) {

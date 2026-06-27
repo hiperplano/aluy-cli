@@ -1,6 +1,6 @@
 // CLI-SEC-7 — teste de REGRESSÃO automatizado (CA-3 + CA-4).
 //
-// CA-3: varrendo o pacote @aluy/cli-core, NÃO há credencial de provider, nome de
+// CA-3: varrendo o pacote @hiperplano/aluy-cli-core, NÃO há credencial de provider, nome de
 //       provider, markup, quota nem ledger — `tier` é a única pista (HG-2).
 // CA-4: EXISTE exatamente UM caminho de modelo (o broker, POST /v1/chat). Este
 //       teste FALHA (vermelho) se aparecer uma rota alternativa (provider direto
@@ -131,7 +131,7 @@ describe('CLI-SEC-7 · CA-4 — EXATAMENTE UM caminho de modelo (o broker)', () 
     // o mantêm seguro e provados ABAIXO: (a) NÃO toca `/v1/chat` (o caminho do broker
     // continua único — a via local fala o protocolo NATIVO do provider, via adapter);
     // (b) NÃO embute HOST/SDK/chave de provider no core (CA-3 acima) — o `baseUrl` e a
-    // credencial BYO são INJETADOS pelo @aluy/cli (keychain→env), nunca versionados
+    // credencial BYO são INJETADOS pelo @hiperplano/aluy-cli (keychain→env), nunca versionados
     // (CLI-SEC-7/CLI-SEC-2); (c) o `base_url` configurável é validado por anti-SSRF
     // (PROV-SEC-1). Entra na allowlist com essas provas.
     const ALLOWED_CLIENTS = [

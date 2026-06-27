@@ -17,7 +17,7 @@ import {
   providersConfigPath,
   PROVIDERS_FILENAME,
 } from '../../src/io/providers-config.js';
-import { defaultLocalCatalog, findProvider } from '@aluy/cli-core';
+import { defaultLocalCatalog, findProvider } from '@hiperplano/aluy-cli-core';
 
 describe('loadLocalProviderCatalog — default embutido + override do usuário (EST-1118)', () => {
   let base: string;

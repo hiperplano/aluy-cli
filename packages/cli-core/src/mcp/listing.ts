@@ -4,7 +4,7 @@
 // PURO (sem I/O): recebe os servers JÁ-LIDOS de CADA fonte (na ordem de precedência) e,
 // opcionalmente, o resultado da DESCOBERTA (handshake — nº de tools/estado por server), e
 // produz uma listagem determinística com ORIGEM resolvida. Quem lê os arquivos do disco é
-// o `@aluy/cli` (locus confinado); aqui só compomos a vista.
+// o `@hiperplano/aluy-cli` (locus confinado); aqui só compomos a vista.
 //
 // PRECEDÊNCIA (igual ao `mergeMcpConfigs` / setup.ts): da fonte MENOS p/ a MAIS específica
 // — Codex global < `.aluy` global < projeto `.mcp.json`. Em colisão de nome, a fonte mais

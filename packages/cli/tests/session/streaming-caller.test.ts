@@ -14,7 +14,7 @@ import {
   type ModelStreamEvent,
   type ModelUsage,
   type StreamCallArgs,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { StreamingModelCaller, type StreamSink } from '../../src/session/streaming-caller.js';
 
 /**

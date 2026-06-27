@@ -7,7 +7,7 @@
 // segredo capturado não é exfiltrável por NENHUM canal de leitura.
 //
 // MECÂNICA (toda no core portável — a chave e o selar/abrir vivem AQUI; o store
-// concreto em @aluy/cli só grava/lê BYTES OPACOS, §6 do ADR / fronteira modular):
+// concreto em @hiperplano/aluy-cli só grava/lê BYTES OPACOS, §6 do ADR / fronteira modular):
 //   - CHAVE DE SESSÃO: 32 bytes de `crypto.randomBytes` gerados na construção do
 //     `SnapshotJournal`. Vive SÓ na memória do processo — NUNCA escrita no disco,
 //     NUNCA logada, NUNCA no `stack.jsonl`. Morre com o processo (o journal já é

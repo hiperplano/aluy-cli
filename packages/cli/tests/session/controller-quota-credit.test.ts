@@ -4,10 +4,10 @@
 // oculto (degrada). Integração focada: `quotaFetcher` mockado (sem rede).
 
 import { describe, expect, it, vi } from 'vitest';
-import { PolicyPermissionEngine, type Quota } from '@aluy/cli-core';
+import { PolicyPermissionEngine, type Quota } from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
-import type { ModelCaller, ModelCallResult } from '@aluy/cli-core';
+import type { ModelCaller, ModelCallResult } from '@hiperplano/aluy-cli-core';
 import type { StreamSink } from '../../src/session/streaming-caller.js';
 
 function scriptedCaller(

@@ -25,7 +25,7 @@ import {
   type NativeToolCall,
   type NativeToolsCapability,
   type Quota,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { compressViaHeadroom, headroomUrlFromEnv } from '../model/headroom.js';
 
 /** Eventos de stream que a UI observa (token-a-token + usage). */

@@ -18,7 +18,7 @@ import {
   type ModelCaller,
   type ModelCallResult,
   type ToolPorts,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
 import { isLiveBlock } from '../../src/session/render-split.js';

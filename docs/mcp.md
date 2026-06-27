@@ -149,12 +149,12 @@ env = { API_KEY = "x" }     # ou, em linhas próprias: [mcp_servers.everything.e
 
 ## Fronteira modular
 
-- `@aluy/cli-core` (**portável**): config (`parseMcpConfig`), **parser TOML confinado do
+- `@hiperplano/aluy-cli-core` (**portável**): config (`parseMcpConfig`), **parser TOML confinado do
   Codex** (`parseCodexMcpConfig` — só o subconjunto `[mcp_servers]`, sem `node:*`, sem
   dep), descoberta/handshake (`discoverMcpTools`), adaptação das tools (`adaptMcpTools`),
   classificação de efeito por sinais (`effect-signals`) e a porta `McpTransport`. **Sem
   `node:*`, sem o SDK.**
-- `@aluy/cli` (**locus concreto**): leitura confinada do `~/.aluy/mcp.json`
+- `@hiperplano/aluy-cli` (**locus concreto**): leitura confinada do `~/.aluy/mcp.json`
   (`McpConfigStore`, global), do `.mcp.json` do projeto (`ProjectMcpConfigStore`,
   confinado ao workspace) e do `~/.codex/config.toml` (`CodexMcpConfigStore`, Codex
   global), e o transporte stdio com o **SDK MCP oficial** (`StdioMcpTransport`,

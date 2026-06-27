@@ -12,7 +12,7 @@
 //     (EST-0969) + o relógio injetável.
 //
 // PORTÁVEL (ADR-0053 §8): SEM Ink, SEM I/O de terminal. Só estado + mecânica + relógio
-// injetável. O drill-in/UI/contabilidade-visível são do @aluy/cli, que LÊ esta árvore.
+// injetável. O drill-in/UI/contabilidade-visível são do @hiperplano/aluy-cli, que LÊ esta árvore.
 //
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║ INVARIANTES (gate MÉDIO do `seguranca` — GS-C1..C4 + RES-C-1/3):           ║
@@ -514,7 +514,7 @@ export interface FlowSummary {
 
 /**
  * A ÁRVORE DE FLUXOS de uma sessão: o nó RAIZ (pai) + os filhos vivos. É o registro
- * navegável que o @aluy/cli LÊ p/ ver/parar/interagir. Cria/encontra nós por id e
+ * navegável que o @hiperplano/aluy-cli LÊ p/ ver/parar/interagir. Cria/encontra nós por id e
  * roteia o cancelamento (um nó / todos). Determinística e sem I/O.
  */
 export class FlowTree {

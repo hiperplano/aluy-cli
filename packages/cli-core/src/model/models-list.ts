@@ -2,11 +2,11 @@
 // providers`: o FORMATADOR PURO da listagem de providers/modelos disponíveis.
 //
 // Espelha o `buildAgentsNote`/`buildSkillsNote` (EST-0977/EST-1112): o builder NÃO
-// faz I/O — recebe o DADO já carregado pelo locus (`@aluy/cli`) e estrutura as linhas.
+// faz I/O — recebe o DADO já carregado pelo locus (`@hiperplano/aluy-cli`) e estrutura as linhas.
 // Duas SEÇÕES:
 //   1. LOCAL (BYO): os providers/adapters do backend local (anthropic/openai/openrouter),
 //      o modo de auth de cada e o modelo default — metadata PURA passada como DADO (o
-//      core NÃO embute endpoint/SDK/chave; CLI-SEC-7/CA-3 — os defaults moram no `@aluy/cli`).
+//      core NÃO embute endpoint/SDK/chave; CLI-SEC-7/CA-3 — os defaults moram no `@hiperplano/aluy-cli`).
 //   2. BROKER: os TIERS (com o principal resolvido), os PROVIDERS registrados e os MODELOS
 //      custom, do catálogo VIVO. FAIL-SOFT: se o broker não respondeu, a seção vira um AVISO
 //      ("broker indisponível — …") em vez de quebrar (espelha o `/doctor`).
@@ -24,7 +24,7 @@ import type { TierCatalogEntry } from './catalog-client.js';
 import type { ProviderInfo } from './providers-client.js';
 import type { CustomModel } from './custom-models-client.js';
 
-/** Uma nota (título + linhas) — espelha o `SlashNote` do @aluy/cli, sem acoplar a ele. */
+/** Uma nota (título + linhas) — espelha o `SlashNote` do @hiperplano/aluy-cli, sem acoplar a ele. */
 export interface ModelsListNote {
   readonly title: string;
   readonly lines: readonly string[];
@@ -34,7 +34,7 @@ export interface ModelsListNote {
 export type ModelsScope = 'local' | 'broker' | 'both';
 
 /**
- * Metadata PÚBLICA de UM provider do backend local — montada pelo locus (`@aluy/cli`,
+ * Metadata PÚBLICA de UM provider do backend local — montada pelo locus (`@hiperplano/aluy-cli`,
  * que detém os defaults). SÓ campos públicos (nome/auth/modelo-default + a indicação de
  * catálogo vivo); NUNCA `base_url`/chave (CLI-SEC-7). O builder só FORMATA isto.
  */

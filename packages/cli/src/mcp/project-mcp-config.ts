@@ -24,8 +24,8 @@
 // FAIL-SAFE: ausente/ilegível/JSON inválido/escapa-a-raiz ⇒ config VAZIA (sem MCP de
 // projeto), com erro legível quando o arquivo existe mas é inválido. NUNCA lança.
 
-import { parseMcpConfig, EMPTY_MCP_CONFIG, McpConfigError } from '@aluy/cli-core';
-import type { McpConfig } from '@aluy/cli-core';
+import { parseMcpConfig, EMPTY_MCP_CONFIG, McpConfigError } from '@hiperplano/aluy-cli-core';
+import type { McpConfig } from '@hiperplano/aluy-cli-core';
 import { classifyAttachPath } from '../attach/path-deny.js';
 import type { WorkspacePort } from '../io/workspace.js';
 import type { McpConfigLoad } from './mcp-config-store.js';
@@ -40,7 +40,7 @@ export interface ProjectMcpConfigStoreOptions {
   /** Workspace confinado — `.mcp.json` é resolvido/canonicalizado SÓ sob a raiz. */
   readonly workspace: WorkspacePort;
   /**
-   * Leitor de arquivo confinado (FileSystemPort do @aluy/cli). Recebe um path
+   * Leitor de arquivo confinado (FileSystemPort do @hiperplano/aluy-cli). Recebe um path
    * RELATIVO à raiz; reconfina internamente. Devolve o conteúdo (string).
    */
   readonly readFile: (path: string) => Promise<string>;

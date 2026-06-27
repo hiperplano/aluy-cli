@@ -13,7 +13,7 @@ import {
   type ModelPickerChoice,
   type ConjugatedChoice,
 } from '../../src/ui/hooks/useModelPicker.js';
-import type { CustomModel, TierCatalogEntry } from '@aluy/cli-core';
+import type { CustomModel, TierCatalogEntry } from '@hiperplano/aluy-cli-core';
 
 const CATALOG: readonly TierCatalogEntry[] = [
   {

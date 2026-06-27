@@ -11,7 +11,7 @@
 //   - sob --yolo, o teto CONVIVE com allowInternalHosts (não some).
 
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MAX_OBSERVATION_CHARS, MAX_OBSERVATION_CHARS_CEILING } from '@aluy/cli-core';
+import { DEFAULT_MAX_OBSERVATION_CHARS, MAX_OBSERVATION_CHARS_CEILING } from '@hiperplano/aluy-cli-core';
 import { buildSession } from '../../src/session/wiring.js';
 
 describe('EST-0970 — teto da observação do web_fetch fiado de buildSession à WebPort', () => {

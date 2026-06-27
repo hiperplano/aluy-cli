@@ -17,8 +17,8 @@ import {
   createPinnedStreamFetch,
   connectPinned,
 } from '../../../src/model/local/pinned-stream-fetch.js';
-import { parseSse } from '@aluy/cli-core';
-import type { HostResolver } from '@aluy/cli-core';
+import { parseSse } from '@hiperplano/aluy-cli-core';
+import type { HostResolver } from '@hiperplano/aluy-cli-core';
 
 let server: Server | undefined;
 afterEach(() => {

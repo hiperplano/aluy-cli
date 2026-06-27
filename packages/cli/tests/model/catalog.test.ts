@@ -1,7 +1,7 @@
 // EST-0962 — testes do fallback de catálogo + helpers de display do seletor `/model`.
 
 import { describe, it, expect, vi } from 'vitest';
-import type { TierCatalogEntry } from '@aluy/cli-core';
+import type { TierCatalogEntry } from '@hiperplano/aluy-cli-core';
 import {
   FALLBACK_TIERS,
   costLabel,

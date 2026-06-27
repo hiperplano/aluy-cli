@@ -23,8 +23,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SandboxCapability, SandboxConfinement } from '@aluy/cli-core';
-import { DEFAULT_RESOURCE_LIMITS } from '@aluy/cli-core';
+import type { SandboxCapability, SandboxConfinement } from '@hiperplano/aluy-cli-core';
+import { DEFAULT_RESOURCE_LIMITS } from '@hiperplano/aluy-cli-core';
 import { BwrapSandboxLauncher } from '../../src/sandbox/launcher.js';
 
 /** Capability COM cgroup (systemd-run --user disponível) + piso de fuga completo. */

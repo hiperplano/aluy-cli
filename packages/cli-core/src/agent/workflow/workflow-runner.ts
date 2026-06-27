@@ -1,6 +1,6 @@
 // EST-1106 · ADR-workflows — MOTOR DO /workflows run (FATIA 2).
 // Roda CADA atividade do workflow EM ORDEM, via um `WorkflowActivityRunner`
-// injetado (o locus concreto @aluy/cli executa o turno pela MESMA catraca).
+// injetado (o locus concreto @hiperplano/aluy-cli executa o turno pela MESMA catraca).
 // PARA na 1ª que falhar/for cancelada/limite (não segue cega).
 //
 // PORTÁVEL (ADR-0053 §8): orquestração PURA (sem I/O, sem Ink, sem modelo).
@@ -9,7 +9,7 @@
 import type { WorkflowActivity } from './workflow-parse.js';
 
 /**
- * PORTA de execução de UMA atividade. O locus concreto (@aluy/cli) injeta o
+ * PORTA de execução de UMA atividade. O locus concreto (@hiperplano/aluy-cli) injeta o
  * turno agêntico real (pela MESMA catraca `decide()`). O workflow-runner é
  * um ORQUESTRADOR que chama esta porta uma vez por atividade.
  */

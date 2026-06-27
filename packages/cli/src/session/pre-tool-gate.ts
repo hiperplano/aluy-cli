@@ -15,8 +15,8 @@
 // ║  • o motivo do veto volta como DADO não-confiável (CLI-SEC-4) ao loop.        ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
-import type { HookRunner, HooksConfig, PreToolGate, ToolCall } from '@aluy/cli-core';
-import { selectGateHooks } from '@aluy/cli-core';
+import type { HookRunner, HooksConfig, PreToolGate, ToolCall } from '@hiperplano/aluy-cli-core';
+import { selectGateHooks } from '@hiperplano/aluy-cli-core';
 
 export interface PreToolGateOptions {
   /** O runner que roda cada hook ATRÁS da catraca (mesma `decide()` do agente). */

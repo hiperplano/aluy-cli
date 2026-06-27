@@ -3,7 +3,7 @@
 // Parseia a saída STREAMING de 16 frameworks principais linha-a-linha,
 // emitindo eventos estruturados (pass/fail/file-done/summary) + placar exato.
 // PURO (sem `node:*`, sem I/O) — testável sem spawnar.
-// Parte do @aluy/cli-core (§8): a execução/streaming é porta injetada no @aluy/cli.
+// Parte do @hiperplano/aluy-cli-core (§8): a execução/streaming é porta injetada no @hiperplano/aluy-cli.
 //
 // TRAVAS:
 //   • Anti-ReDoS — regex LINEAR/ancorada; MAX_LINE_BYTES ANTES do match.

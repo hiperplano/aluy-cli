@@ -16,7 +16,7 @@ import type {
   ServerLimits,
   SessionMode,
   TestScore,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 /** Um turno do usuário (▌ você). */
 export interface YouTurn {

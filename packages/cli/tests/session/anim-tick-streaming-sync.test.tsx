@@ -42,7 +42,7 @@ import {
   type ModelCaller,
   type ModelCallResult,
   type ToolPorts,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { DEFAULT_TICK_MS } from '../../src/ui/hooks/useTick.js';

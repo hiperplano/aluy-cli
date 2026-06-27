@@ -2,7 +2,7 @@
 // `/model <tier>` troca. Catálogo do broker com FALLBACK; HG-2 (nunca o provider).
 
 import { describe, expect, it, vi } from 'vitest';
-import type { TierCatalogEntry } from '@aluy/cli-core';
+import type { TierCatalogEntry } from '@hiperplano/aluy-cli-core';
 import { runModelLinear, type LinearOut } from '../../src/session/linear.js';
 
 const CATALOG: readonly TierCatalogEntry[] = [

@@ -4,7 +4,7 @@ import {
   NoKeychainError,
   type KeychainEntry,
 } from '../../src/auth/keychain-store.js';
-import type { StoredCredential } from '@aluy/cli-core';
+import type { StoredCredential } from '@hiperplano/aluy-cli-core';
 
 const CRED: StoredCredential = {
   kind: 'pat',

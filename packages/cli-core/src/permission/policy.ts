@@ -3,7 +3,7 @@
 // A engine (allow/ask/deny + categorias + hooks) é CÓDIGO no pacote; a POLÍTICA
 // CONCRETA (quais comandos o usuário liberou, quais negou, hooks) é DADO editável
 // sem reinstalar. Este arquivo define o FORMATO desse dado e a sua avaliação —
-// PORTÁVEL (sem I/O): quem LÊ o arquivo de settings do SO é o `@aluy/cli`
+// PORTÁVEL (sem I/O): quem LÊ o arquivo de settings do SO é o `@hiperplano/aluy-cli`
 // (EST-0948); aqui só interpretamos o objeto já carregado.
 //
 // LIMITE DE ESCOPO (v1): a política é de SESSÃO/GLOBAL. Persistência POR WORKSPACE

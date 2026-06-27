@@ -20,7 +20,7 @@
 
 import { join } from 'node:path';
 import { readdirSync, readFileSync, statSync, type Dirent } from 'node:fs';
-import { parseSkill, isSkillError, type Skill, type SkillError } from '@aluy/cli-core';
+import { parseSkill, isSkillError, type Skill, type SkillError } from '@hiperplano/aluy-cli-core';
 import type { WorkspacePort } from './workspace.js';
 import { SKILL_MANIFEST, type SkillLoadResult } from './user-skills.js';
 

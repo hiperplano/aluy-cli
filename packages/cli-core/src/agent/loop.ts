@@ -210,7 +210,7 @@ export type InjectedInputPort = () => readonly HistoryItem[];
  * Devolve `{ blocked: true, ... }` p/ VETAR a tool (o loop a trata como bloqueio: vira
  * observação, NÃO roda o efeito) ou `{ blocked: false }` p/ seguir. Opcional: sem porta,
  * o loop roda idêntico ao baseline (nenhum gate). PORTÁVEL: só um callback assíncrono
- * com dado estruturado — o wiring concreto (HookRunner+config) mora em @aluy/cli.
+ * com dado estruturado — o wiring concreto (HookRunner+config) mora em @hiperplano/aluy-cli.
  */
 export type PreToolGate = (
   call: ToolCall,
@@ -284,7 +284,7 @@ export type AutoCompactPort = (
  * compactou (`summarizedTurns` turnos → sumário) e o loop CONTINUA. `onGiveUp`: o
  * anti-loop desistiu (janela cheia mesmo após compactar) — a UX avisa 1× e o loop cai
  * no baseline. Opcional: sem observador, a auto-compactação roda igual (silenciosa) —
- * mas o locus concreto (@aluy/cli) SEMPRE pluga, p/ o usuário VER que compactou (DoD).
+ * mas o locus concreto (@hiperplano/aluy-cli) SEMPRE pluga, p/ o usuário VER que compactou (DoD).
  * NÃO toca a catraca/budget — pura observação.
  */
 export interface AutoCompactObserver {
@@ -433,7 +433,7 @@ export interface AgentLoopOptions {
   readonly onUsage?: (usage: { iterations: number; toolCalls: number; tokens: number }) => void;
   /**
    * EST-0964 — INSTRUÇÕES DE PROJETO (AGENT.md): config CONFIÁVEL do dono do repo,
-   * lida no startup do workspace confinado pelo locus concreto (@aluy/cli). Entra
+   * lida no startup do workspace confinado pelo locus concreto (@hiperplano/aluy-cli). Entra
    * SÓ no canal `system` (via buildMessages → buildSystemPrompt), nunca como
    * observação. Já deve vir CLAMPADA (teto de tamanho). Ausente ⇒ prompt idêntico
    * ao baseline. Distinta do `@arquivo` (DADO ingerido por turno — esse vem como

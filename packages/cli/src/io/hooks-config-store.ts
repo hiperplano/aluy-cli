@@ -25,7 +25,7 @@ import {
   parseClaudeHooksSettings,
   mergeHooksConfigs,
   type HooksConfig,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 /** Nome do arquivo de config de hooks (dentro de `~/.aluy/`). */
 export const HOOKS_CONFIG_FILENAME = 'hooks.json';

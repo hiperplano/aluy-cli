@@ -20,8 +20,8 @@
 // `rejected` (com o motivo legível p/ a UI/linear). Fail-safe: QUALQUER erro de
 // confinamento/leitura ⇒ `rejected`, nunca um throw que derrube a sessão.
 
-import { attachmentObservation, type HistoryItem } from '@aluy/cli-core';
-import type { FileSystemPort } from '@aluy/cli-core';
+import { attachmentObservation, type HistoryItem } from '@hiperplano/aluy-cli-core';
+import type { FileSystemPort } from '@hiperplano/aluy-cli-core';
 import { relative, sep, isAbsolute } from 'node:path';
 import { classifyAttachPath } from './path-deny.js';
 import type { WorkspacePort } from '../io/workspace.js';

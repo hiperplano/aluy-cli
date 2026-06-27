@@ -1,7 +1,7 @@
 // EST-0948 — wrapper que reporta a linha `⏺` (verbo/alvo/resultado quantificado).
 
 import { describe, expect, it } from 'vitest';
-import type { NativeTool, ToolPorts, ToolResult } from '@aluy/cli-core';
+import type { NativeTool, ToolPorts, ToolResult } from '@hiperplano/aluy-cli-core';
 import { withToolReport } from '../../src/session/tool-reporter.js';
 import type { ToolLineBlock } from '../../src/session/model.js';
 

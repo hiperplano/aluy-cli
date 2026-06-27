@@ -26,7 +26,7 @@
 //      o bwrap cru + AVISA (degrade-com-aviso); NUNCA bloqueia o comando por falta de
 //      cgroup nem finge teto de recurso.
 //
-// I/O de SO (`node:child_process`/`node:fs`/`node:os`) ⇒ @aluy/cli, não o core.
+// I/O de SO (`node:child_process`/`node:fs`/`node:os`) ⇒ @hiperplano/aluy-cli, não o core.
 
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { closeSync, mkdtempSync, openSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -45,8 +45,8 @@ import type {
   SandboxLauncher,
   SandboxResourceLimits,
   SandboxSpawnResult,
-} from '@aluy/cli-core';
-import { DEFAULT_RESOURCE_LIMITS, resolveFailMode, seccompFilterBytes } from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
+import { DEFAULT_RESOURCE_LIMITS, resolveFailMode, seccompFilterBytes } from '@hiperplano/aluy-cli-core';
 import { aluyHomeDir } from './aluy-home.js';
 
 /**

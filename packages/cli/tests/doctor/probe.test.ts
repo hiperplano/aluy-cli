@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gatherDoctorFacts, validateAuth, type DoctorProbeDeps } from '../../src/doctor/probe.js';
-import type { McpServerConfig, McpToolDescriptor, McpTransport, StreamFetch } from '@aluy/cli-core';
+import type { McpServerConfig, McpToolDescriptor, McpTransport, StreamFetch } from '@hiperplano/aluy-cli-core';
 
 let home: string;
 let workspace: string;

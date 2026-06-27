@@ -24,7 +24,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdirSync, readFileSync, mkdirSync, statSync, type Dirent } from 'node:fs';
-import { parseSkill, isSkillError, type Skill, type SkillError } from '@aluy/cli-core';
+import { parseSkill, isSkillError, type Skill, type SkillError } from '@hiperplano/aluy-cli-core';
 
 /** Permissão restrita do dir `~/.aluy/skills/` (espelha o user-agents/commands). */
 const DIR_MODE = 0o700;

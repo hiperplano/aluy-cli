@@ -15,7 +15,7 @@
 // MODO (Plan nega mutações). FIXAR é controle de RETENÇÃO — o fato fixado CONTINUA
 // entrando no recall como DADO (a invariante B/GS-M3 é absoluta e independe de pin).
 
-import { looksImperative, type AgentMemory, type MemoryFact } from '@aluy/cli-core';
+import { looksImperative, type AgentMemory, type MemoryFact } from '@hiperplano/aluy-cli-core';
 import type { SlashNote } from './handlers.js';
 
 /** O subcomando parseado de `/memory <args>`. */

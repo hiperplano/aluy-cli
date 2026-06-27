@@ -9,7 +9,7 @@ import {
   type MemoryFact,
   type MemoryScope,
   type MemoryStorePort,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import {
   parseClearCommand,
   isDestructiveClear,

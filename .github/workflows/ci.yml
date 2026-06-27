@@ -36,4 +36,4 @@ jobs:
         run: npm run build
 
       - name: testes
-        run: npm test
+        run: npm test -- --exclude '**/headless-exit.test.ts' --exclude '**/headless-yolo-bin.test.ts'

@@ -15,8 +15,8 @@
 // este observador não precisa saber do modo; a catraca é a fronteira.
 
 import type { SessionState } from './model.js';
-import type { HookRunner, HooksConfig } from '@aluy/cli-core';
-import { selectHooks } from '@aluy/cli-core';
+import type { HookRunner, HooksConfig } from '@hiperplano/aluy-cli-core';
+import { selectHooks } from '@hiperplano/aluy-cli-core';
 
 /** Fases em que o turno está em ATIVIDADE. */
 function isActivePhase(phase: SessionState['phase']): boolean {

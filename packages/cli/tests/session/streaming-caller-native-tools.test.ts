@@ -16,7 +16,7 @@ import {
   type ModelStreamEvent,
   type StreamCallArgs,
   type ToolFunctionSchema,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { StreamingModelCaller, type StreamSink } from '../../src/session/streaming-caller.js';
 
 const SCHEMA: readonly ToolFunctionSchema[] = [

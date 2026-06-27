@@ -13,7 +13,7 @@ import {
   type RewindChoice,
   type RewindCheckpointSource,
 } from '../../src/ui/hooks/useRewindPicker.js';
-import type { Checkpoint } from '@aluy/cli-core';
+import type { Checkpoint } from '@hiperplano/aluy-cli-core';
 
 function cp(id: string, ordinal: number, label = `prompt ${ordinal}`): Checkpoint {
   return { id, ordinal, ts: ordinal * 1000, label, journalSeq: ordinal, blockCount: ordinal * 2 };

@@ -11,7 +11,7 @@
 //
 // PORTÁVEL (ADR-0053 §8): ZERO I/O, ZERO import de `node:*`, ZERO sidecar,
 // ZERO credencial (CLI-SEC-7). A impl concreta (Mem0 self-host ou Letta) mora
-// no `@aluy/cli`, falando HTTP-local com o serviço de memória.
+// no `@hiperplano/aluy-cli`, falando HTTP-local com o serviço de memória.
 //
 // Saída = DADO envelopado (CLI-SEC-15-B): o resultado de `search` é DADO, nunca
 // instrução; o caller envelopa antes de injetar no contexto do agente.
@@ -110,9 +110,9 @@ export interface MemoryScopeResult {
 /**
  * Porta ASSÍNCRONA de memória acoplada (recall/archival).
  *
- * Contrato puro em `@aluy/cli-core` — ZERO implementação concreta, ZERO I/O,
+ * Contrato puro em `@hiperplano/aluy-cli-core` — ZERO implementação concreta, ZERO I/O,
  * ZERO sidecar, ZERO credencial. A impl (Mem0 self-host default ou Letta
- * alternativa) mora no `@aluy/cli` e fala HTTP-local com o serviço de memória,
+ * alternativa) mora no `@hiperplano/aluy-cli` e fala HTTP-local com o serviço de memória,
  * atrás desta MESMA porta (ADR-0123 §2.2/Inv. II).
  *
  * O `scope` ≡ CAIXA de contexto (§4.3): cada caixa do grafo é um escopo do

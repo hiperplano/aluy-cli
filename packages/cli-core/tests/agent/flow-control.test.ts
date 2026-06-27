@@ -1,7 +1,7 @@
 // EST-0982 · ADR-0063 — CONTROLE/OBSERVABILIDADE da árvore de fluxos: a bateria do
 // gate MÉDIO do `seguranca` (GS-C1..C5 + RES-C-1/2/3) sobre a MECÂNICA portável
 // (cli-core): FlowTree/FlowNode (ver/parar + contabilidade), ControlAudit (CLI-SEC-10)
-// e injectedInputItem (interagir). A integração no @aluy/cli (controller/UI) é testada
+// e injectedInputItem (interagir). A integração no @hiperplano/aluy-cli (controller/UI) é testada
 // em packages/cli/tests/session/controller-flow-control.test.ts.
 
 import { describe, expect, it } from 'vitest';

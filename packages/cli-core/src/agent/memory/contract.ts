@@ -70,7 +70,7 @@ export interface MemoryWriteInput {
 
 /**
  * PORTA de I/O ESTREITA da memória (GS-M1) — o ÚNICO canal de escrita/leitura da
- * memória. O locus concreto (@aluy/cli) a liga a `~/.aluy/memory/` (global, atômico
+ * memória. O locus concreto (@hiperplano/aluy-cli) a liga a `~/.aluy/memory/` (global, atômico
  * 0600/0700) e `.aluy/memory/` (projeto, no workspace). A superfície NÃO tem
  * `write(path, …)`: só operações de memória por ESCOPO. Por isso `edit_file`/
  * `run_command` (que recebem path) seguem DENY em `~/.aluy/`, sem carve-out.

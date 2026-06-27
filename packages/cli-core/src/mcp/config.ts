@@ -4,7 +4,7 @@
 // literal versionável: declara QUAIS servers locais (stdio) o usuário pluga, e
 // COMO lançá-los (command/args/env). Este arquivo define o formato + um parser
 // PORTÁVEL (sem I/O): quem LÊ o arquivo do disco (confinado a `~/.aluy/`) é o
-// `@aluy/cli` (locus concreto); aqui só validamos o objeto JÁ carregado.
+// `@hiperplano/aluy-cli` (locus concreto); aqui só validamos o objeto JÁ carregado.
 //
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║ E-B1 (gate FORTE do `seguranca`) — `~/.aluy/mcp.json` É CONFIG DO USUÁRIO. ║
@@ -18,7 +18,7 @@
 // mínimo. O `mcp.json` NÃO deve carregar segredo literal — referencia, no máximo,
 // nomes de variável que o locus resolve do ambiente do usuário. A credencial
 // HEADLESS do CLI (CLI-SEC-1/7) JAMAIS entra no `environ` de um server (isso é
-// garantido no spawn concreto, @aluy/cli — ver `stdio-transport.ts`).
+// garantido no spawn concreto, @hiperplano/aluy-cli — ver `stdio-transport.ts`).
 //
 // PORTÁVEL: só validação de objeto/string (sem `node:*`, sem `fs`).
 

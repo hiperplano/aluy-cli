@@ -13,7 +13,7 @@
 // está dentro (silencioso) ou fora (warning explícito) da allowlist, e extrair o
 // host exato. É a base concreta do `⚠ rede` da spec-tui §2.8.
 //
-// PORTÁVEL? É lógica de string (sem rede real), mas vive no @aluy/cli porque a
+// PORTÁVEL? É lógica de string (sem rede real), mas vive no @hiperplano/aluy-cli porque a
 // allowlist concreta (hosts da Aluy + config local) é wiring do locus.
 
 /** Os hosts da própria Aluy — sempre na allowlist (broker/identity). */

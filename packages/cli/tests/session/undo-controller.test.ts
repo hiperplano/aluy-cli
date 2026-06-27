@@ -22,7 +22,7 @@ import {
   type JournalStorePort,
   type RestoreWriterPort,
   type JournalWorkspacePort as WorkspacePort,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { UndoController } from '../../src/session/undo-controller.js';
 
 const CIPHER = new JournalCipher(randomBytes(32));

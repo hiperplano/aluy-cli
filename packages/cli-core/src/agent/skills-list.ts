@@ -1,7 +1,7 @@
 // EST-1112 · ADR-0116 (proposto) — `/skills` + `aluy skills`: o FORMATADOR PURO que
 // lista as skills (`SKILL.md`) que o aluy MAPEOU. Espelha o `agents-list.ts` (EST-0977):
 // reusa o resultado dos MESMOS loaders confinados (`UserSkillsLoader`/`ProjectSkillsLoader`
-// no @aluy/cli) — aqui só FORMATAMOS o DADO já parseado (skills VÁLIDAS + erros RES-MD-3),
+// no @hiperplano/aluy-cli) — aqui só FORMATAMOS o DADO já parseado (skills VÁLIDAS + erros RES-MD-3),
 // sem reimplementar parse nem I/O.
 //
 // O que mostra:
@@ -13,7 +13,7 @@
 //   • VAZIO: aponta onde criar (`~/.aluy/skills/<nome>/SKILL.md`) e o manifesto mínimo.
 //
 // PORTÁVEL (ADR-0053 §8): formatação de string PURA (sem `node:*`, sem I/O). A LEITURA
-// confinada dos diretórios é do locus concreto (@aluy/cli, io/); ela ENTREGA as skills
+// confinada dos diretórios é do locus concreto (@hiperplano/aluy-cli, io/); ela ENTREGA as skills
 // + erros aqui. Determinístico/testável sem montar Ink nem tocar o filesystem.
 
 import type { Skill, SkillError, SkillOrigin } from './skill.js';

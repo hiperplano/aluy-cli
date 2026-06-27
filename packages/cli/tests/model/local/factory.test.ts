@@ -1,9 +1,9 @@
 // ADR-0120 / EST-1113 — fábrica do backend local (adapter + anti-SSRF do base_url).
 import { describe, expect, it } from 'vitest';
 import { buildLocalModelClient } from '../../../src/model/local/factory.js';
-import { buildLocalCatalog } from '@aluy/cli-core';
-import type { StreamFetch } from '@aluy/cli-core';
-import type { ResolvedCredential } from '@aluy/cli-core';
+import { buildLocalCatalog } from '@hiperplano/aluy-cli-core';
+import type { StreamFetch } from '@hiperplano/aluy-cli-core';
+import type { ResolvedCredential } from '@hiperplano/aluy-cli-core';
 
 const cred = async (): Promise<ResolvedCredential> => ({ kind: 'apikey', secret: 'sk' });
 const noFetch: StreamFetch = async () => {

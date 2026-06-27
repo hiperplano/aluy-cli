@@ -7,7 +7,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mergeMcpConfigs, type McpConfig } from '@aluy/cli-core';
+import { mergeMcpConfigs, type McpConfig } from '@hiperplano/aluy-cli-core';
 import { NodeWorkspace } from '../../src/io/workspace.js';
 import { NodeFileSystemPort } from '../../src/io/fs-port.js';
 import {

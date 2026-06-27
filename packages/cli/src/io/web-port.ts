@@ -32,7 +32,7 @@ import type {
   WebPort,
   WebFetchPolicy,
   SafeFetcherPorts,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import type { EgressAllowlist } from './egress.js';
 
 /** Resolver concreto: `dns.lookup` com `all:true` ⇒ todos os IPs (A + AAAA). */

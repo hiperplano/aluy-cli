@@ -17,8 +17,8 @@
 // ║ 6. Egress loopback: engines já usam malha CLI-SEC-13.                    ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
-// IMPL CONCRETA em @aluy/cli (I/O layer). As portas (JudgeEngine/MemoryEngine/
-// MaestroPort) são puras no @aluy/cli-core (ADR-0053 §8).
+// IMPL CONCRETA em @hiperplano/aluy-cli (I/O layer). As portas (JudgeEngine/MemoryEngine/
+// MaestroPort) são puras no @hiperplano/aluy-cli-core (ADR-0053 §8).
 
 import {
   PollSignalBus,
@@ -31,7 +31,7 @@ import {
   type SupervisorDecision,
   type JudgeEngine,
   type MemoryEngine,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { OllamaJudgeEngine } from './ollama-judge.js';
 import { Mem0MemoryEngine } from '../io/mem0-memory-engine.js';
 import { resolveMem0Url, resolveOllamaUrl } from './sidecar-urls.js';

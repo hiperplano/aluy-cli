@@ -41,8 +41,8 @@
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // PORTÁVEL (ADR-0053 §8): sem Ink, sem I/O de terminal. A mecânica/budget/
-// orquestração moram aqui (@aluy/cli-core); a UI (mostrar filhos rodando) é do
-// @aluy/cli (observador opcional injetado).
+// orquestração moram aqui (@hiperplano/aluy-cli-core); a UI (mostrar filhos rodando) é do
+// @hiperplano/aluy-cli (observador opcional injetado).
 
 import { AgentLoop, type ModelCaller, type AgentRunResult } from './loop.js';
 import { resolveModelTier } from './agent-model-tier.js';
@@ -286,7 +286,7 @@ export interface SubAgentOutcome {
   readonly usage: { iterations: number; toolCalls: number; tokens: number };
 }
 
-/** Observador OPCIONAL do ciclo de vida dos filhos (a UI do @aluy/cli pluga). */
+/** Observador OPCIONAL do ciclo de vida dos filhos (a UI do @hiperplano/aluy-cli pluga). */
 export interface SubAgentObserver {
   onChildStart?(label: string): void;
   onChildEnd?(label: string, outcome: SubAgentOutcome): void;
@@ -310,7 +310,7 @@ export interface SubAgentSpawnerOptions {
    * EST-SUBAGENT-MODEL · ADR-0073 (tier por-request) · CLI-SEC-7 — FÁBRICA de caller
    * POR TIER. Dado uma CHAVE DE TIER (ex.: `aluy-deep`), devolve um `ModelCaller` que
    * manda AQUELE tier no request ao broker (MESMO broker/credencial do pai — só varia
-   * a pista de tier, HG-2). É uma PORTA injetada pelo @aluy/cli (o cli-core não conhece
+   * a pista de tier, HG-2). É uma PORTA injetada pelo @hiperplano/aluy-cli (o cli-core não conhece
    * o broker concreto): o locus a constrói reusando o BrokerModelCaller dos filhos,
    * parametrizado por tier. Quando um filho declara `model:` no `.md` que resolve num
    * tier, o spawner usa `callerForTier(tier)` PRA AQUELE FILHO; sem `.md` model (ou sem
@@ -353,7 +353,7 @@ export interface SubAgentSpawnerOptions {
   readonly observer?: SubAgentObserver;
   /**
    * EST-0982 (semântica do esc) — sinal de PARADA POR FILHO, resolvido pelo RÓTULO.
-   * O locus concreto (@aluy/cli) liga aqui o `signal` do nó do filho na FlowTree:
+   * O locus concreto (@hiperplano/aluy-cli) liga aqui o `signal` do nó do filho na FlowTree:
    * `p` (parar ESTE) aborta SÓ aquele filho; F8/painel (PARAR-TUDO) aborta todos via
    * a cascata da raiz. O esc (interrupt do pai) NÃO dispara estes sinais — os filhos
    * SEGUEM trabalhando (decisão de produto EST-0982). Ausente ⇒ só `parentSignal`/
@@ -370,7 +370,7 @@ export interface SubAgentSpawnerOptions {
    * EST-ROOMS-4 · ADR-0081 §6 — fábrica dos tools de SALA POR FILHO. Quando o
    * `spawn` é pedido com `room`, cada filho recebe `roomToolsFor(profile.label)`
    * ADICIONADO ao seu toolset — postando como SI MESMO (writerId = label do filho,
-   * NUNCA um id global). O locus concreto (@aluy/cli) liga isto ao `buildRoomTools`
+   * NUNCA um id global). O locus concreto (@hiperplano/aluy-cli) liga isto ao `buildRoomTools`
    * com o RoomStore + as policies da sessão. Ausente ⇒ `room` é no-op (fail-safe:
    * sem sala, sem conversa — o fan-out roda normal).
    */
@@ -382,7 +382,7 @@ export interface SubAgentSpawnerOptions {
    */
   readonly roomArtPattern?: RoomArtPattern;
   /**
-   * EST-1121 — CÓDIGO da sala compartilhada. O locus concreto (@aluy/cli) injeta
+   * EST-1121 — CÓDIGO da sala compartilhada. O locus concreto (@hiperplano/aluy-cli) injeta
    * o código gerado por `createRoom()` para que a system-note de processo possa
    * referenciá-lo. Ausente ⇒ a system-note omite o código e referencia apenas as
    * tools de sala (o modelo o descobre das descrições das tools).
@@ -393,7 +393,7 @@ export interface SubAgentSpawnerOptions {
    * injetada, um filho com `isolation: 'worktree'` roda num `git worktree` próprio
    * (ports enraizadas nele); ao fim, o spawner faz `dispose()` em TODO caminho de
    * saída. Ausente ⇒ `isolation` é no-op (filho usa as ports do pai — não-regressão).
-   * O locus concreto (@aluy/cli) liga isto ao `NodeWorktreePort`.
+   * O locus concreto (@hiperplano/aluy-cli) liga isto ao `NodeWorktreePort`.
    */
   readonly worktree?: import('./worktree-port.js').WorktreePort;
 }
@@ -618,7 +618,7 @@ export class SubAgentSpawner {
    * FALLBACK por-filho: quando o `.md` do filho NÃO declara um `model` que resolva
    * num tier (ou sem a fábrica `callerForTier`), o filho usa ESTE caller (back-compat). */
   private readonly model: ModelCaller;
-  /** EST-SUBAGENT-MODEL — fábrica de caller POR TIER (porta injetada do @aluy/cli).
+  /** EST-SUBAGENT-MODEL — fábrica de caller POR TIER (porta injetada do @hiperplano/aluy-cli).
    * Quando o `.md` do filho declara `model:` que resolve num tier, o spawner usa
    * `callerForTier(tier)` PRA AQUELE FILHO; ausente ⇒ todos os filhos usam o do pai. */
   private readonly callerForTier?: (tier: string) => ModelCaller;

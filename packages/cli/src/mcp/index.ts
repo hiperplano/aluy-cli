@@ -1,4 +1,4 @@
-// Barrel do MCP concreto (@aluy/cli) — EST-0970 · ADR-0058 · CLI-SEC-12.
+// Barrel do MCP concreto (@hiperplano/aluy-cli) — EST-0970 · ADR-0058 · CLI-SEC-12.
 //
 // Liga o cliente MCP PORTÁVEL (cli-core) ao I/O concreto: leitura confinada do
 // `~/.aluy/mcp.json` + o transporte stdio do SDK MCP oficial. O `setupMcp` é o

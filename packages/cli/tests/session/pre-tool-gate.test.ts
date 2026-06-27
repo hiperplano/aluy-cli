@@ -11,7 +11,7 @@ import {
   type Hook,
   type HookGateVerdict,
   type HooksConfig,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { makePreToolGate } from '../../src/session/pre-tool-gate.js';
 
 /** HookRunner mínimo p/ o teste: só implementa `runGate` (o que a fábrica usa). */

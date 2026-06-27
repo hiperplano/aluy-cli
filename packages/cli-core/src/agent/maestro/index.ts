@@ -6,7 +6,7 @@
 //   Precedência de guarda (Inv. I), salience por sinais (recência/frequência/pin),
 //   roteamento por regra. Puro, local, determinístico, offline-first.
 // EST-1128: portas `MemoryEngine` + `JudgeEngine` — interfaces puras, ZERO impl,
-//   ZERO I/O, ZERO sidecar, ZERO credencial (CLI-SEC-7); impl concreta no `@aluy/cli`.
+//   ZERO I/O, ZERO sidecar, ZERO credencial (CLI-SEC-7); impl concreta no `@hiperplano/aluy-cli`.
 //   `MemoryEngine` acomoda ingestão de documentos (§4-bis, RAG-como-modo);
 //   `JudgeEngine` plugável (Ollama/llama.cpp OU provider). Saída = DADO envelopado (CLI-SEC-15-B).
 export * from './contract.js';

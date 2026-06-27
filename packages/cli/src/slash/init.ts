@@ -23,7 +23,7 @@ import {
   type PermissionEngine,
   type ToolCall,
   type ToolPorts,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import type { SlashNote } from './handlers.js';
 import { AGENT_MD_FILENAME } from '../io/agent-md.js';
 

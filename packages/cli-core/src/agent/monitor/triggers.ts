@@ -185,7 +185,7 @@ export class ProcessWaitTrigger {
 
 /**
  * Face MÍNIMA e PORTÁVEL do spawn de processo — `cli-core` NÃO importa
- * `node:child_process`. O concreto (`@aluy/cli`) a implementa com `spawn`.
+ * `node:child_process`. O concreto (`@hiperplano/aluy-cli`) a implementa com `spawn`.
  */
 export interface CommandSpawnHandle {
   /**
@@ -207,7 +207,7 @@ export interface CommandWaitTriggerOptions {
   now: () => string;
   /**
    * Spawn do comando INJETÁVEL (default: lança erro claro — cli-core não tem
-   * `child_process`). O concreto no `@aluy/cli` injeta `spawn('/bin/sh', ...)`.
+   * `child_process`). O concreto no `@hiperplano/aluy-cli` injeta `spawn('/bin/sh', ...)`.
    */
   spawnFn: (command: string) => CommandSpawnHandle;
 }

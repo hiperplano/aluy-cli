@@ -11,7 +11,7 @@
 //   6. sem segredo ⇒ devolve a MESMA referência (sem churn).
 
 import { describe, expect, it } from 'vitest';
-import { REDACTED } from '@aluy/cli-core';
+import { REDACTED } from '@hiperplano/aluy-cli-core';
 import { redactFileContentForJournal } from '../../src/io/journal-redact.js';
 import type { SessionBlock } from '../../src/session/model.js';
 

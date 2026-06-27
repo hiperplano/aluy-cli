@@ -14,7 +14,7 @@ import { resolveTheme } from '../packages/cli/dist/ui/theme/theme.js';
 import { App } from '../packages/cli/dist/session/App.js';
 import { SessionController } from '../packages/cli/dist/session/controller.js';
 import { TuiAskResolver } from '../packages/cli/dist/ask/ask-resolver.js';
-import { PolicyPermissionEngine } from '@aluy/cli-core';
+import { PolicyPermissionEngine } from '@hiperplano/aluy-cli-core';
 
 const mode = process.argv[2] ?? 'unicode';
 

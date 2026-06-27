@@ -1,11 +1,11 @@
 // `aluy logout` — revoga no identity (device-flow) e APAGA do keychain (CA-5).
 // Idempotente: sem credencial ⇒ informa e sai 0.
 
-import { LoginService, type FetchLike } from '@aluy/cli-core';
+import { LoginService, type FetchLike } from '@hiperplano/aluy-cli-core';
 import { loadAuthConfig } from '../auth/config.js';
 import { NoKeychainError, KeychainCredentialStore } from '../auth/keychain-store.js';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
-import type { CredentialStore } from '@aluy/cli-core';
+import type { CredentialStore } from '@hiperplano/aluy-cli-core';
 
 export interface LogoutDeps {
   readonly io?: TerminalIO;

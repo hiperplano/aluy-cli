@@ -3,7 +3,7 @@
 // POR QUÊ (ordem build->teste, honesta): a CI central (aluy-infra/ci-ts.yml) roda
 // o job `unit` como `vitest run` PURO, SEM passo de build antes (o `build` é um
 // job separado e paralelo). Mas duas suítes deste repo dependem do `dist/`:
-//   1. cli.test.ts importa `@aluy/cli-core`, cujo `exports` aponta para
+//   1. cli.test.ts importa `@hiperplano/aluy-cli-core`, cujo `exports` aponta para
 //      `./dist/index.js` (entry de pacote PUBLICADO — é o wiring real, não um
 //      alias de teste). Sem `dist/`, o Vite/Vitest falha em resolver o pacote.
 //   2. bin.smoke.test.ts (CA-3) spawna o binário COMPILADO `dist/bin/aluy.js`.
@@ -31,7 +31,7 @@ export default function setup(): void {
   if (r.status !== 0) {
     throw new Error(
       `globalSetup: build (tsc -b) falhou (status=${String(r.status)}) — ` +
-        'a suíte depende do dist/ (exports de @aluy/cli-core + binário do smoke).',
+        'a suíte depende do dist/ (exports de @hiperplano/aluy-cli-core + binário do smoke).',
     );
   }
 }

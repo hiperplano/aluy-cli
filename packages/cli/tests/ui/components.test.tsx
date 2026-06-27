@@ -6,7 +6,7 @@
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
-import type { AskRequest } from '@aluy/cli-core';
+import type { AskRequest } from '@hiperplano/aluy-cli-core';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { Header } from '../../src/ui/components/Header.js';
@@ -408,7 +408,7 @@ function diffAsk(): AskRequest {
       exact: [
         '--- src/auth/session.ts',
         '-import { httpClient } from "../net/http"',
-        '+import { broker } from "@aluy/cli-core"',
+        '+import { broker } from "@hiperplano/aluy-cli-core"',
       ].join('\n'),
     },
     category: 'default',
@@ -419,8 +419,8 @@ function diffAsk(): AskRequest {
 
 function bashNetworkAsk(): AskRequest {
   return {
-    call: { name: 'run_command', input: { command: 'npm install @aluy/cli-core@latest' } },
-    effect: { kind: 'command', tool: 'run_command', exact: '$ npm install @aluy/cli-core@latest' },
+    call: { name: 'run_command', input: { command: 'npm install @hiperplano/aluy-cli-core@latest' } },
+    effect: { kind: 'command', tool: 'run_command', exact: '$ npm install @hiperplano/aluy-cli-core@latest' },
     category: 'always-ask:package-exec',
     reason: 'exec de pacote',
     alwaysAsk: true,
@@ -447,7 +447,7 @@ describe('AskDialog — efeito EXATO + ações (CLI-SEC-9/3)', () => {
     // a linha com ANSI; removemos a cor p/ afirmar o efeito EXATO contíguo.
     const p = plain(out);
     expect(p).toContain('‹ import { httpClient } from "../net/http"');
-    expect(p).toContain('› import { broker } from "@aluy/cli-core"');
+    expect(p).toContain('› import { broker } from "@hiperplano/aluy-cli-core"');
     expect(out).toContain('[a] aprovar');
     expect(out).toContain('[s] sempre nesta sessão'); // alwaysAsk=false ⇒ oferece
     expect(out).toContain('[n] negar');
@@ -457,7 +457,7 @@ describe('AskDialog — efeito EXATO + ações (CLI-SEC-9/3)', () => {
   it('bash sempre-ask: comando EXATO + SEM [s] (CLI-SEC-3)', () => {
     const { lastFrame } = wrap(<AskDialog request={bashNetworkAsk()} />);
     const out = lastFrame() ?? '';
-    expect(out).toContain('$ npm install @aluy/cli-core@latest');
+    expect(out).toContain('$ npm install @hiperplano/aluy-cli-core@latest');
     expect(out).not.toContain('[s] sempre'); // categoria sempre-ask não oferece [s]
     expect(out).toContain('[a] aprovar');
   });
@@ -648,7 +648,7 @@ describe('a11y — NO_COLOR (mono): glifo+palavra carregam o significado', () =>
   it('AskDialog em NO_COLOR ainda mostra o comando exato e as palavras de ação', () => {
     const { lastFrame } = wrap(<AskDialog request={bashNetworkAsk()} />, { NO_COLOR: '1' });
     const out = lastFrame() ?? '';
-    expect(out).toContain('$ npm install @aluy/cli-core@latest');
+    expect(out).toContain('$ npm install @hiperplano/aluy-cli-core@latest');
     expect(out).toContain('aprovar');
     expect(out).toContain('negar');
   });

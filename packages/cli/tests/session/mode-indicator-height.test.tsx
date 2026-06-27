@@ -20,7 +20,7 @@ import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { ModeIndicator } from '../../src/ui/components/ModeIndicator.js';
 import { MODE_INDICATOR_BASE_ROWS, UNSAFE_INDICATOR_ROWS } from '../../src/session/live-budget.js';
-import type { SessionMode } from '@aluy/cli-core';
+import type { SessionMode } from '@hiperplano/aluy-cli-core';
 
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');

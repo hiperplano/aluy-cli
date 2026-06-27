@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { testTierLive } from '../../src/doctor/tier-test.js';
-import type { LoginService, StreamFetch } from '@aluy/cli-core';
+import type { LoginService, StreamFetch } from '@hiperplano/aluy-cli-core';
 
 const login = { getAccessToken: async () => 'tok' } as unknown as LoginService;
 const env = { ALUY_BROKER_URL: 'https://broker.test' };

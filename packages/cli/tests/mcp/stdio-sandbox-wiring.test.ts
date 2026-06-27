@@ -17,7 +17,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { existsSync } from 'node:fs';
 import { BwrapSandboxLauncher } from '../../src/sandbox/index.js';
 import { StdioMcpTransport, resolveLaunchBinds } from '../../src/mcp/stdio-transport.js';
-import type { McpServerConfig, SandboxCapability } from '@aluy/cli-core';
+import type { McpServerConfig, SandboxCapability } from '@hiperplano/aluy-cli-core';
 
 const FLOOR_CAP: SandboxCapability = {
   platform: 'linux',

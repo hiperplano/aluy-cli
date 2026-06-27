@@ -33,7 +33,7 @@ import {
   McpConfigError,
   parseCodexMcpConfig,
   type McpConfig,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import type { McpConfigLoad } from './mcp-config-store.js';
 
 /** Nome do arquivo de config global do Codex (dentro de `~/.codex/`). */

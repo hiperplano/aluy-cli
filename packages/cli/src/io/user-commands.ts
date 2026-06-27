@@ -20,7 +20,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdirSync, readFileSync, mkdirSync, statSync, type Dirent } from 'node:fs';
-import { parseUserCommand, type UserCommand } from '@aluy/cli-core';
+import { parseUserCommand, type UserCommand } from '@hiperplano/aluy-cli-core';
 
 /** Permissão restrita do dir `~/.aluy/commands/` (espelha o journal-store). */
 const DIR_MODE = 0o700;

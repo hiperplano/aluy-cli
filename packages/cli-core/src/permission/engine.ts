@@ -20,7 +20,7 @@
 // ║ sessão (flag `--yolo`/`--unsafe`), NUNCA default, NUNCA persistido; banner   ║
 // ║ permanente + confirmação de entrada (TTY) + entrada DIRETA em headless (a    ║
 // ║ flag é o consentimento) + recusa DURA só como root (AG-0008) vivem no         ║
-// ║ @aluy/cli (yolo-guard).                                                      ║
+// ║ @hiperplano/aluy-cli (yolo-guard).                                                      ║
 // ║ NÃO CAEM no YOLO (são GASTO/integridade, não PERMISSÃO — ADR-0072 §4):       ║
 // ║  · teto de profundidade de sub-agente (E-A1, prec. -2);                      ║
 // ║  · toolset restrito do agente-`.md` (GS-MD1, prec. -1.9);                    ║
@@ -161,7 +161,7 @@ export interface PermissionEngineOptions {
    * YOLO — PERMISSÃO COMPLETA de sessão (ADR-0072, decisão do dono): `unsafe`
    * auto-aprova QUALQUER tool, INCLUSIVE as categorias sempre-ask E os pisos de
    * `~/.aluy` (journal/config). Opt-in EXPLÍCITO por sessão, NUNCA default, NUNCA
-   * persistido (banner/confirmação/headless-root-guard no @aluy/cli).
+   * persistido (banner/confirmação/headless-root-guard no @hiperplano/aluy-cli).
    */
   readonly unsafe?: boolean;
   /** Store "sempre nesta sessão" (CA-5). Default: um novo (em memória). */

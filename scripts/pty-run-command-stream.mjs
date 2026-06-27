@@ -17,7 +17,7 @@ import { SessionController } from '../packages/cli/dist/session/controller.js';
 import { TuiAskResolver } from '../packages/cli/dist/ask/ask-resolver.js';
 import { NodeShellPort } from '../packages/cli/dist/io/shell-port.js';
 import { NodeWorkspace } from '../packages/cli/dist/io/workspace.js';
-import { PolicyPermissionEngine } from '@aluy/cli-core';
+import { PolicyPermissionEngine } from '@hiperplano/aluy-cli-core';
 
 const base = mkdtempSync(join(tmpdir(), 'aluy-0982-pty-'));
 const root = join(base, 'project');

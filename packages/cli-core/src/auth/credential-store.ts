@@ -2,13 +2,13 @@
 //
 // PORTÁVEL: aqui é só a INTERFACE + serialização. A implementação concreta é o
 // KEYCHAIN do SO (macOS Keychain / Windows Credential Manager / Linux Secret
-// Service), que vive em `@aluy/cli` (dep nativa `@napi-rs/keyring`). O core nunca
+// Service), que vive em `@hiperplano/aluy-cli` (dep nativa `@napi-rs/keyring`). O core nunca
 // grava a credencial em disco em claro; quem implementa o store É o keychain.
 //
 // CLI-SEC-2 (crítico): NUNCA gravar a credencial em arquivo texto no repo/cwd,
 // em `~/.aluy/config.json`, em env persistida, nem em log. Sem fallback
 // silencioso para arquivo em claro — se não há keychain, o store DEVE lançar
-// `NoKeychainError` (definido em @aluy/cli), e o caller avisa o usuário SEM
+// `NoKeychainError` (definido em @hiperplano/aluy-cli), e o caller avisa o usuário SEM
 // gravar nada em claro.
 
 import { jwtSubForDisplay } from './jwt-claims.js';
@@ -16,7 +16,7 @@ import type { StoredCredential } from './types.js';
 
 /**
  * Backend de armazenamento da credencial. A única implementação de produção é o
- * keychain do SO (@aluy/cli). Testes injetam um fake EM MEMÓRIA — nunca disco.
+ * keychain do SO (@hiperplano/aluy-cli). Testes injetam um fake EM MEMÓRIA — nunca disco.
  */
 export interface CredentialStore {
   /** Lê a credencial corrente, ou `null` se não há login. */

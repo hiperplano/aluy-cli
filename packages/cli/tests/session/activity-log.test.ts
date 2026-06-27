@@ -7,7 +7,7 @@
 //   • anel BOUNDED (teto global de eventos).
 
 import { describe, expect, it } from 'vitest';
-import { FlowTree, REDACTED } from '@aluy/cli-core';
+import { FlowTree, REDACTED } from '@hiperplano/aluy-cli-core';
 import { buildActivityLog, MAX_LOG_EVENTS } from '../../src/session/activity-log.js';
 
 /** Monta uma FlowTree real com root + (opcional) sub-agentes e algumas atividades. */
@@ -151,7 +151,7 @@ describe('buildActivityLog — V2 agrupado por agente', () => {
 // FlowActivity, sem depender da FlowTree real — para isolar os ramos do
 // mapeador interno activityToEvent e do anel bounded.
 
-import type { FlowSummary, FlowDrillIn, FlowActivity, FlowAccounting } from '@aluy/cli-core';
+import type { FlowSummary, FlowDrillIn, FlowActivity, FlowAccounting } from '@hiperplano/aluy-cli-core';
 
 /** Contabilidade padrão para fixtures de overview. */
 const BASE_ACCT: FlowAccounting = {

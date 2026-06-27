@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeShellPort } from '../../src/io/shell-port.js';
 import { NodeWorkspace } from '../../src/io/workspace.js';
-import type { ShellChunk } from '@aluy/cli-core';
+import type { ShellChunk } from '@hiperplano/aluy-cli-core';
 
 function tmpWorkspace(): { root: string; cleanup: () => void } {
   const base = mkdtempSync(join(tmpdir(), 'aluy-sh-0982-'));

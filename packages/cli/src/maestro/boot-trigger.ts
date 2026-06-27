@@ -10,7 +10,7 @@
 //   Zero credencial no env do sidecar (CLI-SEC-7).
 
 import { join } from 'node:path';
-import { resolveSidecarToggles, type SidecarTarget } from '@aluy/cli-core';
+import { resolveSidecarToggles, type SidecarTarget } from '@hiperplano/aluy-cli-core';
 import { NodeBootSupervisor } from './boot-supervisor.js';
 import { UserConfigStore } from '../io/user-config.js';
 import { warmupSidecars, type WarmTarget } from './sidecar-warmup.js';

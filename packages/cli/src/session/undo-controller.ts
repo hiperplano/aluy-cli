@@ -1,6 +1,6 @@
 // EST-0960b · ADR-0056 — UX de `/undo` `/redo` (empilhável). A MECÂNICA (journal,
 // captura do `antes`, fronteira `edit_file`↔`run_command`, detecção de concorrência,
-// restauração CONFINADA no momento da escrita) é da EST-0960a (`@aluy/cli-core`
+// restauração CONFINADA no momento da escrita) é da EST-0960a (`@hiperplano/aluy-cli-core`
 // `SnapshotJournal`). Aqui mora SÓ a UX: o cursor undo/redo da sessão, a decisão de
 // quando pedir confirmação, o aviso de barreira REDIGIDO (R9) e as notas de feedback.
 //
@@ -19,8 +19,8 @@
 //          mas o journal só guarda o `antes`. v1: /redo restaura via re-captura —
 //          ver `redo()` (reaplica o snapshot inverso guardado no passo do /undo).
 
-import { redactCommandSecrets, type JournalEntry, type RestoreOutcome } from '@aluy/cli-core';
-import type { SnapshotJournal } from '@aluy/cli-core';
+import { redactCommandSecrets, type JournalEntry, type RestoreOutcome } from '@hiperplano/aluy-cli-core';
+import type { SnapshotJournal } from '@hiperplano/aluy-cli-core';
 
 /** Uma nota a empurrar na conversa (mesma forma do SlashNote dos handlers). */
 export interface UndoNote {

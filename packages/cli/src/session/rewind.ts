@@ -7,7 +7,7 @@
 // truncado no core). É a fala do próprio usuário (não dado de ambiente), exibida como
 // rótulo do item — mesma natureza do título da sessão no `/history`.
 
-import type { Checkpoint } from '@aluy/cli-core';
+import type { Checkpoint } from '@hiperplano/aluy-cli-core';
 
 /** A AÇÃO escolhida sobre um checkpoint (a 2ª etapa do menu). */
 export type RewindAction = 'both' | 'conversation' | 'code';

@@ -31,7 +31,7 @@
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // PORTÁVEL (ADR-0053 §8): pura manipulação de dados (sem I/O). O loader confinado
-// (filesystem) é do @aluy/cli; ele entrega os perfis parseados + a origem aqui.
+// (filesystem) é do @hiperplano/aluy-cli; ele entrega os perfis parseados + a origem aqui.
 
 import type { AgentProfile } from './agent-profile.js';
 import type { SubAgentProfile } from './subagent.js';

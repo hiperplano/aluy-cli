@@ -21,7 +21,7 @@ import { App } from '../packages/cli/dist/session/App.js';
 import { SessionController } from '../packages/cli/dist/session/controller.js';
 import { TuiAskResolver } from '../packages/cli/dist/ask/ask-resolver.js';
 import { wrapStdoutWithSync } from '../packages/cli/dist/session/synchronized-output.js';
-import { PolicyPermissionEngine } from '@aluy/cli-core';
+import { PolicyPermissionEngine } from '@hiperplano/aluy-cli-core';
 
 const overwrite = (process.argv[2] ?? 'on') !== 'off';
 const env = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' };

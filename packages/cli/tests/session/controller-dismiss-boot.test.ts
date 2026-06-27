@@ -9,7 +9,7 @@ import {
   type FileSystemPort,
   type ShellPort,
   type SearchPort,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 
 const noFs: FileSystemPort = {

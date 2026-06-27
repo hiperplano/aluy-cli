@@ -763,7 +763,7 @@ export const NATIVE_TOOLS: readonly NativeTool<ToolPorts>[] = [
   // EST-1015 (pedido do dono) — checklist/plano vivo (effect:'read', sem efeito externo).
   PLAN_TOOL,
   // EST-1110 · ADR-0114 — `perguntar`: o agente pergunta ao usuário (effect:'read',
-  // sem efeito externo; porta `question` injetada pelo @aluy/cli; fail-safe não-pendura).
+  // sem efeito externo; porta `question` injetada pelo @hiperplano/aluy-cli; fail-safe não-pendura).
   QUESTION_TOOL,
   // EST-1108 — backlog/TODO persistente: add_todo, list_todos, done_todo
   // (porta de I/O PRÓPRIA confinada a `todos.json`, efeito `memory` p/ add/done).

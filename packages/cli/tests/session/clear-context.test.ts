@@ -20,7 +20,7 @@ import {
   type ShellPort,
   type SearchPort,
   type HistoryItem,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
 import { buildActivityLog } from '../../src/session/activity-log.js';

@@ -29,7 +29,7 @@ import {
   type StreamFetch,
   type StreamResponse,
   type HostResolver,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { NodeHostResolver } from '../../io/web-port.js';
 
 export interface PinnedStreamFetchOptions {

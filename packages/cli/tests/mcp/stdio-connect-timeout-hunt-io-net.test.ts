@@ -16,7 +16,7 @@ import {
   DEFAULT_MCP_CONNECT_TIMEOUT_MS,
   type McpClientLike,
 } from '../../src/mcp/stdio-transport.js';
-import type { McpServerConfig } from '@aluy/cli-core';
+import type { McpServerConfig } from '@hiperplano/aluy-cli-core';
 
 const SERVER: McpServerConfig = { name: 'fake', command: 'node', args: [], env: {} };
 

@@ -15,7 +15,7 @@ import {
   isWorkflowError,
   type WorkflowDef,
   type WorkflowError,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 /** Permissão restrita do dir `~/.aluy/workflows/`. */
 const DIR_MODE = 0o700;

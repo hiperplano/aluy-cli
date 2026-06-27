@@ -13,8 +13,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runModels } from '../../src/commands/models.js';
 import { InMemoryStore, makeMockFetch } from '../auth/helpers.js';
-import { defaultLocalCatalog, buildLocalCatalog } from '@aluy/cli-core';
-import type { StreamFetch } from '@aluy/cli-core';
+import { defaultLocalCatalog, buildLocalCatalog } from '@hiperplano/aluy-cli-core';
+import type { StreamFetch } from '@hiperplano/aluy-cli-core';
 
 const BROKER = 'http://broker.test';
 // PAT de FORMATO válido (`pat_<32hex>_<secret>`) — o LoginService.getAccessToken só

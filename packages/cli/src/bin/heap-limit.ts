@@ -15,7 +15,7 @@
 // Esta é a parte PURA/testável (computa o NODE_OPTIONS alvo + decide se re-exec);
 // o spawn concreto vive em `applyHeapLimit` (I/O), chamado no topo do entrypoint.
 
-import { resolveHeapLimitMb } from '@aluy/cli-core';
+import { resolveHeapLimitMb } from '@hiperplano/aluy-cli-core';
 
 /** Sentinela no env: marca que JÁ re-exec-amos (evita loop infinito de re-spawn). */
 export const HEAP_LIMIT_APPLIED_ENV = 'ALUY_HEAP_LIMIT_APPLIED';

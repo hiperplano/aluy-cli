@@ -6,7 +6,7 @@
 
 import type { WorkflowDef, WorkflowError, WorkflowOrigin } from './workflow-parse.js';
 
-/** Uma nota (título + linhas) — espelha o `SlashNote` do @aluy/cli, sem acoplar a ele. */
+/** Uma nota (título + linhas) — espelha o `SlashNote` do @hiperplano/aluy-cli, sem acoplar a ele. */
 export interface WorkflowsListNote {
   readonly title: string;
   readonly lines: readonly string[];

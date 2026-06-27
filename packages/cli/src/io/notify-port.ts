@@ -1,7 +1,7 @@
 // EST-0963 — PORTA de NOTIFICAÇÃO (inspirada no OpenCode): avisa o usuário quando
 // o agente PRECISA DE ATENÇÃO enquanto ele está noutra janela.
 //
-// É uma preocupação de IO/terminal — por isso vive no @aluy/cli (locus concreto),
+// É uma preocupação de IO/terminal — por isso vive no @hiperplano/aluy-cli (locus concreto),
 // nunca no core portável. Dois canais, ambos best-effort e DEGRADAÇÃO SILENCIOSA:
 //   1. BELL do terminal (`\a` / BEL): o sino padrão. Faz o terminal piscar/tocar e,
 //      em muitos gerenciadores de janela, marca a aba/janela como "tem novidade".
@@ -141,7 +141,7 @@ function isFalsey(v: string | undefined): boolean {
 
 /**
  * Resolve a config de notificação do AMBIENTE (espelha model/config.ts: a leitura
- * de env mora no @aluy/cli). Default LIGADO (bell em ask-pendente; desktop-notify
+ * de env mora no @hiperplano/aluy-cli). Default LIGADO (bell em ask-pendente; desktop-notify
  * best-effort), salvo `ALUY_NOTIFY` desligando explicitamente. `NO_COLOR` desliga
  * o OSC (desktop) mas NÃO o BEL — o sino não é cor. Puro: recebe o `env`.
  */

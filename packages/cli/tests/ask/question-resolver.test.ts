@@ -2,7 +2,7 @@
 // a UI o resolve UMA vez; fail-safe NÃO-PENDURA — não-interativo E abort ⇒ `unavailable`.
 
 import { describe, expect, it } from 'vitest';
-import type { QuestionSpec } from '@aluy/cli-core';
+import type { QuestionSpec } from '@hiperplano/aluy-cli-core';
 import { TuiQuestionResolver, type PendingQuestionEntry } from '../../src/ask/question-resolver.js';
 
 const spec: QuestionSpec = {

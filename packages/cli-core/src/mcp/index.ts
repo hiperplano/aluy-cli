@@ -3,7 +3,7 @@
 // Cliente MCP PORTÁVEL: config (DADO), descoberta+handshake, adaptação das tools
 // p/ o toolset (atrás da catraca), e a classificação de efeito por SINAIS
 // NÃO-CONFIÁVEIS-DO-SERVER (E-B2). O SPAWN/STDIO concreto (`@modelcontextprotocol/
-// sdk` + `child_process`) é injetado pelo `@aluy/cli` via a porta `McpTransport`.
+// sdk` + `child_process`) é injetado pelo `@hiperplano/aluy-cli` via a porta `McpTransport`.
 
 export {
   EMPTY_MCP_CONFIG,

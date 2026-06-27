@@ -21,8 +21,8 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { StdioMcpTransport } from '../../src/mcp/stdio-transport.js';
 import { BwrapSandboxLauncher, detectSandboxCapability } from '../../src/sandbox/index.js';
-import type { McpServerConfig } from '@aluy/cli-core';
-import { floorAvailable } from '@aluy/cli-core';
+import type { McpServerConfig } from '@hiperplano/aluy-cli-core';
+import { floorAvailable } from '@hiperplano/aluy-cli-core';
 
 const SERVER = fileURLToPath(new URL('./fixtures/sandbox-probe-server.mjs', import.meta.url));
 

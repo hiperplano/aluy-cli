@@ -22,7 +22,7 @@ export function realTerminalIO(): TerminalIO {
       stderr.write(line + '\n');
     },
     prompt: async (question, opts) => {
-      // readline só aqui (I/O de terminal mora em @aluy/cli — ADR-0053 §8).
+      // readline só aqui (I/O de terminal mora em @hiperplano/aluy-cli — ADR-0053 §8).
       const { createInterface } = await import('node:readline');
       const rl = createInterface({ input: stdin, output: stdout, terminal: true });
       try {

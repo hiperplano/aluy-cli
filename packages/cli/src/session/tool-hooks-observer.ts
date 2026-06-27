@@ -14,8 +14,8 @@
 // comando do hook RE-PASSA a MESMA `decide()` dentro do runner — em Plan/não-interativo é
 // NEGADO; nunca relaxa nada). Espelha o `void runner.runAll(...)` do turn-end.
 
-import type { HookRunner, HooksConfig, ToolCall, ToolLifecycleObserver } from '@aluy/cli-core';
-import { selectHooks } from '@aluy/cli-core';
+import type { HookRunner, HooksConfig, ToolCall, ToolLifecycleObserver } from '@hiperplano/aluy-cli-core';
+import { selectHooks } from '@hiperplano/aluy-cli-core';
 
 export interface ToolHooksObserverOptions {
   /** O runner que executa cada hook ATRÁS da catraca (mesma `decide()` do agente). */

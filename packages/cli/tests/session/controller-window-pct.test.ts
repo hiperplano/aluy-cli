@@ -6,10 +6,10 @@
 // (como ocorre após /clear ou /compact) faz a janela CAIR — e o acumulado SEGUE subindo.
 
 import { describe, expect, it } from 'vitest';
-import { PolicyPermissionEngine } from '@aluy/cli-core';
+import { PolicyPermissionEngine } from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
-import type { ModelCaller, ModelCallResult } from '@aluy/cli-core';
+import type { ModelCaller, ModelCallResult } from '@hiperplano/aluy-cli-core';
 import type { StreamSink } from '../../src/session/streaming-caller.js';
 
 // Caller que reporta um `tokens_in` CUSTOM por turno (o tamanho do prompt/contexto).

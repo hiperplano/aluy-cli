@@ -1,8 +1,8 @@
 {
-  "name": "@aluy/cli-monorepo",
+  "name": "@hiperplano/aluy-cli-monorepo",
   "version": "1.0.0-rc.1",
   "private": true,
-  "description": "Aluy CLI — um agente de terminal. Roda local com o seu próprio provider de LLM (BYO). Monorepo: @aluy/cli-core (engine portável) + @aluy/cli (TUI Ink + binário `aluy`).",
+  "description": "Aluy CLI — um agente de terminal. Roda local com o seu próprio provider de LLM (BYO). Monorepo: @hiperplano/aluy-cli-core (engine portável) + @hiperplano/aluy-cli (TUI Ink + binário `aluy`).",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {

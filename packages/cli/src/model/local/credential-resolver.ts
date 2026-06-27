@@ -2,7 +2,7 @@
 //
 // Resolve a credencial de um provider local (API key OU access token OAuth) por
 // provider, na ordem **keychain → env**. PORTÁVEL? Não: toca o keychain do SO (dep
-// nativa) e `process.env` ⇒ mora no `@aluy/cli` (ADR-0053 §8). O core só recebe a
+// nativa) e `process.env` ⇒ mora no `@hiperplano/aluy-cli` (ADR-0053 §8). O core só recebe a
 // `CredentialProvider` (função injetada) que devolve a credencial CORRENTE.
 //
 // CLI-SEC-7 / CLI-SEC-2 (DUROS): a chave NUNCA está no repo/binário; vem do
@@ -16,7 +16,7 @@ import type {
   ResolvedCredential,
   LocalProviderKind,
   LocalAuthKind,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 /** Serviço do keychain p/ as credenciais BYO do backend local (≠ do PAT do broker). */
 export const LOCAL_KEYCHAIN_SERVICE = 'aluy-cli-local';

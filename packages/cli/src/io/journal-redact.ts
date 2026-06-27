@@ -23,7 +23,7 @@
 //
 // PURO: sem I/O. Testável sem fs. (O concreto `SessionStore` o chama no sink.)
 
-import { redactOutputSecrets, redactCommandSecrets } from '@aluy/cli-core';
+import { redactOutputSecrets, redactCommandSecrets } from '@hiperplano/aluy-cli-core';
 import type { SessionBlock } from '../session/model.js';
 
 /**

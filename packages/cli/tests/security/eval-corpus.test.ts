@@ -16,7 +16,7 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyAlwaysAsk, floorAvailable } from '@aluy/cli-core';
+import { classifyAlwaysAsk, floorAvailable } from '@hiperplano/aluy-cli-core';
 import { createSandbox, detectSandboxCapability } from '../../src/sandbox/index.js';
 
 // (A) testa a PRIMITIVA de confinamento (#170 launcher) DIRETO — está em `main`. A

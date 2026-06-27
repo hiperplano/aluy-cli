@@ -24,8 +24,8 @@ import type {
   SearchMatch,
   SearchPort,
   SearchOutcome,
-} from '@aluy/cli-core';
-import { compileGlob } from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
+import { compileGlob } from '@hiperplano/aluy-cli-core';
 import type { WorkspacePort } from './workspace.js';
 import { readBounded } from './read-bounded.js';
 

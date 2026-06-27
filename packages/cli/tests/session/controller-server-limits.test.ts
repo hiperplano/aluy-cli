@@ -5,10 +5,10 @@
 //   • DEGRADA quando ausente (cai no fail-safe LOCAL + footer oculto), sem o fail-safe sumir.
 
 import { describe, expect, it } from 'vitest';
-import { PolicyPermissionEngine, type ModelUsage } from '@aluy/cli-core';
+import { PolicyPermissionEngine, type ModelUsage } from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
-import type { ModelCaller, ModelCallResult } from '@aluy/cli-core';
+import type { ModelCaller, ModelCallResult } from '@hiperplano/aluy-cli-core';
 import type { StreamSink } from '../../src/session/streaming-caller.js';
 
 /** Caller scriptado com um `usage` por turno (controla balance_after/limits/tokens). */

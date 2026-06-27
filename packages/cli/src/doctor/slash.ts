@@ -9,7 +9,7 @@
 // gasto de modelo no default. O teste do tier ao vivo (`--deep`) GASTA 1 chamada mínima
 // e SÓ roda quando o caller injeta o `tierTester` (opt-in).
 
-import type { LoginService } from '@aluy/cli-core';
+import type { LoginService } from '@hiperplano/aluy-cli-core';
 import { gatherDoctorFacts, type DoctorProbeDeps, type MemoryCounter } from './probe.js';
 import {
   buildDoctorReport,

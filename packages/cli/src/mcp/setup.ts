@@ -1,6 +1,6 @@
 // EST-0970 · ADR-0058 · CLI-SEC-12 — SETUP do MCP: lê a config, descobre, adapta.
 //
-// Ponto de entrada do wiring de MCP no `@aluy/cli`. Junta:
+// Ponto de entrada do wiring de MCP no `@hiperplano/aluy-cli`. Junta:
 //   1. McpConfigStore — lê `~/.aluy/mcp.json` confinado (DADO; write-deny pelo
 //      agente — E-B1).
 //   2. StdioMcpTransport — lança cada server local com environ MÍNIMO (CLI-SEC-7:
@@ -26,7 +26,7 @@ import {
   type McpTransport,
   type NativeTool,
   type ToolPorts,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import type { BwrapSandboxLauncher } from '../sandbox/index.js';
 import { McpConfigStore } from './mcp-config-store.js';
 import { StdioMcpTransport } from './stdio-transport.js';

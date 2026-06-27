@@ -2,7 +2,7 @@
 // (role/tool_calls/tool_call_id), só troca `content`, e só quando a forma BATE.
 
 import { describe, expect, it, vi } from 'vitest';
-import type { ChatMessage } from '@aluy/cli-core';
+import type { ChatMessage } from '@hiperplano/aluy-cli-core';
 import { compressViaHeadroom, headroomUrlFromEnv } from '../../src/model/headroom.js';
 
 function jsonResponse(body: unknown, ok = true): Response {

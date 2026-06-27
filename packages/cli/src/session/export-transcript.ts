@@ -7,7 +7,7 @@
 // GATE DO `seguranca` (ADR-0076 §Sinal de segurança, RES-C-1): o transcript exportado
 // PASSA PELA REDAÇÃO CLI-SEC-6 ANTES de ser gravado — nenhum segredo/token/`.env` que
 // foi redigido na tela aparece EM CLARO no arquivo. Reusamos a MESMA fonte de verdade
-// (`redactCommandSecrets`/`redactOutputSecrets` do `@aluy/cli-core`, a redação canônica
+// (`redactCommandSecrets`/`redactOutputSecrets` do `@hiperplano/aluy-cli-core`, a redação canônica
 // da EST-0960b/0982) — NÃO há regra de redação divergente aqui. Caso de teste
 // obrigatório: exportar uma sessão que conteve um segredo ⇒ o arquivo NÃO contém o
 // segredo cru (`export-redaction.test.ts`).
@@ -17,7 +17,7 @@
 // (`~/.aluy/exports/<sessão>-<ts>.md`) moram no wiring/IO. Separar a transformação pura
 // torna o GATE de redação testável sem disco.
 
-import { cleanAluyForDisplay, redactOutputSecrets } from '@aluy/cli-core';
+import { cleanAluyForDisplay, redactOutputSecrets } from '@hiperplano/aluy-cli-core';
 import type { SessionBlock } from './model.js';
 
 /** Metadados de cabeçalho do export (sessão/data) — só DADO DE UI, nunca credencial (HG-2). */

@@ -6,7 +6,7 @@
 // do recall; aqui provamos que o COMANDO não muda canal, só marca pinned).
 
 import { describe, expect, it } from 'vitest';
-import { AgentMemory, type MemoryFact, type MemoryStorePort } from '@aluy/cli-core';
+import { AgentMemory, type MemoryFact, type MemoryStorePort } from '@hiperplano/aluy-cli-core';
 import { parseMemoryCommand, isMemoryMutation, runMemoryCommand } from '../../src/slash/memory.js';
 
 class FakeStore implements MemoryStorePort {

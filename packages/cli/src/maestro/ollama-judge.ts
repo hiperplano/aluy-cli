@@ -22,8 +22,8 @@
 // ║   determinístico — NUNCA trava o Maestro.                                ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
-// IMPL CONCRETA em @aluy/cli (I/O layer). A porta JudgeEngine é pura no
-// @aluy/cli-core (ADR-0053 §8). Zero mudança de contrato no core.
+// IMPL CONCRETA em @hiperplano/aluy-cli (I/O layer). A porta JudgeEngine é pura no
+// @hiperplano/aluy-cli-core (ADR-0053 §8). Zero mudança de contrato no core.
 
 import {
   classifyHeadroomTarget,
@@ -33,7 +33,7 @@ import {
   type JudgeInput,
   type JudgeOption,
   type JudgeResult,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { NodeHostResolver } from '../io/web-port.js';
 
 // ─── Configuração ──────────────────────────────────────────────────────────
@@ -213,7 +213,7 @@ function toParsedVerdict(obj: Record<string, unknown>, fallback: boolean): Parse
 /**
  * Cliente concreto JudgeEngine → Ollama loopback.
  *
- * Implementa a porta `JudgeEngine` (definida em `@aluy/cli-core`) falando com
+ * Implementa a porta `JudgeEngine` (definida em `@hiperplano/aluy-cli-core`) falando com
  * um Ollama local via `127.0.0.1:11434`. Reusa a malha anti-SSRF CLI-SEC-13
  * (`classifyHeadroomTarget`) para garantir egress só-loopback.
  *

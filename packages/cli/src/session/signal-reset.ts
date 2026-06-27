@@ -13,7 +13,7 @@
 // engole o sinal: o Ink instala o próprio handler de SIGINT (exitOnCtrlC) que
 // desmonta e encerra — aqui só rodamos o reset best-effort do terminal.
 //
-// PORTÁVEL? NÃO — é I/O de processo (sinais do SO), por isso mora no @aluy/cli.
+// PORTÁVEL? NÃO — é I/O de processo (sinais do SO), por isso mora no @hiperplano/aluy-cli.
 
 /** Subconjunto do `process` que tocamos — injetável p/ teste (sem mexer no real). */
 export interface SignalProcessLike {

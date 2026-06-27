@@ -16,7 +16,7 @@ import {
   HEAP_LIMIT_APPLIED_ENV,
   type HeapLimitPorts,
 } from '../../src/bin/heap-limit.js';
-import { DEFAULT_MAX_HEAP_MB } from '@aluy/cli-core';
+import { DEFAULT_MAX_HEAP_MB } from '@hiperplano/aluy-cli-core';
 
 describe('existingMaxOldSpaceMb', () => {
   it('extrai o teto JÁ posto no NODE_OPTIONS (forma =N)', () => {

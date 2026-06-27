@@ -2,7 +2,7 @@
 //
 // PORTÁVEL e TESTÁVEL: relógio e `sleep` são INJETADOS (sem timers reais nos
 // testes). A apresentação do `user_code`/URL é um CALLBACK (`onPrompt`) — o core
-// não escreve no terminal; quem renderiza é o @aluy/cli. Respeita `interval`,
+// não escreve no terminal; quem renderiza é o @hiperplano/aluy-cli. Respeita `interval`,
 // faz back-off no `slow_down` (+5s, RFC §3.5) e encerra em access_denied/
 // expired_token. O sucesso devolve o par de tokens.
 

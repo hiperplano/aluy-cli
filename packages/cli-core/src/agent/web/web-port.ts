@@ -1,7 +1,7 @@
 // EST-0971 · CLI-SEC-13 — a PORTA de rede do agente (web_fetch/web_search).
 //
 // As tools `web_fetch`/`web_search` são CÓDIGO portável (cli-core); a rede CONCRETA
-// (DNS real + socket pinado) é injetada por esta porta, ligada no @aluy/cli. Fecha
+// (DNS real + socket pinado) é injetada por esta porta, ligada no @hiperplano/aluy-cli. Fecha
 // a fronteira do §8: a lógica anti-SSRF (resolve→valida→pina) é testável no core
 // com mocks; o I/O de rede mora no locus.
 //
@@ -14,7 +14,7 @@ import type { SafeFetcherPorts, WebFetchPolicy } from './fetcher.js';
 
 /**
  * Decisão de egress p/ um host (CLI-SEC-5). O locus liga isto à `EgressAllowlist`
- * concreta (@aluy/cli). DEFAULT-DENY: host fora da allowlist ⇒ `allowed:false`.
+ * concreta (@hiperplano/aluy-cli). DEFAULT-DENY: host fora da allowlist ⇒ `allowed:false`.
  * NUNCA libera faixa interna (a allowlist abre domínios públicos; a denylist de IP
  * do anti-SSRF é independente e inviolável).
  */

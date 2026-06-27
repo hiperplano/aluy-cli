@@ -20,7 +20,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Role } from '../theme/index.js';
 import { useI18n } from '../../i18n/index.js';
-import type { TierCatalogEntry, EffortOption } from '@aluy/cli-core';
+import type { TierCatalogEntry, EffortOption } from '@hiperplano/aluy-cli-core';
 import { principalModel, costLabel } from '../../model/catalog.js';
 import type { CustomBrowseRow } from '../hooks/useModelPicker.js';
 import type { I18nKey } from '../../i18n/index.js';

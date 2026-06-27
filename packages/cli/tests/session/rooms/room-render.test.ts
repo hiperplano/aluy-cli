@@ -9,7 +9,7 @@ import {
   formatNewSince,
   maxSeq,
 } from '../../../src/session/rooms/room-render.js';
-import type { Room } from '@aluy/cli-core';
+import type { Room } from '@hiperplano/aluy-cli-core';
 
 function msg(over: Partial<Room['messages'][number]> = {}): Room['messages'][number] {
   return {

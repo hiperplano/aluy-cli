@@ -5,8 +5,8 @@
 // `bwrap`/userns + seccomp + Landlock-aditivo. O contrato (`SandboxLauncher`) e a
 // lógica pura (fail-mode, seccomp-bytes) vêm do core PORTÁVEL; aqui mora o I/O de SO.
 
-import type { SandboxEnv } from '@aluy/cli-core';
-import { resolveSandboxEnv, resolveUnsafeNoSandbox } from '@aluy/cli-core';
+import type { SandboxEnv } from '@hiperplano/aluy-cli-core';
+import { resolveSandboxEnv, resolveUnsafeNoSandbox } from '@hiperplano/aluy-cli-core';
 import { detectSandboxCapability } from './capability.js';
 import { BwrapSandboxLauncher } from './launcher.js';
 
@@ -32,7 +32,7 @@ export interface CreateSandboxOptions {
 /**
  * CRIA o lançador do sandbox pronto p/ uso: detecta a capability, resolve o
  * ambiente (`ALUY_ENV`) e o flag (`--unsafe-no-sandbox`/env), e devolve o
- * `BwrapSandboxLauncher`. É o ponto que o wiring do @aluy/cli chama no boot p/
+ * `BwrapSandboxLauncher`. É o ponto que o wiring do @hiperplano/aluy-cli chama no boot p/
  * obter a primitiva que 1010/1011 injetam no `ShellPort`/transporte MCP.
  */
 export function createSandbox(opts: CreateSandboxOptions = {}): BwrapSandboxLauncher {

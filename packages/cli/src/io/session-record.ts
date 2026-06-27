@@ -17,7 +17,7 @@
 //      conversa com o modelo). Continuam na transcrição VISÍVEL (restaurada na tela),
 //      só não viram mensagem p/ o broker.
 
-import type { HistoryItem } from '@aluy/cli-core';
+import type { HistoryItem } from '@hiperplano/aluy-cli-core';
 import type { SessionBlock } from '../session/model.js';
 
 /**

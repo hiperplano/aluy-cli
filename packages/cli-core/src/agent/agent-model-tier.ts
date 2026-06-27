@@ -18,7 +18,7 @@
 // é consumido pela TUI; aqui só o piso determinístico p/ o agente-`.md`).
 
 /**
- * Chaves de tier que o CLI conhece de cor (espelha o FALLBACK_TIERS do @aluy/cli).
+ * Chaves de tier que o CLI conhece de cor (espelha o FALLBACK_TIERS do @hiperplano/aluy-cli).
  * É SÓ o fallback offline — NÃO restringe: o broker pode ter MAIS tiers (EST-0962),
  * e tiers desconhecidos bem-formados passam adiante na resolução abaixo.
  */

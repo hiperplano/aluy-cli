@@ -2,7 +2,7 @@
 //
 // O tool nativo `glob` acha ARQUIVOS por padrão (`**/*.ts`, `src/**/test_*.py`). A
 // LÓGICA de I/O (enumerar arquivos confinados, respeitar `.gitignore`, tetos) mora na
-// PORTA concreta (@aluy/cli, Node). AQUI fica só a parte PORTÁVEL e determinística: a
+// PORTA concreta (@hiperplano/aluy-cli, Node). AQUI fica só a parte PORTÁVEL e determinística: a
 // COMPILAÇÃO do padrão glob num MATCHER de caminhos RELATIVOS. Sem `node:*`, sem dep —
 // testável sem filesystem nem modelo (cli-core não faz I/O cru, CLI-SEC-7).
 //

@@ -18,7 +18,7 @@ import {
   verifySha256,
   MEM0_PIP_PACKAGES,
   HEADROOM_PIP_PACKAGES,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -43,8 +43,8 @@ vi.mock('node:os', async () => {
 });
 
 // Mock do verifySha256 do cli-core — por padrão delega ao real.
-vi.mock('@aluy/cli-core', async () => {
-  const actual = await vi.importActual<typeof import('@aluy/cli-core')>('@aluy/cli-core');
+vi.mock('@hiperplano/aluy-cli-core', async () => {
+  const actual = await vi.importActual<typeof import('@hiperplano/aluy-cli-core')>('@hiperplano/aluy-cli-core');
   // Por padrão, usa a implementação real.
   const mockVerify = vi.fn((a: string, b: string) => actual.verifySha256(a, b));
   return { ...actual, verifySha256: mockVerify };

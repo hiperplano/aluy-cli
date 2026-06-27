@@ -19,7 +19,7 @@
 //   • FAIL-OPEN: QUALQUER erro/timeout/forma inesperada ⇒ devolve as mensagens ORIGINAIS
 //     (nunca quebra o turno). Preserva role/tool_calls/tool_call_id — só troca `content`.
 
-import type { ChatMessage, HostResolver } from '@aluy/cli-core';
+import type { ChatMessage, HostResolver } from '@hiperplano/aluy-cli-core';
 import { headroomFetch } from './headroom-fetch.js';
 
 export interface HeadroomOptions {

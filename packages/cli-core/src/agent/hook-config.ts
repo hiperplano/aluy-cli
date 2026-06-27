@@ -4,7 +4,7 @@
 // sessão, antes/depois de uma tool, ao terminar o turno). A config mora em
 // `~/.aluy/hooks.json` (config do dono). Aqui só os TIPOS + o PARSER puro do JSON;
 // a EXECUÇÃO (atrás da catraca, via shell-port) é o `HookRunner` (hook-runner.ts), o
-// disparo nos eventos é do locus concreto (@aluy/cli).
+// disparo nos eventos é do locus concreto (@hiperplano/aluy-cli).
 //
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║ CRÍTICO DE SEGURANÇA (o `seguranca` GATEIA — hook = EXECUÇÃO DE CÓDIGO):     ║

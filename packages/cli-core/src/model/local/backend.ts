@@ -7,7 +7,7 @@
 // Sem nada ⇒ `local` ⇒ o aluy usa o provider/credencial do próprio usuário (BYO).
 // Para usar o backend central, configure `backend: "broker"` (flag/env/config).
 //
-// PORTÁVEL: só lógica de string/precedência, sem I/O. O locus (@aluy/cli) lê a
+// PORTÁVEL: só lógica de string/precedência, sem I/O. O locus (@hiperplano/aluy-cli) lê a
 // flag/env/config e chama isto.
 
 /** Os backends de modelo selecionáveis. */

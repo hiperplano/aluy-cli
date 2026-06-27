@@ -378,7 +378,7 @@ describe('EST-1122 · CA-BUS-FRONTEIRA — Módulo maestro sem I/O (ADR-0053 §8
 
 // ─── Re-export via barrel (CA-BUS-1 — exposição pública) ────────────────────
 
-describe('EST-1122 · Barrel — exportação pública via @aluy/cli-core', () => {
+describe('EST-1122 · Barrel — exportação pública via @hiperplano/aluy-cli-core', () => {
   it('createSignal é re-exportado via barrel principal', () => {
     const sig = createSignalBarrel('self-check', 'info', 0);
     expect(sig.origin).toBe('self-check');

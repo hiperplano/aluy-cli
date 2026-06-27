@@ -1,7 +1,7 @@
 // ADR-0120 / EST-1113 — resolução da config do BACKEND LOCAL (flag>env>config>default).
 //
 // Junta as fontes (flag de boot, env `ALUY_*`, `~/.aluy/config.json`) numa config
-// efetiva do backend local. PORTÁVEL? Não — lê env/config; mora no @aluy/cli. A
+// efetiva do backend local. PORTÁVEL? Não — lê env/config; mora no @hiperplano/aluy-cli. A
 // regra PURA de precedência do backend vem do core (`resolveBackend`).
 
 import {
@@ -12,7 +12,7 @@ import {
   type LocalProviderKind,
   type LocalAuthKind,
   type LocalProviderCatalog,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import type { UserConfig } from '../../io/user-config.js';
 
 /** Config efetiva do backend local (já resolvida). */

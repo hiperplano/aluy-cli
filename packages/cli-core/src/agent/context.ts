@@ -73,7 +73,7 @@ export const AGENT_INSTRUCTION_HEADER = 'Você é o Aluy Cli, um agente de termi
  *
  * Mesmo confiável, NÃO é ilimitado: tem TETO de tamanho (não estoura a janela) e
  * é lido SÓ de dentro da raiz confinada, respeitando path-deny (o locus concreto
- * no @aluy/cli faz isso ANTES de chegar aqui).
+ * no @hiperplano/aluy-cli faz isso ANTES de chegar aqui).
  */
 export const PROJECT_INSTRUCTIONS_HEADER =
   'INSTRUÇÕES DE PROJETO (AGENT.md — configuração deste repositório, escrita pelo dono do projeto):';

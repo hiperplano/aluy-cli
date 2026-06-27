@@ -6,7 +6,7 @@
 //
 // Estilo do `/doctor` do Claude Code (referência de DESIGN, sem cópia — Q9).
 
-import { LoginService, AgentMemory } from '@aluy/cli-core';
+import { LoginService, AgentMemory } from '@hiperplano/aluy-cli-core';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
 import { loadAuthConfig } from '../auth/config.js';
 import { KeychainCredentialStore } from '../auth/keychain-store.js';

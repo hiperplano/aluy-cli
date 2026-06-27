@@ -21,7 +21,7 @@
 //     (maxObservationChars — EST-0970: o blob não satura a janela do modelo ⇒ anti-OOM),
 //     timeout (porta mata), redirects (teto).
 //
-// PORTÁVEL: sem `node:*`. A rede concreta é a `WebPort` injetada (@aluy/cli).
+// PORTÁVEL: sem `node:*`. A rede concreta é a `WebPort` injetada (@hiperplano/aluy-cli).
 
 import type { NativeTool, ToolResult } from '../tools/types.js';
 import { redactCommandSecrets, redactOutputSecrets } from '../journal/redact.js';
@@ -117,7 +117,7 @@ export const webFetchTool: NativeTool<WebToolPorts> = {
     );
     // EST-0970 (fix OOM) — teto de CARACTERES da observação (o blob que entra no
     // contexto do modelo), default DEFAULT_MAX_OBSERVATION_CHARS, configurável via
-    // policy (o @aluy/cli lê ALUY_WEB_FETCH_MAX_CHARS). Distinto e mais apertado que
+    // policy (o @hiperplano/aluy-cli lê ALUY_WEB_FETCH_MAX_CHARS). Distinto e mais apertado que
     // o maxBytes da LEITURA de rede — protege a JANELA do modelo (causa-raiz do OOM).
     const maxObsChars = ports.web.policy?.maxObservationChars ?? DEFAULT_MAX_OBSERVATION_CHARS;
     return fetchResultToObservation(result, eg.allowed ? undefined : eg.host, maxObsChars);

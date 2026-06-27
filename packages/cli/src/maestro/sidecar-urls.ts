@@ -9,7 +9,7 @@
 // quando ausente); `resolveHeadroomProbeUrl` aqui é só o ALVO de PROBE do doctor
 // (default mesmo quando a feature está off — p/ reportar se o sidecar está no ar).
 
-import { MEM0_PORT, HEADROOM_PORT, OLLAMA_BASE_URL } from '@aluy/cli-core';
+import { MEM0_PORT, HEADROOM_PORT, OLLAMA_BASE_URL } from '@hiperplano/aluy-cli-core';
 
 type Env = Record<string, string | undefined> | undefined;
 

@@ -2,7 +2,7 @@
 //
 // Tools add_todo/list_todos/done_todo (porta de I/O PRÓPRIA, confinada a `todos.json`),
 // contrato TodoStorePort + tipos TodoItem. O I/O concreto (`~/.aluy/todos.json` 0600,
-// fail-safe) é do @aluy/cli.
+// fail-safe) é do @hiperplano/aluy-cli.
 
 export {
   ADD_TODO_TOOL_NAME,

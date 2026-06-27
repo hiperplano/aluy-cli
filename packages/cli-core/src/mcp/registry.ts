@@ -10,7 +10,7 @@
 // ║ SEGURANÇA — o que este módulo NÃO faz (CLI-SEC-5 · CLI-SEC-4 · E-B1):       ║
 // ║  • EGRESS FIXO: fala com UM endpoint só — o registro OFICIAL (host fixo,     ║
 // ║    abaixo). NÃO é fetch arbitrário; o host entra explícito na egress-allowlist║
-// ║    (CLI-SEC-5). O @aluy/cli injeta o fetch seguro (anti-SSRF, EST-0971).     ║
+// ║    (CLI-SEC-5). O @hiperplano/aluy-cli injeta o fetch seguro (anti-SSRF, EST-0971).     ║
 // ║  • SEM KEY: o registro oficial é ABERTO. NUNCA pedimos/embutimos credencial. ║
 // ║  • SÓ LÊ E MOSTRA: a resposta do registro é DADO_NÃO_CONFIÁVEL (CLI-SEC-4) —  ║
 // ║    NADA é executado/instalado/auto-aprovado a partir dela. O comando exibido  ║
@@ -20,7 +20,7 @@
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // PORTÁVEL (ADR-0053 §8): só lógica de string/objeto (URL, parse, filtro, formato).
-// O I/O de rede é a porta `RegistryFetch` injetada (ligada ao safeFetch do @aluy/cli).
+// O I/O de rede é a porta `RegistryFetch` injetada (ligada ao safeFetch do @hiperplano/aluy-cli).
 
 /** Host FIXO do registro oficial aberto do MCP (CLI-SEC-5: entra na allowlist). */
 export const MCP_REGISTRY_HOST = 'registry.modelcontextprotocol.io';
@@ -41,7 +41,7 @@ export type RegistryFetchResult =
   | { readonly ok: false; readonly reason: string };
 
 /**
- * Porta de rede da busca no registro — injetada pelo @aluy/cli (safeFetch pinado +
+ * Porta de rede da busca no registro — injetada pelo @hiperplano/aluy-cli (safeFetch pinado +
  * egress-allowlist do host FIXO). O CORE só monta a URL e interpreta o corpo; NUNCA
  * abre socket. `url` é SEMPRE derivada de `MCP_REGISTRY_SERVERS_URL` (host fixo).
  */

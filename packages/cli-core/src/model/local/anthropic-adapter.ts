@@ -33,7 +33,7 @@ const OAUTH_BETA = 'oauth-2025-04-20';
 export class AnthropicAdapter implements ProviderAdapter {
   readonly kind = 'anthropic';
   // CLI-SEC-7 / CA-3 — o HOST do provider NÃO mora no core (seria endpoint cru no
-  // pacote portável). O `baseUrl` EFETIVO é SEMPRE injetado pelo wiring (@aluy/cli,
+  // pacote portável). O `baseUrl` EFETIVO é SEMPRE injetado pelo wiring (@hiperplano/aluy-cli,
   // factory), que detém os defaults públicos. O adapter só monta o PATH do protocolo.
   readonly defaultBaseUrl = '';
   readonly allowsBaseUrlOverride = true;

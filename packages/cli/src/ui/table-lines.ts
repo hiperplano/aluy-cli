@@ -36,7 +36,7 @@ export function tableLines(rows: readonly (readonly string[])[], opts: TableOpts
   return all.map(fmt);
 }
 
-// TABELA COM BORDAS (box-drawing): o helper PURO mora no @aluy/cli-core (p/ os
+// TABELA COM BORDAS (box-drawing): o helper PURO mora no @hiperplano/aluy-cli-core (p/ os
 // builders portáveis /agents·/skills·/model·/workflows usarem sem cruzar a
 // fronteira). O `cli` só RE-EXPORTA — uma única implementação, sem divergir.
-export { boxTable, type BoxTableOpts } from '@aluy/cli-core';
+export { boxTable, type BoxTableOpts } from '@hiperplano/aluy-cli-core';

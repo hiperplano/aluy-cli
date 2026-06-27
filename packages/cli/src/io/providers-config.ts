@@ -1,7 +1,7 @@
 // ADR-0118 / EST-1118 — LOAD do catálogo de providers LOCAIS do usuário
 // (`~/.aluy/providers.json`) e merge com o default EMBUTIDO do core.
 //
-// É o LOCUS de I/O do catálogo (ADR-0053 §8): o `@aluy/cli-core` tem o DADO embutido +
+// É o LOCUS de I/O do catálogo (ADR-0053 §8): o `@hiperplano/aluy-cli-core` tem o DADO embutido +
 // o merge/sanitize PUROS; AQUI lemos o disco (toca `node:fs`) e entregamos o catálogo
 // EFETIVO já mesclado. Espelha o read-path FAIL-SAFE do `UserConfigStore` (EST-0969):
 //   - arquivo ausente/ilegível/JSON inválido ⇒ AVISA (uma vez) e cai no default embutido,
@@ -21,7 +21,7 @@ import {
   type LocalProviderCatalog,
   type WireFormat,
   type LocalAuthMode,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 /** Nome do arquivo de override do catálogo (dentro de `~/.aluy/`). */
 export const PROVIDERS_FILENAME = 'providers.json';

@@ -4,7 +4,7 @@ import {
   resolveModelBackend,
   resolveLocalProviderConfig,
 } from '../../../src/model/local/config.js';
-import { buildLocalCatalog } from '@aluy/cli-core';
+import { buildLocalCatalog } from '@hiperplano/aluy-cli-core';
 import type { UserConfig } from '../../../src/io/user-config.js';
 
 describe('resolveModelBackend', () => {

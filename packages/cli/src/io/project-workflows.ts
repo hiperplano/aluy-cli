@@ -15,7 +15,7 @@ import {
   isWorkflowError,
   type WorkflowDef,
   type WorkflowError,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import type { WorkspacePort } from './workspace.js';
 import { classifyAttachPath } from '../attach/path-deny.js';
 import type { WorkflowLoadResult } from './user-workflows.js';

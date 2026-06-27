@@ -1,7 +1,7 @@
 // EST-0948 — WIRING da sessão: liga login + broker + loop + catraca + I/O concreto.
 //
 // É o ponto onde TUDO se conecta no binário `aluy` (ADR-0053 §8: entrega
-// monolítica, `@aluy/cli` consome `@aluy/cli-core`):
+// monolítica, `@hiperplano/aluy-cli` consome `@hiperplano/aluy-cli-core`):
 //   LoginService (0942) ─┐
 //                        ├→ createBrokerModelClient (0943) → StreamingModelCaller
 //   ALUY_BROKER_URL ─────┘
@@ -52,7 +52,7 @@ import {
   type NativeTool,
   type AgentRegistry,
   type RoomStore,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { loadAuthConfig, CLI_CLIENT_ID } from '../auth/config.js';
 import { loadBrokerConfig } from '../model/config.js';
 import { headroomUrlFromEnv } from '../model/headroom.js';
@@ -83,7 +83,7 @@ import { SessionController } from './controller.js';
 import { HooksConfigStore } from '../io/index.js';
 import { FileRoomStore } from './rooms/file-room-store.js';
 import { makePreToolGate } from './pre-tool-gate.js';
-import { HookRunner, selectHooks, type HooksConfig } from '@aluy/cli-core';
+import { HookRunner, selectHooks, type HooksConfig } from '@hiperplano/aluy-cli-core';
 import { resolveContextWindow } from '../model/catalog.js';
 import { resolveMaestro, resolveContinuationCfg, resolveMemory } from '../maestro/wiring.js';
 import type { SessionMeta } from './model.js';
@@ -505,7 +505,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // Registro de 1 ponto por PROMPT. ORQUESTRA o journal (acima): grava a fronteira
   // de seq (código) + a contagem de blocos (conversa) no início de cada turno e
   // restaura o código revertendo as edições posteriores ao ponto. Mecânica PORTÁVEL
-  // (core); a UI do `/rewind` e a rebobinada de conversa moram no @aluy/cli.
+  // (core); a UI do `/rewind` e a rebobinada de conversa moram no @hiperplano/aluy-cli.
   const checkpoints = new CheckpointRegistry({ journal });
 
   const fs = new NodeFileSystemPort({ workspace });
@@ -566,7 +566,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   const questionResolver = new TuiQuestionResolver();
 
   // ── EST-1126 · ADR-0123 §4 — grafo de caixas de contexto POR SESSÃO ─────────
-  // O ContextGraph é DADO+heurística PORTÁVEL (cli-core, ADR-0053 §8): o @aluy/cli
+  // O ContextGraph é DADO+heurística PORTÁVEL (cli-core, ADR-0053 §8): o @hiperplano/aluy-cli
   // só o INSTANCIA e o injeta como porta. Com ele presente, `update_plan` sincroniza
   // os passos → caixas (syncPlanToGraph) e renderiza com HORIZONTE + ANINHAMENTO
   // (renderPlanChecklistFromGraph) em vez da lista FLAT — o plano vira hierárquico.

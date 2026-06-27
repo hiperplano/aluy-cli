@@ -22,14 +22,14 @@ import type {
   ShellResult,
   ToolCall,
   ToolPorts,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import {
   parseAgentProfile,
   isAgentProfileError,
   parseWorkflow,
   isWorkflowError,
   parseUserCommand,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import {
   buildAgentMdTemplate,
   buildExampleAgent,

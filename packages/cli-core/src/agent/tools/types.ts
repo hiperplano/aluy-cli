@@ -1,8 +1,8 @@
 // EST-0944 — contrato das tools nativas + PORTAS de I/O injetáveis.
 //
-// As tools são código no pacote (ADR-0053 §2.2), mas o `@aluy/cli-core` é
+// As tools são código no pacote (ADR-0053 §2.2), mas o `@hiperplano/aluy-cli-core` é
 // PORTÁVEL: NÃO importa `node:fs`/`node:child_process`. Em vez disso, cada tool
-// depende de uma PORTA (interface) que o locus concreto injeta — `@aluy/cli`
+// depende de uma PORTA (interface) que o locus concreto injeta — `@hiperplano/aluy-cli`
 // liga a porta a `fs`/`child_process` reais (EST-0948); no futuro server-side, a
 // MESMA tool liga a um sandbox da nuvem. Isso é a fronteira do §8/§8-bis viva no
 // nível da tool: a mecânica (parse/contrato/efeito) é portável, o I/O é injetado.
@@ -140,7 +140,7 @@ export interface NativeTool<Ports = unknown> {
   ): Promise<ToolResult>;
 }
 
-// ── Portas de I/O (injetáveis; o concreto mora em @aluy/cli) ──────────────────
+// ── Portas de I/O (injetáveis; o concreto mora em @hiperplano/aluy-cli) ──────────────────
 
 /** Resultado de uma leitura COM metadado de completude (EST-0944 · anti-data-loss). */
 export interface FileReadMeta {
@@ -348,7 +348,7 @@ export interface SearchPort {
    * OPCIONAL (aditivo, como `cwd`/`journal` em `ToolPorts`): um port sem `glob` (ex.:
    * fakes de teste que só implementam `search`) segue válido — a tool `glob` degrada
    * com erro CLARO ("indisponível nesta sessão"), nunca quebra. O locus concreto
-   * (@aluy/cli) sempre liga o `glob` real (NodeSearchPort).
+   * (@hiperplano/aluy-cli) sempre liga o `glob` real (NodeSearchPort).
    */
   glob?(pattern: string, path: string): Promise<GlobOutcome>;
 }
@@ -386,7 +386,7 @@ export interface ToolPorts {
    * EST-0982 — porta do DIRETÓRIO DE TRABALHO DE SESSÃO (`sessionCwd`) que a tool
    * `change_dir` navega (confinada à raiz). OPCIONAL: sem ela, `change_dir` é inerte
    * (erro claro, nenhum efeito) e o agente segue na raiz (não-regressão). O locus
-   * concreto (@aluy/cli) liga esta porta ao `NodeWorkspace`, que owna o `sessionCwd`
+   * concreto (@hiperplano/aluy-cli) liga esta porta ao `NodeWorkspace`, que owna o `sessionCwd`
    * que o `shell`/`fs`/`search` já consultam — uma ÚNICA fonte de verdade do cwd.
    */
   readonly cwd?: CwdPort;
@@ -410,7 +410,7 @@ export interface ToolPorts {
    * Quando presente, a tool `spawn_agent` a usa p/ delegar subtarefas em paralelo;
    * sem ela, `spawn_agent` é inerte (erro, nenhum efeito — fail-safe). Tipada por
    * `import(...)` p/ não acoplar este contrato ao módulo concreto (evita ciclo). O
-   * locus concreto (@aluy/cli) liga esta porta ao `SubAgentSpawner`, que carrega a
+   * locus concreto (@hiperplano/aluy-cli) liga esta porta ao `SubAgentSpawner`, que carrega a
    * MESMA engine/ports/budget do pai (não-bypass + escopo ⊆ pai + E-A2).
    */
   readonly subAgents?: import('./spawn-agent.js').SubAgentPort;
@@ -425,7 +425,7 @@ export interface ToolPorts {
    *    PERMANECE — só esta porta interna lê.
    * Sem a porta toda, `remember`/`recall` são inertes (erro claro — fail-safe). Tipada
    * por `import(...)` p/ não acoplar este contrato à mecânica de memória (evita ciclo;
-   * mesma técnica do journal/web/subAgents). O locus concreto (@aluy/cli) liga esta porta
+   * mesma técnica do journal/web/subAgents). O locus concreto (@hiperplano/aluy-cli) liga esta porta
    * à `AgentMemory` (escreve/lê `~/.aluy/memory/` 0600/0700 atômico + `.aluy/memory/`).
    */
   readonly memory?: import('../memory/remember-tool.js').MemoryWritePort &
@@ -461,7 +461,7 @@ export interface ToolPorts {
    * e devolver a resposta como observação. Sem ela, `perguntar` é inerte (erro acionável,
    * fail-safe não-pendura) — não-regressão. Tipada por `import(...)` p/ não acoplar este
    * contrato à mecânica concreta (evita ciclo; mesma técnica de plan/memory/web). O locus
-   * concreto (@aluy/cli) liga esta porta ao `TuiQuestionResolver` (controlador da TUI).
+   * concreto (@hiperplano/aluy-cli) liga esta porta ao `TuiQuestionResolver` (controlador da TUI).
    */
   readonly question?: import('./question.js').QuestionPort;
 }

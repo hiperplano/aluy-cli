@@ -4,7 +4,7 @@
 // OAuth-PKCE em vez de API key. Esta camada é PORTÁVEL (ADR-0053 §8): gera o par
 // verifier/challenge, monta o authorize URL, e troca/refresca tokens via um
 // `fetch` injetável. O I/O concreto (abrir o browser, loopback server, gravar no
-// keychain) mora no `@aluy/cli` (EST-1114, locus).
+// keychain) mora no `@hiperplano/aluy-cli` (EST-1114, locus).
 //
 // ⚠ AVISO DE ToS (ADR-0120): usar token de ASSINATURA em cliente NÃO-oficial é
 // zona cinzenta dos Termos do provider — opção consciente do usuário. A via API

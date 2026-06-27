@@ -19,7 +19,7 @@ import {
   type ShellPort,
   type SearchPort,
   type AskResolver,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import { queueAtRest } from '../../src/session/model.js';
 

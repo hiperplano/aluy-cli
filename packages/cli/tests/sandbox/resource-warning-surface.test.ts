@@ -23,7 +23,7 @@ import type {
   SandboxSpawnResult,
   ShellChunk,
   ShellExecOptions,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { NodeShellPort } from '../../src/io/shell-port.js';
 import { NodeWorkspace } from '../../src/io/workspace.js';
 import { BwrapSandboxLauncher } from '../../src/sandbox/index.js';

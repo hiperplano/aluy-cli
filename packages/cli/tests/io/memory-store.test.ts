@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeMemoryStore } from '../../src/io/memory-store.js';
 import { NodeWorkspace } from '../../src/io/workspace.js';
-import type { MemoryFact } from '@aluy/cli-core';
+import type { MemoryFact } from '@hiperplano/aluy-cli-core';
 
 function mode(path: string): number {
   return statSync(path).mode & 0o777;

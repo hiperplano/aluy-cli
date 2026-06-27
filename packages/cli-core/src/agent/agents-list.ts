@@ -1,7 +1,7 @@
 // EST-0977 · ADR-0061 · CLI-SEC-11 (reaplicado) — `/agents` + `aluy agents`: o
 // FORMATADOR PURO que lista os perfis de agente-`.md` que o aluy MAPEOU. Reusa o
 // resultado dos MESMOS loaders confinados que o boot/`/doctor` consomem
-// (`UserAgentsLoader`/`ProjectAgentsLoader` no @aluy/cli) — aqui só FORMATAMOS o DADO
+// (`UserAgentsLoader`/`ProjectAgentsLoader` no @hiperplano/aluy-cli) — aqui só FORMATAMOS o DADO
 // já parseado (perfis VÁLIDOS + erros RES-MD-3), sem reimplementar parse nem I/O.
 //
 // O que mostra (decisão do Tiago: "ver os agentes que ele mapeou"):
@@ -13,13 +13,13 @@
 //   • VAZIO: aponta onde criar (`~/.aluy/agents/<nome>.md`) e o frontmatter mínimo.
 //
 // PORTÁVEL (ADR-0053 §8): formatação de string PURA (sem `node:*`, sem I/O). A LEITURA
-// confinada dos diretórios é do locus concreto (@aluy/cli, io/); ela ENTREGA os perfis
+// confinada dos diretórios é do locus concreto (@hiperplano/aluy-cli, io/); ela ENTREGA os perfis
 // + erros aqui. Determinístico/testável sem montar Ink nem tocar o filesystem.
 
 import type { AgentProfile, AgentProfileError, AgentOrigin } from './agent-profile.js';
 import { boxTable } from '../util/box-table.js';
 
-/** Uma nota (título + linhas) — espelha o `SlashNote` do @aluy/cli, sem acoplar a ele. */
+/** Uma nota (título + linhas) — espelha o `SlashNote` do @hiperplano/aluy-cli, sem acoplar a ele. */
 export interface AgentsListNote {
   readonly title: string;
   readonly lines: readonly string[];

@@ -1,7 +1,7 @@
 // EST-1132 · ADR-0123 §2.2/Inv. II · G2 (CA-G2-6/7/8) — cliente concreto
 // MemoryEngine → Mem0 OSS local via HTTP loopback.
 //
-// Implementa a porta `MemoryEngine` do `@aluy/cli-core` (contrato puro, ZERO I/O)
+// Implementa a porta `MemoryEngine` do `@hiperplano/aluy-cli-core` (contrato puro, ZERO I/O)
 // com um cliente HTTP que fala com o Mem0 self-hosted rodando na máquina local.
 // scope ↔ `user_id` do Mem0 (CAIXA de contexto §4.3).
 //
@@ -39,7 +39,7 @@ import type {
   MemoryScopeInput,
   MemoryScopeResult,
   MemoryScopeInfo,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 import {
   classifyHeadroomTarget,
@@ -47,7 +47,7 @@ import {
   type HeadroomTargetResult,
   type HostResolver,
   type PinnedFetcher,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 import { NodeHostResolver, NodePinnedFetcher } from './web-port.js';
 

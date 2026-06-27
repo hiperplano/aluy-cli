@@ -23,7 +23,7 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { inspectEnvSecret, type McpServerConfig } from '@aluy/cli-core';
+import { inspectEnvSecret, type McpServerConfig } from '@hiperplano/aluy-cli-core';
 import { McpConfigWriter, McpWriteError } from '../mcp/mcp-config-writer.js';
 import { MCP_CONFIG_FILENAME } from '../mcp/mcp-config-store.js';
 import { CodexMcpConfigStore } from '../mcp/codex-mcp-config.js';

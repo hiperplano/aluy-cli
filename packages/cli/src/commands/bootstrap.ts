@@ -17,7 +17,7 @@ import {
   LOCAL_KEYCHAIN_SERVICE,
   type KeyringEntry,
 } from '../model/local/credential-resolver.js';
-import type { LocalProviderKind } from '@aluy/cli-core';
+import type { LocalProviderKind } from '@hiperplano/aluy-cli-core';
 
 const VALID_PROVIDERS: readonly LocalProviderKind[] = ['anthropic', 'openrouter', 'openai'];
 

@@ -82,7 +82,7 @@ import {
   buildWorkflowsNote,
   buildSkillsNote,
   buildAvailableAgentsNote,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { applyTierLiteral } from '../model/catalog.js';
 import { TerminalNotificationPort, loadNotifyConfig } from '../io/notify-port.js';
 import { attachNotifyObserver } from './notify-observer.js';
@@ -148,7 +148,7 @@ import {
   type UserCommand,
   type LoginService,
   type RegistryFetch,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { DEFAULT_TIER } from './wiring.js';
 import { runInit, buildScaffoldSystemPrompt } from '../slash/init.js';
 import { parseMemoryCommand, runMemoryCommand } from '../slash/memory.js';
@@ -758,7 +758,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // EST-1113 (display) — o provider LOCAL resolvido (ex.: `tokenrouter`), p/ o `meta`
   // mostrar `◷ local · tokenrouter · <modelo>` e não o provider do tier (ex.: `openai`).
   let localProviderForMeta: string | undefined;
-  let localModelClient: import('@aluy/cli-core').ModelClient | undefined;
+  let localModelClient: import('@hiperplano/aluy-cli-core').ModelClient | undefined;
   if (resolvedBackend === 'local' && opts.brokerClient === undefined) {
     // ADR-0118 — o catálogo EFETIVO (built-ins + `~/.aluy/providers.json`). SEM isto, a
     // resolução cairia no `defaultLocalCatalog()` (só built-ins) e um provider CUSTOM

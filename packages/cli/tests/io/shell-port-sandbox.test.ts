@@ -10,7 +10,7 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { floorAvailable } from '@aluy/cli-core';
+import { floorAvailable } from '@hiperplano/aluy-cli-core';
 import { NodeShellPort } from '../../src/io/shell-port.js';
 import { NodeWorkspace } from '../../src/io/workspace.js';
 import { createSandbox, detectSandboxCapability } from '../../src/sandbox/index.js';

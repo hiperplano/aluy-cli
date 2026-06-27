@@ -9,10 +9,10 @@
 // CA-G2-13 redação + zero credencial
 // CA-G2-14 binário-limpo (judge não é rota de modelo)
 //
-// + fronteira ADR-0053 §8 (ollama-judge.ts no @aluy/cli, core puro)
+// + fronteira ADR-0053 §8 (ollama-judge.ts no @hiperplano/aluy-cli, core puro)
 
 import { describe, expect, it, vi } from 'vitest';
-import type { HostResolver, JudgeInput } from '@aluy/cli-core';
+import type { HostResolver, JudgeInput } from '@hiperplano/aluy-cli-core';
 import {
   OllamaJudgeEngine,
   parseVerdict,
@@ -585,15 +585,15 @@ describe('EST-1131 · configuração default', () => {
 
 // ─── Fronteira ADR-0053 §8 — core puro, I/O no cli ────────────────────────
 
-describe('EST-1131 · fronteira — I/O no @aluy/cli (ADR-0053 §8)', () => {
-  it('OllamaJudgeEngine NÃO está no core (está no @aluy/cli)', async () => {
+describe('EST-1131 · fronteira — I/O no @hiperplano/aluy-cli (ADR-0053 §8)', () => {
+  it('OllamaJudgeEngine NÃO está no core (está no @hiperplano/aluy-cli)', async () => {
     const mod = await import('../../src/maestro/ollama-judge.js');
     expect(mod.OllamaJudgeEngine).toBeDefined();
     expect(mod.parseVerdict).toBeDefined();
   });
 
   it('core NÃO importa OllamaJudgeEngine', async () => {
-    const coreMod = await import('@aluy/cli-core');
+    const coreMod = await import('@hiperplano/aluy-cli-core');
     expect((coreMod as Record<string, unknown>).OllamaJudgeEngine).toBeUndefined();
   });
 });

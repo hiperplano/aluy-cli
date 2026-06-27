@@ -1,4 +1,4 @@
-// EST-0962 (lado @aluy/cli) — FALLBACK do catálogo de tiers + display do seletor.
+// EST-0962 (lado @hiperplano/aluy-cli) — FALLBACK do catálogo de tiers + display do seletor.
 //
 // FONTE DA VERDADE = o CATÁLOGO do broker. O seletor `/model` busca os tiers no
 // broker (`GET /v1/tiers/catalog`, EST-0962/ADR-0030 §3) p/ mostrar nome amigável +
@@ -15,7 +15,7 @@
 // o broker conhece). A resolução `tier → (provider, model, credencial)` é
 // server-only, intocada.
 
-import type { TierCatalogEntry, CostSignal } from '@aluy/cli-core';
+import type { TierCatalogEntry, CostSignal } from '@hiperplano/aluy-cli-core';
 
 /**
  * Tiers CONHECIDOS do FALLBACK — usados SÓ quando o catálogo do broker não responde

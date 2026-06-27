@@ -21,7 +21,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeJournalStore } from '../../src/io/journal-store.js';
-import type { JournalEntry } from '@aluy/cli-core';
+import type { JournalEntry } from '@hiperplano/aluy-cli-core';
 
 /** Uma entrada `barrier` mínima (não custa blob) — barata p/ encher a pilha. */
 function barrier(seq: number): JournalEntry {

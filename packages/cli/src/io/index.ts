@@ -1,4 +1,4 @@
-// EST-0948 — barrel do I/O concreto do @aluy/cli (o "locus concreto" da 0944/45).
+// EST-0948 — barrel do I/O concreto do @hiperplano/aluy-cli (o "locus concreto" da 0944/45).
 // Liga as portas PORTÁVEIS do core (FileSystemPort/ShellPort/SearchPort) ao fs/
 // child_process reais, SEMPRE atrás do confinamento de workspace + egress
 // allowlist (cravas do seguranca). É aqui que mora o I/O — nunca no core.

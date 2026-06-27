@@ -1,6 +1,6 @@
 // EST-1117 · ADR-0053 §8 · ADR-0030 §3 — o PASSO de `reasoning_effort` do `/model`
 // CONJUGADO: a lógica PURA das opções de esforço (a 3ª etapa do trio provider+model+
-// effort), sem Ink/IO. O hook do `@aluy/cli` detém o ESTADO (índice/texto digitado) e a
+// effort), sem Ink/IO. O hook do `@hiperplano/aluy-cli` detém o ESTADO (índice/texto digitado) e a
 // captura de teclas; este módulo só MODELA as opções, a navegação e a normalização do
 // valor — exatamente como `models-list`/`catalog` são puros e a TUI só PINTA o DADO.
 //

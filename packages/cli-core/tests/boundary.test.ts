@@ -1,6 +1,6 @@
 // CA-2 — teste de FRONTEIRA do core modular (ADR-0053 §8).
 //
-// @aluy/cli-core é o engine PORTÁVEL: NÃO pode importar Ink/React nem fazer I/O
+// @hiperplano/aluy-cli-core é o engine PORTÁVEL: NÃO pode importar Ink/React nem fazer I/O
 // de terminal (readline/tty). Este teste varre os fontes de cli-core e FALHA
 // (vermelho) se qualquer import proibido aparecer. É a contrapartida do
 // `no-restricted-imports` no eslint — defesa em profundidade: se alguém
@@ -44,7 +44,7 @@ function isForbidden(spec: string): boolean {
   return FORBIDDEN.includes(bare);
 }
 
-describe('fronteira modular: @aluy/cli-core não importa TUI/IO de terminal', () => {
+describe('fronteira modular: @hiperplano/aluy-cli-core não importa TUI/IO de terminal', () => {
   const files = tsFiles(SRC);
 
   it('encontrou fontes do core para varrer', () => {

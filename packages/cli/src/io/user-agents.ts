@@ -26,7 +26,7 @@ import {
   isAgentProfileError,
   type AgentProfile,
   type AgentProfileError,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 /** Permissão restrita do dir `~/.aluy/agents/` (espelha o journal-store/commands). */
 const DIR_MODE = 0o700;

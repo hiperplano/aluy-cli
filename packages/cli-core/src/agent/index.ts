@@ -218,7 +218,7 @@ export * from './tools/index.js';
 // Orçamento agregado ATÔMICO (SharedBudget, E-A2) + orquestrador do fan-out
 // paralelo (SubAgentSpawner: engine derivada do pai com grants próprios + teto de
 // profundidade ≤1, budget compartilhado, ask rotulado por origem, timeout duro).
-// PORTÁVEL: mecânica/budget/orquestração aqui; a UI dos filhos rodando é do @aluy/cli.
+// PORTÁVEL: mecânica/budget/orquestração aqui; a UI dos filhos rodando é do @hiperplano/aluy-cli.
 export { SharedBudget } from './shared-budget.js';
 export {
   SubAgentSpawner,
@@ -243,7 +243,7 @@ export {
 
 // EST-1098 · ADR-0109 (WT-1) — seam de ISOLAMENTO por worktree de sub-agentes. O
 // CONTRATO (WorktreePort/WorktreeHandle) + o resolvedor PURO (resolveChildWorktree);
-// o concreto (NodeWorktreePort) vive no @aluy/cli. PORTÁVEL (só tipos + função pura).
+// o concreto (NodeWorktreePort) vive no @hiperplano/aluy-cli. PORTÁVEL (só tipos + função pura).
 export {
   resolveChildWorktree,
   type WorktreePort,
@@ -260,7 +260,7 @@ export {
 //   • ControlAudit — trilha `actor_type=cli` dos verbos de controle (CLI-SEC-10).
 //   • injectedInputItem — INTERAGIR: input = conteúdo do usuário pela MESMA catraca,
 //     sem ampliar escopo nem relaxar sempre-ask (GS-C5/RES-C-2).
-// PORTÁVEL: mecânica/estado/relógio aqui; o drill-in/UI/contabilidade-visível é do @aluy/cli.
+// PORTÁVEL: mecânica/estado/relógio aqui; o drill-in/UI/contabilidade-visível é do @hiperplano/aluy-cli.
 export {
   FlowTree,
   FlowNode,
@@ -288,7 +288,7 @@ export { injectedInputItem, INJECTED_INPUT_LABEL } from './input-injection.js';
 // prompt; FALHA FECHADA RES-MD-3), o registro nomeado (precedência projeto>global,
 // anti-spoofing cross-camada RES-MD-1, auto-seleção SÓ-globais R-S3-3/RES-MD-2) e o
 // binding do `spawn_agent` ao nome (GS-MD7). A leitura confinada dos diretórios de
-// agentes é do locus concreto (@aluy/cli, io/). O `tools:` vira `toolScope` ⊆ pai na
+// agentes é do locus concreto (@hiperplano/aluy-cli, io/). O `tools:` vira `toolScope` ⊆ pai na
 // catraca (GS-MD1, no PolicyPermissionEngine); o `model` vira tier pelo broker (GS-MD4).
 export {
   parseAgentProfile,
@@ -323,7 +323,7 @@ export { resolveModelTier, ALUY_TIER_KEYS, type AluyTierKey } from './agent-mode
 // empacotada num diretório). Parser PURO do manifesto (frontmatter name/description +
 // corpo = instruções; FALHA FECHADA RES-MD-3) + o FORMATADOR PURO que lista as skills
 // mapeadas (válidas ✓ + rejeitadas ⚠). A leitura confinada dos diretórios de skills é
-// do locus concreto (@aluy/cli, io/).
+// do locus concreto (@hiperplano/aluy-cli, io/).
 export {
   parseSkill,
   isSkillError,
@@ -347,7 +347,7 @@ export { buildAvailableAgentsNote, AVAILABLE_AGENTS_HEADER } from './available-a
 // workflow (frontmatter name/description + corpo com atividades numeradas;
 // FALHA FECHADA RES-MD-3) e o FORMATADOR PURO que lista os workflows mapeados
 // (válidos ✓ + rejeitados ⚠). A leitura confinada dos diretórios de workflows
-// é do locus concreto (@aluy/cli, io/).
+// é do locus concreto (@hiperplano/aluy-cli, io/).
 export {
   parseWorkflow,
   isWorkflowError,
@@ -386,7 +386,7 @@ export {
 // EST-0974 · ADR-0053 §2.2 — COMANDOS CUSTOMIZADOS do usuário (`~/.aluy/commands/
 // *.md`): parser PURO do template + expansão com args. O resultado é um OBJETIVO
 // submetido pelo usuário (não bypassa a catraca). A leitura confinada (0700) é do
-// locus concreto (@aluy/cli).
+// locus concreto (@hiperplano/aluy-cli).
 export {
   parseUserCommand,
   expandUserCommand,
@@ -427,7 +427,7 @@ export {
 // (autonomia REPETIDA): scheduler de re-disparo + paradas DURAS (duração/iterações/
 // budget AGREGADO atômico/conclusão) + anti-loop-vazio + parável por abort + os DOIS
 // ritmos (fixo + auto-pace). MECÂNICA PORTÁVEL; o comando `/cycle` + a UI do laço vivo
-// são do @aluy/cli. Reusa SharedBudget/E-A2, AbortSignal/freio (EST-0948/0982) e o
+// são do @hiperplano/aluy-cli. Reusa SharedBudget/E-A2, AbortSignal/freio (EST-0948/0982) e o
 // AgentLoop por-ciclo (via CycleRunner) — não reinventa nada.
 export {
   CycleEngine,
@@ -460,12 +460,12 @@ export {
 // I/O PRÓPRIA, confinada a `memory/` — NÃO carve-out do `edit_file`), recall COMO
 // DADO envelopado (anti-laundering, B/GS-M3 — nunca `system`), proveniência +
 // heurística de diretiva (GS-M5), teto por sessão (GS-M2, na engine). O I/O concreto
-// (`~/.aluy/memory/` 0600/0700 + `.aluy/memory/` do workspace) é do @aluy/cli.
+// (`~/.aluy/memory/` 0600/0700 + `.aluy/memory/` do workspace) é do @hiperplano/aluy-cli.
 export * from './memory/index.js';
 
 // EST-1108 — BACKLOG/TODO persistente: tools add_todo/list_todos/done_todo (porta
 // de I/O PRÓPRIA, confinada a `todos.json`). O I/O concreto (`~/.aluy/todos.json`
-// 0600, fail-safe) é do @aluy/cli.
+// 0600, fail-safe) é do @hiperplano/aluy-cli.
 export * from './todo/index.js';
 
 // EST-0999 · ADR-0078 — SALAS MULTI-AGENTE (INVARIANTE #1): mensagem entre agentes
@@ -480,12 +480,12 @@ export * from './journal/index.js';
 
 // EST-XXXX — CHECKPOINTS / REWIND (`/rewind` + Esc-Esc). Um ponto de restauração
 // por PROMPT do usuário; orquestra o journal de snapshot p/ reverter código e
-// expõe a fronteira da conversa (blockCount) que o @aluy/cli usa p/ truncar.
+// expõe a fronteira da conversa (blockCount) que o @hiperplano/aluy-cli usa p/ truncar.
 export * from './checkpoint/index.js';
 
 // EST-0971 · CLI-SEC-13 — tools de WEB (web_fetch/web_search) + anti-SSRF PORTÁVEL.
 // A lógica de segurança (resolve→valida→pina, denylist dura de IP, parser DDG) é
-// dado/string puro; a rede concreta é a `WebPort` injetada pelo @aluy/cli.
+// dado/string puro; a rede concreta é a `WebPort` injetada pelo @hiperplano/aluy-cli.
 export * from './web/index.js';
 
 // ADR-0112 · EST-RT-1 — parser de testes + acumulador (4 dialetos: vitest/jest/pytest/go-test).

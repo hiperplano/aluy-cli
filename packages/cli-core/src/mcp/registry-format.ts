@@ -2,7 +2,7 @@
 //
 // Texto legível p/ a CLI/TUI: por server, nome/versão, descrição, como rodar e a
 // LIGAÇÃO com `aluy mcp add` (o comando pronto p/ o usuário copiar/colar). PURO (só
-// string) — o I/O (stdout) mora no @aluy/cli. NÃO executa nada: o comando é TEXTO.
+// string) — o I/O (stdout) mora no @hiperplano/aluy-cli. NÃO executa nada: o comando é TEXTO.
 
 import type { RegistrySearchResult, RegistrySearchOutcome } from './registry.js';
 

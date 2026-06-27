@@ -5,7 +5,7 @@
 // um produz um EFEITO REAL — e que /model NUNCA expõe provider (HG-2).
 
 import { describe, expect, it } from 'vitest';
-import type { LoginService } from '@aluy/cli-core';
+import type { LoginService } from '@hiperplano/aluy-cli-core';
 import { buildSlashEffect, runAsyncSlash, type SlashContext } from '../../src/slash/handlers.js';
 
 const CTX: SlashContext = { usage: { tokens: 12400, windowPct: 38, tier: 'turbo' } };

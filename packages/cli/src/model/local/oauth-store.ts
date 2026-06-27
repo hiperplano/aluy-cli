@@ -6,7 +6,7 @@
 // `createOAuthAccessTokenProvider` que o `LocalModelClient` chama por requisição:
 // devolve um access token VÁLIDO (refrescando se preciso).
 //
-// PORTÁVEL? Não — keychain + fetch de rede ⇒ mora no @aluy/cli. A lógica de
+// PORTÁVEL? Não — keychain + fetch de rede ⇒ mora no @hiperplano/aluy-cli. A lógica de
 // PKCE/troca/refresh (pura, com fetch injetável) vive no core (`auth/oauth/pkce.ts`).
 //
 // ⚠ AVISO DE ToS (ADR-0120): token de assinatura em cliente não-oficial = zona
@@ -20,7 +20,7 @@ import {
   type OAuthProviderConfig,
   type OAuthFetch,
   type LocalProviderKind,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { LOCAL_KEYCHAIN_SERVICE, oauthAccount } from './credential-resolver.js';
 import { OAUTH_PROVIDERS } from './oauth-providers.js';
 

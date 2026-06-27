@@ -17,7 +17,7 @@
 // o resolver o REBAIXA para `approve-once` (defesa em profundidade — a TUI não
 // contorna a engine). A engine ainda recusa o grant (grantSession devolve false).
 
-import type { AskRequest, AskResolution, AskResolver } from '@aluy/cli-core';
+import type { AskRequest, AskResolution, AskResolver } from '@hiperplano/aluy-cli-core';
 
 /** Estado de uma confirmação pendente, observável pela UI. */
 export interface PendingAskEntry {

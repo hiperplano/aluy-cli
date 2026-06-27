@@ -7,13 +7,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { BrokerModelClient, ChatMessage } from '@aluy/cli-core';
+import type { BrokerModelClient, ChatMessage } from '@hiperplano/aluy-cli-core';
 import { runSession } from '../../src/session/run.js';
 import { buildSession } from '../../src/session/wiring.js';
 import { NodeMemoryStore } from '../../src/io/memory-store.js';
 import { SessionStore } from '../../src/io/index.js';
 import { NodeWorkspace } from '../../src/io/workspace.js';
-import { AgentMemory } from '@aluy/cli-core';
+import { AgentMemory } from '@hiperplano/aluy-cli-core';
 
 /** Broker stub: captura TODO o conteúdo de mensagens (qualquer canal) por chamada. */
 function capturingBroker(): { client: BrokerModelClient; calls: string[][] } {

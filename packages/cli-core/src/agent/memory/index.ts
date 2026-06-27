@@ -3,7 +3,7 @@
 // Tool `remember` (porta de I/O PRÓPRIA, confinada a `memory/`), mecânica de recall
 // COMO DADO envelopado (anti-laundering, B/GS-M3), proveniência + heurística de
 // diretiva (GS-M5), e os tipos da porta ESTREITA (GS-M1). O I/O concreto
-// (`~/.aluy/memory/` 0600/0700 + `.aluy/memory/` do workspace) é do @aluy/cli.
+// (`~/.aluy/memory/` 0600/0700 + `.aluy/memory/` do workspace) é do @hiperplano/aluy-cli.
 
 export {
   REMEMBER_TOOL_NAME,

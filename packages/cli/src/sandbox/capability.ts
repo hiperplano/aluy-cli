@@ -8,13 +8,13 @@
 // indisponível com motivo legível (o fail-mode então degrada/recusa, com aviso).
 //
 // Este arquivo TOCA o SO (`node:child_process`/`node:os`/`node:fs`) ⇒ mora no
-// @aluy/cli, não no core portável. A DECISÃO (fail-mode) é do core; a DETECÇÃO é aqui.
+// @hiperplano/aluy-cli, não no core portável. A DECISÃO (fail-mode) é do core; a DETECÇÃO é aqui.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { arch as osArch, platform as osPlatform, release as osRelease } from 'node:os';
-import type { SandboxCapability } from '@aluy/cli-core';
-import { seccompArchOf } from '@aluy/cli-core';
+import type { SandboxCapability } from '@hiperplano/aluy-cli-core';
+import { seccompArchOf } from '@hiperplano/aluy-cli-core';
 
 export interface DetectCapabilityOptions {
   /** Plataforma (default `os.platform()`). Injetável p/ teste. */

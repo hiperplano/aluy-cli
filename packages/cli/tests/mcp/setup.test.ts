@@ -10,7 +10,7 @@ import {
   type McpCallResult,
   type McpToolDescriptor,
   type McpTransport,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 function fakeTransport(tools: McpToolDescriptor[]): McpTransport & { closed: boolean } {
   return {

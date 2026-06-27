@@ -13,7 +13,7 @@ import {
   type SearchPort,
   type ModelCaller,
   type ModelCallResult,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { ThemeRoot } from '../../src/session/ThemeRoot.js';
 import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';

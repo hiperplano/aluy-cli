@@ -11,7 +11,7 @@
 // ChatGPT) num cliente NÃO-oficial é zona cinzenta dos Termos do provider. É uma
 // opção consciente do usuário; a via API key (paga-por-uso) não tem essa ressalva.
 
-import type { OAuthProviderConfig, LocalProviderKind } from '@aluy/cli-core';
+import type { OAuthProviderConfig, LocalProviderKind } from '@hiperplano/aluy-cli-core';
 
 /** Porta de loopback default p/ o redirect do PKCE (o locus sobe um server aqui). */
 export const DEFAULT_LOOPBACK_PORT = 49_876;

@@ -15,7 +15,7 @@ import {
   type ShellPort,
   type SearchPort,
   type CwdPort,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 
 const TOOL_OPEN = '<<<ALUY_TOOL_CALL';

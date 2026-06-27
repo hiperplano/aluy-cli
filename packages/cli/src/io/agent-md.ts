@@ -37,8 +37,8 @@
 // Fail-safe: QUALQUER erro/ausência ⇒ o arquivo é PULADO (não derruba o startup).
 // Nenhum arquivo presente ⇒ `undefined` (prompt baseline). Nunca lança.
 
-import { clampProjectInstructions } from '@aluy/cli-core';
-import type { FileSystemPort } from '@aluy/cli-core';
+import { clampProjectInstructions } from '@hiperplano/aluy-cli-core';
+import type { FileSystemPort } from '@hiperplano/aluy-cli-core';
 import { classifyAttachPath } from '../attach/path-deny.js';
 import type { WorkspacePort } from './workspace.js';
 

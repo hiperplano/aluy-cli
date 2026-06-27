@@ -30,8 +30,8 @@ import type {
   HookRunner,
   ToolCall,
   HooksConfig,
-} from '@aluy/cli-core';
-import { TOOL_CALL_OPEN, TOOL_CALL_CLOSE } from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
+import { TOOL_CALL_OPEN, TOOL_CALL_CLOSE } from '@hiperplano/aluy-cli-core';
 import { runSession } from '../../src/session/run.js';
 import { makeToolHooksObserver } from '../../src/session/tool-hooks-observer.js';
 import { HooksConfigStore } from '../../src/io/hooks-config-store.js';

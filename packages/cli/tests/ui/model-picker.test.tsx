@@ -10,8 +10,8 @@ import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { ModelPicker } from '../../src/ui/components/ModelPicker.js';
 import type { CustomBrowseRow } from '../../src/ui/hooks/useModelPicker.js';
-import type { TierCatalogEntry } from '@aluy/cli-core';
-import { effortOptions } from '@aluy/cli-core';
+import type { TierCatalogEntry } from '@hiperplano/aluy-cli-core';
+import { effortOptions } from '@hiperplano/aluy-cli-core';
 
 function wrap(node: React.ReactElement) {
   const theme = resolveTheme({ env: { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' } });

@@ -10,7 +10,7 @@ import { render } from 'ink-testing-library';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { RewindPicker } from '../../src/ui/components/RewindPicker.js';
-import type { Checkpoint } from '@aluy/cli-core';
+import type { Checkpoint } from '@hiperplano/aluy-cli-core';
 
 function wrap(node: React.ReactElement) {
   const theme = resolveTheme({ env: { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' } });

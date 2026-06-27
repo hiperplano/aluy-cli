@@ -7,7 +7,7 @@
 //   3. `run_command pwd` ⇒ roda NA subpasta (não na raiz fixa);
 //   4. `read_file data/produtos.json` (relativo) ⇒ lê o arquivo da subpasta.
 //
-// Usa as tools NATIVAS do core ligadas às portas CONCRETAS do @aluy/cli (NodeWorkspace/
+// Usa as tools NATIVAS do core ligadas às portas CONCRETAS do @hiperplano/aluy-cli (NodeWorkspace/
 // FS/Shell), com a ÚNICA fonte de verdade do cwd (o workspace). Nenhum modelo é chamado.
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
@@ -20,7 +20,7 @@ import {
   readFileTool,
   runCommandTool,
   type ToolPorts,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { NodeWorkspace } from '../../src/io/workspace.js';
 import { NodeFileSystemPort } from '../../src/io/fs-port.js';
 import { NodeShellPort } from '../../src/io/shell-port.js';

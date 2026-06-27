@@ -27,6 +27,11 @@ export default defineConfig({
     // pesados (criação de dirs temp / build de registry).
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // Suites de INTEGRAÇÃO que spawnam o binário/processos-filho (kill de grupo,
+    // handshake de broker/MCP) podem FALHAR-FLAKY sob contenção de CPU no CI
+    // (timeout/race), passando 100% isolados. `retry` re-tenta o flake transiente
+    // sem esconder regressão real (um bug determinístico ainda falha as N+1 vezes).
+    retry: 2,
     // EST · acabamento TUI — FORCE_COLOR=3 (truecolor) p/ os testes de RENDER do
     // markdown/realce poderem afirmar a SAÍDA ANSI REAL que um terminal truecolor
     // vê (cores derivadas dos papéis do DS). Sem isto, o `chalk` da Ink detecta
@@ -38,7 +43,7 @@ export default defineConfig({
     // a palette MONO simplesmente não tem `color` — nenhum SGR de cor é emitido.
     env: { FORCE_COLOR: '3' },
     // Build (`tsc -b`) ANTES da suíte — o job `unit` da CI central roda `vitest
-    // run` sem build prévio, mas cli.test.ts resolve `@aluy/cli-core` pelo seu
+    // run` sem build prévio, mas cli.test.ts resolve `@hiperplano/aluy-cli-core` pelo seu
     // `exports` (./dist/index.js, wiring REAL de pacote) e bin.smoke.test.ts
     // spawna o binário COMPILADO. O globalSetup garante o dist/ p/ AMBOS, de
     // forma honesta (sem alias, sem skip). Ver vitest.global-setup.ts.

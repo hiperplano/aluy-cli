@@ -11,7 +11,7 @@
 // da 1ª consulta real. Fire-and-forget, fail-safe (NUNCA lança, NUNCA bloqueia o boot). Sem
 // teto de UX aqui (é background) — só um teto-teto generoso anti-pendura.
 
-import { JUDGE_MODEL } from '@aluy/cli-core';
+import { JUDGE_MODEL } from '@hiperplano/aluy-cli-core';
 import { resolveMem0Url, resolveOllamaUrl } from './sidecar-urls.js';
 
 export type WarmTarget = 'mem0' | 'ollama';

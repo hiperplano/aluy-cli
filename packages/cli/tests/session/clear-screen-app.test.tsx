@@ -37,14 +37,14 @@ import {
   type FileSystemPort,
   type ShellPort,
   type SearchPort,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { App } from '../../src/session/App.js';
 import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
 import { parseClearCommand, runClearCommand } from '../../src/slash/clear.js';
-import { AgentMemory, type MemoryFact, type MemoryStorePort } from '@aluy/cli-core';
+import { AgentMemory, type MemoryFact, type MemoryStorePort } from '@hiperplano/aluy-cli-core';
 import type { SlashCommand } from '../../src/slash/commands.js';
 
 function fakePorts(): ToolPorts {

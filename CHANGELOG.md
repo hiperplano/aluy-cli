@@ -1,15 +1,15 @@
 # Changelog
 
 Todas as mudanças relevantes do `aluy` (binário) e dos pacotes do monorepo
-(`@aluy/cli`, `@aluy/cli-core`) ficam registradas aqui.
+(`@hiperplano/aluy-cli`, `@hiperplano/aluy-cli-core`) ficam registradas aqui.
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento [SemVer](https://semver.org/lang/pt-BR/). Os pacotes são versionados
-em **sincronia** (mesma versão em `@aluy/cli`, `@aluy/cli-core` e nas constantes
+em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli-core` e nas constantes
 `CLI_VERSION`/`CORE_VERSION`).
 
-> **Distribuição:** entrega **monolítica** — o usuário instala só `@aluy/cli`
-> (binário `aluy`); o `@aluy/cli-core` entra **bundlado**, não é publicado
+> **Distribuição:** entrega **monolítica** — o usuário instala só `@hiperplano/aluy-cli`
+> (binário `aluy`); o `@hiperplano/aluy-cli-core` entra **bundlado**, não é publicado
 > standalone.
 
 ## [Não lançado]
@@ -45,7 +45,7 @@ em **sincronia** (mesma versão em `@aluy/cli`, `@aluy/cli-core` e nas constante
 
 - `publishConfig.access` agora `"public"` nos pacotes — preparação para publicação npm (#185).
 - CI de release: bundle + scan no `release.yml`; guarda obsoleta removida (#185).
-- Build de release: embute `@aluy/cli-core` no bundle de publicação (#183).
+- Build de release: embute `@hiperplano/aluy-cli-core` no bundle de publicação (#183).
 
 ### Corrigido
 

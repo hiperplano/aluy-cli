@@ -2,8 +2,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildMcpNote } from '../../src/slash/handlers.js';
-import { buildMcpListing, type McpSource } from '@aluy/cli-core';
-import type { McpDiscoveryResult } from '@aluy/cli-core';
+import { buildMcpListing, type McpSource } from '@hiperplano/aluy-cli-core';
+import type { McpDiscoveryResult } from '@hiperplano/aluy-cli-core';
 
 const sources: McpSource[] = [
   { origin: 'codex', config: { servers: [{ name: 'cx', command: 'c', args: [], env: {} }] } },

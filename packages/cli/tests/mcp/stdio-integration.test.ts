@@ -8,7 +8,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { StdioMcpTransport } from '../../src/mcp/stdio-transport.js';
-import { adaptMcpTool, type McpServerConfig } from '@aluy/cli-core';
+import { adaptMcpTool, type McpServerConfig } from '@hiperplano/aluy-cli-core';
 
 const SERVER = fileURLToPath(new URL('./fixtures/echo-env-server.mjs', import.meta.url));
 

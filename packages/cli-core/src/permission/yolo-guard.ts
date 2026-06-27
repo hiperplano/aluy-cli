@@ -33,7 +33,7 @@
 // ESTA é a peça (d)+(b): uma função PURA/PORTÁVEL (ADR-0053 §8 — sem `node:*`, sem
 // I/O) que recebe o CONTEXTO (TTY? root?) e devolve um veredito `allow | refuse`, mais
 // o texto da confirmação/aviso e o EVENTO DE AUDITORIA (CLI-SEC-10, flag de modo). O
-// @aluy/cli injeta o contexto real (process.stdin.isTTY, geteuid) e renderiza/loga.
+// @hiperplano/aluy-cli injeta o contexto real (process.stdin.isTTY, geteuid) e renderiza/loga.
 // Testável de ponta a ponta com um contexto mock.
 
 /** Contexto de runtime que decide se o YOLO pode entrar. PORTÁVEL — sem I/O. */

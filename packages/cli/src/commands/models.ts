@@ -4,7 +4,7 @@
 // A face SHELL da discoverability de modelos (hoje só há as flags `--provider`/`--model`
 // e o menu `/model` em sessão): mostra DUAS seções —
 //   1. LOCAL (BYO): os providers/adapters do backend local (anthropic/openai/openrouter),
-//      o modo de auth e o modelo default. Metadata PÚBLICA montada AQUI (o `@aluy/cli`
+//      o modo de auth e o modelo default. Metadata PÚBLICA montada AQUI (o `@hiperplano/aluy-cli`
 //      detém os defaults — CLI-SEC-7/CA-3: o core não embute endpoint/SDK/chave).
 //   2. BROKER: tiers + providers registrados + modelos custom, do CATÁLOGO VIVO do broker
 //      (`GET /v1/tiers/catalog`, `/v1/providers`, `/v1/models/custom`). FAIL-SOFT: broker
@@ -33,7 +33,7 @@ import {
   type StreamFetch,
   type CredentialStore,
   type LocalProviderCatalog,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { loadAuthConfig } from '../auth/config.js';
 import { loadBrokerConfig } from '../model/config.js';
 import { loadLocalProviderCatalog } from '../io/providers-config.js';

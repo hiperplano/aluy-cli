@@ -23,7 +23,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Glyph, Role } from '../theme/index.js';
 import type { PanelRow } from '../hooks/usePermissionsPanel.js';
-import type { SessionMode } from '@aluy/cli-core';
+import type { SessionMode } from '@hiperplano/aluy-cli-core';
 import { windowAround } from '../window.js';
 import { displayWidth } from '../../session/visual-lines.js';
 

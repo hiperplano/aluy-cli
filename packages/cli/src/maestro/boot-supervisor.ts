@@ -1,6 +1,6 @@
 // EST-1129 · ADR-0123 §2.2 — BOOT-SUPERVISOR DE SIDECARS (implementação concreta).
 //
-// Implementa `BootSupervisor` do `@aluy/cli-core`. Sobe os 3 sidecars
+// Implementa `BootSupervisor` do `@hiperplano/aluy-cli-core`. Sobe os 3 sidecars
 // (headroom + Mem0 + JudgeEngine/Ollama) como daemons locais sob travas
 // DURAS G2 (CA-G2-1..CA-G2-16). Injeta spawner/resolver/fetcher/fs por
 // construtor para testabilidade — suíte nunca sobe daemon real.
@@ -33,7 +33,7 @@ import {
   resolveSidecarPaths,
   targetsToKinds,
   shouldProvision,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 
 // ─── Portas injetáveis ───────────────────────────────────────────────────
 
@@ -111,7 +111,7 @@ const realFs: BootFileSystem = {
  * Boot-supervisor concreto que sobe sidecars como processos locais.
  *
  * Injeta spawner/resolver/fetcher/fs por construtor — testável sem
- * subir daemon real. Implementa `BootSupervisor` do `@aluy/cli-core`.
+ * subir daemon real. Implementa `BootSupervisor` do `@hiperplano/aluy-cli-core`.
  */
 export class NodeBootSupervisor implements BootSupervisor {
   private readonly spawn: SpawnFn;

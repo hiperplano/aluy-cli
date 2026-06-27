@@ -1,4 +1,4 @@
-// @aluy/cli-core — engine modular PORTÁVEL do agente Aluy.
+// @hiperplano/aluy-cli-core — engine modular PORTÁVEL do agente Aluy.
 // Sem Ink, sem React, sem I/O de terminal (fronteira ADR-0053 §8, travada no
 // eslint + teste de fronteira). O que sai daqui roda em qualquer locus.
 export { CORE_VERSION } from './version.js';
@@ -11,7 +11,7 @@ export * from './permission/index.js';
 
 // Auth headless do CLI (lado cliente — EST-0942 / CLI-SEC-1/2). Lógica PORTÁVEL:
 // device-flow/PAT/refresh/revoke + contrato do CredentialStore. A implementação
-// do keychain do SO mora em @aluy/cli (dep nativa).
+// do keychain do SO mora em @hiperplano/aluy-cli (dep nativa).
 export * from './auth/index.js';
 
 // Cliente de modelo CLI→broker (EST-0943 / CLI-SEC-7). O ÚNICO caminho de modelo:
@@ -29,7 +29,7 @@ export * from './agent/index.js';
 // Sandbox de SO (EST-1009 · ADR-0065 · CLI-SEC-H1): a FUNDAÇÃO PORTÁVEL do piso de
 // SO sob a catraca — tipos da primitiva (SandboxLauncher/Confinement), decisão de
 // fail-mode (D-SB-4) e geração do filtro seccomp (bytes). O LANÇADOR concreto
-// (`bwrap`/userns + spawn) mora em @aluy/cli; aqui é só o contrato + a lógica pura
+// (`bwrap`/userns + spawn) mora em @hiperplano/aluy-cli; aqui é só o contrato + a lógica pura
 // (sem tocar o SO). EST-1010 (bash) e EST-1011 (MCP) consomem esta API.
 export * from './sandbox/index.js';
 
@@ -38,7 +38,7 @@ export * from './sandbox/index.js';
 // adapta p/ o toolset ATRÁS da catraca. Toda tool MCP = EFEITO por padrão ⇒
 // `decide()` (E-B2: classificação por sinais NÃO-confiáveis do input, nunca pelo
 // rótulo `readonly` auto-declarado). Saída = DADO não-confiável (CLI-SEC-4). O
-// spawn/stdio concreto (SDK MCP) é injetado pelo @aluy/cli via porta `McpTransport`.
+// spawn/stdio concreto (SDK MCP) é injetado pelo @hiperplano/aluy-cli via porta `McpTransport`.
 export * from './mcp/index.js';
 
 // EST-1128 · ADR-0123 — portas do Maestro (MemoryEngine + JudgeEngine).
@@ -46,5 +46,5 @@ export * from './agent/maestro/index.js';
 
 // Helper PURO de TABELA COM BORDAS (box-drawing) — compartilhado pelos builders de
 // listagem (/agents, /skills, /model, /workflows no core; /tools, /mcp re-exportam
-// no @aluy/cli). Só formata string (sem Ink/IO) ⇒ portável (ADR-0053 §8).
+// no @hiperplano/aluy-cli). Só formata string (sem Ink/IO) ⇒ portável (ADR-0053 §8).
 export * from './util/box-table.js';

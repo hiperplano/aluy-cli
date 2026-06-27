@@ -20,7 +20,7 @@ import {
   type ShellPort,
   type SearchPort,
   type AskResolver,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import { runCycleLinear, type LinearOut } from '../../src/session/linear.js';
 

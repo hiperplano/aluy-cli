@@ -55,7 +55,7 @@ export {
 } from './spawn-agent.js';
 
 // EST-1110 · ADR-0114 — `perguntar`: tipos + tool de PERGUNTA ao usuário (PORTÁVEL). A
-// porta `QuestionPort` é injetada pelo @aluy/cli (TuiQuestionResolver); a tool entra em
+// porta `QuestionPort` é injetada pelo @hiperplano/aluy-cli (TuiQuestionResolver); a tool entra em
 // NATIVE_TOOLS (effect:'read'). Os tipos/normalizadores são consumidos pelos testes e
 // pelo locus concreto (UI + resolver).
 export {

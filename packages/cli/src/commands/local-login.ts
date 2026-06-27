@@ -8,7 +8,7 @@
 //     troca por tokens e os grava no keychain (refresh automático no uso). ⚠ ZONA
 //     CINZENTA DE ToS (aviso explícito antes de abrir o browser).
 //
-// I/O concreto (keychain, browser, loopback server) ⇒ @aluy/cli (ADR-0053 §8). A
+// I/O concreto (keychain, browser, loopback server) ⇒ @hiperplano/aluy-cli (ADR-0053 §8). A
 // lógica PKCE/troca é PURA no core. CLI-SEC-2: segredo só no keychain, nunca em claro.
 
 import { createServer } from 'node:http';
@@ -20,7 +20,7 @@ import {
   type PkceCrypto,
   type OAuthFetch,
   type LocalProviderKind,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
 import { storeApiKey, type KeyringEntry } from '../model/local/credential-resolver.js';
 import { loadLocalProviderCatalog } from '../io/providers-config.js';

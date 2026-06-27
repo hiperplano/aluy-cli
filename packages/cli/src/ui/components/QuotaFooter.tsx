@@ -37,7 +37,7 @@ import {
   type QuotaLevel,
   type ServerLimits,
   type ServerLimitLevel,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { Role } from '../theme/index.js';
 
 export interface QuotaFooterProps {

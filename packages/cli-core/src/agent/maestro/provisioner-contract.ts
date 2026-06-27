@@ -3,7 +3,7 @@
 // Define os TIPOS, interfaces e CONSTANTES DO CONTRATO de provisionamento
 // de sidecars user-space. PORTÁVEL (ADR-0053 §8): ZERO I/O, ZERO import de
 // `node:*`, ZERO sidecar, ZERO credencial. A implementação concreta
-// (download, verificação, venv) mora no `@aluy/cli`.
+// (download, verificação, venv) mora no `@hiperplano/aluy-cli`.
 //
 // Invariantes (ADR-0123 §2.2-ter / EST-1133):
 //   G2-C1  — Caminho confiável: destino absoluto ~/.aluy/, perms 0700/0600.
@@ -176,15 +176,15 @@ export interface ProvisionResult {
 // ─── Interface do provisionador (porta abstrata) ───────────────────────────
 //
 // Esta interface define O QUE o provisionador faz, sem COMO.
-// A implementação concreta mora no `@aluy/cli` e faz I/O real.
+// A implementação concreta mora no `@hiperplano/aluy-cli` e faz I/O real.
 // Testável com mock/stub injetando implementação fake.
 
 /**
  * Porta ABSTRATA do provisionador de sidecars.
  *
- * Contrato puro em `@aluy/cli-core` — ZERO I/O, ZERO sidecar.
+ * Contrato puro em `@hiperplano/aluy-cli-core` — ZERO I/O, ZERO sidecar.
  * A implementação concreta (download, extração, venv, pull de modelos)
- * mora no `@aluy/cli`.
+ * mora no `@hiperplano/aluy-cli`.
  */
 export interface SidecarProvisioner {
   /**

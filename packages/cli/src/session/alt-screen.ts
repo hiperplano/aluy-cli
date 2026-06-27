@@ -18,7 +18,7 @@
 //    que solta os handlers (sem vazar listener entre sessões) — mas SEMPRE chamando a
 //    restauração uma última vez.
 //
-// ESCOPO/SEGURANÇA: só bytes de controle de terminal (`@aluy/cli`). NÃO toca engine,
+// ESCOPO/SEGURANÇA: só bytes de controle de terminal (`@hiperplano/aluy-cli`). NÃO toca engine,
 // catraca, egress, broker nem auth (ADR-0076 §Decisão: o cockpit é superfície de
 // RENDER, não decide invariante). Sem `node:*` além do que o tipo do stream/process
 // já oferece.

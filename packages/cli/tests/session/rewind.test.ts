@@ -2,7 +2,7 @@
 // da linha do checkpoint. Sem Ink, sem I/O.
 
 import { describe, expect, it } from 'vitest';
-import type { Checkpoint } from '@aluy/cli-core';
+import type { Checkpoint } from '@hiperplano/aluy-cli-core';
 import {
   selectRewindCheckpoints,
   formatRewindEntry,

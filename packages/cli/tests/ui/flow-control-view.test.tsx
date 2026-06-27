@@ -13,7 +13,7 @@ import { FlowTreeView } from '../../src/ui/components/FlowTreeView.js';
 import { TurnFooter } from '../../src/ui/components/TurnFooter.js';
 import { SubAgents } from '../../src/ui/components/SubAgents.js';
 import { formatDuration } from '../../src/session/model.js';
-import { REDACTED, type FlowSummary, type FlowDrillIn } from '@aluy/cli-core';
+import { REDACTED, type FlowSummary, type FlowDrillIn } from '@hiperplano/aluy-cli-core';
 
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');

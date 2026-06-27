@@ -19,7 +19,7 @@ import {
   HISTORY_LIST_LIMIT,
   type ResumeApplyDeps,
 } from '../../src/session/history.js';
-import type { HistoryItem } from '@aluy/cli-core';
+import type { HistoryItem } from '@hiperplano/aluy-cli-core';
 
 const you = (text: string): SessionBlock => ({ kind: 'you', text });
 const aluy = (text: string): SessionBlock => ({ kind: 'aluy', text, streaming: false });

@@ -12,7 +12,7 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { buildWorkflowsNote } from '@aluy/cli-core';
+import { buildWorkflowsNote } from '@hiperplano/aluy-cli-core';
 import { UserWorkflowsLoader, WORKFLOWS_DIRNAME } from '../io/user-workflows.js';
 import type { WorkflowLoadResult } from '../io/user-workflows.js';
 import { ProjectWorkflowsLoader } from '../io/project-workflows.js';

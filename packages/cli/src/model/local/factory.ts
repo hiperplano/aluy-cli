@@ -1,4 +1,4 @@
-// ADR-0120 / EST-1113 — FÁBRICA do backend local (I/O concreto, @aluy/cli).
+// ADR-0120 / EST-1113 — FÁBRICA do backend local (I/O concreto, @hiperplano/aluy-cli).
 //
 // Monta o `LocalModelClient` a partir da config BYO resolvida: escolhe o adapter
 // do provider, VALIDA o `base_url` (anti-SSRF PROV-SEC-1 com o resolver de DNS
@@ -19,7 +19,7 @@ import {
   type StreamFetch,
   type LocalProviderCatalog,
   type WireFormat,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { NodeHostResolver } from '../../io/web-port.js';
 import { createLocalCredentialProvider } from './credential-resolver.js';
 import { createPinnedStreamFetch } from './pinned-stream-fetch.js';

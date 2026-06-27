@@ -36,7 +36,7 @@ import {
   existsSync,
   constants as fsConstants,
 } from 'node:fs';
-import type { MemoryFact, MemoryScope, MemoryStorePort } from '@aluy/cli-core';
+import type { MemoryFact, MemoryScope, MemoryStorePort } from '@hiperplano/aluy-cli-core';
 import type { WorkspacePort } from './workspace.js';
 import { withFileLock } from './file-lock.js';
 

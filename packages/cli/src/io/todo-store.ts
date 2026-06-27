@@ -26,7 +26,7 @@ import {
   existsSync,
   constants as fsConstants,
 } from 'node:fs';
-import type { TodoItem, TodoStorePort } from '@aluy/cli-core';
+import type { TodoItem, TodoStorePort } from '@hiperplano/aluy-cli-core';
 import { withFileLock } from './file-lock.js';
 
 const DIR_MODE = 0o700;

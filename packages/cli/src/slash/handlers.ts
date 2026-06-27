@@ -17,8 +17,8 @@
 // os assíncronos (whoami/logout) expõem um runner próprio. Assim o teste verifica
 // a SAÍDA sem montar Ink nem tocar rede.
 
-import type { LoginService, RegistryFetch } from '@aluy/cli-core';
-import { invalidCommandWarning, originLabel, type McpListedServer } from '@aluy/cli-core';
+import type { LoginService, RegistryFetch } from '@hiperplano/aluy-cli-core';
+import { invalidCommandWarning, originLabel, type McpListedServer } from '@hiperplano/aluy-cli-core';
 import { runMcpSearch } from '../mcp/registry-search.js';
 import type { SessionController } from '../session/controller.js';
 import { NATIVE_COMMANDS, type NativeCommandId } from './commands.js';

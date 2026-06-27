@@ -32,7 +32,7 @@
 // marcador aparece ⇒ a máquina passa TUDO como `passthrough` e o comportamento atual
 // (EST-0948, Enter-grudado de digitação real) permanece intacto — sem regressão.
 //
-// ESCOPO/SEGURANÇA: só PROCESSA bytes de input do terminal (`@aluy/cli`). Não toca engine,
+// ESCOPO/SEGURANÇA: só PROCESSA bytes de input do terminal (`@hiperplano/aluy-cli`). Não toca engine,
 // catraca, egress, broker nem auth. O conteúdo colado é TEXTO do usuário (vira o objetivo/
 // edição do composer); não é executado — passa pela MESMA catraca de submit.
 

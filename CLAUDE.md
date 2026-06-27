@@ -13,9 +13,9 @@ direto, sem intermediário.
 
 ## Stack
 
-TypeScript/Node · distribuição **npm** (`npm i -g @aluy/cli`) · TUI **Ink** · SDK
-MCP TS · **monorepo (npm workspaces)**: `@aluy/cli-core` (engine modular) +
-`@aluy/cli` (TUI + binário `aluy`). Lema: **core modular, entrega monolítica**.
+TypeScript/Node · distribuição **npm** (`npm i -g @hiperplano/aluy-cli`) · TUI **Ink** · SDK
+MCP TS · **monorepo (npm workspaces)**: `@hiperplano/aluy-cli-core` (engine modular) +
+`@hiperplano/aluy-cli` (TUI + binário `aluy`). Lema: **core modular, entrega monolítica**.
 
 ## Regras
 
@@ -30,9 +30,9 @@ MCP TS · **monorepo (npm workspaces)**: `@aluy/cli-core` (engine modular) +
 
 ## Invariantes (não relaxar)
 
-- **Ponto de interceptação único.** Todo tool-call passa por `@aluy/cli-core`
+- **Ponto de interceptação único.** Todo tool-call passa por `@hiperplano/aluy-cli-core`
   antes de qualquer efeito (deny-by-default). É o seam de segurança da CLI.
-- **Fronteira modular.** `@aluy/cli-core` é portável: **não importa Ink nem faz
+- **Fronteira modular.** `@hiperplano/aluy-cli-core` é portável: **não importa Ink nem faz
   I/O de terminal**. Travado no eslint (`no-restricted-imports`) + teste de
   fronteira (`packages/cli-core/tests/boundary.test.ts`).
 
@@ -50,10 +50,10 @@ node packages/cli/dist/bin/aluy.js --help
 
 ## Estrutura
 
-- `packages/cli-core/` — **`@aluy/cli-core`**: engine modular PORTÁVEL
+- `packages/cli-core/` — **`@hiperplano/aluy-cli-core`**: engine modular PORTÁVEL
   (loop/tools/permissão). **Sem Ink, sem I/O de terminal.** Aqui vive o ponto de
   interceptação único de tool-calls (`src/permission/`).
-- `packages/cli/` — **`@aluy/cli`**: TUI (Ink) + binário `aluy` + wiring.
+- `packages/cli/` — **`@hiperplano/aluy-cli`**: TUI (Ink) + binário `aluy` + wiring.
   `src/bin/aluy.ts` (entrypoint), `src/cli.ts` (parser puro), `src/ui/` (Ink).
 - `docs/` — `config-compat.md`, `mcp.md`.
 - `.github/workflows/` — CI (lint/test/build) + secret-scan (gitleaks).

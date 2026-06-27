@@ -16,7 +16,7 @@
 // server-side. `ProvidersClient`/`parseProviders` já descartaram qualquer api_key_ref.
 
 import { useCallback, useRef, useState } from 'react';
-import type { ProvidersClient } from '@aluy/cli-core';
+import type { ProvidersClient } from '@hiperplano/aluy-cli-core';
 import { PROVIDERS, buildProviderEntries, type ProviderEntry } from '../../model/providers.js';
 
 export interface UseProviderPickerArgs {

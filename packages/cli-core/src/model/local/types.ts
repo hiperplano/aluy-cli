@@ -2,7 +2,7 @@
 //
 // O backend local fala com o provider de LLM DIRETO, com credencial BYO do
 // usuário, em vez de ir pelo `aluy-broker` central. Estes tipos são a fronteira
-// PORTÁVEL (ADR-0053 §8): sem I/O (HTTP/keychain/browser moram no `@aluy/cli`).
+// PORTÁVEL (ADR-0053 §8): sem I/O (HTTP/keychain/browser moram no `@hiperplano/aluy-cli`).
 //
 // CLI-SEC-7: nada de credencial versionada. A `apiKey`/`accessToken` aqui são
 // RESOLVIDAS em runtime (keychain → env) pelo locus concreto e passadas a cada

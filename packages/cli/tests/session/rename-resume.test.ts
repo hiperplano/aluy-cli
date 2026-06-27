@@ -17,7 +17,7 @@ import type {
   ChatMessage,
   CredentialStore,
   StoredCredential,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { runSession } from '../../src/session/run.js';
 import { SessionStore } from '../../src/io/session-store.js';
 import { UserConfigStore } from '../../src/io/user-config.js';

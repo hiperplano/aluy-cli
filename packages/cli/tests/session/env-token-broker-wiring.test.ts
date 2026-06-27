@@ -1,4 +1,4 @@
-// EST-0940 (hunt login) — INTEGRAÇÃO no @aluy/cli: o `ALUY_TOKEN` do ambiente
+// EST-0940 (hunt login) — INTEGRAÇÃO no @hiperplano/aluy-cli: o `ALUY_TOKEN` do ambiente
 // realmente AUTENTICA as chamadas ao broker quando o keychain está VAZIO (caminho
 // headless/CI documentado: `export ALUY_TOKEN=…` SEM `aluy login`).
 //
@@ -9,7 +9,7 @@
 // LoginService; aqui provamos que `getAccessToken` o devolve.
 
 import { describe, expect, it } from 'vitest';
-import type { CredentialStore, StoredCredential } from '@aluy/cli-core';
+import type { CredentialStore, StoredCredential } from '@hiperplano/aluy-cli-core';
 import { buildSession } from '../../src/session/wiring.js';
 
 const HEX = 'deadbeefdeadbeefdeadbeefdeadbeef';

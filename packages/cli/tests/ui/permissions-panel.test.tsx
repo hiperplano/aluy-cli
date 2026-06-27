@@ -11,7 +11,7 @@ import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { PermissionsPanel } from '../../src/ui/components/PermissionsPanel.js';
 import type { PanelRow } from '../../src/ui/hooks/usePermissionsPanel.js';
-import { LOCKED_CATEGORIES } from '@aluy/cli-core';
+import { LOCKED_CATEGORIES } from '@hiperplano/aluy-cli-core';
 
 function wrap(node: React.ReactElement) {
   const theme = resolveTheme({ env: { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' } });

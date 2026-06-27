@@ -16,9 +16,9 @@ import {
   type JudgeInput,
   type JudgeResult,
   type SupervisorSignal,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { resolveMaestro } from '../../src/maestro/wiring.js';
-import type { ModelClient } from '@aluy/cli-core';
+import type { ModelClient } from '@hiperplano/aluy-cli-core';
 import { buildSession } from '../../src/session/wiring.js';
 
 // ─── Stubs ─────────────────────────────────────────────────────────────────

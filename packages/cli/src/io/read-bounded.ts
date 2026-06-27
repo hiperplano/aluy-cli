@@ -16,7 +16,7 @@
 // `totalBytes` é o tamanho REAL do arquivo (do stat) — o caller monta o marcador
 // de truncamento com o número honesto.
 //
-// PORTÁVEL? NÃO — é I/O concreto (Node `fs`), por isso mora no @aluy/cli (não no
+// PORTÁVEL? NÃO — é I/O concreto (Node `fs`), por isso mora no @hiperplano/aluy-cli (não no
 // core). É consumido pelo FS-port (read_file) e pelo Search-port (grep/scanFile).
 
 import { statSync, createReadStream } from 'node:fs';

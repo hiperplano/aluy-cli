@@ -12,7 +12,7 @@
 // rebinding (resolve→loopback no check, →público no connect). Pra loopback http isso
 // é direto; o `Host` header é irrelevante p/ um proxy local.
 
-import { classifyHeadroomTarget, type HostResolver } from '@aluy/cli-core';
+import { classifyHeadroomTarget, type HostResolver } from '@hiperplano/aluy-cli-core';
 import { NodeHostResolver } from '../io/web-port.js';
 
 export interface HeadroomFetchDeps {

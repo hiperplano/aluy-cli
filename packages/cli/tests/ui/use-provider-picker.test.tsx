@@ -12,7 +12,7 @@ import {
   type ProviderPickerController,
   type UseProviderPickerArgs,
 } from '../../src/ui/hooks/useProviderPicker.js';
-import type { ProviderInfo } from '@aluy/cli-core';
+import type { ProviderInfo } from '@hiperplano/aluy-cli-core';
 
 /** Cliente fake de providers — devolve a lista dada (ou lança, p/ o caminho de fallback). */
 function fakeProvidersClient(

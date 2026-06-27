@@ -16,7 +16,7 @@ describe('EST-0949 · CLI-SEC-7 — binário público limpo', () => {
   beforeAll(() => {
     const coreDist = join(pkgRoot, '..', 'cli-core', 'dist', 'index.js');
     if (!existsSync(coreDist)) {
-      execFileSync('npm', ['run', 'build', '--workspace', '@aluy/cli-core'], {
+      execFileSync('npm', ['run', 'build', '--workspace', '@hiperplano/aluy-cli-core'], {
         cwd: join(pkgRoot, '..', '..'),
         stdio: 'pipe',
       });

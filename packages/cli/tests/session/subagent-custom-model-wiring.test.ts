@@ -1,4 +1,4 @@
-// EST-0962 (Custom · bug do sub-agente 422) — INTEGRAÇÃO no @aluy/cli: `buildSession`
+// EST-0962 (Custom · bug do sub-agente 422) — INTEGRAÇÃO no @hiperplano/aluy-cli: `buildSession`
 // fia a pista de modelo CORRENTE do PAI (tier + slug Custom do StreamingModelCaller)
 // até o corpo do request dos FILHOS (sub-agentes).
 //
@@ -23,7 +23,7 @@ import {
   type ModelCallRequest,
   type ModelCallResult,
   type ModelStreamEvent,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { buildSession } from '../../src/session/wiring.js';
 
 const TOOL_OPEN = '<<<ALUY_TOOL_CALL';

@@ -1,4 +1,4 @@
-// @aluy/cli — TUI (Ink) + wiring do binário `aluy`. Consome @aluy/cli-core.
+// @hiperplano/aluy-cli — TUI (Ink) + wiring do binário `aluy`. Consome @hiperplano/aluy-cli-core.
 export { CLI_VERSION } from './version.js';
 export { parseArgs, versionText, HELP_TEXT, type CliAction } from './cli.js';
 

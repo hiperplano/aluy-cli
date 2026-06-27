@@ -25,7 +25,7 @@
 // O `clearAll` da memória é AÇÃO DO USUÁRIO (via este slash) — NUNCA uma tool: o agente
 // não tem caminho até aqui (slash não é tool; a path-deny de `~/.aluy/memory/` é mantida).
 
-import type { AgentMemory } from '@aluy/cli-core';
+import type { AgentMemory } from '@hiperplano/aluy-cli-core';
 import type { SlashNote } from './handlers.js';
 
 /** O subcomando parseado de `/clear <args>`. */

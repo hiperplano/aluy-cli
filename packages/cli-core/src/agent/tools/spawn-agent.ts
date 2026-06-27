@@ -32,7 +32,7 @@ export const SPAWN_AGENT_TOOL_NAME = 'spawn_agent';
 export const SUBAGENT_SOURCE_LABEL = 'sub-agente';
 
 /**
- * Porta de SPAWN injetada (pelo @aluy/cli, que conhece a engine/ports/budget do
+ * Porta de SPAWN injetada (pelo @hiperplano/aluy-cli, que conhece a engine/ports/budget do
  * pai). PORTÁVEL: o core define o contrato; o locus concreto liga ao
  * `SubAgentSpawner`. Sem esta porta, a tool devolve erro (não há como spawnar) —
  * fail-safe (nenhum efeito).

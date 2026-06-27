@@ -8,7 +8,7 @@
 // O roteamento (parse) é PURO/testável; o runner consome a `TodoStorePort` e
 // checa o MODO (Plan nega mutações). Comandos EM INGLÊS (done/clear).
 
-import type { TodoItem, TodoStorePort } from '@aluy/cli-core';
+import type { TodoItem, TodoStorePort } from '@hiperplano/aluy-cli-core';
 import type { SlashNote } from './handlers.js';
 
 /** O subcomando parseado de `/todo <args>`. */

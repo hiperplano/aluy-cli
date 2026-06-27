@@ -9,7 +9,7 @@
 // PORTÁVEL (ADR-0053 §8): ZERO I/O, ZERO import de `node:*`, ZERO sidecar,
 // ZERO credencial (CLI-SEC-7 — a interface NÃO prevê passar credencial de
 // provider ao engine). A impl concreta (Ollama loopback ou broker) mora no
-// `@aluy/cli`.
+// `@hiperplano/aluy-cli`.
 //
 // Saída = DADO envelopado (CLI-SEC-15-B): o julgamento é DADO, nunca
 // instrução — o Maestro pondera o resultado, não o obedece cegamente.
@@ -72,9 +72,9 @@ export interface JudgeResult {
  * Porta ASSÍNCRONA de julgamento plugável — camada (b) do motor tiered
  * local-first do Maestro (ADR-0123 §2.1-bis).
  *
- * Contrato puro em `@aluy/cli-core` — ZERO implementação concreta, ZERO I/O,
+ * Contrato puro em `@hiperplano/aluy-cli-core` — ZERO implementação concreta, ZERO I/O,
  * ZERO sidecar, ZERO credencial (CLI-SEC-7). A impl concreta mora no
- * `@aluy/cli`: pode ser Ollama/llama.cpp (loopback local, default) ou um
+ * `@hiperplano/aluy-cli`: pode ser Ollama/llama.cpp (loopback local, default) ou um
  * provider remoto via broker/BYO, trocável sem mexer no core.
  *
  * O `JudgeEngine` é a face de AVALIAÇÃO SEMÂNTICA do Maestro: quando a

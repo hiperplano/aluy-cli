@@ -5,11 +5,11 @@
 // (`LocalProviderKind` fechado, `DEFAULT_MODEL_BY_PROVIDER`, `DEFAULT_BASE_URL`,
 // `adapterFor`, e as 3 constantes do `aluy models`). Aqui ele vira DADO:
 //   - um catálogo default EMBUTIDO (shipped, PURO) com os principais providers/modelos;
-//   - merge com o override do usuário (carregado pelo `@aluy/cli` de `~/.aluy/providers.json`).
+//   - merge com o override do usuário (carregado pelo `@hiperplano/aluy-cli` de `~/.aluy/providers.json`).
 //
 // FRONTEIRA (ADR-0053 §8): este módulo é PURO — só tipos, o DADO embutido e funções de
 // merge/sanitize de objetos já parseados. NÃO toca disco/rede (o `readFileSync` do
-// `providers.json` mora no `@aluy/cli`; o anti-SSRF do `base_url` roda no uso, na factory).
+// `providers.json` mora no `@hiperplano/aluy-cli`; o anti-SSRF do `base_url` roda no uso, na factory).
 //
 // CLI-SEC-7: o catálogo carrega SÓ nomes/slugs/`base_url` PÚBLICOS — NUNCA uma chave. O
 // `auth:'apikey'` só diz QUAL via; o segredo vem do keychain/env por provider (ADR-0120).

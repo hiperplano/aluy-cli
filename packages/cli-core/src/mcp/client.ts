@@ -4,7 +4,7 @@
 // faz o handshake, lista as tools. A LÓGICA (descoberta, adaptação das tools p/ o
 // toolset, classificação de efeito) é portável (cli-core); o SPAWN/STDIO concreto
 // (`child_process` + `@modelcontextprotocol/sdk` StdioClientTransport) é injetado
-// pelo `@aluy/cli` via a porta `McpTransport`. Fecha a fronteira do §8: a costura
+// pelo `@hiperplano/aluy-cli` via a porta `McpTransport`. Fecha a fronteira do §8: a costura
 // é testável no core com um transport-mock; o I/O de processo mora no locus.
 //
 // INVARIANTES (CLI-SEC-12):
@@ -54,7 +54,7 @@ export interface McpCallResult {
 }
 
 /**
- * PORTA do transporte MCP concreto (injetada pelo `@aluy/cli`). Abstrai o
+ * PORTA do transporte MCP concreto (injetada pelo `@hiperplano/aluy-cli`). Abstrai o
  * lançamento do processo-server e a fala MCP por stdio. O core a consome; o locus
  * a implementa com `@modelcontextprotocol/sdk` + `child_process`. Uma instância =
  * UM server conectado.
@@ -81,7 +81,7 @@ export interface McpTransport {
 }
 
 /**
- * Fábrica de transport por server. O `@aluy/cli` injeta isto; o core a chama uma
+ * Fábrica de transport por server. O `@hiperplano/aluy-cli` injeta isto; o core a chama uma
  * vez por server declarado. Mantém o core sem `child_process`.
  */
 export type McpTransportFactory = (server: McpServerConfig) => McpTransport;

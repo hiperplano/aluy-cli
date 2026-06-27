@@ -12,7 +12,7 @@
 //   - `esc` na etapa `action` VOLTA p/ a lista; `esc` na `list` fecha.
 
 import { useCallback, useState } from 'react';
-import type { Checkpoint } from '@aluy/cli-core';
+import type { Checkpoint } from '@hiperplano/aluy-cli-core';
 import {
   selectRewindCheckpoints,
   REWIND_ACTIONS,

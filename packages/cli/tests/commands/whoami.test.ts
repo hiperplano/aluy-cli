@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { runWhoami } from '../../src/commands/whoami.js';
 import { NoKeychainError } from '../../src/auth/keychain-store.js';
-import type { CredentialStore, StoredCredential } from '@aluy/cli-core';
+import type { CredentialStore, StoredCredential } from '@hiperplano/aluy-cli-core';
 
 // ---------------------------------------------------------------------------
 // Fakes

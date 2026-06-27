@@ -11,7 +11,7 @@
 // de muitas iterações — só provamos os limites injetados no controller.
 
 import { describe, expect, it } from 'vitest';
-import type { ModelClient } from '@aluy/cli-core';
+import type { ModelClient } from '@hiperplano/aluy-cli-core';
 import { buildSession } from '../../src/session/wiring.js';
 
 /** Broker stub que emite e encerra. */

@@ -4,7 +4,7 @@
 // Dir `0700`, arquivos `0600`. Append atômico sob lock; seq monotônico por
 // linha; eviction lazy HARD-DELETA os bytes (não só status).
 //
-// LOCUS: @aluy/cli (ADR-0053 §8 — porta vive no core, concreto `file` no CLI).
+// LOCUS: @hiperplano/aluy-cli (ADR-0053 §8 — porta vive no core, concreto `file` no CLI).
 // Protocolo de sala INVARIANTE (ADR-0081): muda só ONDE o byte vive.
 //
 // PURO quanto relógio de SALA: o `now` vem via opts do createRoom.
@@ -15,7 +15,7 @@ import * as fsPromises from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createRoom, isExpired, type Room, type RoomStore } from '@aluy/cli-core';
+import { createRoom, isExpired, type Room, type RoomStore } from '@hiperplano/aluy-cli-core';
 
 // ---------------------------------------------------------------------------
 // Constantes

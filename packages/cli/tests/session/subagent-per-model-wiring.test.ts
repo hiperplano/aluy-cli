@@ -1,5 +1,5 @@
 // EST-SUBAGENT-MODEL · ADR-0061 §3 · ADR-0073 (tier por-request) · CLI-SEC-7 —
-// INTEGRAÇÃO no @aluy/cli: `buildSession` fia o `model:` do `.md` de CADA sub-agente
+// INTEGRAÇÃO no @hiperplano/aluy-cli: `buildSession` fia o `model:` do `.md` de CADA sub-agente
 // nomeado até o `tier` do corpo do request DAQUELE filho.
 //
 // O pai delega via `spawn_agent({ agents:[{ agent:'<nome>', ... }] })`; o registry
@@ -28,7 +28,7 @@ import {
   type ModelCallRequest,
   type ModelCallResult,
   type ModelStreamEvent,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { buildSession } from '../../src/session/wiring.js';
 
 const TOOL_OPEN = '<<<ALUY_TOOL_CALL';

@@ -8,7 +8,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildWorkflowsNote, type WorkflowDef, type WorkflowError } from '@aluy/cli-core';
+import { buildWorkflowsNote, type WorkflowDef, type WorkflowError } from '@hiperplano/aluy-cli-core';
 import { runWorkflows } from '../../src/commands/workflows.js';
 import { UserWorkflowsLoader, WORKFLOWS_DIRNAME } from '../../src/io/user-workflows.js';
 

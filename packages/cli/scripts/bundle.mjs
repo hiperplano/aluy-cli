@@ -1,4 +1,4 @@
-// EST-0949 · ADR-0053 §8 — bundle de PUBLICAÇÃO: embute SÓ o @aluy/cli-core (interno,
+// EST-0949 · ADR-0053 §8 — bundle de PUBLICAÇÃO: embute SÓ o @hiperplano/aluy-cli-core (interno,
 // private) no dist publicável; mantém os pesados/nativos como externals.
 import { build } from 'esbuild';
 import { chmodSync } from 'node:fs';

@@ -37,7 +37,7 @@
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // PORTÁVEL (ADR-0053 §8): parser de string PURO (sem `node:*`, sem I/O). A LEITURA
-// confinada dos diretórios de skills é do locus concreto (@aluy/cli, io/).
+// confinada dos diretórios de skills é do locus concreto (@hiperplano/aluy-cli, io/).
 
 /** Camada de descoberta de uma skill — define a CONFIANÇA da proveniência. */
 export type SkillOrigin =

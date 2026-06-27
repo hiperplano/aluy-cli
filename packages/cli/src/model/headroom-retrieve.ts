@@ -29,8 +29,8 @@
 //    cache do proxy). Erro/timeout/404 ⇒ `ok:false` com observação CLARA — o modelo
 //    TRATA o erro (CLI-SEC-4: a observação é DADO, não ordem), nunca lança o turno.
 
-import type { NativeTool, ToolResult, HostResolver } from '@aluy/cli-core';
-import { wrapUntrusted } from '@aluy/cli-core';
+import type { NativeTool, ToolResult, HostResolver } from '@hiperplano/aluy-cli-core';
+import { wrapUntrusted } from '@hiperplano/aluy-cli-core';
 import { headroomFetch } from './headroom-fetch.js';
 
 export interface HeadroomRetrieveToolOptions {

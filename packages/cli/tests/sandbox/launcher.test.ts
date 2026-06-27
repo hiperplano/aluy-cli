@@ -13,7 +13,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import type { SandboxCapability, SandboxConfinement } from '@aluy/cli-core';
+import type { SandboxCapability, SandboxConfinement } from '@hiperplano/aluy-cli-core';
 import { BwrapSandboxLauncher, SandboxConfinementError } from '../../src/sandbox/launcher.js';
 
 const FLOOR: SandboxCapability = {

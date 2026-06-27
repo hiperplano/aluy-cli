@@ -20,7 +20,7 @@ import { Box, Text } from 'ink';
 import { Glyph, Role } from '../theme/index.js';
 import { abbreviateCount, formatDuration } from '../../session/model.js';
 import { displayWidth } from '../../session/visual-lines.js';
-import type { FlowSummary, FlowDrillIn, FlowPhase, FlowActivity } from '@aluy/cli-core';
+import type { FlowSummary, FlowDrillIn, FlowPhase, FlowActivity } from '@hiperplano/aluy-cli-core';
 import { windowAround } from '../window.js';
 
 export interface FlowTreeViewProps {

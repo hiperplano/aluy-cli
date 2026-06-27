@@ -26,7 +26,7 @@ import {
   type FileSystemPort,
   type SearchPort,
   type ShellPort,
-} from '@aluy/cli-core';
+} from '@hiperplano/aluy-cli-core';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { App } from '../../src/session/App.js';

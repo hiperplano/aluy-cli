@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpConfigWriter, serializeMcpConfig } from '../../src/mcp/mcp-config-writer.js';
-import { parseMcpConfig } from '@aluy/cli-core';
+import { parseMcpConfig } from '@hiperplano/aluy-cli-core';
 
 describe('McpConfigWriter.setDisabled — desliga sem desinstalar', () => {
   let base: string;

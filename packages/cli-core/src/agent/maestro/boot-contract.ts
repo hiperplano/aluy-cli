@@ -3,7 +3,7 @@
 // Define os TIPOS e CONSTANTES do boot-supervisor que sobe os 3 sidecars
 // (headroom + Mem0 + JudgeEngine/Ollama) sob travas DURAS G2.
 // PORTÁVEL (ADR-0053 §8): ZERO I/O, ZERO import de `node:*`, ZERO sidecar,
-// ZERO credencial (CLI-SEC-7). A implementação concreta mora no `@aluy/cli`.
+// ZERO credencial (CLI-SEC-7). A implementação concreta mora no `@hiperplano/aluy-cli`.
 //
 // Invariantes (ADR-0123 §2.2 / threat-model G2 · AG-0008):
 //   CA-G2-1 — Caminho absoluto: binário full path, nunca PATH/cwd.
@@ -101,9 +101,9 @@ export interface BootResult {
 /**
  * Porta ABSTRATA do boot-supervisor de sidecars.
  *
- * Contrato puro em `@aluy/cli-core` — ZERO I/O, ZERO sidecar.
+ * Contrato puro em `@hiperplano/aluy-cli-core` — ZERO I/O, ZERO sidecar.
  * A implementação concreta (spawn, health-check, handshake) mora no
- * `@aluy/cli` e injeta spawner/resolver/fetcher/fs por construtor.
+ * `@hiperplano/aluy-cli` e injeta spawner/resolver/fetcher/fs por construtor.
  */
 export interface BootSupervisor {
   /**
@@ -159,7 +159,7 @@ export function resolveSidecarPaths(opts: {
   mem0VenvDir?: string;
   /**
    * SO-alvo p/ o LAYOUT do binário (EST-1129-bis). O contrato é puro (sem
-   * `node:*`) ⇒ o SO é DADO injetado pelo locus (`@aluy/cli` passa
+   * `node:*`) ⇒ o SO é DADO injetado pelo locus (`@hiperplano/aluy-cli` passa
    * `process.platform`). Default `linux` (não-regressão: o caminho provado).
    * Windows tem árvore distinta: Ollama é `ollama.exe` na raiz e o venv do
    * Mem0 usa `Scripts/python.exe` (não `bin/python3`).

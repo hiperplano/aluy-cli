@@ -1,7 +1,7 @@
 // EST-0970 · ADR-0058 · CLI-SEC-12 — DESCOBERTA: lança os servers, handshake, lista.
 //
 // Orquestra a descoberta PORTÁVEL: dada a `McpConfig` (já lida do `~/.aluy/mcp.json`
-// confinado, pelo locus) e uma fábrica de transport (injetada pelo `@aluy/cli`),
+// confinado, pelo locus) e uma fábrica de transport (injetada pelo `@hiperplano/aluy-cli`),
 // para cada server: lança (command/args/env), faz o handshake (initialize) e lista
 // as tools. Falha de UM server NÃO derruba os outros (fail-soft: o server some do
 // toolset, com erro registrado p/ a UX/log) — um MCP quebrado não trava o agente.

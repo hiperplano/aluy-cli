@@ -23,7 +23,7 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
-import { BUDGET_WARN_PCT } from '@aluy/cli-core';
+import { BUDGET_WARN_PCT } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role } from '../theme/index.js';
 import { abbreviateCount } from '../../session/model.js';
 import { useI18n } from '../../i18n/index.js';

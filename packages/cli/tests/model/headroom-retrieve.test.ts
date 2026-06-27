@@ -4,7 +4,7 @@
 // vira observação `ok:false` clara, nunca lança o turno.
 
 import { describe, expect, it, vi } from 'vitest';
-import { UNTRUSTED_OPEN, UNTRUSTED_CLOSE } from '@aluy/cli-core';
+import { UNTRUSTED_OPEN, UNTRUSTED_CLOSE } from '@hiperplano/aluy-cli-core';
 import { makeHeadroomRetrieveTool } from '../../src/model/headroom-retrieve.js';
 
 function jsonResponse(body: unknown, status = 200): Response {

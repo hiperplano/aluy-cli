@@ -1,7 +1,7 @@
 // Orquestração de login/logout/whoami — PORTÁVEL (store e prompt injetados).
 //
 // Junta: IdentityClient (rede) + CredentialStore (keychain, injetado) +
-// device-flow (polling) + PAT. NÃO faz I/O de terminal: o @aluy/cli é quem
+// device-flow (polling) + PAT. NÃO faz I/O de terminal: o @hiperplano/aluy-cli é quem
 // renderiza o prompt e lê o PAT. Nenhum segredo é logado/retornado aqui — só
 // a forma redigida (CLI-SEC-2/10).
 
@@ -77,7 +77,7 @@ export class LoginService {
    */
   private readonly sleep: ((ms: number, signal?: AbortSignal) => Promise<void>) | undefined;
   /**
-   * FALLBACK do PAT do AMBIENTE (`ALUY_TOKEN`) — injetado pelo @aluy/cli (portável:
+   * FALLBACK do PAT do AMBIENTE (`ALUY_TOKEN`) — injetado pelo @hiperplano/aluy-cli (portável:
    * o core NÃO lê `process.env`). Consumido por `getAccessToken` SÓ quando o
    * keychain está VAZIO: o caminho headless/CI documentado é `export ALUY_TOKEN=…`
    * SEM rodar `aluy login`, e o boot já trata `ALUY_TOKEN` presente como "logado"

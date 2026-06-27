@@ -12,7 +12,7 @@ import {
   FALLBACK_TIERS,
   DEFAULT_TIER_CONTEXT_TOKENS,
 } from '../../src/model/catalog.js';
-import type { TierCatalogEntry } from '@aluy/cli-core';
+import type { TierCatalogEntry } from '@hiperplano/aluy-cli-core';
 
 describe('parseContextWindow', () => {
   it('"256k" → 256000', () => {

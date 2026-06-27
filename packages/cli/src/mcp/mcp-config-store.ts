@@ -23,7 +23,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync, statSync } from 'node:fs';
-import { EMPTY_MCP_CONFIG, McpConfigError, parseMcpConfig, type McpConfig } from '@aluy/cli-core';
+import { EMPTY_MCP_CONFIG, McpConfigError, parseMcpConfig, type McpConfig } from '@hiperplano/aluy-cli-core';
 
 /** Nome do arquivo de config de MCP (dentro de `~/.aluy/`). */
 export const MCP_CONFIG_FILENAME = 'mcp.json';

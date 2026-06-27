@@ -207,7 +207,7 @@ describe('CA-BROKER §9.5: seam loopback/broker são valores válidos', () => {
 
   it('loopback e broker NÃO disparam fail-closed', () => {
     // Eles são válidos; o erro LOUD pela ausência da implementação
-    // é responsabilidade do wiring (@aluy/cli), não do core.
+    // é responsabilidade do wiring (@hiperplano/aluy-cli), não do core.
     for (const b of ['loopback', 'broker'] as const) {
       const { backend, warning } = resolveRoomBackend(b, undefined);
       expect(backend).toBe(b);

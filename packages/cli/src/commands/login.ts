@@ -7,12 +7,12 @@
 // A credencial vai SEMPRE ao keychain do SO (CLI-SEC-2). Sem keychain ⇒ avisa e
 // NÃO grava em claro (CA-4).
 
-import { LoginService, isPat, type FetchLike, type RedactedCredential } from '@aluy/cli-core';
+import { LoginService, isPat, type FetchLike, type RedactedCredential } from '@hiperplano/aluy-cli-core';
 import { loadAuthConfig } from '../auth/config.js';
 import { loadBrokerConfig } from '../model/config.js';
 import { NoKeychainError, KeychainCredentialStore } from '../auth/keychain-store.js';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
-import type { CredentialStore } from '@aluy/cli-core';
+import type { CredentialStore } from '@hiperplano/aluy-cli-core';
 
 /**
  * EST-1015 (decisão do dono) — VALIDA o PAT na REDE antes de gravar. Hoje `loginWithPat`

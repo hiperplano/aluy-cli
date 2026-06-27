@@ -13,7 +13,7 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
-import { cleanAluyForDisplay } from '@aluy/cli-core';
+import { cleanAluyForDisplay } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { Markdown } from '../markdown/index.js';
 import { AluyLoader } from './AluyLoader.js';

@@ -3,7 +3,7 @@
 // e grant de sessão SÓ p/ não-sempre-ask (sanitiza approve-session p/ sempre-ask).
 
 import { describe, expect, it, vi } from 'vitest';
-import type { AskRequest } from '@aluy/cli-core';
+import type { AskRequest } from '@hiperplano/aluy-cli-core';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
 
 function askReq(over: Partial<AskRequest> = {}): AskRequest {

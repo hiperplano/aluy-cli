@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CORE_VERSION, decide, denyAllEngine, type ToolCall } from '../src/index.js';
 
-describe('@aluy/cli-core — versão', () => {
+describe('@hiperplano/aluy-cli-core — versão', () => {
   it('expõe a versão do engine', () => {
     expect(CORE_VERSION).toMatch(/^\d+\.\d+\.\d+/);
   });

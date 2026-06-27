@@ -7,14 +7,14 @@
 // (EST-0960a/ADR-0056), que já detém o `before` cifrado de cada `edit_file` e a
 // escrita CONFINADA (R8/TOCTOU). O rewind de CÓDIGO é, por construção, da SESSÃO
 // VIVA (a chave de cifra do journal é efêmera — mesma limitação do `/undo` e do
-// `/rewind` do Claude Code). O rewind de CONVERSA mora no @aluy/cli (truncar blocos
+// `/rewind` do Claude Code). O rewind de CONVERSA mora no @hiperplano/aluy-cli (truncar blocos
 // + re-semear o contexto), que consome a contagem de blocos gravada aqui.
 //
 // MODELO: cada checkpoint marca, no INÍCIO de um turno do usuário, dois números:
 //   - `journalSeq` — o `nextSeq` do journal naquele instante: a FRONTEIRA do
 //     "depois". Toda edição com `seq >= journalSeq` aconteceu DEPOIS do ponto.
 //   - `blockCount` — o tamanho da transcrição naquele instante: o ponto de corte
-//     da conversa (o @aluy/cli trunca os blocos para este tamanho).
+//     da conversa (o @hiperplano/aluy-cli trunca os blocos para este tamanho).
 //
 // RESTAURAR CÓDIGO ao checkpoint C: para cada arquivo editado em `seq >=
 // C.journalSeq`, restaura o `before` da PRIMEIRA edição após o ponto — isso devolve
@@ -49,7 +49,7 @@ export interface Checkpoint {
   readonly journalSeq: number;
   /**
    * O nº de blocos da transcrição no início do turno: o ponto de corte da CONVERSA.
-   * O @aluy/cli trunca os blocos visíveis + o contexto do modelo a este tamanho.
+   * O @hiperplano/aluy-cli trunca os blocos visíveis + o contexto do modelo a este tamanho.
    */
   readonly blockCount: number;
 }
