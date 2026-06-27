@@ -1,0 +1,25 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Markdown — FALLBACK NO_COLOR (a11y): formatado, sem cor, marcas visiveis > snapshot da saida NO_COLOR 1`] = `
+"[1m# Titulo[22m
+um [1m*negrito*[22m, um [3m_italico_[23m e um \`codigo\`.
+[1m• [22mitem um
+[1m• [22mitem dois
+▌ [2mcitacao[22m
+link [1mADR[2m (https://aluy.dev/41)[22m.
+[2m╭─ [22mtypescript[2m ──[22m
+[2m│ [1mconst[22m x = [1m1[22m; [2m// ok[22m
+[2m╰───[22m"
+`;
+
+exports[`Markdown — render truecolor (acabamento) > snapshot estavel da saida truecolor 1`] = `
+"[1m[38;2;221;161;63mTitulo[39m[22m
+[38;2;242;238;232mum [1mnegrito[22m, um [3mitalico[23m e um [38;2;91;168;162mcodigo[38;2;242;238;232m.[39m
+[1m[38;2;221;161;63m• [22m[38;2;242;238;232mitem um[39m
+[1m[38;2;221;161;63m• [22m[38;2;242;238;232mitem dois[39m
+[38;2;91;168;162m▌ [38;2;138;127;109m[2mcitacao[22m[39m
+[38;2;242;238;232mlink [1m[38;2;221;161;63mADR[38;2;138;127;109m[2m (https://aluy.dev/41)[22m[38;2;242;238;232m.[39m
+[38;2;138;127;109m[2m╭─ [22m[38;2;91;168;162mtypescript[38;2;138;127;109m[2m ──[22m[39m
+[38;2;138;127;109m[2m│ [1m[38;2;221;161;63mconst[22m[38;2;242;238;232m x = [1m[38;2;166;106;20m1[22m[38;2;242;238;232m; [38;2;138;127;109m[2m// ok[22m[39m
+[38;2;138;127;109m[2m╰───[22m[39m"
+`;

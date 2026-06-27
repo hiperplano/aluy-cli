@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "comment": "Solution-style root tsconfig (referências). `tsc -b` (build/typecheck) percorre os dois pacotes na ordem do grafo (cli-core antes de cli). A CI central (ci-ts.yml) roda `tsc --noEmit` no root e `npm run build` (tsc -b) — ambos respeitam estas referências.",
+  "files": [],
+  "references": [{ "path": "packages/cli-core" }, { "path": "packages/cli" }]
+}

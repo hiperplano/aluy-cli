@@ -1,0 +1,5 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Renovate deste repo aluy-*. Estende o preset CENTRAL do aluy-infra (renovate-config/default.json) — fonte unica da politica de versoes pinadas do Aluy (EST-0012): schedule semanal, agrupamento patch+minor, GitHub Actions por SHA (pinDigests), labels `deps`, limites anti-flood e auto-merge HONESTO (so patch dev, e so com CI verde). Para mudar a politica, edite o preset central, nao aqui.",
+  "extends": ["github>hiperplano/aluy-infra//renovate-config/default"]
+}

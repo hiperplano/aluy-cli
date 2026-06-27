@@ -1,0 +1,14 @@
+# CODEOWNERS — Aluy CLI
+# Review de CODEOWNERS é a base da branch protection do `main`.
+
+# Default — tudo exige review do time dono do repo.
+*                                   @hiperplano-admin
+
+# Infra de CI/governança do repo.
+/.github/                           @hiperplano-admin
+/CODEOWNERS                         @hiperplano-admin
+/LICENSE                            @hiperplano-admin
+
+# Ponto único de interceptação de tool-calls — invariante de segurança.
+# Mudanças aqui exigem review atento.
+/packages/cli-core/src/permission/  @hiperplano-admin

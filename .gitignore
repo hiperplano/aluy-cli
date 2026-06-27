@@ -1,0 +1,38 @@
+# aluy-vau — TS/Node monorepo (público)
+# Segredos: SÓ .env.example é versionado; .env e variantes NUNCA (ADR-0021 §2,
+# reforçado pelo CLI-SEC-7 — binário público limpo: nenhuma credencial/economia
+# mora neste repo).
+
+# Env / segredos
+.env
+.env.*
+!.env.example
+
+# Node / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+.vitest/
+
+# SCA — SBOM gerado localmente (na CI vira artefato, não é versionado)
+sbom.cyclonedx.json
+
+# Misc
+*.log
+*.pid
+.DS_Store
+
+# Worktrees efêmeras de agentes (cópias do repo) — nunca versionar.
+.claude/
+
+# EST-0949 — artefatos do bundle de publicação (gerados no release; README/LICENSE
+# são copiados da raiz p/ o pacote em make-publish-pkg — não versionar a cópia).
+packages/cli/dist-bundle/
+packages/cli/package.publish.json
+packages/cli/README.md
+packages/cli/LICENSE
+__pycache__/
+.pytest_cache/

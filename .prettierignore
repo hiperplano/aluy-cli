@@ -1,0 +1,9 @@
+dist/
+node_modules/
+coverage/
+*.tsbuildinfo
+package-lock.json
+# worktrees efêmeras de agentes (cópias do repo) — não são código de produto.
+.claude/
+# brief de estória (não versionado).
+BRIEF.md

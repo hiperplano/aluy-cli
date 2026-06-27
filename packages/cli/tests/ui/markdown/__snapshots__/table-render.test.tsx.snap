@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`TableBlock — render da tabela do Tiago > snapshot do alinhamento — columns=40 estreito (plain) 1`] = `
+"Tipo      Nome       Tamanho   Modifica…
+────────┼──────────┼─────────┼──────────
+dir       src        -         hoje     
+arquivo   README.…   2.1 KB    ontem    
+arquivo   package…   1.4 KB    semana p…"
+`;
+
+exports[`TableBlock — render da tabela do Tiago > snapshot do alinhamento — columns=100 (plain, sem ANSI) 1`] = `
+"Tipo      Nome           Tamanho   Modificação   
+────────┼──────────────┼─────────┼───────────────
+dir       src            -         hoje          
+arquivo   README.md      2.1 KB    ontem         
+arquivo   package.json   1.4 KB    semana passada"
+`;

@@ -1,0 +1,160 @@
+# .gitleaks.toml — OVERRIDE LOCAL do aluy-vau (EST-0960b).
+#
+# Por que existe (e por que é HONESTO):
+# O secret-scan central (aluy-infra/secrets-scan.yml) varre o HISTÓRICO via
+# `gitleaks git --log-opts=HEAD`. Os testes da redação R9 (EST-0960b/CLI-SEC-6)
+# PRECISAM, por natureza, conter strings com a FORMA de segredo — é o insumo que
+# prova que a redação as apaga. Mesmo montando-as de partes na fonte (helpers
+# `hdr`/`userPass`, JWT em segmentos), o gitleaks também escaneia COMMITS antigos
+# do branch (58a71ec, da 0960a→b), onde o literal foi introduzido. Reescrever só
+# o HEAD não tira o achado do histórico.
+#
+# Este override REPLICA byte-a-byte a config CENTRAL do Aluy (EST-0011) — NÃO
+# afrouxa NENHUMA regra de detecção para o resto do repo — e SÓ ADICIONA uma
+# allowlist por PATH EXATO (regex ancorado `$`) dos DOIS arquivos de teste de
+# fixture da redação. É a MESMA política já vigente para os fixtures sintéticos do
+# próprio gate (test_gitleaks_*.sh) e do aluy-broker (test_api_key_client.py):
+# arquivos de teste que plantam segredos SINTÉTICOS de propósito, cobertos por
+# path-exato, nunca segredo real. Adicionar regex aqui para "calar" um achado real
+# seria proibido e reprovado em revisão de segurança — não é o caso.
+#
+# Auditável: ao tirar a EST-0960b da fronteira, a allowlist destes 2 paths deve
+# ser reavaliada pelo `seguranca` (idealmente migrada para a config central).
+
+title = "Aluy — gitleaks config (aluy-vau, EST-0960b override = central + fixtures de redação)"
+
+[extend]
+useDefault = true
+
+# ── Allowlist de FIXTURES de teste do próprio gate (HONESTA, path fechado) ───
+[[allowlists]]
+description = "Fixtures sintéticas dos testes do próprio secret-scan (EST-0011) — só estes paths."
+paths = [
+  '''tests/ci/test_gitleaks_blocks\.sh$''',
+  '''tests/ci/test_gitleaks_clean\.sh$''',
+  '''tests/ci/test_gitleaks_orphan_scope\.sh$''',
+]
+
+# ── Allowlist de FIXTURES de teste de REPOS CHAMADORES (HONESTA, path fechado) ─
+[[allowlists]]
+description = "Fixtures sintéticas de teste de repos chamadores (path exato) — NÃO são segredos reais."
+paths = [
+  '''tests/unit/test_api_key_client\.py$''',  # aluy-broker EST-0907
+]
+
+# ── Allowlist de FIXTURES da REDAÇÃO R9 do aluy-vau (HONESTA, path fechado) ───
+# EST-0960b/CLI-SEC-6: estes 2 arquivos testam `redactCommandSecrets`. Por
+# natureza contêm strings com a FORMA de segredo (Authorization Bearer, x-api-key,
+# `-u user:pass`, JWT) — TODAS sintéticas/FAKE — que existem só para provar que a
+# redação as apaga antes de exibir no aviso de /undo. Cobertura por PATH EXATO
+# (regex ancorado `$`); nenhum outro path é afetado. Não é supressão de segredo
+# real: é o fixture que prova o gate de redação.
+[[allowlists]]
+description = "Fixtures sintéticas da redação R9 (EST-0960b) — só estes paths, nunca segredo real."
+paths = [
+  '''packages/cli-core/tests/agent/journal-redact\.test\.ts$''',
+  '''packages/cli/tests/session/undo-controller\.test\.ts$''',
+  # checkpoints/rewind: testa que a barreira de run_command APÓS um ponto é AVISADA
+  # REDIGIDA (CLI-SEC-6) — contém um `Bearer sk-…` SINTÉTICO só p/ provar a redação.
+  '''packages/cli-core/tests/agent/checkpoint\.test\.ts$''',
+  # backend local (EST-1113): harness de smoke que ASSERTA o header Authorization do
+  # caminho BYO — contém uma chave `sk-or-test-…` SINTÉTICA (não é segredo real).
+  '''scripts/smoke-backend-local\.mjs$''',
+]
+
+# ── Allowlist de FIXTURES da REDAÇÃO do drill-in (EST-0982/RES-C-1, path fechado) ─
+# EST-0982/CLI-SEC-6: estes 2 arquivos testam que o drill-in (VER/observabilidade
+# de sub-agente) REDIGE o segredo da linha de comando ANTES de torná-lo visível —
+# a atividade observável nunca pode vazar o que o confinamento esconde (RES-C-1 /
+# GS-C3). Por natureza contêm uma string com a FORMA de segredo (`Authorization
+# Bearer sk-secret-…`) — SINTÉTICA/FAKE — que é o insumo que prova a redação: o
+# próprio teste asserta `.not.toContain('sk-secret')` e `.toContain(REDACTED)`.
+# Cobertura por PATH EXATO (regex ancorado `$`); nenhum outro path é afetado.
+# Mesma política HONESTA dos fixtures R9 acima — não é supressão de segredo real.
+[[allowlists]]
+description = "Fixtures sintéticas da redação do drill-in (EST-0982/RES-C-1) — só estes paths, nunca segredo real."
+paths = [
+  '''packages/cli-core/tests/agent/flow-control\.test\.ts$''',
+  '''packages/cli/tests/session/controller-flow-control\.test\.ts$''',
+]
+
+# ── Allowlist de FIXTURE da REDAÇÃO do /export — MODO COCKPIT (EST-1000/RES-C-1) ─
+# EST-1000/ADR-0076 §4 / CLI-SEC-6: este arquivo testa que o `/export` REDIGE o
+# segredo ANTES de montar o transcript E de gravá-lo no disco (~/.aluy/exports/,
+# 0600). É o GATE de redação obrigatório do `seguranca`: o próprio teste asserta
+# `.not.toContain(SECRET)` (no corpo E no arquivo) e `.toContain('‹redigido›')`.
+# Por natureza precisa de strings com a FORMA de segredo (`sk-…`, `Authorization
+# Bearer ghp_…`, `*_TOKEN=ghp_…`) — TODAS SINTÉTICAS/FAKE. No HEAD elas são
+# MONTADAS por concatenação em runtime (a varredura de ÁRVORE fica limpa); mas a
+# varredura de HISTÓRICO (`gitleaks git --log-opts=HEAD`) ainda alcança o commit
+# 6a6326cb, onde o literal sintético (`sk-ABCD1234efgh5678ijkl9012`) foi
+# introduzido — não dá para anotar `gitleaks:allow` num commit passado sem
+# reescrever histórico (vide cabeçalho deste arquivo). Cobertura por PATH EXATO
+# (regex ancorado `$`); nenhum outro path é afetado. Não é supressão de segredo
+# real (padrões fake, repetidos/sequenciais): é o fixture que PROVA o gate.
+[[allowlists]]
+description = "Fixture sintética da redação do /export — cockpit (EST-1000/RES-C-1) — só este path, nunca segredo real."
+paths = [
+  '''packages/cli/tests/session/export-redaction\.test\.ts$''',
+]
+
+# ── Allowlist de FIXTURES da REDAÇÃO AT-REST no journal (F23/dogfood, path fechado) ─
+# F23/CLI-SEC-6: estes 2 arquivos provam que read_file/grep/@attach são REDIGIDOS no
+# SINK do journal (at-rest) antes de tocar o disco. Por natureza plantam uma string
+# com a FORMA de segredo (`sk-…`, OpenAI-shape) — SINTÉTICA/FAKE — que é o insumo que
+# prova a redação: o próprio teste asserta `.not.toContain(SECRET)` no byte do disco.
+# Cobertura por PATH EXATO (regex ancorado `$`); nenhum outro path é afetado. Mesma
+# política HONESTA dos fixtures R9 acima — não é supressão de segredo real.
+[[allowlists]]
+description = "Fixtures sintéticas da redação at-rest no journal (F23/dogfood) — só estes paths, nunca segredo real."
+paths = [
+  '''packages/cli/tests/io/journal-redact\.test\.ts$''',
+  '''packages/cli/tests/io/session-store-redact\.test\.ts$''',
+]
+
+# ── Allowlist de FIXTURES da redação de SAÍDA EXTERNA (EST-1000/CLI-SEC-6, path fechado) ─
+# HUNT-REDACT: estes 2 arquivos provam que a saída EXTERNA não-confiável é redigida na
+# ORIGEM — o corpo do `web_fetch` (web-tools) e a saída de server MCP (discovery). Por
+# natureza contêm strings com a FORMA de segredo (`sk-…`, `Authorization: Bearer …`,
+# `api_key=…`, JWT) — TODAS SINTÉTICAS/FAKE — que são o insumo que prova a redação: os
+# próprios testes assertam `.not.toContain(segredo)` e `.toContain('‹redigido›')`.
+# Cobertura por PATH EXATO (regex ancorado `$`); nenhum outro path é afetado. Mesma
+# política HONESTA dos fixtures de redação acima — NÃO é supressão de segredo real.
+# (A reavaliar pelo `seguranca`, como os demais fixtures de redação.)
+[[allowlists]]
+description = "Fixtures sintéticas da redação de saída externa (EST-1000) — só estes paths, nunca segredo real."
+paths = [
+  '''packages/cli-core/tests/agent/web-tools\.test\.ts$''',
+  '''packages/cli-core/tests/mcp/discovery\.test\.ts$''',
+]
+
+# ── Allowlist global (HONESTA, fechada) ──────────────────────────────────────
+[[allowlists]]
+description = "Placeholders sintéticos da F0-S1 (EST-0004/0005) e e-mails RFC 2606 — NÃO são segredos reais."
+regexTarget = "match"
+regexes = [
+  '''__set_local_dev_password__''',
+  '''__set_in_vault__''',
+  '''__set_[a-z0-9_]+__''',
+  '''CHANGE[_-]?ME''',
+  '''<[A-Z0-9_]+>''',
+]
+stopwords = [
+  "example.com",
+  "example.org",
+  "example.net",
+]
+
+# ── Allowlist de paths que SÓ contêm placeholders por contrato ───────────────
+[[allowlists]]
+description = "Arquivos-modelo que, por política, só contêm placeholders (nunca segredo real)."
+targetPaths = [
+  '''.*\.env\.example$''',
+  '''.*\.env\.sample$''',
+  '''.*\.example\.ya?ml$''',
+]
+regexTarget = "match"
+regexes = [
+  '''__set_[a-z0-9_]+__''',
+  '''CHANGE[_-]?ME''',
+]

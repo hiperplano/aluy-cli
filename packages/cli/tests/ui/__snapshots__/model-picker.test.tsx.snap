@@ -1,0 +1,10 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ModelPicker — BROWSER do Custom (EST-0962) > SNAPSHOT do browser (janela densa, estável) 1`] = `
+"modelos Custom · digite p/ filtrar · ↑↓ navega · ^T só-tools · enter seleciona · esc volta
+filtro › ▏   3 de 20
+› meta-llama/llama-3.1-8b-instruct  Meta · 128k ✓ tools
+  ai21/jamba-large-1.7  Ai21 · 256k — tools
+  vendor/neutro  Vendor · tools?
+  ↓ mais abaixo"
+`;

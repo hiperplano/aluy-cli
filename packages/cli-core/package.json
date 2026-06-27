@@ -1,0 +1,41 @@
+{
+  "name": "@aluy/cli-core",
+  "version": "1.0.0-rc.1",
+  "description": "Engine modular do agente Aluy (loop/tools/permissão). PORTÁVEL: sem TUI, sem I/O de terminal — habilita o split futuro de locus (client-side hoje, server-side amanhã; ADR-0053 §8-bis). Aqui nasce o ponto de interceptação único de tool-calls (CLI-SEC-H1). NÃO publicado standalone: entra BUNDLADO em @aluy/cli (entrega monolítica, ADR-0053 §8 — ver docs/release.md). `private:true` previne publish acidental do pacote interno.",
+  "keywords": [
+    "aluy",
+    "agent",
+    "engine"
+  ],
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/hiperplano/aluy-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiperplano/aluy-cli.git",
+    "directory": "packages/cli-core"
+  },
+  "bugs": {
+    "url": "https://github.com/hiperplano/aluy-cli/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.map",
+    "!dist/.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  }
+}

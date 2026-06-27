@@ -1,0 +1,55 @@
+{
+  "name": "@aluy/cli-monorepo",
+  "version": "1.0.0-rc.1",
+  "private": true,
+  "description": "Aluy CLI — um agente de terminal. Roda local com o seu próprio provider de LLM (BYO). Monorepo: @aluy/cli-core (engine portável) + @aluy/cli (TUI Ink + binário `aluy`).",
+  "type": "module",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiperplano/aluy-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hiperplano/aluy-cli/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "overrides": {
+    "hono": "^4.12.26"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:py": "python3 -m unittest discover -s packages/cli/tests/mem0 -p 'test_*.py'",
+    "coverage": "vitest run --coverage",
+    "build": "tsc -b",
+    "prebuild": "node scripts/gen-version.mjs",
+    "postbuild": "node -e \"require('fs').chmodSync('packages/cli/dist/bin/aluy.js', 0o755)\"",
+    "aluy": "node packages/cli/dist/bin/aluy.js",
+    "smoke": "npm run build && node scripts/smoke-e2e.mjs",
+    "smoke:subagents": "npm run build && node scripts/smoke-subagents.mjs",
+    "smoke:subagent-custom-model": "npm run build && node scripts/smoke-subagent-custom-model.mjs",
+    "smoke:memory": "npm run build && node scripts/smoke-memory.mjs",
+    "smoke:cycle": "npm run build && node scripts/smoke-cycle.mjs",
+    "smoke:codex-mcp": "npm run build && node scripts/smoke-codex-mcp.mjs",
+    "smoke:run-command": "npm run build && node scripts/smoke-run-command-abort.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@types/node": "^20",
+    "@vitest/coverage-v8": "^4",
+    "eslint": "^9",
+    "ink-testing-library": "^4.0.0",
+    "prettier": "3.8.3",
+    "typescript": "^5",
+    "typescript-eslint": "^8",
+    "vitest": "^4"
+  }
+}

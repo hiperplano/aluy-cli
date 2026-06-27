@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Composer — ●+nome da sessão (/rename) > SNAPSHOT — composer com o rótulo colorido (truecolor) 1`] = `"● projeto-x › ●digite um objetivo ou /comando…"`;
