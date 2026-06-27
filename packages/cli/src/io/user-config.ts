@@ -171,6 +171,24 @@ export interface UserConfig {
    * loopback literal (não relaxar anti-SSRF do egress de sidecar). DADO, não credencial.
    */
   readonly services?: UserServicesConfig;
+  /**
+   * ADR-0134/0135 (conectores) — config dos bridges externos. DADO de config: só a
+   * allowlist de ids-do-canal e preferências (CLI-SEC-7). O TOKEN do bot NUNCA mora aqui
+   * — vai no keychain do SO (CLI-SEC-2 / TC-3). Allowlist VAZIA/ausente ⇒ bridge fechada
+   * (default fechado, TC-2): nada entra até o dono autorizar um id.
+   */
+  readonly connectors?: UserConnectorsConfig;
+}
+
+/** Config dos conectores (ADR-0135). Só DADO (allowlist/prefs); token só no keychain. */
+export interface UserConnectorsConfig {
+  readonly telegram?: UserTelegramConfig;
+}
+
+/** Config do conector Telegram (ADR-0134). Allowlist de chat-ids do dono. */
+export interface UserTelegramConfig {
+  /** chat-ids autorizados (a allowlist do dono). Vazia ⇒ nada entra (default fechado). */
+  readonly allowlist?: readonly number[];
 }
 
 /** Porta/host de um sidecar (ADR-0136 §8). Ambos opcionais; ausente ⇒ default. */
@@ -227,6 +245,30 @@ function sanitizeEndpoint(raw: unknown): UserServiceEndpoint | undefined {
   if (isLoopbackHost(o.host)) ep.host = o.host.trim();
   if (okPort(o.port)) ep.port = o.port;
   return ep.host !== undefined || ep.port !== undefined ? ep : undefined;
+}
+
+/** Sanitiza a config de conectores (ADR-0134/0135). Só a allowlist (DADO); token no keychain. */
+function sanitizeConnectors(raw: unknown): UserConnectorsConfig | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const out: { telegram?: UserTelegramConfig } = {};
+  if (typeof o.telegram === 'object' && o.telegram !== null) {
+    const tg = o.telegram as Record<string, unknown>;
+    if (Array.isArray(tg.allowlist)) {
+      // chat-ids: inteiros finitos, dedup. Lixo descartado (entrada inválida não autoriza ninguém).
+      const ids: number[] = [];
+      for (const v of tg.allowlist) {
+        if (typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && !ids.includes(v)) {
+          ids.push(v);
+        }
+      }
+      // grava a seção mesmo se vazia (allowlist explicitamente vazia = "fechei a bridge").
+      out.telegram = { allowlist: ids };
+    } else {
+      out.telegram = {};
+    }
+  }
+  return out.telegram !== undefined ? out : undefined;
 }
 
 /** Sanitiza a seção `services` (ADR-0136 §8). Só sub-endpoints válidos sobrevivem. */
@@ -329,6 +371,7 @@ function sanitize(raw: unknown): UserConfig {
     sidecarToggles?: { ollama?: boolean; mem0?: boolean; headroom?: boolean };
     providers?: readonly UserProviderEntry[];
     services?: UserServicesConfig;
+    connectors?: UserConnectorsConfig;
   } = {};
   // theme: precisa ser um nome conhecido do catálogo (senão ignora → default dark).
   if (typeof obj.theme === 'string') {
@@ -410,7 +453,27 @@ function sanitize(raw: unknown): UserConfig {
   const services = sanitizeServices(obj.services);
   if (services) out.services = services;
 
+  // ADR-0134/0135 — conectores (allowlist do Telegram; token só no keychain).
+  const connectors = sanitizeConnectors(obj.connectors);
+  if (connectors) out.connectors = connectors;
+
   return out;
+}
+
+/** Allowlist atual do Telegram (chat-ids) a partir da config. Ausente ⇒ vazia. */
+export function telegramAllowlist(config: UserConfig): readonly number[] {
+  return config.connectors?.telegram?.allowlist ?? [];
+}
+
+/** Adiciona um chat-id à allowlist do Telegram (dedup). Retorna a nova allowlist. PURO. */
+export function addTelegramAllow(config: UserConfig, chatId: number): readonly number[] {
+  const cur = telegramAllowlist(config);
+  return cur.includes(chatId) ? cur : [...cur, chatId];
+}
+
+/** Remove um chat-id da allowlist do Telegram. Retorna a nova allowlist. PURO. */
+export function removeTelegramAllow(config: UserConfig, chatId: number): readonly number[] {
+  return telegramAllowlist(config).filter((id) => id !== chatId);
 }
 
 /**
