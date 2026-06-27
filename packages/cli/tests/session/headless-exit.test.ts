@@ -140,6 +140,8 @@ describe('binário aluy — EXIT em não-TTY com MCP vivo (EST-1007 HANG)', () =
     HOME: homeDir,
     USERPROFILE: homeDir,
     ALUY_BACKEND: 'broker', // este teste exercita o caminho headless via broker (stub abaixo).
+    ALUY_MEM_OFF: '1', // mem0 é independente do maestro (kill-switch próprio)
+    ALUY_MAESTRO_OFF: '1', // turbo OFF (mem0/headroom) → hermético no CI sem serviços
     ALUY_BROKER_URL: brokerUrl,
     ALUY_TOKEN: 'stub-token', // semeia a credencial (sem keychain/login).
     NO_COLOR: '1',

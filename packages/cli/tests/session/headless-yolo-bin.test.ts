@@ -136,6 +136,8 @@ describe('binário aluy — YOLO headless (EST-1007 · AG-0008)', () => {
     HOME: homeDir,
     USERPROFILE: homeDir,
     ALUY_BACKEND: 'broker', // este teste exercita o caminho headless via broker (stub abaixo).
+    ALUY_MEM_OFF: '1', // mem0 é independente do maestro (kill-switch próprio)
+    ALUY_MAESTRO_OFF: '1', // turbo OFF (mem0/headroom) → hermético no CI sem serviços
     ALUY_BROKER_URL: brokerUrl,
     ALUY_TOKEN: 'stub-token',
     NO_COLOR: '1',
