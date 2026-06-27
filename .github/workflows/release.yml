@@ -1,0 +1,110 @@
+# release — em tag `v*` (ou disparo manual): valida, empacota o bundle monolítico
+# (embute @aluy/cli-core), publica no npm e cria/atualiza o GitHub Release com o
+# tarball anexado.
+#
+# A versão publicada é a do `packages/cli/package.json` (fonte única). O dist-tag
+# do npm é derivado: prerelease (`1.0.0-rc.1`) → `rc`; estável → `latest`. Assim o
+# RC não vira o `latest` (quem faz `npm i -g @aluy/cli` pega o estável; o rc vem
+# com `@rc`).
+#
+# Pré-requisito: secret `NPM_TOKEN` (Automation/Granular com write em `@aluy`).
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # criar/editar releases
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: instalar deps (lockfile exato)
+        run: npm ci
+
+      - name: validar (lint + type-check + build + testes)
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run typecheck
+          npm run build
+          npm test
+
+      - name: versão + dist-tag
+        id: ver
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/cli/package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # numa tag de push, ela tem de casar com a versão do package.json
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            want="${GITHUB_REF_NAME#v}"
+            if [ "$want" != "$version" ]; then
+              echo "::error::tag $GITHUB_REF_NAME != versão do package.json ($version)"
+              exit 1
+            fi
+          fi
+          # prerelease (tem `-`) → o id antes do ponto (rc/beta/…); senão latest
+          if [[ "$version" == *-* ]]; then
+            t="${version#*-}"; t="${t%%.*}"
+          else
+            t="latest"
+          fi
+          echo "disttag=$t" >> "$GITHUB_OUTPUT"
+          echo "::notice::publicando $version (dist-tag: $t)"
+
+      - name: bundle + publish-pkg (embute o cli-core; scan de segredo)
+        working-directory: packages/cli
+        run: |
+          set -euo pipefail
+          npm run scan-bundle
+          npm run make-publish-pkg
+
+      - name: empacotar o artefato REAL (publish-pkg, sem dep interna)
+        id: pack
+        working-directory: packages/cli
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          cp -r dist-bundle "$stage/"
+          cp README.md LICENSE "$stage/"
+          cp package.publish.json "$stage/package.json"
+          ( cd "$stage" && npm pack )
+          tgz="$(ls "$stage"/*.tgz)"
+          cp "$tgz" "$GITHUB_WORKSPACE/"
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+          echo "tgz=$(basename "$tgz")" >> "$GITHUB_OUTPUT"
+
+      - name: npm publish
+        working-directory: ${{ steps.pack.outputs.stage }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --tag "${{ steps.ver.outputs.disttag }}"
+
+      - name: GitHub Release (cria ou atualiza) + tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          v="v${{ steps.ver.outputs.version }}"
+          pre=""
+          if [[ "${{ steps.ver.outputs.version }}" == *-* ]]; then pre="--prerelease"; fi
+          if gh release view "$v" >/dev/null 2>&1; then
+            gh release upload "$v" "${{ steps.pack.outputs.tgz }}" --clobber
+          else
+            gh release create "$v" "${{ steps.pack.outputs.tgz }}" --title "$v" $pre --generate-notes
+          fi
