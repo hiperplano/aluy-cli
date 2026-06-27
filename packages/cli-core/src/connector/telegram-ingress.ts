@@ -26,11 +26,17 @@ export interface TelegramUpdate {
   readonly chatId: number;
   /** `from.id` — quem enviou. */
   readonly fromId: number;
-  /** O texto da mensagem (o que o dono digitou). */
+  /** O texto da mensagem. */
   readonly text: string;
-  /** Presença = a mensagem CONTÉM conteúdo encaminhado de terceiro (forward). */
+  /**
+   * A mensagem INTEIRA é um FORWARD de terceiro (`forward_origin`/`forward_from`): o
+   * `text` não foi escrito pelo dono ⇒ a mensagem toda é DADO (`third-party-relayed`).
+   */
   readonly forwarded?: boolean;
-  /** Texto citado/encaminhado de terceiro (tratado como DADO, não instrução). */
+  /**
+   * O dono ESCREVEU `text` e CITOU (reply-with-quote) este trecho de terceiro: o comando
+   * do dono é instrução; só o `quotedText` é DADO embutido. (Distinto de `forwarded`.)
+   */
   readonly quotedText?: string;
 }
 
@@ -45,10 +51,17 @@ export function classifyTelegramIngress(
   update: TelegramUpdate,
   allowlist: ReadonlySet<number>,
 ): ConnectorIngress {
-  const embedded = update.forwarded === true ? (update.quotedText ?? '').trim() : '';
-  const provenance: Provenance = embedded
-    ? { kind: 'author-direct', embeddedThirdParty: embedded }
-    : { kind: 'author-direct' };
+  // FORWARD (msg inteira de terceiro) ⇒ third-party-relayed (a malha trata como DADO).
+  // REPLY-COM-QUOTE (dono escreve + cita) ⇒ author-direct + o quote vira DADO embutido.
+  let provenance: Provenance;
+  if (update.forwarded === true) {
+    provenance = { kind: 'third-party-relayed' };
+  } else {
+    const embedded = (update.quotedText ?? '').trim();
+    provenance = embedded
+      ? { kind: 'author-direct', embeddedThirdParty: embedded }
+      : { kind: 'author-direct' };
+  }
   const msg: IncomingMessage = {
     content: update.text,
     sender: String(update.fromId),

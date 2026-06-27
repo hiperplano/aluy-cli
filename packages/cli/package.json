@@ -1,6 +1,6 @@
 {
   "name": "@hiperplano/aluy-cli",
-  "version": "1.0.0-rc.11",
+  "version": "1.0.0-rc.12",
   "description": "Aluy CLI — TUI (Ink) + binário `aluy` + wiring. Consome @hiperplano/aluy-cli-core (engine portável). Credenciais só no keychain do SO.",
   "keywords": [
     "aluy",
