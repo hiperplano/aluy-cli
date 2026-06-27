@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           npm run lint
           npm run build
-          npm test -- --exclude '**/headless-exit.test.ts' --exclude '**/headless-yolo-bin.test.ts'
+          npm test -- --exclude '**/headless-exit.test.ts' --exclude '**/headless-yolo-bin.test.ts' --maxWorkers=2
 
       - name: versão + dist-tag
         id: ver

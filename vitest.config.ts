@@ -25,8 +25,8 @@ export default defineConfig({
     // tarde. (Os testes cross-process de SALAS já usavam 30s inline e nunca
     // caíram — mesma lógica, agora global.) hookTimeout idem p/ beforeAll/Each
     // pesados (criação de dirs temp / build de registry).
-    testTimeout: 20_000,
-    hookTimeout: 20_000,
+    testTimeout: 45_000,
+    hookTimeout: 45_000,
     // Suites de INTEGRAÇÃO que spawnam o binário/processos-filho (kill de grupo,
     // handshake de broker/MCP) podem FALHAR-FLAKY sob contenção de CPU no CI
     // (timeout/race), passando 100% isolados. `retry` re-tenta o flake transiente
