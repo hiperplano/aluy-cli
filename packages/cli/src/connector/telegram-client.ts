@@ -80,4 +80,28 @@ export class TelegramClient {
       }
     }
   }
+
+  /**
+   * EGRESSO — envia texto a um chat (sendMessage). Espelha o `send()` da porta `Connector`.
+   * O `chatId` é o ALVO TRAVADO pela malha (o chat allowlistado da conversa corrente — a
+   * malha NUNCA passa destino arbitrário do agente; TC-5, fecha exfiltração). Aqui só o I/O.
+   * FAIL-SAFE: retorna `true` se a Bot API confirmou (`ok:true`), `false` em qualquer falha
+   * (rede/HTTP/JSON/`ok:false`). Token na URL NUNCA logado.
+   */
+  async send(chatId: number, text: string, signal?: AbortSignal): Promise<boolean> {
+    const url = `${this.apiBase}/bot${this.token}/sendMessage`;
+    try {
+      const resp = await this.fetchFn(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text }),
+        ...(signal ? { signal } : {}),
+      });
+      if (!resp.ok) return false;
+      const body = (await resp.json()) as { ok?: unknown };
+      return body?.ok === true;
+    } catch {
+      return false; // rede caiu / abort / JSON inválido ⇒ fail-safe (não lança).
+    }
+  }
 }

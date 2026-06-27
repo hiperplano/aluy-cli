@@ -73,6 +73,8 @@ export { classifyTelegramIngress, parseAllowlist, TELEGRAM_META } from './connec
 export type { TelegramUpdate, IngressDecision } from './connector/telegram-ingress.js';
 export { parseGetUpdates } from './connector/telegram-protocol.js';
 export type { ParsedUpdates } from './connector/telegram-protocol.js';
+// Teto anti-spam de egresso de conector (TC-6 / CLI-SEC-8) — puro, tempo injetável.
+export { EgressRateLimiter } from './connector/egress-limit.js';
 // Segredo do conector (TC-3 / CLI-SEC-2): contrato + naming + validadores PUROS; o store
 // concreto (keychain) vive no @hiperplano/aluy-cli.
 export {

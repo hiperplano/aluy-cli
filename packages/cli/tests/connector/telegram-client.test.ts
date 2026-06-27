@@ -68,4 +68,42 @@ describe('TelegramClient — long-poll concreto (ADR-0134 §4)', () => {
     }
     expect(got).toEqual(['um', 'dois']);
   });
+
+  it('send: POST sendMessage com chat_id+text; ok:true ⇒ true', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fn = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return { ok: true, json: async () => ({ ok: true }) } as Response;
+    }) as unknown as typeof fetch;
+    const c = new TelegramClient({ token: TOKEN, fetchFn: fn });
+    const ok = await c.send(777, 'resposta');
+    expect(ok).toBe(true);
+    expect(calls[0]?.url).toContain('/sendMessage');
+    expect(calls[0]?.init?.method).toBe('POST');
+    const body = JSON.parse(String(calls[0]?.init?.body));
+    expect(body).toEqual({ chat_id: 777, text: 'resposta' });
+  });
+
+  it('send: HTTP não-2xx ou ok:false ⇒ false (fail-safe)', async () => {
+    const c1 = new TelegramClient({
+      token: TOKEN,
+      fetchFn: (async () => ({ ok: false, json: async () => ({}) }) as Response) as unknown as typeof fetch,
+    });
+    expect(await c1.send(1, 'x')).toBe(false);
+    const c2 = new TelegramClient({
+      token: TOKEN,
+      fetchFn: (async () => ({ ok: true, json: async () => ({ ok: false }) }) as Response) as unknown as typeof fetch,
+    });
+    expect(await c2.send(1, 'x')).toBe(false);
+  });
+
+  it('send: rede caiu ⇒ false (não lança)', async () => {
+    const c = new TelegramClient({
+      token: TOKEN,
+      fetchFn: (async () => {
+        throw new Error('ECONNREFUSED');
+      }) as unknown as typeof fetch,
+    });
+    await expect(c.send(1, 'x')).resolves.toBe(false);
+  });
 });
