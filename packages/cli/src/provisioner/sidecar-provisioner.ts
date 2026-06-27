@@ -1166,6 +1166,72 @@ async function ensureOllamaModels(): Promise<void> {
  * @param opts - EST-1133-bis: `useAgent` habilita a delegação ao agente em SO sem
  *               artefato pinado (não-Linux); `platform` injeta o SO (teste).
  */
+/** O módulo `venv` do Python está disponível? (mem0/headroom criam virtualenv). */
+function checkVenvModule(): boolean {
+  try {
+    const r = spawnSync('python3', ['-m', 'venv', '--help'], { timeout: 10_000 });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** O `pip` do python3 do SISTEMA está disponível? (necessário p/ semear o venv). */
+function checkSystemPip(): boolean {
+  try {
+    const r = spawnSync('python3', ['-m', 'pip', '--version'], { timeout: 10_000 });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * PRÉ-FLIGHT do turbo: checa os pré-requisitos de SO dos sidecars selecionados e
+ * devolve linhas a IMPRIMIR (vazio = tudo presente). Ollama precisa de zstd+tar
+ * (binário); mem0/headroom precisam de python3.10+ + venv + pip (serviços Python).
+ * NÃO aborta — os sidecars são independentes (o ollama instala mesmo sem Python);
+ * só AVISA na hora o que falta + o comando, em vez de falhar por-sidecar no escuro.
+ */
+function preflightPrereqs(toggles: ReadonlySet<SidecarTarget>): string[] {
+  const missing: string[] = [];
+  const apt: string[] = [];
+  if (toggles.has('ollama')) {
+    if (!checkZstd()) {
+      missing.push('zstd (extrair o Ollama)');
+      apt.push('zstd');
+    }
+    if (!checkTar()) {
+      missing.push('tar (extrair o Ollama)');
+      apt.push('tar');
+    }
+  }
+  if (toggles.has('mem0') || toggles.has('headroom')) {
+    const py = checkPython();
+    if (!py.ok) {
+      missing.push(`python3 >= ${MEM0_MIN_PYTHON} para mem0/headroom (encontrado: ${py.version || 'nenhum'})`);
+      apt.push('python3', 'python3-venv', 'python3-pip');
+    } else {
+      if (!checkVenvModule()) {
+        missing.push('módulo venv do Python (mem0/headroom criam um virtualenv)');
+        apt.push('python3-venv');
+      }
+      if (!checkSystemPip()) {
+        missing.push('pip do Python (mem0/headroom instalam pacotes)');
+        apt.push('python3-pip');
+      }
+    }
+  }
+  if (missing.length === 0) return [];
+  const aptUniq = [...new Set(apt)];
+  return [
+    'Faltam pré-requisitos para o modo turbo (o que conseguir, instala; o resto fica de fora):',
+    ...missing.map((m) => `  • ${m}`),
+    `Instale e rode \`aluy bootstrap\` de novo:  sudo apt install -y ${aptUniq.join(' ')}`,
+    '',
+  ];
+}
+
 export async function runProvisioner(
   configProfile?: 'turbo' | 'leve',
   configToggles?: { ollama?: boolean; mem0?: boolean },
@@ -1177,5 +1243,8 @@ export async function runProvisioner(
     ...(opts?.platform ? { platform: opts.platform } : {}),
     ...(opts?.useAgent ? { agentInstaller: defaultAgentInstaller } : {}),
   });
+  // Pré-flight: avisa AGORA quais pré-requisitos de SO faltam (python3.10+/venv/pip p/
+  // mem0+headroom; zstd/tar p/ ollama), em vez de cada sidecar falhar no escuro.
+  for (const line of preflightPrereqs(toggles)) process.stderr.write(line + '\n');
   return provisioner.provisionAll(profile, toggles);
 }

@@ -616,7 +616,7 @@ function checkSidecars(f: SidecarsFact): DoctorCheck {
 
   const status: DoctorStatus = fail ? 'fail' : warn ? 'warn' : 'ok';
   const fix = fail
-    ? 'sidecar(es) fora — provisione/suba com `aluy init` (perfil TURBO). No boot eles sobem sozinhos se já instalados.'
+    ? 'sidecar(es) fora — provisione/suba com `aluy bootstrap` (perfil TURBO; mem0/headroom precisam de python3.10+/pip/venv). No boot eles sobem sozinhos se já instalados.'
     : warn
       ? 'sidecar(es) com status inesperado — cheque os logs do Maestro.'
       : undefined;

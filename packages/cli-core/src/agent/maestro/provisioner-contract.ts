@@ -43,6 +43,8 @@ export interface PinnedArtifact {
 }
 
 /** Versão do Ollama a provisionar. */
+import { OLLAMA_PORT, HEADROOM_PORT } from './boot-contract.js';
+
 export const OLLAMA_VERSION = '0.30.10';
 
 /** Tag da release do Ollama no GitHub. */
@@ -98,7 +100,7 @@ export const NOMIC_EMBEDDER_MODEL_DIGEST =
 export const OLLAMA_PULL_TIMEOUT_MS = 600_000; // 10 min
 
 /** Porta loopback do Ollama (localhost, sem bind externo). */
-export const OLLAMA_LOOPBACK_PORT = 11434;
+export const OLLAMA_LOOPBACK_PORT = OLLAMA_PORT; // single-source: boot-contract (ADR-0136 §10)
 
 /** Host loopback do Ollama. */
 export const OLLAMA_LOOPBACK_HOST = '127.0.0.1';
@@ -128,7 +130,7 @@ export const HEADROOM_VENV_DIR = 'hr-venv';
 export const HEADROOM_PIP_PACKAGES: readonly string[] = ['headroom-ai==0.25.0'];
 
 /** Porta loopback do proxy headroom (compressão de contexto, ADR-0108). */
-export const HEADROOM_LOOPBACK_PORT = 8787;
+export const HEADROOM_LOOPBACK_PORT = HEADROOM_PORT; // single-source: boot-contract (ADR-0136 §10)
 
 /** Versão do Python requerida p/ o venv do Mem0. */
 export const MEM0_MIN_PYTHON = '3.10';

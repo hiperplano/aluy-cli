@@ -532,7 +532,7 @@ describe('doctor/checks — sidecars/Maestro', () => {
     expect(c.detail).toContain('toggles: ollama, mem0');
   });
 
-  it('headroom fora ⇒ ✗ com dica de provisionamento (aluy init)', () => {
+  it('headroom fora ⇒ ✗ com dica de provisionamento (aluy bootstrap)', () => {
     const f = okFacts();
     const c = checkOf(
       {
@@ -545,8 +545,8 @@ describe('doctor/checks — sidecars/Maestro', () => {
       'sidecars',
     );
     expect(c.status).toBe('fail');
-    // O hint correto aponta `aluy init` (o `aluy maestro start` não existe — EST-1133-bis).
-    expect(c.fix).toContain('aluy init');
+    // O hint correto aponta `aluy bootstrap` (o `aluy maestro start` não existe — EST-1133-bis).
+    expect(c.fix).toContain('aluy bootstrap');
   });
 
   it('ollama fora ⇒ ✗', () => {
