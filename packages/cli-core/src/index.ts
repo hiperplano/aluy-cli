@@ -53,7 +53,20 @@ export * from './util/box-table.js';
 export { parseVersion, compareVersions, isNewer } from './version-compare.js';
 export type { ParsedVersion } from './version-compare.js';
 
-// Conector Telegram (ADR-0134) — filtro de ingresso por allowlist. PURO e INERTE
-// (ainda não ligado a `--telegram`/boot); long-poll/keychain/egress no @hiperplano/aluy-cli.
-export { classifyTelegramIngress, parseAllowlist } from './connector/telegram-ingress.js';
+// Padrão de conectores (ADR-0135) — porta `Connector` portável + a MALHA genérica (a
+// fronteira de confiança, single-source). PURO e INERTE (ainda não ligado a `--connector`/
+// `--telegram`/boot); o I/O concreto vive no @hiperplano/aluy-cli.
+export { classifyConnectorIngress } from './connector/mesh.js';
+export type { ConnectorIngress } from './connector/mesh.js';
+export type {
+  Connector,
+  ConnectorMeta,
+  IncomingMessage,
+  OutgoingMessage,
+  SenderId,
+  ConversationRef,
+  Provenance,
+} from './connector/types.js';
+// Conector Telegram (ADR-0134) — adaptador de ingresso que DELEGA à malha.
+export { classifyTelegramIngress, parseAllowlist, TELEGRAM_META } from './connector/telegram-ingress.js';
 export type { TelegramUpdate, IngressDecision } from './connector/telegram-ingress.js';
