@@ -94,6 +94,24 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --tag "${{ steps.ver.outputs.disttag }}"
 
+      - name: dist-tag 'latest' → versão nova (só enquanto não há stable)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          v='${{ steps.ver.outputs.version }}'
+          # `npm i` sem tag pega o `latest`. Enquanto só há prereleases (latest atual
+          # com `-` ou inexistente), aponta o latest p/ a versão recém-publicada — assim
+          # o bare-install pega o rc mais novo. Quando houver um stable (latest sem `-`),
+          # prereleases NÃO mexem no latest (mantém o stable).
+          cur="$(npm view @hiperplano/aluy-cli@latest version 2>/dev/null || true)"
+          if [ -z "$cur" ] || printf '%s' "$cur" | grep -q '-'; then
+            npm dist-tag add "@hiperplano/aluy-cli@$v" latest
+            echo "::notice::dist-tag latest → $v (ainda sem stable)"
+          else
+            echo "::notice::latest mantido em $cur (já há stable; prerelease não mexe)"
+          fi
+
       - name: GitHub Release (cria ou atualiza) + tarball
         env:
           GH_TOKEN: ${{ github.token }}

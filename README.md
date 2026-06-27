@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/aluy-wordmark-white.png">
-    <img src="docs/aluy-wordmark.png" alt="Aluy" height="56">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/hiperplano/aluy-cli/main/docs/aluy-wordmark-white.png">
+    <img src="https://raw.githubusercontent.com/hiperplano/aluy-cli/main/docs/aluy-wordmark.png" alt="Aluy" height="56">
   </picture>
 </p>
 
