@@ -66,4 +66,10 @@ describe('classifyConnectorIngress (ADR-0135 — fronteira de confiança genéri
       'discard',
     );
   });
+
+  it('TC-6: remetente é BOT ⇒ descarta (anti-loop), mesmo allowlistado', () => {
+    const d = classifyConnectorIngress(msg({ senderIsBot: true }), new Set(['100']), NON_FORGEABLE);
+    expect(d.kind).toBe('discard');
+    if (d.kind === 'discard') expect(d.reason).toMatch(/bot/i);
+  });
 });

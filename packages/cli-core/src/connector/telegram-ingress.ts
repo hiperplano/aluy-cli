@@ -38,6 +38,8 @@ export interface TelegramUpdate {
    * do dono é instrução; só o `quotedText` é DADO embutido. (Distinto de `forwarded`.)
    */
   readonly quotedText?: string;
+  /** `from.is_bot` — remetente é bot ⇒ a malha DESCARTA (anti-loop TC-6, R2). */
+  readonly isBot?: boolean;
 }
 
 /** A decisão (alias da decisão da malha — instrução × dado × descarte). */
@@ -66,6 +68,7 @@ export function telegramUpdateToIncoming(update: TelegramUpdate): IncomingMessag
     sender: String(update.fromId),
     conversation: String(update.chatId),
     provenance,
+    ...(update.isBot === true ? { senderIsBot: true } : {}),
   };
 }
 

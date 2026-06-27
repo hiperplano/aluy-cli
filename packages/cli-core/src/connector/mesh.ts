@@ -52,6 +52,11 @@ export function classifyConnectorIngress(
   if (!allowlist.has(msg.conversation)) {
     return { kind: 'discard', reason: `canal ${msg.conversation} não-allowlistado` };
   }
+  // TC-6 — filtro de AUTO-MENSAGEM: remetente-bot (incl. o próprio bot) ⇒ DESCARTA. Fecha o
+  // loop "bot reprocessa a própria resposta". O dono (v1) é humano; mensagem de bot nunca é comando.
+  if (msg.senderIsBot === true) {
+    return { kind: 'discard', reason: `remetente é bot (anti-loop, TC-6)` };
+  }
   const text = msg.content.trim();
   if (text === '') {
     return { kind: 'discard', reason: 'mensagem sem conteúdo' };

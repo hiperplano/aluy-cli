@@ -22,7 +22,7 @@ function fakeFetch(responses: unknown[]) {
 describe('TelegramClient — long-poll concreto (ADR-0134 §4)', () => {
   it('poll: parseia e AVANÇA o offset (offset vai na próxima URL)', async () => {
     const { fn, urls } = fakeFetch([
-      { ok: true, result: [{ update_id: 5, message: { chat: { id: 1 }, text: 'a' } }] },
+      { ok: true, result: [{ update_id: 5, message: { chat: { id: 1, type: 'private' }, text: 'a' } }] },
       { ok: true, result: [] },
     ]);
     const c = new TelegramClient({ token: TOKEN, fetchFn: fn });
@@ -56,8 +56,8 @@ describe('TelegramClient — long-poll concreto (ADR-0134 §4)', () => {
 
   it('stream: produz updates e PARA quando o signal aborta', async () => {
     const { fn } = fakeFetch([
-      { ok: true, result: [{ update_id: 1, message: { chat: { id: 1 }, text: 'um' } }] },
-      { ok: true, result: [{ update_id: 2, message: { chat: { id: 1 }, text: 'dois' } }] },
+      { ok: true, result: [{ update_id: 1, message: { chat: { id: 1, type: 'private' }, text: 'um' } }] },
+      { ok: true, result: [{ update_id: 2, message: { chat: { id: 1, type: 'private' }, text: 'dois' } }] },
     ]);
     const ac = new AbortController();
     const c = new TelegramClient({ token: TOKEN, fetchFn: fn });

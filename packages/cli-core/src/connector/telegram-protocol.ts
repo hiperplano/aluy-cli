@@ -41,9 +41,16 @@ export function parseGetUpdates(raw: unknown, currentOffset: number): ParsedUpda
     // v1: só `message` (ignora edited_message/channel_post/etc.).
     const m = obj(u.message);
     if (!m) continue;
-    const chatId = num(obj(m.chat)?.id);
+    const chat = obj(m.chat);
+    const chatId = num(chat?.id);
     if (chatId === undefined) continue; // sem chat ⇒ não dá p/ allowlist nem responder.
-    const fromId = num(obj(m.from)?.id) ?? chatId;
+    // R4 (gate seguranca) — v1 = DM 1:1: só chat PRIVADO. Grupo/canal ⇒ IGNORA (lá o chat-id
+    // é coletivo e `chatId != fromId`, então autorizar por chat-id abriria instrução a
+    // terceiros do grupo). Garante chatId == fromId. `type` ausente ⇒ trata como não-privado.
+    if (chat?.type !== 'private') continue;
+    const from = obj(m.from);
+    const fromId = num(from?.id) ?? chatId;
+    const isBot = from?.is_bot === true; // R2/TC-6 — remetente-bot ⇒ a malha descarta.
     const text = typeof m.text === 'string' ? m.text : '';
     // FORWARD (msg inteira de terceiro): qualquer marcador de forward da Bot API.
     const forwarded =
@@ -63,6 +70,7 @@ export function parseGetUpdates(raw: unknown, currentOffset: number): ParsedUpda
       text,
       ...(forwarded ? { forwarded: true } : {}),
       ...(quotedText !== undefined ? { quotedText } : {}),
+      ...(isBot ? { isBot: true } : {}),
     });
   }
   return { updates, nextOffset: maxId + 1 };

@@ -44,6 +44,12 @@ export interface IncomingMessage {
   readonly conversation: ConversationRef;
   /** Proveniência (autor-direto × terceiro-embutido). */
   readonly provenance: Provenance;
+  /**
+   * O remetente é um BOT? (TC-6) — usado pela malha p/ DESCARTAR auto-mensagem / mensagem
+   * de bot, fechando o loop "bot reprocessa a própria resposta". O dono (v1) é humano, então
+   * qualquer remetente-bot é descartado. O conector preenche (ex.: `from.is_bot` do Telegram).
+   */
+  readonly senderIsBot?: boolean;
 }
 
 /** Uma resposta a ENVIAR de volta ao canal (egresso). O alvo NÃO é arbitrário (§1.b). */

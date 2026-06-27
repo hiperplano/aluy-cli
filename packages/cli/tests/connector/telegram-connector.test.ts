@@ -28,7 +28,7 @@ describe('TelegramConnector — impl da porta Connector (ADR-0135 §1)', () => {
 
   it('incoming() mapeia updates → IncomingMessage que a malha classifica', async () => {
     const client = clientWith([
-      { ok: true, result: [{ update_id: 1, message: { chat: { id: 100 }, from: { id: 100 }, text: 'rode' } }] },
+      { ok: true, result: [{ update_id: 1, message: { chat: { id: 100, type: 'private' }, from: { id: 100 }, text: 'rode' } }] },
       { ok: true, result: [] },
     ]);
     const ac = new AbortController();
