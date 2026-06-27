@@ -155,6 +155,69 @@ export interface UserConfig {
     readonly mem0?: boolean;
     readonly headroom?: boolean;
   };
+  /**
+   * ADR-0136 (config único) — catálogo de providers LOCAIS do usuário, ABSORVIDO do
+   * antigo `~/.aluy/providers.json` (que passa a `.migrated`). É DADO PÚBLICO
+   * (id/label/base_url/slug — CLI-SEC-7), NUNCA credencial (essa fica no keychain/env
+   * por provider). Cada entrada espelha `LocalProviderEntry` cru; a validação profunda
+   * é no `buildLocalCatalog` do core, no uso. Ausente ⇒ só o catálogo embutido.
+   */
+  readonly providers?: readonly UserProviderEntry[];
+}
+
+/** Uma entrada de provider local no config único (DADO público — sem credencial). */
+export interface UserProviderEntry {
+  readonly id: string;
+  readonly label?: string;
+  readonly wireFormat: 'openai-compat' | 'anthropic' | 'gemini';
+  readonly baseUrl: string;
+  readonly auth?: readonly string[];
+  readonly defaultModel: string;
+  readonly models?: readonly string[];
+}
+
+/** Formatos de fio aceitos (espelha `WireFormat` do core; gatekeeper de `sanitize`). */
+const WIRE_FORMATS = new Set(['openai-compat', 'anthropic', 'gemini']);
+
+/** Normaliza `string | string[]` p/ array de strings não-vazias; vazio ⇒ undefined. */
+function normStrList(raw: unknown): readonly string[] | undefined {
+  const arr = Array.isArray(raw) ? raw : raw !== undefined ? [raw] : [];
+  const out = arr.filter((v): v is string => typeof v === 'string' && v.trim() !== '');
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Sanitiza o array de providers do config (ADR-0136). Mantém só entradas BEM-FORMADAS
+ * (id/baseUrl/defaultModel string não-vazia + wireFormat conhecido); descarta o resto.
+ * Copia só campos reconhecidos (nunca credencial). Array vazio/sem válidas ⇒ undefined.
+ */
+function sanitizeProviderEntries(raw: unknown): readonly UserProviderEntry[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: UserProviderEntry[] = [];
+  for (const e of raw) {
+    if (typeof e !== 'object' || e === null) continue;
+    const o = e as Record<string, unknown>;
+    const id = typeof o.id === 'string' ? o.id.trim() : '';
+    const baseUrl = typeof o.baseUrl === 'string' ? o.baseUrl.trim() : '';
+    const defaultModel = typeof o.defaultModel === 'string' ? o.defaultModel.trim() : '';
+    const wf = typeof o.wireFormat === 'string' ? o.wireFormat : '';
+    if (id === '' || baseUrl === '' || defaultModel === '' || !WIRE_FORMATS.has(wf)) continue;
+    // auth/models: aceita string única OU array (espelha o legado providers.json e o
+    // parseAuth do core). Normaliza p/ array de strings; vazio ⇒ campo omitido.
+    const auth = normStrList(o.auth);
+    const models = normStrList(o.models);
+    const entry: UserProviderEntry = {
+      id,
+      wireFormat: wf as UserProviderEntry['wireFormat'],
+      baseUrl,
+      defaultModel,
+      ...(typeof o.label === 'string' && o.label.trim() ? { label: o.label.trim() } : {}),
+      ...(auth ? { auth } : {}),
+      ...(models ? { models } : {}),
+    };
+    out.push(entry);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 export interface UserConfigStoreOptions {
@@ -206,6 +269,7 @@ function sanitize(raw: unknown): UserConfig {
     rooms?: { backend?: string };
     profile?: 'turbo' | 'leve';
     sidecarToggles?: { ollama?: boolean; mem0?: boolean; headroom?: boolean };
+    providers?: readonly UserProviderEntry[];
   } = {};
   // theme: precisa ser um nome conhecido do catálogo (senão ignora → default dark).
   if (typeof obj.theme === 'string') {
@@ -278,6 +342,10 @@ function sanitize(raw: unknown): UserConfig {
       out.sidecarToggles = clean;
     }
   }
+
+  // ADR-0136 (config único) — providers absorvidos do antigo providers.json.
+  const providers = sanitizeProviderEntries(obj.providers);
+  if (providers) out.providers = providers;
 
   return out;
 }

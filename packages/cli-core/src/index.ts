@@ -52,3 +52,8 @@ export * from './util/box-table.js';
 // Update-notifier — compare SemVer puro (o fetch/cache vive no @hiperplano/aluy-cli).
 export { parseVersion, compareVersions, isNewer } from './version-compare.js';
 export type { ParsedVersion } from './version-compare.js';
+
+// Conector Telegram (ADR-0134) — filtro de ingresso por allowlist. PURO e INERTE
+// (ainda não ligado a `--telegram`/boot); long-poll/keychain/egress no @hiperplano/aluy-cli.
+export { classifyTelegramIngress, parseAllowlist } from './connector/telegram-ingress.js';
+export type { TelegramUpdate, IngressDecision } from './connector/telegram-ingress.js';

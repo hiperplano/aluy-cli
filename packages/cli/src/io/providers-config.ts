@@ -13,8 +13,8 @@
 // nomes/slugs/base_url PÚBLICOS — a credencial fica no keychain/env por provider.
 
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { readFileSync, renameSync } from 'node:fs';
 import {
   buildLocalCatalog,
   defaultLocalCatalog,
@@ -22,9 +22,46 @@ import {
   type WireFormat,
   type LocalAuthMode,
 } from '@hiperplano/aluy-cli-core';
+import { UserConfigStore, type UserProviderEntry } from './user-config.js';
 
 /** Nome do arquivo de override do catálogo (dentro de `~/.aluy/`). */
 export const PROVIDERS_FILENAME = 'providers.json';
+
+/**
+ * ADR-0136 (config único) — MIGRAÇÃO one-shot do legado `~/.aluy/providers.json` para a
+ * seção `providers` do `~/.aluy/config.json`. Idempotente e FAIL-SAFE (nunca lança):
+ *   - config já tem `providers` ⇒ no-op (já migrado).
+ *   - providers.json ausente/ilegível/vazio ⇒ no-op.
+ *   - providers.json com entradas ⇒ grava no config (via store, sanitizado) e RENOMEIA
+ *     providers.json → providers.json.migrated (não apaga — rastro auditável).
+ * Retorna a allowlist efetiva de entradas no config após a migração (ou as já lá).
+ */
+export function migrateLegacyProvidersJson(baseDir?: string): readonly UserProviderEntry[] {
+  const store = new UserConfigStore(baseDir ? { baseDir } : {});
+  const already = store.load().providers;
+  if (already && already.length > 0) return already; // já migrado/preenchido
+  const file = providersConfigPath(baseDir);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return already ?? []; // sem legado a migrar
+  }
+  const arr = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'object' && raw !== null && Array.isArray((raw as Record<string, unknown>).providers)
+      ? ((raw as Record<string, unknown>).providers as unknown[])
+      : [];
+  if (arr.length === 0) return already ?? [];
+  // store.save sanitiza (descarta entradas malformadas); só as válidas sobrevivem.
+  store.save({ providers: arr as readonly UserProviderEntry[] });
+  try {
+    renameSync(file, file + '.migrated'); // rastro: providers.json.migrated
+  } catch {
+    /* rename best-effort; o config já é a fonte de verdade de qualquer forma */
+  }
+  return store.load().providers ?? [];
+}
 
 export interface LoadProvidersOptions {
   /** Raiz do `~/.aluy/` (default: `<home>/.aluy`). Injetável p/ teste (tmpdir). */
@@ -51,34 +88,12 @@ export function providersConfigPath(baseDir?: string): string {
  * descartadas pelo sanitize do core). NUNCA lança.
  */
 export function loadLocalProviderCatalog(opts: LoadProvidersOptions = {}): LocalProviderCatalog {
-  const file = providersConfigPath(opts.baseDir);
-  let text: string;
-  try {
-    text = readFileSync(file, 'utf8');
-  } catch {
-    // ENOENT (sem override) e qualquer erro de leitura ⇒ default embutido, SILENCIOSO.
-    return defaultLocalCatalog();
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    // Arquivo existe mas é JSON inválido ⇒ AVISA e cai no default (fail-soft).
-    warnOnce(opts, file, 'JSON inválido');
-    return defaultLocalCatalog();
-  }
-  // JSON válido: o core mescla (sanitize descarta entradas inválidas; o resto vale).
-  return buildLocalCatalog(parsed);
-}
-
-/** Emite o aviso de fallback (uma vez por chamada de load). NUNCA lança. */
-function warnOnce(opts: LoadProvidersOptions, file: string, why: string): void {
-  const sink = opts.warn ?? ((m: string) => process.stderr.write(m + '\n'));
-  try {
-    sink(`aviso: ${file} ${why} — usando o catálogo de providers embutido.`);
-  } catch {
-    /* aviso best-effort: nunca derruba */
-  }
+  // ADR-0136 (config único): a fonte de verdade é o config.json. Migra o legado
+  // providers.json (one-shot, fail-safe) e lê dali. Sem entradas ⇒ default embutido.
+  const entries = migrateLegacyProvidersJson(opts.baseDir);
+  if (entries.length === 0) return defaultLocalCatalog();
+  // O core mescla com o embutido (sanitize descarta inválidas; o resto vale).
+  return buildLocalCatalog(entries);
 }
 
 /** Entrada de override que o usuário/onboard registra (espelha `LocalProviderEntry` cru). */
@@ -93,31 +108,17 @@ export interface ProviderOverrideInput {
 }
 
 /**
- * ESCRITA do `~/.aluy/providers.json` — registra/atualiza um provider custom (merge por
- * `id`, o novo SUBSTITUI). É o que faltava: até aqui o catálogo só LIA. Usado pelo
+ * ESCRITA do provider custom (merge por `id`, o novo SUBSTITUI). Usado pelo
  * `aluy onboard` (opção "custom OpenAI-compatível") e por `aluy provider add`.
  *
- * FAIL-SOFT na leitura do existente (ausente/inválido ⇒ começa vazio); aceita tanto o
- * formato lista (`[...]`) quanto `{ providers: [...] }` e RE-ESCREVE como lista canônica.
- * Cria `~/.aluy/` se preciso. Lança só em erro REAL de escrita (disco/permissão).
+ * ADR-0136 (config único): grava na seção `providers` do `config.json` (via store,
+ * sanitizado), NÃO mais em providers.json. Migra o legado antes (one-shot). Best-effort
+ * na persistência (o store nunca derruba a sessão).
  */
 export function addLocalProviderOverride(input: ProviderOverrideInput, baseDir?: string): void {
-  const file = providersConfigPath(baseDir);
-  let existing: unknown[] = [];
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
-    if (Array.isArray(parsed)) existing = parsed;
-    else if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      Array.isArray((parsed as Record<string, unknown>).providers)
-    ) {
-      existing = (parsed as Record<string, unknown>).providers as unknown[];
-    }
-  } catch {
-    /* sem arquivo / JSON inválido ⇒ começa do zero (o onboard sobrescreve com algo válido) */
-  }
-  const entry = {
+  const store = new UserConfigStore(baseDir ? { baseDir } : {});
+  const existing = migrateLegacyProvidersJson(baseDir); // absorve legado + pega o atual
+  const entry: UserProviderEntry = {
     id: input.id,
     label: input.label ?? input.id,
     wireFormat: input.wireFormat,
@@ -127,34 +128,16 @@ export function addLocalProviderOverride(input: ProviderOverrideInput, baseDir?:
     models: input.models ?? [input.defaultModel],
   };
   // merge por id: remove a entrada antiga de mesmo id, anexa a nova (a última vence).
-  const kept = existing.filter(
-    (e) => !(typeof e === 'object' && e !== null && (e as Record<string, unknown>).id === input.id),
-  );
+  const kept = existing.filter((e) => e.id !== input.id);
   kept.push(entry);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(kept, null, 2) + '\n');
+  store.save({ providers: kept });
 }
 
-/** Remove um provider custom do `providers.json` (por `id`). No-op se ausente. */
+/** Remove um provider custom da seção `providers` do config (por `id`). No-op se ausente. */
 export function removeLocalProviderOverride(id: string, baseDir?: string): void {
-  const file = providersConfigPath(baseDir);
-  let existing: unknown[] = [];
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
-    if (Array.isArray(parsed)) existing = parsed;
-    else if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      Array.isArray((parsed as Record<string, unknown>).providers)
-    ) {
-      existing = (parsed as Record<string, unknown>).providers as unknown[];
-    }
-  } catch {
-    return; // nada a remover
-  }
-  const kept = existing.filter(
-    (e) => !(typeof e === 'object' && e !== null && (e as Record<string, unknown>).id === id),
-  );
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(kept, null, 2) + '\n');
+  const store = new UserConfigStore(baseDir ? { baseDir } : {});
+  const existing = migrateLegacyProvidersJson(baseDir);
+  const kept = existing.filter((e) => e.id !== id);
+  if (kept.length === existing.length) return; // nada a remover
+  store.save({ providers: kept });
 }
