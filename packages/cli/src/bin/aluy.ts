@@ -331,6 +331,7 @@ async function main(): Promise<void> {
       // travaria ANTES de abrir a sessão (`aluy onboard → aluy bootstrap → aluy`). Como o
       // bootstrap JÁ terminou aqui, sair é seguro e garante que o script siga pro `aluy`.
       process.exit(process.exitCode ?? 0);
+      break;
     }
     case 'onboard': {
       // `aluy onboard` — onboarding interativo (Ink). Import dinâmico p/ não puxar Ink

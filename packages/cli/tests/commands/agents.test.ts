@@ -104,7 +104,6 @@ describe('EST-0977 · aluy agents (shell)', () => {
     writeProject('p.md', '---\nname: pagent\ndescription: project agent\n---\ncorpo do projeto');
 
     const { code, out } = run({ globalBase, projectRoot });
-    const t = out.join('\n');
     expect(code).toBe(0);
     const rowG = out.find((l) => l.includes('gagent'))!;
     const rowP = out.find((l) => l.includes('pagent'))!;

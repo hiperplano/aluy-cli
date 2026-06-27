@@ -94,7 +94,6 @@ describe('EST-1112 · aluy skills (shell)', () => {
     writeProject('p-skill', '---\nname: pskill\ndescription: project\n---\ncorpo');
 
     const { code, out } = run({ globalBase, projectRoot });
-    const t = out.join('\n');
     expect(code).toBe(0);
     const rowG = out.find((l) => l.includes('gskill'))!;
     const rowP = out.find((l) => l.includes('pskill'))!;

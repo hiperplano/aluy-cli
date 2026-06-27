@@ -17,6 +17,7 @@ await build({
   entryPoints: { 'bin/aluy': 'src/bin/aluy.ts', index: 'src/index.ts' },
   outdir: 'dist-bundle',
   bundle: true,
+  minify: true,
   platform: 'node',
   format: 'esm',
   target: 'node20',

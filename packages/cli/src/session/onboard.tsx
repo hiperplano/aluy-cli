@@ -164,7 +164,6 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
   // Recebe o profile ESCOLHIDO direto (não lê o estado `profile`): o setProfile do
