@@ -30,6 +30,7 @@ import {
 import { routeRename, runRenameLinear } from './rename.js';
 import { setWindowTitle } from '../ui/window-title.js';
 import { CLI_VERSION } from '../version.js';
+import { readUpdateNote, refreshUpdateCheck } from '../io/update-check.js';
 import { ThemeRoot } from './ThemeRoot.js';
 import { buildSession, type BuildSessionOptions } from './wiring.js';
 // ADR-0120 / EST-1113 — backend LOCAL (BYO): resolve a config e monta o LocalModelClient
@@ -1487,6 +1488,15 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       codexMcp: codexMcpHadServers,
     });
     if (lines.length > 0) built.controller.pushNote('config', lines);
+  }
+
+  // Update-notifier — nota discreta no boot se o cache já viu uma versão mais nova; em
+  // paralelo refresca o cache (1x/dia, fail-soft) p/ o próximo boot. Off via
+  // ALUY_NO_UPDATE_CHECK=1 / NO_UPDATE_NOTIFIER=1 / CI=true. Nunca trava nem usa rede aqui.
+  {
+    const upd = readUpdateNote(CLI_VERSION, env);
+    if (upd !== undefined) built.controller.pushNote('update', [upd]);
+    void refreshUpdateCheck(CLI_VERSION, env);
   }
 
   // EST-0942 — CHECK DE CREDENCIAL no boot. Se NÃO há credencial alguma (keychain

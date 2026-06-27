@@ -48,3 +48,7 @@ export * from './agent/maestro/index.js';
 // listagem (/agents, /skills, /model, /workflows no core; /tools, /mcp re-exportam
 // no @hiperplano/aluy-cli). Só formata string (sem Ink/IO) ⇒ portável (ADR-0053 §8).
 export * from './util/box-table.js';
+
+// Update-notifier — compare SemVer puro (o fetch/cache vive no @hiperplano/aluy-cli).
+export { parseVersion, compareVersions, isNewer } from './version-compare.js';
+export type { ParsedVersion } from './version-compare.js';
