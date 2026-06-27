@@ -11,7 +11,7 @@
 //    de segurança que o ADR-0134 exige.
 
 import { classifyConnectorIngress, type ConnectorIngress } from './mesh.js';
-import type { IncomingMessage, Provenance, ConnectorMeta } from './types.js';
+import type { IncomingMessage, Provenance, ConnectorMeta, ConversationRef } from './types.js';
 
 /** Metadados do conector Telegram. `authIsForgeable:false` — o from-id é assinado pelo servidor. */
 export const TELEGRAM_META: ConnectorMeta = {
@@ -44,15 +44,14 @@ export interface TelegramUpdate {
 export type IngressDecision = ConnectorIngress;
 
 /**
- * Classifica um update do Telegram contra a allowlist do dono (ADR-0134 §1/§2 via malha
- * ADR-0135). PURO. Default FECHADO. Mapeia o update p/ `IncomingMessage` e delega.
+ * Mapeia um `TelegramUpdate` p/ a `IncomingMessage` portável (proveniência inclusa). PURO.
+ * SINGLE-SOURCE da tradução: usado pelo `classifyTelegramIngress` E pela impl `Connector`
+ * (incoming()), p/ não divergirem.
+ *
+ * FORWARD (msg inteira de terceiro) ⇒ `third-party-relayed` (a malha trata como DADO).
+ * REPLY-COM-QUOTE (dono escreve + cita) ⇒ `author-direct` + o quote vira DADO embutido.
  */
-export function classifyTelegramIngress(
-  update: TelegramUpdate,
-  allowlist: ReadonlySet<number>,
-): ConnectorIngress {
-  // FORWARD (msg inteira de terceiro) ⇒ third-party-relayed (a malha trata como DADO).
-  // REPLY-COM-QUOTE (dono escreve + cita) ⇒ author-direct + o quote vira DADO embutido.
+export function telegramUpdateToIncoming(update: TelegramUpdate): IncomingMessage {
   let provenance: Provenance;
   if (update.forwarded === true) {
     provenance = { kind: 'third-party-relayed' };
@@ -62,15 +61,30 @@ export function classifyTelegramIngress(
       ? { kind: 'author-direct', embeddedThirdParty: embedded }
       : { kind: 'author-direct' };
   }
-  const msg: IncomingMessage = {
+  return {
     content: update.text,
     sender: String(update.fromId),
     conversation: String(update.chatId),
     provenance,
   };
+}
+
+/** O `ConversationRef` (opaco) de um chat-id do Telegram. Inverso do `Number(ref)` no send. */
+export function telegramConversationRef(chatId: number): ConversationRef {
+  return String(chatId);
+}
+
+/**
+ * Classifica um update do Telegram contra a allowlist do dono (ADR-0134 §1/§2 via malha
+ * ADR-0135). PURO. Default FECHADO. Mapeia o update p/ `IncomingMessage` e delega.
+ */
+export function classifyTelegramIngress(
+  update: TelegramUpdate,
+  allowlist: ReadonlySet<number>,
+): ConnectorIngress {
   // A allowlist do Telegram é por chat-id (numérica); a malha trabalha com ids opacos (string).
   const allow = new Set<string>(Array.from(allowlist, (n) => String(n)));
-  return classifyConnectorIngress(msg, allow, TELEGRAM_META);
+  return classifyConnectorIngress(telegramUpdateToIncoming(update), allow, TELEGRAM_META);
 }
 
 /** Allowlist a partir de uma lista de chat-ids (DADO de config; ignora inválidos). */

@@ -69,7 +69,13 @@ export type {
 } from './connector/types.js';
 // Conector Telegram (ADR-0134) — adaptador de ingresso que DELEGA à malha + parser do
 // long-poll `getUpdates` (puro, fail-safe; o I/O HTTP vive no @hiperplano/aluy-cli).
-export { classifyTelegramIngress, parseAllowlist, TELEGRAM_META } from './connector/telegram-ingress.js';
+export {
+  classifyTelegramIngress,
+  telegramUpdateToIncoming,
+  telegramConversationRef,
+  parseAllowlist,
+  TELEGRAM_META,
+} from './connector/telegram-ingress.js';
 export type { TelegramUpdate, IngressDecision } from './connector/telegram-ingress.js';
 export { parseGetUpdates } from './connector/telegram-protocol.js';
 export type { ParsedUpdates } from './connector/telegram-protocol.js';
