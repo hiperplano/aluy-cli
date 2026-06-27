@@ -13,6 +13,7 @@
 
 import { JUDGE_MODEL } from '@hiperplano/aluy-cli-core';
 import { resolveMem0Url, resolveOllamaUrl } from './sidecar-urls.js';
+import type { UserServicesConfig } from '../io/user-config.js';
 
 export type WarmTarget = 'mem0' | 'ollama';
 
@@ -28,9 +29,12 @@ export async function warmupSidecars(opts?: {
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchFn?: typeof fetch;
   readonly timeoutMs?: number;
+  /** Seção `services` do config único (ADR-0136 §8/§9): porta/host dos sidecars. */
+  readonly services?: UserServicesConfig;
 }): Promise<void> {
   const targets = opts?.targets ?? new Set<WarmTarget>(['mem0', 'ollama']);
   const env = opts?.env ?? process.env;
+  const services = opts?.services;
   const fetchFn = opts?.fetchFn ?? (globalThis.fetch as typeof fetch);
   const timeoutMs = opts?.timeoutMs ?? WARMUP_TIMEOUT_MS;
 
@@ -47,13 +51,13 @@ export async function warmupSidecars(opts?: {
 
   if (targets.has('mem0')) {
     // search dummy: carrega o embedder + chromadb (a parte cara do 1º recall).
-    const base = resolveMem0Url(env).replace(/\/$/, '');
+    const base = resolveMem0Url(env, services).replace(/\/$/, '');
     jobs.push(ping(`${base}/v1/memories/?user_id=__aluy_warmup__&query=warmup&limit=1`));
   }
 
   if (targets.has('ollama')) {
     // generate dummy com o JUDGE_MODEL: carrega o qwen-0.5b na memória (o ~9.5s cold).
-    const base = resolveOllamaUrl(env).replace(/\/$/, '');
+    const base = resolveOllamaUrl(env, services).replace(/\/$/, '');
     jobs.push(
       ping(`${base}/api/generate`, {
         method: 'POST',

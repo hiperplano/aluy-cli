@@ -830,6 +830,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     tier: resolvedTier,
     // ADR-0120 — backend EFETIVO (flag>env>config>default) p/ a StatusBar indicar o modo.
     effectiveBackend: resolvedBackend,
+    // ADR-0136 §8/§9 — seção `services` (porta/host dos sidecars) p/ o judge/recall AO VIVO.
+    ...(savedConfig.services ? { services: savedConfig.services } : {}),
     // EST-1112 · ADR-0119 — budget local resolvido (flag>env>config>default).
     localBudget,
     // EST-0972/0962 (BUG Custom) — slug Custom resolvido (só sob `tier:'custom'`): da

@@ -36,6 +36,7 @@ import { OllamaJudgeEngine } from './ollama-judge.js';
 import { Mem0MemoryEngine } from '../io/mem0-memory-engine.js';
 import { resolveMem0Url, resolveOllamaUrl } from './sidecar-urls.js';
 import { deriveMemoryScope } from './memory-scope.js';
+import type { UserServicesConfig } from '../io/user-config.js';
 
 // ─── Opções de wiring ──────────────────────────────────────────────────────
 
@@ -52,6 +53,9 @@ export interface ResolveMaestroOptions {
 
   /** MemoryEngine injetável (teste). Default: new Mem0MemoryEngine(). */
   readonly memory?: MemoryEngine;
+
+  /** Seção `services` do config único (ADR-0136 §8/§9): porta/host do sidecar Ollama (judge). */
+  readonly services?: UserServicesConfig;
 }
 
 // ─── resolveMaestro ────────────────────────────────────────────────────────
@@ -98,7 +102,7 @@ export function resolveMaestro(opts: ResolveMaestroOptions = {}): MaestroPort | 
   const judge: JudgeEngine =
     opts.judge ??
     new OllamaJudgeEngine({
-      baseUrl: resolveOllamaUrl(opts.env),
+      baseUrl: resolveOllamaUrl(opts.env, opts.services),
       model: JUDGE_MODEL,
     });
 
@@ -220,6 +224,8 @@ export function resolveMemory(opts?: {
   env?: Record<string, string | undefined>;
   memory?: MemoryEngine;
   cwd?: string;
+  /** Seção `services` do config único (ADR-0136 §8/§9): porta/host do sidecar Mem0. */
+  services?: UserServicesConfig;
 }):
   | { memory: MemoryEngine; memoryScope: string; memoryRecallScopes: readonly string[] }
   | undefined {
@@ -238,7 +244,7 @@ export function resolveMemory(opts?: {
   // (ver memory-scope.ts). STORE no escopo novo; RECALL nos dois (migração sem
   // reset das memórias já gravadas).
   const { scope, recallScopes } = deriveMemoryScope(cwd);
-  const memory = opts?.memory ?? new Mem0MemoryEngine({ mem0Url: resolveMem0Url(e) });
+  const memory = opts?.memory ?? new Mem0MemoryEngine({ mem0Url: resolveMem0Url(e, opts?.services) });
   return { memory, memoryScope: scope, memoryRecallScopes: recallScopes };
 }
 

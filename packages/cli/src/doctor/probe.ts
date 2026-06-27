@@ -50,7 +50,7 @@ import { McpConfigStore } from '../mcp/mcp-config-store.js';
 import { CodexMcpConfigStore } from '../mcp/codex-mcp-config.js';
 import { PROJECT_MCP_CONFIG_FILENAME } from '../mcp/project-mcp-config.js';
 import { UserAgentsLoader } from '../io/user-agents.js';
-import { CONFIG_FILENAME } from '../io/user-config.js';
+import { CONFIG_FILENAME, UserConfigStore, type UserServicesConfig } from '../io/user-config.js';
 import { CLI_VERSION } from '../version.js';
 import type {
   AuthFact,
@@ -645,10 +645,17 @@ async function gatherSidecars(deps: DoctorProbeDeps): Promise<SidecarsFact> {
   // resolvers env-configuráveis (ALUY_{MEM0,OLLAMA,HEADROOM}_URL) — o doctor proba
   // ONDE o engine REALMENTE fala, não uma porta hardcodada. Default = porta canônica.
   const env = deps.env ?? process.env;
+  // services (ADR-0136 §8/§9): porta/host salvos no config — proba ONDE o engine fala.
+  let services: UserServicesConfig | undefined;
+  try {
+    services = new UserConfigStore({ baseDir: aluyHomeOf(deps) }).load().services;
+  } catch {
+    /* config ausente/corrompida ⇒ default (porta canônica). */
+  }
   const [headroom, ollama, mem0] = await Promise.all([
-    httpProbe(`${resolveHeadroomProbeUrl(env)}/health`, doFetch),
-    httpProbe(`${resolveOllamaUrl(env)}/api/tags`, doFetch),
-    httpProbe(`${resolveMem0Url(env)}/health`, doFetch),
+    httpProbe(`${resolveHeadroomProbeUrl(env, services)}/health`, doFetch),
+    httpProbe(`${resolveOllamaUrl(env, services)}/api/tags`, doFetch),
+    httpProbe(`${resolveMem0Url(env, services)}/health`, doFetch),
   ]);
 
   // Lê perfil + toggles de ~/.aluy/config.json (fail-safe: default TURBO/3-ON).

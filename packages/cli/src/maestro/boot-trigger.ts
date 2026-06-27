@@ -92,7 +92,11 @@ export function triggerBoot(opts: BootTriggerOptions = {}): Promise<unknown> | u
         for (const s of result.states) {
           if (s.running && (s.kind === 'mem0' || s.kind === 'ollama')) warm.add(s.kind);
         }
-        if (warm.size > 0) void warmupSidecars({ targets: warm });
+        if (warm.size > 0)
+          void warmupSidecars({
+            targets: warm,
+            ...(config.services ? { services: config.services } : {}),
+          });
         return result;
       })
       .catch((err: unknown) => {

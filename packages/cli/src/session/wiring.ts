@@ -86,6 +86,7 @@ import { makePreToolGate } from './pre-tool-gate.js';
 import { HookRunner, selectHooks, type HooksConfig } from '@hiperplano/aluy-cli-core';
 import { resolveContextWindow } from '../model/catalog.js';
 import { resolveMaestro, resolveContinuationCfg, resolveMemory } from '../maestro/wiring.js';
+import type { UserServicesConfig } from '../io/user-config.js';
 import type { SessionMeta } from './model.js';
 
 /** Tier default da sessão (HG-2: só o tier sai do cliente; o broker resolve). */
@@ -96,6 +97,12 @@ export const DEFAULT_EXEC_TIMEOUT_MS = 120_000;
 
 export interface BuildSessionOptions {
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Seção `services` do config único (ADR-0136 §8/§9): porta/host dos sidecars.
+   * Resolvido em run.tsx (savedConfig.services) e repassado ao Maestro/Memória, p/ o
+   * judge/recall AO VIVO falarem ONDE o usuário configurou (não só o warmup/doctor).
+   */
+  readonly services?: UserServicesConfig;
   /** Raiz do workspace (cwd preso). Default: process.cwd(). */
   readonly workspaceRoot?: string;
   /**
@@ -1035,7 +1042,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // O wiring resolve o `MaestroPort` concreto (engines + bus + rege) e o injeta.
     // Quando OFF (default), retorna undefined ⇒ baseline bit-a-bit.
     ...(() => {
-      const maestro = resolveMaestro({ env });
+      const maestro = resolveMaestro({ env, ...(opts.services ? { services: opts.services } : {}) });
       if (!maestro) return {};
       // F54 — também liga a política de CONTINUAÇÃO (fim-de-turno). Sem este fio,
       // o seam fica inerte e o agente "para e pede totó" (default-ON c/ Maestro).
@@ -1045,7 +1052,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // F-MEM — liga a MEMÓRIA (Mem0): recall+store no loop, escopo por projeto.
     // Independente do Maestro (kill-switch próprio ALUY_MEM_OFF). Default ON.
     ...(() => {
-      const mem = resolveMemory({ env });
+      const mem = resolveMemory({ env, ...(opts.services ? { services: opts.services } : {}) });
       return mem
         ? {
             memoryEngine: mem.memory,

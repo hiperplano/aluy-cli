@@ -163,6 +163,27 @@ export interface UserConfig {
    * é no `buildLocalCatalog` do core, no uso. Ausente ⇒ só o catálogo embutido.
    */
   readonly providers?: readonly UserProviderEntry[];
+  /**
+   * ADR-0136 EMENDA-1 (§8) — porta/host dos sidecars locais (Ollama/Mem0/headroom).
+   * PREFERÊNCIA REAL (balde a): quem já roda Ollama em `:11500` salva aqui em vez de
+   * reexportar env toda sessão. Precedência: `*_URL` (env) > `*_HOST`/`*_PORT` (env) >
+   * este campo > default. `port` fora de 1..65535 ⇒ descartado (default); `host` só
+   * loopback literal (não relaxar anti-SSRF do egress de sidecar). DADO, não credencial.
+   */
+  readonly services?: UserServicesConfig;
+}
+
+/** Porta/host de um sidecar (ADR-0136 §8). Ambos opcionais; ausente ⇒ default. */
+export interface UserServiceEndpoint {
+  readonly host?: string;
+  readonly port?: number;
+}
+
+/** Seção `services` do config único — endpoints dos sidecars locais. */
+export interface UserServicesConfig {
+  readonly ollama?: UserServiceEndpoint;
+  readonly mem0?: UserServiceEndpoint;
+  readonly headroom?: UserServiceEndpoint;
 }
 
 /** Uma entrada de provider local no config único (DADO público — sem credencial). */
@@ -184,6 +205,43 @@ function normStrList(raw: unknown): readonly string[] | undefined {
   const arr = Array.isArray(raw) ? raw : raw !== undefined ? [raw] : [];
   const out = arr.filter((v): v is string => typeof v === 'string' && v.trim() !== '');
   return out.length > 0 ? out : undefined;
+}
+
+/** Host loopback literal aceito em `services.*.host` (não relaxar anti-SSRF do egress). */
+function isLoopbackHost(v: unknown): v is string {
+  if (typeof v !== 'string') return false;
+  const h = v.trim().toLowerCase();
+  return h === 'localhost' || h === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+}
+
+/** Porta válida 1..65535 (inteiro). Fora disso ⇒ undefined (cai no default). */
+function okPort(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 65535;
+}
+
+/** Sanitiza um endpoint `{host?, port?}` (ADR-0136 §8). Campos inválidos descartados. */
+function sanitizeEndpoint(raw: unknown): UserServiceEndpoint | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const ep: { host?: string; port?: number } = {};
+  if (isLoopbackHost(o.host)) ep.host = o.host.trim();
+  if (okPort(o.port)) ep.port = o.port;
+  return ep.host !== undefined || ep.port !== undefined ? ep : undefined;
+}
+
+/** Sanitiza a seção `services` (ADR-0136 §8). Só sub-endpoints válidos sobrevivem. */
+function sanitizeServices(raw: unknown): UserServicesConfig | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const out: { ollama?: UserServiceEndpoint; mem0?: UserServiceEndpoint; headroom?: UserServiceEndpoint } =
+    {};
+  const ollama = sanitizeEndpoint(o.ollama);
+  const mem0 = sanitizeEndpoint(o.mem0);
+  const headroom = sanitizeEndpoint(o.headroom);
+  if (ollama) out.ollama = ollama;
+  if (mem0) out.mem0 = mem0;
+  if (headroom) out.headroom = headroom;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
@@ -270,6 +328,7 @@ function sanitize(raw: unknown): UserConfig {
     profile?: 'turbo' | 'leve';
     sidecarToggles?: { ollama?: boolean; mem0?: boolean; headroom?: boolean };
     providers?: readonly UserProviderEntry[];
+    services?: UserServicesConfig;
   } = {};
   // theme: precisa ser um nome conhecido do catálogo (senão ignora → default dark).
   if (typeof obj.theme === 'string') {
@@ -346,6 +405,10 @@ function sanitize(raw: unknown): UserConfig {
   // ADR-0136 (config único) — providers absorvidos do antigo providers.json.
   const providers = sanitizeProviderEntries(obj.providers);
   if (providers) out.providers = providers;
+
+  // ADR-0136 EMENDA-1 (§8) — seção services (porta/host dos sidecars).
+  const services = sanitizeServices(obj.services);
+  if (services) out.services = services;
 
   return out;
 }
