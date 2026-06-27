@@ -70,3 +70,11 @@ export type {
 // Conector Telegram (ADR-0134) — adaptador de ingresso que DELEGA à malha.
 export { classifyTelegramIngress, parseAllowlist, TELEGRAM_META } from './connector/telegram-ingress.js';
 export type { TelegramUpdate, IngressDecision } from './connector/telegram-ingress.js';
+// Segredo do conector (TC-3 / CLI-SEC-2): contrato + naming + validadores PUROS; o store
+// concreto (keychain) vive no @hiperplano/aluy-cli.
+export {
+  connectorKeychainAccount,
+  isPlausibleTelegramToken,
+  redactTelegramToken,
+} from './connector/secret-store.js';
+export type { ConnectorSecretStore } from './connector/secret-store.js';
