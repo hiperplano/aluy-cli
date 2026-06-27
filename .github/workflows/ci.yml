@@ -32,9 +32,6 @@ jobs:
       - name: lint
         run: npm run lint
 
-      - name: type-check
-        run: npm run typecheck
-
       - name: build (tsc -b)
         run: npm run build
 

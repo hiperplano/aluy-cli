@@ -36,11 +36,10 @@ jobs:
       - name: instalar deps (lockfile exato)
         run: npm ci
 
-      - name: validar (lint + type-check + build + testes)
+      - name: validar (lint + build [type-check via tsc -b] + testes)
         run: |
           set -euo pipefail
           npm run lint
-          npm run typecheck
           npm run build
           npm test
 
