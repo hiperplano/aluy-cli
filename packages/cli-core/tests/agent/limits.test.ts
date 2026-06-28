@@ -163,6 +163,13 @@ describe('EST-0948 — resolveMaxTokens (precedência flag>env>default, validaç
     // exatamente o piso passa; o clamp garante ≥ piso de qualquer forma
     expect(resolveMaxTokens(String(MIN_TOKENS_FLOOR))).toBe(MIN_TOKENS_FLOOR);
   });
+
+  it('ADR-0136: config.limits.maxTokens entra entre env e default (flag>env>config>default)', () => {
+    expect(resolveMaxTokens(undefined, undefined, 500000)).toBe(500_000); // só config
+    expect(resolveMaxTokens(undefined, '750000', 500000)).toBe(750_000); // env vence config
+    expect(resolveMaxTokens('600000', '750000', 500000)).toBe(600_000); // flag vence tudo
+    expect(resolveMaxTokens(undefined, undefined, MAX_TOKENS_CEILING * 10)).toBe(MAX_TOKENS_CEILING); // config clampada
+  });
 });
 
 describe('EST-0948 — DEFAULT_LIMITS de iterações (subiu de 25 p/ 300)', () => {
@@ -204,6 +211,12 @@ describe('EST-0948 — resolveMaxIterations (precedência flag>env>default, vali
     expect(resolveMaxIterations('', undefined)).toBe(DEFAULT_MAX_ITERATIONS);
   });
 
+  it('ADR-0136: config.limits.maxIterations entra entre env e default (flag>env>config>default)', () => {
+    expect(resolveMaxIterations(undefined, undefined, 500)).toBe(500); // só config
+    expect(resolveMaxIterations(undefined, '400', 500)).toBe(400); // env vence config
+    expect(resolveMaxIterations('600', '400', 500)).toBe(600); // flag vence tudo
+  });
+
   it('CLAMPA no teto-teto (anti-runaway preservado mesmo com config absurda)', () => {
     expect(resolveMaxIterations(String(MAX_ITERATIONS_CEILING * 100))).toBe(MAX_ITERATIONS_CEILING);
     // env absurdo também é clampado
@@ -236,18 +249,24 @@ describe('EST-0948 — resolveMaxOutputTokens (max_tokens de OUTPUT por chamada;
   it('inválido (NaN/negativo/zero/não-inteiro) ⇒ UNSET + AVISO, sem quebrar', () => {
     const warns: string[] = [];
     const warn = (m: string): void => void warns.push(m);
-    expect(resolveMaxOutputTokens('abc', undefined, warn)).toBeUndefined();
-    expect(resolveMaxOutputTokens('-1', undefined, warn)).toBeUndefined();
-    expect(resolveMaxOutputTokens('0', undefined, warn)).toBeUndefined();
-    expect(resolveMaxOutputTokens('1.5', undefined, warn)).toBeUndefined();
+    expect(resolveMaxOutputTokens('abc', undefined, undefined, warn)).toBeUndefined();
+    expect(resolveMaxOutputTokens('-1', undefined, undefined, warn)).toBeUndefined();
+    expect(resolveMaxOutputTokens('0', undefined, undefined, warn)).toBeUndefined();
+    expect(resolveMaxOutputTokens('1.5', undefined, undefined, warn)).toBeUndefined();
     expect(warns.length).toBe(4);
     expect(warns.every((w) => /max-output-tokens|MAX_OUTPUT/i.test(w))).toBe(true);
   });
 
   it('flag inválida ⇒ cai p/ o env (precedência preservada), avisa do typo da flag', () => {
     const warns: string[] = [];
-    expect(resolveMaxOutputTokens('abc', '16384', (m) => void warns.push(m))).toBe(16384);
+    expect(resolveMaxOutputTokens('abc', '16384', undefined, (m) => void warns.push(m))).toBe(16384);
     expect(warns.length).toBe(1); // só o aviso da flag inválida; o env era válido
+  });
+
+  it('ADR-0136: config.limits.maxOutputTokens entra entre env e UNSET (flag>env>config)', () => {
+    expect(resolveMaxOutputTokens(undefined, undefined, 16384)).toBe(16384); // só config
+    expect(resolveMaxOutputTokens(undefined, '8192', 16384)).toBe(8192); // env vence config
+    expect(resolveMaxOutputTokens('4096', '8192', 16384)).toBe(4096); // flag vence tudo
   });
 
   it('CLAMPA no teto CLI-side (um typo absurdo não vai inteiro ao broker) + avisa', () => {
@@ -255,6 +274,7 @@ describe('EST-0948 — resolveMaxOutputTokens (max_tokens de OUTPUT por chamada;
     expect(
       resolveMaxOutputTokens(
         String(MAX_OUTPUT_TOKENS_CEILING * 10),
+        undefined,
         undefined,
         (m) => void warns.push(m),
       ),

@@ -118,10 +118,13 @@ export const DEFAULT_LIMITS: SessionLimits = {
 export function resolveMaxTokens(
   flag?: string | number | undefined,
   env?: string | undefined,
+  config?: string | number | undefined, // ADR-0136 balde(a): config.limits.maxTokens
 ): number {
   const fromFlag = parseTokenSetting(flag);
   const fromEnv = parseTokenSetting(env);
-  const chosen = fromFlag ?? fromEnv ?? DEFAULT_MAX_TOKENS;
+  const fromConfig = parseTokenSetting(config);
+  // Precedência ADR-0136: flag > env > config > default. Clamp anti-runaway sempre.
+  const chosen = fromFlag ?? fromEnv ?? fromConfig ?? DEFAULT_MAX_TOKENS;
   return Math.min(MAX_TOKENS_CEILING, Math.max(MIN_TOKENS_FLOOR, chosen));
 }
 
@@ -155,10 +158,13 @@ function parseTokenSetting(v: string | number | undefined): number | undefined {
 export function resolveMaxIterations(
   flag?: string | number | undefined,
   env?: string | undefined,
+  config?: string | number | undefined, // ADR-0136 balde(a): config.limits.maxIterations
 ): number {
   const fromFlag = parseIterationSetting(flag);
   const fromEnv = parseIterationSetting(env);
-  const chosen = fromFlag ?? fromEnv ?? DEFAULT_MAX_ITERATIONS;
+  const fromConfig = parseIterationSetting(config);
+  // Precedência ADR-0136: flag > env > config > default. Clamp anti-runaway sempre.
+  const chosen = fromFlag ?? fromEnv ?? fromConfig ?? DEFAULT_MAX_ITERATIONS;
   return Math.min(MAX_ITERATIONS_CEILING, Math.max(MIN_ITERATIONS_FLOOR, chosen));
 }
 
@@ -228,14 +234,16 @@ export const MIN_OUTPUT_TOKENS_FLOOR = 1;
 export function resolveMaxOutputTokens(
   flag?: string | number | undefined,
   env?: string | undefined,
+  config?: string | number | undefined, // ADR-0136 balde(a): config.limits.maxOutputTokens
   onWarn?: (msg: string) => void,
 ): number | undefined {
   // Mesma disciplina de `resolveMaxTokens`/`resolveMaxIterations`: flag inválida ⇒
-  // cai p/ o env (a precedência); ausente ⇒ env; ambos vazios ⇒ UNSET. A diferença é
-  // que aqui o inválido AVISA (não silencia) — um typo é visível, mas não quebra.
+  // cai p/ o env (a precedência); ausente ⇒ env > config; tudo vazio ⇒ UNSET. A diferença
+  // é que aqui o inválido AVISA (não silencia) — um typo é visível, mas não quebra.
   const fromFlag = parseOutputTokenSetting(flag, '--max-output-tokens', onWarn);
   const fromEnv = parseOutputTokenSetting(env, 'ALUY_MAX_OUTPUT_TOKENS', onWarn);
-  const chosen = fromFlag ?? fromEnv;
+  const fromConfig = parseOutputTokenSetting(config, 'config.limits.maxOutputTokens', onWarn);
+  const chosen = fromFlag ?? fromEnv ?? fromConfig; // flag > env > config > UNSET
   if (chosen === undefined) return undefined; // UNSET ⇒ broker decide.
   if (chosen > MAX_OUTPUT_TOKENS_CEILING) {
     onWarn?.(

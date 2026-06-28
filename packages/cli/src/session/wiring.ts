@@ -86,7 +86,7 @@ import { makePreToolGate } from './pre-tool-gate.js';
 import { HookRunner, selectHooks, type HooksConfig } from '@hiperplano/aluy-cli-core';
 import { resolveContextWindow } from '../model/catalog.js';
 import { resolveMaestro, resolveContinuationCfg, resolveMemory } from '../maestro/wiring.js';
-import type { UserServicesConfig } from '../io/user-config.js';
+import type { UserServicesConfig, UserLimitsConfig } from '../io/user-config.js';
 import type { SessionMeta } from './model.js';
 
 /** Tier default da sessão (HG-2: só o tier sai do cliente; o broker resolve). */
@@ -103,6 +103,12 @@ export interface BuildSessionOptions {
    * judge/recall AO VIVO falarem ONDE o usuário configurou (não só o warmup/doctor).
    */
   readonly services?: UserServicesConfig;
+  /**
+   * ADR-0136 §5 (balde a) — limits do config (maxTokens/maxOutputTokens/maxIterations).
+   * Resolvido em run.tsx (savedConfig.limits) e repassado; entra como nível ENTRE env e
+   * default na precedência (flag > env > config > default). O core RE-VALIDA e CLAMPA.
+   */
+  readonly limits?: UserLimitsConfig;
   /** Raiz do workspace (cwd preso). Default: process.cwd(). */
   readonly workspaceRoot?: string;
   /**
@@ -719,8 +725,12 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   const limits: SessionLimits = budgetOn
     ? {
         ...DEFAULT_LIMITS,
-        maxIterations: resolveMaxIterations(opts.maxIterations, env.ALUY_MAX_ITERATIONS),
-        maxTokens: resolveMaxTokens(opts.maxTokens, env.ALUY_MAX_TOKENS),
+        maxIterations: resolveMaxIterations(
+          opts.maxIterations,
+          env.ALUY_MAX_ITERATIONS,
+          opts.limits?.maxIterations,
+        ),
+        maxTokens: resolveMaxTokens(opts.maxTokens, env.ALUY_MAX_TOKENS, opts.limits?.maxTokens),
       }
     : {
         maxIterations: MAX_ITERATIONS_CEILING,
@@ -737,6 +747,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   const maxOutputTokens = resolveMaxOutputTokens(
     opts.maxOutputTokens,
     env.ALUY_MAX_OUTPUT_TOKENS,
+    opts.limits?.maxOutputTokens,
     opts.onConfigWarn,
   );
   // EST-0944 — SELF-CHECK de atenção (re-âncora + auto-verificação): gating FLAG

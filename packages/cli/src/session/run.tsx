@@ -832,6 +832,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     effectiveBackend: resolvedBackend,
     // ADR-0136 §8/§9 — seção `services` (porta/host dos sidecars) p/ o judge/recall AO VIVO.
     ...(savedConfig.services ? { services: savedConfig.services } : {}),
+    // ADR-0136 §5 — limits do config (maxTokens/maxOutputTokens/maxIterations); flag/env vencem.
+    ...(savedConfig.limits ? { limits: savedConfig.limits } : {}),
     // EST-1112 · ADR-0119 — budget local resolvido (flag>env>config>default).
     localBudget,
     // EST-0972/0962 (BUG Custom) — slug Custom resolvido (só sob `tier:'custom'`): da

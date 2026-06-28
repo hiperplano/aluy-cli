@@ -178,6 +178,20 @@ export interface UserConfig {
    * (default fechado, TC-2): nada entra até o dono autorizar um id.
    */
   readonly connectors?: UserConnectorsConfig;
+  /**
+   * ADR-0136 balde (a) — limites/orçamento PROMOVIDOS das env (`ALUY_MAX_TOKENS`,
+   * `ALUY_MAX_OUTPUT_TOKENS`, `ALUY_MAX_ITERATIONS`). Preferência durável de custo/guarda-
+   * corpo. Precedência: flag > env > este campo > default. Os resolvers do core RE-VALIDAM
+   * e CLAMPAM (anti-runaway CLI-SEC-8 não-relaxável) — aqui só guardamos inteiros positivos.
+   */
+  readonly limits?: UserLimitsConfig;
+}
+
+/** Limites de orçamento de sessão (ADR-0136 §5). Inteiros positivos; o core clampa no uso. */
+export interface UserLimitsConfig {
+  readonly maxTokens?: number;
+  readonly maxOutputTokens?: number;
+  readonly maxIterations?: number;
 }
 
 /** Config dos conectores (ADR-0135). Só DADO (allowlist/prefs); token só no keychain. */
@@ -245,6 +259,22 @@ function sanitizeEndpoint(raw: unknown): UserServiceEndpoint | undefined {
   if (isLoopbackHost(o.host)) ep.host = o.host.trim();
   if (okPort(o.port)) ep.port = o.port;
   return ep.host !== undefined || ep.port !== undefined ? ep : undefined;
+}
+
+/** Sanitiza `limits` (ADR-0136 §5). Só inteiros positivos; o core re-valida/clampa no uso. */
+function sanitizeLimits(raw: unknown): UserLimitsConfig | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const posInt = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+  const out: { maxTokens?: number; maxOutputTokens?: number; maxIterations?: number } = {};
+  const mt = posInt(o.maxTokens);
+  const mo = posInt(o.maxOutputTokens);
+  const mi = posInt(o.maxIterations);
+  if (mt !== undefined) out.maxTokens = mt;
+  if (mo !== undefined) out.maxOutputTokens = mo;
+  if (mi !== undefined) out.maxIterations = mi;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** Sanitiza a config de conectores (ADR-0134/0135). Só a allowlist (DADO); token no keychain. */
@@ -372,6 +402,7 @@ function sanitize(raw: unknown): UserConfig {
     providers?: readonly UserProviderEntry[];
     services?: UserServicesConfig;
     connectors?: UserConnectorsConfig;
+    limits?: UserLimitsConfig;
   } = {};
   // theme: precisa ser um nome conhecido do catálogo (senão ignora → default dark).
   if (typeof obj.theme === 'string') {
@@ -456,6 +487,10 @@ function sanitize(raw: unknown): UserConfig {
   // ADR-0134/0135 — conectores (allowlist do Telegram; token só no keychain).
   const connectors = sanitizeConnectors(obj.connectors);
   if (connectors) out.connectors = connectors;
+
+  // ADR-0136 §5 (balde a) — limits promovidos das env (maxTokens/maxOutputTokens/maxIterations).
+  const limits = sanitizeLimits(obj.limits);
+  if (limits) out.limits = limits;
 
   return out;
 }
