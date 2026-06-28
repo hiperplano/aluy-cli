@@ -804,7 +804,21 @@ export interface NodeSidecarProvisionerOptions {
    * Injetável p/ teste; o default (via `runProvisioner({useAgent:true})`) roda
    * `aluy -p "<goal>" --yolo` e VERIFICA o estado real do sidecar depois.
    */
-  readonly agentInstaller?: (target: SidecarTarget) => Promise<ProvisionTargetResult>;
+  readonly agentInstaller?: (
+    target: SidecarTarget,
+    ctx?: AgentInstallContext,
+  ) => Promise<ProvisionTargetResult>;
+}
+
+/**
+ * Posição do alvo na FILA de provisionamento, p/ o instalador mostrar "Complemento 2/3" e a
+ * fila completa NO CABEÇALHO (que é impresso DEPOIS do clear de tela ⇒ sobrevive). Resolve o
+ * achado do dono: o plano impresso antes do loop era apagado pelo `\x1b[2J`.
+ */
+export interface AgentInstallContext {
+  readonly index: number; // 1-based
+  readonly total: number;
+  readonly plan: readonly SidecarTarget[];
 }
 
 /**
@@ -814,7 +828,7 @@ export interface NodeSidecarProvisionerOptions {
 export class NodeSidecarProvisioner implements SidecarProvisioner {
   private readonly platform: NodeJS.Platform;
   private readonly agentInstaller:
-    | ((target: SidecarTarget) => Promise<ProvisionTargetResult>)
+    | ((target: SidecarTarget, ctx?: AgentInstallContext) => Promise<ProvisionTargetResult>)
     | undefined;
 
   constructor(opts: NodeSidecarProvisionerOptions = {}) {
@@ -850,9 +864,10 @@ export class NodeSidecarProvisioner implements SidecarProvisioner {
   }
 
   /**
-   * Provisiona UM alvo específico.
+   * Provisiona UM alvo específico. `ctx` (posição na fila) é repassado ao instalador-agente
+   * p/ o cabeçalho mostrar "Complemento i/N" + a fila (sobrevive ao clear de tela).
    */
-  async provision(target: SidecarTarget): Promise<ProvisionTargetResult> {
+  async provision(target: SidecarTarget, ctx?: AgentInstallContext): Promise<ProvisionTargetResult> {
     // G2-C1 / CLI-SEC-H2: recusa root.
     const uid = userInfo().uid;
     if (isRoot(uid)) {
@@ -872,7 +887,7 @@ export class NodeSidecarProvisioner implements SidecarProvisioner {
     // Por isso, havendo `agentInstaller`, ele VENCE — inclusive no Linux e mesmo com python
     // presente (o agente parte do que existe e completa o que falta).
     if (this.agentInstaller) {
-      return this.agentInstaller(target);
+      return this.agentInstaller(target, ctx);
     }
     // Sem agente (--no-agent): caminho direto do tarball pinado (Linux); nos demais SOs,
     // instrui (sem fingir/baixar errado).
@@ -927,12 +942,15 @@ export class NodeSidecarProvisioner implements SidecarProvisioner {
     }
 
     const results: ProvisionTargetResult[] = [];
-    for (const target of toggles) {
+    const plan = [...toggles];
+    for (let i = 0; i < plan.length; i++) {
+      const target = plan[i]!;
+      const ctx: AgentInstallContext = { index: i + 1, total: plan.length, plan };
       // RESILIÊNCIA: cada sidecar é INDEPENDENTE — uma falha (ex.: o agente do mem0 estourar o
       // teto de turno) NÃO pode impedir os seguintes (era o que travava o headroom). Captura por
       // alvo e segue; o resultado ✗ entra no relatório, mas a fila continua.
       try {
-        results.push(await this.provision(target));
+        results.push(await this.provision(target, ctx));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         results.push({
@@ -1104,7 +1122,10 @@ async function verifyTargetHealthy(
  * adaptativa ao SO, e VERIFICA o estado real depois. ⚠ `--yolo` = acesso total à
  * máquina (consentimento dado pela flag `aluy init --agent`).
  */
-async function defaultAgentInstaller(target: SidecarTarget): Promise<ProvisionTargetResult> {
+async function defaultAgentInstaller(
+  target: SidecarTarget,
+  ctx?: AgentInstallContext,
+): Promise<ProvisionTargetResult> {
   const goal = agentInstallGoal(target);
   const aluyScript = process.argv[1];
   if (!aluyScript) {
@@ -1119,9 +1140,12 @@ async function defaultAgentInstaller(target: SidecarTarget): Promise<ProvisionTa
   // sem o output do anterior empilhado por cima (pedido do dono — "coisas em cima de
   // coisas"). `2J` limpa a tela, `3J` o scrollback, `H` volta o cursor ao topo.
   process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
-  // O usuário PRECISA ver a EVOLUÇÃO (saber que está indo). A saída do agente é VISÍVEL
-  // (`stdio:'inherit'`): o download/instalação aparece (winget/pip, pull de modelos).
-  process.stdout.write(`  ── Instalando o complemento "${target}" ── (acompanhe abaixo; pode levar alguns minutos)\n\n`);
+  // O usuário PRECISA ver a EVOLUÇÃO + ONDE está na fila (após o clear, este cabeçalho é a
+  // única coisa que sobrevive — por isso a SEQUÊNCIA + a FILA vão AQUI, não num plano pré-loop
+  // que o `2J` apagaria). Assim o dono vê "2/3: mem0" e que o headroom ainda vem.
+  const seq = ctx ? `Complemento ${ctx.index}/${ctx.total}: "${target}"` : `Complemento "${target}"`;
+  const queue = ctx ? `  (fila: ${ctx.plan.join(' · ')})` : '';
+  process.stdout.write(`  ── Instalando o ${seq} ──${queue}\n  (acompanhe abaixo; pode levar alguns minutos)\n\n`);
   const run = spawnSync(
     process.execPath,
     [aluyScript, '-p', goal, '--yolo', '--no-self-check'],
@@ -1319,15 +1343,8 @@ export async function runProvisioner(
   if (!useAgent) {
     for (const line of preflightPrereqs(toggles)) process.stderr.write(line + '\n');
   }
-  // PLANO explícito (achado do dono: parecia "parar no mem0"): mostra a FILA completa de
-  // complementos ANTES de começar — assim o headroom (e a ordem) ficam VISÍVEIS, e se algum
-  // não estiver na fila, dá p/ ver na hora.
-  if (shouldProvision(profile)) {
-    const list = [...toggles];
-    process.stderr.write(
-      `Complementos a provisionar (perfil ${profile}): ${list.length > 0 ? list.join(', ') : '(nenhum)'}.\n` +
-        `Cada um é uma etapa; ao terminar uma, a próxima começa numa tela limpa.\n\n`,
-    );
-  }
+  // NB: NÃO imprimimos o "plano" aqui — o `defaultAgentInstaller` dá um `\x1b[2J` (clear) antes
+  // de cada complemento, que apagaria qualquer coisa impressa agora (achado do dono). A
+  // SEQUÊNCIA + a fila vão no CABEÇALHO de cada complemento (sobrevive ao clear).
   return provisioner.provisionAll(profile, toggles);
 }

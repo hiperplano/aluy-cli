@@ -212,6 +212,25 @@ describe('NodeSidecarProvisioner.provision — agentInstaller é PREFERIDO (qual
     // sem agente, é o caminho direto (mockado) — não a mensagem "via agente"
     expect(r.message).not.toContain('via agente');
   });
+
+  it('provisionAll passa o CTX de SEQUÊNCIA (i/N + fila) ao agente — cabeçalho sobrevive ao clear', async () => {
+    const seen: { target: SidecarTarget; index?: number; total?: number; plan?: readonly SidecarTarget[] }[] = [];
+    const provisioner = new NodeSidecarProvisioner({
+      platform: 'linux',
+      agentInstaller: async (t, ctx) => {
+        seen.push({ target: t, index: ctx?.index, total: ctx?.total, plan: ctx?.plan });
+        return { target: t, hashOk: true, installed: true, message: 'ok' };
+      },
+    });
+    await provisioner.provisionAll('turbo', new Set(['ollama', 'mem0', 'headroom']));
+    // cada alvo recebeu sua posição na fila + o total + a fila completa (p/ "2/3" no cabeçalho)
+    expect(seen.map((s) => [s.target, s.index, s.total])).toEqual([
+      ['ollama', 1, 3],
+      ['mem0', 2, 3],
+      ['headroom', 3, 3],
+    ]);
+    expect(seen[1]?.plan).toEqual(['ollama', 'mem0', 'headroom']); // fila completa visível
+  });
 });
 
 // ─── Suite: provision (root refusal) ────────────────────────────────────────
@@ -640,7 +659,7 @@ describe('EST-1133-bis — delegação ao agente (SO não-Linux)', () => {
 
     const result = await provisioner.provision('ollama');
 
-    expect(installer).toHaveBeenCalledWith('ollama');
+    expect(installer.mock.calls[0]?.[0]).toBe('ollama');
     expect(result.installed).toBe(true);
     expect(result.message).toMatch(/via agente/);
     // Caminho de download NÃO foi exercido.
@@ -666,7 +685,7 @@ describe('EST-1133-bis — delegação ao agente (SO não-Linux)', () => {
     const result = await provisioner.provision('ollama');
 
     // NOVO comportamento: o agente VENCE no Linux também — não cai no download direto.
-    expect(installer).toHaveBeenCalledWith('ollama');
+    expect(installer.mock.calls[0]?.[0]).toBe('ollama');
     expect(result.message).toMatch(/via agente/);
     expect(mockFetch).not.toHaveBeenCalled();
   });
