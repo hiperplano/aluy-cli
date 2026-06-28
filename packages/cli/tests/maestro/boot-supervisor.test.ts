@@ -327,6 +327,43 @@ describe('CA-G2-2 — spawn sem shell, argv array', () => {
       // stdio deve ser definido (ignore/pipe), não shell
     }
   });
+
+  it('captura stdout/stderr do sidecar num LOG quando a fs tem openSync (stdio usa o fd)', async () => {
+    const fetchFn = vi.fn<FetchFn>(async () => ({ ok: false })); // força spawn
+    const spawnFn = vi.fn<SpawnFn>(() => fakeChildProcess(1000));
+    const opened: string[] = [];
+    let closed = false;
+    const fs: BootFileSystem = {
+      existsSync: (p) => String(p) === defaultPaths.headroom.binary,
+      mkdirSync: vi.fn(),
+      chmodSync: vi.fn(),
+      openSync: (p) => {
+        opened.push(String(p));
+        return 42; // fd fake
+      },
+      closeSync: () => {
+        closed = true;
+      },
+    };
+    const sup = new NodeBootSupervisor({ spawn: spawnFn, fetchFn, uid: 1000, fs, timer: fakeTimer() });
+    await sup.boot(TURBO, ALL_TOGGLES, defaultPaths.headroom.binary);
+
+    // abriu o log do headroom e passou o fd no stdio (não 'ignore')
+    expect(opened.some((p) => p.includes('logs') && p.includes('headroom.log'))).toBe(true);
+    const opts = spawnFn.mock.calls[0]![2] as { stdio?: unknown };
+    expect(opts.stdio).toEqual(['ignore', 42, 42]); // stdout+stderr → o fd do log
+    expect(closed).toBe(true); // o fd do PAI é fechado (o filho herdou a cópia)
+  });
+
+  it('SEM openSync na fs (teste/legado) ⇒ stdio cai p/ "ignore" (sem I/O de log)', async () => {
+    const fetchFn = vi.fn<FetchFn>(async () => ({ ok: false }));
+    const spawnFn = vi.fn<SpawnFn>(() => fakeChildProcess(1000));
+    const fs = fakeFs(new Set([defaultPaths.headroom.binary])); // fakeFs NÃO tem openSync
+    const sup = new NodeBootSupervisor({ spawn: spawnFn, fetchFn, uid: 1000, fs, timer: fakeTimer() });
+    await sup.boot(TURBO, ALL_TOGGLES, defaultPaths.headroom.binary);
+    const opts = spawnFn.mock.calls[0]![2] as { stdio?: unknown };
+    expect(opts.stdio).toBe('ignore');
+  });
 });
 
 // ─── CA-G2-3: recusa root ────────────────────────────────────────────────

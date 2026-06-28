@@ -19,7 +19,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { win32 as pathWin32, posix as pathPosix } from 'node:path';
 import { type PathLike } from 'node:fs';
-import { mkdirSync, chmodSync, existsSync } from 'node:fs';
+import { mkdirSync, chmodSync, existsSync, openSync, closeSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join as pathJoin } from 'node:path';
 import {
   type BootSupervisor,
   type BootResult,
@@ -68,6 +70,14 @@ export interface BootFileSystem {
   existsSync(path: PathLike): boolean;
   mkdirSync(path: PathLike, options?: { mode?: number; recursive?: boolean }): void;
   chmodSync(path: PathLike, mode: number): void;
+  /**
+   * Abre um arquivo de LOG p/ capturar o stdout/stderr do sidecar (fd). OPCIONAL: quando o
+   * fs injetado NÃO o provê (testes), o boot cai p/ `stdio:'ignore'` (sem log, sem I/O real).
+   * O real (realFs) o provê — é o que torna a falha de um sidecar (ex.: mem0 crashando)
+   * INSPECIONÁVEL em `~/.aluy/logs/<kind>.log` em vez de sumir no `ignore`.
+   */
+  openSync?(path: PathLike, flags: string, mode?: number): number;
+  closeSync?(fd: number): void;
 }
 
 /** Opções do construtor do NodeBootSupervisor. */
@@ -103,6 +113,8 @@ const realFs: BootFileSystem = {
   existsSync: (path) => existsSync(path as string),
   mkdirSync: (path, opts) => mkdirSync(path as string, opts),
   chmodSync: (path, mode) => chmodSync(path as string, mode),
+  openSync: (path, flags, mode) => openSync(path as string, flags, mode),
+  closeSync: (fd) => closeSync(fd),
 };
 
 // ─── Implementação ───────────────────────────────────────────────────────
@@ -313,16 +325,39 @@ export class NodeBootSupervisor implements BootSupervisor {
         };
       }
 
+      // LOG do sidecar: captura stdout+stderr em `~/.aluy/logs/<kind>.log` (trunca por boot).
+      // Antes era `stdio:'ignore'` → a falha de um sidecar (ex.: mem0 crashando ao criar o
+      // `Memory()`) SUMIA, deixando só "mem0 ✗" sem causa. Agora dá p/ ler o traceback.
+      // Best-effort: sem `openSync` (fs de teste) ou erro ⇒ cai p/ 'ignore' (não derruba o boot).
+      let logFd: number | undefined;
+      try {
+        if (this.fs.openSync) {
+          const logsDir = pathJoin(homedir(), '.aluy', 'logs');
+          this.fs.mkdirSync(logsDir, { recursive: true, mode: 0o700 });
+          logFd = this.fs.openSync(pathJoin(logsDir, `${kind}.log`), 'w', 0o600);
+        }
+      } catch {
+        logFd = undefined;
+      }
+
       // 5. CA-G2-2: spawn sem shell, argv array.
       //    CA-G2-7: env mínimo, sem credencial.
       const child = this.spawn(config.binary, [...config.args], {
         detached: true,
-        stdio: 'ignore',
+        stdio: logFd !== undefined ? ['ignore', logFd, logFd] : 'ignore',
         // No Windows, sem isto cada sidecar (ollama/python/headroom) abre uma janela
         // de console. windowsHide esconde; detached mantém o daemon vivo após o pai.
         windowsHide: true,
         env: this.sidecarEnv(kind),
       });
+      // O filho herdou sua cópia do fd; fechamos a nossa (evita vazar fd no processo pai).
+      if (logFd !== undefined) {
+        try {
+          this.fs.closeSync?.(logFd);
+        } catch {
+          /* best-effort */
+        }
+      }
 
       child.unref?.();
       this.children.set(kind, child);
