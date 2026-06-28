@@ -1083,11 +1083,16 @@ async function verifyTargetHealthy(
     try {
       const resp = await fetch(`http://${OLLAMA_LOOPBACK_HOST}:${OLLAMA_LOOPBACK_PORT}/api/tags`);
       if (!resp.ok) return false;
-      // "usável" ≠ só porta up: o JUDGE_MODEL precisa estar baixado, senão o
-      // judge degrada p/ heurística (o turbo não usa o Ollama de fato).
+      // "usável" ≠ só porta up: os DOIS modelos do turbo precisam estar baixados —
+      // JUDGE (qwen2.5:0.5b, o judge) E EMBEDDER (nomic-embed-text). ACHADO DO DONO: checar
+      // SÓ o judge dava ollama ✓ FALSO quando o embedder não fora puxado — e o servidor MEM0
+      // precisa do embedder p/ criar o `Memory()`, então CRASHAVA no boot (mem0 ✗ "misterioso").
+      // Conferir AMBOS torna o status honesto e o re-bootstrap AUTO-CURA (re-puxa o que falta).
       const data = (await resp.json()) as { models?: Array<{ name?: string }> };
       const names = (data.models ?? []).map((m) => m.name ?? '');
-      return names.some((n) => n.startsWith(JUDGE_MODEL));
+      const hasJudge = names.some((n) => n.startsWith(JUDGE_MODEL));
+      const hasEmbedder = names.some((n) => n.startsWith(EMBEDDER_MODEL));
+      return hasJudge && hasEmbedder;
     } catch {
       return false;
     }
