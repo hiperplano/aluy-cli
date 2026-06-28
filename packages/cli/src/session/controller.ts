@@ -321,6 +321,16 @@ export interface SessionControllerOptions {
    */
   readonly autoCompactEnv?: Record<string, string | undefined>;
   /**
+   * ADR-0136 §5 (balde a) — `config.context` (autocompactAt/autocompactMax/window). Entra
+   * como nível ENTRE env e default na resolução da auto-compactação e da janela custom
+   * (precedência flag > env > config > default). O core re-valida/clampa.
+   */
+  readonly contextConfig?: {
+    readonly window?: number;
+    readonly autocompactAt?: number | string;
+    readonly autocompactMax?: number;
+  };
+  /**
    * Anti-flicker — opções do THROTTLE de flush do streaming. Os deltas de token
    * acumulam no estado e a NOTIFICAÇÃO aos observers (re-render) é coalescida numa
    * janela (~40ms). Injetável p/ teste (timer fake) e p/ desligar (`intervalMs: 0`).
@@ -749,6 +759,10 @@ export class SessionController {
   private readonly autoCompactAt: string | undefined;
   // EST-0973 — env da auto-compactação (p/ re-resolver na troca de tier).
   private readonly autoCompactEnv: Record<string, string | undefined>;
+  // ADR-0136 §5 — config.context (autocompactAt/Max/window) p/ re-resolver na troca de tier.
+  private readonly contextConfig:
+    | { readonly window?: number; readonly autocompactAt?: number | string; readonly autocompactMax?: number }
+    | undefined;
   // EST-0973 — config RESOLVIDA da AUTO-COMPACTAÇÃO da janela (limiar + janela +
   // anti-loop). `at:0` ⇒ desligada (o loop roda baseline). Resolvida no construtor de
   // `contextWindow` + env/flag. Re-resolvida na troca de tier (`setTier`).
@@ -994,6 +1008,7 @@ export class SessionController {
     this.onUserPrompt = opts.onUserPrompt;
     this.autoCompactEnv = opts.autoCompactEnv ?? process.env;
     this.autoCompactAt = opts.autoCompactAt;
+    this.contextConfig = opts.contextConfig;
     this.contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
     // EST-0973 — AUTO-COMPACTAÇÃO da JANELA: resolve o limiar (flag `--autocompact-at`
     // > env `ALUY_AUTOCOMPACT_AT` > default 0.85) + a JANELA do modelo (`contextWindow`)
@@ -1002,8 +1017,14 @@ export class SessionController {
     this.autoCompactCfg = resolveAutoCompact({
       ...(this.autoCompactAt !== undefined ? { atFlag: this.autoCompactAt } : {}),
       atEnv: this.autoCompactEnv.ALUY_AUTOCOMPACT_AT,
+      ...(this.contextConfig?.autocompactAt !== undefined
+        ? { atConfig: this.contextConfig.autocompactAt }
+        : {}),
       contextWindow: this.contextWindow,
       maxConsecutiveEnv: this.autoCompactEnv.ALUY_AUTOCOMPACT_MAX,
+      ...(this.contextConfig?.autocompactMax !== undefined
+        ? { maxConsecutiveConfig: this.contextConfig.autocompactMax }
+        : {}),
     });
     // EST-1012 — MONITOR DE PRESSÃO DE MEMÓRIA (backstop de OOM). Só liga quando o
     // wiring injeta `opts.memory` (heap-limit + amostrador + porta de encerramento) E
@@ -3413,7 +3434,12 @@ export class SessionController {
     // F64 (fix) — respeita o override `ALUY_CONTEXT_WINDOW` quando o tier novo é
     // `custom` (janela 0): a troca p/ Custom passa a poder auto-compactar se o env
     // estiver setado, em vez de zerar a janela (inerte).
-    const newWindow = resolveContextWindow(tier, this.autoCompactEnv);
+    const newWindow = resolveContextWindow(
+      tier,
+      this.autoCompactEnv,
+      undefined,
+      this.contextConfig?.window,
+    );
     if (newWindow !== this.contextWindow) {
       this.contextWindow = newWindow;
       this.autoCompactCfg = resolveAutoCompact({

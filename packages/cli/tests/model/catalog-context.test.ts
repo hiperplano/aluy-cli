@@ -158,6 +158,19 @@ describe('resolveContextWindow (F64 — janela via ALUY_CONTEXT_WINDOW p/ custom
     expect(resolveContextWindow('custom', { [CONTEXT_WINDOW_ENV]: '-5' })).toBe(0);
   });
 
+  it('ADR-0136: custom usa config.context.window quando não há env (env vence config)', () => {
+    expect(resolveContextWindow('custom', {}, undefined, 256000)).toBe(256_000); // só config
+    // env vence config
+    expect(
+      resolveContextWindow('custom', { [CONTEXT_WINDOW_ENV]: '128k' }, undefined, 256000),
+    ).toBe(128_000);
+    // tier conhecido vence ambos
+    expect(resolveContextWindow('aluy-strata', {}, undefined, 256000)).toBe(128_000);
+    // config inválida (<=0/não-inteiro) ⇒ 0
+    expect(resolveContextWindow('custom', {}, undefined, 0)).toBe(0);
+    expect(resolveContextWindow('custom', {}, undefined, -5)).toBe(0);
+  });
+
   it('env default vazio ({}) ⇒ custom continua 0', () => {
     expect(resolveContextWindow('')).toBe(0);
   });

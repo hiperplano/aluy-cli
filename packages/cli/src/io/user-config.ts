@@ -185,6 +185,13 @@ export interface UserConfig {
    * e CLAMPAM (anti-runaway CLI-SEC-8 não-relaxável) — aqui só guardamos inteiros positivos.
    */
   readonly limits?: UserLimitsConfig;
+  /**
+   * ADR-0136 balde (a) — janela/auto-compactação PROMOVIDAS das env (`ALUY_CONTEXT_WINDOW`,
+   * `ALUY_AUTOCOMPACT_AT`, `ALUY_AUTOCOMPACT_MAX`). Precedência flag > env > este campo >
+   * default. `window` só vale p/ tier `custom` (no tier conhecido, a janela vem do catálogo).
+   * Os resolvers do core RE-VALIDAM/CLAMPAM (anti-overflow/anti-loop).
+   */
+  readonly context?: UserContextConfig;
 }
 
 /** Limites de orçamento de sessão (ADR-0136 §5). Inteiros positivos; o core clampa no uso. */
@@ -192,6 +199,16 @@ export interface UserLimitsConfig {
   readonly maxTokens?: number;
   readonly maxOutputTokens?: number;
   readonly maxIterations?: number;
+}
+
+/** Janela/auto-compactação (ADR-0136 §5). O core re-valida/clampa no uso. */
+export interface UserContextConfig {
+  /** Janela assumida (tokens) — só p/ tier custom. Inteiro positivo. */
+  readonly window?: number;
+  /** Limiar de auto-compactação: razão `0..1`, % `>1`, ou `0`/`'off'` (desliga). */
+  readonly autocompactAt?: number | string;
+  /** Teto do anti-loop de auto-compactação. Inteiro positivo. */
+  readonly autocompactMax?: number;
 }
 
 /** Config dos conectores (ADR-0135). Só DADO (allowlist/prefs); token só no keychain. */
@@ -274,6 +291,26 @@ function sanitizeLimits(raw: unknown): UserLimitsConfig | undefined {
   if (mt !== undefined) out.maxTokens = mt;
   if (mo !== undefined) out.maxOutputTokens = mo;
   if (mi !== undefined) out.maxIterations = mi;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Sanitiza `context` (ADR-0136 §5). O core re-valida/clampa no uso; aqui só a forma. */
+function sanitizeContext(raw: unknown): UserContextConfig | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const out: { window?: number; autocompactAt?: number | string; autocompactMax?: number } = {};
+  if (typeof o.window === 'number' && Number.isInteger(o.window) && o.window > 0) {
+    out.window = o.window;
+  }
+  // autocompactAt: número (razão/%) OU string ('off'/'0'/'0.85') — o core parseia/clampa.
+  if (typeof o.autocompactAt === 'number' && Number.isFinite(o.autocompactAt)) {
+    out.autocompactAt = o.autocompactAt;
+  } else if (typeof o.autocompactAt === 'string' && o.autocompactAt.trim() !== '') {
+    out.autocompactAt = o.autocompactAt.trim();
+  }
+  if (typeof o.autocompactMax === 'number' && Number.isInteger(o.autocompactMax) && o.autocompactMax > 0) {
+    out.autocompactMax = o.autocompactMax;
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -403,6 +440,7 @@ function sanitize(raw: unknown): UserConfig {
     services?: UserServicesConfig;
     connectors?: UserConnectorsConfig;
     limits?: UserLimitsConfig;
+    context?: UserContextConfig;
   } = {};
   // theme: precisa ser um nome conhecido do catálogo (senão ignora → default dark).
   if (typeof obj.theme === 'string') {
@@ -491,6 +529,10 @@ function sanitize(raw: unknown): UserConfig {
   // ADR-0136 §5 (balde a) — limits promovidos das env (maxTokens/maxOutputTokens/maxIterations).
   const limits = sanitizeLimits(obj.limits);
   if (limits) out.limits = limits;
+
+  // ADR-0136 §5 (balde a) — context promovido das env (window/autocompactAt/autocompactMax).
+  const context = sanitizeContext(obj.context);
+  if (context) out.context = context;
 
   return out;
 }

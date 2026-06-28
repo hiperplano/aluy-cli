@@ -176,10 +176,16 @@ export function resolveContextWindow(
   tierKey: string,
   env: Record<string, string | undefined> = {},
   catalog?: readonly TierCatalogEntry[],
+  configWindow?: number | undefined, // ADR-0136 balde(a): config.context.window (custom only)
 ): number {
   const fromTier = contextWindowForTier(tierKey, catalog);
   if (fromTier > 0) return fromTier; // tier conhecido manda
-  return parseContextWindow(env[CONTEXT_WINDOW_ENV] ?? ''); // custom: opt-in via env (0 se ausente)
+  // Custom: opt-in via env `ALUY_CONTEXT_WINDOW`, senão config.context.window, senão 0 (inerte).
+  const fromEnv = parseContextWindow(env[CONTEXT_WINDOW_ENV] ?? '');
+  if (fromEnv > 0) return fromEnv;
+  return configWindow !== undefined && Number.isInteger(configWindow) && configWindow > 0
+    ? configWindow
+    : 0;
 }
 
 /**

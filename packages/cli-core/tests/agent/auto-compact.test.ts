@@ -86,6 +86,27 @@ describe('EST-0973 — resolveAutoCompact (gating flag>env>default)', () => {
     expect(c2.at).toBe(0);
   });
 
+  it('ADR-0136: config.context entra entre env e default (flag>env>config>default)', () => {
+    // só config define o limiar
+    expect(resolveAutoCompact({ atConfig: 0.7, contextWindow: WINDOW }).at).toBeCloseTo(0.7);
+    // env vence config
+    expect(resolveAutoCompact({ atEnv: '0.8', atConfig: 0.7, contextWindow: WINDOW }).at).toBeCloseTo(0.8);
+    // flag vence tudo
+    expect(
+      resolveAutoCompact({ atFlag: '0.9', atEnv: '0.8', atConfig: 0.7, contextWindow: WINDOW }).at,
+    ).toBeCloseTo(0.9);
+    // config desliga (off) quando é a fonte vencedora
+    expect(resolveAutoCompact({ atConfig: 'off', contextWindow: WINDOW }).at).toBe(0);
+    // maxConsecutive (clampado a [1,5]): env vence config; só config também vale
+    expect(
+      resolveAutoCompact({ contextWindow: WINDOW, maxConsecutiveConfig: 3 }).maxConsecutive,
+    ).toBe(3);
+    expect(
+      resolveAutoCompact({ contextWindow: WINDOW, maxConsecutiveEnv: '4', maxConsecutiveConfig: 2 })
+        .maxConsecutive,
+    ).toBe(4);
+  });
+
   it('limiar é CLAMPADO a [0.5, 0.98] quando ligado', () => {
     expect(resolveAutoCompact({ atFlag: '0.1', contextWindow: WINDOW }).at).toBeCloseTo(0.5);
     expect(resolveAutoCompact({ atFlag: '0.999', contextWindow: WINDOW }).at).toBeCloseTo(0.98);

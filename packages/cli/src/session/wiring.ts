@@ -86,7 +86,7 @@ import { makePreToolGate } from './pre-tool-gate.js';
 import { HookRunner, selectHooks, type HooksConfig } from '@hiperplano/aluy-cli-core';
 import { resolveContextWindow } from '../model/catalog.js';
 import { resolveMaestro, resolveContinuationCfg, resolveMemory } from '../maestro/wiring.js';
-import type { UserServicesConfig, UserLimitsConfig } from '../io/user-config.js';
+import type { UserServicesConfig, UserLimitsConfig, UserContextConfig } from '../io/user-config.js';
 import type { SessionMeta } from './model.js';
 
 /** Tier default da sessão (HG-2: só o tier sai do cliente; o broker resolve). */
@@ -109,6 +109,12 @@ export interface BuildSessionOptions {
    * default na precedência (flag > env > config > default). O core RE-VALIDA e CLAMPA.
    */
   readonly limits?: UserLimitsConfig;
+  /**
+   * ADR-0136 §5 (balde a) — context do config (window/autocompactAt/autocompactMax).
+   * Resolvido em run.tsx (savedConfig.context); entra ENTRE env e default na janela custom
+   * e na auto-compactação (flag > env > config > default). O core re-valida/clampa.
+   */
+  readonly context?: UserContextConfig;
   /** Raiz do workspace (cwd preso). Default: process.cwd(). */
   readonly workspaceRoot?: string;
   /**
@@ -686,7 +692,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // `--backend local`), `resolveContextWindow` cai no override `ALUY_CONTEXT_WINDOW`
   // (opt-in): habilita a auto-compactação no modo local. Sem o env, segue 0 (inerte).
   // Passada ao controller e RE-RESOLVIDA na troca de tier (`/model`).
-  const contextWindow = resolveContextWindow(tier, env);
+  const contextWindow = resolveContextWindow(tier, env, undefined, opts.context?.window);
   // EST-0972 (BUG Custom) — slug Custom do BOOT: só vale sob `tier:'custom'`. Vem de
   // uma sessão retomada (run.tsx); fora de Custom é ignorado (não vaza Custom em tier
   // canônico). String opaca / chave de catálogo (HG-2), nunca credencial.
@@ -955,6 +961,8 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // (a flag vence o env). O controller resolve flag>env>default 0.85 com a janela do
     // modelo (`contextWindow`). Sem a flag, cai no env/default (ligada por padrão).
     ...(opts.autoCompactAt !== undefined ? { autoCompactAt: opts.autoCompactAt } : {}),
+    // ADR-0136 §5 — config.context (autocompactAt/Max/window): nível ENTRE env e default.
+    ...(opts.context ? { contextConfig: opts.context } : {}),
     // EST-0973 (fix) — JANELA DE CONTEXTO do tier ativo (denominador da % janela +
     // auto-compactação). Resolvida do catálogo (ex.: 128k p/ Strata, 256k p/ Flui,
     // 200k p/ Cortex, 0 p/ Custom). SEMPRE passada (≠200k hardcoded). O controller

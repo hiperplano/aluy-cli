@@ -834,6 +834,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     ...(savedConfig.services ? { services: savedConfig.services } : {}),
     // ADR-0136 §5 — limits do config (maxTokens/maxOutputTokens/maxIterations); flag/env vencem.
     ...(savedConfig.limits ? { limits: savedConfig.limits } : {}),
+    // ADR-0136 §5 — context do config (window/autocompactAt/autocompactMax); flag/env vencem.
+    ...(savedConfig.context ? { context: savedConfig.context } : {}),
     // EST-1112 · ADR-0119 — budget local resolvido (flag>env>config>default).
     localBudget,
     // EST-0972/0962 (BUG Custom) — slug Custom resolvido (só sob `tier:'custom'`): da
