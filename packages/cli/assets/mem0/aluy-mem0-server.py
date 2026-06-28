@@ -47,6 +47,10 @@ USERS_FILE = os.path.join(ALUY_MEMORY_DIR, "aluy_users.json")
 def _build_mem0_config() -> dict[str, Any]:
     """Monta a config do mem0ai com paths locais absolutos."""
     return {
+        # history em ~/.aluy/memory (não no default ~/.mem0): TODO o estado do mem0 fica num
+        # único lugar ⇒ limpar ~/.aluy/memory no self-heal recria TUDO fresco. Antes o history
+        # ia p/ ~/.mem0/history.db e, de uma versão antiga, dava `no such column: prev_value`.
+        "history_db_path": os.path.join(ALUY_MEMORY_DIR, "history.db"),
         "vector_store": {
             "provider": "chroma",
             "config": {
@@ -316,6 +320,35 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
+def _reset_incompatible_stores() -> None:
+    """Move os stores de memória p/ backup, p/ recriar frescos. Chamado quando a versão atual
+    do chromadb/mem0 não lê o store de uma versão anterior (KeyError '_type' no chromadb /
+    sqlite 'no such column' no history). Best-effort — nunca lança. Limpa OS DOIS lugares:
+    `~/.aluy/memory` (chromadb + history novo) E `~/.mem0/history.db` (history default ANTIGO,
+    de antes de consolidarmos o path — senão a 2ª tentativa ainda bate nele)."""
+    import time
+    try:
+        ts = int(time.time())
+    except Exception:  # noqa: BLE001
+        ts = 0
+    targets = [ALUY_MEMORY_DIR, os.path.expanduser("~/.mem0/history.db")]
+    for path in targets:
+        if not os.path.exists(path):
+            continue
+        try:
+            os.rename(path, f"{path}.incompat-{ts}")
+        except OSError:
+            # rename pode falhar (cross-device/permissão) ⇒ apaga o conteúdo problemático.
+            import shutil
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    os.remove(path)
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="aluy-mem0-server")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
@@ -334,9 +367,30 @@ def main() -> None:
     # Garante o dir de store com perms corretas.
     os.makedirs(ALUY_MEMORY_DIR, mode=0o700, exist_ok=True)
 
-    # Instancia Memory() UMA vez.
+    # Instancia Memory() UMA vez. SELF-HEAL de upgrade: um store gravado por uma versão
+    # ANTERIOR do chromadb/mem0 pode ser ilegível pela atual (ex.: chromadb `KeyError: '_type'`
+    # na config da collection; sqlite `no such column: prev_value` no history). Em vez de
+    # CRASHAR (deixando o sidecar "fora" sem causa visível), movemos os stores antigos p/
+    # backup e RECRIAMOS frescos. Perde-se memória antiga (já ilegível de qualquer forma),
+    # mas o serviço SOBE. Achado ao vivo na máquina do dono (dois stores de jun/antigo).
     config = _build_mem0_config()
-    memory = Memory.from_config(config)
+    try:
+        memory = Memory.from_config(config)
+    except Exception as exc:  # noqa: BLE001 — qualquer erro ao ler o store antigo
+        if os.environ.get("ALUY_MEM0_RESET_DONE") == "1":
+            # JÁ resetamos uma vez e AINDA falha ⇒ não é store velho; propaga (não loopa).
+            raise
+        sys.stderr.write(
+            f"aluy-mem0: store incompatível ({type(exc).__name__}: {exc}); "
+            "movendo p/ backup e reiniciando fresco…\n"
+        )
+        _reset_incompatible_stores()
+        # RE-EXEC em vez de retry in-process: o chromadb CACHEIA o client/conexão por
+        # processo, então um 2º `from_config` no MESMO processo reusa o store velho. Reiniciar
+        # o processo garante chromadb/mem0 FRESCOS. `ALUY_MEM0_RESET_DONE` evita loop infinito.
+        os.environ["ALUY_MEM0_RESET_DONE"] = "1"
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+        return  # inalcançável (execv substitui o processo) — só p/ o type-checker
 
     # Injeta no handler.
     Mem0Handler.memory = memory
