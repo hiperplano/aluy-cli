@@ -40,3 +40,15 @@ export function redactTelegramToken(raw: string): string {
   if (colon <= 0) return `…(${t.length} chars)`;
   return `${t.slice(0, colon)}:…(${t.length - colon - 1} chars)`;
 }
+
+/**
+ * Redação POR CONSTRUÇÃO (CLI-SEC-6, R6 do gate seguranca): substitui TODAS as ocorrências
+ * de `secret` em `text` pela forma redigida. É o que o wiring DEVE aplicar antes de logar
+ * qualquer string que possa conter o token (ex.: a URL `…/bot<token>/getUpdates`, a mensagem
+ * de um erro de rede que ecoa a URL). Segredo vazio/curto ⇒ devolve `text` intacto. PURO.
+ */
+export function redactSecretIn(text: string, secret: string): string {
+  const s = secret.trim();
+  if (s.length < 8) return text; // nada plausível a redigir (evita falsos positivos).
+  return text.split(s).join('«REDACTED»');
+}

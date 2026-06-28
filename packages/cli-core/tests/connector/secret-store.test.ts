@@ -3,6 +3,7 @@ import {
   connectorKeychainAccount,
   isPlausibleTelegramToken,
   redactTelegramToken,
+  redactSecretIn,
 } from '../../src/connector/secret-store.js';
 
 describe('connector secret-store — naming + validadores PUROS (TC-3 / CLI-SEC-2)', () => {
@@ -31,5 +32,19 @@ describe('connector secret-store — naming + validadores PUROS (TC-3 / CLI-SEC-
     const r = redactTelegramToken('SECRETVALUE');
     expect(r).not.toContain('SECRETVALUE');
     expect(r).toMatch(/chars/);
+  });
+
+  it('redactSecretIn (R6): remove TODAS as ocorrências do token de uma string logável', () => {
+    const tok = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
+    const url = `https://api.telegram.org/bot${tok}/getUpdates?offset=0`;
+    const safe = redactSecretIn(`erro ao chamar ${url} (e de novo ${tok})`, tok);
+    expect(safe).not.toContain(tok);
+    expect(safe).not.toContain('AAHk');
+    expect(safe).toContain('«REDACTED»');
+  });
+
+  it('redactSecretIn: segredo curto/vazio ⇒ texto intacto (sem falso positivo)', () => {
+    expect(redactSecretIn('abc def', '')).toBe('abc def');
+    expect(redactSecretIn('abc def', 'a')).toBe('abc def');
   });
 });

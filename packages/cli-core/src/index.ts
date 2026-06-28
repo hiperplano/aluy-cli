@@ -87,5 +87,6 @@ export {
   connectorKeychainAccount,
   isPlausibleTelegramToken,
   redactTelegramToken,
+  redactSecretIn,
 } from './connector/secret-store.js';
 export type { ConnectorSecretStore } from './connector/secret-store.js';

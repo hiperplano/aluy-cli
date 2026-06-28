@@ -9,18 +9,30 @@
 // ⚠️ INERTE: nada aqui é chamado pelo boot ainda. A ativação (`--telegram`) + o roteamento
 //    do ingresso à sessão + o `telegram_send` esperam a revisão `seguranca` (ADR-0134).
 
-import { parseGetUpdates, redactTelegramToken, type TelegramUpdate } from '@hiperplano/aluy-cli-core';
+import {
+  parseGetUpdates,
+  redactTelegramToken,
+  redactSecretIn,
+  type TelegramUpdate,
+} from '@hiperplano/aluy-cli-core';
 
-/** Base da Bot API. Override só p/ teste/proxy (egress allowlistado em produção). */
-const TELEGRAM_API_BASE = 'https://api.telegram.org';
+/** Base da Bot API. CONSTANTE — em produção o token só vai p/ este host (R7/CLI-SEC-5). */
+export const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
 export interface TelegramClientOptions {
   /** Token do bot (do keychain). NUNCA logado em claro. */
   readonly token: string;
   /** `fetch` injetável (teste). Default: o global. */
   readonly fetchFn?: typeof fetch;
-  /** Base da API (teste/proxy). Default: api.telegram.org. */
+  /** Base da API. Só honrado COM `allowNonDefaultApiBase` (teste/proxy). Default: api.telegram.org. */
   readonly apiBase?: string;
+  /**
+   * R7 (gate seguranca) — TRAVA do apiBase. Só `true` (passado por CÓDIGO, ex.: teste)
+   * permite `apiBase` != default. Sem esta flag, `apiBase` é IGNORADO e o host é forçado p/
+   * api.telegram.org — assim DADO não-confiável (config/env) NUNCA redireciona o token p/
+   * um host atacante. A flag NÃO é lida de config/env.
+   */
+  readonly allowNonDefaultApiBase?: boolean;
   /** Timeout do long-poll no SERVIDOR (s) — o getUpdates segura a conexão até isso. */
   readonly longPollSeconds?: number;
 }
@@ -36,13 +48,25 @@ export class TelegramClient {
   constructor(opts: TelegramClientOptions) {
     this.token = opts.token;
     this.fetchFn = opts.fetchFn ?? (globalThis.fetch as typeof fetch);
-    this.apiBase = opts.apiBase ?? TELEGRAM_API_BASE;
+    // R7 — apiBase só != default COM a flag explícita de código (teste/proxy). Sem ela,
+    // o host é TRAVADO em api.telegram.org (config/env não redireciona o token).
+    this.apiBase =
+      opts.allowNonDefaultApiBase === true && opts.apiBase ? opts.apiBase : TELEGRAM_API_BASE;
     this.longPollSeconds = opts.longPollSeconds ?? 25;
   }
 
   /** Identificação redigida (p/ log) — nunca o token em claro. */
   get redactedToken(): string {
     return redactTelegramToken(this.token);
+  }
+
+  /**
+   * R6 (redação por construção) — torna QUALQUER string segura p/ log, removendo o token
+   * (ex.: uma mensagem de erro que ecoe a URL `…/bot<token>/…`). O wiring DEVE usar isto
+   * antes de logar erros do conector.
+   */
+  safeForLog(text: string): string {
+    return redactSecretIn(text, this.token);
   }
 
   /**

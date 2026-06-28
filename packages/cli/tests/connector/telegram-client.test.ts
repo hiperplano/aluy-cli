@@ -40,6 +40,33 @@ describe('TelegramClient — long-poll concreto (ADR-0134 §4)', () => {
     expect(c.redactedToken).not.toContain('AAHk');
   });
 
+  it('R6: safeForLog remove o token de uma mensagem (ex.: erro que ecoa a URL)', () => {
+    const c = new TelegramClient({ token: TOKEN, fetchFn: (async () => ({}) as Response) as unknown as typeof fetch });
+    const msg = `fetch failed: https://api.telegram.org/bot${TOKEN}/getUpdates`;
+    expect(c.safeForLog(msg)).not.toContain(TOKEN);
+    expect(c.safeForLog(msg)).not.toContain('AAHk');
+  });
+
+  it('R7: apiBase != default é IGNORADO sem a flag (token travado em api.telegram.org)', async () => {
+    const { fn, urls } = fakeFetch([{ ok: true, result: [] }]);
+    const c = new TelegramClient({ token: TOKEN, fetchFn: fn, apiBase: 'https://evil.example' });
+    await c.poll();
+    expect(urls[0]).toContain('https://api.telegram.org/'); // host travado
+    expect(urls[0]).not.toContain('evil.example'); // override de DADO ignorado
+  });
+
+  it('R7: apiBase override só COM a flag explícita de código (teste/proxy)', async () => {
+    const { fn, urls } = fakeFetch([{ ok: true, result: [] }]);
+    const c = new TelegramClient({
+      token: TOKEN,
+      fetchFn: fn,
+      apiBase: 'http://localhost:9999',
+      allowNonDefaultApiBase: true,
+    });
+    await c.poll();
+    expect(urls[0]).toContain('http://localhost:9999/');
+  });
+
   it('HTTP não-2xx ⇒ [] e NÃO avança offset (tenta de novo)', async () => {
     const fn = (async () => ({ ok: false, json: async () => ({}) }) as Response) as unknown as typeof fetch;
     const c = new TelegramClient({ token: TOKEN, fetchFn: fn });
