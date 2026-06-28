@@ -1139,6 +1139,8 @@ async function defaultAgentInstaller(target: SidecarTarget): Promise<ProvisionTa
         ALUY_OVERWRITE_RENDER: '0',
         ALUY_SYNC_OUTPUT: '0',
         ALUY_NO_WEAK_YOLO_WARN: '1',
+        // O dono quer ACOMPANHAR: progresso VERBOSO (comando + saída de cada tool) no stderr.
+        ALUY_PRINT_VERBOSE: '1',
       },
     },
   );
@@ -1164,6 +1166,10 @@ async function defaultAgentInstaller(target: SidecarTarget): Promise<ProvisionTa
   // O agente PODE deixar um `pip install` rodando em BACKGROUND (watch_command) e
   // retornar antes dele terminar — verificar UMA vez aqui daria falso-negativo. Por
   // isso fazemos POLL do estado real por uma janela curta antes de concluir ✗.
+  // ACHADO DO DONO: este poll era SILENCIOSO e longo (parecia "travado no mem0" — na verdade
+  // re-rodava o `import mem0,chromadb` pesado por até 12min). Agora AVISA que está verificando
+  // e o teto caiu p/ ~2min (o agente já confirmou internamente; aqui é só rede-safety).
+  process.stderr.write(`\n  verificando "${target}"… (alguns segundos; a próxima etapa vem em seguida)\n`);
   let healthy = await verifyTargetHealthy(target, process.platform);
   for (let i = 0; i < AGENT_VERIFY_POLLS && !healthy; i++) {
     await sleep(AGENT_VERIFY_INTERVAL_MS);
@@ -1183,9 +1189,10 @@ async function defaultAgentInstaller(target: SidecarTarget): Promise<ProvisionTa
 }
 
 /** Poll de verificação pós-agente (cobre `pip install`/`winget` deixado em background).
- *  ~12min: o `winget install Ollama` baixa centenas de MB + o serviço sobe + os modelos
- *  do turbo são puxados; 5min dava falso 0/3 em conexões lentas (achado do dono). */
-const AGENT_VERIFY_POLLS = 144;
+ *  ~2min: o agente JÁ confirma a instalação internamente (imports/serviço); aqui é só uma
+ *  rede-safety p/ background lento. NÃO pode bloquear a fila por 12min "no escuro" (achado do
+ *  dono: parecia travar no mem0). Quem precisa de mais tempo (winget pesado) re-roda `aluy bootstrap`. */
+const AGENT_VERIFY_POLLS = 24;
 const AGENT_VERIFY_INTERVAL_MS = 5_000;
 
 function sleep(ms: number): Promise<void> {
@@ -1311,6 +1318,16 @@ export async function runProvisioner(
   // quando o agente está desligado.
   if (!useAgent) {
     for (const line of preflightPrereqs(toggles)) process.stderr.write(line + '\n');
+  }
+  // PLANO explícito (achado do dono: parecia "parar no mem0"): mostra a FILA completa de
+  // complementos ANTES de começar — assim o headroom (e a ordem) ficam VISÍVEIS, e se algum
+  // não estiver na fila, dá p/ ver na hora.
+  if (shouldProvision(profile)) {
+    const list = [...toggles];
+    process.stderr.write(
+      `Complementos a provisionar (perfil ${profile}): ${list.length > 0 ? list.join(', ') : '(nenhum)'}.\n` +
+        `Cada um é uma etapa; ao terminar uma, a próxima começa numa tela limpa.\n\n`,
+    );
   }
   return provisioner.provisionAll(profile, toggles);
 }

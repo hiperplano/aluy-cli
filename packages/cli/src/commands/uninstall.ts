@@ -103,7 +103,7 @@ function uninstallSystemViaAgent(io: TerminalIO): number {
   spawnSync(process.execPath, [aluyScript, '-p', systemUninstallGoal(), '--yolo', '--no-self-check'], {
     stdio: 'inherit',
     timeout: 600_000,
-    env: { ...process.env, ALUY_NO_WEAK_YOLO_WARN: '1' },
+    env: { ...process.env, ALUY_NO_WEAK_YOLO_WARN: '1', ALUY_PRINT_VERBOSE: '1' },
   });
   return 0;
 }

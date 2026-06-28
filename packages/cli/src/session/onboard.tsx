@@ -314,8 +314,20 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
     } else if (step === 'provider') {
       const v = providerOpts[cursor]!.value;
       setProviderId(v);
-      if (v === '__custom__') gotoText('custom-id', '');
-      else gotoText('key', '');
+      if (v === '__custom__') {
+        gotoText('custom-id', '');
+      } else {
+        // Provider SEM credencial (`auth:['none']`, ex.: Ollama local): PULA o passo da chave
+        // — não faz sentido pedir uma chave que não existe — e vai direto p/ o modelo.
+        const entry = providers.find((p) => p.id === v);
+        const keyless = entry?.auth?.length === 1 && entry.auth[0] === 'none';
+        if (keyless) {
+          setApiKey('');
+          gotoText('model', entry?.defaultModel ?? '');
+        } else {
+          gotoText('key', '');
+        }
+      }
     } else if (step === 'sidecars') {
       const chosen = sidecarOpts[cursor]!.value as Profile;
       setProfile(chosen);

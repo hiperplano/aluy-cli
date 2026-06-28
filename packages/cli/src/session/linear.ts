@@ -48,6 +48,13 @@ export interface RunLinearOptions {
    * LIGADO por default — o usuário VÊ o progresso; `--quiet` para scripts mudos.
    */
   readonly quiet?: boolean;
+  /**
+   * VERBOSO — mostra, no progresso do stderr, o COMANDO/alvo de cada tool (`b.target`) e o
+   * RESULTADO/saída ao concluir, em vez de só `· bash ✓`. Ligado pelo instalador de sidecars
+   * (`ALUY_PRINT_VERBOSE=1`) p/ o dono ACOMPANHAR o que o agente roda (apt/pip/curl). Default:
+   * `process.env.ALUY_PRINT_VERBOSE === '1'`.
+   */
+  readonly verbose?: boolean;
 }
 
 /**
@@ -203,6 +210,13 @@ export async function runHeadlessPrint(
   // sempre expõe; stubs mínimos de teste do resultado headless podem não — não quebrar
   // por isso). `--quiet` desliga; sem subscribe ⇒ pula silenciosamente.
   const showProgress = opts.quiet !== true && typeof controller.subscribe === 'function';
+  // VERBOSO (ALUY_PRINT_VERBOSE=1, ligado pelo instalador): mostra o comando + a saída.
+  const verbose = opts.verbose ?? process.env.ALUY_PRINT_VERBOSE === '1';
+  /** Trunca p/ uma linha de progresso legível (sem poluir). */
+  const oneLine = (s: string, max: number): string => {
+    const flat = s.replace(/\s+/g, ' ').trim();
+    return flat.length > max ? flat.slice(0, max - 1) + '…' : flat;
+  };
   let unsubProgress: (() => void) | undefined;
   if (showProgress) {
     const emitted = new Set<string>();
@@ -237,12 +251,20 @@ export async function runHeadlessPrint(
 
         // tool running
         if (b.kind === 'tool' && b.status === 'running') {
-          process.stderr.write(`· ${b.verb}…\n`);
+          // VERBOSO: mostra o comando/alvo (`sudo apt install …`, `curl …`); senão só o verbo.
+          const what = verbose && b.target ? ` ${oneLine(b.target, 120)}` : '…';
+          process.stderr.write(`· ${b.verb}${what}\n`);
         }
         // tool done/error
         if (b.kind === 'tool' && b.status !== 'running') {
           const ok = b.status === 'ok';
-          process.stderr.write(`  ${ok ? '✓' : '✗'} ${b.verb}\n`);
+          const head = verbose && b.target ? `${b.verb} ${oneLine(b.target, 100)}` : b.verb;
+          process.stderr.write(`  ${ok ? '✓' : '✗'} ${head}\n`);
+          // VERBOSO: a saída relevante (resultado quantificado + cauda do output), indentada.
+          if (verbose) {
+            const out = b.result || b.output || b.liveOutput;
+            if (out) process.stderr.write(`      ${oneLine(out, 200)}\n`);
+          }
         }
       }
     });

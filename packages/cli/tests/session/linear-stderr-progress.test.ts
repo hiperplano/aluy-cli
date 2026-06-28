@@ -220,6 +220,74 @@ describe('runHeadlessPrint — progresso human-readable no stderr', () => {
     }
   });
 
+  it('VERBOSO: mostra o COMANDO (target) + a SAÍDA (result), não só `· bash`', async () => {
+    const stderrLines: string[] = [];
+    const stderrSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        stderrLines.push(String(chunk));
+        return true;
+      });
+    try {
+      const controller = fakeController([
+        [{ kind: 'you', text: 'instale' }],
+        [
+          { kind: 'you', text: 'instale' },
+          { kind: 'tool', verb: 'bash', target: 'sudo apt install -y python3-venv', result: '', status: 'running' },
+        ],
+        [
+          { kind: 'you', text: 'instale' },
+          {
+            kind: 'tool',
+            verb: 'bash',
+            target: 'sudo apt install -y python3-venv',
+            result: '1 pacote instalado',
+            status: 'ok',
+          },
+          { kind: 'aluy', text: 'pronto.', streaming: false },
+        ],
+      ]);
+      await runHeadlessPrint(controller, 'instale', { verbose: true });
+      const stderr = stderrLines.join('');
+      // o COMANDO aparece (running + done), não só o verbo "bash"
+      expect(stderr).toContain('sudo apt install -y python3-venv');
+      // a SAÍDA/resultado aparece indentada
+      expect(stderr).toContain('1 pacote instalado');
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('NÃO-verboso (default): só `· bash`/`✓ bash`, sem o comando', async () => {
+    const stderrLines: string[] = [];
+    const stderrSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        stderrLines.push(String(chunk));
+        return true;
+      });
+    try {
+      const controller = fakeController([
+        [{ kind: 'you', text: 'x' }],
+        [
+          { kind: 'you', text: 'x' },
+          { kind: 'tool', verb: 'bash', target: 'sudo apt install xyz', result: '', status: 'running' },
+        ],
+        [
+          { kind: 'you', text: 'x' },
+          { kind: 'tool', verb: 'bash', target: 'sudo apt install xyz', result: 'ok', status: 'ok' },
+          { kind: 'aluy', text: 'pronto.', streaming: false },
+        ],
+      ]);
+      await runHeadlessPrint(controller, 'x', { verbose: false });
+      const stderr = stderrLines.join('');
+      expect(stderr).toContain('· bash');
+      expect(stderr).not.toContain('sudo apt install xyz'); // comando NÃO aparece sem verbose
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
   it('emite mudança de fase (» thinking, » streaming, » done)', async () => {
     const stderrLines: string[] = [];
     const stderrSpy = vi
