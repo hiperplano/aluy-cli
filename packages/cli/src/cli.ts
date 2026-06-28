@@ -600,6 +600,7 @@ export function versionText(): string {
  */
 const KNOWN_LONG_FLAGS: ReadonlySet<string> = new Set([
   'agent',
+  'no-agent',
   'ascii',
   'autocompact-at',
   'backend',
@@ -770,7 +771,10 @@ export function parseArgs(argv: readonly string[]): CliAction {
     return { kind: 'agents' };
   }
   if (sub === 'bootstrap' && !argv.includes('-h') && !argv.includes('--help')) {
-    return { kind: 'bootstrap', agent: argv.includes('--agent') };
+    // O AGENTE EMBUTIDO é o DEFAULT (instala pré-requisitos + sidecars adaptativo, qualquer
+    // SO). `--no-agent` força o caminho direto (tarball pinado, só Linux c/ python pronto).
+    // `--agent` segue aceito (redundante/explícito).
+    return { kind: 'bootstrap', agent: !argv.includes('--no-agent') };
   }
   // `aluy onboard` — onboarding interativo (Ink). Sem args/flags próprias nesta fatia;
   // `--help` cai no help geral. O bootstrap mínimo o invoca reanexado ao TTY real.

@@ -864,20 +864,26 @@ export class NodeSidecarProvisioner implements SidecarProvisioner {
       };
     }
 
-    // EST-1133-bis — SO sem artefato pinado (não-Linux): o download hardcoded
-    // (tarball linux-amd64 + zstd, venv Unix) NÃO roda. DELEGA ao agente se houver
-    // instalador injetado; senão, instrui (sem fingir/baixar errado).
+    // O AGENTE EMBUTIDO é o instalador PREFERIDO em QUALQUER SO/distro (decisão do dono):
+    // ele detecta o ambiente, instala os PRÉ-REQUISITOS que faltam (python3.10+/pip/venv,
+    // zstd/tar — via o gerenciador da distro, com sudo) E o sidecar, e ACOMPANHA/trata os
+    // problemas — que num parque heterogêneo (apt/dnf/pacman/zypper/brew) são a regra, não a
+    // exceção. O caminho rígido (tarball pinado) só era robusto no Linux com python já pronto.
+    // Por isso, havendo `agentInstaller`, ele VENCE — inclusive no Linux e mesmo com python
+    // presente (o agente parte do que existe e completa o que falta).
+    if (this.agentInstaller) {
+      return this.agentInstaller(target);
+    }
+    // Sem agente (--no-agent): caminho direto do tarball pinado (Linux); nos demais SOs,
+    // instrui (sem fingir/baixar errado).
     if (!this.hasPinnedArtifact()) {
-      if (this.agentInstaller) {
-        return this.agentInstaller(target);
-      }
       return {
         target,
         hashOk: false,
         installed: false,
         message:
           `SO '${this.platform}' sem artefato pinado p/ provisionamento direto. ` +
-          'Rode `aluy init --agent` para o aluy instalar via o próprio agente (⚠ --yolo), ' +
+          'Rode `aluy bootstrap` (o aluy instala via o próprio agente, ⚠ --yolo) ' +
           'ou instale manualmente.',
       };
     }
@@ -949,14 +955,38 @@ const PY_COMPAT_HINT =
   '(ex.: 3.14), APAGUE e recrie com a versão certa';
 
 /** Objetivo de instalação por alvo, passado ao agente do aluy. */
+/**
+ * Preâmbulo de PRÉ-REQUISITOS de sistema para o agente instalar adaptativamente ANTES do
+ * sidecar (decisão do dono: o agente cuida do que falta, não importa a distro). `pkgs` são
+ * os pacotes de sistema necessários (ex.: python3, python3-venv, python3-pip / zstd, tar).
+ *
+ * Cobre a "variedade de configurações" do parque Unix e a questão do sudo:
+ *  - detecta a distro/gerenciador (apt/dnf/pacman/zypper no Linux; brew no macOS);
+ *  - usa `sudo` p/ pacotes de sistema; se o `sudo -n` (sem senha) falhar, PEDE a senha ao
+ *    usuário (stdio interativo) em vez de abortar — o usuário está ciente e consentiu.
+ */
+function prereqPreamble(pkgs: readonly string[]): string {
+  return (
+    `PRIMEIRO garanta os pré-requisitos de sistema (${pkgs.join(', ')}). ` +
+    `Detecte o gerenciador de pacotes da máquina (apt/dnf/pacman/zypper no Linux; brew no ` +
+    `macOS; winget/instalador no Windows) e instale só o que FALTAR — parta do que já existe. ` +
+    `Pacotes de sistema exigem privilégio: tente \`sudo -n true\` p/ ver se o sudo é sem-senha; ` +
+    `se exigir senha, PEÇA a senha ao usuário e rode com \`sudo\` (não aborte). Se algo falhar ` +
+    `(repo, lock do apt, nome de pacote diferente na distro), DIAGNOSTIQUE e contorne — você é ` +
+    `o instalador adaptativo, trate o problema em vez de desistir. `
+  );
+}
+
 function agentInstallGoal(target: SidecarTarget): string {
   if (target === 'ollama') {
     return (
       'Provisione o sidecar OLLAMA do aluy, detectando o SO. ' +
+      prereqPreamble(['zstd', 'tar']) +
       `Teste GET http://${OLLAMA_LOOPBACK_HOST}:${OLLAMA_LOOPBACK_PORT}/api/tags. ` +
-      'Se o serviço não responder, instale o Ollama (no Windows: `winget install --id ' +
-      'Ollama.Ollama -e --accept-source-agreements --accept-package-agreements`, ou o ' +
-      'instalador oficial) e garanta o serviço rodando. ' +
+      'Se o serviço não responder, instale o Ollama (Linux: script oficial `curl -fsSL ' +
+      'https://ollama.com/install.sh | sh`; Windows: `winget install --id Ollama.Ollama -e ' +
+      '--accept-source-agreements --accept-package-agreements`; macOS: brew ou instalador) e ' +
+      'garanta o serviço rodando. ' +
       `DEPOIS, puxe os modelos do TURBO (senão o judge/embedder não funcionam): ` +
       `\`ollama pull ${JUDGE_MODEL}\` (judge) e \`ollama pull ${EMBEDDER_MODEL}\` (embedder). ` +
       `Confirme que ambos aparecem em \`ollama list\`. Seja conciso.`
@@ -965,7 +995,9 @@ function agentInstallGoal(target: SidecarTarget): string {
   if (target === 'mem0') {
     const venvDir = join(aluyDir(), MEM0_VENV_DIR);
     return (
-      `Provisione o sidecar MEM0 do aluy. Crie um venv em "${venvDir}" usando um Python ` +
+      `Provisione o sidecar MEM0 do aluy. ` +
+      prereqPreamble(['python3 (>=3.10)', 'python3-venv', 'python3-pip']) +
+      `DEPOIS crie um venv em "${venvDir}" usando um Python ` +
       `${PY_COMPAT_HINT} e garanta pip funcional (Scripts\\pip.exe no Windows, bin/pip no Unix). ` +
       `Instale TODAS as deps no venv: ${MEM0_PIP_PACKAGES.join(', ')} (não só mem0ai — o ` +
       `servidor importa chromadb e ollama). Confirme que 'import mem0, chromadb, ollama' ` +
@@ -976,7 +1008,8 @@ function agentInstallGoal(target: SidecarTarget): string {
     const venvDir = join(aluyDir(), HEADROOM_VENV_DIR);
     return (
       `Provisione o sidecar HEADROOM do aluy (proxy de compressão). ` +
-      `Crie um venv em "${venvDir}" usando um Python ${PY_COMPAT_HINT}, ` +
+      prereqPreamble(['python3 (>=3.10)', 'python3-venv', 'python3-pip']) +
+      `DEPOIS crie um venv em "${venvDir}" usando um Python ${PY_COMPAT_HINT}, ` +
       `instale o pacote ${HEADROOM_PIP_PACKAGES.join(', ')} (pip install) e confirme que o ` +
       "entrypoint 'headroom' existe no venv (Scripts\\headroom.exe no Windows, bin/headroom no Unix). " +
       `No Windows o core Rust não tem wheel: o proxy só sobe com HEADROOM_REQUIRE_RUST_CORE=false ` +
@@ -1239,12 +1272,19 @@ export async function runProvisioner(
 ): Promise<ProvisionResult> {
   const profile: AgentProfileTier = configProfile ?? 'turbo';
   const toggles = resolveSidecarToggles(configToggles ?? {});
+  // O AGENTE EMBUTIDO é o instalador DEFAULT (decisão do dono): ele detecta o ambiente e
+  // instala os pré-requisitos que faltam adaptativamente (qualquer distro, com sudo). Só
+  // `useAgent:false` (--no-agent) força o caminho direto do tarball pinado (Linux).
+  const useAgent = opts?.useAgent !== false;
   const provisioner = new NodeSidecarProvisioner({
     ...(opts?.platform ? { platform: opts.platform } : {}),
-    ...(opts?.useAgent ? { agentInstaller: defaultAgentInstaller } : {}),
+    ...(useAgent ? { agentInstaller: defaultAgentInstaller } : {}),
   });
-  // Pré-flight: avisa AGORA quais pré-requisitos de SO faltam (python3.10+/venv/pip p/
-  // mem0+headroom; zstd/tar p/ ollama), em vez de cada sidecar falhar no escuro.
-  for (const line of preflightPrereqs(toggles)) process.stderr.write(line + '\n');
+  // O preflight (avisar "instale python na mão") só vale no caminho DIRETO — no caminho do
+  // AGENTE é ELE quem instala os pré-requisitos, então o aviso seria contraditório. Só avisamos
+  // quando o agente está desligado.
+  if (!useAgent) {
+    for (const line of preflightPrereqs(toggles)) process.stderr.write(line + '\n');
+  }
   return provisioner.provisionAll(profile, toggles);
 }

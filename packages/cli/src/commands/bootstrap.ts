@@ -259,35 +259,22 @@ export async function runInit(opts: {
     return 0;
   }
 
-  // EST-1133-bis — SO não-Linux: sem artefato pinado. Com `--agent`, o aluy instala
-  // via o PRÓPRIO agente (⚠ --yolo). Sem a flag, instrui (sem tentar baixar errado).
-  const isLinux = process.platform === 'linux';
-  if (!isLinux) {
-    if (opts.agent) {
-      out(
-        `  Sistema ${process.platform}: os componentes serão instalados pelo próprio aluy.`,
-      );
-      out(
-        '  (No Linux há um pacote único já verificado; nos demais sistemas a instalação é assistida.)',
-      );
-    } else {
-      out(
-        `  Sistema ${process.platform}: a instalação automática dos componentes está, por ora,`,
-      );
-      out('  disponível só no Linux. Você tem duas opções:');
-      out('   • `aluy bootstrap --agent` — o aluy instala sozinho (acesso total à máquina); ou');
-      out('   • instalar manualmente. Instalar o Ollama para Windows já basta — ele sobe');
-      out('     em :11434 e o aluy detecta sozinho.');
-      return 0;
-    }
+  // O AGENTE EMBUTIDO instala os complementos em QUALQUER SO (decisão do dono): detecta a
+  // distro/gerenciador, instala os PRÉ-REQUISITOS que faltam (python/pip/venv, zstd/tar — com
+  // sudo) e o sidecar, e ACOMPANHA/trata os problemas. ⚠ Roda em --yolo (acesso total à
+  // máquina) — optar pelo TURBO é o consentimento. `--no-agent` força o caminho direto (tarball
+  // pinado, só Linux com python já pronto), para quem prefere não rodar o agente.
+  const useAgent = opts.agent !== false;
+  if (useAgent) {
+    out('  Instalando os complementos com o próprio aluy — ele detecta o sistema, instala o que');
+    out('  faltar (Python, pip, etc.) e os complementos. ⚠ Acesso total à máquina (com sudo quando');
+    out('  preciso). Você verá o progresso de cada um abaixo.');
+  } else {
+    out('  Instalando os complementos pelo caminho direto (--no-agent; requer Python já pronto)...');
   }
-
-  out('  Instalando os complementos (você verá o progresso de cada um abaixo)...');
   out('');
 
-  const result = await runProvisioner(profile, sidecarToggles, {
-    useAgent: opts.agent === true,
-  });
+  const result = await runProvisioner(profile, sidecarToggles, { useAgent });
 
   for (const t of result.targets) {
     const icon = t.installed ? '✓' : '✗';

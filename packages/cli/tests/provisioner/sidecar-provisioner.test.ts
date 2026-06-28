@@ -172,6 +172,48 @@ describe('NodeSidecarProvisioner.provisionAll', () => {
   });
 });
 
+// ─── Suite: roteamento p/ o AGENTE (decisão do dono — agente é o instalador) ──
+
+describe('NodeSidecarProvisioner.provision — agentInstaller é PREFERIDO (qualquer SO)', () => {
+  beforeEach(resetAllMocks);
+
+  it('agentInstaller presente ⇒ usado MESMO no Linux (não cai no tarball direto)', async () => {
+    const calls: SidecarTarget[] = [];
+    const provisioner = new NodeSidecarProvisioner({
+      platform: 'linux',
+      agentInstaller: async (t) => {
+        calls.push(t);
+        return { target: t, hashOk: true, installed: true, message: 'via agente' };
+      },
+    });
+    const r = await provisioner.provision('ollama');
+    expect(calls).toEqual(['ollama']); // o agente foi chamado, no Linux
+    expect(r.installed).toBe(true);
+    expect(r.message).toContain('agente');
+  });
+
+  it('agentInstaller presente ⇒ usado p/ mem0 também (mesmo com python presente, parte do que existe)', async () => {
+    let used = false;
+    const provisioner = new NodeSidecarProvisioner({
+      platform: 'linux',
+      agentInstaller: async (t) => {
+        used = true;
+        return { target: t, hashOk: true, installed: true, message: 'via agente' };
+      },
+    });
+    await provisioner.provision('mem0');
+    expect(used).toBe(true);
+  });
+
+  it('SEM agentInstaller ⇒ caminho direto no Linux (comportamento --no-agent preservado)', async () => {
+    mockFetch.mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) });
+    const provisioner = new NodeSidecarProvisioner({ platform: 'linux' });
+    const r = await provisioner.provision('ollama');
+    // sem agente, é o caminho direto (mockado) — não a mensagem "via agente"
+    expect(r.message).not.toContain('via agente');
+  });
+});
+
 // ─── Suite: provision (root refusal) ────────────────────────────────────────
 
 describe('NodeSidecarProvisioner.provision — recusa root', () => {
@@ -446,13 +488,13 @@ describe('runProvisioner', () => {
       arrayBuffer: async () => new ArrayBuffer(0),
     });
 
-    const result = await runProvisioner(undefined, undefined, { platform: 'linux' });
+    const result = await runProvisioner(undefined, undefined, { platform: 'linux', useAgent: false });
     expect(result.profile).toBe('turbo');
     expect(result.targets.length).toBeGreaterThanOrEqual(1);
   });
 
   it('perfil LEVE explícito ⇒ não provisiona nada', async () => {
-    const result = await runProvisioner('leve', { ollama: true }, { platform: 'linux' });
+    const result = await runProvisioner('leve', { ollama: true }, { platform: 'linux', useAgent: false });
     expect(result.profile).toBe('leve');
     expect(result.targets).toHaveLength(0);
     expect(result.anySuccess).toBe(false);
@@ -462,7 +504,7 @@ describe('runProvisioner', () => {
     const result = await runProvisioner(
       'turbo',
       { ollama: false, mem0: true, headroom: false },
-      { platform: 'linux' },
+      { platform: 'linux', useAgent: false },
     );
     expect(result.profile).toBe('turbo');
     expect(result.targets).toHaveLength(1);
@@ -478,7 +520,7 @@ describe('runProvisioner', () => {
     const result = await runProvisioner(
       'turbo',
       { ollama: true, mem0: false, headroom: false },
-      { platform: 'linux' },
+      { platform: 'linux', useAgent: false },
     );
     expect(result.targets).toHaveLength(1);
     expect(result.targets[0]!.target).toBe('ollama');
@@ -492,7 +534,7 @@ describe('runProvisioner', () => {
         mem0: false,
         headroom: false,
       },
-      { platform: 'linux' },
+      { platform: 'linux', useAgent: false },
     );
     expect(result.targets).toHaveLength(0);
     expect(result.anySuccess).toBe(false);
@@ -575,11 +617,11 @@ describe('provisionAll — degradação', () => {
 describe('EST-1133-bis — delegação ao agente (SO não-Linux)', () => {
   beforeEach(resetAllMocks);
 
-  it('win32 SEM agentInstaller ⇒ instrui (aluy init --agent), não baixa', async () => {
+  it('win32 SEM agentInstaller ⇒ instrui (aluy bootstrap), não baixa', async () => {
     const provisioner = new NodeSidecarProvisioner({ platform: 'win32' });
     const result = await provisioner.provision('ollama');
     expect(result.installed).toBe(false);
-    expect(result.message).toMatch(/aluy init --agent/);
+    expect(result.message).toMatch(/aluy bootstrap/);
     // NÃO tentou baixar o tarball (fetch nunca chamado).
     expect(mockFetch).not.toHaveBeenCalled();
   });
@@ -605,8 +647,13 @@ describe('EST-1133-bis — delegação ao agente (SO não-Linux)', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('linux NÃO delega: usa o provisionamento direto (download)', async () => {
-    const installer = vi.fn();
+  it('linux COM agentInstaller ⇒ DELEGA (decisão do dono: agente é o instalador, mesmo no Linux)', async () => {
+    const installer = vi.fn(async (target: SidecarTarget) => ({
+      target,
+      hashOk: true,
+      installed: true,
+      message: `via agente: ${target}`,
+    }));
     mockFetch.mockResolvedValue({
       ok: true,
       arrayBuffer: async () => new ArrayBuffer(0),
@@ -616,10 +663,22 @@ describe('EST-1133-bis — delegação ao agente (SO não-Linux)', () => {
       agentInstaller: installer,
     });
 
-    await provisioner.provision('ollama');
+    const result = await provisioner.provision('ollama');
 
-    // Em Linux há artefato pinado ⇒ NÃO delega, vai pro download.
-    expect(installer).not.toHaveBeenCalled();
+    // NOVO comportamento: o agente VENCE no Linux também — não cai no download direto.
+    expect(installer).toHaveBeenCalledWith('ollama');
+    expect(result.message).toMatch(/via agente/);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('linux SEM agentInstaller ⇒ caminho direto (download) preservado (--no-agent)', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    });
+    const provisioner = new NodeSidecarProvisioner({ platform: 'linux' });
+    await provisioner.provision('ollama');
+    // sem agente, o Linux baixa o tarball pinado (comportamento --no-agent).
     expect(mockFetch).toHaveBeenCalled();
   });
 
