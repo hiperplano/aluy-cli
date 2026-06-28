@@ -62,6 +62,27 @@ describe('OpenAiCompatAdapter — request building', () => {
     expect(body.messages).toEqual([{ role: 'user', content: 'Oi' }]);
   });
 
+  it('auth `none` (Ollama local) ⇒ NÃO manda header Authorization', async () => {
+    const credNone = async (): Promise<ResolvedCredential> => ({ kind: 'none', secret: '' });
+    const sse = openAiSse([
+      { id: 'c', choices: [{ delta: { content: 'oi' } }] },
+      { id: 'c', choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+    ]);
+    const { fetch, calls } = makeBrokerFetch({ status: 200, sse });
+    const client = new LocalModelClient({
+      adapter: adapter(),
+      config: { provider: 'ollama', model: 'llama3.2' },
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      getCredential: credNone,
+      fetch,
+      maxTokens: 1024,
+    });
+    await drain(client.stream({ request: req() }));
+    // SEM Authorization — o Ollama no loopback não usa credencial.
+    expect(calls[0]?.headers['authorization']).toBeUndefined();
+    expect(calls[0]?.url).toBe('http://127.0.0.1:11434/v1/chat/completions');
+  });
+
   it('mapeia o stream p/ delta+usage+done; agrega o texto no call()', async () => {
     const sse = openAiSse([
       { id: 'c1', model: 'x', choices: [{ delta: { content: 'Olá' } }] },

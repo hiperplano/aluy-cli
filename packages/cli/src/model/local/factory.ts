@@ -36,6 +36,17 @@ function defaultBaseUrlFor(
 }
 
 /**
+ * Auth DEFAULT derivado do catálogo: provider KEYLESS (entrada com auth `['none']`, ex.:
+ * Ollama local) ⇒ `'none'` (sem credencial). Qualquer outro / desconhecido ⇒ `'apikey'`.
+ * Usado quando a flag/config não fixa o auth — assim Ollama "só funciona" sem pedir chave.
+ */
+function defaultAuthFor(provider: LocalProviderKind, catalog: LocalProviderCatalog): LocalAuthKind {
+  const modes = findProvider(catalog, provider)?.auth;
+  if (modes !== undefined && modes.length > 0 && modes.every((m) => m === 'none')) return 'none';
+  return 'apikey';
+}
+
+/**
  * Cria o adapter pelo `wireFormat` da entrada do catálogo (ADR-0118: o `wireFormat`
  * escolhe o ADAPTER de código). Hoje: `anthropic` ⇒ AnthropicAdapter; `openai-compat`/
  * `gemini` ⇒ OpenAiCompatAdapter parametrizado por base_url (um adapter `gemini` próprio
@@ -85,7 +96,10 @@ export async function buildLocalModelClient(
   opts: BuildLocalClientOptions,
 ): Promise<LocalModelClient> {
   const catalog = opts.catalog ?? defaultLocalCatalog();
-  const auth: LocalAuthKind = opts.auth ?? 'apikey';
+  // auth EFETIVO: a flag/config (`opts.auth`) vence; senão DERIVA do catálogo — provider
+  // keyless (auth `['none']`, ex.: Ollama local) ⇒ 'none' automático (sem o usuário setar
+  // nada). Demais ⇒ 'apikey'. Assim escolher "Ollama (local)" no onboard "só funciona".
+  const auth: LocalAuthKind = opts.auth ?? defaultAuthFor(opts.provider, catalog);
   const resolver = opts.resolver ?? new NodeHostResolver();
 
   // base_url DEFAULT do provider (do catálogo). Provider desconhecido sem override de

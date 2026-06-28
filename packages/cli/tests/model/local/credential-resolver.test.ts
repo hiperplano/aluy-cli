@@ -55,6 +55,16 @@ describe('createLocalCredentialProvider — apikey: keychain → env', () => {
     await expect(provider()).rejects.toBeInstanceOf(MissingLocalCredentialError);
   });
 
+  it('auth `none` (Ollama local) ⇒ credencial vazia, NÃO lança (sem exigir chave)', async () => {
+    const provider = createLocalCredentialProvider({
+      provider: 'ollama',
+      auth: 'none',
+      entryFactory: fakeKeyring({}),
+      env: {},
+    });
+    await expect(provider()).resolves.toEqual({ kind: 'none', secret: '' });
+  });
+
   it('a env var é a do provider certo (não cruza providers)', async () => {
     const provider = createLocalCredentialProvider({
       provider: 'anthropic',

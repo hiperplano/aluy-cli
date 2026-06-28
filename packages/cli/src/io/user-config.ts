@@ -113,7 +113,7 @@ export interface UserConfig {
    * paga-por-uso) | `oauth` (assinatura — ⚠ zona cinzenta de ToS, EST-1114). NÃO
    * credencial (só diz QUAL via usar). Default `apikey`.
    */
-  readonly localAuth?: 'apikey' | 'oauth';
+  readonly localAuth?: 'apikey' | 'oauth' | 'none';
   /**
    * ADR-0120 / EST-1113 · PROV-SEC-1 — override de `base_url` do provider local
    * (ex.: gateway OpenAI-compat próprio). VALIDADO por anti-SSRF antes do uso. NÃO
@@ -430,7 +430,7 @@ function sanitize(raw: unknown): UserConfig {
     backend?: 'broker' | 'local';
     localProvider?: string;
     localModel?: string;
-    localAuth?: 'apikey' | 'oauth';
+    localAuth?: 'apikey' | 'oauth' | 'none';
     localBaseUrl?: string;
     localBudget?: boolean;
     rooms?: { backend?: string };
@@ -476,7 +476,7 @@ function sanitize(raw: unknown): UserConfig {
   // ADR-0120 — localModel: string opaca razoável (MESMA forma do tier).
   if (isReasonableOpaque(obj.localModel)) out.localModel = obj.localModel.trim();
   // ADR-0120 — localAuth: só `apikey`|`oauth` (lixo ⇒ descartado ⇒ default apikey).
-  if (obj.localAuth === 'apikey' || obj.localAuth === 'oauth') out.localAuth = obj.localAuth;
+  if (obj.localAuth === 'apikey' || obj.localAuth === 'oauth' || obj.localAuth === 'none') out.localAuth = obj.localAuth;
   // ADR-0120 — localBaseUrl: string opaca razoável; o anti-SSRF a valida no uso.
   if (isReasonableOpaque(obj.localBaseUrl)) out.localBaseUrl = obj.localBaseUrl.trim();
 

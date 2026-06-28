@@ -111,6 +111,11 @@ export function createLocalCredentialProvider(
   const env = opts.env ?? process.env;
 
   return async (): Promise<ResolvedCredential> => {
+    if (auth === 'none') {
+      // Provider SEM credencial (ex.: Ollama local no loopback): nada a resolver, NÃO lança.
+      // O adapter omite o Authorization quando o kind é 'none'.
+      return { kind: 'none', secret: '' };
+    }
     if (auth === 'oauth') {
       const token = opts.oauthAccessToken !== undefined ? await opts.oauthAccessToken() : undefined;
       if (token === undefined || token === '') {

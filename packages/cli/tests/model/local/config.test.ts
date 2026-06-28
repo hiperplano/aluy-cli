@@ -30,6 +30,13 @@ describe('resolveLocalProviderConfig — provider/model/auth/base_url', () => {
     expect(c).toEqual({ provider: 'anthropic', model: 'claude-opus-4-8', auth: 'apikey' });
   });
 
+  it('provider KEYLESS (Ollama local) ⇒ auth DERIVA p/ "none" do catálogo (sem exigir chave)', () => {
+    const c = resolveLocalProviderConfig({ env: {}, config: { localProvider: 'ollama' } });
+    expect(c.provider).toBe('ollama');
+    expect(c.auth).toBe('none'); // não 'apikey' — o Ollama não tem credencial
+    expect(c.model).toBe('llama3.2'); // default do catálogo
+  });
+
   it('flags vencem env e config', () => {
     const c = resolveLocalProviderConfig({
       flags: {

@@ -26,7 +26,9 @@ export type LocalProviderKind = 'anthropic' | 'openrouter' | 'openai' | (string 
  * Pro/Max / ChatGPT — ⚠ zona cinzenta de ToS, EST-1114). A escolha é do usuário,
  * por provider.
  */
-export type LocalAuthKind = 'apikey' | 'oauth';
+// `none` (ADR-0120/0118): provider LOCAL sem credencial — ex.: Ollama no loopback
+// (:11434/v1). Não há chave nem token; o cliente NÃO manda header de Authorization.
+export type LocalAuthKind = 'apikey' | 'oauth' | 'none';
 
 /**
  * Credencial JÁ RESOLVIDA p/ UMA chamada (o locus a obtém do keychain→env e a

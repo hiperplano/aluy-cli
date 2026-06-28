@@ -72,8 +72,19 @@ function parseProvider(
 function parseAuth(raw: string | undefined | null): LocalAuthKind | undefined {
   if (raw === undefined || raw === null) return undefined;
   const v = raw.trim().toLowerCase();
-  if (v === 'apikey' || v === 'oauth') return v;
+  if (v === 'apikey' || v === 'oauth' || v === 'none') return v;
   return undefined;
+}
+
+/**
+ * Auth DEFAULT do provider quando flag/env/config não fixam: provider KEYLESS no catálogo
+ * (auth `['none']`, ex.: Ollama local) ⇒ `'none'` (sem credencial); senão `'apikey'`. Sem
+ * isto o default era SEMPRE 'apikey' ⇒ o cliente exigia chave do Ollama (que não tem).
+ */
+function defaultAuthForProvider(provider: string, catalog: LocalProviderCatalog): LocalAuthKind {
+  const modes = findProvider(catalog, provider)?.auth;
+  if (modes !== undefined && modes.length > 0 && modes.every((m) => m === 'none')) return 'none';
+  return 'apikey';
 }
 
 function nonEmpty(raw: string | undefined | null): string | undefined {
@@ -119,7 +130,7 @@ export function resolveLocalProviderConfig(args: {
     parseAuth(flags.localAuth) ??
     parseAuth(args.env.ALUY_LOCAL_AUTH) ??
     parseAuth(args.config.localAuth) ??
-    'apikey';
+    defaultAuthForProvider(provider, catalog); // keyless (Ollama) ⇒ 'none', senão 'apikey'
   const baseUrl =
     nonEmpty(flags.localBaseUrl) ??
     nonEmpty(args.env.ALUY_LOCAL_BASE_URL) ??

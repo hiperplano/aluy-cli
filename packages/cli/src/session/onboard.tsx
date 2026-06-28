@@ -12,6 +12,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { render, Box, useApp, useInput } from 'ink';
 import { Wordmark } from '../ui/components/Wordmark.js';
 import { Role, ThemeProvider, resolveTheme } from '../ui/theme/index.js';
+import { CLI_VERSION } from '../version.js';
 import { LANGS, type Lang } from '../i18n/lang.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -372,7 +373,9 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
     <Box flexDirection="column" paddingY={1}>
       <Wordmark columns={80} />
       <Box paddingTop={1}>
-        <Role name="fgDim">{T('configuração inicial', 'first-run setup')}{step !== 'done' ? `  ·  ${stepNo()}` : ''}</Role>
+        {/* Mostra a VERSÃO que está sendo instalada/configurada na tela do logo (pedido do
+            dono): tira a dúvida de "qual versão estou rodando" logo no 1º passo. */}
+        <Role name="fgDim">aluy v{CLI_VERSION}  ·  {T('configuração inicial', 'first-run setup')}{step !== 'done' ? `  ·  ${stepNo()}` : ''}</Role>
       </Box>
       <Box paddingTop={1} flexDirection="column">
         {step === 'lang' && <Picker title={T('Idioma', 'Language')} opts={LANGS.map((l) => ({ value: l.code, label: l.label }))} cursor={cursor} active={lang} />}

@@ -80,10 +80,15 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
     }
 
     const headers: Record<string, string> = {
-      authorization: `Bearer ${credential.secret}`,
       'content-type': 'application/json',
       accept: 'text/event-stream',
     };
+    // auth `none` (ex.: Ollama local) ⇒ SEM header de Authorization. Só manda o Bearer
+    // quando há segredo de fato (apikey/oauth) — o Ollama no loopback rejeitaria/ignoraria
+    // um `Bearer undefined`, e mandar header vazio é ruído.
+    if (credential.kind !== 'none' && credential.secret !== '') {
+      headers.authorization = `Bearer ${credential.secret}`;
+    }
     if (this.provider === 'openrouter') {
       headers['http-referer'] = ATTRIBUTION_URL;
       headers['x-title'] = ATTRIBUTION_TITLE;
