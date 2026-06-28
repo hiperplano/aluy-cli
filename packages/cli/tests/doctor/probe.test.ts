@@ -45,7 +45,10 @@ function baseDeps(extra: Partial<DoctorProbeDeps> = {}): DoctorProbeDeps {
   return {
     aluyHome: home,
     workspaceRoot: workspace,
-    env: { ALUY_BROKER_URL: 'https://broker.test' },
+    // DEFAULT_BACKEND é 'local' (ADR-0120); os testes de BROKER selecionam broker
+    // explicitamente (senão o doctor pula o broker como N/A — comportamento correto p/ o
+    // público local-first). Os testes de backend LOCAL sobrescrevem `env` sem ALUY_BACKEND.
+    env: { ALUY_BROKER_URL: 'https://broker.test', ALUY_BACKEND: 'broker' },
     // auth real toca o keychain do SO — não na suíte; injetamos o fato direto.
     gatherAuth: async () => ({
       present: true,
@@ -82,6 +85,42 @@ describe('doctor/probe — broker (#2)', () => {
       baseDeps({ fetch: fakeFetch({ '/healthz': { status: 401 }, '/v1/': { status: 401 } }) }),
     );
     expect(facts.broker.probe).toEqual({ reached: true, status: 401 });
+  });
+
+  it('backend=local via ENV ⇒ broker e catálogo viram N/A (localSkip), NÃO probados', async () => {
+    const facts = await gatherDoctorFacts(
+      baseDeps({
+        env: { ALUY_BROKER_URL: 'https://broker.test', ALUY_BACKEND: 'local' },
+        fetch: fakeFetch({ '/healthz': 'throw' }),
+      }),
+    );
+    expect(facts.broker.localSkip).toBe(true);
+    expect(facts.catalog.localSkip).toBe(true);
+  });
+
+  it('backend=local via CONFIG (sem env) ⇒ localSkip (FIX: antes probava o broker e dava ✗ falso)', async () => {
+    // público é local-por-config/default sem ALUY_BACKEND na env.
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ backend: 'local' }), 'utf8');
+    const facts = await gatherDoctorFacts(
+      baseDeps({
+        env: { ALUY_BROKER_URL: 'https://broker.test' }, // SEM ALUY_BACKEND
+        fetch: fakeFetch({ '/healthz': 'throw' }),
+      }),
+    );
+    expect(facts.broker.localSkip).toBe(true);
+    expect(facts.catalog.localSkip).toBe(true);
+  });
+
+  it('ENV broker VENCE config local ⇒ broker é probado (precedência env>config)', async () => {
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ backend: 'local' }), 'utf8');
+    const facts = await gatherDoctorFacts(
+      baseDeps({
+        env: { ALUY_BROKER_URL: 'https://broker.test', ALUY_BACKEND: 'broker' },
+        fetch: fakeFetch({ '/healthz': { status: 200 }, '/v1/': { status: 401 } }),
+      }),
+    );
+    expect(facts.broker.localSkip).toBeUndefined();
+    expect(facts.broker.probe).toEqual({ reached: true, status: 200 });
   });
 });
 

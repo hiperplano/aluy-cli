@@ -28,6 +28,7 @@ import {
   parseMcpConfig,
   McpConfigError,
   resolveSidecarToggles,
+  resolveBackend,
   type RedactedCredential,
   type McpConfig,
   type McpServerConfig,
@@ -271,8 +272,20 @@ function resolveFetch(deps: DoctorProbeDeps): StreamFetch {
 
 // ADR-0120 (BYO) — backend local: o modelo NÃO passa pelo broker ⇒ os probes de
 // broker/catálogo são pulados e o check vira N/A (não ✗ falso). EST-1133-bis.
-function isLocalBackend(env: NodeJS.ProcessEnv): boolean {
-  return (env.ALUY_BACKEND ?? '').trim().toLowerCase() === 'local';
+//
+// FIX: resolve o backend EFETIVO pela precedência real (env `ALUY_BACKEND` > config
+// `~/.aluy/config.json` `backend` > default). Antes só olhava a env — então o usuário
+// público (backend=local por CONFIG/default, sem env) tinha o broker probado e marcado ✗
+// "inalcançável" (falso-negativo). Agora o config/default também contam.
+function isLocalBackend(deps: DoctorProbeDeps): boolean {
+  const env = deps.env ?? process.env;
+  let configBackend: string | undefined;
+  try {
+    configBackend = new UserConfigStore({ baseDir: aluyHomeOf(deps) }).load().backend;
+  } catch {
+    /* config ausente/corrompido ⇒ ignora (cai no default do resolveBackend). */
+  }
+  return resolveBackend({ env: env.ALUY_BACKEND, config: configBackend }) === 'local';
 }
 
 // ── #2 broker — ping leve em /healthz (sem auth, sem gasto de modelo) ─────────
@@ -280,7 +293,7 @@ async function gatherBroker(deps: DoctorProbeDeps): Promise<BrokerFact> {
   const env = deps.env ?? process.env;
   const { brokerBaseUrl } = loadBrokerConfig(env);
   // Backend local ⇒ não pinga o broker (não é usado); marca N/A.
-  if (isLocalBackend(env)) {
+  if (isLocalBackend(deps)) {
     return { url: brokerBaseUrl, probe: { reached: false }, localSkip: true };
   }
   const probe = await httpProbe(`${brokerBaseUrl}${HEALTHZ_PATH}`, resolveFetch(deps));
@@ -291,7 +304,7 @@ async function gatherBroker(deps: DoctorProbeDeps): Promise<BrokerFact> {
 async function gatherCatalog(deps: DoctorProbeDeps): Promise<CatalogFact> {
   const env = deps.env ?? process.env;
   // Backend local ⇒ o catálogo do broker não se aplica; marca N/A.
-  if (isLocalBackend(env)) {
+  if (isLocalBackend(deps)) {
     return { tiers: { reached: false }, custom: { reached: false }, localSkip: true };
   }
   const { brokerBaseUrl } = loadBrokerConfig(env);
