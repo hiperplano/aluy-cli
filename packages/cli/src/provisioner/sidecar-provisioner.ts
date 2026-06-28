@@ -21,6 +21,9 @@ import {
   readFileSync,
   rmSync,
   copyFileSync,
+  symlinkSync,
+  unlinkSync,
+  realpathSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir, userInfo } from 'node:os';
@@ -1200,6 +1203,7 @@ async function defaultAgentInstaller(
   // serviço subia mas o judge model ficava de fora ⇒ o judge degradava p/ heurística).
   if (target === 'ollama') {
     await ensureOllamaModels();
+    ensureOllamaOnPath();
   }
   // O agente PODE deixar um `pip install` rodando em BACKGROUND (watch_command) e
   // retornar antes dele terminar — verificar UMA vez aqui daria falso-negativo. Por
@@ -1256,6 +1260,53 @@ async function ensureOllamaModels(): Promise<void> {
     } catch {
       // best-effort.
     }
+  }
+}
+
+/**
+ * Garante o binário `ollama` ALCANÇÁVEL pelo usuário, de forma DETERMINÍSTICA (não depende
+ * do agente lembrar de editar o rc do shell). ACHADO DO DONO (Ubuntu): o serviço subia em
+ * :11434 mas `ollama list` → "command not found" — o binário ficava fora do PATH e a edição
+ * do `.bashrc` não pega no shell JÁ aberto. Aqui localizamos o binário e criamos um symlink em
+ * `~/.local/bin` (que o Ubuntu/Debian põe no PATH via ~/.profile quando o dir existe), além de
+ * deixar o link pronto p/ novas sessões. Só Unix (no Windows o winget já põe no PATH). Best-effort.
+ */
+function ensureOllamaOnPath(): void {
+  if (process.platform === 'win32') return;
+  try {
+    // 1) Já alcançável? `command -v ollama` num shell de login (lê ~/.profile/.bashrc).
+    const probe = spawnSync('sh', ['-lc', 'command -v ollama'], { encoding: 'utf8', timeout: 10_000 });
+    if (probe.status === 0 && (probe.stdout ?? '').trim() !== '') return; // já no PATH
+
+    // 2) Descobre o binário nos locais conhecidos (instalador oficial, brew, user-local).
+    const home = homedir();
+    const candidates = [
+      '/usr/local/bin/ollama',
+      '/usr/bin/ollama',
+      '/opt/homebrew/bin/ollama',
+      join(home, '.ollama', 'bin', 'ollama'),
+      join(aluyDir(), OLLAMA_INSTALL_DIR, 'bin', 'ollama'),
+    ];
+    const found = candidates.find((p) => existsSync(p));
+    if (found === undefined) return; // nada p/ linkar — verify/healthcheck reporta
+
+    // 3) Symlink em ~/.local/bin (idempotente: recria se apontar p/ outro lugar).
+    const localBin = join(home, '.local', 'bin');
+    mkdirSync(localBin, { recursive: true });
+    const link = join(localBin, 'ollama');
+    try {
+      if (realpathSync(link) === realpathSync(found)) return; // já aponta certo
+      unlinkSync(link); // aponta p/ outro alvo (stale) — refaz
+    } catch {
+      // link inexistente/quebrado — segue p/ criar
+    }
+    try {
+      symlinkSync(found, link);
+    } catch {
+      // ~/.local/bin pode já ter um link válido criado em paralelo; ignora.
+    }
+  } catch {
+    // best-effort — nunca quebra o provisionamento.
   }
 }
 
