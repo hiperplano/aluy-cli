@@ -1071,6 +1071,13 @@ function agentInstallGoal(target: SidecarTarget): string {
 async function verifyTargetHealthy(
   target: SidecarTarget,
   platform: NodeJS.Platform,
+  /**
+   * `light` (caminho do AGENTE): o agente JÁ confirmou os imports no seu próprio goal
+   * ("0 erros"). Então AQUI evitamos re-rodar o `import mem0,chromadb` (cold de chromadb
+   * leva 30-60s e pode estourar o timeout → re-poll → "trava no mem0" — achado do dono).
+   * Light ⇒ só checa EXISTÊNCIA (venv python + server script). O doctor usa o full (light=false).
+   */
+  light = false,
 ): Promise<boolean> {
   if (target === 'ollama') {
     try {
@@ -1092,8 +1099,10 @@ async function verifyTargetHealthy(
         ? join(venvDir, 'Scripts', 'python.exe')
         : join(venvDir, 'bin', 'python3');
     if (!existsSync(py)) return false;
-    // NÃO basta o venv existir: as DEPS precisam IMPORTAR (pega "venv ok mas falta
-    // chromadb/ollama"). E o script do servidor precisa estar no venv p/ o boot subir.
+    // LIGHT (agente): só existência — o agente já provou os imports. Evita o re-import lento.
+    if (light) return existsSync(join(venvDir, MEM0_SERVER_SCRIPT));
+    // FULL (doctor): NÃO basta o venv existir: as DEPS precisam IMPORTAR (pega "venv ok mas
+    // falta chromadb/ollama"). E o script do servidor precisa estar no venv p/ o boot subir.
     const imp = spawnSync(py, ['-c', 'import mem0, chromadb, ollama'], { timeout: 60_000 });
     if (imp.status !== 0) return false;
     return existsSync(join(venvDir, MEM0_SERVER_SCRIPT));
@@ -1194,10 +1203,12 @@ async function defaultAgentInstaller(
   // re-rodava o `import mem0,chromadb` pesado por até 12min). Agora AVISA que está verificando
   // e o teto caiu p/ ~2min (o agente já confirmou internamente; aqui é só rede-safety).
   process.stderr.write(`\n  verificando "${target}"… (alguns segundos; a próxima etapa vem em seguida)\n`);
-  let healthy = await verifyTargetHealthy(target, process.platform);
+  // LIGHT: o agente já confirmou imports/serviço no seu goal — aqui só existência (rápido),
+  // p/ não pendurar a fila re-importando chromadb (achado do dono: "travava no mem0").
+  let healthy = await verifyTargetHealthy(target, process.platform, true);
   for (let i = 0; i < AGENT_VERIFY_POLLS && !healthy; i++) {
     await sleep(AGENT_VERIFY_INTERVAL_MS);
-    healthy = await verifyTargetHealthy(target, process.platform);
+    healthy = await verifyTargetHealthy(target, process.platform, true);
   }
   // A saída do agente já foi mostrada ao vivo (inherit) — o usuário viu o que aconteceu.
   void run; // (status do processo não é confiável p/ background pip/winget; vale o health-check)
