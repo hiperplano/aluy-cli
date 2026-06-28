@@ -928,8 +928,20 @@ export class NodeSidecarProvisioner implements SidecarProvisioner {
 
     const results: ProvisionTargetResult[] = [];
     for (const target of toggles) {
-      const result = await this.provision(target);
-      results.push(result);
+      // RESILIÊNCIA: cada sidecar é INDEPENDENTE — uma falha (ex.: o agente do mem0 estourar o
+      // teto de turno) NÃO pode impedir os seguintes (era o que travava o headroom). Captura por
+      // alvo e segue; o resultado ✗ entra no relatório, mas a fila continua.
+      try {
+        results.push(await this.provision(target));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        results.push({
+          target,
+          hashOk: false,
+          installed: false,
+          message: `falha inesperada ao provisionar — seguindo p/ os próximos (${msg}).`,
+        });
+      }
     }
 
     const anySuccess = results.some((r) => r.installed);
@@ -965,15 +977,21 @@ const PY_COMPAT_HINT =
  *  - usa `sudo` p/ pacotes de sistema; se o `sudo -n` (sem senha) falhar, PEDE a senha ao
  *    usuário (stdio interativo) em vez de abortar — o usuário está ciente e consentiu.
  */
+const VISIBILITY_HINT =
+  'IMPORTANTE — o usuário quer ACOMPANHAR: antes de cada passo, diga em 1 linha o que vai fazer; ' +
+  'rode os comandos de instalação de forma VISÍVEL (NÃO silencie pip/apt/curl com -q; mostre a ' +
+  'saída/progresso). Sem modo silencioso. ';
+
 function prereqPreamble(pkgs: readonly string[]): string {
   return (
+    VISIBILITY_HINT +
     `PRIMEIRO garanta os pré-requisitos de sistema (${pkgs.join(', ')}). ` +
     `Detecte o gerenciador de pacotes da máquina (apt/dnf/pacman/zypper no Linux; brew no ` +
     `macOS; winget/instalador no Windows) e instale só o que FALTAR — parta do que já existe. ` +
     `Pacotes de sistema exigem privilégio: tente \`sudo -n true\` p/ ver se o sudo é sem-senha; ` +
-    `se exigir senha, PEÇA a senha ao usuário e rode com \`sudo\` (não aborte). Se algo falhar ` +
-    `(repo, lock do apt, nome de pacote diferente na distro), DIAGNOSTIQUE e contorne — você é ` +
-    `o instalador adaptativo, trate o problema em vez de desistir. `
+    `se exigir senha, PEÇA a senha ao usuário e rode com \`sudo\` (NÃO aborte, NÃO pule). Se algo ` +
+    `falhar (repo, lock do apt, nome de pacote diferente na distro), DIAGNOSTIQUE e contorne — ` +
+    `você é o instalador adaptativo, trate o problema em vez de desistir. `
   );
 }
 
@@ -983,13 +1001,21 @@ function agentInstallGoal(target: SidecarTarget): string {
       'Provisione o sidecar OLLAMA do aluy, detectando o SO. ' +
       prereqPreamble(['zstd', 'tar']) +
       `Teste GET http://${OLLAMA_LOOPBACK_HOST}:${OLLAMA_LOOPBACK_PORT}/api/tags. ` +
-      'Se o serviço não responder, instale o Ollama (Linux: script oficial `curl -fsSL ' +
-      'https://ollama.com/install.sh | sh`; Windows: `winget install --id Ollama.Ollama -e ' +
-      '--accept-source-agreements --accept-package-agreements`; macOS: brew ou instalador) e ' +
-      'garanta o serviço rodando. ' +
+      'Se o serviço não responder, instale o Ollama. Linux: o script oficial `curl -fsSL ' +
+      'https://ollama.com/install.sh | sh` PRECISA de privilégio (instala em /usr/local/bin + ' +
+      'cria o serviço systemd) — ele chama `sudo` internamente; garanta que o sudo está ' +
+      'disponível e, se pedir senha, PEÇA ao usuário. Windows: `winget install --id ' +
+      'Ollama.Ollama -e --accept-source-agreements --accept-package-agreements`; macOS: brew ou ' +
+      'instalador. Garanta o serviço rodando. ' +
       `DEPOIS, puxe os modelos do TURBO (senão o judge/embedder não funcionam): ` +
-      `\`ollama pull ${JUDGE_MODEL}\` (judge) e \`ollama pull ${EMBEDDER_MODEL}\` (embedder). ` +
-      `Confirme que ambos aparecem em \`ollama list\`. Seja conciso.`
+      `\`ollama pull ${JUDGE_MODEL}\` (judge) e \`ollama pull ${EMBEDDER_MODEL}\` (embedder); ` +
+      `confirme que ambos aparecem em \`ollama list\`. ` +
+      // O dono quer USAR o ollama (não só como judge): deixe-o pronto + persista o ambiente.
+      `POR FIM, deixe o Ollama USÁVEL pelo usuário: garanta o binário \`ollama\` no PATH e ` +
+      `PERSISTA \`export OLLAMA_HOST=127.0.0.1:${OLLAMA_LOOPBACK_PORT}\` + o PATH no rc do shell ` +
+      `(~/.bashrc/.zshrc, idempotente). Diga ao usuário que ele pode usar o ollama como modelo ` +
+      `do aluy via \`aluy onboard\` (backend local) apontando a base_url http://127.0.0.1:` +
+      `${OLLAMA_LOOPBACK_PORT}/v1 (API OpenAI-compat do Ollama). Seja conciso.`
     );
   }
   if (target === 'mem0') {

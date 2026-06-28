@@ -586,7 +586,7 @@ describe('doctor/probe — sidecars (#9)', () => {
     expect(facts.sidecars.ollama).toEqual({ reached: true, status: 200 });
     expect(facts.sidecars.mem0).toEqual({ reached: true, status: 200 });
     expect(facts.sidecars.profile).toBe('turbo');
-    expect(facts.sidecars.toggles).toEqual(['ollama', 'mem0']);
+    expect(facts.sidecars.toggles).toEqual(['ollama', 'mem0', 'headroom']);
   });
 
   it('respeita ALUY_MEM0_URL — proba a URL CONFIGURADA, não a porta hardcodada', async () => {
@@ -640,13 +640,16 @@ describe('doctor/probe — sidecars (#9)', () => {
       }),
     );
     expect(facts.sidecars.profile).toBe('turbo');
-    expect(facts.sidecars.toggles).toEqual(['ollama', 'mem0']);
+    expect(facts.sidecars.toggles).toEqual(['ollama', 'mem0', 'headroom']);
   });
 
   it('config LEVE ⇒ perfil leve, toggles vazios', async () => {
     writeFileSync(
       join(home, 'config.json'),
-      JSON.stringify({ profile: 'leve', sidecarToggles: { ollama: false, mem0: false } }),
+      JSON.stringify({
+        profile: 'leve',
+        sidecarToggles: { ollama: false, mem0: false, headroom: false },
+      }),
     );
     const facts = await gatherDoctorFacts(
       baseDeps({
@@ -677,7 +680,7 @@ describe('doctor/probe — sidecars (#9)', () => {
       }),
     );
     expect(facts.sidecars.profile).toBe('turbo');
-    expect(facts.sidecars.toggles).toEqual(['ollama', 'mem0']);
+    expect(facts.sidecars.toggles).toEqual(['ollama', 'mem0', 'headroom']);
   });
 
   it('sidecar fora NÃO impede os outros (cada probe é independente)', async () => {

@@ -344,6 +344,16 @@ async function main(): Promise<void> {
       process.exit(process.exitCode ?? 0);
       break;
     }
+    case 'uninstall': {
+      // Remove os complementos (sidecars). Determinístico nos venvs de ~/.aluy; `--agent`
+      // remove o ollama de SISTEMA via o próprio agente (⚠ --yolo + sudo).
+      const { runUninstall } = await import('../commands/uninstall.js');
+      process.exitCode = runUninstall({ agent: action.agent });
+      // FORÇA a saída: o `--agent` pode deixar handles vivos (spawn do agente) — como já
+      // terminou, sair é seguro (mesma razão do bootstrap).
+      process.exit(process.exitCode ?? 0);
+      break;
+    }
     case 'onboard': {
       // `aluy onboard` — onboarding interativo (Ink). Import dinâmico p/ não puxar Ink
       // no caminho headless (--version/--help). É a TUI do instalador (idioma/backend/

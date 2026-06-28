@@ -672,14 +672,16 @@ async function gatherSidecars(deps: DoctorProbeDeps): Promise<SidecarsFact> {
   ]);
 
   // Lê perfil + toggles de ~/.aluy/config.json (fail-safe: default TURBO/3-ON).
+  // FIX: o headroom faltava no default E na lista — o doctor mostrava "toggles: ollama, mem0"
+  // mesmo com o headroom ligado (resolveSidecarToggles o liga por default). Agora aparece.
   let profile: 'leve' | 'turbo' = 'turbo';
-  let toggles: readonly string[] = ['ollama', 'mem0'];
+  let toggles: readonly string[] = ['ollama', 'mem0', 'headroom'];
   try {
     const home = aluyHomeOf(deps);
     const raw = readFileSync(join(home, CONFIG_FILENAME), 'utf8');
     const parsed = JSON.parse(raw) as {
       profile?: unknown;
-      sidecarToggles?: { ollama?: boolean; mem0?: boolean };
+      sidecarToggles?: { ollama?: boolean; mem0?: boolean; headroom?: boolean };
     };
     if (parsed.profile === 'leve' || parsed.profile === 'turbo') {
       profile = parsed.profile;
@@ -688,6 +690,7 @@ async function gatherSidecars(deps: DoctorProbeDeps): Promise<SidecarsFact> {
     const list: string[] = [];
     if (resolved.has('ollama')) list.push('ollama');
     if (resolved.has('mem0')) list.push('mem0');
+    if (resolved.has('headroom')) list.push('headroom');
     toggles = list; // sobrescreve sempre (vazio também é válido)
   } catch {
     // config ausente/corrompida ⇒ defaults (TURBO, 3-ON).

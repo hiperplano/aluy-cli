@@ -51,6 +51,9 @@ export type CliAction =
   // via o próprio agente (⚠ usa --yolo). Consentimento EXPLÍCITO via flag. Sem a
   // flag em SO não-Linux ⇒ instrui em vez de tentar baixar errado.
   | { kind: 'bootstrap'; agent: boolean }
+  // `aluy uninstall [--agent]`: remove os complementos (sidecars). Determinístico nos venvs
+  // de ~/.aluy; `--agent` remove o ollama de SISTEMA (curl/sudo) via o próprio agente.
+  | { kind: 'uninstall'; agent: boolean }
   // `aluy onboard` — o instalador/onboarding interativo (Node + Ink) p/ onde o
   // bootstrap mínimo entrega: splash + idioma + backend + provider(+custom) + chave
   // + modelo + sidecars. Substitui o setup em script (porco/encoding/sem i18n).
@@ -256,7 +259,8 @@ Uso:
   aluy -p "prompt" [--model <slug>] [--output-format text|json|stream-json]   (headless, script)
   aluy --continue | --resume [<id>]
   aluy onboard                  (instalador guiado — primeiro uso)
-  aluy bootstrap [--agent]      (provisiona os complementos opcionais — turbo)
+  aluy bootstrap [--no-agent]   (provisiona os complementos opcionais — turbo)
+  aluy uninstall [--agent]      (remove os complementos; --agent tira o ollama de sistema)
   aluy login [--token <PAT>] [--org <id>] [--device]
   aluy logout
   aluy whoami
@@ -775,6 +779,11 @@ export function parseArgs(argv: readonly string[]): CliAction {
     // SO). `--no-agent` força o caminho direto (tarball pinado, só Linux c/ python pronto).
     // `--agent` segue aceito (redundante/explícito).
     return { kind: 'bootstrap', agent: !argv.includes('--no-agent') };
+  }
+  // `aluy uninstall [--agent]` — remove os complementos. `--agent` (opt-in) remove também o
+  // ollama de SISTEMA via o próprio agente (⚠ --yolo + sudo). `--help` cai no help geral.
+  if (sub === 'uninstall' && !argv.includes('-h') && !argv.includes('--help')) {
+    return { kind: 'uninstall', agent: argv.includes('--agent') };
   }
   // `aluy onboard` — onboarding interativo (Ink). Sem args/flags próprias nesta fatia;
   // `--help` cai no help geral. O bootstrap mínimo o invoca reanexado ao TTY real.
