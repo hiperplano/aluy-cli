@@ -139,6 +139,7 @@ export const ptBR: FullCatalog = {
   'cmd.login': 'entrar na conta',
   'cmd.logout': 'sair da conta',
   'cmd.whoami': 'conta, org e escopos atuais',
+  'cmd.telegram': 'conector Telegram · status/allow/deny/logout (setup na sessão)',
   'cmd.model': 'trocar o tier',
   'cmd.provider': 'seta o provider do modelo Custom',
   'cmd.effort': 'seta o reasoning_effort (low/medium/high/custom) · passthrough ≤32 chars',

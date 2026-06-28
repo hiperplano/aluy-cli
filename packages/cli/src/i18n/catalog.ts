@@ -213,6 +213,7 @@ export interface Catalog {
   'cmd.login': string;
   'cmd.logout': string;
   'cmd.whoami': string;
+  'cmd.telegram': string;
   'cmd.model': string;
   'cmd.provider': string;
   'cmd.effort': string;

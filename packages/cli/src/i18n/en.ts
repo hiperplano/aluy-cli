@@ -141,6 +141,7 @@ export const en: PartialCatalog = {
   'cmd.login': 'sign in',
   'cmd.logout': 'sign out',
   'cmd.whoami': 'current account, org and scopes',
+  'cmd.telegram': 'Telegram connector · status/allow/deny/logout (in-session setup)',
   'cmd.model': 'switch the tier',
   'cmd.provider': 'set the Custom model provider',
   'cmd.effort': 'set the reasoning_effort (low/medium/high/custom) · passthrough ≤32 chars',

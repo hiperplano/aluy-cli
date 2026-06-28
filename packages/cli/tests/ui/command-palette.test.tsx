@@ -32,10 +32,10 @@ describe('CommandPalette — render da paleta de comandos', () => {
     const { lastFrame } = wrap(<CommandPalette hits={filterPalette('')} selected={0} />);
     const out = plain(lastFrame() ?? '');
     expect(out).toContain('/model');
-    // `/effort` (alto na lista) substitui o antigo assert de `/theme`: a lista de comandos
-    // CRESCEU (/effort, /mcp reconnect/reload) e a paleta tem janela INTERNA (comandos fora
-    // dela alcançam-se digitando p/ filtrar) — cravar um comando do FIM (/theme) virou brittle.
-    expect(out).toContain('/effort');
+    // Cravamos comandos do TOPO (seção "conta", dentro da janela): a lista CRESCE com o tempo
+    // (/effort, /telegram, /mcp…) e a paleta tem janela INTERNA — cravar um comando do FIM é
+    // brittle (cada comando novo empurra o último p/ fora). `/telegram` é alto na lista.
+    expect(out).toContain('/telegram');
   });
 
   it('expõe a AÇÃO "trocar modo" (não-slash) quando buscada', () => {

@@ -17,8 +17,19 @@
 // os assíncronos (whoami/logout) expõem um runner próprio. Assim o teste verifica
 // a SAÍDA sem montar Ink nem tocar rede.
 
-import type { LoginService, RegistryFetch } from '@hiperplano/aluy-cli-core';
-import { invalidCommandWarning, originLabel, type McpListedServer } from '@hiperplano/aluy-cli-core';
+import type { LoginService, RegistryFetch, ConnectorSecretStore } from '@hiperplano/aluy-cli-core';
+import {
+  invalidCommandWarning,
+  originLabel,
+  redactTelegramToken,
+  type McpListedServer,
+} from '@hiperplano/aluy-cli-core';
+import {
+  UserConfigStore,
+  telegramAllowlist,
+  addTelegramAllow,
+  removeTelegramAllow,
+} from '../io/user-config.js';
 import { runMcpSearch } from '../mcp/registry-search.js';
 import type { SessionController } from '../session/controller.js';
 import { NATIVE_COMMANDS, type NativeCommandId } from './commands.js';
@@ -396,6 +407,16 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
     case 'whoami':
     case 'logout':
       return { kind: 'async', id };
+    case 'telegram':
+      // `/telegram` é roteado ANTES (run.tsx) p/ `runTelegramSlash` com os `args` (config +
+      // keychain). Cair AQUI só acontece sem esse roteamento (ex.: teste linear) ⇒ nota honesta.
+      return {
+        kind: 'note',
+        note: {
+          title: 'telegram',
+          lines: ['uso: /telegram [status | allow <chat-id> | deny <chat-id> | logout | login]'],
+        },
+      };
     case 'doctor':
       // EST-0970 — `/doctor` é roteado ANTES (run.tsx) p/ o probe com o contexto da
       // sessão (token/memória/workspace/modo). Cair AQUI só acontece sem esse
@@ -1106,6 +1127,70 @@ export async function runAsyncSlash(
   } catch {
     return { title: 'logout', lines: ['não foi possível concluir o logout — tente de novo.'] };
   }
+}
+
+/**
+ * ADR-0134/0135 — runner do `/telegram` (setup do conector DENTRO da sessão). PURO de Ink:
+ * recebe os `args` + as deps (config + secret-store) e devolve a nota a empurrar.
+ *   /telegram | status        → token (redigido) + allowlist + estado (bridge inerte)
+ *   /telegram allow <chat-id> → autoriza um chat-id (allowlist no config único)
+ *   /telegram deny  <chat-id> → remove um chat-id
+ *   /telegram logout          → apaga o token do bot do keychain
+ *   /telegram login           → aponta p/ o terminal (o token é sensível — prompt sem eco lá)
+ * O TOKEN nunca é digitado/exibido aqui (CLI-SEC-2): só a allowlist (DADO) é manipulada.
+ */
+export async function runTelegramSlash(
+  args: string,
+  deps: { configStore: UserConfigStore; secretStore: ConnectorSecretStore },
+): Promise<SlashNote> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[0] ?? 'status').toLowerCase();
+  const cfg = deps.configStore.load();
+
+  if (sub === 'status' || sub === '') {
+    const token = await deps.secretStore.get().catch(() => null);
+    const allow = telegramAllowlist(cfg);
+    return {
+      title: 'telegram',
+      lines: [
+        `token:     ${token ? `presente (${redactTelegramToken(token)})` : 'ausente — rode `aluy telegram login` no terminal'}`,
+        `allowlist: ${allow.length > 0 ? `[${allow.join(', ')}]` : 'VAZIA (bridge fechada — /telegram allow <chat-id>)'}`,
+        'estado:    a bridge ainda NÃO está ativa (ativação sob revisão de segurança).',
+      ],
+    };
+  }
+  if (sub === 'allow' || sub === 'deny') {
+    const raw = parts[1];
+    const id = raw !== undefined && /^-?\d+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isInteger(id)) {
+      return { title: 'telegram', lines: [`uso: /telegram ${sub} <chat-id>  (um inteiro)`] };
+    }
+    const next = sub === 'allow' ? addTelegramAllow(cfg, id) : removeTelegramAllow(cfg, id);
+    deps.configStore.save({ connectors: { telegram: { allowlist: next } } });
+    return {
+      title: 'telegram',
+      lines: [
+        `chat-id ${id} ${sub === 'allow' ? 'autorizado' : 'removido'}. allowlist: [${next.join(', ')}]`,
+      ],
+    };
+  }
+  if (sub === 'logout') {
+    await deps.secretStore.clear().catch(() => undefined);
+    return { title: 'telegram', lines: ['token do bot removido do keychain (a bridge não autentica mais).'] };
+  }
+  if (sub === 'login') {
+    return {
+      title: 'telegram',
+      lines: [
+        'o token do bot é sensível — rode `aluy telegram login` no TERMINAL (prompt sem eco, vai p/ o keychain).',
+        'aqui na sessão: /telegram status · /telegram allow <id> · /telegram deny <id> · /telegram logout',
+      ],
+    };
+  }
+  return {
+    title: 'telegram',
+    lines: ['uso: /telegram [status | allow <chat-id> | deny <chat-id> | logout | login]'],
+  };
 }
 
 /** Aplica um `SlashEffect` síncrono ao controller (note/clear). */

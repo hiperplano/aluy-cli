@@ -44,6 +44,7 @@ export type NativeCommandId =
   | 'agents'
   | 'skills'
   | 'workflows'
+  | 'telegram'
   | 'add-dir'
   | 'split'
   | 'fullscreen'
@@ -401,6 +402,19 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     id: 'whoami',
     section: 'conta',
     // EST-0982 — read-only puro (nota): roda JÁ mid-turn.
+    parallelWhileBusy: true,
+  },
+  {
+    // ADR-0134/0135 — conector Telegram: setup DENTRO da sessão. `status` (read-only),
+    // `allow/deny <chat-id>` (allowlist no config), `logout` (apaga o token). `login` (token)
+    // aponta p/ o terminal (prompt sem eco). A bridge em si segue inerte até a ativação gated.
+    name: 'telegram',
+    summary: 'conector Telegram · status/allow/deny/logout (setup na sessão)',
+    summaryKey: 'cmd.telegram',
+    source: 'native',
+    id: 'telegram',
+    section: 'conta',
+    // status/allow/deny são leves (config/keychain local) — rodam JÁ mid-turn como nota.
     parallelWhileBusy: true,
   },
   {

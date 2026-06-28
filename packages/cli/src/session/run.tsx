@@ -70,8 +70,10 @@ import {
   mcpSearchPendingNote,
   runMcpSearchSlash,
   runAsyncSlash,
+  runTelegramSlash,
   runAddDir,
 } from '../slash/handlers.js';
+import { KeychainConnectorSecretStore } from '../auth/connector-secret-store.js';
 import { createRegistryFetch } from '../mcp/registry-search.js';
 import { runDoctorLive } from '../doctor/slash.js';
 import { testTierLive } from '../doctor/tier-test.js';
@@ -2195,6 +2197,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         return;
       }
       // cai no fallback honesto do buildSlashEffect (sem descoberta nesta sessão).
+    }
+
+    // ADR-0134/0135 — `/telegram` (setup do conector na sessão): async (config + keychain),
+    // com `args` (subcomando + chat-id). Empurra a nota ao concluir. O token NUNCA é digitado
+    // aqui — `login` aponta p/ o terminal; allow/deny/status/logout rodam in-session.
+    if (command.id === 'telegram') {
+      void runTelegramSlash(args, {
+        configStore,
+        secretStore: new KeychainConnectorSecretStore('telegram'),
+      }).then((note) => built.controller.pushNote(note.title, note.lines));
+      return;
     }
 
     const effect = buildSlashEffect(command.id, {
