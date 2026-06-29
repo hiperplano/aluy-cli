@@ -1454,12 +1454,12 @@ export function App(props: AppProps): React.ReactElement {
         enqueue(line);
         return;
       }
-      // EST-1015 (pai-ocioso responde sem enfileirar) — com SUB-AGENTES RODANDO o pai está
-      // BLOQUEADO os aguardando: um `injectInput` só dreno DEPOIS que eles terminam ("como
-      // está?" fica pendurado). Então TEXTO PURO (sem `@`-anexo) com Enter vira RESPOSTA
-      // PARALELA (`askParallel`, read-only, com o estado VIVO dos sub-agentes) — JÁ, sem
-      // precisar do `/ask`. (Ctrl+Enter segue INJETANDO uma instrução no pai — caminho à
-      // parte, acima.) A decisão é PURA/testável (`answerInParallelWhileSubagents`).
+      // DECISÃO DO DONO — texto puro do composer é PEDIDO AO AGENTE PRINCIPAL, sempre. Com
+      // SUB-AGENTES RODANDO o pai está BLOQUEADO os aguardando, então o pedido vai pra FILA (e
+      // processa quando o pai voltar) — NÃO vira `/ask` automático. O canal lateral (`/ask`,
+      // resposta paralela read-only) é OPT-IN explícito: só quando você digita `/ask`. Assim a
+      // fila só tem o que você manda como pedido real; o `/ask` é uma pergunta lateral separada.
+      // (Antes, EST-1015 transformava texto puro em askParallel — confundia "meu pedido sumiu".)
       const route = routeInput(line, userCommands);
       const goalText = route.kind === 'goal' ? route.text : '';
       if (
@@ -1472,7 +1472,7 @@ export function App(props: AppProps): React.ReactElement {
             (goalText !== '' && parseAtMentions(goalText).length > 0),
         })
       ) {
-        void controller.askParallel(goalText);
+        enqueue(line); // FILA do pai (não /ask). O pai drena quando os sub-agentes terminam.
         return;
       }
       // Fila vazia ⇒ encaixe mid-turn (texto puro) / paralelo-seguro / senão enfileira.
