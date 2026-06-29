@@ -1,0 +1,162 @@
+// `aluy config` — VISÃO CONSOLIDADA, read-only, da configuração efetiva.
+//
+// Motivação (achado do dono): o `~/.aluy/config.json` é ESPARSO (só grava o que foi mudado
+// do default), então abri-lo no editor "não mostra tudo" e dá a impressão de que falta
+// unificação. Na verdade o schema JÁ unifica a configuração durável num arquivo; o que faltava
+// era DESCOBERTA. Este comando lista cada chave efetiva, o VALOR e a ORIGEM
+// (default / env ALUY_* / config.json), na precedência real `flag > env > config.json > default`
+// — SEM materializar defaults no arquivo nem colapsar as fronteiras de segurança (segredos no
+// keychain, MCP no mcp.json, hooks no hooks.json ficam de propósito FORA do config.json).
+//
+// Read-only: NÃO escreve nada, NÃO gasta modelo, NÃO toca rede. `--json` p/ script.
+
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { realTerminalIO, type TerminalIO } from '../auth/io.js';
+import { UserConfigStore } from '../io/user-config.js';
+import { resolveLocalProviderConfig, resolveModelBackend } from '../model/local/config.js';
+
+export interface ConfigCommandDeps {
+  readonly io?: TerminalIO;
+  readonly env?: NodeJS.ProcessEnv;
+  /** Raiz do `~/.aluy/` (default: `<home>/.aluy`). Injetável p/ teste. */
+  readonly baseDir?: string;
+  /** Override do store de config (testes injetam um config pronto). */
+  readonly configStore?: UserConfigStore;
+  /** `--json`: imprime um JSON estável em vez da tabela (stdout limpo p/ script). */
+  readonly json?: boolean;
+}
+
+type Origin = 'default' | 'env' | 'config.json';
+
+interface Setting {
+  /** Nome lógico da chave (ex.: `backend`, `localProvider`). */
+  readonly key: string;
+  /** Valor EFETIVO já resolvido. */
+  readonly value: string;
+  /** De onde o valor veio, pela precedência. */
+  readonly origin: Origin;
+  /** Fonte concreta: a env var (se origin=env) ou o campo do config.json. */
+  readonly source: string;
+}
+
+/** Resolve um setting env-sobreponível: env ALUY_* > config.json > default. */
+function pickEnvConfig(
+  key: string,
+  envVar: string,
+  envVal: string | undefined,
+  configVal: unknown,
+  defaultVal: string,
+): Setting {
+  const e = envVal?.trim();
+  if (e !== undefined && e !== '') return { key, value: e, origin: 'env', source: envVar };
+  if (configVal !== undefined && configVal !== null)
+    return { key, value: String(configVal), origin: 'config.json', source: `config.${key}` };
+  return { key, value: defaultVal, origin: 'default', source: '—' };
+}
+
+/** Resolve um setting SÓ de config (sem env): config.json > default. */
+function pickConfig(key: string, configVal: unknown, defaultVal: string): Setting {
+  if (configVal !== undefined && configVal !== null)
+    return { key, value: String(configVal), origin: 'config.json', source: `config.${key}` };
+  return { key, value: defaultVal, origin: 'default', source: '—' };
+}
+
+/** Constrói a lista de settings efetivos com origem (a precedência real do boot). */
+export function collectSettings(env: NodeJS.ProcessEnv, config: ReturnType<UserConfigStore['load']>): Setting[] {
+  // Defaults puros: resolve com env/config VAZIOS p/ extrair o que o catálogo/domínio default.
+  const def = resolveLocalProviderConfig({ env: {}, config: {} });
+  const defaultBaseUrl = def.baseUrl ?? '—';
+
+  const settings: Setting[] = [
+    pickEnvConfig('backend', 'ALUY_BACKEND', env.ALUY_BACKEND, config.backend, resolveModelBackend({ env: {}, config: {} })),
+    pickEnvConfig('localProvider', 'ALUY_LOCAL_PROVIDER', env.ALUY_LOCAL_PROVIDER, config.localProvider, def.provider),
+    pickEnvConfig('localModel', 'ALUY_LOCAL_MODEL', env.ALUY_LOCAL_MODEL, config.localModel, def.model),
+    pickEnvConfig('localAuth', 'ALUY_LOCAL_AUTH', env.ALUY_LOCAL_AUTH, config.localAuth, def.auth),
+    pickEnvConfig('localBaseUrl', 'ALUY_LOCAL_BASE_URL', env.ALUY_LOCAL_BASE_URL, config.localBaseUrl, defaultBaseUrl),
+    pickConfig('profile', config.profile, 'turbo'),
+    pickConfig('sidecar.ollama', config.sidecarToggles?.ollama, 'on (default)'),
+    pickConfig('sidecar.mem0', config.sidecarToggles?.mem0, 'on (default)'),
+    pickConfig('sidecar.headroom', config.sidecarToggles?.headroom, 'on (default)'),
+    pickConfig('lang', config.lang, 'auto'),
+    pickConfig('theme', config.theme, 'default'),
+  ];
+  return settings;
+}
+
+/** Os OUTROS arquivos de `~/.aluy/` (fora do config.json DE PROPÓSITO) + seu papel. */
+function fileMap(baseDir: string): Array<{ path: string; role: string; exists: boolean }> {
+  const f = (rel: string, role: string) => {
+    const path = join(baseDir, rel);
+    return { path, role, exists: existsSync(path) };
+  };
+  return [
+    f('config.json', 'configuração durável (este comando)'),
+    f('mcp.json', 'servers MCP (interop; sem credencial — CLI-SEC-7)'),
+    f('hooks.json', 'hooks (fronteira de execução; o agente nunca escreve)'),
+    f('providers.json', 'catálogo de providers (override do usuário)'),
+    f('update-check.json', 'estado/cache (reescrito pela máquina)'),
+    f('memory', 'store do mem0 (chromadb + history)'),
+    f('logs', 'logs dos sidecars (mem0/ollama/headroom)'),
+  ];
+}
+
+const ORIGIN_GLYPH: Record<Origin, string> = {
+  env: 'env',
+  'config.json': 'config',
+  default: 'default',
+};
+
+/**
+ * `aluy config` — imprime a configuração efetiva (valor + origem) num lugar só. Read-only.
+ * Exit 0 sempre (é diagnóstico, não há falha a reportar). `--json` ⇒ JSON estável no stdout.
+ */
+export function runConfig(deps: ConfigCommandDeps = {}): number {
+  const io = deps.io ?? realTerminalIO();
+  const env = deps.env ?? process.env;
+  const baseDir = deps.baseDir ?? join(homedir(), '.aluy');
+  const store = deps.configStore ?? new UserConfigStore({ baseDir });
+  const config = store.load();
+  const settings = collectSettings(env, config);
+  const files = fileMap(baseDir);
+
+  if (deps.json === true) {
+    io.out(
+      JSON.stringify(
+        {
+          configPath: join(baseDir, 'config.json'),
+          settings: settings.map((s) => ({ key: s.key, value: s.value, origin: s.origin, source: s.source })),
+          files: files.map((x) => ({ path: x.path, role: x.role, exists: x.exists })),
+        },
+        null,
+        2,
+      ),
+    );
+    return 0;
+  }
+
+  io.out('aluy config — configuração efetiva (read-only)');
+  io.out(`  arquivo durável: ${join(baseDir, 'config.json')}`);
+  io.out('  precedência: flag > env (ALUY_*) > config.json > default');
+  io.out('');
+
+  // Tabela: chave · valor · origem · fonte.
+  const keyW = Math.max(...settings.map((s) => s.key.length), 3);
+  const valW = Math.max(...settings.map((s) => s.value.length), 5);
+  for (const s of settings) {
+    const origin = ORIGIN_GLYPH[s.origin];
+    const src = s.origin === 'default' ? '' : `  (${s.source})`;
+    io.out(`  ${s.key.padEnd(keyW)}  ${s.value.padEnd(valW)}  [${origin}]${src}`);
+  }
+
+  io.out('');
+  io.out('  outros arquivos (fora do config.json de propósito — segredo/interop/execução):');
+  for (const x of files) {
+    const mark = x.exists ? '·' : '○';
+    io.out(`    ${mark} ${x.path}  — ${x.role}`);
+  }
+  io.out('');
+  io.out('  segredos (chave de API/token) ficam no keychain do SO, NUNCA no config.json.');
+  return 0;
+}

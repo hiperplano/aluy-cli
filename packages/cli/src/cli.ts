@@ -32,6 +32,8 @@ export type CliAction =
   // CI). `--deep`/`--test` ADICIONA o teste do tier ao vivo (gasta 1 chamada ao modelo).
   // `--json` imprime o resultado como JSON.stringify de um array {id,status,label,detail}.
   | { kind: 'doctor'; deep: boolean; json: boolean }
+  // `aluy config` — visão consolidada read-only da config efetiva (valor + origem).
+  | { kind: 'config'; json: boolean }
   // EST-0977 · ADR-0061 — `aluy agents`: lista os perfis de sub-agente .md MAPEADOS
   // (válidos + rejeitados c/ motivo RES-MD-3) das DUAS camadas (global + projeto/cwd).
   // Read-only, sem modelo, sem rede; reusa os MESMOS loaders do boot. Exit 0 (listagem).
@@ -468,6 +470,9 @@ Comandos de auth:
            progressivos + como consertar. Exit≠0 se houver ✗ (útil em script/CI).
            --deep/--test: ADICIONA o teste do tier ao vivo (1 chamada mínima ao
            modelo — opt-in, pois gasta). Sem --deep, NÃO chama o modelo.
+  config   Visão CONSOLIDADA read-only da configuração efetiva: cada chave, o valor
+           e a ORIGEM (default / env ALUY_* / config.json), na precedência real. Mostra
+           também os outros arquivos (mcp/hooks/estado) e seus papéis. --json p/ script.
 
 Conector Telegram (preparação — a bridge ainda NÃO está ativa):
   telegram login [--token <t>]   Guarda o token do bot (@BotFather) no KEYCHAIN do SO
@@ -768,6 +773,10 @@ export function parseArgs(argv: readonly string[]): CliAction {
     const deep = argv.includes('--deep') || argv.includes('--test');
     const json = argv.includes('--json');
     return { kind: 'doctor', deep, json };
+  }
+  // `aluy config` — visão consolidada read-only da config efetiva. `--json` p/ script.
+  if (sub === 'config' && !argv.includes('-h') && !argv.includes('--help')) {
+    return { kind: 'config', json: argv.includes('--json') };
   }
   // EST-0977 — `aluy agents`: lista os perfis de sub-agente .md mapeados. Read-only,
   // sem args/flags próprias. `--help` cai no help geral.

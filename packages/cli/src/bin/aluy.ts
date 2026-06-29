@@ -303,6 +303,12 @@ async function main(): Promise<void> {
       process.exitCode = await runDoctor({ deep: action.deep, json: action.json });
       return;
     }
+    case 'config': {
+      // Visão consolidada read-only da config efetiva (valor + origem: default/env/config.json).
+      const { runConfig } = await import('../commands/config.js');
+      process.exitCode = runConfig({ json: action.json });
+      return;
+    }
     case 'agents': {
       // EST-0977 — lista os perfis de sub-agente .md mapeados (global + projeto/cwd),
       // válidos + rejeitados (RES-MD-3) com o motivo. Read-only, sem modelo, sem rede;
