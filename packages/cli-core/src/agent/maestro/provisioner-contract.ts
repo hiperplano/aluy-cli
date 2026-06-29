@@ -92,12 +92,21 @@ export interface EmbedderSpec {
 }
 export const EMBEDDER_CATALOG: readonly EmbedderSpec[] = [
   {
+    model: 'embeddinggemma',
+    digest: 'sha256:0800cbac9c2064dde519420e75e512a83cb360de3ad5df176185dc69652fc515',
+    dim: 768,
+    sizeMB: 622,
+    multilingual: true,
+    hintPt: 'multilíngue · moderno (Google) · forte · ~622MB',
+    hintEn: 'multilingual · modern (Google) · strong · ~622MB',
+  },
+  {
     model: 'bge-m3',
     digest: 'sha256:daec91ffb5dd0c27411bd71f29932917c49cf529a641d0168496c3a501e3062c',
     dim: 1024,
     sizeMB: 1160,
     multilingual: true,
-    hintPt: 'multilíngue (melhor em PT) · forte · ~1.16GB',
+    hintPt: 'multilíngue · forte · ~1.16GB',
     hintEn: 'multilingual · strong · ~1.16GB',
   },
   {
@@ -120,9 +129,10 @@ export const EMBEDDER_CATALOG: readonly EmbedderSpec[] = [
   },
 ];
 
-/** Embedder DEFAULT quando nada foi escolhido/configurado: o MAIOR/mais forte (bge-m3,
- * multilíngue — decisão do dono). A escolha no onboard permite trocar p/ mxbai/nomic menores. */
-export const DEFAULT_EMBEDDER_MODEL = 'bge-m3';
+/** Embedder DEFAULT: `embeddinggemma` (Google) — multilíngue, moderno e forte, mas ~metade do
+ * bge-m3 (~622MB). Melhor ponto tamanho×qualidade p/ PT (decisão do dono). O onboard permite
+ * trocar p/ bge-m3 (maior), mxbai (inglês) ou nomic (legado). */
+export const DEFAULT_EMBEDDER_MODEL = 'embeddinggemma';
 
 /** Spec do embedder pelo nome do modelo (undefined se fora do catálogo). */
 export function embedderSpec(model: string): EmbedderSpec | undefined {
