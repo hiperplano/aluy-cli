@@ -76,6 +76,7 @@ import {
 import { KeychainConnectorSecretStore } from '../auth/connector-secret-store.js';
 import { createRegistryFetch } from '../mcp/registry-search.js';
 import { runDoctorLive } from '../doctor/slash.js';
+import { buildRepairGoal, gatherLogTails, SIDECAR_KINDS } from '../doctor/repair.js';
 import { testTierLive } from '../doctor/tier-test.js';
 import { StdioMcpTransport } from '../mcp/stdio-transport.js';
 import { parseMcpAdminSlash, runMcpAdminSlash } from '../slash/mcp-admin.js';
@@ -2096,6 +2097,20 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // de config (tema/tier no catálogo). `--deep`/`--test` ADICIONA o teste do tier ao vivo
     // (gasta 1 chamada mínima ao modelo — opt-in explícito). Sem `--deep`, NÃO chama o modelo.
     if (command.id === 'doctor') {
+      // `/doctor fix` — AUTO-REPARO agente-dirigido: em vez de só apontar "rode aluy bootstrap",
+      // o agente se conserta. Lê a cauda dos logs, monta um objetivo focado e o SUBMETE ao loop
+      // (o agente roda `aluy bootstrap --no-agent`, instala o que falta, re-tenta). Decisão do
+      // dono: o reparo tem que ser o próprio agente — há modos de falha demais p/ roteiro fixo.
+      if (/(^|\s)fix(\s|$)/.test(args)) {
+        const logTails = gatherLogTails(SIDECAR_KINDS);
+        const goal = buildRepairGoal({ logTails });
+        built.controller.pushNote('doctor fix', [
+          'tentando consertar os complementos do turbo — vou diagnosticar pelos logs, rodar o',
+          'bootstrap e reparar. Acompanhe abaixo.',
+        ]);
+        void built.controller.submit(goal);
+        return;
+      }
       const deep = /(^|\s)--(deep|test)(\s|$)/.test(args);
       const workspaceRoot = built.workspace.root;
       void runDoctorLive(
@@ -2127,7 +2142,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           },
         },
         (state) => built.controller.upsertDoctor(state.checks, state.summary),
-      );
+      ).then((final) => {
+        // Pedido do dono: não só APONTAR — PERGUNTAR. Se algum sidecar do turbo está fora,
+        // oferece o auto-reparo agente-dirigido (`/doctor fix`). Só quando há o que consertar.
+        const sidecars = final.checks.find((c) => c.id === 'sidecars');
+        if (sidecars?.status === 'fail') {
+          built.controller.pushNote('doctor', [
+            'Há complemento(s) do turbo fora. Quer que eu tente consertar?',
+            'Digite  /doctor fix  — eu leio os logs, rodo o bootstrap e reparo sozinho.',
+          ]);
+        }
+      });
       return;
     }
 

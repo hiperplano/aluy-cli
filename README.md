@@ -69,6 +69,7 @@ Dentro da sessão, **slash-commands** controlam tudo sem sair do fluxo:
   Filesystem, Memory, …).
 - **Complementos opcionais** (modo turbo) — memória persistente, modelos locais via
   Ollama e gestão de contexto, instaláveis no onboard ou depois com `aluy bootstrap`.
+  Guia completo (instalação, problemas comuns, instalação manual): [docs/turbo.md](docs/turbo.md).
 
 ## Configuração
 

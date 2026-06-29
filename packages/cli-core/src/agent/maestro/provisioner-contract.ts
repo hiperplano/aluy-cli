@@ -127,7 +127,10 @@ export const HEADROOM_VENV_DIR = 'hr-venv';
  * ser instalado silenciosamente. ⚠ Continua SEM hash-pin (ao contrário do binário do
  * Ollama): proveniência por nome+versão+registry pip (HTTPS). Bump deliberado, como o Mem0.
  */
-export const HEADROOM_PIP_PACKAGES: readonly string[] = ['headroom-ai==0.25.0'];
+// `[proxy]` é OBRIGATÓRIO: puxa fastapi/uvicorn — sem o extra, o proxy não sobe
+// ("Proxy dependencies not installed … No module named 'fastapi'") e o headroom fica ✗.
+// Achado do dono no ~/.aluy/logs/headroom.log. O pin de versão vale também com o extra.
+export const HEADROOM_PIP_PACKAGES: readonly string[] = ['headroom-ai[proxy]==0.25.0'];
 
 /** Porta loopback do proxy headroom (compressão de contexto, ADR-0108). */
 export const HEADROOM_LOOPBACK_PORT = HEADROOM_PORT; // single-source: boot-contract (ADR-0136 §10)
