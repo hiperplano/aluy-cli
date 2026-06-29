@@ -21,6 +21,7 @@ import { loadLocalProviderCatalog, addLocalProviderOverride } from '../io/provid
 import { storeApiKey } from '../model/local/credential-resolver.js';
 import { checkModelConnectivity } from '../model/local/connectivity-check.js';
 import { McpConfigWriter } from '../mcp/mcp-config-writer.js';
+import { EMBEDDER_CATALOG, DEFAULT_EMBEDDER_MODEL } from '@hiperplano/aluy-cli-core';
 
 type Step =
   | 'lang'
@@ -35,6 +36,7 @@ type Step =
   | 'validate-failed'
   | 'mcp'
   | 'sidecars'
+  | 'embedder'
   | 'done';
 
 /**
@@ -83,6 +85,7 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
   const [apiKey, setApiKey] = useState<string>('');
   const [model, setModel] = useState<string>('');
   const [profile, setProfile] = useState<Profile>('leve'); // default LEVE (decisão do dono)
+  const [embedder, setEmbedder] = useState<string>(DEFAULT_EMBEDDER_MODEL); // embedder do mem0 (turbo)
   const [vError, setVError] = useState<string>(''); // detalhe do check de conectividade falho
 
   const MCPS = useMemo(() => mcpCatalog(), []);
@@ -109,8 +112,15 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
     { value: 'leve', label: T('Leve — nada agora', 'Lite — nothing now'), hint: T('liga depois com aluy bootstrap', 'enable later with aluy bootstrap') },
   ];
 
+  // Embedder do mem0 (turbo): catálogo do core, hints i18n. O 1º é o default (bge-m3, forte).
+  const embedderOpts: Opt[] = EMBEDDER_CATALOG.map((e) => ({
+    value: e.model,
+    label: e.model,
+    hint: T(e.hintPt, e.hintEn),
+  }));
+
   const pickerLen = (s: Step): number =>
-    s === 'lang' ? LANGS.length : s === 'backend' ? backendOpts.length : s === 'provider' ? providerOpts.length : s === 'sidecars' ? sidecarOpts.length : 0;
+    s === 'lang' ? LANGS.length : s === 'backend' ? backendOpts.length : s === 'provider' ? providerOpts.length : s === 'sidecars' ? sidecarOpts.length : s === 'embedder' ? embedderOpts.length : 0;
 
   function gotoText(next: Step, prefill = ''): void {
     setBuf(prefill);
@@ -171,7 +181,7 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
   // Recebe o profile ESCOLHIDO direto (não lê o estado `profile`): o setProfile do
   // handler é assíncrono, então ler `profile` aqui pegaria o valor VELHO (leve) — era o
   // bug "escolhi turbo e foi pra leve". `prof` é a fonte da verdade.
-  function finish(prof: Profile): void {
+  function finish(prof: Profile, embedderChoice?: string): void {
     const msg: string[] = [];
     const patch: Record<string, unknown> = { lang, backend };
     if (backend === 'local') {
@@ -180,6 +190,11 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
       if (chosenModel.trim() !== '') patch.localModel = chosenModel.trim();
     }
     patch.profile = prof;
+    // Embedder do mem0 escolhido no turbo (slug do catálogo) → config.embedder. O provisioner/
+    // boot puxam/usam este (default bge-m3 se ausente). `embedderChoice` vem direto (estado async).
+    if (prof === 'turbo' && embedderChoice !== undefined && embedderChoice !== '') {
+      patch.embedder = embedderChoice;
+    }
     props.store.save(patch as never);
     msg.push(`✓ ${T('config', 'config')}: backend ${backend}`);
 
@@ -226,6 +241,9 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
       }
     }
     msg.push(`✓ sidecars: ${prof}`);
+    if (prof === 'turbo' && embedderChoice !== undefined && embedderChoice !== '') {
+      msg.push(`  → embedder: ${embedderChoice}`);
+    }
     if (prof === 'turbo') msg.push(T('  → instale agora: aluy bootstrap', '  → install now: aluy bootstrap'));
     if (vError !== '') msg.push(T('⚠ modelo NÃO validado — pode não funcionar', '⚠ model NOT validated — may not work'));
     if (backend === 'broker') msg.push(T('→ broker: autentique com `aluy login`', '→ broker: authenticate with `aluy login`'));
@@ -273,7 +291,7 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
       return;
     }
 
-    const isPicker = step === 'lang' || step === 'backend' || step === 'provider' || step === 'sidecars';
+    const isPicker = step === 'lang' || step === 'backend' || step === 'provider' || step === 'sidecars' || step === 'embedder';
     if (isPicker) {
       const len = pickerLen(step);
       if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
@@ -332,7 +350,17 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
     } else if (step === 'sidecars') {
       const chosen = sidecarOpts[cursor]!.value as Profile;
       setProfile(chosen);
-      finish(chosen);
+      // TURBO ⇒ pergunta o embedder do mem0 antes de fechar; LEVE ⇒ fecha direto.
+      if (chosen === 'turbo') {
+        setCursor(0); // 1º do catálogo = default (bge-m3)
+        setStep('embedder');
+      } else {
+        finish(chosen);
+      }
+    } else if (step === 'embedder') {
+      const m = embedderOpts[cursor]!.value;
+      setEmbedder(m);
+      finish('turbo', m); // passa o embedder direto (estado é assíncrono)
     }
   }
 
@@ -415,6 +443,25 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
             </Box>
           </Box>
         )}
+        {step === 'embedder' && (
+          <Box flexDirection="column">
+            <Picker title={T('Modelo de embedding (memória)', 'Embedding model (memory)')} opts={embedderOpts} cursor={cursor} active={embedder} />
+            <Box paddingTop={1} flexDirection="column">
+              <Role name="fgDim">
+                {T(
+                  'O embedder transforma suas memórias em vetores p/ o recall semântico do mem0.',
+                  'The embedder turns your memories into vectors for mem0’s semantic recall.',
+                )}
+              </Role>
+              <Role name="fgDim">
+                {T(
+                  '  bge-m3 é o mais forte (multilíngue, melhor em PT) — porém o maior download.',
+                  '  bge-m3 is the strongest (multilingual) — but the biggest download.',
+                )}
+              </Role>
+            </Box>
+          </Box>
+        )}
 
         {step === 'custom-id' && <TextRow label={T('id do provider (ex.: tokenrouter)', 'provider id (e.g. tokenrouter)')} value={buf} />}
         {step === 'custom-url' && <TextRow label={T('base URL (https, .../v1)', 'base URL (https, .../v1)')} value={buf} />}
@@ -459,7 +506,7 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
       {step !== 'done' && step !== 'validating' && step !== 'validate-failed' && (
         <Box paddingTop={1}>
           <Role name="fgDim">
-            {step === 'lang' || step === 'backend' || step === 'provider' || step === 'sidecars'
+            {step === 'lang' || step === 'backend' || step === 'provider' || step === 'sidecars' || step === 'embedder'
               ? `↑↓ ${T('navegar', 'move')} · enter ${T('escolher', 'select')} · esc ${T('sair', 'quit')}`
               : `${T('digite', 'type')} · enter ${T('confirmar', 'confirm')} · esc ${T('sair', 'quit')}`}
           </Role>
