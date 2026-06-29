@@ -388,9 +388,26 @@ def main() -> None:
         # RE-EXEC em vez de retry in-process: o chromadb CACHEIA o client/conexão por
         # processo, então um 2º `from_config` no MESMO processo reusa o store velho. Reiniciar
         # o processo garante chromadb/mem0 FRESCOS. `ALUY_MEM0_RESET_DONE` evita loop infinito.
+        # CROSS-SO: o supervisor health-checa a PORTA (não o PID), então trocar de processo é OK
+        # em Linux/macOS/Windows. `os.execv` no Windows pode falhar em casos raros (path/quoting)
+        # — então caímos p/ um respawn via subprocess + saída limpa; e, em último caso, p/ um
+        # retry in-process (melhor um chromadb possivelmente cacheado do que o sidecar morto).
         os.environ["ALUY_MEM0_RESET_DONE"] = "1"
-        os.execv(sys.executable, [sys.executable, *sys.argv])
-        return  # inalcançável (execv substitui o processo) — só p/ o type-checker
+        try:
+            os.execv(sys.executable, [sys.executable, *sys.argv])
+        except Exception:  # noqa: BLE001 — execv indisponível/falhou (ex.: Windows)
+            try:
+                import subprocess
+
+                subprocess.Popen([sys.executable, *sys.argv], close_fds=True)
+                os._exit(0)  # encerra ESTE processo; o novo assume a porta
+            except Exception:  # noqa: BLE001 — sem respawn possível: tenta in-process
+                os.makedirs(ALUY_MEMORY_DIR, mode=0o700, exist_ok=True)
+                memory = Memory.from_config(config)
+            else:
+                return  # inalcançável após _exit — só p/ o type-checker
+        else:
+            return  # inalcançável (execv substitui o processo) — só p/ o type-checker
 
     # Injeta no handler.
     Mem0Handler.memory = memory

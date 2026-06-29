@@ -14,6 +14,7 @@ import { resolveSidecarToggles, type SidecarTarget } from '@hiperplano/aluy-cli-
 import { NodeBootSupervisor } from './boot-supervisor.js';
 import { UserConfigStore } from '../io/user-config.js';
 import { warmupSidecars, type WarmTarget } from './sidecar-warmup.js';
+import { ensureMem0ServerScript } from '../provisioner/sidecar-provisioner.js';
 
 export interface BootTriggerOptions {
   /** Raiz do `~/.aluy/` (default: `<home>/.aluy`). Injetável p/ teste. */
@@ -64,6 +65,18 @@ export function triggerBoot(opts: BootTriggerOptions = {}): Promise<unknown> | u
   const headroomBinaryPath =
     process.env.ALUY_HEADROOM_BIN ??
     (isWin ? join(hrVenv, 'Scripts', 'headroom.exe') : join(hrVenv, 'bin', 'headroom'));
+
+  // SELF-REPAIR: se o mem0 vai subir, garante o script do servidor no venv ANTES do boot.
+  // Cobre o caso "atualizei o CLI mas o venv já existia" — sem isto o servidor velho (ou
+  // ausente) fica no disco e o mem0 não sobe (achado do dono: script faltando no venv).
+  // Best-effort, fail-open: nunca trava o boot.
+  if (toggles.has('mem0')) {
+    try {
+      ensureMem0ServerScript(mem0VenvDir);
+    } catch {
+      /* fail-open (CA-G2-5) */
+    }
+  }
 
   const supervisor = new NodeBootSupervisor();
 

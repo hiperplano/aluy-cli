@@ -265,6 +265,11 @@ const MEM0_SERVER_SCRIPT = 'aluy-mem0-server.py';
 function resolveMem0ServerScript(): string {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const candidates = [
+    // PUBLICADO (bundle): o código vive em `<pkg>/dist-bundle/index.js`, então o asset
+    // (`<pkg>/assets/mem0/…`) está UM nível acima. Sem este candidato o pacote npm não
+    // encontra o script em nenhum SO ⇒ mem0 ✗ (era o bug: faltava o `../assets`).
+    join(__dirname, '..', 'assets', 'mem0', MEM0_SERVER_SCRIPT),
+    // DEV/dist (código mais fundo: `src|dist/provisioner/…`) ⇒ 2-3 níveis acima.
     join(__dirname, '..', '..', 'assets', 'mem0', MEM0_SERVER_SCRIPT),
     join(__dirname, '..', '..', '..', 'assets', 'mem0', MEM0_SERVER_SCRIPT),
   ];
@@ -275,6 +280,43 @@ function resolveMem0ServerScript(): string {
   }
   // Fallback: retorna o primeiro candidato (vai falhar com erro claro no copy).
   return candidates[0];
+}
+
+/**
+ * SELF-REPAIR de boot: garante que o `aluy-mem0-server.py` (nosso asset) esteja no venv do
+ * mem0, copiando do asset publicado se faltar OU estiver desatualizado. Chamado no TRIGGER de
+ * boot (todo launch), não só no `bootstrap` — assim ATUALIZAR o CLI (`npm i -g`) + reabrir o
+ * aluy já propaga o servidor (com correções, ex.: self-heal de store). Idempotente, best-effort
+ * (nunca lança): retorna `true` se o script ficou presente. NÃO recria o venv — só o script.
+ */
+export function ensureMem0ServerScript(venvDir: string): boolean {
+  try {
+    if (!existsSync(venvDir)) return false; // sem venv não há o que reparar (bootstrap cria)
+    const dest = join(venvDir, MEM0_SERVER_SCRIPT);
+    const asset = resolveMem0ServerScript();
+    if (!existsSync(asset)) return existsSync(dest); // asset indisponível: mantém o que houver
+    // Copia se ausente OU diferente (upgrade trouxe servidor novo). Comparação por conteúdo —
+    // arquivo pequeno, barato; evita reescrever a cada boot sem necessidade.
+    let needsCopy = !existsSync(dest);
+    if (!needsCopy) {
+      try {
+        needsCopy = readFileSync(asset, 'utf8') !== readFileSync(dest, 'utf8');
+      } catch {
+        needsCopy = true;
+      }
+    }
+    if (needsCopy) {
+      copyFileSync(asset, dest);
+      try {
+        chmodSync(dest, 0o700);
+      } catch {
+        /* best-effort (Windows ignora modo) */
+      }
+    }
+    return existsSync(dest);
+  } catch {
+    return false;
+  }
 }
 
 // ─── Provisionamento de alvos ──────────────────────────────────────────────
