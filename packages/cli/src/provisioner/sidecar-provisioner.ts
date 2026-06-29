@@ -578,28 +578,23 @@ async function provisionMem0(): Promise<ProvisionTargetResult> {
   const venvDir = join(aluyDir(), MEM0_VENV_DIR);
   const pythonBin = join(venvDir, 'bin', 'python3');
 
-  // Idempotente: se o venv já existe com pip funcional E o script servidor
-  // está presente, pula. Se o script falta, copia-o (atualização).
+  // Idempotente: se o venv já existe com pip funcional, REUSA o venv mas SEMPRE
+  // re-copia (sobrescreve) o script do servidor. O script é NOSSO asset e tem que
+  // bater com a versão instalada do CLI — ACHADO DO DONO: ao atualizar o aluy (ex.:
+  // rc.26→rc.30), o venv já existia e o script NÃO era atualizado, então correções no
+  // servidor (ex.: self-heal de store incompatível) nunca chegavam ao disco. Sobrescrever
+  // sempre é barato (arquivo pequeno) e garante que o upgrade do CLI propague o servidor.
   if (existsSync(pythonBin) && checkPip(pythonBin)) {
     const serverScript = join(venvDir, MEM0_SERVER_SCRIPT);
-    if (existsSync(serverScript)) {
-      return {
-        target: 'mem0',
-        hashOk: true,
-        installed: true,
-        message: `Venv do Mem0 já provisionado em ${venvDir}.`,
-      };
-    }
-    // Script ausente — copia do asset (provisionamento incremental).
     const assetScript = resolveMem0ServerScript();
     try {
-      copyFileSync(assetScript, serverScript);
+      copyFileSync(assetScript, serverScript); // overwrite incondicional (upgrade-safe)
       chmodSync(serverScript, 0o700);
       return {
         target: 'mem0',
         hashOk: true,
         installed: true,
-        message: `Venv do Mem0 já existente; script ${MEM0_SERVER_SCRIPT} copiado para ${venvDir}.`,
+        message: `Venv do Mem0 já provisionado em ${venvDir}; script ${MEM0_SERVER_SCRIPT} atualizado.`,
       };
     } catch (copyErr) {
       return {
@@ -1186,13 +1181,15 @@ async function defaultAgentInstaller(
     },
   );
   // mem0: o caminho via agente NÃO copia o script do servidor (só o nativo copia).
-  // Garantimos aqui — sem ele o boot não tem o que rodar em :11435.
+  // Garantimos aqui. SOBRESCREVE SEMPRE (não só quando ausente): o script é nosso asset e
+  // tem que bater com a versão do CLI — ACHADO DO DONO: ao atualizar o aluy com o venv já
+  // existente, o script velho permanecia e correções no servidor (self-heal) não chegavam.
   if (target === 'mem0') {
     try {
       const venvDir = join(aluyDir(), MEM0_VENV_DIR);
       const dest = join(venvDir, MEM0_SERVER_SCRIPT);
-      if (existsSync(venvDir) && !existsSync(dest)) {
-        copyFileSync(resolveMem0ServerScript(), dest);
+      if (existsSync(venvDir)) {
+        copyFileSync(resolveMem0ServerScript(), dest); // overwrite incondicional (upgrade-safe)
       }
     } catch {
       // best-effort; a verificação de deps/script abaixo reporta se faltar.
