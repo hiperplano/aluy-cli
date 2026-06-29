@@ -17,7 +17,50 @@ import {
   LOCAL_KEYCHAIN_SERVICE,
   type KeyringEntry,
 } from '../model/local/credential-resolver.js';
-import type { LocalProviderKind } from '@hiperplano/aluy-cli-core';
+import { resolveLocalProviderConfig } from '../model/local/config.js';
+import { defaultLocalCatalog, findProvider, type LocalProviderKind } from '@hiperplano/aluy-cli-core';
+
+/** Função de fetch injetável (testes) — assinatura mínima usada pelo preflight. */
+export type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<{ status: number }>;
+
+/**
+ * Preflight de ACESSIBILIDADE do modelo local (BYO) p/ o caminho via AGENTE — que PRECISA de
+ * um modelo pra "pensar". ACHADO DO DONO (máquina do zero): `aluy bootstrap` parou em
+ * "verificando ollama" porque o instalador-agente (`aluy -p`) não conseguiu falar com o
+ * provider ("erro de broker: provider local") — circular: o agente precisa do modelo que ele
+ * ainda ia instalar. Aqui checamos o endpoint efetivo ANTES; inacessível ⇒ o caller cai no
+ * caminho DIRETO (`--no-agent`), que não usa modelo.
+ *
+ * NÃO infere (não gasta token): só um GET curto em `<baseUrl>/models` — qualquer resposta HTTP
+ * (mesmo 401) = alcançável. Sem baseUrl efetivo (provider remoto default) ⇒ devolve `true`
+ * (não bloqueia: a falha de chave de um provider remoto é assunto do wizard, não daqui).
+ * Fail-safe: SÓ erro de REDE (ECONNREFUSED/timeout/DNS) conta como inacessível.
+ */
+export async function probeModelReachable(opts: {
+  config: ReturnType<UserConfigStore['load']>;
+  env: NodeJS.ProcessEnv;
+  fetchImpl?: FetchLike;
+  timeoutMs?: number;
+}): Promise<boolean> {
+  const { config, env } = opts;
+  const resolved = resolveLocalProviderConfig({ env, config });
+  // baseUrl EFETIVO: o explícito do usuário OU o default do catálogo p/ o provider.
+  const catalogBaseUrl = findProvider(defaultLocalCatalog(), resolved.provider)?.baseUrl;
+  const baseUrl = resolved.baseUrl ?? catalogBaseUrl;
+  if (baseUrl === undefined || baseUrl === '') return true; // sem endpoint p/ sondar ⇒ não bloqueia
+  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+  const timeoutMs = opts.timeoutMs ?? 4000;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/models`, { signal: ctrl.signal });
+    return true; // QUALQUER resposta HTTP = endpoint alcançável (mesmo 401/404)
+  } catch {
+    return false; // erro de rede ⇒ inacessível
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const VALID_PROVIDERS: readonly LocalProviderKind[] = ['anthropic', 'openrouter', 'openai'];
 
@@ -206,6 +249,16 @@ export async function runInit(opts: {
    * Força modo interativo/não-interativo (default: `process.stdin.isTTY`).
    */
   isInteractive?: boolean;
+  /** Ambiente (default: `process.env`) — usado pelo preflight de acessibilidade do modelo. */
+  env?: NodeJS.ProcessEnv;
+  /**
+   * Preflight injetável (testes): dado config+env, devolve se o modelo está acessível.
+   * Default: `probeModelReachable`. Só é consultado no caminho via agente.
+   */
+  modelProbe?: (
+    config: ReturnType<UserConfigStore['load']>,
+    env: NodeJS.ProcessEnv,
+  ) => Promise<boolean>;
 }): Promise<number> {
   const { out, err } = opts;
 
@@ -264,7 +317,21 @@ export async function runInit(opts: {
   // sudo) e o sidecar, e ACOMPANHA/trata os problemas. ⚠ Roda em --yolo (acesso total à
   // máquina) — optar pelo TURBO é o consentimento. `--no-agent` força o caminho direto (tarball
   // pinado, só Linux com python já pronto), para quem prefere não rodar o agente.
-  const useAgent = opts.agent !== false;
+  let useAgent = opts.agent !== false;
+  // PREFLIGHT (só p/ o caminho via agente): o instalador-agente PRECISA falar com o modelo.
+  // Se o endpoint do modelo não responde (típico em máquina do zero — inclusive quando o
+  // próprio modelo seria o ollama local que ainda não subiu), cai SOZINHO no caminho direto
+  // em vez de "polir no vazio" em "verificando…". Achado do dono. Injetável p/ teste.
+  if (useAgent) {
+    const probe = opts.modelProbe ?? ((c, e) => probeModelReachable({ config: c, env: e }));
+    const reachable = await probe(config, opts.env ?? process.env);
+    if (!reachable) {
+      out('  ⚠ O modelo local não respondeu — o instalador via agente precisa dele para rodar.');
+      out('  Caindo no caminho DIRETO (--no-agent), que provisiona sem usar modelo.');
+      out('');
+      useAgent = false;
+    }
+  }
   if (useAgent) {
     out('  Instalando os complementos com o próprio aluy — ele detecta o sistema, instala o que');
     out('  faltar (Python, pip, etc.) e os complementos. ⚠ Acesso total à máquina (com sudo quando');

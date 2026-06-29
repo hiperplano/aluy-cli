@@ -7,7 +7,7 @@
 //  - Integração via `runInit` (wizard ANTES do provisionamento)
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { runInit, runFirstRunWizard } from '../../src/commands/bootstrap.js';
+import { runInit, runFirstRunWizard, probeModelReachable } from '../../src/commands/bootstrap.js';
 import { UserConfigStore } from '../../src/io/user-config.js';
 import {
   LOCAL_KEYCHAIN_SERVICE,
@@ -406,6 +406,7 @@ describe('runInit — integração wizard + provisionamento', () => {
       entryFactory: fakeEntryFactory(mem),
       isInteractive: true,
       prompt: async () => '', // não deve ser chamado
+      modelProbe: async () => true, // hermético: não toca rede no preflight
     });
 
     expect(code).toBe(0);
@@ -437,6 +438,7 @@ describe('runInit — integração wizard + provisionamento', () => {
       entryFactory: fakeEntryFactory(new Map()),
       configStore,
       isInteractive: true,
+      modelProbe: async () => true, // hermético: não toca rede no preflight
     });
 
     expect(code).toBe(0);
@@ -481,5 +483,62 @@ describe('runInit — integração wizard + provisionamento', () => {
     // Precisamos verificar se o wizard impede ou não.
     // Pelo código, `if (!ok) { return 0; }` — então NÃO provisiona.
     expect(runProvisioner).not.toHaveBeenCalled();
+  });
+
+  it('modelo INACESSÍVEL + caminho agente ⇒ cai p/ direto (useAgent:false) e avisa', async () => {
+    const mem = new Map<string, string>();
+    mem.set(`${LOCAL_KEYCHAIN_SERVICE}:${apiKeyAccount('anthropic')}`, 'sk-ant');
+    const tmp = mkdtempSync(join(tmpdir(), 'aluy-bootstrap-fb-'));
+    tmpDirs.push(tmp);
+    const configStore = new UserConfigStore({ baseDir: tmp });
+    configStore.save({ localProvider: 'anthropic', localModel: 'claude-sonnet-4-8', profile: 'turbo' });
+
+    const out: string[] = [];
+    const code = await runInit({
+      out: (l) => out.push(l),
+      err: () => {},
+      configStore,
+      entryFactory: fakeEntryFactory(mem),
+      isInteractive: true,
+      prompt: async () => '',
+      agent: true, // pediu o caminho agente…
+      modelProbe: async () => false, // …mas o modelo não responde
+    });
+
+    expect(code).toBe(0);
+    expect(out.join('\n')).toMatch(/caminho DIRETO|--no-agent/i);
+    // Provisionou pelo caminho DIRETO (useAgent:false) — não polir no vazio.
+    expect(runProvisioner).toHaveBeenCalledWith(
+      'turbo',
+      undefined,
+      expect.objectContaining({ useAgent: false }),
+    );
+  });
+});
+
+describe('probeModelReachable — preflight de acessibilidade do modelo', () => {
+  it('fetch resolve (mesmo 401) ⇒ alcançável (true); sonda <baseUrl>/models', async () => {
+    let calledUrl = '';
+    const ok = await probeModelReachable({
+      config: { localProvider: 'ollama' } as never,
+      env: {},
+      fetchImpl: async (url) => {
+        calledUrl = url;
+        return { status: 401 };
+      },
+    });
+    expect(ok).toBe(true);
+    expect(calledUrl).toBe('http://127.0.0.1:11434/v1/models'); // baseUrl do catálogo + /models
+  });
+
+  it('fetch lança (rede caída) ⇒ inacessível (false)', async () => {
+    const ok = await probeModelReachable({
+      config: { localProvider: 'ollama' } as never,
+      env: {},
+      fetchImpl: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+    });
+    expect(ok).toBe(false);
   });
 });
