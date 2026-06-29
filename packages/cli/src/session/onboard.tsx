@@ -467,7 +467,19 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
         {step === 'custom-url' && <TextRow label={T('base URL (https, .../v1)', 'base URL (https, .../v1)')} value={buf} />}
         {step === 'custom-model' && <TextRow label={T('modelo default', 'default model')} value={buf} />}
         {step === 'key' && <TextRow label={T(`API key de ${providerId === '__custom__' ? custom.id : providerId} (oculta)`, `${providerId === '__custom__' ? custom.id : providerId} API key (hidden)`)} value={buf} mask />}
-        {step === 'model' && <TextRow label={T('modelo (enter = default)', 'model (enter = default)')} value={buf} />}
+        {step === 'model' && (
+          <Box flexDirection="column">
+            <TextRow label={T('modelo (enter = default)', 'model (enter = default)')} value={buf} />
+            {(() => {
+              const sugg = providers.find((p) => p.id === providerId)?.models ?? [];
+              return sugg.length > 0 ? (
+                <Box paddingTop={1}>
+                  <Role name="fgDim">{T('sugestões: ', 'suggestions: ') + sugg.join(' · ')}</Role>
+                </Box>
+              ) : null;
+            })()}
+          </Box>
+        )}
 
         {step === 'validating' && (
           <Box flexDirection="column">

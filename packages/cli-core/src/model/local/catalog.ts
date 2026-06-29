@@ -163,7 +163,7 @@ const DEFAULT_ENTRIES: readonly LocalProviderEntry[] = [
     baseUrl: 'http://127.0.0.1:11434/v1',
     auth: ['none'],
     defaultModel: 'llama3.2',
-    models: ['llama3.2', 'qwen2.5-coder', 'deepseek-r1'],
+    models: ['llama3.2', 'gemma3:4b', 'qwen2.5-coder', 'deepseek-r1'],
     wave: 3,
     notes: 'roda local; sem credencial (auth none). O egress local ainda é pinado/validado.',
   },
