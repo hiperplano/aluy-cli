@@ -55,7 +55,6 @@ import {
 } from '@hiperplano/aluy-cli-core';
 import { loadAuthConfig, CLI_CLIENT_ID } from '../auth/config.js';
 import { loadBrokerConfig } from '../model/config.js';
-import { headroomUrlFromEnv } from '../model/headroom.js';
 import { makeHeadroomRetrieveTool } from '../model/headroom-retrieve.js';
 import { KeychainCredentialStore } from '../auth/keychain-store.js';
 import { createSandbox } from '../sandbox/index.js';
@@ -103,6 +102,12 @@ export interface BuildSessionOptions {
    * judge/recall AO VIVO falarem ONDE o usuário configurou (não só o warmup/doctor).
    */
   readonly services?: UserServicesConfig;
+  /**
+   * URL do proxy headroom JÁ RESOLVIDA config-driven (`resolveHeadroomUrl`: turbo+toggle/
+   * services/env), resolvida em run.tsx. `undefined` ⇒ compressão+retrieve do headroom OFF.
+   * Substitui a leitura env-only de antes (o proxy subia mas não era consumido).
+   */
+  readonly headroomUrl?: string;
   /**
    * ADR-0136 §5 (balde a) — limits do config (maxTokens/maxOutputTokens/maxIterations).
    * Resolvido em run.tsx (savedConfig.limits) e repassado; entra como nível ENTRE env e
@@ -788,6 +793,8 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   const caller = new StreamingModelCaller({
     client: brokerClient,
     tier,
+    // headroom config-driven: URL resolvida no run.tsx (turbo+toggle/services/env). undefined ⇒ off.
+    ...(opts.headroomUrl !== undefined ? { headroomUrl: opts.headroomUrl } : {}),
     // EST-0972 (BUG Custom) — slug Custom retomado: só sob `tier:'custom'` (bootModel).
     // Sem isto, a 1ª chamada após retomar uma sessão Custom ia SEM model ⇒ 422.
     ...(bootModel !== undefined ? { model: bootModel } : {}),
@@ -982,12 +989,9 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // EST-1015 (POC headroom) — RETRIEVE: só monta a tool quando `ALUY_HEADROOM_URL`
     // aponta p/ o proxy LOCAL do usuário. Ausente ⇒ a sessão segue idêntica (sem ela).
     // Efeito `network` ⇒ atrás da catraca (`always-ask:network`, Plan-deny) como web_fetch.
-    ...(() => {
-      const headroomUrl = headroomUrlFromEnv(env);
-      return headroomUrl !== undefined
-        ? { headroomRetrieveTool: makeHeadroomRetrieveTool({ baseUrl: headroomUrl }) }
-        : {};
-    })(),
+    ...(opts.headroomUrl !== undefined
+      ? { headroomRetrieveTool: makeHeadroomRetrieveTool({ baseUrl: opts.headroomUrl }) }
+      : {}),
     // EST-0969 · ADR-0057 — sub-agentes locais paralelos (tool `spawn_agent`). Só
     // entra quando habilitado; o controller monta o spawner com a MESMA engine/
     // ports/budget/ask do pai (não-bypass + escopo ⊆ pai + E-A1/E-A2/E-A3).

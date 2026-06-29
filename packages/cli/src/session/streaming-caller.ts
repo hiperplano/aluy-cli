@@ -26,7 +26,7 @@ import {
   type NativeToolsCapability,
   type Quota,
 } from '@hiperplano/aluy-cli-core';
-import { compressViaHeadroom, headroomUrlFromEnv } from '../model/headroom.js';
+import { compressViaHeadroom } from '../model/headroom.js';
 
 /** Eventos de stream que a UI observa (token-a-token + usage). */
 export interface StreamSink {
@@ -70,6 +70,12 @@ export interface StreamingModelCallerOptions {
   readonly maxTokens?: number;
   readonly temperature?: number;
   readonly context?: ModelCallContext;
+  /**
+   * URL do proxy headroom (compressão de contexto), JÁ RESOLVIDA config-driven pelo wiring
+   * (`resolveHeadroomUrl`: turbo+toggle/services/env). `undefined` ⇒ compressão OFF. Antes o
+   * caller lia `ALUY_HEADROOM_URL` do env direto (env-only) — agora é injetada (config-driven).
+   */
+  readonly headroomUrl?: string;
   /** Para onde os tokens são emitidos ao vivo (a UI). */
   readonly sink: StreamSink;
   /**
@@ -196,11 +202,11 @@ export class StreamingModelCaller implements ModelCaller {
     readonly idempotencyKey: string;
     readonly signal?: AbortSignal;
   }): Promise<ModelCallResult> {
-    // EST-1015 (POC do dono — headroom) — quando `ALUY_HEADROOM_URL` está setado, comprime
-    // as mensagens via o proxy headroom ANTES do broker (economia de tokens em saídas de
-    // tool verbosas). OFF por default; FAIL-OPEN (erro ⇒ originais). ⚠️ EXPERIMENTAL: 2ª hop
-    // de rede do prompt (CLI-SEC-7) + CCR lossy — atrás de arquiteto+seguranca p/ produção.
-    const headroomUrl = headroomUrlFromEnv();
+    // EST-1015 (headroom) — quando há URL do headroom, comprime as mensagens via o proxy ANTES
+    // do broker (economia de tokens em saídas de tool verbosas). FAIL-OPEN (erro ⇒ originais).
+    // ⚠️ EXPERIMENTAL: 2ª hop de rede do prompt (CLI-SEC-7) + CCR lossy. A URL vem INJETADA pelo
+    // wiring (config-driven: turbo+toggle/services/env), não mais lida do env aqui.
+    const headroomUrl = this.opts.headroomUrl;
     const args =
       headroomUrl === undefined
         ? argsIn

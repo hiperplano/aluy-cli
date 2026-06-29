@@ -86,3 +86,29 @@ export function resolveHeadroomProbeUrl(env?: Env, services?: UserServicesConfig
     defPort: HEADROOM_PORT,
   });
 }
+
+/**
+ * URL EFETIVA do headroom p/ a SESSÃO (compress + retrieve), ou `undefined` (desligado).
+ * CONFIG-DRIVEN — não mais env-only (achado do dono: o proxy subia mas nunca era consumido,
+ * porque a ÚNICA chave de ativação era a env `ALUY_HEADROOM_URL`, que ninguém setava). Agora
+ * liga pelo CONFIG: `profile:turbo` + `sidecarToggles.headroom` (default on) OU `services.headroom`
+ * no `~/.aluy/config.json`. A env `ALUY_HEADROOM_URL` vira OVERRIDE explícito; `ALUY_HEADROOM_OFF`
+ * é o kill-switch. Precedência: off-switch > env-url > config (turbo/toggle/services) > desligado.
+ */
+export function resolveHeadroomUrl(opts: {
+  readonly env?: Env;
+  readonly profile?: 'turbo' | 'leve';
+  /** `config.sidecarToggles.headroom` (default ON quando turbo). */
+  readonly headroomToggle?: boolean;
+  readonly services?: UserServicesConfig;
+}): string | undefined {
+  const env = opts.env ?? {};
+  const off = (env['ALUY_HEADROOM_OFF'] ?? '').trim().toLowerCase();
+  if (off === '1' || off === 'true' || off === 'on') return undefined; // kill-switch
+  const explicit = (env['ALUY_HEADROOM_URL'] ?? '').trim();
+  if (explicit !== '') return resolveHeadroomProbeUrl(opts.env, opts.services); // override por env
+  const turboOn = opts.profile === 'turbo' && opts.headroomToggle !== false;
+  const servicesSet = opts.services?.headroom !== undefined;
+  if (turboOn || servicesSet) return resolveHeadroomProbeUrl(opts.env, opts.services);
+  return undefined; // sem turbo/toggle/services/env ⇒ desligado
+}

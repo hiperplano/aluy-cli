@@ -6,6 +6,7 @@ import {
   resolveMem0Url,
   resolveOllamaUrl,
   resolveHeadroomProbeUrl,
+  resolveHeadroomUrl,
 } from '../../src/maestro/sidecar-urls.js';
 
 describe('sidecar-urls — URLs env-configuráveis', () => {
@@ -72,5 +73,40 @@ describe('sidecar-urls — config único services (ADR-0136 §8): precedência U
       'http://127.0.0.1:11500',
     );
     expect(resolveOllamaUrl({ ALUY_OLLAMA_PORT: '70000' }, {})).toBe('http://127.0.0.1:11434');
+  });
+});
+
+describe('resolveHeadroomUrl — ativação CONFIG-DRIVEN (não mais env-only)', () => {
+  it('turbo + toggle default (on) ⇒ LIGA no default :8787 (sem env)', () => {
+    expect(resolveHeadroomUrl({ env: {}, profile: 'turbo' })).toBe('http://127.0.0.1:8787');
+  });
+
+  it('turbo + toggle headroom=false ⇒ DESLIGADO (undefined)', () => {
+    expect(resolveHeadroomUrl({ env: {}, profile: 'turbo', headroomToggle: false })).toBeUndefined();
+  });
+
+  it('perfil leve ⇒ desligado (a menos que services/env)', () => {
+    expect(resolveHeadroomUrl({ env: {}, profile: 'leve' })).toBeUndefined();
+  });
+
+  it('services.headroom no config ⇒ liga (mesmo fora do turbo) e usa host/port do config', () => {
+    expect(
+      resolveHeadroomUrl({ env: {}, profile: 'leve', services: { headroom: { port: 9090 } } }),
+    ).toBe('http://127.0.0.1:9090');
+  });
+
+  it('ALUY_HEADROOM_URL = OVERRIDE explícito (liga e manda a URL dada)', () => {
+    expect(
+      resolveHeadroomUrl({ env: { ALUY_HEADROOM_URL: 'http://127.0.0.1:7000' }, profile: 'leve' }),
+    ).toBe('http://127.0.0.1:7000');
+  });
+
+  it('ALUY_HEADROOM_OFF = kill-switch (vence tudo)', () => {
+    expect(
+      resolveHeadroomUrl({
+        env: { ALUY_HEADROOM_OFF: '1', ALUY_HEADROOM_URL: 'http://127.0.0.1:7000' },
+        profile: 'turbo',
+      }),
+    ).toBeUndefined();
   });
 });

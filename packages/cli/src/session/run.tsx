@@ -29,6 +29,7 @@ import {
 } from '../ui/theme/index.js';
 import { routeRename, runRenameLinear } from './rename.js';
 import { setWindowTitle } from '../ui/window-title.js';
+import { resolveHeadroomUrl } from '../maestro/sidecar-urls.js';
 import { CLI_VERSION } from '../version.js';
 import { readUpdateNote, refreshUpdateCheck } from '../io/update-check.js';
 import { ThemeRoot } from './ThemeRoot.js';
@@ -835,6 +836,19 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     effectiveBackend: resolvedBackend,
     // ADR-0136 §8/§9 — seção `services` (porta/host dos sidecars) p/ o judge/recall AO VIVO.
     ...(savedConfig.services ? { services: savedConfig.services } : {}),
+    // headroom CONFIG-DRIVEN (não env-only): liga por profile:turbo + sidecarToggles.headroom
+    // (default on) OU services.headroom; env ALUY_HEADROOM_URL = override, ALUY_HEADROOM_OFF = kill.
+    ...(() => {
+      const hru = resolveHeadroomUrl({
+        env,
+        profile: savedConfig.profile ?? 'turbo', // default real do sistema (boot-trigger)
+        ...(savedConfig.sidecarToggles?.headroom !== undefined
+          ? { headroomToggle: savedConfig.sidecarToggles.headroom }
+          : {}),
+        ...(savedConfig.services ? { services: savedConfig.services } : {}),
+      });
+      return hru !== undefined ? { headroomUrl: hru } : {};
+    })(),
     // ADR-0136 §5 — limits do config (maxTokens/maxOutputTokens/maxIterations); flag/env vencem.
     ...(savedConfig.limits ? { limits: savedConfig.limits } : {}),
     // ADR-0136 §5 — context do config (window/autocompactAt/autocompactMax); flag/env vencem.
