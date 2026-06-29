@@ -50,6 +50,7 @@ import {
   QWEN_JUDGE_MODEL_DIGEST,
   EMBEDDER_MODEL,
   NOMIC_EMBEDDER_MODEL_DIGEST,
+  embedderSpec,
   OLLAMA_PULL_TIMEOUT_MS,
   OLLAMA_LOOPBACK_HOST,
   OLLAMA_LOOPBACK_PORT,
@@ -280,6 +281,16 @@ function resolveMem0ServerScript(): string {
   }
   // Fallback: retorna o primeiro candidato (vai falhar com erro claro no copy).
   return candidates[0];
+}
+
+/**
+ * Embedder a PROVISIONAR (puxar+verificar). Lê `ALUY_MEM0_EMBEDDER` — setado por bootstrap/
+ * run.tsx a partir do config (escolha na instalação) ANTES de provisionar; validado contra o
+ * catálogo. Ausente/ inválido ⇒ `EMBEDDER_MODEL` (default bge-m3). Fonte única do provisioner.
+ */
+function provisionEmbedderModel(): string {
+  const e = process.env.ALUY_MEM0_EMBEDDER?.trim();
+  return e !== undefined && e !== '' && embedderSpec(e) !== undefined ? e : EMBEDDER_MODEL;
 }
 
 /**
@@ -584,8 +595,12 @@ async function pullAndVerifyModels(
     return { ok: false, message: judgeErr };
   }
 
-  // Pull e verificação do embedder.
-  const embedderErr = await pullAndCheck(EMBEDDER_MODEL, NOMIC_EMBEDDER_MODEL_DIGEST);
+  // Pull e verificação do embedder ESCOLHIDO (config-driven). O digest vem do CATÁLOGO pelo
+  // modelo — senão pull do bge-m3 verificaria contra o digest errado e ABORTARIA. Fallback p/
+  // o digest do nomic se o modelo não estiver no catálogo (legado).
+  const embedderModel = provisionEmbedderModel();
+  const embedderDigest = embedderSpec(embedderModel)?.digest ?? NOMIC_EMBEDDER_MODEL_DIGEST;
+  const embedderErr = await pullAndCheck(embedderModel, embedderDigest);
   if (embedderErr) {
     try {
       serveProc.kill();
@@ -1066,7 +1081,7 @@ function agentInstallGoal(target: SidecarTarget): string {
       'Ollama.Ollama -e --accept-source-agreements --accept-package-agreements`; macOS: brew ou ' +
       'instalador. Garanta o serviço rodando. ' +
       `DEPOIS, puxe os modelos do TURBO (senão o judge/embedder não funcionam): ` +
-      `\`ollama pull ${JUDGE_MODEL}\` (judge) e \`ollama pull ${EMBEDDER_MODEL}\` (embedder); ` +
+      `\`ollama pull ${JUDGE_MODEL}\` (judge) e \`ollama pull ${provisionEmbedderModel()}\` (embedder); ` +
       `confirme que ambos aparecem em \`ollama list\`. ` +
       // O dono quer USAR o ollama (não só como judge): deixe-o pronto + persista o ambiente.
       `POR FIM, deixe o Ollama USÁVEL pelo usuário: garanta o binário \`ollama\` no PATH e ` +
@@ -1131,7 +1146,7 @@ async function verifyTargetHealthy(
       const data = (await resp.json()) as { models?: Array<{ name?: string }> };
       const names = (data.models ?? []).map((m) => m.name ?? '');
       const hasJudge = names.some((n) => n.startsWith(JUDGE_MODEL));
-      const hasEmbedder = names.some((n) => n.startsWith(EMBEDDER_MODEL));
+      const hasEmbedder = names.some((n) => n.startsWith(provisionEmbedderModel()));
       return hasJudge && hasEmbedder;
     } catch {
       return false;
@@ -1288,7 +1303,7 @@ function sleep(ms: number): Promise<void> {
  * (re-pull de modelo já presente é rápido). Best-effort: erro ⇒ `verifyTargetHealthy` reporta.
  */
 async function ensureOllamaModels(): Promise<void> {
-  for (const model of [JUDGE_MODEL, EMBEDDER_MODEL]) {
+  for (const model of [JUDGE_MODEL, provisionEmbedderModel()]) {
     try {
       const resp = await fetch(`http://${OLLAMA_LOOPBACK_HOST}:${OLLAMA_LOOPBACK_PORT}/api/pull`, {
         method: 'POST',

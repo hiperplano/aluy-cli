@@ -75,10 +75,65 @@ export const OLLAMA_BINARY_URL = `https://github.com/ollama/ollama/releases/down
 export const JUDGE_MODEL = 'qwen2.5:0.5b';
 
 /**
- * Modelo de embedding (nomic-embed-text).
- * Puxado via `ollama pull` após o binário estar instalado.
+ * CATÁLOGO de embedders suportados (escolhidos na instalação; ADR — embedder config-driven).
+ * Cada um traz o digest SHA256 do peso (pin de integridade, verificado pós-`ollama pull`), a
+ * dimensão do vetor (importa p/ a migração do store chromadb — trocar de dim invalida a
+ * coleção) e metadados p/ o onboard. Default = `mxbai-embed-large` (forte; nomic era fraco —
+ * dava ~0.5 a tudo, recall vazio). bge-m3 = multilíngue (melhor em PT) porém ~1.16GB.
  */
-export const EMBEDDER_MODEL = 'nomic-embed-text';
+export interface EmbedderSpec {
+  readonly model: string;
+  readonly digest: string;
+  readonly dim: number;
+  readonly sizeMB: number;
+  readonly multilingual: boolean;
+  readonly hintPt: string;
+  readonly hintEn: string;
+}
+export const EMBEDDER_CATALOG: readonly EmbedderSpec[] = [
+  {
+    model: 'bge-m3',
+    digest: 'sha256:daec91ffb5dd0c27411bd71f29932917c49cf529a641d0168496c3a501e3062c',
+    dim: 1024,
+    sizeMB: 1160,
+    multilingual: true,
+    hintPt: 'multilíngue (melhor em PT) · forte · ~1.16GB',
+    hintEn: 'multilingual · strong · ~1.16GB',
+  },
+  {
+    model: 'mxbai-embed-large',
+    digest: 'sha256:819c2adf5ce6df2b6bd2ae4ca90d2a69f060afeb438d0c171db57daa02e39c3d',
+    dim: 1024,
+    sizeMB: 670,
+    multilingual: false,
+    hintPt: 'forte · ~670MB · foco inglês',
+    hintEn: 'strong · ~670MB · english-leaning',
+  },
+  {
+    model: 'nomic-embed-text',
+    digest: 'sha256:970aa74c0a90ef7482477cf803618e776e173c007bf957f635f1015bfcfef0e6',
+    dim: 768,
+    sizeMB: 274,
+    multilingual: false,
+    hintPt: 'leve · ~274MB · fraco (legado)',
+    hintEn: 'light · ~274MB · weak (legacy)',
+  },
+];
+
+/** Embedder DEFAULT quando nada foi escolhido/configurado: o MAIOR/mais forte (bge-m3,
+ * multilíngue — decisão do dono). A escolha no onboard permite trocar p/ mxbai/nomic menores. */
+export const DEFAULT_EMBEDDER_MODEL = 'bge-m3';
+
+/** Spec do embedder pelo nome do modelo (undefined se fora do catálogo). */
+export function embedderSpec(model: string): EmbedderSpec | undefined {
+  return EMBEDDER_CATALOG.find((e) => e.model === model);
+}
+
+/**
+ * Modelo de embedding default. ⚠ LEGADO: muitos consumidores ainda referenciam `EMBEDDER_MODEL`
+ * direto — agora aponta p/ o DEFAULT (mxbai). O caminho config-driven usa `resolveEmbedderModel`.
+ */
+export const EMBEDDER_MODEL = DEFAULT_EMBEDDER_MODEL;
 
 /**
  * Digest SHA256 da camada de peso do modelo judge (qwen2.5:0.5b).

@@ -9,7 +9,7 @@
 // faltar, entra num wizard interativo que pergunta provider, chave e modelo.
 
 import { Entry } from '@napi-rs/keyring';
-import { UserConfigStore } from '../io/user-config.js';
+import { UserConfigStore, resolveEmbedderModel } from '../io/user-config.js';
 import { runProvisioner } from '../provisioner/sidecar-provisioner.js';
 import {
   storeApiKey,
@@ -340,6 +340,10 @@ export async function runInit(opts: {
     out('  Instalando os complementos pelo caminho direto (--no-agent; requer Python já pronto)...');
   }
   out('');
+
+  // Embedder ESCOLHIDO (config-driven) p/ o provisioner puxar+verificar o modelo certo
+  // (env > config.embedder > default bge-m3). Exposto via env, lido por `provisionEmbedderModel`.
+  process.env.ALUY_MEM0_EMBEDDER = resolveEmbedderModel(config);
 
   const result = await runProvisioner(profile, sidecarToggles, { useAgent });
 

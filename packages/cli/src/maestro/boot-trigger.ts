@@ -12,7 +12,7 @@
 import { join } from 'node:path';
 import { resolveSidecarToggles, type SidecarTarget } from '@hiperplano/aluy-cli-core';
 import { NodeBootSupervisor } from './boot-supervisor.js';
-import { UserConfigStore } from '../io/user-config.js';
+import { UserConfigStore, resolveEmbedderModel } from '../io/user-config.js';
 import { warmupSidecars, type WarmTarget } from './sidecar-warmup.js';
 import { ensureMem0ServerScript } from '../provisioner/sidecar-provisioner.js';
 
@@ -65,6 +65,13 @@ export function triggerBoot(opts: BootTriggerOptions = {}): Promise<unknown> | u
   const headroomBinaryPath =
     process.env.ALUY_HEADROOM_BIN ??
     (isWin ? join(hrVenv, 'Scripts', 'headroom.exe') : join(hrVenv, 'bin', 'headroom'));
+
+  // Embedder CONFIG-DRIVEN: resolve o escolhido (env > config.embedder > default bge-m3) e o
+  // expõe em `ALUY_MEM0_EMBEDDER` p/ o `sidecarEnv` encaminhar ao servidor mem0. Só quando o
+  // mem0 sobe. Idempotente (resolveEmbedderModel já lê o env primeiro).
+  if (toggles.has('mem0')) {
+    process.env.ALUY_MEM0_EMBEDDER = resolveEmbedderModel(config, process.env);
+  }
 
   // SELF-REPAIR: se o mem0 vai subir, garante o script do servidor no venv ANTES do boot.
   // Cobre o caso "atualizei o CLI mas o venv já existia" — sem isto o servidor velho (ou

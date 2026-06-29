@@ -36,7 +36,10 @@ DEFAULT_PORT = 11435
 DEFAULT_HOST = "127.0.0.1"
 ALUY_MEMORY_DIR = os.path.expanduser("~/.aluy/memory")
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-EMBEDDER_MODEL = "nomic-embed-text"
+# Embedder CONFIG-DRIVEN: o boot passa `ALUY_MEM0_EMBEDDER` (escolhido na instalação); default
+# bge-m3 (multilíngue, forte). Trocar o embedder muda a DIMENSÃO do vetor (bge-m3/mxbai=1024,
+# nomic=768) ⇒ o store chromadb antigo fica incompatível e o self-heal o reseta no 1º boot.
+EMBEDDER_MODEL = os.environ.get("ALUY_MEM0_EMBEDDER", "bge-m3").strip() or "bge-m3"
 # LLM local p/ extração de fatos (mem0 add infer=True). SEM isto o mem0 cai no
 # default OpenAI → 401. Local-first: tudo via Ollama loopback, zero credencial.
 LLM_MODEL = "qwen2.5:0.5b"
@@ -320,6 +323,38 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
+EMBEDDER_MARKER = os.path.join(ALUY_MEMORY_DIR, ".embedder")
+
+
+def _migrate_embedder_if_changed() -> None:
+    """Se o embedder mudou desde o último boot (marca em `.embedder` ≠ atual), a dimensão do
+    vetor muda e o store chromadb fica incompatível ⇒ reseta proativamente. Best-effort."""
+    try:
+        prev = None
+        if os.path.exists(EMBEDDER_MARKER):
+            with open(EMBEDDER_MARKER, encoding="utf-8") as fh:
+                prev = fh.read().strip()
+        if prev is not None and prev != EMBEDDER_MODEL:
+            sys.stderr.write(
+                f"aluy-mem0: embedder mudou ({prev} → {EMBEDDER_MODEL}); "
+                "dimensão do vetor difere — resetando store p/ recriar.\n"
+            )
+            _reset_incompatible_stores()
+            os.makedirs(ALUY_MEMORY_DIR, mode=0o700, exist_ok=True)
+    except Exception:  # noqa: BLE001 — migração best-effort, nunca derruba o boot
+        pass
+
+
+def _write_embedder_marker() -> None:
+    """Grava qual embedder gerou os vetores atuais (p/ detectar troca no próximo boot)."""
+    try:
+        os.makedirs(ALUY_MEMORY_DIR, mode=0o700, exist_ok=True)
+        with open(EMBEDDER_MARKER, "w", encoding="utf-8") as fh:
+            fh.write(EMBEDDER_MODEL)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _reset_incompatible_stores() -> None:
     """Move os stores de memória p/ backup, p/ recriar frescos. Chamado quando a versão atual
     do chromadb/mem0 não lê o store de uma versão anterior (KeyError '_type' no chromadb /
@@ -367,6 +402,13 @@ def main() -> None:
     # Garante o dir de store com perms corretas.
     os.makedirs(ALUY_MEMORY_DIR, mode=0o700, exist_ok=True)
 
+    # MIGRAÇÃO DE EMBEDDER (proativa): trocar o embedder muda a DIMENSÃO do vetor (bge-m3/
+    # mxbai=1024, nomic=768). O chromadb só estoura a incompatibilidade no ADD/SEARCH (runtime),
+    # NÃO no boot — então o self-heal abaixo (que envolve só o `from_config`) não pegaria. Aqui,
+    # ANTES de subir: se o embedder mudou desde o último boot, reseta o store (a marca guarda
+    # qual embedder gerou os vetores atuais). Best-effort — nunca derruba o boot.
+    _migrate_embedder_if_changed()
+
     # Instancia Memory() UMA vez. SELF-HEAL de upgrade: um store gravado por uma versão
     # ANTERIOR do chromadb/mem0 pode ser ilegível pela atual (ex.: chromadb `KeyError: '_type'`
     # na config da collection; sqlite `no such column: prev_value` no history). Em vez de
@@ -408,6 +450,9 @@ def main() -> None:
                 return  # inalcançável após _exit — só p/ o type-checker
         else:
             return  # inalcançável (execv substitui o processo) — só p/ o type-checker
+
+    # Store criado/aberto OK com o embedder atual — grava a marca p/ detectar troca futura.
+    _write_embedder_marker()
 
     # Injeta no handler.
     Mem0Handler.memory = memory

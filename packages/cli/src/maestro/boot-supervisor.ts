@@ -189,6 +189,12 @@ export class NodeBootSupervisor implements BootSupervisor {
     if (kind === 'headroom' && e.HEADROOM_REQUIRE_RUST_CORE === undefined) {
       env.HEADROOM_REQUIRE_RUST_CORE = 'false';
     }
+    // mem0: encaminha o embedder ESCOLHIDO (config-driven), resolvido no boot-trigger p/
+    // `ALUY_MEM0_EMBEDDER` no ambiente do aluy. O servidor lê isto (default bge-m3). Trocar
+    // o embedder muda a dimensão do vetor ⇒ o servidor reseta o store (marca `.embedder`).
+    if (kind === 'mem0' && e.ALUY_MEM0_EMBEDDER !== undefined) {
+      env.ALUY_MEM0_EMBEDDER = e.ALUY_MEM0_EMBEDDER;
+    }
     return env;
   }
 

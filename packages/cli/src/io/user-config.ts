@@ -34,6 +34,7 @@ import {
 } from 'node:fs';
 import { themeByName, type ThemeName } from '../ui/theme/themes.js';
 import { langByCode, type Lang } from '../i18n/lang.js';
+import { embedderSpec, DEFAULT_EMBEDDER_MODEL } from '@hiperplano/aluy-cli-core';
 
 /** Permissões restritas: dir `0700`, arquivo `0600` (espelha o journal-store). */
 const DIR_MODE = 0o700;
@@ -155,6 +156,12 @@ export interface UserConfig {
     readonly mem0?: boolean;
     readonly headroom?: boolean;
   };
+  /**
+   * Modelo de EMBEDDING do mem0 (turbo), escolhido na instalação. Slug do catálogo
+   * (`bge-m3` | `mxbai-embed-large` | `nomic-embed-text`). Ausente ⇒ default
+   * `DEFAULT_EMBEDDER_MODEL` (bge-m3). Trocar reseta o store (dimensão do vetor muda).
+   */
+  readonly embedder?: string;
   /**
    * ADR-0136 (config único) — catálogo de providers LOCAIS do usuário, ABSORVIDO do
    * antigo `~/.aluy/providers.json` (que passa a `.migrated`). É DADO PÚBLICO
@@ -436,6 +443,7 @@ function sanitize(raw: unknown): UserConfig {
     rooms?: { backend?: string };
     profile?: 'turbo' | 'leve';
     sidecarToggles?: { ollama?: boolean; mem0?: boolean; headroom?: boolean };
+    embedder?: string;
     providers?: readonly UserProviderEntry[];
     services?: UserServicesConfig;
     connectors?: UserConnectorsConfig;
@@ -498,6 +506,12 @@ function sanitize(raw: unknown): UserConfig {
   // EST-1133 — profile: só 'turbo' | 'leve' (lixo ⇒ descartado ⇒ default 'turbo').
   if (obj.profile === 'turbo' || obj.profile === 'leve') {
     out.profile = obj.profile;
+  }
+
+  // embedder: só um slug do CATÁLOGO (bge-m3/mxbai-embed-large/nomic-embed-text); lixo ⇒
+  // descartado ⇒ default. Validado contra o catálogo p/ não puxar/verificar modelo desconhecido.
+  if (typeof obj.embedder === 'string' && embedderSpec(obj.embedder.trim()) !== undefined) {
+    out.embedder = obj.embedder.trim();
   }
 
   // EST-1133 — sidecarToggles: objeto com booleanos genuínos.
@@ -787,4 +801,20 @@ export function resolveInitialFullscreen(flag: boolean | undefined, config: User
  */
 export function configuredLocalBudget(config: UserConfig): boolean | undefined {
   return config.localBudget;
+}
+
+/**
+ * Embedder do mem0 EFETIVO (turbo): env `ALUY_MEM0_EMBEDDER` > `config.embedder` > default
+ * (`DEFAULT_EMBEDDER_MODEL` = bge-m3). Sempre um slug VÁLIDO do catálogo (valida; lixo ⇒ default).
+ * Fonte única p/ o provisioner (qual puxar+verificar), o boot (env do servidor) e o doctor.
+ */
+export function resolveEmbedderModel(
+  config: UserConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const fromEnv = env['ALUY_MEM0_EMBEDDER']?.trim();
+  if (fromEnv !== undefined && fromEnv !== '' && embedderSpec(fromEnv) !== undefined) return fromEnv;
+  if (config.embedder !== undefined && embedderSpec(config.embedder) !== undefined)
+    return config.embedder;
+  return DEFAULT_EMBEDDER_MODEL;
 }

@@ -421,6 +421,16 @@ describe('D3 — prova de proveniência pinada', () => {
         ];
         return Buffer.from(JSON.stringify({ layers }));
       }
+      if (p.includes('bge-m3')) {
+        // embedder DEFAULT atual (config-driven) — digest pinado do catálogo.
+        const layers = [
+          {
+            mediaType: OLLAMA_MODEL_MEDIA_TYPE,
+            digest: 'sha256:daec91ffb5dd0c27411bd71f29932917c49cf529a641d0168496c3a501e3062c',
+          },
+        ];
+        return Buffer.from(JSON.stringify({ layers }));
+      }
       return Buffer.from('dummy');
     });
     mockVerifySha256.mockReturnValue(true); // hash binário ok
