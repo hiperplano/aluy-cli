@@ -163,6 +163,12 @@ export interface UserConfig {
    */
   readonly embedder?: string;
   /**
+   * PISO de relevância do recall do mem0 (0..1): só injeta memórias com `score >=` isto.
+   * Antes só env `ALUY_MEM_MIN_SCORE`; agora config-driven (precedência env > config > default
+   * 0.6). 0 desliga o piso. Calibra conforme o embedder (forte discrimina ⇒ piso maior).
+   */
+  readonly recallMinScore?: number;
+  /**
    * ADR-0136 (config único) — catálogo de providers LOCAIS do usuário, ABSORVIDO do
    * antigo `~/.aluy/providers.json` (que passa a `.migrated`). É DADO PÚBLICO
    * (id/label/base_url/slug — CLI-SEC-7), NUNCA credencial (essa fica no keychain/env
@@ -444,6 +450,7 @@ function sanitize(raw: unknown): UserConfig {
     profile?: 'turbo' | 'leve';
     sidecarToggles?: { ollama?: boolean; mem0?: boolean; headroom?: boolean };
     embedder?: string;
+    recallMinScore?: number;
     providers?: readonly UserProviderEntry[];
     services?: UserServicesConfig;
     connectors?: UserConnectorsConfig;
@@ -512,6 +519,16 @@ function sanitize(raw: unknown): UserConfig {
   // descartado ⇒ default. Validado contra o catálogo p/ não puxar/verificar modelo desconhecido.
   if (typeof obj.embedder === 'string' && embedderSpec(obj.embedder.trim()) !== undefined) {
     out.embedder = obj.embedder.trim();
+  }
+
+  // recallMinScore: número finito em [0,1]. Fora disso ⇒ descartado (cai no default 0.6).
+  if (
+    typeof obj.recallMinScore === 'number' &&
+    Number.isFinite(obj.recallMinScore) &&
+    obj.recallMinScore >= 0 &&
+    obj.recallMinScore <= 1
+  ) {
+    out.recallMinScore = obj.recallMinScore;
   }
 
   // EST-1133 — sidecarToggles: objeto com booleanos genuínos.

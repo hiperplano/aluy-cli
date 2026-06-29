@@ -510,6 +510,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // em sessão (`/model`/`/theme`) grava de volta aqui p/ a próxima sessão reabrir nela.
   const configStore = opts.configStore ?? new UserConfigStore();
   const savedConfig: UserConfig = configStore.load();
+  // Piso de recall do mem0 CONFIG-DRIVEN: o loop lê `ALUY_MEM_MIN_SCORE` do env da sessão.
+  // Expõe o `config.recallMinScore` nessa env — SÓ se a env não fixa já (precedência env >
+  // config > default 0.6). Assim o dono calibra no config.json sem precisar exportar env.
+  if (env['ALUY_MEM_MIN_SCORE'] === undefined && savedConfig.recallMinScore !== undefined) {
+    env['ALUY_MEM_MIN_SCORE'] = String(savedConfig.recallMinScore);
+  }
   // EST-0989 (i18n) — IDIOMA inicial da TUI. Precedência: `--lang` (flag) > config salva
   // (`~/.aluy/config.json`) > auto-detect do locale do SO (LANG/LC_*; só promove en se
   // for claramente inglês) > pt-BR default. Puro/testável (resolveInitialLang). Resolvido
