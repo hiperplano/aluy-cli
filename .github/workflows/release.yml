@@ -80,8 +80,14 @@ jobs:
           set -euo pipefail
           stage="$(mktemp -d)"
           cp -r dist-bundle "$stage/"
+          # assets/ carrega o aluy-mem0-server.py (servidor do sidecar mem0). SEM esta cópia
+          # o tarball sai sem o script (o `files:['assets']` aponta p/ dir ausente no stage)
+          # ⇒ mem0 ✗ em toda máquina/SO. Regressão histórica — manter junto do dist-bundle.
+          cp -r assets "$stage/"
           cp README.md LICENSE "$stage/"
           cp package.publish.json "$stage/package.json"
+          # TRAVA: o asset TEM de estar no stage antes do pack (falha barata vs. quebrar prod).
+          test -f "$stage/assets/mem0/aluy-mem0-server.py" || { echo "::error::asset mem0 ausente no stage"; exit 1; }
           ( cd "$stage" && npm pack )
           tgz="$(ls "$stage"/*.tgz)"
           cp "$tgz" "$GITHUB_WORKSPACE/"
