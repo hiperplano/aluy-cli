@@ -18,6 +18,7 @@ import {
   Composer,
   QueuedInputs,
   PendingInjects,
+  PendingAsks,
   queuedInputsLines,
   YouBlock,
   AluyBlock,
@@ -1472,7 +1473,11 @@ export function App(props: AppProps): React.ReactElement {
             (goalText !== '' && parseAtMentions(goalText).length > 0),
         })
       ) {
-        enqueue(line); // FILA do pai (não /ask). O pai drena quando os sub-agentes terminam.
+        // INJETA no turno do agente principal (drena na PRÓXIMA iteração, indicador "encaixando…")
+        // — NÃO enfileira. A fila (`queueAtRest`) só drena em REPOUSO = fim de TODO o ciclo, o que
+        // demora demais (achado do dono: "a fila só libera quando termina tudo"). Inject vai pro
+        // agente principal e é incorporado bem antes — quando o pai retoma após os sub-agentes.
+        injectIfPlainText(line);
         return;
       }
       // Fila vazia ⇒ encaixe mid-turn (texto puro) / paralelo-seguro / senão enfileira.
@@ -3087,7 +3092,10 @@ export function App(props: AppProps): React.ReactElement {
   // `paddingBottom`. Somado ao `queueLines` (ambos coexistem: fila de submit × encaixando).
   const pendingInjectLines =
     state.pendingInjects.length > 0 ? queuedInputsLines(state.pendingInjects.length) + 1 : 0;
-  const stagedLines = queueLines + pendingInjectLines;
+  // `/ask` pendente ocupa a MESMA região (abaixo da fala, acima do composer) ⇒ mesmo desconto.
+  const pendingAskLines =
+    state.pendingAsks.length > 0 ? queuedInputsLines(state.pendingAsks.length) + 1 : 0;
+  const stagedLines = queueLines + pendingInjectLines + pendingAskLines;
   // EST-1015 (anti-flicker) — o <SlashMenu> mora ABAIXO do composer e PODE coexistir com o stream
   // (EST-0982). Sua altura (lista filtrada + cabeçalhos + ajuda + o `paddingTop={1}` do contêiner)
   // CONSOME altura do frame: desconta do teto da fala p/ `chrome + fala + menu` caber em `rows`
@@ -3779,6 +3787,12 @@ export function App(props: AppProps): React.ReactElement {
       {state.pendingInjects.length > 0 && (
         <Box paddingBottom={1}>
           <PendingInjects items={state.pendingInjects} />
+        </Box>
+      )}
+      {/* `/ask` EM VOO — área SEPARADA da fila (canal lateral ↗), até a resposta chegar. */}
+      {state.pendingAsks.length > 0 && (
+        <Box paddingBottom={1}>
+          <PendingAsks items={state.pendingAsks} />
         </Box>
       )}
 

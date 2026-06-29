@@ -96,6 +96,24 @@ describe('EST-ASK · SessionController.askParallel — /ask paralela read-only (
     expect(note?.lines.join('\n')).toContain('Você tem 3 falhas.');
   });
 
+  it('/ask PENDENTE aparece em área separada enquanto responde e SOME no fim (não na fila)', async () => {
+    // Caller "represado": resolve só quando eu liberar — assim checo o estado MID-VOO.
+    let release!: (v: ModelCallResult) => void;
+    const gate = new Promise<ModelCallResult>((r) => {
+      release = r;
+    });
+    const caller: ModelCaller = { async call() { return gate; } };
+    const c = makeController(caller);
+    const p = c.askParallel('como está?');
+    // EM VOO: a /ask está na área de pendentes (separada), AINDA sem nota de resposta.
+    expect(c.current.pendingAsks.map((a) => a.question).join('|')).toContain('como está?');
+    release({ request_id: 'r', content: 'indo bem.', finish_reason: 'stop' });
+    await p;
+    // RESPONDIDA: some dos pendentes e vira nota ↗ /ask.
+    expect(c.current.pendingAsks).toHaveLength(0);
+    expect(noteBlocks(c).some((b) => b.title.includes('/ask'))).toBe(true);
+  });
+
   it('sem caller dedicado ⇒ note "indisponível" e NÃO chama modelo', async () => {
     const c = makeController(undefined);
     await c.askParallel('oi?');

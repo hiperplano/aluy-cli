@@ -549,6 +549,12 @@ export interface SessionState {
    * fila de SUBMIT do type-ahead, ainda viva, p/ slash/bang/anexo).
    */
   readonly pendingInjects: readonly string[];
+  /**
+   * `/ask` em VOO — perguntas do canal lateral (read-only, paralelo) ainda SEM resposta.
+   * Renderizadas numa área SEPARADA da fila do agente principal (a fila é só pedido sem `/ask`).
+   * Some quando a resposta chega (vira nota `↗ /ask:`). `{id, question}` (head redigido/curto).
+   */
+  readonly pendingAsks: readonly { readonly id: string; readonly question: string }[];
 }
 
 /**

@@ -117,3 +117,37 @@ export function PendingInjects(props: PendingInjectsProps): React.ReactElement |
     </Box>
   );
 }
+
+export interface PendingAsksProps {
+  /** `/ask` EM VOO (canal lateral read-only) ainda sem resposta. `{id, question}` — head curto. */
+  readonly items: readonly { readonly id: string; readonly question: string }[];
+}
+
+/**
+ * `<PendingAsks>`: as `/ask` (canal lateral, paralelo) AINDA sem resposta. Irmão do
+ * <QueuedInputs>/<PendingInjects> (mesma altura BOUNDED/anti-flicker), mas SEPARADO da fila do
+ * agente principal — a fila é só pedido sem `/ask`. Mostra a pergunta com a seta `↗` (canal
+ * lateral) até a resposta chegar (some, vira nota `↗ /ask:`). Achado do dono: antes a `/ask`
+ * pendente não aparecia em lugar nenhum.
+ */
+export function PendingAsks(props: PendingAsksProps): React.ReactElement | null {
+  const { items } = props;
+  if (items.length === 0) return null;
+  const shown = items.slice(0, VISIBLE_QUEUED);
+  const hidden = items.length - shown.length;
+  return (
+    <Box flexDirection="column">
+      <Role name="depth">{`↗ ${items.length} /ask em paralelo · respondendo (canal lateral, sem parar o trabalho)`}</Role>
+      {shown.map((a) => (
+        <Box key={a.id}>
+          <Role name="fgDim">{`  ↗ ${elide(a.question)}`}</Role>
+        </Box>
+      ))}
+      {hidden > 0 && (
+        <Box>
+          <Role name="fgDim">{`  …+${hidden} /ask`}</Role>
+        </Box>
+      )}
+    </Box>
+  );
+}

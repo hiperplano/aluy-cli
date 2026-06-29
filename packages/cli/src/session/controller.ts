@@ -1073,6 +1073,7 @@ export class SessionController {
       // EST-0982 (mid-turn UX) — ecos REDIGIDOS dos injects de texto puro AINDA não
       // drenados pelo loop (indicador "encaixando…"). Espelha `pendingInjectEchoes`.
       pendingInjects: [],
+      pendingAsks: [],
     };
 
     // Tools envolvidas p/ reportar a linha `⏺` ao concluir (§2.5/§2.6). Agora o
@@ -3873,6 +3874,16 @@ export class SessionController {
    * curso segue enquanto a pergunta é respondida em paralelo. Indisponível sem o caller
    * dedicado (headless ⇒ note explicativo, sem travar).
    */
+  /** Registra uma `/ask` em voo na área separada (estilo fila do canal lateral). */
+  private addPendingAsk(id: string, question: string): void {
+    this.patch({ pendingAsks: [...this.state.pendingAsks, { id, question }] });
+  }
+
+  /** Remove a `/ask` quando a resposta chega (ou falha) — some da área separada. */
+  private removePendingAsk(id: string): void {
+    this.patch({ pendingAsks: this.state.pendingAsks.filter((a) => a.id !== id) });
+  }
+
   async askParallel(question: string): Promise<void> {
     const q = question.trim();
     if (q === '') {
@@ -3885,6 +3896,12 @@ export class SessionController {
       this.pushNoteSafe('/ask', ['indisponível nesta sessão (sem caller paralelo)']);
       return;
     }
+    const askHead = q.length > 56 ? `${q.slice(0, 56)}…` : q;
+    // PENDENTE — registra a `/ask` numa área SEPARADA (estilo fila), visível enquanto a resposta
+    // paralela é gerada. Antes ficava MUDA até a resposta (parecia que sumiu — achado do dono).
+    // A fila do agente principal NÃO mistura com isto: aqui é só o canal lateral.
+    const askId = this.nextAskIdempotencyKey();
+    this.addPendingAsk(askId, askHead);
     // SNAPSHOT point-in-time (cópia imutável): o histórico do último turno concluído.
     // structuredClone garante que nem a side-query nem nada mais toque o array vivo.
     const snapshot = structuredClone(
@@ -3908,13 +3925,14 @@ export class SessionController {
         snapshot,
         question: q,
         caller: this.sideQueryModel,
-        idempotencyKey: this.nextAskIdempotencyKey(),
+        idempotencyKey: askId,
         ...(liveState !== undefined ? { liveState } : {}),
       });
-      const head = q.length > 56 ? `${q.slice(0, 56)}…` : q;
-      this.pushNoteSafe(`↗ /ask: ${head}`, answer.split('\n'));
+      this.pushNoteSafe(`↗ /ask: ${askHead}`, answer.split('\n'));
     } catch (err) {
       this.pushNoteSafe('/ask', [`falhou: ${err instanceof Error ? err.message : String(err)}`]);
+    } finally {
+      this.removePendingAsk(askId); // some da área de pendentes (respondida ou falhou)
     }
   }
 
