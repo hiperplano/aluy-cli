@@ -51,6 +51,7 @@ import {
   type ToolPorts,
   type NativeTool,
   type AgentRegistry,
+  type AgentProfile,
   type RoomStore,
 } from '@hiperplano/aluy-cli-core';
 import { loadAuthConfig, CLI_CLIENT_ID } from '../auth/config.js';
@@ -321,6 +322,12 @@ export interface BuildSessionOptions {
    * registro (persona/toolset⊆pai/tier). Ausente ⇒ só sub-agentes genéricos (EST-0969).
    */
   readonly agentRegistry?: AgentRegistry;
+  /**
+   * GS-MD7 (fix registry-cwd) — callback que relê os agentes de PROJETO (`.claude/agents/`) do
+   * cwd CORRENTE da sessão. O controller o usa LAZY no `spawnNamed` p/ reconstruir o registro
+   * (globais fixos do boot + projeto fresco do cwd). Ausente ⇒ usa o registro do boot.
+   */
+  readonly reloadProjectAgents?: () => readonly AgentProfile[];
   /**
    * EST-1012 — ROBUSTEZ DE MEMÓRIA · MONITOR DE PRESSÃO de heap (backstop de OOM).
    * Quando presente, o controller liga um monitor LEVE que DEGRADA com graça antes do
@@ -1018,6 +1025,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // habilitados): habilita `spawn_agent({ agent: "<nome>" })` com persona/toolset
     // (⊆ pai)/tier do `.md`. Nome desconhecido ⇒ erro visível (GS-MD7).
     ...(opts.subAgents?.enabled && opts.agentRegistry ? { agentRegistry: opts.agentRegistry } : {}),
+    // GS-MD7 (fix registry-cwd) — relê os agentes de PROJETO do cwd corrente no spawnNamed.
+    ...(opts.subAgents?.enabled && opts.reloadProjectAgents
+      ? { reloadProjectAgents: opts.reloadProjectAgents }
+      : {}),
     // EST-0969 (display) — caller dedicado dos filhos (não-streaming): evita o
     // interleave dos tokens crus dos N filhos na região viva do pai.
     ...(subAgentCaller ? { subAgentModel: subAgentCaller } : {}),

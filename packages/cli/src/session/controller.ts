@@ -75,7 +75,8 @@ import {
   type FlowSummary,
   type FlowDrillIn,
   type ControlAuditEvent,
-  type AgentRegistry,
+  AgentRegistry,
+  type AgentProfile,
   type AskRequest,
   type AskResolution,
   type ToolEffectDescriptor,
@@ -131,6 +132,7 @@ import {
 } from './rooms/room-render.js';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { sep as pathSep } from 'node:path';
 import { redactOutputSecrets } from '@hiperplano/aluy-cli-core';
 import type { StreamSink } from './streaming-caller.js';
 import type { ModelCaller } from '@hiperplano/aluy-cli-core';
@@ -440,6 +442,16 @@ export interface SessionControllerOptions {
    */
   readonly agentRegistry?: AgentRegistry;
   /**
+   * GS-MD7 (fix registry-cwd) — relê os agentes de PROJETO (`.claude/agents/`) do cwd
+   * CORRENTE da sessão (o `cd`/change_dir move o cwd; o registro do boot ficava preso no dir
+   * de LANÇAMENTO). Chamado LAZY no `spawnNamed`: reconstrói o registro como
+   * `new AgentRegistry(agentRegistry.listGlobal(), reloadProjectAgents())` — globais fixos do
+   * boot (dono confiável, independem do cwd), projeto fresco do cwd. Ausente ⇒ usa o do boot
+   * (não-regressão). A fronteira (precedência projeto>global, fora da auto-seleção, confirmação
+   * de homônimo) é re-derivada pelo construtor PURO — a política não muda, só os dados.
+   */
+  readonly reloadProjectAgents?: () => readonly AgentProfile[];
+  /**
    * EST-0969 (display) · CLI-SEC-7 — ModelCaller DEDICADO dos FILHOS (sub-agentes).
    * MESMO broker/credencial do pai, mas SEM o sink de stream ao vivo: o `model` do
    * pai emite tokens token-a-token na região VIVA; os N filhos paralelos usando ESSE
@@ -712,6 +724,8 @@ export class SessionController {
   // engine escopada (childEngineOf, ⊆ pai, deny spawn) e resolver o perfil `.md` por nome.
   private readonly permissionEngine: PermissionEngine;
   private readonly subagentRegistry: AgentRegistry | undefined;
+  /** GS-MD7 (fix registry-cwd) — relê agentes de projeto do cwd corrente (lazy no spawnNamed). */
+  private readonly reloadProjectAgents: (() => readonly AgentProfile[]) | undefined;
   // EST-0948 — os tetos EFETIVOS da sessão (CLI-SEC-8), já resolvidos (flag>env>default,
   // clampados) pelo wiring. Fonte do TETO de tokens p/ os indicadores em % (StatusBar/
   // gate) e do `extend()` do `[c] continuar`.
@@ -982,6 +996,7 @@ export class SessionController {
   constructor(opts: SessionControllerOptions) {
     this.permissionEngine = opts.permission; // ADR-0126(A·PR2)
     this.subagentRegistry = opts.agentRegistry; // ADR-0126(A·PR2)
+    this.reloadProjectAgents = opts.reloadProjectAgents; // GS-MD7 fix: registry segue o cwd
     this.clock = opts.clock ?? Date.now;
     this.isRoot =
       opts.isRoot ?? (() => typeof process.geteuid === 'function' && process.geteuid() === 0);
@@ -5075,6 +5090,15 @@ export class SessionController {
     // cada filho (DADO confiável do pai, não conteúdo ingerido). Os filhos conversam.
     const roomActive = roomRequested && profiles.length > 0;
     profiles = roomActive ? await this.openBatchRoom(profiles) : profiles;
+    // GS-MD7 (fix registry-cwd) — RECONSTRÓI o registro pelo cwd CORRENTE da sessão: agentes de
+    // PROJETO frescos do cwd (o `cd`/change_dir move o cwd; o registro do boot ficava preso no
+    // dir de LANÇAMENTO ⇒ "agente desconhecido" mesmo com o `.claude/agents/<nome>.md` no projeto
+    // atual), e os GLOBAIS fixos do boot (dono confiável, independem do cwd — `listGlobal()`).
+    // A fronteira é re-derivada pelo construtor PURO (precedência projeto>global §4, fora da
+    // auto-seleção R-S3-3, conflito de homônimo RES-MD-1) — só os DADOS de projeto mudam.
+    if (registry !== undefined && this.reloadProjectAgents !== undefined) {
+      registry = new AgentRegistry(registry.listGlobal(), this.reloadProjectAgents());
+    }
     // Sem registro OU nenhum perfil pede agente nomeado ⇒ caminho direto (EST-0969).
     if (!registry || !profiles.some((p) => p.agent !== undefined && p.agent.trim() !== '')) {
       return this.spawnDetachable(spawner, profiles, signal, roomActive);
@@ -5253,7 +5277,30 @@ export class SessionController {
    * Devolve `true` SÓ se o usuário aprovou EXPLICITAMENTE o de projeto; qualquer outro
    * caminho (deny/timeout/abort/sem-TTY) ⇒ `false` (deny fail-closed). Nunca lança.
    */
+  /**
+   * O cwd corrente da sessão está sob o dir de LANÇAMENTO (a raiz primária do boot, que NUNCA
+   * muda)? Usado p/ o estreitamento do override em --yolo: "meus agentes" = os do projeto onde
+   * abri o aluy, não os de um dir p/ onde o agente `cd`-ou. Sem `cwdPort` ⇒ conservador (false).
+   * Paths já canonicalizados pelo workspace (sem truque de symlink). Containment por prefixo + sep.
+   */
+  private cwdUnderLaunchDir(): boolean {
+    const port = this.cwdPort;
+    if (!port) return false;
+    const cwd = port.cwd;
+    const launch = port.root; // raiz PRIMÁRIA do boot (onde o aluy abriu — nunca muda)
+    if (cwd === launch) return true;
+    const base = launch.endsWith(pathSep) ? launch : launch + pathSep;
+    return cwd.startsWith(base);
+  }
+
   private async confirmCrossLayerProject(name: string, signal?: AbortSignal): Promise<boolean> {
+    // LIBERAR EM --yolo p/ os SEUS agentes (decisão do dono + estreitamento do seguranca): em
+    // modo unsafe, auto-aprova a delegação a agente de PROJETO homônimo SÓ quando o cwd corrente
+    // está sob o dir de LANÇAMENTO da sessão (= os agentes do projeto onde você abriu o aluy).
+    // Se o agente deu `cd` p/ FORA (só possível em --yolo, onde o confinamento vira `/`), o
+    // `.claude/agents/` é de TERCEIRO ⇒ cai na confirmação/deny normal. Atende "meus agentes" sem
+    // auto-confiar em repo vagado; NÃO é "trust por repo" (não persiste nada), é o dir de origem.
+    if (this.modeControl?.mode === 'unsafe' && this.cwdUnderLaunchDir()) return true;
     const effect: ToolEffectDescriptor = pathEffect('spawn_agent', `.claude/agents/${name}.md`);
     const request: AskRequest = {
       call: { name: 'spawn_agent', input: { agent: name, origin: 'project' } },

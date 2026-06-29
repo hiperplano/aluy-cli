@@ -153,6 +153,14 @@ const SAFE_INHERITED_ENV_KEYS: readonly string[] = [
   // Dentro do sandbox o path é inalcançável (namespace), então é inócuo o server vê-las.
   'XDG_RUNTIME_DIR',
   'DBUS_SESSION_BUS_ADDRESS',
+  // GUI/display — necessárias p/ ferramentas MCP gráficas (ex.: Playwright em modo HEADED)
+  // acharem a tela do usuário. São caminhos de SESSÃO (X/Wayland), NÃO segredos: sem elas,
+  // o server cai em headless mesmo num desktop (achado do dono). `XAUTHORITY` é o PATH do
+  // cookie de auth do X (o arquivo em si é access-controlled). Num servidor sem GUI ficam
+  // ausentes e é inócuo. (Headed continua impossível onde não há display — ex.: SSH puro.)
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'XAUTHORITY',
   // Windows
   'SystemRoot',
   'SystemDrive',

@@ -316,4 +316,79 @@ describe('EST-0978 · RES-MD-1 · controller HONRA o conflito cross-camada na de
     // ... e SÓ por confirmação explícita o de PROJETO (com run_command) rodou.
     expect(ran).toEqual(['echo SOU-O-PROJETO']);
   });
+
+  it('--yolo + cwd SOB o dir de lançamento ⇒ AUTO-APROVA (override do dono, SEM confirmar)', async () => {
+    // Estreitamento do seguranca: em unsafe, homônimo de projeto auto-aprova SÓ quando o cwd
+    // corrente está sob a raiz primária do boot (= "meus agentes", o projeto onde abri o aluy).
+    const { ports, ran } = fakePorts();
+    // resolver que NEGARIA — se o projeto rodar mesmo assim, prova que NÃO foi consultado.
+    const { resolver, asks } = scriptedResolver({ kind: 'deny' });
+
+    const controller = new SessionController({
+      model: delegatingModel(),
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      // cwd '/proj/sub' está SOB a raiz de lançamento '/proj'.
+      ports: { ...ports, cwd: { cwd: '/proj/sub', root: '/proj', roots: ['/'] } },
+      askResolver: resolver,
+      meta: { cwd: '/proj/sub', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
+      subAgents: { enabled: true },
+      agentRegistry: conflictedRegistry(),
+    });
+
+    await controller.submit('delegue ao revisor');
+    expect(controller.current.phase).toBe('done');
+    // NÃO confirmou (auto-aprovado) e o de PROJETO rodou.
+    expect(asks).toHaveLength(0);
+    expect(ran).toEqual(['echo SOU-O-PROJETO']);
+  });
+
+  it('--yolo mas cwd FORA do dir de lançamento (repo vagado) ⇒ AINDA confirma (não auto-aprova)', async () => {
+    // O outro lado: deu `cd` p/ fora do projeto (só possível em --yolo) ⇒ o `.claude/agents/` é
+    // de TERCEIRO ⇒ a confirmação volta (deny fail-closed aqui ⇒ o de projeto NÃO roda).
+    const { ports, ran } = fakePorts();
+    const { resolver, asks } = scriptedResolver({ kind: 'deny' });
+
+    const controller = new SessionController({
+      model: delegatingModel(),
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      // cwd '/tmp/clone' NÃO está sob a raiz de lançamento '/proj'.
+      ports: { ...ports, cwd: { cwd: '/tmp/clone', root: '/proj', roots: ['/'] } },
+      askResolver: resolver,
+      meta: { cwd: '/tmp/clone', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
+      subAgents: { enabled: true },
+      agentRegistry: conflictedRegistry(),
+    });
+
+    await controller.submit('delegue ao revisor');
+    expect(controller.current.phase).toBe('done');
+    expect(asks).toHaveLength(1); // confirmou (não auto-aprovou fora do dir de origem)
+    expect(ran).toEqual([]); // negado ⇒ o de projeto não rodou
+  });
+
+  it('GS-MD7 (registry segue o cwd) — boot SEM o agente + reloadProjectAgents provê ⇒ RESOLVE', async () => {
+    // Simula "lancei o aluy fora do projeto": o registro do BOOT não tem 'revisor'. O fix relê os
+    // agentes de PROJETO do cwd corrente (reloadProjectAgents) e reconstrói o registro ⇒ resolve.
+    const { ports, ran } = fakePorts();
+    const { resolver, asks } = scriptedResolver({ kind: 'deny' });
+    const controller = new SessionController({
+      model: delegatingModel(),
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports,
+      askResolver: resolver,
+      meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
+      subAgents: { enabled: true },
+      // Boot VAZIO (lançado fora do projeto): sem o fix, 'revisor' seria "desconhecido".
+      agentRegistry: new AgentRegistry([], []),
+      // Relê do cwd corrente: o `.claude/agents/revisor.md` do projeto onde estou agora.
+      reloadProjectAgents: () => [
+        profile({ name: 'revisor', systemPrompt: 'projeto', tools: ['run_command'], origin: 'project' }),
+      ],
+    });
+
+    await controller.submit('delegue ao revisor');
+    expect(controller.current.phase).toBe('done');
+    // Sem homônimo global (boot vazio) ⇒ sem confirmação; o de projeto resolveu e RODOU.
+    expect(asks).toHaveLength(0);
+    expect(ran).toEqual(['echo SOU-O-PROJETO']);
+  });
 });

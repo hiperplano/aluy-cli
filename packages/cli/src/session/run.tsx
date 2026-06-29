@@ -836,6 +836,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     ...(effectiveMode !== undefined ? { mode: effectiveMode } : {}),
     // EST-0977/0978 — registro de agentes-`.md` (só usado com sub-agentes habilitados).
     agentRegistry,
+    // GS-MD7 (fix registry-cwd) — relê os agentes de PROJETO do cwd CORRENTE no spawnNamed. O
+    // `projectAgentsLoader` está ancorado no `cwdWorkspace` (= cwdPort), cujo `load()` resolve
+    // `.claude/agents/` relativo ao sessionCwd — então segue o `cd`. Globais ficam fixos do boot.
+    reloadProjectAgents: () => projectAgentsLoader.load().profiles,
     // tier resolvido pela precedência (flag > sessão retomada > pref salva > default).
     tier: resolvedTier,
     // ADR-0120 — backend EFETIVO (flag>env>config>default) p/ a StatusBar indicar o modo.

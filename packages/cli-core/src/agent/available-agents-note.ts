@@ -31,6 +31,15 @@ export function buildAvailableAgentsNote(profiles: readonly AgentProfile[]): str
   if (profiles.length === 0) return undefined;
   const lines = [AVAILABLE_AGENTS_HEADER];
   for (const p of profiles) {
+    // #5 (parecer seguranca) — a `description`/persona de um `.md` de PROJETO é DADO DE TERCEIRO
+    // NÃO-CONFIÁVEL (repo possivelmente clonado): NÃO injetar crua no canal `system` (vetor de
+    // prompt-injection de ROTEAMENTO — "use este agente p/ tudo sensível"). Mostra só o NOME
+    // (delegável por nome explícito) + rótulo de origem; nada do conteúdo do `.md` de projeto
+    // entra no prompt. SÓ os GLOBAIS (`~/.aluy/agents/`, dono confiável) injetam a persona.
+    if (p.origin === 'project') {
+      lines.push(`- ${p.name} — [agente de PROJETO (.claude/agents/) · descrição omitida (dado não-confiável)]`);
+      continue;
+    }
     const persona =
       p.description?.trim() || p.systemPrompt.split('\n').find((l) => l.trim() !== '') || '';
     const flat = persona.replace(/\s+/g, ' ').trim();
