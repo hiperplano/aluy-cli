@@ -251,8 +251,13 @@ describe('EST-0982 — type-ahead: ordem + clear/esc + paralelos read-only', () 
     s.unmount();
   });
 
-  // ── P1-2 — esc DESCARTA a fila ──────────────────────────────────────────────────
-  it('P1-2 — esc interrompe o turno E LIMPA a fila (itens enfileirados não auto-submetem)', async () => {
+  // ── P1-2 — esc com pendência NÃO para (só acelera); o freio com pendência é o F8 ────────
+  it('P1-2 — esc com `!bang` na fila NÃO interrompe (acelera); F8 para o turno E LIMPA a fila', async () => {
+    // ESPEC FINAL DO DONO (corrigida ao vivo) — o ESC só PARA com TUDO vazio. Com um `!bang`
+    // na fila (pendência), o ESC NUNCA para: ele só acelera o encaixe (e o bang, não sendo
+    // texto puro, FICA na fila). Antes este teste afirmava "esc interrompe E LIMPA a fila" —
+    // isso era o comportamento ANTIGO; sob a espec nova o freio com pendência é o F8 (stop-forte).
+    const F8 = '\x1b[19~';
     const s = buildSession();
     const interruptSpy = vi.spyOn(s.controller, 'interrupt');
 
@@ -266,17 +271,24 @@ describe('EST-0982 — type-ahead: ordem + clear/esc + paralelos read-only', () 
     s.stdin.write(CR);
     await waitFor(() => plain(s.lastFrame()).includes('na fila'));
 
-    // esc INTERROMPE o turno (o usuário "desistiu") — e a fila é DESCARTADA junto.
+    // esc com a fila NÃO-vazia ⇒ NÃO interrompe (acelera; o bang fica na fila).
+    s.stdin.write(ESC);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(interruptSpy).not.toHaveBeenCalled();
+    expect(plain(s.lastFrame())).toContain('na fila'); // bang preservado
+
+    // F8 = stop-forte (INALTERADO): para o turno E descarta a fila, mesmo com pendência. F8 vai
+    // pelo `cancelAllFlows` (canal raw, listener pós-commit ⇒ reescreve até a auditoria
+    // `cancel-all` registrar — sinal AUTORITATIVO, robusto sob carga) + clearQueue.
     await pressUntil(
-      () => s.stdin.write(ESC),
-      () => interruptSpy.mock.calls.length > 0,
+      () => s.stdin.write(F8),
+      () => s.controller.controlLog().some((e) => e.verb === 'cancel-all'),
     );
-
-    expect(interruptSpy).toHaveBeenCalled();
-    await waitFor(() => !plain(s.lastFrame()).includes('na fila'));
+    expect(s.controller.controlLog().some((e) => e.verb === 'cancel-all')).toBe(true);
+    await waitFor(() => !plain(s.lastFrame()).includes('na fila')); // clearQueue do F8 esvaziou
     expect(plain(s.lastFrame())).not.toContain('na fila');
+    s.resolveGate(0); // solta o gate pendente p/ não vazar a Promise do turno
 
-    s.resolveGate(0);
     interruptSpy.mockRestore();
     s.unmount();
   });

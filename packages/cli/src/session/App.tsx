@@ -2262,57 +2262,61 @@ export function App(props: AppProps): React.ReactElement {
         // Demais teclas (char/backspace/cursor) caem p/ a edição abaixo, que
         // RE-SINCRONIZA o menu via `syncSlashMenu` (espaço/qualquer não-casamento fecha).
       }
-      if (key.escape || (key.ctrl && char === 'c')) {
-        // F57 — ESC com fila não-vazia ENFILEIRA o input corrente em vez de abortar.
-        // Duplo-ESC (2º ESC em até 500ms) ou Ctrl-C sempre aborta independente da fila.
-        // Fila vazia + ESC = aborta (comportamento original intacto).
+      // Ctrl+C (turno vivo) = HARD-STOP INALTERADO — para tudo na hora, independente de
+      // pendência (mesma garantia do F8). NÃO entra na lógica "acelera" do ESC abaixo.
+      if (key.ctrl && char === 'c') {
+        controller.interrupt();
+        clearQueue();
+        return;
+      }
+      if (key.escape) {
+        // ESPEC FINAL DO DONO (corrigida ao vivo) — o ESC durante o turno vivo SÓ PARA quando
+        // está TUDO VAZIO: fila (queueRef) vazia E sem injects pendentes (controller.current.
+        // pendingInjects — estado AUTORITATIVO, patch SÍNCRONO via injectInput) E composer vazio.
+        // Havendo QUALQUER pendência, o ESC NUNCA para — ele só ACELERA o encaixe AGORA:
+        //   • composer não-vazio ⇒ REDIRECIONA a minha msg p/ o agente vivo (injectInput; o
+        //     agente a vê na próxima iteração). `/ask <q>` vira a pergunta `<q>` injetada;
+        //     `/ask` sozinho (nada a injetar) só limpa o composer (não para).
+        //   • fila com TEXTO PURO ⇒ FORÇA o encaixe de cada item (injectInput('root', …),
+        //     drena na próxima iteração do loop); bang/slash/anexo FICAM na fila (rodam no
+        //     repouso). Em /cycle mantém o NO-OP clássico (não encaixa a fila).
+        // O fluxo natural já dá o "freio em 2 ESC": o 1º acelera/esvazia, o 2º (agora com tudo
+        // vazio) para. SEM contador de double-ESC nem janela de 500ms — a decisão de PARAR é
+        // PURAMENTE "está tudo vazio?". F8 e Ctrl+C seguem hard-stop a qualquer momento.
+        //
+        // FONTE FRESCA OBRIGATÓRIA: `controller.current.pendingInjects` (não o espelho React
+        // `state.pendingInjects`, STALE no closure do useInput — mesmo motivo do queueRef).
         const hasQueue = queueRef.current.length > 0;
-        const now = Date.now();
-        const isDoubleEsc = hasQueue && now - lastEscRef.current < 500;
-        lastEscRef.current = now;
+        const hasInjects = controller.current.pendingInjects.length > 0;
+        const composer = expandAndReset(input).trim();
+        const hasComposer = composer !== '';
 
-        if (hasQueue && !isDoubleEsc && key.escape) {
-          // Enfileira o input corrente do composer (se não-vazio) — preserva, não perde.
-          const currentLine = expandAndReset(input).trim();
-          if (currentLine !== '') {
-            enqueue(currentLine); // atualiza `queueRef.current` de forma SÍNCRONA (inclui esta linha)
-            setHistory((h) => [...h, currentLine]);
+        if (hasQueue || hasInjects || hasComposer) {
+          // (1) ACELERA a msg do composer: REDIRECIONA p/ o agente vivo (não enfileira p/ o fim).
+          if (hasComposer) {
+            const action = decideEscAction(composer);
+            if (action.kind === 'redirect') {
+              controller.injectInput('root', action.inject);
+              setHistory((h) => [...h, action.inject]);
+            }
+            // `/ask` sozinho ⇒ nada a injetar; só limpamos o composer (segue sem parar).
             setText('');
             setHistIdx(-1);
           }
-          // DECISÃO DO DONO (a correção que faltava) — em turno NORMAL, ESC com fila NÃO é mais
-          // um NO-OP que deixava a msg "presa e nunca lida". Ele FORÇA o encaixe: cada item de
-          // TEXTO PURO da fila vira `injectInput('root', …)` no agente vivo (drena na próxima
-          // iteração do loop); bang/slash/anexo NÃO injetam como texto ⇒ FICAM na fila (rodam no
-          // repouso). Em /cycle mantém o NO-OP clássico (o escape do ciclo é o duplo-ESC, acima).
-          if (!state.cycleActive) {
+          // (2) ACELERA a fila: encaixa cada item de TEXTO PURO agora (drena na próxima
+          //     iteração). bang/slash/anexo ⇒ FICAM na fila (rodam no repouso). /cycle ⇒ NO-OP.
+          if (!state.cycleActive && queueRef.current.length > 0) {
             const kept: string[] = [];
             for (const q of queueRef.current) {
               if (!injectIfPlainText(q)) kept.push(q);
             }
             setQueue(kept);
           }
-          return; // NÃO interrompe (ESC com fila = "processa a fila agora")
+          return; // NÃO interrompe — havendo pendência, o ESC só acelera o encaixe.
         }
 
-        // ADR-0126(C — pedido do dono) — ESC com TEXTO no composer = REDIRECIONAR (encaixa
-        // a minha msg no agente vivo; ele a vê na próxima iteração e decide o rumo — NÃO
-        // aborta à força). `/ask <q>` ⇒ a pergunta vira mensagem REAL injetada (priorizada).
-        // Composer VAZIO ⇒ PARAR (abort + clear), como antes (memória de músculo do ESC).
-        if (input.trim() !== '') {
-          const action = decideEscAction(expandAndReset(input));
-          if (action.kind === 'redirect') {
-            controller.injectInput('root', action.inject);
-            setText('');
-            setHistory((h) => [...h, action.inject]);
-            setHistIdx(-1);
-            return; // NÃO aborta — o agente incorpora a msg priorizada
-          }
-          // `/ask` sozinho (sem pergunta) ⇒ nada a injetar ⇒ cai na parada abaixo.
-        }
-        // Aqui só se chega com FILA VAZIA (o caso com-fila foi tratado no bloco F57 acima, que
-        // encaixa e dá return). Logo: ESC com composer vazio E fila vazia = PARAR o turno
-        // (memória de músculo do ESC). Ctrl+C e duplo-ESC também caem aqui (hard stop).
+        // TUDO VAZIO (sem fila, sem injects pendentes, composer vazio) ⇒ PARAR o turno
+        // (freio — a ÚNICA condição em que o ESC para). Memória de músculo do ESC.
         controller.interrupt();
         clearQueue();
         return;

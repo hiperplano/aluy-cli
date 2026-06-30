@@ -311,21 +311,38 @@ describe('App — SLASH-MENU durante o trabalho (EST-0982)', () => {
     s.unmount();
   });
 
-  it('esc com o menu aberto ⇒ FECHA o menu SEM cancelar o trabalho', async () => {
+  it('esc com o menu aberto ⇒ FECHA o menu SEM cancelar o trabalho; o freio só volta com TUDO vazio', async () => {
+    // ESPEC FINAL DO DONO (corrigida ao vivo) — o freio do ESC mudou: o ESC SÓ PARA o turno
+    // quando está TUDO VAZIO (fila vazia E sem injects pendentes E composer vazio). Antes,
+    // o "esc seguinte" (menu já fechado) parava direto; mas fechar o menu DEIXA o `/` no
+    // composer ⇒ esse ESC agora ACELERA (redirect do `/`), NÃO para. Então o freio AINDA é
+    // alcançável, só que exige esvaziar primeiro: apago o `/` (backspace) e, com o composer
+    // vazio e sem pendência, o ESC volta a ser o freio (interrompe). (F8/Ctrl+C seguem stop
+    // a qualquer momento — não exercitados aqui.)
+    const BACKSPACE = '\x7f';
     const s = await startStreaming();
     const interruptSpy = vi.spyOn(s.controller, 'interrupt');
 
     await tap(s, '/');
     await waitFor(() => plain(s.lastFrame()).includes(MENU_HEADER));
 
+    // (a) fechar o menu NÃO aborta o trabalho — e DEIXA o `/` no composer.
     await tap(s, ESC);
-    // O menu sumiu; o trabalho NÃO foi interrompido.
     await waitFor(() => !plain(s.lastFrame()).includes(MENU_HEADER));
     expect(plain(s.lastFrame())).not.toContain(MENU_HEADER);
     expect(interruptSpy).not.toHaveBeenCalled();
     expect(s.controller.current.phase).toBe('streaming');
+    // O `/` SOBROU no composer (pendência) ⇒ o composer NÃO está vazio.
+    expect(composerLine(s).replace(/^›\s*/, '').trim()).toBe('/');
 
-    // E o esc seguinte (menu já fechado) VOLTA a ser o freio (interrompe).
+    // (b) o freio AINDA é alcançável (NÃO trivial): com o `/` no composer, o ESC ACELERA
+    //     (não para). Esvazio o composer (apago o `/`) e SÓ então, com TUDO vazio (fila vazia,
+    //     sem injects, composer vazio), o ESC volta a ser o freio (interrompe).
+    await pressUntil(
+      () => s.stdin.write(BACKSPACE),
+      () => composerLine(s).replace(/^›\s*/, '').trim() === '',
+    );
+    expect(interruptSpy).not.toHaveBeenCalled(); // até aqui NADA parou (só fechou o menu + editou)
     await pressUntil(
       () => s.stdin.write(ESC),
       () => interruptSpy.mock.calls.length > 0,

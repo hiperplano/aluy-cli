@@ -211,7 +211,7 @@ describe('App — fila do type-ahead × /cycle (EST-0981 · CLI-SEC-14)', () => 
     s.unmount();
   });
 
-  it('esc com fila vazia interrompe (freio intacto); esc com fila NÃO-vazia ENFILEIRA (F57)', async () => {
+  it('esc com TUDO vazio interrompe (freio intacto); esc com fila NÃO-vazia ACELERA, nunca para (sem double-ESC)', async () => {
     const s = buildSession();
     const bangSpy = vi.spyOn(s.controller, 'runBang').mockResolvedValue();
 
@@ -236,21 +236,32 @@ describe('App — fila do type-ahead × /cycle (EST-0981 · CLI-SEC-14)', () => 
     s.stdin.write(CR);
     await waitFor(() => plain(s.lastFrame()).includes('na fila'));
 
-    // ESC simples com fila NÃO-vazia + input vazio = no-op (NÃO interrompe, F57).
+    // ESPEC FINAL DO DONO (corrigida ao vivo) — o ESC só PARA com TUDO vazio. Com o `!bang`
+    // na fila (pendência), o ESC NUNCA para: ele só ACELERA o encaixe. Em /cycle, o `!bang`
+    // não é texto puro ⇒ FICA na fila (roda no repouso); o ciclo SEGUE ativo. NÃO há mais
+    // contador de double-ESC: por mais que eu aperte ESC, com a fila cheia ele não para.
     s.stdin.write(ESC);
     await new Promise((r) => setTimeout(r, 80));
-    // Ciclo CONTINUA ativo (ESC não interrompeu).
+    expect(s.controller.current.cycleActive).toBe(true); // ESC não parou
+    expect(plain(s.lastFrame())).toContain('na fila');
+
+    // 2º ESC logo depois (o que ANTES era o "double-ESC" que parava): agora a fila SEGUE
+    // cheia ⇒ o ESC SÓ ACELERA, NÃO para. O ciclo continua, a fila sobrevive. (O FREIO com
+    // pendência é o F8 — stop-forte INALTERADO, coberto por f8-stop-all.test e por
+    // type-ahead-order P1-2; aqui o foco é a NOVA semântica do ESC sob /cycle: nunca para com
+    // a fila cheia, sem contador de double-ESC.)
+    s.stdin.write(ESC);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(s.controller.current.cycleActive).toBe(true); // 2º ESC TAMBÉM não parou (sem double-ESC)
+    expect(plain(s.lastFrame())).toContain('na fila');
+
+    // 3º ESC — reforça: NÃO há janela de double-ESC; com a fila cheia o ESC nunca para.
+    s.stdin.write(ESC);
+    await new Promise((r) => setTimeout(r, 80));
     expect(s.controller.current.cycleActive).toBe(true);
     expect(plain(s.lastFrame())).toContain('na fila');
 
-    // Cenário 3: Duplo-ESC (2º ESC em <500ms) → INTERROMPE + DESCARTA fila.
-    s.stdin.write(ESC);
-    s.resolveGate(1);
-    await waitFor(() => s.controller.current.cycleActive === false);
-    await waitFor(() => !plain(s.lastFrame()).includes('na fila'));
-    await new Promise((r) => setTimeout(r, 40));
-    expect(bangSpy.mock.calls.some((c) => c[0] === 'item na fila')).toBe(false);
-
+    s.resolveGate(1); // solta o gate pendente p/ não vazar a Promise do ciclo
     bangSpy.mockRestore();
     s.unmount();
   });
