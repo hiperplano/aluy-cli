@@ -47,6 +47,61 @@ export function isLiveBlock(block: SessionBlock): boolean {
   return false;
 }
 
+/**
+ * #13 (ghost "rodando") — IMOBILIZA um bloco que está num estado VIVO mas que NÃO pode
+ * mais resolver sozinho (um ÓRFÃO): uma sessão RETOMADA (`--resume`) traz a transcrição
+ * gravada VERBATIM, então um `!cmd`/tool/stream que estava em voo quando o `aluy` morreu
+ * volta congelado em `running`/`streaming` — sem processo vivo p/ resolvê-lo. Demover ao
+ * estado TERMINAL no instante da restauração garante que o estado VIVO da sessão NUNCA
+ * contenha um órfão; assim `splitBlocks` pode manter QUALQUER bloco `running`/`streaming`
+ * remanescente FORA do `<Static>` (ele é, por construção, genuinamente vivo) e a resolução
+ * IN-PLACE acontece ANTES de o bloco migrar p/ o scrollback. (Era a âncora F142 — coarse:
+ * ela arrastava o sufixo vivo INTEIRO p/ o Static quando o rabo era concluído, congelando
+ * a linha `○ rodando` viva no scrollback até um resize.)
+ *
+ * PURO. A demoção é HONESTA (a11y): `running`→`err`/`cancelled` ("interrompido", não
+ * "falhou silenciosamente"), nunca finge sucesso. Só toca blocos vivos; o resto é cópia.
+ */
+export function sanitizeOrphans(blocks: readonly SessionBlock[]): SessionBlock[] {
+  return blocks.map((b) => {
+    switch (b.kind) {
+      case 'tool':
+        return b.status === 'running'
+          ? { ...b, status: 'err' as const, result: b.result || 'interrompido' }
+          : b;
+      case 'bang':
+        // `running` retomado nunca resolve: vira `err` honesto. `liveOutput` (prévia viva)
+        // vira o `output` final p/ não sumir; omitido (não `undefined`) p/ exactOptional.
+        if (b.status === 'running') {
+          const { liveOutput, ...rest } = b;
+          return { ...rest, status: 'err' as const, output: b.output ?? liveOutput ?? 'interrompido' };
+        }
+        return b;
+      case 'aluy':
+        return b.streaming ? { ...b, streaming: false } : b;
+      case 'subagents':
+        return b.children.some((c) => c.status === 'running')
+          ? {
+              ...b,
+              children: b.children.map((c) =>
+                c.status === 'running' ? { ...c, status: 'cancelled' as const } : c,
+              ),
+            }
+          : b;
+      case 'broker-error':
+        // backoff vivo retomado: não há retry em curso ⇒ imobiliza como erro terminal.
+        return b.retrying === true ? { ...b, retrying: false } : b;
+      case 'doctor':
+        // checklist sem resumo retomada: nenhum probe vai mais "acender" ⇒ sela com resumo.
+        return b.summary === undefined ? { ...b, summary: 'sessão retomada' } : b;
+      case 'testrun':
+        return b.running ? { ...b, running: false } : b;
+      default:
+        return b;
+    }
+  });
+}
+
 export interface BlockSplit {
   /** Blocos CONCLUÍDOS (imutáveis) — vão p/ o `<Static>` (escritos uma vez). */
   readonly done: readonly SessionBlock[];
@@ -71,20 +126,18 @@ export function splitBlocks(blocks: readonly SessionBlock[]): BlockSplit {
       break;
     }
   }
-  // F142 (ÂNCORA anti-flicker) — a invariante (acima) é que bloco vivo é SEMPRE o RABO da
-  // lista: a tool `running` / o aluy `streaming` que animam são o último bloco do turno em
-  // voo. Então se o ÚLTIMO bloco NÃO é vivo, o turno ACABOU — e qualquer bloco "vivo" mais
-  // atrás é um ÓRFÃO: um `/doctor` que nunca recebeu `summary` (persistido de ANTES do F141,
-  // ou um stream interrompido por `/`/esc que não assentou). Sem este guarda o órfão arrasta
-  // TODO o sufixo (tudo depois dele) p/ a região dinâmica ⇒ a viva fica > terminal ⇒ o Ink
-  // repinta header+histórico+viva a cada frame (`ink.js`: `outputHeight >= rows`) = o
-  // "refresh do início ao fim a cada tecla". Âncora: sem rabo vivo ⇒ TUDO é concluído (vai
-  // p/ o `<Static>`, escrito uma vez). CURA órfãos já gravados no RESUME e protege a CLASSE
-  // inteira (qualquer kind), não só o `/doctor` do F141. Em turno ativo o último bloco É vivo
-  // (stream/tool no rabo) ⇒ guarda não dispara ⇒ comportamento inalterado.
-  if (liveStart < blocks.length && !isLiveBlock(blocks[blocks.length - 1]!)) {
-    liveStart = blocks.length;
-  }
+  // #13 (ghost "rodando") — um bloco VIVO (tool/bang `running`, aluy `streaming`) é mantido
+  // FORA do `<Static>` ATÉ resolver: a região viva é o sufixo contíguo a partir do PRIMEIRO
+  // bloco vivo. Antes, a âncora F142 fazia o OPOSTO quando o RABO da lista era concluído
+  // (ex.: um `!cmd` `running` seguido de uma `↳ note`/`inject` ao se aprovar/interromper):
+  // ela arrastava o sufixo INTEIRO — incluindo o bang AINDA VIVO — p/ `done` ⇒ o Ink
+  // escrevia `○ rodando $ cmd` no scrollback UMA vez e NUNCA repintava ao resolver in-place,
+  // deixando a linha FANTASMA até um resize re-emitir. A premissa da âncora (bloco vivo no
+  // meio ⇒ ÓRFÃO) foi MOVIDA p/ a FONTE: `sanitizeOrphans` (acima), chamado na RESTAURAÇÃO
+  // de sessão (`--resume`), imobiliza órfãos persistidos no instante em que entram — então
+  // QUALQUER bloco vivo remanescente aqui é, por construção, genuinamente vivo (há processo/
+  // stream em voo p/ resolvê-lo) e DEVE seguir vivo. Anti-flicker preservado: sem órfãos, o
+  // sufixo vivo é pequeno (o bloco em voo + no máx. uma nota), nunca o histórico inteiro.
   return {
     done: blocks.slice(0, liveStart),
     live: blocks.slice(liveStart),

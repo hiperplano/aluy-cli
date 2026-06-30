@@ -240,3 +240,108 @@ describe('App — turnos concluídos vão p/ o <Static>, vivo fica dinâmico', (
     unmount();
   });
 });
+
+// #13 (ghost "rodando") — um `!comando` em voo (`running`) NÃO pode ser commitado no
+// <Static> enquanto roda, NEM mesmo quando um bloco NÃO-vivo (uma nota `↳ encaixado` /
+// `turno interrompido`) é empurrado DEPOIS dele. Antes, a âncora F142 arrastava o bang
+// AINDA VIVO p/ o Static ⇒ `○ rodando` escrito UMA vez no scrollback e nunca repintado
+// ao resolver = a linha FANTASMA do dono (só um resize a curava). Provamos via a captura
+// dos `items` do <Static>: o bang `running` NUNCA entra; ao resolver, o bang TERMINAL
+// (err/ok) entra UMA vez — resolução IN-PLACE, sem ghost.
+describe('#13 — bang running + nota depois NÃO congela no Static (resolve in-place)', () => {
+  function buildBangController(gate: Promise<void>): SessionController {
+    const fs: FileSystemPort = {
+      async readFile() {
+        return '';
+      },
+      async writeFile() {},
+      async exists() {
+        return false;
+      },
+    };
+    // shell que BLOQUEIA até o gate liberar ⇒ o bang fica `running` p/ inspeção determinística.
+    const shell: ShellPort = {
+      async exec() {
+        await gate;
+        return { stdout: 'ok', stderr: '', exitCode: 0 };
+      },
+    };
+    const search: SearchPort = {
+      async search() {
+        return [];
+      },
+    };
+    return new SessionController({
+      model: inertModelCaller(),
+      permission: new PolicyPermissionEngine(),
+      ports: { fs, shell, search },
+      askResolver: new TuiAskResolver(),
+      meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
+      flush: { intervalMs: 0 },
+    });
+  }
+
+  function inertModelCaller(): ModelCaller {
+    return {
+      async call(): Promise<ModelCallResult> {
+        return { request_id: 'r', content: '', finish_reason: 'stop' };
+      },
+    };
+  }
+
+  it('bang `running` fica FORA do Static mesmo com uma nota empurrada depois; resolve in-place', async () => {
+    staticItemsLog.length = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const controller = buildBangController(gate);
+    const theme = resolveTheme({ env: ENV });
+    const { unmount } = render(
+      <ThemeProvider theme={theme}>
+        <App controller={controller} animate={false} bootMs={0} />
+      </ThemeProvider>,
+    );
+    controller.dismissBoot();
+
+    // dispara o `!comando` (fica `running` no gate) e, ENQUANTO roda, empurra uma nota —
+    // exatamente o que `interrupt()`/`flushInjectNotes` fazem (bloco não-vivo após o vivo).
+    // `!ls` ⇒ a catraca abre o AskDialog (phase `asking`); aprovar (como o `a` do dono)
+    // executa — e o shell GATEADO o mantém `running` p/ inspeção determinística.
+    void controller.runBang('ls');
+    await waitFor(() => controller.current.phase === 'asking');
+    controller.resolveAsk({ kind: 'approve-once' });
+    await waitFor(() =>
+      controller.current.blocks.some((b) => b.kind === 'bang' && b.status === 'running'),
+    );
+    controller.pushNote('↳ encaixado', ['oi durante o bang']);
+    // espera o React renderizar o estado com o bang running + a nota.
+    await waitFor(() =>
+      controller.current.blocks.some((b) => b.kind === 'note' && b.title === '↳ encaixado'),
+    );
+
+    // PROVA do bug: NENHUM render do Static jamais conteve o bang em `running`.
+    const sawRunningBangInStatic = staticItemsLog.some((items) =>
+      asBlocks(items).some((b) => b.kind === 'bang' && b.status === 'running'),
+    );
+    expect(sawRunningBangInStatic).toBe(false);
+
+    // libera o shell ⇒ o bang resolve (ok). A resolução é IN-PLACE no MESMO bloco.
+    release();
+    await waitFor(() => {
+      const bang = controller.current.blocks.find((b) => b.kind === 'bang');
+      return bang !== undefined && bang.kind === 'bang' && bang.status !== 'running';
+    });
+    // o turno acabou ⇒ o bang TERMINAL desce p/ o Static (escrito uma vez, já resolvido).
+    await waitFor(() =>
+      asBlocks(staticItemsLog[staticItemsLog.length - 1] ?? []).some(
+        (b) => b.kind === 'bang' && b.status !== 'running',
+      ),
+    );
+    const finalStatic = asBlocks(staticItemsLog[staticItemsLog.length - 1] ?? []);
+    // o bang no Static está RESOLVIDO (nunca `running`).
+    expect(finalStatic.some((b) => b.kind === 'bang' && b.status === 'running')).toBe(false);
+    expect(finalStatic.some((b) => b.kind === 'bang' && b.status !== 'running')).toBe(true);
+    unmount();
+  });
+});

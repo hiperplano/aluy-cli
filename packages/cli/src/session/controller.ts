@@ -164,7 +164,7 @@ import type { TuiQuestionResolver, PendingQuestionEntry } from '../ask/question-
 import type { AskResolver, QuestionAnswer, QuestionSpec } from '@hiperplano/aluy-cli-core';
 import { FlushThrottle, type FlushThrottleOptions } from './flush-throttle.js';
 import { backoffDelayMs, DEFAULT_BACKOFF, type BackoffPolicy } from './retry-backoff.js';
-import { isLiveBlock } from './render-split.js';
+import { isLiveBlock, sanitizeOrphans } from './render-split.js';
 import { resolveContextWindow } from '../model/catalog.js';
 
 /** `true` se o resolver é o da TUI (observável) — guard estrutural. */
@@ -2803,7 +2803,15 @@ export class SessionController {
     this.dismissBoot();
     // Bloco de saída do atalho (ação do usuário, §2.6): começa em `running`.
     this.pushBlock({ kind: 'bang', command, status: 'running' });
-    const bangIdx = this.state.blocks.length - 1;
+    // #13 (ghost "rodando", 2ª RAIZ — DRIFT de índice) — NÃO capturamos o índice do bang
+    // aqui. Um bloco PARALELO inserido ANTES do sufixo vivo enquanto o bang roda (uma nota
+    // `↳ encaixado`/`turno interrompido` via `insertBeforeLiveTail`, um sub-agente, …)
+    // DESLOCA o bang: o índice capturado passa a apontar p/ OUTRO bloco. Aí `updateBangBlock`
+    // falhava no guarda `kind==='bang'` e DESCARTAVA a resolução em silêncio ⇒ o bang ficava
+    // `running` p/ SEMPRE (ghost — independente do <Static>). `appendBangChunk`/
+    // `updateBangBlock` agora LOCALIZAM o bang vivo por BUSCA (identidade — `lastRunningBang
+    // Index`), como o caminho da tool (`lastRunningToolIndex`). Só há UM bang vivo por vez
+    // (guarda `bangInFlight`), então a busca é inequívoca.
     this.bangInFlight = true;
     this.abort = signal ? null : new AbortController();
     const sig = signal ?? this.abort?.signal;
@@ -2811,24 +2819,22 @@ export class SessionController {
       // EST-0982 — STREAMING do `!comando`: a saída ao vivo (já redigida pelo core)
       // anexa ao bloco bang viva, bounded + throttled. O `sig` (esc/Ctrl-C) MATA o
       // processo (grupo) ao abortar — `!sleep 20` cessa em < grace, não espera 20s.
-      const outcome = await this.bang.run(command, sig, (chunk) =>
-        this.appendBangChunk(bangIdx, chunk),
-      );
+      const outcome = await this.bang.run(command, sig, (chunk) => this.appendBangChunk(chunk));
       if (outcome.kind === 'blocked') {
-        this.updateBangBlock(bangIdx, {
+        this.updateBangBlock({
           status: 'blocked',
           // Mostra o motivo da catraca (deny/ask negado) como saída do bloco.
           output: outcome.verdict.reason,
         });
       } else {
-        this.updateBangBlock(bangIdx, {
+        this.updateBangBlock({
           status: outcome.ok ? 'ok' : 'err',
           output: outcome.output,
         });
       }
     } catch (err) {
       // Defensivo: o executor não deveria lançar, mas se lançar, o bloco vira `err`.
-      this.updateBangBlock(bangIdx, {
+      this.updateBangBlock({
         status: 'err',
         output: err instanceof Error ? err.message : String(err),
       });
@@ -2844,9 +2850,16 @@ export class SessionController {
     }
   }
 
-  /** Atualiza um bloco `bang` pelo índice (status/saída) — patch imediato. */
-  private updateBangBlock(idx: number, patch: { status: BangStatus; output?: string }): void {
+  /**
+   * Resolve o bloco `bang` AINDA `running` (status/saída) — patch imediato. #13 — localiza
+   * o bang por BUSCA (`lastRunningBangIndex`), não por índice capturado, p/ ser ROBUSTO a
+   * blocos inseridos antes do sufixo vivo durante a execução (que deslocariam um índice fixo
+   * ⇒ resolução perdida ⇒ ghost `○ rodando` permanente). Só há um bang vivo por vez.
+   */
+  private updateBangBlock(patch: { status: BangStatus; output?: string }): void {
     const blocks = [...this.state.blocks];
+    const idx = lastRunningBangIndex(blocks);
+    if (idx < 0) return;
     const b = blocks[idx];
     if (b && b.kind === 'bang') {
       // EST-0982 — ao resolver, o `output` final substitui a prévia viva: descarta
@@ -3315,7 +3328,15 @@ export class SessionController {
    */
   restoreBlocks(blocks: readonly SessionBlock[]): void {
     if (blocks.length === 0) return;
-    this.patch({ blocks: [...blocks], phase: 'idle' });
+    // #13 (ghost "rodando") — o SessionStore grava a transcrição VERBATIM, então um bloco
+    // que estava em voo quando a sessão anterior morreu (`!cmd`/tool `running`, aluy
+    // `streaming`, …) volta congelado num estado VIVO sem processo p/ resolvê-lo: um ÓRFÃO.
+    // `sanitizeOrphans` o demove ao estado TERMINAL AGORA, na fronteira de entrada, p/ que o
+    // estado vivo da sessão NUNCA contenha um órfão — assim `splitBlocks` pode manter
+    // qualquer bloco `running`/`streaming` corrente FORA do `<Static>` até resolver in-place
+    // (sem a âncora coarse que congelava a linha "rodando" viva no scrollback). A demoção é
+    // HONESTA (running→err/cancelled = "interrompido", nunca finge sucesso).
+    this.patch({ blocks: sanitizeOrphans(blocks), phase: 'idle' });
   }
 
   /** EST-0972 — os blocos correntes da sessão (p/ o auto-save persistir). */
@@ -4612,8 +4633,12 @@ export class SessionController {
    * EST-0982 — idem para o bloco `!comando` (atalho do usuário): anexa a saída ao vivo
    * (já redigida) ao bloco bang em `running`, bounded + throttled. No-op fora de um bang.
    */
-  private appendBangChunk(idx: number, chunk: ShellChunk): void {
+  private appendBangChunk(chunk: ShellChunk): void {
     const blocks = [...this.state.blocks];
+    // #13 — localiza o bang vivo por BUSCA (idem `appendToolChunk`): robusto a deslocamento
+    // por blocos inseridos antes do sufixo vivo enquanto o comando streama. No-op fora de bang.
+    const idx = lastRunningBangIndex(blocks);
+    if (idx < 0) return;
     const b = blocks[idx];
     if (!b || b.kind !== 'bang' || b.status !== 'running') return;
     blocks[idx] = { ...b, liveOutput: clipLiveTail((b.liveOutput ?? '') + chunk.text) };
@@ -5918,6 +5943,19 @@ function lastRunningToolIndex(blocks: readonly SessionBlock[]): number {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
     if (b && b.kind === 'tool' && b.status === 'running') return i;
+  }
+  return -1;
+}
+
+/**
+ * #13 — índice do ÚLTIMO bloco `bang` ainda `running` (p/ a resolução/streaming IN-PLACE
+ * por IDENTIDADE, não por índice capturado). Só há um bang vivo por vez (`bangInFlight`),
+ * então é inequívoco; espelha `lastRunningToolIndex`.
+ */
+function lastRunningBangIndex(blocks: readonly SessionBlock[]): number {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b && b.kind === 'bang' && b.status === 'running') return i;
   }
   return -1;
 }
