@@ -1650,6 +1650,26 @@ export function App(props: AppProps): React.ReactElement {
     // closure obsoleto. `atRest`/`queue` são as dependências reais do gatilho.
   }, [atRest, queue, submit, userCommands, clearQueue]);
 
+  // DRENO MID-TURN (achado GRAVE do dono — "as mensagens na fila ficam infinitamente esperando o
+  // turno acabar"). O efeito acima só drena a fila no REPOUSO TOTAL (e por `submit` = novo turno).
+  // Aqui, enquanto há turno VIVO (thinking/streaming), drenamos os itens de TEXTO PURO da FRENTE
+  // da fila INJETANDO-os no agente vivo (`injectInput` ⇒ processam na PRÓXIMA iteração do loop, não
+  // no fim de TUDO). PARA no 1º item não-injetável (bang/slash/anexo) p/ PRESERVAR A ORDEM — esses
+  // seguem esperando o repouso/submit. Assim "como está?" digitado durante o trabalho entra logo,
+  // sem esperar o turno inteiro. (Limite honesto: se o pai está bloqueado num sub-agente/tool longo,
+  // a próxima iteração — e o drain — só vem quando aquele efeito termina; é o mais cedo possível.)
+  useEffect(() => {
+    if (atRest || queue.length === 0) return;
+    if (state.phase !== 'thinking' && state.phase !== 'streaming') return;
+    let drained = 0;
+    for (const item of queue) {
+      if (!injectIfPlainText(item)) break; // bang/slash/anexo ⇒ para (ordem preservada)
+      drained += 1;
+    }
+    if (drained > 0) setQueue((q) => q.slice(drained));
+    // `injectIfPlainText` é memoizado; `atRest`/`queue`/`phase` são os gatilhos reais.
+  }, [atRest, queue, state.phase, injectIfPlainText]);
+
   useInput((char, key) => {
     // ── EST-0948 — BRACKETED PASTE: SUPRIME os bytes do paste no `useInput` ──────────
     // Com o `?2004` ligado, o Ink entrega ao `useInput` o chunk do paste MANGLED (`[200~
