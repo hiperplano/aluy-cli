@@ -3825,6 +3825,9 @@ export function App(props: AppProps): React.ReactElement {
             selected={flowSel}
             maxRows={Math.max(4, slashMenuRowCap - 2)}
             columns={columns}
+            {...(!cycleUiOff && state.cycleProgress !== undefined
+              ? { cycleProgress: state.cycleProgress }
+              : {})}
             {...(flowDrill ? { drillIn: controller.drillInFlow(flowDrill) } : {})}
           />
         </Box>

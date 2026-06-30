@@ -68,6 +68,105 @@ describe('FlowTreeView — OVERVIEW (VER): árvore + contabilidade tokens+tempo'
   });
 });
 
+// FATIA 2 (CICLOS/SUBCICLOS) — o CABEÇALHO/RAIZ cíclico (`↻ ciclo N/M`) na árvore de fluxos:
+// torna o CICLO DE VIDA DO LOOP visível além da StatusBar. DISCRETO no ciclo único (uma linha
+// `↻ ciclo`, sem N/M) p/ NÃO poluir o uso simples; EXPANDIDO no /cycle recorrente (raiz N/M +
+// subciclos K/T + turno aninhados). Ausente ⇒ a árvore renderiza como antes.
+describe('FlowTreeView — FATIA 2: cabeçalho cíclico (↻ ciclo) na árvore', () => {
+  it('SEM cycleProgress ⇒ a árvore NÃO ganha cabeçalho cíclico (uso simples, sem poluição)', () => {
+    const { lastFrame } = wrap(<FlowTreeView overview={overview} selected={0} />, UTF8);
+    const out = plain(lastFrame() ?? '');
+    expect(out).not.toContain('↻');
+    expect(out).not.toContain('ciclo');
+    expect(out).toContain('árvore de fluxos'); // a árvore segue como antes
+  });
+
+  it('CICLO ÚNICO (max=1) ⇒ DISCRETO: uma linha `↻ ciclo`, SEM progressão N/M nem turno', () => {
+    const { lastFrame } = wrap(
+      <FlowTreeView
+        overview={overview}
+        selected={0}
+        cycleProgress={{ iteration: 1, max: 1, subcyclesDone: 0, subcyclesTotal: 0 }}
+      />,
+      UTF8,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('↻ ciclo');
+    expect(out).not.toContain('1/1'); // sem progressão (discreto)
+    expect(out).not.toContain('turno'); // sem o turno aninhado no ciclo único
+    expect(out).not.toContain('subciclos'); // sem plano ⇒ sem subciclos
+  });
+
+  it('CICLO ÚNICO COM PLANO ⇒ a linha discreta ainda traz `subciclos K/T`', () => {
+    const { lastFrame } = wrap(
+      <FlowTreeView
+        overview={overview}
+        selected={0}
+        cycleProgress={{ iteration: 1, max: 1, subcyclesDone: 2, subcyclesTotal: 5 }}
+      />,
+      UTF8,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('↻ ciclo');
+    expect(out).toContain('subciclos 2/5');
+    expect(out).not.toContain('1/1'); // segue discreto (sem progressão de ciclo)
+  });
+
+  it('/cycle RECORRENTE (max>1) ⇒ EXPANDIDO: raiz `↻ ciclo N/M` + subciclos K/T + turno', () => {
+    const { lastFrame } = wrap(
+      <FlowTreeView
+        overview={overview}
+        selected={0}
+        cycleProgress={{ iteration: 2, max: 4, subcyclesDone: 3, subcyclesTotal: 7 }}
+      />,
+      UTF8,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('↻ ciclo 2/4'); // progressão N/M prominente
+    expect(out).toContain('subciclos 3/7'); // subciclos aninhados
+    expect(out).toContain('turno 2'); // o turno em curso destacado
+    expect(out).toContain('árvore de fluxos'); // a árvore segue abaixo (aninhada natural)
+  });
+
+  it('/cycle RECORRENTE SEM PLANO ⇒ raiz N/M + turno, mas SEM `subciclos`', () => {
+    const { lastFrame } = wrap(
+      <FlowTreeView
+        overview={overview}
+        selected={0}
+        cycleProgress={{ iteration: 1, max: 3, subcyclesDone: 0, subcyclesTotal: 0 }}
+      />,
+      UTF8,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('↻ ciclo 1/3');
+    expect(out).toContain('turno 1');
+    expect(out).not.toContain('subciclos');
+  });
+
+  it('o cabeçalho cíclico NÃO aparece no DRILL-IN (modo focado em um nó)', () => {
+    const drill: FlowDrillIn = {
+      id: 'root/x',
+      kind: 'subagent',
+      label: 'x',
+      phase: 'tool',
+      accounting: { tokens: 0, toolCalls: 0, iterations: 1, startedAt: 0, durationMs: 0 },
+      recent: [],
+    };
+    const { lastFrame } = wrap(
+      <FlowTreeView
+        overview={overview}
+        selected={0}
+        drillIn={drill}
+        cycleProgress={{ iteration: 2, max: 4, subcyclesDone: 1, subcyclesTotal: 2 }}
+      />,
+      UTF8,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('[x]'); // está no drill-in
+    expect(out).not.toContain('↻ ciclo'); // o cabeçalho cíclico é só do overview
+  });
+});
+
 describe('FlowTreeView — DRILL-IN (VER): RES-C-1 só atividade REDIGIDA, nunca stream cru', () => {
   it('exibe o `target` que JÁ vem redigido do core — segredo não aparece', () => {
     const drill: FlowDrillIn = {

@@ -97,6 +97,12 @@ export interface Catalog {
   'statusbar.cycle': string;
   /** FATIA 1 — rótulo dos SUBCICLOS (caixas do plano) (`· subciclos K/T`). */
   'statusbar.subcycles': string;
+  /** FATIA 2 — rótulo do CICLO no cabeçalho da árvore de fluxos (`↻ ciclo N/M`). */
+  'flowtree.cycle': string;
+  /** FATIA 2 — rótulo dos SUBCICLOS no cabeçalho da árvore (`subciclos K/T`). */
+  'flowtree.subcycles': string;
+  /** FATIA 2 — rótulo do TURNO em curso no cabeçalho da árvore (`turno`). */
+  'flowtree.turn': string;
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': string;

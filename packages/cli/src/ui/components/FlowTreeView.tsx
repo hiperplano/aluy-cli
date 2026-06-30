@@ -19,7 +19,9 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Glyph, Role } from '../theme/index.js';
 import { abbreviateCount, formatDuration } from '../../session/model.js';
+import type { CycleProgress } from '../../session/model.js';
 import { displayWidth } from '../../session/visual-lines.js';
+import { useI18n } from '../../i18n/index.js';
 import type { FlowSummary, FlowDrillIn, FlowPhase, FlowActivity } from '@hiperplano/aluy-cli-core';
 import { windowAround } from '../window.js';
 
@@ -40,6 +42,15 @@ export interface FlowTreeViewProps {
   readonly maxRows?: number;
   /** F89 (wrap-aware) — largura do terminal; janela por LINHAS VISUAIS em cols estreito. */
   readonly columns?: number;
+  /**
+   * FATIA 2 (CICLOS/SUBCICLOS) — quando presente, a árvore ganha um CABEÇALHO/RAIZ cíclico
+   * (`↻ ciclo N/M`) com os subciclos K/T e o turno em curso, e a árvore de fluxos abaixo
+   * vira o aninhado. CICLO ≡ iteração do CycleEngine; SUBCICLO ≡ caixa do plano; TURNO ≡
+   * turn do loop. DISCRETO no ciclo único (`max <= 1`): uma linha enxuta, sem poluir o uso
+   * simples. EXPANDIDO no `/cycle` recorrente (`max > 1`): a progressão N/M com clareza.
+   * Ausente ⇒ a árvore renderiza como antes (sem cabeçalho cíclico). Só DISPLAY/leitura.
+   */
+  readonly cycleProgress?: CycleProgress | undefined;
 }
 
 /** Palavra da fase (a11y: a palavra carrega o sentido, não só o glifo). */
@@ -97,6 +108,52 @@ function OverviewRow(props: {
   );
 }
 
+/**
+ * FATIA 2 (CICLOS/SUBCICLOS) — o CABEÇALHO/RAIZ cíclico da árvore de fluxos: torna o CICLO
+ * DE VIDA DO LOOP visível além da StatusBar. Reusa o accent (mesmo papel do `↻` da barra) e
+ * o glifo `repeat`/`↻` (fallback a `↻` por texto). DUAS densidades:
+ *   • CICLO ÚNICO (`max <= 1`) — uma ÚNICA linha discreta `↻ ciclo · subciclos K/T` (só
+ *     mostra subciclos se houver plano); NÃO polui o uso simples (nada de progressão N/M).
+ *   • `/cycle` RECORRENTE (`max > 1`) — a RAIZ `↻ ciclo N/M` PROMINENTE + uma linha
+ *     aninhada `└ subciclos K/T · turno em curso` (o turno do loop, destacado).
+ * As caixas/subagentes da árvore abaixo seguem como o aninhado natural (subciclos K/T).
+ */
+function CycleHeader(props: { readonly progress: CycleProgress }): React.ReactElement {
+  const { t } = useI18n();
+  const p = props.progress;
+  const recurring = p.max > 1;
+  const hasSubcycles = p.subcyclesTotal > 0;
+  const subcyclesText = `${t('flowtree.subcycles')} ${p.subcyclesDone}/${p.subcyclesTotal}`;
+
+  // Ciclo único: UMA linha enxuta — o `↻ ciclo` discreto (+ subciclos só se houver plano).
+  if (!recurring) {
+    return (
+      <Box>
+        <Role name="accent">↻ {t('flowtree.cycle')}</Role>
+        {hasSubcycles && <Role name="fgDim"> · {subcyclesText}</Role>}
+      </Box>
+    );
+  }
+
+  // /cycle recorrente: RAIZ `↻ ciclo N/M` prominente + linha aninhada (subciclos · turno).
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Role name="accent">
+          ↻ {t('flowtree.cycle')} {p.iteration}/{p.max}
+        </Role>
+      </Box>
+      <Box paddingLeft={2}>
+        <Role name="fgDim">└ </Role>
+        {hasSubcycles && <Role name="fgDim">{subcyclesText} · </Role>}
+        <Role name="accent">
+          {t('flowtree.turn')} {p.iteration}
+        </Role>
+      </Box>
+    </Box>
+  );
+}
+
 /** O modo OVERVIEW: a árvore (JANELADA p/ caber em `rows`) + a legenda de atalhos. */
 function Overview(props: FlowTreeViewProps): React.ReactElement {
   const maxRows = Math.max(1, props.maxRows ?? 10);
@@ -116,6 +173,9 @@ function Overview(props: FlowTreeViewProps): React.ReactElement {
   const { start, slice } = windowAround(props.overview, props.selected, maxRows, rowHeight);
   return (
     <Box flexDirection="column" paddingLeft={2} paddingBottom={1}>
+      {/* FATIA 2 — cabeçalho cíclico (↻ ciclo N/M + subciclos K/T + turno) quando há ciclo
+          ativo; discreto no ciclo único, expandido no /cycle recorrente. */}
+      {props.cycleProgress !== undefined && <CycleHeader progress={props.cycleProgress} />}
       <Box>
         <Glyph name="subagents" role="accent" />
         <Role name="fg"> árvore de fluxos — ver · parar · interagir</Role>
