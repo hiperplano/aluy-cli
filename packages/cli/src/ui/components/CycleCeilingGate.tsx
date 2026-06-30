@@ -54,11 +54,20 @@ export function CycleCeilingGate(props: CycleCeilingGateProps): React.ReactEleme
         <Role name="accent">{theme.box.vertical} </Role>
         <Role name="fgDim">o teto do ciclo bateu, mas o juiz local sugere continuar.</Role>
       </Box>
-      {/* C2 — o motivo do juiz, ROTULADO como DADO não-confiável (nunca texto de sistema). */}
+      {/* C2 — o motivo do juiz, ROTULADO como DADO não-confiável (nunca texto de sistema). O
+          rótulo fica na PRÓPRIA linha (jamais quebra) e o motivo numa linha SEPARADA com
+          `wrap="truncate"`: o Ink corta DURO na largura do terminal — o motivo nunca vira 2+
+          linhas (mesmo num terminal estreito), então `[c]/[n]` abaixo NUNCA são empurrados
+          p/ fora da tela. Defesa-em-profundidade sobre o clamp do controller (clampReasonToLine). */}
       <Box>
         <Role name="accent">{theme.box.vertical} </Role>
-        <Role name="fgDim">motivo do juiz (local · não verificado): </Role>
-        <Role name="fg">{reason}</Role>
+        <Role name="fgDim">motivo do juiz (local · não verificado):</Role>
+      </Box>
+      <Box>
+        <Role name="accent">{theme.box.vertical}   </Role>
+        <Text wrap="truncate-end">
+          <Role name="fg">{reason}</Role>
+        </Text>
       </Box>
       <Box>
         <Role name="accent">{theme.box.vertical} </Role>
