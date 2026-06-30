@@ -132,6 +132,7 @@ export {
   buildContinuationNudge,
   resolveContinuationConfig,
   isAnnounceNoTool,
+  endsWithUserQuestion,
   hasPendingPlanWork,
   buildPlanPendingNudge,
   DEFAULT_CONTINUATION_CONFIG,

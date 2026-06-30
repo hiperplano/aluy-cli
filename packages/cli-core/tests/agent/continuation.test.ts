@@ -16,6 +16,7 @@ import {
   resolveContinuationConfig,
   buildContinuationNudge,
   isAnnounceNoTool,
+  endsWithUserQuestion,
   hasPendingPlanWork,
   buildPlanPendingNudge,
   DEFAULT_CONTINUATION_CONFIG,
@@ -23,6 +24,39 @@ import {
   DEFAULT_NUDGE_AT,
   DEFAULT_GIVEUP_AT,
 } from '../../src/agent/continuation.js';
+
+// ─── #4 (dogfood): pergunta em TEXTO ⇒ o loop deve PARAR (askedUser) ──────
+describe('endsWithUserQuestion — o turno final termina numa pergunta ao usuário', () => {
+  it('pergunta simples ⇒ true', () => {
+    expect(endsWithUserQuestion('Beleza. O que você quer fazer?')).toBe(true);
+  });
+  it('pergunta com emoji/decoração no fim ⇒ true (tira a decoração)', () => {
+    expect(endsWithUserQuestion('Posso seguir pelo trilho A? 🎯')).toBe(true);
+    expect(endsWithUserQuestion('Faz sentido?**')).toBe(true);
+    expect(endsWithUserQuestion('Quer que eu continue?”')).toBe(true);
+  });
+  it('última linha não-vazia é a que conta (ignora linhas em branco no fim)', () => {
+    expect(endsWithUserQuestion('Vou fazer X.\nConfirma?\n\n   ')).toBe(true);
+  });
+  it('afirmação/anúncio (não termina em ?) ⇒ false', () => {
+    expect(endsWithUserQuestion('Vou implementar o trilho A agora.')).toBe(false);
+    expect(endsWithUserQuestion('Pronto, terminei.')).toBe(false);
+  });
+  it('pergunta no MEIO mas fecha afirmando ⇒ false (só o fim conta)', () => {
+    expect(endsWithUserQuestion('Devo usar X? Sim, vou usar X.')).toBe(false);
+  });
+  it('vazio ⇒ false', () => {
+    expect(endsWithUserQuestion('')).toBe(false);
+    expect(endsWithUserQuestion('   \n  ')).toBe(false);
+  });
+  it('decideContinuation com askedUser=true ⇒ STOP (mesmo com plano pendente/anúncio)', () => {
+    const v = decideContinuation(
+      { continuationsThisTurn: 0, signalAborted: false, askedUser: true },
+      DEFAULT_CONTINUATION_CONFIG,
+    );
+    expect(v.action).toBe('stop');
+  });
+});
 
 // ─── F54+F79 (wire §4): gatilho plano-pendente (ContextGraph) ────────────
 describe('hasPendingPlanWork — gatilho de continuação pelo plano (ContextGraph)', () => {

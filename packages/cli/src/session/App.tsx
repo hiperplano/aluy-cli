@@ -96,6 +96,7 @@ import {
   LIVE_SHELL_OUTPUT_MAX_LINES,
   RESPIRO_MIN_ROWS,
 } from './live-budget.js';
+import { visualLines } from './visual-lines.js';
 import { debugRenderLog } from './debug-render.js';
 import { answerInParallelWhileSubagents } from './mid-turn-routing.js';
 import {
@@ -652,6 +653,14 @@ export function App(props: AppProps): React.ReactElement {
   // piso narrow/short é decidido com composer=1 (chamadas de resize abaixo), então o limiar
   // de recusa NÃO muda — só a partição quando já cabe.
   const composerLines = input.length === 0 ? 1 : input.split('\n').length;
+  // RESIZE-FIX (bug do gap inline) — o `<Composer>` inline renderiza o input CRU e o terminal
+  // o QUEBRA (wrap) em N linhas VISUAIS na largura `columns` (o prompt come ~2 cols de indent).
+  // `composerLines` (linhas-FONTE) não vê o wrap. Medimos o VISUAL p/ descontar o EXCEDENTE
+  // (além da 1 linha já contada no chrome) do orçamento da fala — senão o frame cruza `rows`,
+  // o Ink cai no `clearTerminal` (que não reseta `previousLineCount`) e ACUMULA gap a cada tecla.
+  const composerVisualLines =
+    input.length === 0 ? 1 : visualLines(input, columns > 2 ? columns - 2 : columns);
+  const composerOverflow = Math.max(0, composerVisualLines - 1);
   // EST-1000 · ADR-0076 §3/§7 — as seções do LOG do cockpit: a MESMA projeção REDIGIDA
   // (`buildActivityLog`) que o split #135 usa. PROJETADA ANTES do layout (depende só de
   // `flowOverview` + flags de UI, NÃO das alturas), p/ o layout adaptativo dimensionar o
@@ -1074,6 +1083,10 @@ export function App(props: AppProps): React.ReactElement {
       `resize ${prev.rows}x${prev.columns} → ${rows}x${columns} (clearScreen em 90ms)`,
     );
     inlineResizeDimRef.current = { rows, columns };
+    // RESIZE-FIX — clear no trailing-edge (1 clear quando o DRAG assenta, não N durante o arraste:
+    // o clear imediato-por-tick reintroduzia flicker de arraste). O conserto do "gap que CRESCE ao
+    // digitar" é o `composerOverflow` no orçamento (acima): sem estourar `rows`, o Ink não cai no
+    // `clearTerminal` que dessincroniza o `previousLineCount` — então este clear pós-assento basta.
     const id = setTimeout(() => clearScreen(), 90);
     return () => clearTimeout(id); // novo resize antes de 90ms ⇒ recancela (trailing-edge)
   }, [rows, columns, fullscreen, clearScreen]);
@@ -2208,9 +2221,30 @@ export function App(props: AppProps): React.ReactElement {
           }
           // `/ask` sozinho (sem pergunta) ⇒ nada a injetar ⇒ cai na parada abaixo.
         }
+        // DECISÃO DO DONO (pedido recorrente) — ESC com composer VAZIO mas com FILA durante o
+        // trabalho NÃO para tudo. Em vez de o single-ESC ser NO-OP (a fila ficava parada e "nunca
+        // era lida"), ele agora FORÇA o encaixe: cada item de TEXTO PURO vira `injectInput` no
+        // agente vivo (drena na PRÓXIMA iteração, não no repouso final), preservando a ordem FIFO.
+        // Bang/slash/anexo NÃO dá p/ injetar como texto ⇒ PERMANECEM na fila (rodam no repouso).
+        // ESC vira "processa a fila AGORA", não "joga fora". FORA do /cycle (lá vale o F57: single-
+        // ESC no-op + duplo-ESC descarta — o escape do ciclo); o cenário do dono é turno normal.
+        // Só cai na PARADA abaixo quando não há nada a encaixar (fila vazia OU só /cycle).
+        if (input.trim() === '' && queueRef.current.length > 0 && !state.cycleActive) {
+          const kept: string[] = [];
+          let flushed = 0;
+          for (const q of queueRef.current) {
+            if (injectIfPlainText(q)) flushed += 1;
+            else kept.push(q); // bang/slash/anexo: não injeta como texto ⇒ fica na fila (roda no repouso)
+          }
+          if (flushed > 0) {
+            setQueue(kept);
+            return; // encaixou TEXTO no agente vivo — NÃO aborta (ESC = "processa a fila agora")
+          }
+          // fila só de bang/slash (nada de texto a encaixar) ⇒ cai na PARADA abaixo (ESC = parar).
+        }
         controller.interrupt();
-        // EST-0982 (P1-2) — ESC SEM msg pendente = PARAR o turno + DESCARTAR a fila do
-        // type-ahead. "Parar" é o gesto quando não há nada a priorizar.
+        // EST-0982 (P1-2) — ESC SEM msg pendente NEM fila = PARAR o turno. "Parar" é o gesto
+        // quando não há NADA a priorizar nem a forçar (fila vazia).
         clearQueue();
         return;
       }
@@ -3142,6 +3176,8 @@ export function App(props: AppProps): React.ReactElement {
     queuedLines: stagedLines,
     // EST-1015 — o slash-menu aberto (coexiste com o stream) também desconta (ver acima).
     overlayLines,
+    // RESIZE-FIX — excedente VISUAL do composer (wrap) desconta do teto (anti-gap inline).
+    composerOverflow,
   });
 
   // ── EST-0990 — MODO VIEW AVANÇADO (split CHAT | LOG): projeção do log + orçamento ──
@@ -3172,6 +3208,7 @@ export function App(props: AppProps): React.ReactElement {
           mode: state.mode,
           columns,
           queuedLines: stagedLines,
+          composerOverflow,
           logColumnLines,
         });
 

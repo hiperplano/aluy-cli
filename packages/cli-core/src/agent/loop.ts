@@ -75,6 +75,7 @@ import {
   decideContinuation,
   buildContinuationNudge,
   isAnnounceNoTool,
+  endsWithUserQuestion,
   hasPendingPlanWork,
   buildPlanPendingNudge,
   type ContinuationConfig,
@@ -1332,7 +1333,10 @@ export class AgentLoop {
           // DECISÃO (antes só visual — F79) e fecha o limbo que o `isAnnounceNoTool` perde.
           // Mesmos caps/freios; o nudge é específico do gatilho.
           const pendingPlan = hasPendingPlanWork(this.ports.graph?.listBoxes() ?? []);
-          const askedUser = false; // FUTURE: track if perguntar was called this turn
+          // #4 — o modelo PERGUNTOU em texto livre (sem a tool `perguntar`, que já pausa):
+          // se o turno final termina numa pergunta ao usuário, NÃO nudgar — `decideContinuation`
+          // devolve `stop` e o loop aguarda a resposta em vez de o agente decidir sozinho.
+          const askedUser = endsWithUserQuestion(turn.text);
           if (announcedNoTool || pendingPlan) {
             const verdict = decideContinuation(
               { continuationsThisTurn, signalAborted, askedUser },

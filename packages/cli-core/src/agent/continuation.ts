@@ -222,6 +222,30 @@ export function isAnnounceNoTool(text: string, hadToolCall: boolean): boolean {
   return ANNOUNCE_NO_TOOL_RE.test(text) || ANNOUNCE_NO_TOOL_EN_RE.test(text);
 }
 
+/**
+ * #4 (achado dogfood do dono) — o agente PERGUNTOU ao usuário em TEXTO ("o que você
+ * quer fazer? 🎯") e, com um plano aberto (`pendingPlan`), a continuação o NUDGAVA a
+ * seguir ⇒ ele DECIDIA SOZINHO apesar de ter perguntado. A tool `perguntar` já pausa o
+ * loop (resolver da TUI); o buraco era a pergunta em TEXTO LIVRE. Heurística PURA: a
+ * ÚLTIMA linha não-vazia termina em "?" (depois de tirar decoração final — emoji,
+ * markdown, aspas, fechamentos). Viés DELIBERADO p/ parar: um falso-positivo custa um
+ * "continue" do usuário; um falso-negativo é exatamente a queixa (o agente decide sozinho).
+ * Alimenta `askedUser` em `decideContinuation` ⇒ veredito `stop` (aguarda a resposta).
+ */
+export function endsWithUserQuestion(text: string): boolean {
+  if (!text) return false;
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const ln = lines[i].trim();
+    if (ln === '') continue;
+    // tira do FIM: espaços, emoji/pictográficos, ZWJ/seletor-de-variação, e decoração
+    // de markdown/fechamento (*, _, ~, `, aspas, ), ]). Sobra o caractere "semântico" final.
+    const core = ln.replace(/[\s‍️\p{Extended_Pictographic}*_~`"'»”’)\]]+$/gu, '');
+    return core.endsWith('?') || core.endsWith('？');
+  }
+  return false;
+}
+
 // ─── Nudge texts ────────────────────────────────────────────────────────
 
 /**

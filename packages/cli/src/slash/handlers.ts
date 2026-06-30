@@ -386,9 +386,9 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
         note: {
           title: 'init',
           lines: [
-            'analiso o repo (stack, comandos, estrutura) e crio um AGENT.md na raiz',
+            'analiso o repo (stack, comandos, estrutura) e crio um ALUY.md na raiz',
             'com esse contexto — você confirma a escrita (diff) e edita à vontade.',
-            'o agente lê o AGENT.md como contexto de projeto no boot de cada sessão.',
+            'o agente lê o ALUY.md como contexto de projeto no boot de cada sessão.',
           ],
         },
       };

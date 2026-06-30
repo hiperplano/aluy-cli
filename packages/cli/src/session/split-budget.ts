@@ -161,6 +161,8 @@ export interface SplitLiveBudgetInput {
   readonly columns?: number;
   /** Altura BOUNDED da fila de inputs (`<QueuedInputs>`), abaixo da viva (anti-flicker). */
   readonly queuedLines?: number;
+  /** RESIZE-FIX — excedente VISUAL do composer (wrap) além da 1 linha do chrome. Default 0. */
+  readonly composerOverflow?: number;
   /**
    * Altura (linhas VISUAIS) que a COLUNA DO LOG ocupará neste frame, já capada em
    * `LOG_VISIBLE_ROWS`. As duas colunas vivas compartilham a altura do frame, então a
@@ -204,6 +206,7 @@ export function splitLiveBudget(input: SplitLiveBudgetInput): number {
     SAFETY_MARGIN -
     modeIndicatorOverhead(input.mode) -
     (input.queuedLines ?? 0) -
+    (input.composerOverflow ?? 0) -
     1; // reserva do marcador `…N acima`
 
   // O ALTO das duas colunas é quem dita o frame. Se a coluna do log já é mais alta que

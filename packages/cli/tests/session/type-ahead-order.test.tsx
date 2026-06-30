@@ -281,6 +281,47 @@ describe('EST-0982 — type-ahead: ordem + clear/esc + paralelos read-only', () 
     s.unmount();
   });
 
+  // ── ESC-FLUSH (decisão do dono) — esc com fila de TEXTO ENCAIXA, NÃO para ───────────
+  it('esc com TEXTO na fila ENCAIXA o texto (injectInput) sem interromper; bang fica na fila', async () => {
+    const s = buildSession();
+    const interruptSpy = vi.spyOn(s.controller, 'interrupt');
+    const injectSpy = vi.spyOn(s.controller, 'injectInput');
+
+    void s.controller.submit('objetivo inicial');
+    await waitFor(() => s.controller.current.phase === 'streaming');
+
+    // 1) um !bang ENFILEIRA (sempre); 2) com a fila já não-vazia, o TEXTO PURO também enfileira.
+    await pressUntil(
+      () => s.stdin.write('!echo fica-na-fila'),
+      () => plain(s.lastFrame()).includes('!echo fica-na-fila'),
+    );
+    s.stdin.write(CR);
+    await waitFor(() => plain(s.lastFrame()).includes('na fila'));
+    await pressUntil(
+      () => s.stdin.write('o trabalho travou?'),
+      () => plain(s.lastFrame()).includes('o trabalho travou?'),
+    );
+    s.stdin.write(CR);
+    await waitFor(() => plain(s.lastFrame()).includes('2 na fila'));
+
+    // esc: o TEXTO encaixa no agente vivo (injectInput 'root'); NÃO interrompe; o !bang FICA na fila.
+    await pressUntil(
+      () => s.stdin.write(ESC),
+      () =>
+        injectSpy.mock.calls.some(
+          (c) => c[0] === 'root' && String(c[1]).includes('travou'),
+        ),
+    );
+    expect(interruptSpy).not.toHaveBeenCalled();
+    await waitFor(() => plain(s.lastFrame()).includes('na fila')); // o bang segue enfileirado
+    expect(plain(s.lastFrame())).not.toContain('2 na fila'); // só 1 item agora (o texto saiu)
+
+    s.resolveGate(0);
+    interruptSpy.mockRestore();
+    injectSpy.mockRestore();
+    s.unmount();
+  });
+
   // ── P2-1 — `/help` (read-only) roda PARALELO mid-turn; `/compact` (mutador) enfileira ─
   it('P2-1 — /help mid-turn RODA paralelo (não enfileira) via runCommand/onCommand', async () => {
     const onCommand = vi.fn();

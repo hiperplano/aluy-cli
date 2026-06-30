@@ -63,9 +63,9 @@ describe('buildSlashEffect — cada comando tem efeito (nada de no-op silencioso
     }
   });
 
-  it('/init ⇒ orienta o AGENT.md', () => {
+  it('/init ⇒ orienta o ALUY.md', () => {
     const e = buildSlashEffect('init', CTX);
-    if (e.kind === 'note') expect(e.note.lines.join('\n')).toMatch(/AGENT\.md/);
+    if (e.kind === 'note') expect(e.note.lines.join('\n')).toMatch(/ALUY\.md/);
   });
 
   it('/login ⇒ orienta o device-flow (não no-op)', () => {

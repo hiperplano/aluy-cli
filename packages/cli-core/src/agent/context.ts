@@ -76,7 +76,7 @@ export const AGENT_INSTRUCTION_HEADER = 'Você é o Aluy Cli, um agente de termi
  * no @hiperplano/aluy-cli faz isso ANTES de chegar aqui).
  */
 export const PROJECT_INSTRUCTIONS_HEADER =
-  'INSTRUÇÕES DE PROJETO (AGENT.md — configuração deste repositório, escrita pelo dono do projeto):';
+  'INSTRUÇÕES DE PROJETO (ALUY.md — configuração deste repositório, escrita pelo dono do projeto):';
 
 /**
  * Teto de caracteres das instruções de projeto injetadas no `system` (anti-estouro
@@ -98,7 +98,7 @@ export function clampProjectInstructions(raw: string | undefined): string | unde
   if (trimmed.length <= MAX_PROJECT_INSTRUCTIONS_CHARS) return trimmed;
   return (
     trimmed.slice(0, MAX_PROJECT_INSTRUCTIONS_CHARS) +
-    `\n[…AGENT.md truncado: maior que ${MAX_PROJECT_INSTRUCTIONS_CHARS} caracteres — só o início foi injetado…]`
+    `\n[…ALUY.md truncado: maior que ${MAX_PROJECT_INSTRUCTIONS_CHARS} caracteres — só o início foi injetado…]`
   );
 }
 
@@ -327,6 +327,21 @@ export function buildSystemPrompt(
     // A nota é montada por `buildAvailableAgentsNote` (puro) e já vem aparada. Sem
     // agentes ⇒ `undefined` (não injeta nada — não-regressão).
     ...(availableAgents ? ['', availableAgents] : []),
+    // GOVERNANÇA-AUTÔNOMA (decisão do dono) — POLÍTICA de não-perguntar-pra-delegar. O header
+    // acima descreve o TIME; esta linha crava o comportamento que o dono cobrou ("preciso dizer
+    // toda hora pro agente spawnar agentes, isso é lamentável"): delegar é o DEFAULT, sem pedir
+    // licença. Só com time presente (senão não há a quem delegar — não-regressão).
+    ...(availableAgents
+      ? [
+          '',
+          'DELEGAÇÃO É O PADRÃO, NÃO A EXCEÇÃO: quando a tarefa do usuário casa com a',
+          'especialidade de um agente do seu time (acima), DELEGUE a ele via `spawn_agent` na',
+          'PRIMEIRA ação — sem pedir permissão, sem perguntar "quer que eu use o agente X?". O',
+          'dono configurou esse time JUSTAMENTE para você usá-lo SOZINHO; pedir confirmação para',
+          'delegar a um agente que ele mesmo definiu é ERRO de comportamento. Só faça você mesmo',
+          'as tarefas triviais (1-2 passos) sem dono claro no time.',
+        ]
+      : []),
     // EST-1149 · ADR-0127 — AUTO-CONHECIMENTO: os COMANDOS DA SESSÃO que o HUMANO digita
     // (`/cycle`, `/doctor`, …), gerados do REGISTRO (single-source, camada cli). Sem esta
     // seção o agente NÃO conhece o próprio produto — pediram "agendar um loop" e ele

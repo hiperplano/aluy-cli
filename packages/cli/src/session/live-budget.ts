@@ -480,6 +480,14 @@ export function speechMaxLines(args: {
    * tela inteira via clearTerminal a cada frame ⇒ cintilação). Default 0 (sem overlay aberto).
    */
   readonly overlayLines?: number;
+  /**
+   * RESIZE-FIX (bug do gap inline) — EXCEDENTE de linhas VISUAIS do composer ALÉM da 1 já
+   * contada no chrome base. No inline o `<Composer>` renderiza o input CRU e o terminal o
+   * QUEBRA (wrap) em N linhas visuais; sem descontar esse excedente o frame cruza `rows` e o
+   * Ink cai no caminho `clearTerminal` (que NÃO reseta `previousLineCount`) ⇒ o erase acumula
+   * espaço em branco a cada tecla. Default 0 (composer de 1 linha ⇒ sem desconto, não-regressão).
+   */
+  readonly composerOverflow?: number;
   /** EST-0965 (wrap) — largura do terminal; mede a altura VISUAL dos vivos. */
   readonly columns?: number;
 }): number {
@@ -502,6 +510,7 @@ export function speechMaxLines(args: {
     modeIndicatorOverhead(args.mode) -
     (args.queuedLines ?? 0) -
     (args.overlayLines ?? 0) -
+    (args.composerOverflow ?? 0) -
     1;
   return Math.max(MIN_SPEECH_LINES, budget);
 }

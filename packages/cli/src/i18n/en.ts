@@ -159,7 +159,7 @@ export const en: PartialCatalog = {
   'cmd.cycle': 'run a task in cycles · with hard caps and a stop (anti-runaway)',
   'cmd.permissions': 'panel · mode, grants and safe tools (always-ask locked)',
   'cmd.addDir': 'authorize an EXTRA directory for the agent (session) · no args lists',
-  'cmd.init': 'create an AGENT.md in this project',
+  'cmd.init': 'create an ALUY.md in this project',
   'cmd.memory': "view/edit/forget/pin the agent's memory (global + project)",
   'cmd.mcp': 'list/manage MCP servers (add/remove/disable/enable · search <term>)',
   'cmd.doctor': 'diagnose the install · credential, broker, MCP, config (read-only)',

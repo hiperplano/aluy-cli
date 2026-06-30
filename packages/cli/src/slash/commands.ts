@@ -708,7 +708,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
   },
   {
     name: 'init',
-    summary: 'cria um AGENT.md neste projeto',
+    summary: 'cria um ALUY.md neste projeto',
     summaryKey: 'cmd.init',
     source: 'native',
     id: 'init',

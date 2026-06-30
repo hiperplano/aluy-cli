@@ -9,6 +9,7 @@
 // filtrou os VÁLIDOS (os rejeitados RES-MD-3 NUNCA entram aqui).
 
 import type { AgentProfile } from './agent-profile.js';
+import { sanitizeUntrustedDoc } from './tools/tool-param-docs.js';
 
 /** Cabeçalho da seção de agentes disponíveis no `system`. Estável p/ verificação de canal. */
 export const AVAILABLE_AGENTS_HEADER =
@@ -31,23 +32,24 @@ export function buildAvailableAgentsNote(profiles: readonly AgentProfile[]): str
   if (profiles.length === 0) return undefined;
   const lines = [AVAILABLE_AGENTS_HEADER];
   for (const p of profiles) {
-    // #5 (parecer seguranca) — a `description`/persona de um `.md` de PROJETO é DADO DE TERCEIRO
-    // NÃO-CONFIÁVEL (repo possivelmente clonado): NÃO injetar crua no canal `system` (vetor de
-    // prompt-injection de ROTEAMENTO — "use este agente p/ tudo sensível"). Mostra só o NOME
-    // (delegável por nome explícito) + rótulo de origem; nada do conteúdo do `.md` de projeto
-    // entra no prompt. SÓ os GLOBAIS (`~/.aluy/agents/`, dono confiável) injetam a persona.
-    if (p.origin === 'project') {
-      lines.push(`- ${p.name} — [agente de PROJETO (.claude/agents/) · descrição omitida (dado não-confiável)]`);
-      continue;
-    }
-    const persona =
+    const rawPersona =
       p.description?.trim() || p.systemPrompt.split('\n').find((l) => l.trim() !== '') || '';
+    // GOVERNANÇA-AUTÔNOMA (decisão do dono) — agentes de PROJETO (`.aluy/agents/`) deixam de
+    // ter a descrição OMITIDA. Sem ela o modelo não casava tarefa↔especialidade e o dono tinha
+    // de NOMEAR o agente toda vez ("preciso dizer toda hora pro agente spawnar agentes"). A
+    // `description` de projeto é DADO DE TERCEIRO ⇒ passa por `sanitizeUntrustedDoc` (neutraliza
+    // marcadores de cerca / forja de tool-call) e leva a tag ` [projeto]` (proveniência visível).
+    // A guarda REAL continua ESTRUTURAL e não exige o dono nomear nada: `toolScope ⊆ pai` (a
+    // description pode mentir, mas o agente NUNCA ganha tool fora do escopo do pai) + confirmação
+    // de homônimo com agente global. Os GLOBAIS (`~/.aluy/agents/`, dono) seguem sem sanitizar.
+    const persona = p.origin === 'project' ? sanitizeUntrustedDoc(rawPersona) : rawPersona;
     const flat = persona.replace(/\s+/g, ' ').trim();
     const truncated =
       flat.length <= MAX_AGENT_LINE_CHARS
         ? flat
         : `${flat.slice(0, MAX_AGENT_LINE_CHARS - 1).trimEnd()}…`;
-    lines.push(`- ${p.name} — ${truncated}`);
+    const tag = p.origin === 'project' ? ' [projeto]' : '';
+    lines.push(`- ${p.name}${tag} — ${truncated}`);
   }
   return lines.join('\n');
 }

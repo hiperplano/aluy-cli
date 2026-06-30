@@ -157,7 +157,7 @@ export const ptBR: FullCatalog = {
   'cmd.cycle': 'roda uma tarefa em ciclos · com tetos duros e parada (anti-runaway)',
   'cmd.permissions': 'painel · modo, grants e tools seguras (sempre-ask travado)',
   'cmd.addDir': 'autoriza um diretório EXTRA p/ o agente (sessão) · sem args lista',
-  'cmd.init': 'cria um AGENT.md neste projeto',
+  'cmd.init': 'cria um ALUY.md neste projeto',
   'cmd.memory': 'vê/edita/esquece/fixa a memória do agente (global + projeto)',
   'cmd.mcp': 'lista/gerencia servers MCP (add/remove/disable/enable · search <termo>)',
   'cmd.doctor': 'diagnóstico da instalação · credencial, broker, MCP, config (read-only)',
