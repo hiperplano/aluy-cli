@@ -4133,7 +4133,18 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
       <ModeIndicator mode={state.mode} columns={columns} />
-      {showHints && hintState && (
+      {/* fix(footer-bleed) — durante uma APROVAÇÃO ATIVA (`asking`) o <AskDialog> JÁ
+          renderiza seu PRÓPRIO footer de atalhos (`a aprova · s sempre · …`), em
+          contexto, colado ao diálogo (AskDialog.footerOf, mesmas strings de
+          `hints.ask`/`hints.askDestructive`). Repetir o footer AQUI no rodapé —
+          separado do diálogo pelo composer + régua + status + modo — fazia a linha de
+          aprovação "vazar" PRA BAIXO do composer: um 2º footer idêntico, solto sob o
+          input, lido como resíduo entre o diálogo e o composer. A decisão está capturada
+          pelo diálogo (o composer já fica dim com "aguardando sua decisão acima"), então
+          o rodapé NÃO deve duplicar a dica de ask. Suprimimos os estados de ask aqui; o
+          AskDialog é a única fonte da dica durante a catraca. Ao resolver, `hintState`
+          volta a `idle`/etc. e o rodapé reaparece — transição limpa ask→composer. */}
+      {showHints && hintState && hintState !== 'ask' && hintState !== 'ask-destructive' && (
         <FooterHints
           state={hintState}
           {...(elapsed !== undefined ? { elapsed } : {})}
