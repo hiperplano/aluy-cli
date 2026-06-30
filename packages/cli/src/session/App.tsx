@@ -1923,7 +1923,24 @@ export function App(props: AppProps): React.ReactElement {
         return controller.resolveAsk({ kind: 'approve-session' });
       if (char === 'n')
         return controller.resolveAsk({ kind: 'deny', reason: 'negado pelo usuário' });
-      if (key.escape) return controller.resolveAsk({ kind: 'deny', reason: 'cancelado (esc)' });
+      if (key.escape) {
+        // BUG #2/#13 (QA) — o modal "comia" o ESC (deny + return), então o handler principal
+        // com double-ESC+interrupt NUNCA era alcançado: um `!cmd` de fundo (ex.: `!sleep 30`
+        // já aprovado e rodando atrás deste modal) seguia VIVO; ele terminava DEPOIS do bloco
+        // virar Static e a linha "rodando" ficava FANTASMA até um resize re-emitir (#13).
+        // Fix: single-ESC nega o modal (como antes); DOUBLE-ESC (≤500ms, o gesto de hard-stop)
+        // nega E interrompe o trabalho de fundo (`interrupt()` aborta o `this.abort` do bang/turno)
+        // + descarta a fila — alinhando o modal ao double-ESC do handler principal.
+        const now = Date.now();
+        const isDoubleEsc = now - lastEscRef.current < 500;
+        lastEscRef.current = now;
+        controller.resolveAsk({ kind: 'deny', reason: 'cancelado (esc)' });
+        if (isDoubleEsc) {
+          controller.interrupt();
+          clearQueue();
+        }
+        return;
+      }
       // `e` (editar) cai p/ deny em v1 (abrir $EDITOR é evolução; nunca executa por inação).
       if (char === 'e')
         return controller.resolveAsk({ kind: 'deny', reason: 'editar (não aplicado)' });
