@@ -43,6 +43,7 @@ export type NativeCommandId =
   | 'mcp'
   | 'agents'
   | 'skills'
+  | 'inventory'
   | 'workflows'
   | 'telegram'
   | 'add-dir'
@@ -806,6 +807,17 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     id: 'skills',
     section: 'workspace',
     // EST-0982 — read-only puro (lista skills numa nota): roda JÁ mid-turn.
+    parallelWhileBusy: true,
+  },
+  {
+    // LOTE-2 — `/inventory`: INVENTÁRIO do que a sessão carregou da `.aluy/` — ALUY.md,
+    // agentes, comandos, skills, workflows, memória (+ contagens da StatusBar com os NOMES).
+    // Read-only; reusa os loaders confinados. Espelha o `/skills`/`/workflows`.
+    name: 'inventory',
+    summary: 'inventário do que foi carregado da .aluy/ (agentes·comandos·skills·workflows·memória + ALUY.md)',
+    source: 'native',
+    id: 'inventory',
+    section: 'workspace',
     parallelWhileBusy: true,
   },
   {

@@ -2145,6 +2145,36 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       return;
     }
 
+    // LOTE-2 — `/inventory`: INVENTÁRIO do que a sessão carregou da `.aluy/` (+ `~/.aluy/`): ALUY.md,
+    // agentes, comandos, skills, workflows e memória — com as CONTAGENS e os NOMES. A StatusBar
+    // mostra só os números (`⌁ Na·Cc·Ss·Ww·Mm`); aqui vêm os nomes + a legenda. Read-only (uma
+    // nota), reusa os loaders confinados; espelha o `/skills`/`/workflows`.
+    if (command.id === 'inventory') {
+      const sk = [
+        ...new UserSkillsLoader().load().skills,
+        ...new ProjectSkillsLoader({ workspace: built.workspace }).load().skills,
+      ];
+      const wf = [
+        ...new UserWorkflowsLoader().load().workflows,
+        ...new ProjectWorkflowsLoader({ workspace: built.workspace }).load().workflows,
+      ];
+      const agentNames = [...globalAgents.profiles, ...projectAgents.profiles].map((p) => p.name);
+      const cmdNames = loadedUserCommands.map((c) => `/${c.name}`);
+      const gov = built.controller.current.governance;
+      const join = (xs: readonly string[]): string => (xs.length > 0 ? xs.join(', ') : '—');
+      const aluyMd =
+        instructionSources.length > 0 ? `✓ ${instructionSources.join(' › ')}` : '✗ ausente';
+      built.controller.pushNote('inventário · .aluy/', [
+        `instruções de projeto: ${aluyMd}`,
+        `agentes (${agentNames.length}): ${join(agentNames)}`,
+        `comandos do usuário (${cmdNames.length}): ${join(cmdNames)}`,
+        `skills (${sk.length}): ${join(sk.map((s) => s.name))}`,
+        `workflows (${wf.length}): ${join(wf.map((w) => w.name))}`,
+        `memória de projeto: ${gov?.memory ?? 0} fato(s)`,
+      ]);
+      return;
+    }
+
     // EST-0970 — `/doctor`: health-check read-only da sessão, com VALIDAÇÃO ATIVA e ticks
     // AO VIVO. Cada check nasce `pending` (spinner ⠋) e "acende" ✓/⚠/✗ quando o probe
     // resolve aquele item. VALIDA de verdade: conecta os servers MCP (handshake real →

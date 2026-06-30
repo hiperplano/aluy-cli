@@ -707,6 +707,21 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           ],
         },
       };
+    case 'inventory':
+      // LOTE-2 — o `/inventory` REAL (lista o que a sessão carregou da .aluy/, com os loaders +
+      // o `state.governance`) é roteado ANTES em run.tsx. Cair aqui só sem esse roteamento
+      // (não-TTY sem wiring): explica o comando, sem ler nada.
+      return {
+        kind: 'note',
+        note: {
+          title: 'inventory',
+          lines: [
+            'inventário do que a sessão carregou da .aluy/ (+ ~/.aluy/):',
+            'ALUY.md, agentes, comandos, skills, workflows e memória de projeto —',
+            'com as contagens (espelhadas na StatusBar como ⌁) e os nomes.',
+          ],
+        },
+      };
     case 'skills':
       // EST-1112 · ADR-0116 — o `/skills` REAL (lista as SKILLS SKILL.md MAPEADAS —
       // válidas + rejeitadas com o motivo RES-MD-3) é roteado ANTES em run.tsx via
