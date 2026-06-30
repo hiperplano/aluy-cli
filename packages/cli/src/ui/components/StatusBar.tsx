@@ -25,7 +25,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { BUDGET_WARN_PCT } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role } from '../theme/index.js';
-import { abbreviateCount } from '../../session/model.js';
+import { abbreviateCount, type GovernanceCounts } from '../../session/model.js';
 import { useI18n } from '../../i18n/index.js';
 
 /** Nível de consumo de quota (#125) — espelha os limiares do core (70/90%). */
@@ -73,6 +73,12 @@ export interface StatusBarProps {
   /** `true` quando há erro de broker — barra ganha `⚠` ao fim (§2.11). */
   readonly error?: boolean;
   /**
+   * LOTE-2 (governança .aluy/) — contagens do que foi carregado (agentes/comandos/skills/
+   * workflows/memória). Quando presente E há ALGO carregado, a barra mostra `⌁ Na·Cc·Ss·Ww·Mm`
+   * (droppable no narrow). `undefined`/tudo-zero ⇒ omitido (zero ruído em projeto sem `.aluy/`).
+   */
+  readonly governance?: GovernanceCounts;
+  /**
    * ADR-0126(A) — NOME do sub-agente em FOCO 1:1 (`/subagent <nome>`). Quando setado, a barra
    * mostra um chip `◎ foco: <nome>` em `accent` logo após o tier — pra você LEMBRAR que está
    * falando SÓ com o sub-agente. `undefined` = sessão principal (sem chip). NUNCA cai no narrow
@@ -82,6 +88,11 @@ export interface StatusBarProps {
 }
 
 /** Papel de cor do `⛁ janela %` por nível (§4). */
+/** LOTE-2 — soma das contagens de governança (p/ omitir o campo quando nada carregou). */
+function govTotal(g: GovernanceCounts): number {
+  return g.agents + g.commands + g.skills + g.workflows + g.memory;
+}
+
 function windowRole(pct: number): 'fgDim' | 'accent' | 'danger' {
   if (pct > 90) return 'danger';
   if (pct >= 75) return 'accent';
@@ -179,6 +190,20 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
             </>
           )}
           <Role name="fgDim">{props.cwd}</Role>
+        </>
+      )}
+
+      {/* LOTE-2 (pedido do dono) — CONTADORES da governança `.aluy/` carregada:
+          `⌁ Na·Cc·Ss·Ww·Mm` (agentes·comandos·skills·workflows·memória). Droppable no narrow
+          (junto do cwd); omitido quando NADA foi carregado (projeto sem `.aluy/` ⇒ zero ruído).
+          O `/stat` traz a legenda + os nomes. */}
+      {showCwd && props.governance !== undefined && govTotal(props.governance) > 0 && (
+        <>
+          <Text> </Text>
+          <Role name="fgDim">
+            ⌁ {props.governance.agents}a·{props.governance.commands}c·{props.governance.skills}s·
+            {props.governance.workflows}w·{props.governance.memory}m
+          </Role>
         </>
       )}
 

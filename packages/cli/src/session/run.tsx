@@ -108,6 +108,7 @@ import {
   ProjectWorkflowsLoader,
   UserSkillsLoader,
   ProjectSkillsLoader,
+  NodeMemoryStore,
   HooksConfigStore,
   ExportStore,
 } from '../io/index.js';
@@ -999,6 +1000,36 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // Mapa name→template p/ resolver a expansão quando um `/<nome>` do usuário é
   // invocado. Os nativos NÃO entram aqui (têm efeito próprio em onCommand).
   const userTemplates = new Map<string, UserCommand>(loadedUserCommands.map((c) => [c.name, c]));
+
+  // LOTE-2 (governança .aluy/ — pedido do dono "mostrar quantos agentes/workflows/… carregados")
+  // — CONTA o que foi carregado da `.aluy/` (+ `~/.aluy/` global) e espelha na StatusBar como
+  // `⌁ Na·Cc·Ss·Ww·Mm`. Skills/workflows são carregados AQUI no boot (antes só sob demanda no
+  // `/skills`/`/workflows`). Memória de projeto = fatos com escopo `projeto` no `.aluy/memory/`.
+  // Fail-safe: qualquer fonte ausente ⇒ 0 (nunca derruba o boot).
+  {
+    const skills = [
+      ...new UserSkillsLoader().load().skills,
+      ...new ProjectSkillsLoader({ workspace: cwdWorkspace }).load().skills,
+    ];
+    const workflows = [
+      ...new UserWorkflowsLoader().load().workflows,
+      ...new ProjectWorkflowsLoader({ workspace: cwdWorkspace }).load().workflows,
+    ];
+    let memory = 0;
+    try {
+      const facts = await new NodeMemoryStore({ workspace: cwdWorkspace }).readAll();
+      memory = facts.filter((f) => f.scope === 'projeto').length;
+    } catch {
+      /* memória ausente/ilegível ⇒ 0 */
+    }
+    built.controller.setGovernanceCounts({
+      agents: globalAgents.profiles.length + projectAgents.profiles.length,
+      commands: globalUserCommands.length + projectUserCommands.length,
+      skills: skills.length,
+      workflows: workflows.length,
+      memory,
+    });
+  }
 
   // EST-0974/0980 — HOOKS de ciclo-de-vida: o `buildSession` já leu o DADO
   // (`~/.aluy/hooks.json` + settings do Claude), montou o `HookRunner` (ATRÁS da MESMA

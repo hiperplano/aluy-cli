@@ -4069,6 +4069,7 @@ export function App(props: AppProps): React.ReactElement {
           : {})}
         columns={columns}
         error={state.phase === 'error'}
+        {...(state.governance !== undefined ? { governance: state.governance } : {})}
       />
       {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
           descansa). Sempre visível (glifo+palavra, a11y): plan=read-only (petrol),

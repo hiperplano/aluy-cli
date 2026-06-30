@@ -127,3 +127,40 @@ describe('StatusBar — chip de foco /subagent (ADR-0126)', () => {
     expect(plain(lastFrame() ?? '')).toContain('foco: revisor');
   });
 });
+
+// LOTE-2 (pedido do dono) — a StatusBar mostra `⌁ Na·Cc·Ss·Ww·Mm` (agentes·comandos·skills·
+// workflows·memória carregados da `.aluy/`); omitido quando nada foi carregado.
+describe('StatusBar — contadores de governança .aluy/ (LOTE-2)', () => {
+  it('com contagens ⇒ mostra ⌁ Na·Cc·Ss·Ww·Mm', () => {
+    const { lastFrame } = wrap(
+      <StatusBar
+        cwd="/proj"
+        tier="aluy-strata"
+        tokens={0}
+        windowPct={0}
+        columns={120}
+        governance={{ agents: 5, commands: 3, skills: 2, workflows: 4, memory: 12 }}
+      />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('⌁');
+    expect(out).toContain('5a');
+    expect(out).toContain('2s');
+    expect(out).toContain('4w');
+    expect(out).toContain('12m');
+  });
+
+  it('tudo zero ⇒ OMITE o campo (projeto sem .aluy/ ⇒ zero ruído)', () => {
+    const { lastFrame } = wrap(
+      <StatusBar
+        cwd="/proj"
+        tier="aluy-strata"
+        tokens={0}
+        windowPct={0}
+        columns={120}
+        governance={{ agents: 0, commands: 0, skills: 0, workflows: 0, memory: 0 }}
+      />,
+    );
+    expect(plain(lastFrame() ?? '')).not.toContain('⌁');
+  });
+});

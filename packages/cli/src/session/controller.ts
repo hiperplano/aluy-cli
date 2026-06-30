@@ -148,6 +148,7 @@ import {
   type SessionBlock,
   type SessionMeta,
   type SessionState,
+  type GovernanceCounts,
   type SubAgentChild,
   type TurnAccountingView,
   type ToolLineBlock,
@@ -3617,6 +3618,15 @@ export class SessionController {
    * responsável por só passar `tier`. Sai da fase `boot`/`error` p/ `idle` se
    * preciso (a nota é uma resposta visível).
    */
+  /**
+   * LOTE-2 (governança .aluy/) — espelha no estado as CONTAGENS do que foi carregado da `.aluy/`
+   * (agentes/comandos/skills/workflows/memória), computadas no boot pelo `run.tsx`. A StatusBar as
+   * mostra (`⌁ Na·Cc·Ss·Ww·Mm`) e o `/stat` detalha. Idempotente — pode ser re-chamado (recompute).
+   */
+  setGovernanceCounts(counts: GovernanceCounts): void {
+    this.patch({ governance: counts });
+  }
+
   pushNote(title: string, lines: readonly string[]): void {
     this.dismissBoot();
     // F145 (generaliza F143/F144) — TODA nota de slash-command entra ANTES do sufixo vivo,
