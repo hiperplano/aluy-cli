@@ -1740,6 +1740,13 @@ export class SessionController {
     if (this.pendingInjected.length > 0) {
       attachments = [...this.pendingInjected, ...attachments];
       this.pendingInjected = [];
+      // BUG A — o indicador "encaixando…" (pendingInjectEchoes) sobrevive ao pump do
+      // fan-out p/ a msg do dono NÃO sumir da tela; aqui, ao INCORPORAR de fato esses
+      // pendentes no novo turno, o indicador é limpo (a msg deixou de estar "pendente").
+      if (this.pendingInjectEchoes.length > 0) {
+        this.pendingInjectEchoes = [];
+        this.syncPendingInjects();
+      }
     }
     // EST-0989 — guarda o objetivo JÁ RESOLVIDO (com seed/injected mesclados) p/ o
     // retry do <BrokerError> replicar EXATAMENTE o mesmo turno se o broker falhar.
@@ -5515,9 +5522,12 @@ export class SessionController {
     if (this.liveInjected.length === 0) return;
     this.pendingInjected.push(...this.liveInjected);
     this.liveInjected = [];
-    // Os ecos "encaixando…" desses inputs já não pertencem a ESTE turno (irão pro
-    // próximo): limpa o indicador (mesma higiene do `endTurnInjects`).
-    this.pendingInjectEchoes = [];
+    // BUG A (achado do dono) — NÃO zera os ecos aqui. Antes, ao mover liveInjected→
+    // pendingInjected o pump LIMPAVA `pendingInjectEchoes`, MATANDO o indicador
+    // "encaixando…": a msg do dono SUMIA da tela (preservada em pendingInjected, mas
+    // INVISÍVEL) — exatamente o "minha msg não foi enfileirada / sumiu". A intenção do
+    // dono fica VISÍVEL ("encaixando…") enquanto a msg aguarda incorporação; o indicador
+    // só é limpo quando o `pendingInjected` é DE FATO consumido (ver `submit`/`endTurnInjects`).
     this.syncPendingInjects();
   }
 
