@@ -2084,7 +2084,10 @@ export function App(props: AppProps): React.ReactElement {
     // `[n]`/esc ENCERRA (C3 — default seguro). É decisão HUMANA consciente (o motivo do
     // juiz é DADO rotulado, não instrução).
     if (state.phase === 'cycle-ceiling') {
-      if (char === 'n') {
+      // `n` OU Esc ENCERRA (C3 — default seguro; a tela promete ambos). Espelha os irmãos
+      // `pendingUnsafeConfirm`/`stuck`. Sem a Esc aqui, ela ficava morta nesta fase (o
+      // `return` abaixo engolia tudo) — contradizendo o contrato escrito no gate/controller.
+      if (char === 'n' || key.escape) {
         controller.stopCycleCeiling();
         return;
       }
