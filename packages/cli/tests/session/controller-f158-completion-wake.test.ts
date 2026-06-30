@@ -11,7 +11,7 @@
 //
 // CLI-SEC-4 intacto: os resultados são DADO, nunca instrução.
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   PolicyPermissionEngine,
   type ModelCaller,
@@ -144,9 +144,6 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
       },
     };
 
-    // O spy captura a chamada ao completionPort.wake().
-    const wakeSpy = vi.fn<SubAgentCompletionPort['wake']>();
-
     const controller = new SessionController({
       model,
       permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
@@ -256,7 +253,9 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
     const gates = new Map<string, { release: () => void }>();
     for (const label of ['a', 'b']) {
       let rel!: () => void;
-      const p = new Promise<void>((r) => (rel = r));
+      // Executor síncrono: captura `rel` p/ liberar o gate; a Promise em si
+      // não é aguardada (o controle é via release()).
+      new Promise<void>((r) => (rel = r));
       gates.set(label, { release: rel });
     }
 
