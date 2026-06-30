@@ -35,6 +35,7 @@
     "aluy": "node packages/cli/dist/bin/aluy.js",
     "smoke": "npm run build && node scripts/smoke-e2e.mjs",
     "smoke:subagents": "npm run build && node scripts/smoke-subagents.mjs",
+    "smoke:fanout-inject": "npm run build && node scripts/smoke-fanout-inject.mjs",
     "smoke:subagent-custom-model": "npm run build && node scripts/smoke-subagent-custom-model.mjs",
     "smoke:memory": "npm run build && node scripts/smoke-memory.mjs",
     "smoke:cycle": "npm run build && node scripts/smoke-cycle.mjs",

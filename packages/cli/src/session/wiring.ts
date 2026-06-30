@@ -314,6 +314,11 @@ export interface BuildSessionOptions {
     readonly maxConcurrency?: number;
     /** EST-0969 — timeout de INATIVIDADE por filho (ms), não de relógio total. */
     readonly timeoutMs?: number;
+    /**
+     * FANOUT-17 (task #17) — env injetável p/ a flag `ALUY_FANOUT_DETACH_ON_INJECT`
+     * (Fatia 2). Default: o env da sessão (`opts.env`). Só p/ teste determinístico.
+     */
+    readonly env?: Record<string, string | undefined>;
   };
   /**
    * EST-0977/0978 · ADR-0061 — REGISTRO de agentes-`.md` nomeados (globais + projeto,
@@ -1009,6 +1014,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
       ? {
           subAgents: {
             ...opts.subAgents,
+            // FANOUT-17 (task #17) — thread o env da SESSÃO p/ o controller ler a flag
+            // `ALUY_FANOUT_DETACH_ON_INJECT` (Fatia 2). `opts.subAgents.env` (se vier)
+            // tem precedência (teste); senão o env da sessão (produção). Default OFF.
+            env: opts.subAgents.env ?? env,
             ...(selectHooks(hooksConfig, 'subagent-stop').length > 0
               ? {
                   observer: {
@@ -1076,7 +1085,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // O wiring resolve o `MaestroPort` concreto (engines + bus + rege) e o injeta.
     // Quando OFF (default), retorna undefined ⇒ baseline bit-a-bit.
     ...(() => {
-      const maestro = resolveMaestro({ env, ...(opts.services ? { services: opts.services } : {}) });
+      const maestro = resolveMaestro({
+        env,
+        ...(opts.services ? { services: opts.services } : {}),
+      });
       if (!maestro) return {};
       // F54 — também liga a política de CONTINUAÇÃO (fim-de-turno). Sem este fio,
       // o seam fica inerte e o agente "para e pede totó" (default-ON c/ Maestro).

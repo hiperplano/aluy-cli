@@ -153,6 +153,7 @@ import {
   type SessionState,
   type GovernanceCounts,
   type SubAgentChild,
+  type SubAgentsBlock,
   type TurnAccountingView,
   type ToolLineBlock,
 } from './model.js';
@@ -435,6 +436,13 @@ export interface SessionControllerOptions {
      * substituir o indicador. Opcional.
      */
     readonly observer?: SubAgentObserver;
+    /**
+     * FANOUT-17 (task #17) — env injetável p/ a flag `ALUY_FANOUT_DETACH_ON_INJECT`
+     * (Fatia 2: desacople-por-inject). Default `process.env`. Só p/ teste
+     * determinístico (a Fatia 1 — drenar injects durante o fan-out — NÃO depende
+     * desta flag e é sempre ativa).
+     */
+    readonly env?: Record<string, string | undefined>;
   };
   /**
    * EST-0977/0978 · ADR-0061 — REGISTRO de agentes-`.md` nomeados (já carregado pelo
@@ -651,6 +659,34 @@ export type CycleStartResult =
     };
 
 /**
+ * FANOUT-17 (task #17) — handle do fan-out de sub-agentes VIVO em curso (o `await
+ * port.spawn` do pai está pendurado AGORA, bloqueando o loop). Guardado em
+ * `activeFanout` enquanto o spawn corre, p/ o `injectInput('root')` poder:
+ *  - (Fatia 1, sempre) saber que há fan-out vivo — não usado p/ desacoplar, mas
+ *    o drenador periódico já move `liveInjected`→`pendingInjected` em paralelo;
+ *  - (Fatia 2, atrás da flag) DESACOPLAR o fan-out na hora (`detach()`), reusando
+ *    `detachSpawn`, e devolver o ESTADO VIVO dos filhos (`liveSeed()`) p/ semear
+ *    uma resposta PARALELA — em vez de a injeção esperar o fan-out inteiro.
+ * `detach()` é IDEMPOTENTE (só desacopla na 1ª chamada; chamadas seguintes são
+ * no-op). `liveSeed()` lê o bloco `subagents` corrente (labels+status+resumo) —
+ * o estado real, nunca placeholder morto.
+ */
+interface ActiveFanout {
+  /** Labels do lote em curso (p/ o seed e p/ a nota). */
+  readonly labels: readonly string[];
+  /** DESACOPLA o fan-out vivo (idempotente). Devolve `true` se desacoplou agora. */
+  detach(): boolean;
+  /** `true` se já foi desacoplado (por esc OU por este caminho). */
+  isDetached(): boolean;
+  /**
+   * SEMEIA o estado VIVO dos filhos (labels+fase+resumo) no canal de DADO mid-turn
+   * (`monitorQueue` — o loop o drena no topo da iteração como `observation`), p/ o pai
+   * responder JÁ vendo o estado real (não placeholder). No-op se não houver estado.
+   */
+  seedLiveState(): void;
+}
+
+/**
  * EST-1019 (APR-0086 §A1.1) — funde o teto EMBUTIDO no goal com a FLAG DE BOOT: a flag
  * VENCE a dimensão que ela informa (explícito > embutido); as demais dimensões do pedido
  * embutido (intervalo/budget/ritmo) são preservadas. PURO (sem I/O): só monta o
@@ -701,6 +737,10 @@ const ROOM_SELF_ID = 'agente-principal';
 const ROOM_WATCH_MAX_MS = 120_000; // teto absoluto: 2 min de observação por watch
 const ROOM_WATCH_IDLE_MS = 30_000; // encerra após 30s sem mensagem nova
 const ROOM_WATCH_POLL_MS = 400; // intervalo de poll do store
+// FANOUT-17 (Fatia 1) — intervalo do PUMP que drena os injects do dono enquanto um
+// fan-out está vivo (o loop do pai está bloqueado no `await port.spawn`). Curto o
+// bastante p/ a msg do dono não esperar o fan-out inteiro; barato (só move filas).
+const FANOUT_INJECT_DRAIN_MS = 150;
 /** Signal que NUNCA aborta — p/ o `this.sleep` do watch (sem freio externo amarrado). */
 const NEVER_ABORT = new AbortController().signal;
 
@@ -784,7 +824,11 @@ export class SessionController {
   private readonly autoCompactEnv: Record<string, string | undefined>;
   // ADR-0136 §5 — config.context (autocompactAt/Max/window) p/ re-resolver na troca de tier.
   private readonly contextConfig:
-    | { readonly window?: number; readonly autocompactAt?: number | string; readonly autocompactMax?: number }
+    | {
+        readonly window?: number;
+        readonly autocompactAt?: number | string;
+        readonly autocompactMax?: number;
+      }
     | undefined;
   // EST-0973 — config RESOLVIDA da AUTO-COMPACTAÇÃO da janela (limiar + janela +
   // anti-loop). `at:0` ⇒ desligada (o loop roda baseline). Resolvida no construtor de
@@ -913,6 +957,17 @@ export class SessionController {
   // (o usuário mandou parar tudo — não há "resultado a aproveitar"). Re-armado a
   // cada turno novo (`beginTurn`).
   private hardStopped = false;
+  // FANOUT-17 (Fatia 2) — handle do fan-out VIVO em curso (o `await port.spawn` do
+  // pai está pendurado AGORA). Setado no início de `spawnDetachable` (antes do
+  // `await`), limpo quando o run resolve/desacopla. Dá ao `injectInput('root')` o
+  // gancho p/ DESACOPLAR o fan-out na hora (Fatia 2, atrás da flag) — em vez de a
+  // injeção esperar o fan-out inteiro. `null` quando não há fan-out vivo.
+  private activeFanout: ActiveFanout | null = null;
+  // FANOUT-17 — flag de produto (default OFF = comportamento atual, ZERO regressão).
+  // Fatia 2 (desacople-por-inject) SÓ acende com `ALUY_FANOUT_DETACH_ON_INJECT`
+  // truthy. Lida UMA vez no constructor (env injetável p/ teste). Default falso ⇒
+  // o `injectInput` durante fan-out cai SÓ na Fatia 1 (drena p/ pendingInjected).
+  private readonly fanoutDetachOnInject: boolean;
   // EST-0982 · CLI-SEC-10 — trilha de auditoria do plano de controle (cancel/inject):
   // `actor_type=cli`, nó-alvo. A UI/persistência a LÊ. Vive pela sessão inteira.
   private readonly controlAudit = new ControlAudit();
@@ -1012,6 +1067,12 @@ export class SessionController {
     this.clock = opts.clock ?? Date.now;
     this.isRoot =
       opts.isRoot ?? (() => typeof process.geteuid === 'function' && process.geteuid() === 0);
+    // FANOUT-17 (Fatia 2) — flag de produto (default OFF). Lida UMA vez aqui.
+    {
+      const fanoutEnv = opts.subAgents?.env ?? process.env;
+      const raw = fanoutEnv.ALUY_FANOUT_DETACH_ON_INJECT;
+      this.fanoutDetachOnInject = raw === '1' || raw === 'true' || raw === 'yes';
+    }
     this.maxAttempts = Math.max(1, opts.retry?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
     this.backoffPolicy = { ...DEFAULT_BACKOFF, ...(opts.retry?.backoff ?? {}) };
     this.sleep = opts.retry?.sleep ?? defaultSleep;
@@ -3015,6 +3076,30 @@ export class SessionController {
     // vivo segue o caminho atual (próximo turno do pai re-semeia), sem regressão. NÃO
     // troca a engine (escopo ⊆ pai intocado — RES-C-2); a catraca decide qualquer efeito.
     if (nodeId === 'root' && this.isTurnLive()) {
+      // FANOUT-17 (Fatia 2, atrás de `ALUY_FANOUT_DETACH_ON_INJECT`) — se há um
+      // fan-out VIVO bloqueando o loop do pai AGORA, a injeção do dono ficaria parada
+      // até o fan-out inteiro terminar (a Fatia 1 a salva p/ o próximo turno, mas o
+      // dono espera). Com a flag ON: DESACOPLA o fan-out na hora (reusa `detachSpawn`
+      // via o handle) e SEMEIA o ESTADO VIVO dos filhos (labels+fase+resumo) como
+      // OBSERVATION (DADO, CLI-SEC-4) ANTES do `user_inject` — o pai responde JÁ, em
+      // PARALELO, vendo o estado real (não placeholder). O resultado FINAL chega
+      // mid-turn/pendingSeed quando os filhos concluem (via `onDetachedOutcomes`,
+      // canal escolhido por `isTurnLive`). E-A2 intocado: `detach` chama `detachSpawn`
+      // (idempotente) ⇒ `detachedTrees` populado enquanto houver filho vivo.
+      if (this.fanoutDetachOnInject && this.activeFanout && !this.activeFanout.isDetached()) {
+        const fanout = this.activeFanout;
+        // SEMEIA o estado vivo ANTES de desacoplar (lê o bloco `subagents` corrente, que
+        // ainda reflete os filhos vivos) — entra no canal de DADO mid-turn (monitorQueue),
+        // o loop o drena no MESMO ponto do `user_inject` abaixo.
+        fanout.seedLiveState();
+        if (fanout.detach()) {
+          this.pushNote('sub-agentes em segundo plano', [
+            `o fan-out (${fanout.labels.join(', ')}) foi desacoplado p/ ` +
+              `responder você JÁ — eles seguem trabalhando e o resultado final chega ` +
+              `quando concluírem.`,
+          ]);
+        }
+      }
       this.liveInjected.push(item);
       // Eco REDIGIDO (CLI-SEC-6) na MESMA ordem da fila — drenado p/ a nota "↳ encaixado"
       // quando o loop confirmar a incorporação. Sem texto cru.
@@ -5321,24 +5406,165 @@ export class SessionController {
     const run = spawner.spawn(profiles, signal, { room: roomActive });
     const rootSignal = this.rootFlow?.signal;
     if (!rootSignal) return run;
-    if (rootSignal.aborted) {
+
+    // FANOUT-17 — GUARDA de desacople ÚNICO (idempotente). Tanto o esc (abort da raiz)
+    // quanto a injeção-durante-fan-out (Fatia 2) convergem AQUI: chama `detachSpawn`
+    // UMA vez (E-A2 — `detachedTrees` populado enquanto houver filho vivo, jamais em
+    // dobro). A 1ª chamada vence; as seguintes são no-op.
+    let detached = false;
+    const doDetach = (): boolean => {
+      if (detached) return false;
+      detached = true;
       this.detachSpawn(run, profiles.length);
+      return true;
+    };
+
+    if (rootSignal.aborted) {
+      doDetach();
       return profiles.map((p) => detachedOutcome(p.label));
     }
+
+    // FANOUT-17 (Fatia 1, SEM flag — estritamente melhor) — enquanto o `run` está
+    // pendurado (o loop do pai BLOQUEIA neste `await`), o `pollInjected` do loop NÃO
+    // roda ⇒ os "btw" do dono ficariam parados até o fan-out INTEIRO terminar. Este
+    // pump DRENA periodicamente a fila viva (`liveInjected`) p/ `pendingInjected`, que
+    // o PRÓXIMO turno incorpora — a msg do dono para de esperar o fan-out inteiro. A
+    // catraca é INTOCADA (só move dado entre filas). Para junto com o `run`/abort.
+    const pumpAbort = new AbortController();
+    const pump = this.pumpInjectsDuringFanout(pumpAbort.signal);
+
+    // FANOUT-17 (Fatia 2, atrás da flag) — registra o handle do fan-out vivo p/ o
+    // `injectInput('root')` poder DESACOPLAR na hora. O `detachPromise` resolve quando
+    // a injeção pede o desacople, vencendo a corrida abaixo (resposta paralela já com
+    // seed-vivo). Sempre setado (mesmo com flag OFF) — `detach()` só é CHAMADO pela
+    // injeção quando a flag está ON; com OFF, `injectInput` cai só na Fatia 1.
+    let onInjectDetach: (() => void) | null = null;
+    const detachPromise = new Promise<'detach'>((res) => {
+      onInjectDetach = () => res('detach');
+    });
+    const previousFanout = this.activeFanout;
+    const labels = profiles.map((p) => p.label);
+    const thisFanout: ActiveFanout = {
+      labels,
+      detach: (): boolean => {
+        const did = doDetach();
+        // Acorda a corrida abaixo p/ o pai responder JÁ (seed-vivo), sem esperar o run.
+        onInjectDetach?.();
+        return did;
+      },
+      isDetached: () => detached,
+      seedLiveState: () => this.seedLiveFanoutState(labels),
+    };
+    this.activeFanout = thisFanout;
+
     let onAbort: (() => void) | null = null;
     const aborted = new Promise<'aborted'>((res) => {
       onAbort = () => res('aborted');
       rootSignal.addEventListener('abort', onAbort, { once: true });
     });
     try {
-      const winner = await Promise.race([run, aborted]);
-      if (winner !== 'aborted') return winner;
+      const winner = await Promise.race([run, aborted, detachPromise]);
+      if (winner !== 'aborted' && winner !== 'detach') return winner;
     } finally {
       if (onAbort) rootSignal.removeEventListener('abort', onAbort);
+      pumpAbort.abort();
+      void pump; // o pump resolve sozinho no abort (sem unhandled).
+      // Restaura o handle anterior SÓ se ainda for o NOSSO (defensivo p/ aninhamento;
+      // normalmente `previousFanout` é null e este é o handle vivo).
+      if (this.activeFanout === thisFanout) this.activeFanout = previousFanout;
     }
-    // O turno do PAI foi interrompido (esc) com o fan-out vivo ⇒ DESACOPLA.
-    this.detachSpawn(run, profiles.length);
+    // O turno do PAI cessou com o fan-out vivo — por esc (abort) OU por injeção
+    // (Fatia 2). Em AMBOS, `doDetach` já foi/é chamado (idempotente): os FILHOS
+    // SEGUEM vivos, cercados pelos MESMOS tetos (E-A2 — `detachedTrees` populado).
+    doDetach();
     return profiles.map((p) => detachedOutcome(p.label));
+  }
+
+  /**
+   * FANOUT-17 (Fatia 1) — PUMP de drenagem de injects enquanto um fan-out está vivo.
+   * O loop do pai está BLOQUEADO no `await port.spawn` (não chega ao `pollInjected`),
+   * então NADA moveria a fila viva (`liveInjected`). Este pump roda em paralelo ao
+   * fan-out e, a cada intervalo, move o que o dono injetou p/ `pendingInjected` (o
+   * MESMO destino do caminho PARADO) — o próximo turno o incorpora. A catraca é
+   * INTOCADA (só move dado entre filas; nenhum efeito é executado). Para no abort
+   * (fan-out terminou/desacoplou). Usa o `sleep` injetável (teste determinístico).
+   */
+  private async pumpInjectsDuringFanout(signal: AbortSignal): Promise<void> {
+    // `this.sleep` (o sleep do auto-retry) REJEITA no abort — então o abort do pump
+    // (fan-out terminou/desacoplou) faria um throw. Tratamos o abort como término
+    // NORMAL: `try/catch` + checagem do signal. NUNCA propaga (sem unhandled). O pump
+    // é puramente higiênico (move filas) — jamais derruba o fan-out nem o turno.
+    for (;;) {
+      try {
+        await this.sleep(FANOUT_INJECT_DRAIN_MS, signal);
+      } catch {
+        return; // abort (ou erro do sleep) ⇒ encerra o pump em silêncio.
+      }
+      if (signal.aborted) return;
+      this.drainLiveInjectsToPending();
+    }
+  }
+
+  /**
+   * FANOUT-17 (Fatia 1) — move a fila VIVA de injeção (`liveInjected`) p/
+   * `pendingInjected`, mantendo os ecos REDIGIDOS coerentes (CLI-SEC-6). Idempotente
+   * (fila vazia ⇒ no-op). Reusa a MESMA semântica do `endTurnInjects`: o dono não
+   * perde a intenção; o próximo `submit`/turno a incorpora como `user_inject`.
+   */
+  private drainLiveInjectsToPending(): void {
+    if (this.liveInjected.length === 0) return;
+    this.pendingInjected.push(...this.liveInjected);
+    this.liveInjected = [];
+    // Os ecos "encaixando…" desses inputs já não pertencem a ESTE turno (irão pro
+    // próximo): limpa o indicador (mesma higiene do `endTurnInjects`).
+    this.pendingInjectEchoes = [];
+    this.syncPendingInjects();
+  }
+
+  /**
+   * FANOUT-17 (Fatia 2) — SEMEIA o ESTADO VIVO dos filhos no canal de DADO MID-TURN
+   * (`monitorQueue`), quando o fan-out é desacoplado por uma injeção do dono. Lê o
+   * estado REAL dos filhos do bloco `subagents` corrente (labels+fase+resumo) — NÃO um
+   * placeholder morto — e o ENFILEIRA como evento de monitor, que o loop drena no topo
+   * da iteração e injeta como `observation` (DADO não-confiável, CLI-SEC-4 — nunca
+   * instrução; um efeito derivado RE-PASSA `decide()`). Reusa o MESMO canal de DADO
+   * assíncrono do monitor — não o `liveInjected` (que o loop FILTRA p/ só `user_inject`,
+   * por segurança). No-op se não houver estado a semear. `monitorId` estável
+   * (`fanout-detach`) ⇒ coalescente (não floda se chamado 2×).
+   */
+  private seedLiveFanoutState(labels: readonly string[]): void {
+    const blocks = this.state.blocks;
+    let block: SubAgentsBlock | undefined;
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (b && b.kind === 'subagents') {
+        block = b;
+        break;
+      }
+    }
+    const lines = (block?.children ?? [])
+      .filter((c) => labels.includes(c.label))
+      .map((c) => {
+        const tail = c.summary ? ` — ${c.summary}` : '';
+        return `• ${c.label} [${c.status}]${tail}`;
+      });
+    const payload =
+      lines.length > 0
+        ? `estado VIVO dos sub-agentes em segundo plano (desacoplados — seguem ` +
+          `trabalhando; o resultado FINAL chega quando concluírem):\n${lines.join('\n')}`
+        : labels.length > 0
+          ? `sub-agentes em segundo plano (desacoplados — seguem trabalhando): ` +
+            `${labels.join(', ')}. O resultado final chega quando terminarem.`
+          : null;
+    if (payload === null) return;
+    this.monitorQueue.enqueue({
+      monitorId: 'fanout-detach',
+      label: 'sub-agentes (estado vivo)',
+      type: 'process-wait',
+      condition: 'fan-out desacoplado por injeção',
+      payload,
+      firedAt: new Date(this.clock()).toISOString(),
+    });
   }
 
   /**
@@ -5384,13 +5610,34 @@ export class SessionController {
    */
   private onDetachedOutcomes(outcomes: readonly SubAgentOutcome[]): void {
     if (outcomes.length === 0 || this.hardStopped) return;
-    const item: HistoryItem = {
-      role: 'observation',
-      toolName: 'spawn_agent',
-      text: formatSubAgentResults(outcomes),
-    };
-    this.pendingSeed = [...(this.pendingSeed ?? []), item];
     const n = outcomes.length;
+    const text = formatSubAgentResults(outcomes);
+    // FANOUT-17 (Fatia 2) — ESCOLHE O CANAL por `isTurnLive()`. Se o desacople foi por
+    // INJEÇÃO (a flag) e o turno-RESPOSTA do pai AINDA está vivo (ele respondeu em
+    // paralelo e segue iterando), o resultado REAL chega MID-TURN pelo canal de DADO do
+    // monitor (`monitorQueue`) — o loop o drena no topo da iteração como `observation`,
+    // SEM esperar o próximo `submit`. Se o pai já encerrou (esc clássico / resposta
+    // curta finalizada), cai no `pendingSeed` de sempre (próximo submit o vê). Em AMBOS
+    // é OBSERVATION rotulada (CLI-SEC-4) — nunca instrução; a catraca é intocada.
+    if (this.isTurnLive()) {
+      this.monitorQueue.enqueue({
+        monitorId: 'fanout-result',
+        label: 'sub-agentes concluíram',
+        type: 'process-wait',
+        condition: 'fan-out desacoplado terminou',
+        payload: text,
+        firedAt: new Date(this.clock()).toISOString(),
+      });
+      this.pushNote('sub-agentes concluíram', [
+        `${n} resultado${n > 1 ? 's' : ''} pronto${n > 1 ? 's' : ''} — ` +
+          `entra${n > 1 ? 'm' : ''} como dado NESTE turno.`,
+      ]);
+      return;
+    }
+    this.pendingSeed = [
+      ...(this.pendingSeed ?? []),
+      { role: 'observation', toolName: 'spawn_agent', text },
+    ];
     this.pushNote('sub-agentes concluíram', [
       `${n} resultado${n > 1 ? 's' : ''} pronto${n > 1 ? 's' : ''} — entra${n > 1 ? 'm' : ''} ` +
         `como dado no próximo turno (é só perguntar).`,
