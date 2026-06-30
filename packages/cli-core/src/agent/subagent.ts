@@ -292,6 +292,17 @@ export interface SubAgentObserver {
   onChildEnd?(label: string, outcome: SubAgentOutcome): void;
 }
 
+/**
+ * EST-F158 — PORTA DE COMPLETION de sub-agentes: o `SubAgentSpawner` a chama
+ * IMEDIATAMENTE após TODOS os filhos de um lote terminarem (fan-out completo),
+ * com os desfechos prontos. O locus concreto (@hiperplano/aluy-cli) usa isto
+ * para ACORDAR o turn-loop do Maestro e processar os resultados na hora
+ * (orientado a evento), sem polling nem esperar o próximo submit do usuário.
+ */
+export interface SubAgentCompletionPort {
+  wake(outcomes: readonly SubAgentOutcome[]): void;
+}
+
 export interface SubAgentSpawnerOptions {
   /** O MESMO ModelCaller do pai (toda llm_call pelo broker — CLI-SEC-7). */
   readonly model: ModelCaller;
@@ -396,6 +407,12 @@ export interface SubAgentSpawnerOptions {
    * O locus concreto (@hiperplano/aluy-cli) liga isto ao `NodeWorktreePort`.
    */
   readonly worktree?: import('./worktree-port.js').WorktreePort;
+  /**
+   * EST-F158 — PORTA de completion: chamada pelo spawner IMEDIATAMENTE após
+   * TODOS os filhos de um lote terminarem. O locus concreto usa isto para ACORDAR
+   * o turn-loop do Maestro (orientado a evento). Ausente ⇒ no-op (back-compat).
+   */
+  readonly completionPort?: SubAgentCompletionPort;
 }
 
 /**
@@ -642,6 +659,8 @@ export class SubAgentSpawner {
   private readonly roomCode?: string;
   /** EST-1098 (WT-1) — porta de isolamento por worktree (ausente ⇒ isolation no-op). */
   private readonly worktree?: import('./worktree-port.js').WorktreePort;
+  /** EST-F158 — porta de completion: acordar o Maestro quando o fan-out termina. */
+  private readonly completionPort?: SubAgentCompletionPort;
 
   constructor(opts: SubAgentSpawnerOptions) {
     // display: os filhos usam o caller DEDICADO (sem o sink ao vivo do pai) — se
@@ -673,6 +692,7 @@ export class SubAgentSpawner {
     this.roomArtPattern = opts.roomArtPattern ?? ROOM_ART_PATTERN_DEFAULT;
     if (opts.roomCode) this.roomCode = opts.roomCode;
     if (opts.worktree) this.worktree = opts.worktree;
+    if (opts.completionPort) this.completionPort = opts.completionPort;
   }
 
   /** O budget compartilhado (p/ o pai contabilizar/auditar — E-A2). */
@@ -745,6 +765,10 @@ export class SubAgentSpawner {
     };
 
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    // EST-F158 — acorda o Maestro IMEDIATAMENTE quando o fan-out termina. O locus
+    // concreto (controller) enfileira os resultados no canal mid-turn e dispara o
+    // wake do turn-loop — o pai processa na hora, sem esperar o próximo submit.
+    this.completionPort?.wake(outcomes);
     return outcomes;
   }
 

@@ -108,6 +108,7 @@ import {
   type SessionMode,
   type SubAgentObserver,
   type SubAgentOutcome,
+  type SubAgentCompletionPort,
   type ToolCall,
   type ToolLifecycleObserver,
   type PreToolGate,
@@ -931,6 +932,10 @@ export class SessionController {
   private readonly monitorQueue: EventQueue;
   // EST-1103 — trava anti-runaway: impede o wake do monitor de se auto-realimentar.
   private monitorWaking = false;
+  // EST-F158 — flag: há resultados de fan-out pendentes no monitorQueue que devem
+  // furar a guarda `detachedTrees>0` do maybeWakeForMonitor. Setado por onFanoutCompleted
+  // antes de chamar maybeWakeForMonitor; limpo após o drain.
+  private pendingFanoutCompletion = false;
   // EST-ROOMS-3 · ADR-0081 — salas da sessão + políticas (writers/maxHops) por código.
   private readonly roomStore: RoomStore;
   private readonly roomPolicies = new Map<string, MeshPolicy>();
@@ -1075,6 +1080,12 @@ export class SessionController {
   // EST-1107 — SPAWNER de sub-agentes (construído no constructor quando subAgents habilitado).
   // Reusado pelo modo ATIVO de workflow p/ delegar atividades com [agente].
   private spawner: SubAgentSpawner | null = null;
+  // EST-F158 — completionPort do spawner: chamado quando o fan-out termina. ACORDA o
+  // turn-loop do Maestro via onFanoutCompleted(), que enfileira os resultados no
+  // monitorQueue e dispara maybeWakeForMonitor() — o pai processa na hora.
+  private spawnerCompletionPort: SubAgentCompletionPort = {
+    wake: (outcomes) => this.onFanoutCompleted(outcomes),
+  };
   // EST-1107 — Workflow ATIVO no modo "use" (submissão direcionada pelo fluxo).
   private activeWorkflow: WorkflowDef | null = null;
   // EST-0944 (refino #121) — `true` enquanto a PRÓXIMA passada do modelo for a
@@ -1391,6 +1402,10 @@ export class SessionController {
             now: () => this.clock(),
             genMsgId: () => this.nextRoomMsgId(),
           }) as readonly NativeTool<ToolPorts>[],
+        // EST-F158 — completionPort: quando o fan-out termina, o spawner chama wake()
+        // e o controller ACORDA o turn-loop do Maestro IMEDIATAMENTE (orientado a
+        // evento) — sem polling, sem esperar o próximo submit do usuário.
+        completionPort: this.spawnerCompletionPort,
       });
       // EST-1107 — guarda o spawner p/ o modo ATIVO de workflow delegar etapas.
       this.spawner = spawner;
@@ -1848,15 +1863,26 @@ export class SessionController {
     if (this.monitorWaking) return;
     // 2. Só acorda se OCIOSO/REPOUSO. Durante um turno, o drain interno do loop já pega o evento.
     if (this.state.phase !== 'idle' && this.state.phase !== 'done') return;
-    // 3. Só acorda se não houver ciclo ativo nem sub-agentes desacoplados vivos.
-    if (this.cycleActive || this.detachedTrees.size > 0) return;
+    // 3. Só acorda se não houver ciclo ativo. Sub-agentes desacoplados vivos normalmente
+    //    bloqueiam o wake (evita race com agentes mid-work), mas RESULTADOS de fan-out
+    //    (fanout-completed) FURAM a guarda: o usuário vê o resultado na hora (F158).
+    if (this.cycleActive) return;
+    if (this.detachedTrees.size > 0 && !this.pendingFanoutCompletion) return;
     // 4. Se a fila já está vazia, não há o que drenar.
-    if (this.monitorQueue.pending() === 0) return;
+    if (this.monitorQueue.pending() === 0) {
+      this.pendingFanoutCompletion = false; // limpou sozinho
+      return;
+    }
     // 5. Drena os eventos pendentes.
     const events = this.monitorQueue.drain();
-    if (events.length === 0) return;
+    if (events.length === 0) {
+      this.pendingFanoutCompletion = false;
+      return;
+    }
 
     this.monitorWaking = true;
+    // EST-F158 — limpa o flag de fanout-completion (consumido neste wake).
+    this.pendingFanoutCompletion = false;
     // 6. Empurra uma NOTA visível.
     this.pushNote(
       'monitor',
@@ -5881,6 +5907,57 @@ export class SessionController {
       `${n} resultado${n > 1 ? 's' : ''} pronto${n > 1 ? 's' : ''} — entra${n > 1 ? 'm' : ''} ` +
         `como dado no próximo turno (é só perguntar).`,
     ]);
+    // EST-F158 — ACORDA o turn-loop IMEDIATAMENTE: enfileira no canal mid-turn e
+    // dispara maybeWakeForMonitor. O flag fura a guarda detachedTrees>0 (F158).
+    this.monitorQueue.enqueue({
+      monitorId: 'fanout-result',
+      label: 'sub-agentes concluíram',
+      type: 'process-wait',
+      condition: 'fan-out desacoplado terminou',
+      payload: text,
+      firedAt: new Date(this.clock()).toISOString(),
+    });
+    this.pendingFanoutCompletion = true;
+    this.maybeWakeForMonitor();
+  }
+
+  /**
+   * EST-F158 — COMPLETION de fan-out NORMAL (não-desacoplado): o spawner terminou e
+   * chamou `completionPort.wake()`. Enfileira os resultados no canal mid-turn
+   * (`monitorQueue`) e ACORDA o turn-loop via `maybeWakeForMonitor()` — se o pai
+   * está ocioso/idle, processa na hora; se está em turno vivo, o drain do loop
+   * (topo da iteração) já pega. O flag `pendingFanoutCompletion` fura a guarda
+   * `detachedTrees>0` do maybeWakeForMonitor (F158) — mas só para ESTE evento,
+   * sem relaxar o wake geral (evita race com agentes desacoplados mid-work).
+   *
+   * CLI-SEC-4 intacto: os resultados entram como `observation` rotulada (DADO),
+   * nunca instrução. A catraca é intocada. Idempotente (fan-out vazio ⇒ no-op).
+   */
+  private onFanoutCompleted(outcomes: readonly SubAgentOutcome[]): void {
+    if (outcomes.length === 0 || this.hardStopped) return;
+    const text = formatSubAgentResults(outcomes);
+    const n = outcomes.length;
+    // Fan-out NORMAL terminou enquanto o pai está no turno (não-desacoplado):
+    // os resultados JÁ chegam como tool-result do spawn_agent — este enfileiramento
+    // é redundância de segurança p/ o caso raro de o pai já ter saído do await.
+    // Se o turno está vivo, o drain do loop processa. Se ocioso, o wake acorda.
+    this.monitorQueue.enqueue({
+      monitorId: 'fanout-completed',
+      label: 'fan-out concluído',
+      type: 'process-wait',
+      condition: 'sub-agentes terminaram (completion wake)',
+      payload: text,
+      firedAt: new Date(this.clock()).toISOString(),
+    });
+    this.pushNote('fan-out concluído', [
+      `${n} sub-agente${n > 1 ? 's' : ''} terminou — ` +
+        `resultado${n > 1 ? 's' : ''} ` +
+        `${this.isTurnLive() ? 'entra' : 'entram'} como dado.`,
+    ]);
+    // EST-F158 — acorda o turn-loop: se o pai está ocioso (ex.: terminou enquanto
+    // aguardava), processa IMEDIATAMENTE. O flag fura a guarda detachedTrees>0.
+    this.pendingFanoutCompletion = true;
+    this.maybeWakeForMonitor();
   }
 
   /**
