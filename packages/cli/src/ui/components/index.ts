@@ -33,6 +33,8 @@ export { BudgetGate } from './BudgetGate.js';
 export type { BudgetGateProps } from './BudgetGate.js';
 export { StuckGate } from './StuckGate.js';
 export type { StuckGateProps } from './StuckGate.js';
+export { CycleCeilingGate } from './CycleCeilingGate.js';
+export type { CycleCeilingGateProps } from './CycleCeilingGate.js';
 export { LoginFlow } from './LoginFlow.js';
 export type { LoginFlowProps } from './LoginFlow.js';
 export { SlashMenu } from './SlashMenu.js';

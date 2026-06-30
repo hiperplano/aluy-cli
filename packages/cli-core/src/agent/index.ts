@@ -455,6 +455,19 @@ export {
   type CycleRhythm,
   type ParsedCycleInput,
   type AbortableSleep,
+  // ADR-0137 (Fatia 3) — política PURA de continuação de subciclo guiada pelo juiz.
+  CYCLE_CONTINUE_OPTION_ID,
+  CYCLE_STOP_OPTION_ID,
+  CYCLE_JUDGE_OPTIONS,
+  CYCLE_JUDGE_QUESTION,
+  DEFAULT_JUDGE_REASON_MAX_CHARS,
+  buildRedactedSubcycleContext,
+  buildSubcycleJudgeInput,
+  judgeResultToContinuation,
+  clampReasonToLine,
+  type SubcycleSummaryInput,
+  type SubcycleBox,
+  type CycleContinuation,
 } from './cycle/index.js';
 
 // EST-0983 · ADR-0064 · CLI-SEC-15 — MEMÓRIA de agente: tool `remember` (porta de
