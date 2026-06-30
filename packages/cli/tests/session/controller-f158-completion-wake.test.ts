@@ -261,6 +261,7 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
     }
 
     let parentSession: string | null = null;
+    let parentCalls = 0;
     const model: ModelCaller = {
       async call(args): Promise<ModelCallResult> {
         const key = args.idempotencyKey;
@@ -270,9 +271,11 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
         const isParent = sessionId === parentSession;
 
         if (isParent) {
-          const text = args.messages.map((m) => m.content).join('\n');
-          // 1º turno: spawn; 2º turno em diante: só ecoa "ok".
-          if (!text.includes('spawn_agent')) {
+          // 1º turno do PAI: spawn; 2º em diante: só ecoa "ok". Contagem robusta
+          // (não por texto: o nome `spawn_agent` aparece no contexto já na 1ª
+          // chamada e quebraria a heurística de `text.includes`).
+          parentCalls += 1;
+          if (parentCalls === 1) {
             return {
               request_id: 'rp',
               content: toolCall(SPAWN, {
@@ -293,7 +296,10 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
           };
         }
         // FILHO: pendura no gate (simula long-running) OU abort.
-        const label = args.messages.map((m) => m.content).join('\n').includes('tarefa a')
+        const label = args.messages
+          .map((m) => m.content)
+          .join('\n')
+          .includes('tarefa a')
           ? 'a'
           : 'b';
         await Promise.race([
