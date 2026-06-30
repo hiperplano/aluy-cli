@@ -139,6 +139,7 @@ import { applyResumeRecord, runHistoryLinear } from './history.js';
 import { createBootSplash, resolveSplashMinMs, type BootSplash } from './splash-controller.js';
 import { emitBootClear } from './run-clear.js';
 import { rearmStdinForInk } from './stdin-rearm.js';
+import { installCsiUGuard } from './csi-u-guard.js';
 import {
   newSessionId,
   expandUserCommand,
@@ -2561,6 +2562,15 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // `stdin-rearm.ts` (guarda a regressão do gate de plataforma).
   rearmStdinForInk(process.stdin);
 
+  // task #18 (🔴 CRASH — DERRUBA o app) — INSTALA o guard de CSI-u ANTES de o Ink montar.
+  // Uma sequência CSI-u de tecla FUNCIONAL do kitty keyboard protocol (ex.: `\x1b[57414u`)
+  // faz o `parseKeypress` do Ink devolver `ctrl=true`+`name=undefined`, e o `use-input.js`
+  // crasha em `input.startsWith(undefined)`. O guard FILTRA essas sequências do chunk que o
+  // Ink lê via `stdin.read()` — elas NUNCA chegam ao parse (crash some na origem). Escopo
+  // mínimo, não mascara (≠ engolir uncaughtException). Best-effort: sem `read` ⇒ no-op. O
+  // `restore()` é encadeado no cleanup junto dos outros (raw-mode/paste) p/ não vazar o wrap.
+  const restoreCsiUGuard = installCsiUGuard(process.stdin);
+
   try {
     // Anti "dois splashes" (feedback Tiago): o run.tsx JÁ mostrou o SplashScreen
     // (marca + quip). A fase 'boot' da App renderiza um <Boot> ("conectando")
@@ -2897,6 +2907,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     } catch {
       /* best-effort */
     }
+    // task #18 — DESFAZ o wrap do `read()` (guard de CSI-u) ao sair, em QUALQUER caminho de
+    // término (unmount limpo / crash do `render` / sinal). Idempotente; restaura SÓ se ainda
+    // for o nosso wrap — não vaza o interpositor entre sessões nem pisa num wrap de terceiros.
+    restoreCsiUGuard();
     // EST-0965 — ESU FINAL ao desmontar (unmount limpo OU crash propagado pelo
     // waitUntilExit — daí o `finally`): garante que o terminal NÃO fica preso em modo
     // sync e o cursor reaparece. Idempotente c/ o handler de sinal. Solta também os

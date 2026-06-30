@@ -49,6 +49,7 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ### Corrigido
 
+- 🔴 TUI: sequência CSI-u de tecla funcional do kitty keyboard protocol (ex.: `\x1b[57414u`) não derruba mais o app — um guard no canal RAW filtra a sequência antes de chegar ao `parseKeypress` do Ink, que crashava em `use-input.js` (`startsWith` sobre `undefined`) (#18).
 - Splash: elimina reticências duplicado em "carregando…/descobrindo MCP…" (#229).
 - Cockpit: overflow `hidden` na região de conversa — fim da sangria/perda de conteúdo (#224).
 - Eviction de monitores mortos no arm — fim do cap sem reuso (#222).
