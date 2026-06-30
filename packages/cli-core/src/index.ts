@@ -25,6 +25,16 @@ export * from './model/index.js';
 // separação de canais (CLI-SEC-4) + Idempotency-Key (nasce no loop). TODO
 // tool-call passa pelo ponto único `decide()` (CLI-SEC-H1). PORTÁVEL (sem Ink/IO).
 export * from './agent/index.js';
+// Fatia 3 (ADR-0137) — re-export EXPLÍCITO do seam de juiz de subciclo. O `export *` acima
+// DROPAVA estes nomes (ambiguidade silenciosa do star-export) → ficavam undefined no runtime →
+// `applyCycleJudge` quebrava ao chamar `buildSubcycleJudgeInput(undefined)` e fail-open silenciava
+// o juiz (nunca consultado). Export NOMEADO vence a ambiguidade: força os símbolos no .d.ts e no .js.
+export {
+  buildSubcycleJudgeInput,
+  judgeResultToContinuation,
+  clampReasonToLine,
+} from './agent/cycle/index.js';
+export type { SubcycleBox, CycleContinuation } from './agent/cycle/index.js';
 
 // Sandbox de SO (EST-1009 · ADR-0065 · CLI-SEC-H1): a FUNDAÇÃO PORTÁVEL do piso de
 // SO sob a catraca — tipos da primitiva (SandboxLauncher/Confinement), decisão de
