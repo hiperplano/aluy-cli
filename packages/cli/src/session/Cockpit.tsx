@@ -323,6 +323,11 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
           columns={props.columns}
           error={props.state.phase === 'error'}
           {...(props.state.meta.focus !== undefined ? { focus: props.state.meta.focus } : {})}
+          {...(process.env.ALUY_CYCLE_UI_OFF !== '1' &&
+          process.env.ALUY_CYCLE_UI_OFF !== 'true' &&
+          props.state.cycleProgress !== undefined
+            ? { cycleProgress: props.state.cycleProgress }
+            : {})}
         />
       </Box>
 

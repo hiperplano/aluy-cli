@@ -114,6 +114,9 @@ import {
   type MemoryEngine,
 } from '@hiperplano/aluy-cli-core';
 import { runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
+// FATIA 1 (CICLOS/SUBCICLOS) — mesmo critério `!closed` da continuação plano-pendente,
+// reusado p/ contar os subciclos do `cycleProgress` (cache de render da StatusBar).
+import { hasPendingPlanWork } from '@hiperplano/aluy-cli-core';
 import {
   EventQueue,
   formatMonitorEventAsData,
@@ -759,6 +762,11 @@ export class SessionController {
   // lê (não a muta — quem muta é a tool `change_dir`) p/ ESPELHAR o cwd corrente no
   // StatusBar após cada tool. `null` se a sessão não tiver porta de cwd (não-regressão).
   private readonly cwdPort: CwdPort | null;
+  // FATIA 1 (CICLOS/SUBCICLOS) — porta do ContextGraph (plano/`update_plan`). O controller
+  // a LÊ (snapshot, sem mutar) p/ contar os SUBCICLOS (caixas do plano) no `cycleProgress`
+  // (cache de render da StatusBar). `undefined` se a sessão não montou o graph (degrada —
+  // a barra mostra só `↻ ciclo N/M`, sem subciclos).
+  private readonly graphPort: ToolPorts['graph'];
   // EST-0978 · RES-MD-1 — o MESMO resolver de ask da sessão (a catraca CLI-SEC-3/9).
   // Reusado p/ a CONFIRMAÇÃO do conflito cross-camada na delegação por nome (anti-
   // spoofing): sem TTY/timeout/abort ⇒ deny fail-closed (garantido pelo resolver).
@@ -1015,6 +1023,7 @@ export class SessionController {
     // EST-0982 — guarda a porta de cwd (se houver) p/ espelhar o `sessionCwd` no
     // StatusBar após cada tool. Só LEITURA aqui — a navegação é da tool `change_dir`.
     this.cwdPort = opts.ports.cwd ?? null;
+    this.graphPort = opts.ports.graph; // FATIA 1 — leitura do plano p/ os subciclos
     this.tuiResolver = isTuiResolver(opts.askResolver) ? opts.askResolver : null;
     // EST-1110 · ADR-0114 — resolver de PERGUNTA (TUI), quando injetado pelo wiring.
     this.questionResolver = opts.questionResolver ?? null;
@@ -2009,6 +2018,24 @@ export class SessionController {
   }
 
   /**
+   * FATIA 1 (CICLOS/SUBCICLOS) — conta os SUBCICLOS (caixas do plano/ContextGraph) p/ o
+   * cache de render do `cycleProgress`. SUBCICLO ≡ caixa do `update_plan`. `total` é o nº
+   * de caixas; `done` as FECHADAS (`closed`). PURO: lê o snapshot do graph (sem mutar,
+   * sem tocar a catraca). Sem graph / sem plano ⇒ `{done:0,total:0}` (a barra omite os
+   * subciclos). Reusa `hasPendingPlanWork` (mesmo critério `!closed` da continuação) p/ a
+   * coerência com o gatilho de continuação plano-pendente.
+   */
+  private subcycleCounts(): { done: number; total: number } {
+    const boxes = this.graphPort?.listBoxes() ?? [];
+    if (boxes.length === 0) return { done: 0, total: 0 };
+    // `done` = caixas fechadas; o restante (pendente/in-progress) é o que `hasPendingPlanWork`
+    // sinaliza como NÃO concluído — mesmo critério (`!closed`), aqui agregado em contagem.
+    const pending = hasPendingPlanWork(boxes) ? boxes.filter((b) => !b.closed).length : 0;
+    const total = boxes.length;
+    return { done: total - pending, total };
+  }
+
+  /**
    * EST-0981 · ADR-0062 (APR-0067) · CLI-SEC-14 (GS-L1..L8 · RES-L-1/2/3/4) — `/cycle`:
    * autonomia REPETIDA. Roda a MESMA `task` em ciclos, SEM confirmação humana por-ciclo,
    * cercada por PARADAS DURAS e parável.
@@ -2084,7 +2111,21 @@ export class SessionController {
     this.cycleActive = true;
     this.dismissBoot();
     this.pushBlock({ kind: 'you', text: `/cycle ${input}` });
-    this.patch({ phase: 'thinking', workingLabel: 'em ciclo', cycleActive: true });
+    // FATIA 1 (CICLOS/SUBCICLOS) — semeia o cache de render do progresso já no início:
+    // ciclo 1/M (o `onCycleStart` o atualiza por iteração) + os subciclos correntes do
+    // plano. `ceilings.maxIterations` é o teto de ciclos (M). Só DISPLAY — o loop não muda.
+    const seedSub = this.subcycleCounts();
+    this.patch({
+      phase: 'thinking',
+      workingLabel: 'em ciclo',
+      cycleActive: true,
+      cycleProgress: {
+        iteration: 1,
+        max: ceilings.maxIterations,
+        subcyclesDone: seedSub.done,
+        subcyclesTotal: seedSub.total,
+      },
+    });
     // Reusa o MESMO freio da sessão (EST-0948/0982): a FlowTree do turno; o signal da
     // raiz vai ao CycleEngine E a cada `this.loop.run`. `interrupt()` aborta a raiz ⇒
     // o CycleEngine para entre ciclos e o ciclo em curso cessa (GS-L5/RES-L-2).
@@ -2161,7 +2202,22 @@ export class SessionController {
     };
 
     const cycleObserver: CycleObserver = {
-      onCycleStart: (i) => this.patch({ phase: 'thinking', workingLabel: `ciclo ${i + 1}` }),
+      onCycleStart: (i) => {
+        // FATIA 1 (CICLOS/SUBCICLOS) — `i` é a iteração 0-based; o display é 1-based
+        // (`ciclo N/M`). Re-lê os subciclos do plano A CADA início de ciclo (o
+        // `update_plan` do ciclo anterior pode ter aberto/fechado caixas). Só display.
+        const sub = this.subcycleCounts();
+        this.patch({
+          phase: 'thinking',
+          workingLabel: `ciclo ${i + 1}`,
+          cycleProgress: {
+            iteration: i + 1,
+            max: ceilings.maxIterations,
+            subcyclesDone: sub.done,
+            subcyclesTotal: sub.total,
+          },
+        });
+      },
     };
 
     const engine = new CycleEngine({
@@ -2197,7 +2253,9 @@ export class SessionController {
       // `state.cycleActive`) re-tenta — o efeito da fila re-roda nesta re-publicação.
       this.activeCycleEngine = null; // EST-1158
       this.cycleActive = false;
-      this.patch({ cycleActive: false });
+      // FATIA 1 (CICLOS/SUBCICLOS) — LIMPA o cache de render do progresso junto da guarda:
+      // sem ciclo ativo, a StatusBar não deve mais mostrar `↻ ciclo N/M` (some no repouso).
+      this.patch({ cycleActive: false, cycleProgress: undefined });
       this.abort = null;
       this.endTurnAccounting();
     }

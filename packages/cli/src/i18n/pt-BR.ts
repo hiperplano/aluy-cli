@@ -56,6 +56,8 @@ export const ptBR: FullCatalog = {
   'statusbar.window': 'janela',
   'statusbar.session': 'sessão',
   'statusbar.quota': 'quota',
+  'statusbar.cycle': 'ciclo',
+  'statusbar.subcycles': 'subciclos',
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': 'broker',

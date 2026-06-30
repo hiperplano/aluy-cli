@@ -93,6 +93,10 @@ export interface Catalog {
   'statusbar.session': string;
   /** Rótulo do medidor de quota de billing (`◔ NN% quota`). */
   'statusbar.quota': string;
+  /** FATIA 1 — rótulo do CICLO de vida do loop (`↻ ciclo N/M`). */
+  'statusbar.cycle': string;
+  /** FATIA 1 — rótulo dos SUBCICLOS (caixas do plano) (`· subciclos K/T`). */
+  'statusbar.subcycles': string;
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': string;
