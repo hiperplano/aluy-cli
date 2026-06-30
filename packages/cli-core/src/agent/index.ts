@@ -238,6 +238,7 @@ export {
   type SubAgentProfile,
   type SubAgentOutcome,
   type SubAgentObserver,
+  type SubAgentCompletionPort,
   type SubAgentSpawnerOptions,
   type RoomArtPattern,
 } from './subagent.js';
