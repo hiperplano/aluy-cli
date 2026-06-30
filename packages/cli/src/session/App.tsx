@@ -131,6 +131,7 @@ import {
   type PasteEvent,
   type InputPasteGate,
 } from './bracketed-paste.js';
+import { isUnrecognizedEscapeTail } from './escape-leak.js';
 import {
   createPasteRegistry,
   shouldCollapse,
@@ -1678,6 +1679,16 @@ export function App(props: AppProps): React.ReactElement {
     // bytes — senão o detector de lote (EST-0948) submeteria a 1ª linha do paste. O gate
     // rastreia o paste pelos marcadores no próprio `char` e suprime enquanto ABERTO.
     if (gateInputPaste(inputPasteGateRef.current, char)) return;
+
+    // ── BUG-A (task #16) — VAZAMENTO de sequência de escape como TEXTO no composer ──
+    // Um terminal que emita shift+enter via CSI-u (`\x1b[13;2u`, kitty) ou modifyOtherKeys
+    // (`\x1b[27;2;13~`) SEM o aluy ter negociado o protocolo: o Ink engole o `\x1b` mas
+    // entrega a CAUDA (`[13;2u` / `[27;2;13~`) como `char` ⇒ vazava como texto literal
+    // (`› AAA[13;2uBBB●`). `isUnrecognizedEscapeTail` reconhece o corpo COMPLETO de uma
+    // sequência CSI/SS3 (introdutor `[`/`O` + params + byte final) e a SUPRIME. Um `[`/`O`
+    // DIGITADO sozinho (len 1, sem byte final) NÃO casa ⇒ a digitação normal segue intacta.
+    // Roda DEPOIS do gate de paste (que já trata os marcadores `[200~`/`[201~`).
+    if (isUnrecognizedEscapeTail(char)) return;
 
     // ── splash de boot: QUALQUER tecla dispensa (a sessão começou) ───────────
     if (state.phase === 'boot') {
