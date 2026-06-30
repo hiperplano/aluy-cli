@@ -340,6 +340,7 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
           showCursor={props.showCursor}
           shellMode={props.input.startsWith('!')}
           maxRows={layout.composerRows}
+          columns={props.columns}
           {...(props.state.meta.label !== undefined
             ? { sessionLabel: props.state.meta.label }
             : {})}

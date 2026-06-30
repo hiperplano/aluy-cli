@@ -15,7 +15,8 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { useI18n } from '../../i18n/index.js';
-import { windowComposerLines } from '../../session/composer-edit.js';
+import { windowComposerVisual } from '../../session/composer-edit.js';
+import { visualLines } from '../../session/visual-lines.js';
 
 export interface ComposerProps {
   readonly value: string;
@@ -62,6 +63,14 @@ export interface ComposerProps {
    * conteúdo silenciosamente. ≤ linhas que cabem ⇒ render idêntico (sem marcador).
    */
   readonly maxRows?: number;
+  /**
+   * BUG P2-C (task #14) — LARGURA (colunas) do terminal/região do composer. Necessária p/
+   * o teto `maxRows` ser por linhas VISUAIS (com soft-wrap), não lógicas: uma ÚNICA linha
+   * lógica longa (1300 chars sem `\n`) é 1 linha lógica mas QUEBRA em N linhas visuais que
+   * comem o transcript. Com `columns`, o composer janela a vizinhança VISUAL do cursor e
+   * marca o que escondeu. Ausente/≤0 ⇒ degrada p/ a janela LÓGICA (comportamento antigo).
+   */
+  readonly columns?: number;
 }
 
 /**
@@ -188,16 +197,25 @@ export function Composer(props: ComposerProps): React.ReactElement {
   const showGhost = empty && props.active;
   const showCursor = props.active && props.showCursor !== false;
   const cursor = <Role name="fg">{cursorGlyph}</Role>;
-  // BUG P2-C — JANELA multi-linha no cockpit. `maxRows` cravado ⇒ se o input tem mais
-  // linhas lógicas que cabem, janelamos p/ a vizinhança do cursor reservando 1 linha p/ o
-  // marcador `↑N ⋯ ↓M` (o usuário SABE que há mais; nada SOME). Sem `maxRows` (inline) ⇒
-  // `text = props.value` cru, marcador OFF, render IDÊNTICO ao de antes.
-  const lineCount = props.value === '' ? 1 : props.value.split('\n').length;
-  const overflowing = props.maxRows !== undefined && lineCount > props.maxRows;
-  // quando estoura, reserva 1 linha p/ o marcador ⇒ janela de (maxRows-1) linhas de texto.
-  const textRows = overflowing ? Math.max(1, (props.maxRows as number) - 1) : 0;
+  // BUG P2-C (task #14) — JANELA por linhas VISUAIS. `maxRows` cravado ⇒ se o input ocupa
+  // mais linhas VISUAIS (com soft-wrap) que cabem, janelamos p/ a vizinhança do cursor
+  // reservando 1 linha p/ o marcador `↑N ⋯ ↓M` (o usuário SABE que há mais; nada SOME).
+  // O cálculo passou de linhas LÓGICAS p/ VISUAIS: uma ÚNICA linha lógica longa (1300 chars
+  // sem `\n`) é 1 linha lógica mas QUEBRA em N visuais — antes não janelava e crescia sem
+  // teto comendo o transcript. Sem `maxRows` (caso ilimitado) ⇒ render IDÊNTICO ao de antes.
+  // A largura efetiva desconta o indent do prompt/tag (≈2 cols) p/ o orçamento bater com o
+  // wrap real do terminal. `columns` ausente/≤0 ⇒ degrada p/ janela lógica (comportamento
+  // antigo) dentro de `windowComposerVisual`.
+  const maxRows = props.maxRows;
+  const effCols = props.columns !== undefined && props.columns > 2 ? props.columns - 2 : (props.columns ?? 0);
+  // Estoura SÓ se a altura VISUAL passa do teto CHEIO (`maxRows`). Igual ao gate antigo
+  // (`lineCount > maxRows`), mas VISUAL: cobre a linha lógica única longa que faz soft-wrap.
+  const overflowing =
+    maxRows !== undefined && visualLines(props.value, effCols > 0 ? effCols : 0) > maxRows;
+  // Quando estoura, reserva 1 linha p/ o marcador ⇒ janela de (maxRows-1) linhas visuais.
+  const textRows = overflowing ? Math.max(1, (maxRows as number) - 1) : 0;
   const win = overflowing
-    ? windowComposerLines(props.value, pos, textRows)
+    ? windowComposerVisual(props.value, pos, textRows, effCols)
     : { text: props.value, cursor: pos, hiddenAbove: 0, hiddenBelow: 0 };
   return (
     <Box flexDirection="column">
@@ -236,7 +254,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
       {/* Marcador de linhas escondidas (cockpit, input multi-linha que estoura a região).
           a11y: os números `↑N`/`↓M` carregam o sentido (há mais acima/abaixo) — nunca só
           cor. Só aparece quando de fato janelou (`overflowing`). */}
-      {overflowing && (win.hiddenAbove > 0 || win.hiddenBelow > 0) && (
+      {overflowing && (
         <Role name="fgDim">
           {win.hiddenAbove > 0 ? `↑${win.hiddenAbove}` : ''}
           {win.hiddenAbove > 0 && win.hiddenBelow > 0 ? ' · ' : ''}

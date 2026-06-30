@@ -8,6 +8,8 @@
 // bordas (início/fim/vazio/multibyte) — isolá-la em funções puras dá cobertura
 // determinística e mantém o `useInput` da App enxuto (só roteia tecla → função).
 
+import { displayWidth, visualLines } from './visual-lines.js';
+
 /** Estado mínimo de edição: o texto e a posição do cursor (caret) dentro dele. */
 export interface EditState {
   readonly text: string;
@@ -238,6 +240,17 @@ export function windowComposerLines(text: string, cursor: number, maxRows: numbe
   if (maxRows <= 0 || lines.length <= maxRows) {
     return { text, cursor: clampCursor(text, cursor), hiddenAbove: 0, hiddenBelow: 0 };
   }
+  return windowLogicalLines(lines, text, cursor, maxRows);
+}
+
+/** Extraído de `windowComposerLines`: janela tail-biased por linhas LÓGICAS, já sabendo
+ * que estoura (`lines.length > maxRows`). Reusado pela versão VISUAL abaixo. PURO. */
+function windowLogicalLines(
+  lines: string[],
+  text: string,
+  cursor: number,
+  maxRows: number,
+): ComposerWindow {
   const pos = clampCursor(text, cursor);
   // Em que LINHA lógica cai o cursor? (nº de `\n` antes de `pos`).
   let cursorLine = 0;
@@ -262,6 +275,142 @@ export function windowComposerLines(text: string, cursor: number, maxRows: numbe
     cursor: winCursor,
     hiddenAbove: start,
     hiddenBelow: lines.length - end,
+  };
+}
+
+/**
+ * BUG P2-C (task #14) — JANELA por linhas VISUAIS (com WRAP). O `windowComposerLines`
+ * janela por linhas LÓGICAS (`\n`), o que NÃO contém uma ÚNICA linha lógica LONGA: 1300
+ * chars sem `\n` = 1 linha lógica → nunca "estoura" por contagem lógica → o terminal a
+ * QUEBRA (soft-wrap) em N linhas VISUAIS que COMEM o transcript. Esta versão decide o
+ * estouro pela altura VISUAL (`visualLines(text, columns)`) e, quando a janela lógica
+ * AINDA não cabe (porque a linha do cursor sozinha é mais larga que `maxRows × columns`),
+ * recorta essa linha p/ a VIZINHANÇA VISUAL do cursor — mantendo o cursor SEMPRE visível —
+ * e reporta quantos chars/linhas ficaram escondidos. `columns ≤ 0` (largura desconhecida)
+ * ⇒ degrada p/ a janela lógica (comportamento antigo). Texto que já cabe visualmente ⇒
+ * devolve tudo intacto (o caso comum é INALTERADO). PURO.
+ */
+export function windowComposerVisual(
+  text: string,
+  cursor: number,
+  maxRows: number,
+  columns: number,
+): ComposerWindow {
+  const pos = clampCursor(text, cursor);
+  // Sem teto ou já cabe (medido VISUALMENTE; com `columns ≤ 0`, `visualLines` cai p/ a
+  // contagem LÓGICA — degradação graciosa) ⇒ devolve tudo (inalterado).
+  if (maxRows <= 0 || visualLines(text, columns) <= maxRows) {
+    return { text, cursor: pos, hiddenAbove: 0, hiddenBelow: 0 };
+  }
+  const lines = text.split('\n');
+  // 1) Primeiro tenta a janela LÓGICA tail-biased (reusa a lógica multi-linha existente),
+  //    mas só quando há de fato MAIS de uma linha lógica que o teto. Senão (1 linha, ou
+  //    poucas) a janela lógica não muda nada e caímos no recorte visual abaixo.
+  const base =
+    lines.length > maxRows
+      ? windowLogicalLines(lines, text, pos, maxRows)
+      : { text, cursor: pos, hiddenAbove: 0, hiddenBelow: 0 };
+  // 2) Se a janela lógica já cabe visualmente, ótimo — terminou.
+  if (visualLines(base.text, columns) <= maxRows) return base;
+  // 3) AINDA estoura: a linha que CONTÉM o cursor (na janela base) é larga demais. Recorta
+  //    essa linha p/ uma faixa VISUAL de ~maxRows linhas em torno do cursor. Reserva 1
+  //    linha visual p/ o marcador `↑…` quando há corte de cabeça.
+  return clampLineAroundCursor(base, maxRows, columns);
+}
+
+/**
+ * Recorta a LINHA LÓGICA que contém o cursor (dentro de uma `ComposerWindow` base) p/ uma
+ * faixa VISUAL de `maxRows` linhas em torno do cursor, mantendo o cursor visível. Centra a
+ * janela na coluna do cursor (com viés de cauda) e marca com `…` os cortes de cabeça/cauda.
+ * Os `…` contam como char escondido (acumulam em hiddenAbove/Below p/ o marcador). PURO.
+ */
+function clampLineAroundCursor(
+  base: ComposerWindow,
+  maxRows: number,
+  columns: number,
+): ComposerWindow {
+  const baseLines = base.text.split('\n');
+  // Em que linha lógica (da janela base) cai o cursor, e qual o offset DENTRO dela?
+  let acc = 0;
+  let li = 0;
+  let colInLine = base.cursor;
+  for (let i = 0; i < baseLines.length; i++) {
+    const len = (baseLines[i] as string).length;
+    if (base.cursor <= acc + len) {
+      li = i;
+      colInLine = base.cursor - acc;
+      break;
+    }
+    acc += len + 1; // +1 = `\n`
+    li = i + 1;
+    colInLine = 0;
+  }
+  const line = (baseLines[li] ?? '') as string;
+  const chars = Array.from(line); // por code point (não parte par surrogate)
+  // mapeia o offset UTF-16 (colInLine) p/ índice de CODE POINT.
+  let cpCursor = 0;
+  {
+    let u = 0;
+    for (const ch of chars) {
+      if (u >= colInLine) break;
+      u += ch.length;
+      cpCursor++;
+    }
+  }
+  // Orçamento de largura: maxRows × columns, menos 1 col p/ cada `…` que vamos pôr.
+  // Decidimos os `…` por tentativa: assume os dois e ajusta nas bordas.
+  const totalCols = maxRows * columns;
+  // Constrói a CAUDA a partir do cursor p/ frente (até ~metade do orçamento) e a CABEÇA
+  // p/ trás, priorizando manter o cursor visível. Estratégia simples e robusta: mantém uma
+  // janela [from, to) de code points cuja largura visual cabe em (totalCols - reservas),
+  // ancorada no cursor com viés p/ a CAUDA (conteúdo mais novo à direita).
+  // largura de uma faixa de code points.
+  const widthOf = (a: number, b: number): number => displayWidth(chars.slice(a, b).join(''));
+  // Reserva p/ marcadores: assumimos ambos os `…` (1 col cada) no pior caso.
+  const budget = Math.max(1, totalCols - 2);
+  let from = cpCursor;
+  let to = cpCursor;
+  // Garante ao menos o char SOB o cursor visível (se houver).
+  if (to < chars.length) to++;
+  // Cresce alternando: prioriza incluir contexto à esquerda do cursor (onde a edição
+  // costuma estar) mas mantém a cauda; expande até estourar o orçamento.
+  let grow = true;
+  while (grow) {
+    grow = false;
+    // tenta crescer à esquerda
+    if (from > 0 && widthOf(from - 1, to) <= budget) {
+      from--;
+      grow = true;
+    }
+    // tenta crescer à direita
+    if (to < chars.length && widthOf(from, to + 1) <= budget) {
+      to++;
+      grow = true;
+    }
+  }
+  const headCut = from > 0;
+  const tailCut = to < chars.length;
+  const ell = '…';
+  const kept = chars.slice(from, to).join('');
+  const newLineText = (headCut ? ell : '') + kept + (tailCut ? ell : '');
+  // re-monta as linhas da janela base com a linha recortada.
+  const outLines = baseLines.slice();
+  outLines[li] = newLineText;
+  const outText = outLines.join('\n');
+  // re-mapeia o cursor: chars antes do cursor que sobreviveram + 1 col do `…` de cabeça.
+  const newColInLine = (headCut ? ell.length : 0) + chars.slice(from, cpCursor).join('').length;
+  // offset das linhas anteriores da janela base.
+  let beforeLen = 0;
+  for (let i = 0; i < li; i++) beforeLen += (outLines[i] as string).length + 1;
+  const outCursor = clampCursor(outText, beforeLen + newColInLine);
+  // Conta o "escondido": chars cortados da cabeça somam acima, da cauda somam abaixo.
+  const hiddenHeadChars = headCut ? from : 0;
+  const hiddenTailChars = tailCut ? chars.length - to : 0;
+  return {
+    text: outText,
+    cursor: outCursor,
+    hiddenAbove: base.hiddenAbove + (hiddenHeadChars > 0 ? hiddenHeadChars : 0),
+    hiddenBelow: base.hiddenBelow + (hiddenTailChars > 0 ? hiddenTailChars : 0),
   };
 }
 

@@ -652,7 +652,6 @@ export function App(props: AppProps): React.ReactElement {
   // descontando da CONVERSA p/ a soma seguir == rows (§5). Vazio/1 linha ⇒ inalterado. O
   // piso narrow/short é decidido com composer=1 (chamadas de resize abaixo), então o limiar
   // de recusa NÃO muda — só a partição quando já cabe.
-  const composerLines = input.length === 0 ? 1 : input.split('\n').length;
   // RESIZE-FIX (bug do gap inline) — o `<Composer>` inline renderiza o input CRU e o terminal
   // o QUEBRA (wrap) em N linhas VISUAIS na largura `columns` (o prompt come ~2 cols de indent).
   // `composerLines` (linhas-FONTE) não vê o wrap. Medimos o VISUAL p/ descontar o EXCEDENTE
@@ -697,7 +696,12 @@ export function App(props: AppProps): React.ReactElement {
         focused: cockpitFocus === 'log',
       }
     : undefined;
-  const cockpitLayout = resolveCockpitLayout(rows, columns, composerLines, cockpitLogHint);
+  // BUG P2-C (task #14) — o cockpit dimensiona a Box do composer pelas linhas VISUAIS (com
+  // soft-wrap), não LÓGICAS: uma ÚNICA linha lógica longa (1300 chars sem `\n`) é 1 linha
+  // lógica mas ocupa N linhas visuais. Usar `composerLines` (lógicas) cravava a Box em 1
+  // linha e CLIPAVA a janela+marcador do <Composer>; `composerVisualLines` cresce a Box até
+  // COMPOSER_MAX_ROWS, casando com a janela visual que o <Composer> renderiza.
+  const cockpitLayout = resolveCockpitLayout(rows, columns, composerVisualLines, cockpitLogHint);
   // ATIVO = o usuário pediu fullscreen E o layout cabe (não recusou). Se recusou, a App
   // renderiza o INLINE (degrada) e mostra o aviso. O alt-screen real (entrar/sair) é
   // disparado no TOGGLE (handler abaixo), espelhando este "ativo".
@@ -3895,6 +3899,7 @@ export function App(props: AppProps): React.ReactElement {
         active={composerActive}
         showCursor={composerShowCursor}
         maxRows={inlineComposerMaxRows}
+        columns={columns}
         shellMode={input.startsWith('!')}
         {...(composerHint !== undefined ? { hint: composerHint } : {})}
         {...(state.meta.label !== undefined ? { sessionLabel: state.meta.label } : {})}

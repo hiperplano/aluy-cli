@@ -18,7 +18,10 @@ import {
   moveWordRight,
   applyTypedChunk,
   decideCtrlC,
+  windowComposerLines,
+  windowComposerVisual,
 } from '../../src/session/composer-edit.js';
+import { visualLines } from '../../src/session/visual-lines.js';
 
 describe('composer-edit — clampCursor (invariante 0..len)', () => {
   it('clampa as duas pontas', () => {
@@ -303,5 +306,67 @@ describe('composer-edit — decideCtrlC (duplo Ctrl+C p/ sair, EST-1015)', () =>
 
   it('composer VAZIO e JÁ armado ⇒ exit (2º Ctrl+C sai de fato)', () => {
     expect(decideCtrlC('', true)).toBe('exit');
+  });
+});
+
+// BUG P2-C (task #14) — JANELA por linhas VISUAIS (single long line / soft-wrap).
+describe('composer-edit — windowComposerVisual (janela VISUAL, task #14)', () => {
+  it('linha curta que cabe ⇒ INALTERADO (sem corte, sem hidden)', () => {
+    const w = windowComposerVisual('uma linha curta', 5, 10, 80);
+    expect(w.text).toBe('uma linha curta');
+    expect(w.hiddenAbove).toBe(0);
+    expect(w.hiddenBelow).toBe(0);
+    expect(w.cursor).toBe(5);
+  });
+
+  it('columns ≤ 0 (largura desconhecida) ⇒ degrada p/ janela LÓGICA', () => {
+    const text = Array.from({ length: 9 }, (_, i) => `L${i}`).join('\n');
+    // teto 4 linhas, cols 0 ⇒ deve casar com windowComposerLines (lógica).
+    const vis = windowComposerVisual(text, text.length, 4, 0);
+    const log = windowComposerLines(text, text.length, 4);
+    expect(vis.text).toBe(log.text);
+    expect(vis.hiddenAbove).toBe(log.hiddenAbove);
+    expect(vis.hiddenBelow).toBe(log.hiddenBelow);
+  });
+
+  it('LINHA ÚNICA longa (sem \\n) ⇒ corta p/ caber em maxRows×columns linhas VISUAIS', () => {
+    const cols = 20;
+    const maxRows = 3; // orçamento ~ 3×20 = 60 cols de cauda visível
+    const long = 'Z'.repeat(1300); // 1 linha lógica, mas 65 linhas visuais a 20 cols
+    const w = windowComposerVisual(long, long.length, maxRows, cols);
+    // a altura VISUAL do resultado NÃO ultrapassa maxRows.
+    expect(visualLines(w.text, cols)).toBeLessThanOrEqual(maxRows);
+    // marcou chars escondidos acima (corte de cabeça com `…`).
+    expect(w.hiddenAbove).toBeGreaterThan(0);
+    expect(w.text.startsWith('…')).toBe(true);
+    // o cursor (no FIM) continua DENTRO do texto janelado (visível).
+    expect(w.cursor).toBeLessThanOrEqual(w.text.length);
+    expect(w.cursor).toBeGreaterThan(0);
+  });
+
+  it('LINHA ÚNICA longa, cursor no MEIO ⇒ janela contém o cursor (vizinhança)', () => {
+    const cols = 20;
+    const maxRows = 3;
+    const long = 'A'.repeat(600) + 'B'.repeat(600); // cursor logo após os As
+    const cursor = 600;
+    const w = windowComposerVisual(long, cursor, maxRows, cols);
+    expect(visualLines(w.text, cols)).toBeLessThanOrEqual(maxRows);
+    // a janela cobre a fronteira A/B (vizinhança do cursor): contém ambos.
+    expect(w.text).toContain('A');
+    expect(w.text).toContain('B');
+    // cortou cabeça E cauda ⇒ hidden dos dois lados.
+    expect(w.hiddenAbove).toBeGreaterThan(0);
+    expect(w.hiddenBelow).toBeGreaterThan(0);
+    // o cursor permanece em faixa válida.
+    expect(w.cursor).toBeLessThanOrEqual(w.text.length);
+  });
+
+  it('maxRows ≥ altura visual ⇒ devolve tudo (sem janelar)', () => {
+    const text = 'Z'.repeat(30); // 30 chars
+    const cols = 80; // cabe em 1 linha visual
+    const w = windowComposerVisual(text, text.length, 5, cols);
+    expect(w.text).toBe(text);
+    expect(w.hiddenAbove).toBe(0);
+    expect(w.hiddenBelow).toBe(0);
   });
 });

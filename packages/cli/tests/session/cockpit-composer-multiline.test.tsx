@@ -20,6 +20,7 @@ import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { Cockpit } from '../../src/session/Cockpit.js';
 import { I18nProvider, i18n as makeI18n } from '../../src/i18n/index.js';
 import { resolveCockpitLayout } from '../../src/session/cockpit-layout.js';
+import { visualLines } from '../../src/session/visual-lines.js';
 import type { SessionState } from '../../src/session/model.js';
 
 const ESC = String.fromCharCode(27);
@@ -45,8 +46,10 @@ function state(): SessionState {
 }
 
 function renderCockpit(input: string, cursorPos: number, rows = 24, cols = 100) {
-  // o caller (App) deriva composerLines do input; aqui replicamos p/ o layout.
-  const composerLines = input.length === 0 ? 1 : input.split('\n').length;
+  // o caller (App) deriva composerLines do input; aqui replicamos p/ o layout. Como o App
+  // (task #14), usamos linhas VISUAIS (com soft-wrap) — p/ short lines é == lógicas.
+  const composerLines =
+    input.length === 0 ? 1 : visualLines(input, cols > 2 ? cols - 2 : cols);
   const layout = resolveCockpitLayout(rows, cols, composerLines);
   if (layout.kind !== 'cockpit') throw new Error('layout deveria caber');
   const theme = resolveTheme({ env: ENV });
@@ -121,6 +124,33 @@ describe('cockpit composer multi-linha (BUG P2-C)', () => {
     // o composer saturou no teto e o frame cabe em rows (§5 preservado).
     expect(layout.composerRows).toBe(5);
     expect(frame.split('\n').length).toBeLessThanOrEqual(24);
+    r.unmount();
+  });
+
+  it('LINHA ÚNICA longa (soft-wrap) ⇒ janela VISUAL capada + marcador (task #14)', async () => {
+    // 1300 chars SEM `\n` numa única linha lógica: antes era 1 linha lógica ⇒ nunca janelava
+    // e o terminal a quebrava em ~13 linhas visuais comendo o transcript. Com a janela VISUAL
+    // o composer NÃO ultrapassa o teto (composerRows) e marca o que escondeu.
+    const long = 'Z'.repeat(1300);
+    // 1 linha lógica ⇒ o layout reserva composerRows=1 (o caller deriva por `\n`). Forçamos
+    // um teto pequeno via rows baixo p/ exercitar a janela com cols conhecido.
+    const cols = 100;
+    const { r, layout } = renderCockpit(long, long.length, 24, cols);
+    await flush();
+    const frame = plain(r.lastFrame() ?? '');
+    // o frame NÃO estoura rows (não reflui/clear ⇒ transcript não some).
+    expect(frame.split('\n').length).toBeLessThanOrEqual(24);
+    expect(frame).not.toContain('\x1b[2J');
+    // o transcript continua presente (a conversa não foi empurrada p/ fora).
+    expect(frame).toContain('conversa 0');
+    // a linha do composer (onde o cursor está, no FIM) mostra o `…` de corte de cabeça +
+    // a CAUDA da linha (Zs). O composer ocupa no MÁX composerRows linhas visuais.
+    expect(frame).toContain('…');
+    // marcador de chars escondidos acima.
+    expect(frame).toMatch(/↑\d/);
+    // o composer saturou no teto (COMPOSER_MAX_ROWS=5) — NÃO cresceu p/ as ~14 linhas
+    // embrulhadas. A janela visual capa a altura.
+    expect(layout.composerRows).toBe(5);
     r.unmount();
   });
 });
