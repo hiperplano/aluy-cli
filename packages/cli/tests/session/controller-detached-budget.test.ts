@@ -8,15 +8,16 @@
 // desacoplados já gastaram. Resultado: pai-novo + filhos-vivos passam a somar contra
 // um teto ZERADO ⇒ a soma estoura o teto da sessão (E-A2 furado, runaway órfão).
 //
-// O fix: `submit` RECUSA (igual ao gate de /cycle) enquanto `detachedTrees.size > 0`
-// — o objetivo NÃO é enviado nem enfileirado em silêncio; o usuário espera os
-// desacoplados (viram dado do próximo turno) ou usa PARAR-TUDO (F8).
+// O fix ORIGINAL recusava o submit. DETACH-FIX (item 2, decisão do dono) — recusar TRAVAVA
+// o CLI (o dono nem podia perguntar status). AGORA o submit é ACEITO, mas `runResolvedTurn`
+// PULA o `budget.reset()` enquanto `detachedTrees.size > 0` (mesma guarda que governa o resume
+// do BudgetGate, controller.ts ≈4150). Assim o turno novo SOMA no `SharedBudget` agregado vivo
+// — E-A2 segue cercado (sem reset = sem runaway) — e o dono pode interagir.
 //
-// Por que o verde não pegava: o teste irmão (controller-esc-subagents) só submete o
-// PRÓXIMO turno DEPOIS que os filhos TERMINARAM (waitFor done) — nunca COM filhos
-// desacoplados ainda vivos.
+// Por que o verde não pegava antes: o teste irmão (controller-esc-subagents) só submete o
+// PRÓXIMO turno DEPOIS que os filhos TERMINARAM (waitFor done) — nunca COM filhos vivos.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   PolicyPermissionEngine,
   SPAWN_AGENT_TOOL_NAME,
@@ -138,8 +139,8 @@ function buildScenario(): {
   return { model, release: (l) => gates.get(l)!.release(), parentCalls: () => parentCalls };
 }
 
-describe('HUNT-SUBAGENT (E-A2) — submit é RECUSADO enquanto sub-agentes desacoplados vivem', () => {
-  it('esc ⇒ filhos desacoplados vivos ⇒ submit novo é recusado (objetivo NÃO vai ao modelo; budget não é zerado)', async () => {
+describe('HUNT-SUBAGENT (E-A2) — submit é ACEITO com desacoplados vivos, mas SEM resetar o budget', () => {
+  it('esc ⇒ filhos desacoplados vivos ⇒ submit novo RODA (vai ao modelo) e NÃO zera o budget agregado', async () => {
     const { model, release, parentCalls } = buildScenario();
     const controller = new SessionController({
       model,
@@ -159,29 +160,42 @@ describe('HUNT-SUBAGENT (E-A2) — submit é RECUSADO enquanto sub-agentes desac
     controller.interrupt();
     await done;
     expect(controller.current.phase).toBe('idle');
+    // DETACH-FIX (item 4) — o estado espelha os 2 desacoplados vivos (aviso persistente da TUI).
+    expect(controller.current.detachedSubagents).toBe(2);
 
     const callsAfterEsc = parentCalls();
+    // Espiona o `budget.reset` A PARTIR DE AGORA (o reset legítimo do 1º turno já passou).
+    const resetSpy = vi.spyOn(
+      (controller as unknown as { budget: { reset: () => void } }).budget,
+      'reset',
+    );
 
     // AGORA — com os 2 filhos AINDA pendurados (desacoplados) — submete um turno NOVO.
     await controller.submit('e aí, outra tarefa');
 
-    // RECUSA: o objetivo NÃO foi ao modelo (parentCalls inalterado ⇒ nenhum `budget.reset()`
-    // disparou sob os filhos vivos) e uma NOTA honesta foi empurrada.
-    expect(parentCalls()).toBe(callsAfterEsc);
-    expect(notesText(controller)).toMatch(/desacoplados/i);
-    // O bloco "você" do 2º objetivo NÃO foi empurrado (recusa ANTES do pushBlock do goal).
+    // ACEITO: o objetivo FOI ao modelo (o dono consegue interagir — não trava mais).
+    expect(parentCalls()).toBeGreaterThan(callsAfterEsc);
+    // E-A2 PRESERVADO: o `budget.reset()` NÃO foi chamado neste submit (o agregado dos filhos
+    // desacoplados sobrevive ⇒ pai-novo + filhos somam contra o teto CORRETO, sem runaway).
+    expect(resetSpy).not.toHaveBeenCalled();
+    // O bloco "você" do 2º objetivo FOI empurrado (submit não é mais recusado).
     const youBlocks = controller.current.blocks.filter(
       (b) => b.kind === 'you' && (b as { text?: string }).text === 'e aí, outra tarefa',
     );
-    expect(youBlocks).toHaveLength(0);
+    expect(youBlocks).toHaveLength(1);
+    // Nota informativa (não bloqueante) sobre os sub-agentes em segundo plano.
+    expect(notesText(controller)).toMatch(/segundo plano|orçamento/i);
 
-    // Os filhos terminam (libera os gates) ⇒ vira dado pendente do próximo turno.
+    // Os filhos terminam (libera os gates) ⇒ viram dado pendente do próximo turno.
     release('a');
     release('b');
     await waitFor(() => notesText(controller).includes('sub-agentes concluíram'));
+    // item 4 — terminaram ⇒ o contador zera (aviso some).
+    await waitFor(() => (controller.current.detachedSubagents ?? 0) === 0);
 
-    // Agora SIM um submit novo é aceito (nenhum desacoplado vivo).
+    // Sem desacoplados vivos, o submit volta a resetar o budget normalmente.
+    resetSpy.mockClear();
     await controller.submit('e aí?');
-    expect(parentCalls()).toBeGreaterThan(callsAfterEsc);
+    expect(resetSpy).toHaveBeenCalled();
   });
 });

@@ -522,6 +522,13 @@ export interface SessionState {
    */
   readonly cycleActive?: boolean | undefined;
   /**
+   * DETACH-FIX (item 4) — quantos sub-agentes DESACOPLADOS (sobreviventes de um esc)
+   * seguem rodando em SEGUNDO PLANO. > 0 ⇒ a TUI mostra um aviso persistente ("N em
+   * segundo plano — F8 para parar"): com o teto de relógio em "nunca" (decisão do dono),
+   * F8 é o único stop, então o dono PRECISA ver que há trabalho órfão vivo. 0/ausente = nada.
+   */
+  readonly detachedSubagents?: number | undefined;
+  /**
    * EST-1106 — UM `/workflows run` está ATIVO (espelha `cycleActive`). Usado pela
    * TUI p/ segurar a fila do type-ahead (`queueAtRest`).
    */

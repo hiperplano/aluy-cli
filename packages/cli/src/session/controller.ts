@@ -896,6 +896,9 @@ export class SessionController {
   // exit) alcançá-las MESMO depois de um novo turno recriar `flowTree`. Removidas
   // quando o fan-out desacoplado termina (sem crescimento ilimitado).
   private readonly detachedTrees = new Set<FlowTree>();
+  // DETACH-FIX (item 4) — nº de sub-agentes desacoplados VIVOS (somado no detach, subtraído no
+  // término do fan-out). Espelhado em `state.detachedSubagents` p/ o aviso persistente da TUI.
+  private detachedSubagentCount = 0;
   // EST-0982 (semântica do esc) — `true` após um PARAR-TUDO explícito (F8/painel/
   // exit): o desfecho de um fan-out desacoplado NÃO vira semente do próximo turno
   // (o usuário mandou parar tudo — não há "resultado a aproveitar"). Re-armado a
@@ -1639,12 +1642,17 @@ export class SessionController {
     // o limite da sessão (E-A2 furado: runaway órfão sem cerca). Recusa com nota (igual ao
     // gate de /cycle); o usuário espera os desacoplados terminarem (viram dado do próximo
     // turno) ou usa PARAR-TUDO (F8/Ctrl+T→P). NÃO enfileira em silêncio.
+    // DETACH-FIX (item 2 — decisão do dono) — ANTES isto RECUSAVA o submit ("o CLI travado":
+    // não dava nem p/ perguntar status enquanto um destacado vivia). AGORA PERMITE: o turno roda
+    // e SOMA no `SharedBudget` agregado vivo (o `budget.reset()` é pulado em `runResolvedTurn`
+    // enquanto `detachedTrees>0`), então o E-A2 segue cercado. Nota informativa, NÃO bloqueante.
     if (this.detachedTrees.size > 0) {
+      const n = this.detachedTrees.size;
       this.pushNote('sub-agentes', [
-        'há sub-agentes DESACOPLADOS ainda rodando — o objetivo não foi enviado.',
-        'aguarde concluírem (entram como dado no próximo turno) ou pare-os (F8 ou Ctrl+T → P).',
+        `${n} sub-agente(s) em segundo plano (esc) — este turno SOMA no orçamento agregado.`,
+        'os resultados deles entram como dado quando concluírem; F8 (ou Ctrl+T → P) para parar.',
       ]);
-      return;
+      // segue o fluxo normal do submit (sem return) — o dono pode interagir.
     }
     // Um objetivo submetido durante o splash dispensa-o (a sessão "começou").
     this.dismissBoot();
@@ -1772,7 +1780,13 @@ export class SessionController {
     // chamada-lógica (mesma idempotency-key; o broker deduplica o billing): não é um
     // objetivo novo, logo não re-arma o budget. O `[c]` (continueAfterBudget) é um caminho
     // SEPARADO que estende+retoma SEM passar por aqui — o reset jamais desfaz o seu extend.
-    this.budget.reset();
+    // DETACH-FIX (item 2) — NÃO reseta o budget se há sub-agentes DESACOPLADOS vivos: eles
+    // compartilham este `SharedBudget` agregado (E-A2) e um reset apagaria o consumo deles
+    // (runaway órfão sem cerca). Mesma guarda que já governa o resume do BudgetGate (≈l.4150).
+    // Sem destacados ⇒ reset normal (cada objetivo ganha o budget cheio). Isto é o que permite
+    // o dono SUBMETER um novo turno (perguntar status, etc.) com destacados vivos, em vez de o
+    // submit ser RECUSADO (o "CLI travado").
+    if (this.detachedTrees.size === 0) this.budget.reset();
     // `attempt` é 1-based: a 1ª chamada é a `attempt=1`; cada `BrokerError` retryable
     // (com tentativas restantes) incrementa e dispara o backoff antes da próxima.
     let attempt = 1;
@@ -5215,7 +5229,7 @@ export class SessionController {
     const rootSignal = this.rootFlow?.signal;
     if (!rootSignal) return run;
     if (rootSignal.aborted) {
-      this.detachSpawn(run);
+      this.detachSpawn(run, profiles.length);
       return profiles.map((p) => detachedOutcome(p.label));
     }
     let onAbort: (() => void) | null = null;
@@ -5230,7 +5244,7 @@ export class SessionController {
       if (onAbort) rootSignal.removeEventListener('abort', onAbort);
     }
     // O turno do PAI foi interrompido (esc) com o fan-out vivo ⇒ DESACOPLA.
-    this.detachSpawn(run);
+    this.detachSpawn(run, profiles.length);
     return profiles.map((p) => detachedOutcome(p.label));
   }
 
@@ -5240,9 +5254,12 @@ export class SessionController {
    * quando o fan-out real terminar, semeia os desfechos como DADO do próximo turno.
    * Nunca lança (um erro pós-desacople não tem turno onde aparecer — vira nota).
    */
-  private detachSpawn(run: Promise<readonly SubAgentOutcome[]>): void {
+  private detachSpawn(run: Promise<readonly SubAgentOutcome[]>, count = 0): void {
     const tree = this.flowTree;
     if (tree) this.detachedTrees.add(tree);
+    // DETACH-FIX (item 4) — soma os filhos órfãos e espelha no estado (aviso persistente).
+    this.detachedSubagentCount += count;
+    this.publishDetachedCount();
     void run
       .then((outcomes) => this.onDetachedOutcomes(outcomes))
       .catch((err: unknown) => {
@@ -5252,7 +5269,16 @@ export class SessionController {
       })
       .finally(() => {
         if (tree) this.detachedTrees.delete(tree);
+        this.detachedSubagentCount = Math.max(0, this.detachedSubagentCount - count);
+        this.publishDetachedCount();
       });
+  }
+
+  /** DETACH-FIX (item 4) — espelha o nº de desacoplados vivos no estado (undefined quando 0). */
+  private publishDetachedCount(): void {
+    this.patch({
+      detachedSubagents: this.detachedSubagentCount > 0 ? this.detachedSubagentCount : undefined,
+    });
   }
 
   /**

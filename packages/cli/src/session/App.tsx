@@ -4055,6 +4055,16 @@ export function App(props: AppProps): React.ReactElement {
           desligada). Reativo: o Tab cicla `normal→plan→unsafe` (invertido) — fica VIVO (fora do
           Static, na região viva do rodapé, já dentro do LIVE_CHROME_ROWS), só mudou
           de lugar (topo→rodapé), sem flicker. */}
+      {/* DETACH-FIX (item 4) — AVISO PERSISTENTE de sub-agentes desacoplados vivos (esc). Com o
+          teto de relógio em "nunca" (decisão do dono), F8 é o único stop ⇒ o dono PRECISA ver
+          que há trabalho órfão rodando. Só quando há ⇒ não infla o frame no caso comum. */}
+      {state.detachedSubagents !== undefined && state.detachedSubagents > 0 && (
+        <Box>
+          <Text color="yellow">
+            ⚠ {state.detachedSubagents} sub-agente(s) em segundo plano (esc) — F8 para parar.
+          </Text>
+        </Box>
+      )}
       <ModeIndicator mode={state.mode} columns={columns} />
       {showHints && hintState && (
         <FooterHints

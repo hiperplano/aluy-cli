@@ -240,7 +240,7 @@ export function endsWithUserQuestion(text: string): boolean {
     if (ln === '') continue;
     // tira do FIM: espaços, emoji/pictográficos, ZWJ/seletor-de-variação, e decoração
     // de markdown/fechamento (*, _, ~, `, aspas, ), ]). Sobra o caractere "semântico" final.
-    const core = ln.replace(/[\s‍️\p{Extended_Pictographic}*_~`"'»”’)\]]+$/gu, '');
+    const core = ln.replace(/[\s\p{Extended_Pictographic}*_~`"'»”’)\]]+$/gu, '');
     return core.endsWith('?') || core.endsWith('？');
   }
   return false;

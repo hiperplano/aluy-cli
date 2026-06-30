@@ -1395,6 +1395,15 @@ export class AgentLoop {
       }
 
       // turn.kind === 'tool_call'
+      // DETACH-FIX (item 1) — GATE DE ABORT no caminho de TEXTO, espelhando o nativo (≈l.1182).
+      // Sem ele, após um ESC o loop ainda EXECUTAVA os tool-calls de texto restantes: cada
+      // `spawn_agent` entrava vivo em `spawnDetachable` com o root já abortado e voltava como
+      // erro de destaque ("SEGUE rodando em segundo plano") — o erro-spam que o dono viu (N×).
+      // Checa ANTES do efeito ⇒ interrupção LIMPA, sem iniciar mais nenhuma tool deste turno.
+      if (signal?.aborted) {
+        emitHumanCancelSignal(this.maestro?.bus, 'ESC/Ctrl+C antes de tool-call (texto)');
+        throw new ModelCallAbortedError();
+      }
       const outcome = await this.executeToolCall(
         turn.call.name,
         turn.call.input,
