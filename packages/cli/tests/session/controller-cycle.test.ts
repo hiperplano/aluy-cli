@@ -297,6 +297,43 @@ describe('EST-0981 · GS-L2/E-A2/FU-S3-RES1 — budget AGREGADO corta ATÔMICO (
   });
 });
 
+describe('FATIA 1 (CICLOS/SUBCICLOS) — cycleProgress publicado DURANTE o ciclo e LIMPO ao fim', () => {
+  it('seta `↻ ciclo N/M` no estado durante o ciclo e o LIMPA (undefined) quando termina', async () => {
+    const { ports } = fakePorts();
+    // cada ciclo: turn0 lê (progride), turn1 conclui (sem declarar término ⇒ roda 2 ciclos).
+    const model = scriptedModel((turn) =>
+      turn === 0 ? toolCall('read_file', { path: 'x.log' }) : `ok (${Math.random()}).`,
+    );
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports,
+      askResolver: approveAll,
+      meta,
+    });
+    // Observa CADA publicação de estado e guarda os snapshots de cycleProgress vistos.
+    const seen: Array<{ iteration: number; max: number } | undefined> = [];
+    controller.subscribe((s) => {
+      seen.push(
+        s.cycleProgress ? { iteration: s.cycleProgress.iteration, max: s.cycleProgress.max } : undefined,
+      );
+    });
+    await controller.cycle('--max-iter 2 "trabalho curto"');
+
+    // DURANTE: viu pelo menos a iteração 1/2 publicada (indicador prominente).
+    const live = seen.filter((p): p is { iteration: number; max: number } => p !== undefined);
+    expect(live.length).toBeGreaterThan(0);
+    expect(live.some((p) => p.iteration === 1 && p.max === 2)).toBe(true);
+    // O `max` SEMPRE reflete o teto de iterações (ceilings.maxIterations).
+    expect(live.every((p) => p.max === 2)).toBe(true);
+
+    // AO FIM: o estado corrente NÃO tem mais cycleProgress (some no repouso).
+    expect(controller.current.cycleProgress).toBeUndefined();
+    // e a guarda anti-colisão também foi desarmada (consistência com o limpo).
+    expect(controller.current.cycleActive).not.toBe(true);
+  });
+});
+
 describe('EST-0981 · GS-L4 — para AO CONCLUIR (detecção de término)', () => {
   it('quando o agente declara "tarefa concluída", o /cycle para antes do teto', async () => {
     const { ports } = fakePorts();

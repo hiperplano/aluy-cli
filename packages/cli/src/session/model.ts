@@ -436,6 +436,27 @@ export interface ProgressView {
   readonly max?: number | undefined;
 }
 
+/**
+ * FATIA 1 (CICLOS/SUBCICLOS) — CACHE DE RENDER do PROGRESSO DO CICLO DE VIDA DO LOOP,
+ * exibido PROMINENTE na StatusBar (`↻ ciclo N/M · subciclos K/T`). Torna VISÍVEL a
+ * iteração do CycleEngine (CICLO ≡ iteração; `/cycle`=N recorrentes) e as caixas do
+ * plano/ContextGraph (SUBCICLO ≡ caixa do `update_plan`). Só DISPLAY/leitura — NÃO muda
+ * o comportamento do loop, NÃO carrega segredo. `iteration`/`max` vêm dos `ceilings` +
+ * do `i` do `onCycleStart`; `subcyclesDone`/`subcyclesTotal` das caixas do
+ * ContextGraph (fechadas/total). O controller LIMPA (`undefined`) quando o ciclo acaba
+ * (cycleActive=false). Ausente ⇒ a barra NÃO mostra o indicador cíclico (uso simples).
+ */
+export interface CycleProgress {
+  /** Iteração CORRENTE do CycleEngine (1-based no display; o `onCycleStart(i)` é 0-based). */
+  readonly iteration: number;
+  /** Nº MÁX de ciclos (de `ceilings.maxIterations`). */
+  readonly max: number;
+  /** Caixas do plano CONCLUÍDAS (closed) no ContextGraph. */
+  readonly subcyclesDone: number;
+  /** Total de caixas do plano no ContextGraph (0 ⇒ sem subciclos a mostrar). */
+  readonly subcyclesTotal: number;
+}
+
 /** LOTE-2 — contagens da governança `.aluy/` carregada (StatusBar + `/stat`). */
 export interface GovernanceCounts {
   readonly agents: number;
@@ -530,6 +551,14 @@ export interface SessionState {
    * UI pode indicar o ciclo vivo. Ausente/`false` = sem ciclo.
    */
   readonly cycleActive?: boolean | undefined;
+  /**
+   * FATIA 1 (CICLOS/SUBCICLOS) — CACHE DE RENDER do progresso do ciclo de vida do loop
+   * (iteração N/M do CycleEngine + subciclos K/T das caixas do plano). A StatusBar mostra
+   * `↻ ciclo N/M · subciclos K/T` PROMINENTE (accent) quando definido. O controller o
+   * popula no início do `/cycle` e em cada `onCycleStart`, e o LIMPA (`undefined`) quando
+   * o ciclo acaba (cycleActive=false). Ausente ⇒ uso simples (sem indicador cíclico).
+   */
+  readonly cycleProgress?: CycleProgress | undefined;
   /**
    * DETACH-FIX (item 4) — quantos sub-agentes DESACOPLADOS (sobreviventes de um esc)
    * seguem rodando em SEGUNDO PLANO. > 0 ⇒ a TUI mostra um aviso persistente ("N em

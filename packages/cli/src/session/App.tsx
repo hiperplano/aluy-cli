@@ -3250,6 +3250,11 @@ export function App(props: AppProps): React.ReactElement {
   // senão, o resolvido SÓ com o opt-in. NUNCA toca o roteamento (é só display).
   const showRoutedModel =
     process.env.ALUY_SHOW_MODEL === '1' || process.env.ALUY_SHOW_MODEL === 'true';
+  // FATIA 1 (CICLOS/SUBCICLOS) — knob `ALUY_CYCLE_UI_OFF` suprime o indicador `↻ ciclo N/M`
+  // (escape hatch p/ quem não quer o display do ciclo de vida do loop). OFF por default
+  // ⇒ o indicador aparece quando há ciclo/plano. Ligado (`1`/`true`) ⇒ a prop não passa.
+  const cycleUiOff =
+    process.env.ALUY_CYCLE_UI_OFF === '1' || process.env.ALUY_CYCLE_UI_OFF === 'true';
   // ADR-0120 — INDICAÇÃO DO MODO no 1º campo da StatusBar (lê o backend EFETIVO do `meta`,
   // não env: respeita flag>env>config). `broker` mostra o TIER (`◷ broker · Flui`); `local`
   // (BYO) mostra `◷ local · <provider> · <modelo>` — o usuário escolheu provider+modelo,
@@ -4070,6 +4075,9 @@ export function App(props: AppProps): React.ReactElement {
         columns={columns}
         error={state.phase === 'error'}
         {...(state.governance !== undefined ? { governance: state.governance } : {})}
+        {...(!cycleUiOff && state.cycleProgress !== undefined
+          ? { cycleProgress: state.cycleProgress }
+          : {})}
       />
       {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
           descansa). Sempre visível (glifo+palavra, a11y): plan=read-only (petrol),

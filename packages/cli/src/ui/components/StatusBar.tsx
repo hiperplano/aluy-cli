@@ -25,7 +25,11 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { BUDGET_WARN_PCT } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role } from '../theme/index.js';
-import { abbreviateCount, type GovernanceCounts } from '../../session/model.js';
+import {
+  abbreviateCount,
+  type GovernanceCounts,
+  type CycleProgress,
+} from '../../session/model.js';
 import { useI18n } from '../../i18n/index.js';
 
 /** Nível de consumo de quota (#125) — espelha os limiares do core (70/90%). */
@@ -85,6 +89,16 @@ export interface StatusBarProps {
    * (é estado de roteamento crítico — como o `◷ <tier>`).
    */
   readonly focus?: string;
+  /**
+   * FATIA 1 (CICLOS/SUBCICLOS) — torna o CICLO DE VIDA DO LOOP VISÍVEL. Quando presente,
+   * a barra mostra `↻ ciclo N/M · subciclos K/T` PROMINENTE (accent) logo após o tier/foco
+   * — espelhando os campos existentes (governança `⌁`, foco `◎`). `iteration`/`max` = a
+   * iteração do CycleEngine; `subcyclesDone`/`subcyclesTotal` = as caixas do plano. Os
+   * subciclos só aparecem quando `subcyclesTotal > 0` (há plano). `undefined` ⇒ uso simples
+   * (sem indicador). NUNCA cai no narrow (é o estado-de-vida do loop — como o `◷ <tier>`).
+   * O knob `ALUY_CYCLE_UI_OFF` (lido pela App) suprime tudo via omitir esta prop.
+   */
+  readonly cycleProgress?: CycleProgress;
 }
 
 /** Papel de cor do `⛁ janela %` por nível (§4). */
@@ -177,6 +191,19 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
           crítico — igual ao `◷ <tier>`). `/back` o limpa. */}
       {props.focus !== undefined && props.focus !== '' && (
         <Role name="accent"> ◎ foco: {props.focus}</Role>
+      )}
+
+      {/* FATIA 1 (CICLOS/SUBCICLOS) — o CICLO DE VIDA DO LOOP, PROMINENTE (accent), logo
+          após o tier/foco: `↻ ciclo N/M · subciclos K/T`. CICLO ≡ iteração do CycleEngine;
+          SUBCICLO ≡ caixa do plano (só aparece quando há plano, total>0). Espelha os campos
+          existentes (governança `⌁`, foco `◎`). NÃO cai no narrow (estado-de-vida do loop). */}
+      {props.cycleProgress !== undefined && (
+        <Role name="accent">
+          {' '}
+          ↻ {t('statusbar.cycle')} {props.cycleProgress.iteration}/{props.cycleProgress.max}
+          {props.cycleProgress.subcyclesTotal > 0 &&
+            ` · ${t('statusbar.subcycles')} ${props.cycleProgress.subcyclesDone}/${props.cycleProgress.subcyclesTotal}`}
+        </Role>
       )}
 
       {/* ── cwd (suprimido em narrow) ──────────────────────────────────────────────── */}

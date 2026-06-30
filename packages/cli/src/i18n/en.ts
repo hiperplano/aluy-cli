@@ -59,6 +59,8 @@ export const en: PartialCatalog = {
   'statusbar.window': 'window',
   'statusbar.session': 'session',
   'statusbar.quota': 'quota',
+  'statusbar.cycle': 'cycle',
+  'statusbar.subcycles': 'subcycles',
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': 'broker',
