@@ -10,6 +10,7 @@ import {
   LEAVE_ALT_SCREEN,
   SHOW_CURSOR,
   HIDE_CURSOR,
+  isBenignNetworkAbort,
   type AltScreenStream,
   type ProcessLike,
 } from '../../src/session/alt-screen.js';
@@ -69,6 +70,52 @@ describe('enterAltScreen', () => {
     const s = fakeStream();
     enterAltScreen(s);
     expect(s.writes.join('')).toBe(`${ENTER_ALT_SCREEN}${HIDE_CURSOR}`);
+  });
+});
+
+describe('isBenignNetworkAbort — ESC-CRASH fix (não crashar em socket abortado)', () => {
+  it('ECONNRESET / EPIPE / AbortError / "socket hang up" ⇒ true', () => {
+    expect(isBenignNetworkAbort({ code: 'ECONNRESET' })).toBe(true);
+    expect(isBenignNetworkAbort({ code: 'EPIPE' })).toBe(true);
+    expect(isBenignNetworkAbort({ name: 'AbortError' })).toBe(true);
+    expect(isBenignNetworkAbort(new Error('socket hang up'))).toBe(true);
+    expect(isBenignNetworkAbort(new Error('The operation was aborted'))).toBe(true);
+  });
+  it('undici envelopa em `cause` (fetch failed → cause ECONNRESET) ⇒ true', () => {
+    const err = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    expect(isBenignNetworkAbort(err)).toBe(true);
+  });
+  it('erro de LÓGICA real ⇒ false (segue crashando)', () => {
+    expect(isBenignNetworkAbort(new TypeError("Cannot read properties of undefined"))).toBe(false);
+    expect(isBenignNetworkAbort(new Error('boom de verdade'))).toBe(false);
+    expect(isBenignNetworkAbort(null)).toBe(false);
+    expect(isBenignNetworkAbort('string')).toBe(false);
+  });
+
+  it('onCrash ENGOLE erro benigno (não restaura tela, não re-lança); erro real re-lança', () => {
+    // benigno: a sessão segue viva — sem LEAVE_ALT_SCREEN, sem nextTick (re-throw).
+    const stream = fakeStream();
+    const scheduled: Array<() => void> = [];
+    const proc = Object.assign(fakeProcess(), { nextTick: (cb: () => void) => scheduled.push(cb) });
+    registerRestoreHandlers(stream, proc);
+    (proc as unknown as { emit: (e: string, ...a: unknown[]) => void }).emit(
+      'uncaughtException',
+      { code: 'ECONNRESET', message: 'socket hang up' },
+    );
+    expect(stream.writes.join('')).not.toContain(LEAVE_ALT_SCREEN); // tela NÃO restaurada
+    expect(scheduled).toHaveLength(0); // NÃO re-lançou ⇒ app segue vivo
+
+    // real: restaura a tela + agenda o re-throw (crash limpo).
+    const stream2 = fakeStream();
+    const scheduled2: Array<() => void> = [];
+    const proc2 = Object.assign(fakeProcess(), { nextTick: (cb: () => void) => scheduled2.push(cb) });
+    registerRestoreHandlers(stream2, proc2);
+    (proc2 as unknown as { emit: (e: string, ...a: unknown[]) => void }).emit(
+      'uncaughtException',
+      new Error('falha de verdade'),
+    );
+    expect(stream2.writes.join('')).toContain(LEAVE_ALT_SCREEN); // tela restaurada
+    expect(scheduled2).toHaveLength(1); // re-throw agendado
   });
 });
 

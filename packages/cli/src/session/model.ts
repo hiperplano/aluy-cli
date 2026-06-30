@@ -436,6 +436,15 @@ export interface ProgressView {
   readonly max?: number | undefined;
 }
 
+/** LOTE-2 — contagens da governança `.aluy/` carregada (StatusBar + `/stat`). */
+export interface GovernanceCounts {
+  readonly agents: number;
+  readonly commands: number;
+  readonly skills: number;
+  readonly workflows: number;
+  readonly memory: number;
+}
+
 /** O estado COMPLETO da sessão que a TUI renderiza. */
 export interface SessionState {
   readonly blocks: readonly SessionBlock[];
@@ -528,6 +537,14 @@ export interface SessionState {
    * F8 é o único stop, então o dono PRECISA ver que há trabalho órfão vivo. 0/ausente = nada.
    */
   readonly detachedSubagents?: number | undefined;
+  /**
+   * LOTE-2 (governança .aluy/) — CONTAGENS do que foi CARREGADO da `.aluy/` (+ `~/.aluy/`
+   * global) no boot: agentes, comandos, skills, workflows e itens de memória de projeto. A
+   * TUI mostra `⌁ Na·Cc·Ss·Ww·Mm` na StatusBar p/ o dono VER que a governança foi carregada
+   * (decisão do dono: "mostrar quantos agentes/workflows/… estão carregados"). `/stat` detalha.
+   * Ausente = ainda não computado (boot) ou nada carregado.
+   */
+  readonly governance?: GovernanceCounts | undefined;
   /**
    * EST-1106 — UM `/workflows run` está ATIVO (espelha `cycleActive`). Usado pela
    * TUI p/ segurar a fila do type-ahead (`queueAtRest`).

@@ -304,13 +304,12 @@ describe('EST-0982 — type-ahead: ordem + clear/esc + paralelos read-only', () 
     s.stdin.write(CR);
     await waitFor(() => plain(s.lastFrame()).includes('2 na fila'));
 
-    // esc: o TEXTO encaixa no agente vivo (injectInput 'root'); NÃO interrompe; o !bang FICA na fila.
-    await pressUntil(
-      () => s.stdin.write(ESC),
-      () =>
-        injectSpy.mock.calls.some(
-          (c) => c[0] === 'root' && String(c[1]).includes('travou'),
-        ),
+    // esc UMA ÚNICA vez (SINGLE — o caminho real do F57, NÃO o double-ESC): o TEXTO encaixa no
+    // agente vivo (injectInput 'root'); NÃO interrompe; o !bang FICA na fila. (Antes o teste usava
+    // pressUntil = ESC repetido ⇒ virava double-ESC e passava pelo caminho ERRADO — o bug do dono.)
+    s.stdin.write(ESC);
+    await waitFor(() =>
+      injectSpy.mock.calls.some((c) => c[0] === 'root' && String(c[1]).includes('travou')),
     );
     expect(interruptSpy).not.toHaveBeenCalled();
     await waitFor(() => plain(s.lastFrame()).includes('na fila')); // o bang segue enfileirado

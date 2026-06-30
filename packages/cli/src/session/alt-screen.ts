@@ -46,6 +46,27 @@ export interface ProcessLike {
   removeListener(event: string, listener: (...args: unknown[]) => void): unknown;
 }
 
+/**
+ * ESC-CRASH FIX — `true` se o erro é um ruído BENIGNO de socket abortado/derrubado (a
+ * requisição do modelo abortada pelo ESC, um keep-alive resetado, etc.). Esses NÃO devem
+ * crashar a TUI: o caminho do modelo já trata o `ModelCallAbortedError`; isto é um `'error'`
+ * stray do socket interno do `fetch`. Classes cobertas: `ECONNRESET`, `EPIPE`, "socket hang
+ * up", `AbortError`/"aborted" (abort). PURO/determinístico. Conservador: só a classe de
+ * teardown de conexão — um erro de lógica de verdade NÃO casa e segue crashando.
+ */
+export function isBenignNetworkAbort(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false;
+  const e = err as { code?: unknown; name?: unknown; message?: unknown; cause?: unknown };
+  const code = typeof e.code === 'string' ? e.code : '';
+  const name = typeof e.name === 'string' ? e.name : '';
+  const msg = typeof e.message === 'string' ? e.message : '';
+  if (code === 'ECONNRESET' || code === 'EPIPE' || name === 'AbortError') return true;
+  if (/socket hang up|ECONNRESET|EPIPE|\baborted\b/i.test(msg)) return true;
+  // undici envelopa o erro real em `cause` (ex.: TypeError: fetch failed → cause ECONNRESET).
+  if (e.cause !== undefined && e.cause !== err) return isBenignNetworkAbort(e.cause);
+  return false;
+}
+
 /** Eventos onde a restauração TEM de rodar (ADR-0076 §2: todo caminho de término). */
 export const RESTORE_EVENTS = [
   'exit',
@@ -174,6 +195,14 @@ export function registerRestoreHandlers(
     }
   };
   const onCrash = (err: unknown): void => {
+    // ESC-CRASH FIX (achado do dono) — um erro BENIGNO de socket ABORTADO escapando como
+    // `uncaughtException` NÃO pode derrubar a TUI. Ao dar ESC, o `interrupt()` aborta a
+    // requisição do modelo EM VOO; o socket interno do `fetch` (undici) emite um `'error'`
+    // STRAY (ECONNRESET / "socket hang up" / AbortError) DEPOIS que o loop já tratou o
+    // `ModelCallAbortedError` upstream — então é ruído, não falha. SWALLOW: a sessão segue
+    // viva, SEM restaurar a tela (restaurar corromperia o cockpit) e SEM re-lançar (re-lançar
+    // = o crash que o dono viu). Erros de verdade seguem restaurando + re-lançando (abaixo).
+    if (isBenignNetworkAbort(err)) return;
     restoreScreen();
     cleanupListeners();
     // Re-lança no próximo tick p/ o crash NÃO ser silenciado (tela já limpa). Usa o

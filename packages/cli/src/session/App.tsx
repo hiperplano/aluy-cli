@@ -660,7 +660,16 @@ export function App(props: AppProps): React.ReactElement {
   // o Ink cai no `clearTerminal` (que não reseta `previousLineCount`) e ACUMULA gap a cada tecla.
   const composerVisualLines =
     input.length === 0 ? 1 : visualLines(input, columns > 2 ? columns - 2 : columns);
-  const composerOverflow = Math.max(0, composerVisualLines - 1);
+  // MULTI-LINHA FIX (achado do dono) — TETO de altura do composer no INLINE. Sem ele o composer
+  // crescia SEM LIMITE ao digitar várias linhas, o frame estourava `rows` e o Ink caía no
+  // `clearTerminal` (que não reseta `previousLineCount`) ⇒ ESPAÇO EM BRANCO acumulado entre o
+  // output e o composer. Com o teto o composer JANELA (mostra a vizinhança do cursor + marcador
+  // `↑N`/`↓M`) em vez de empurrar o frame. ~1/3 da tela, piso de 3 linhas. (O cockpit já tinha
+  // o seu próprio `maxRows`; só o inline ficou sem.)
+  const inlineComposerMaxRows = Math.max(3, Math.floor(rows / 3));
+  // O composer agora nunca renderiza mais que `maxRows` linhas (janela) ⇒ o EXCEDENTE que
+  // desconta do orçamento da fala é capado nessa altura (não no total do input cru).
+  const composerOverflow = Math.max(0, Math.min(composerVisualLines, inlineComposerMaxRows) - 1);
   // EST-1000 · ADR-0076 §3/§7 — as seções do LOG do cockpit: a MESMA projeção REDIGIDA
   // (`buildActivityLog`) que o split #135 usa. PROJETADA ANTES do layout (depende só de
   // `flowOverview` + flags de UI, NÃO das alturas), p/ o layout adaptativo dimensionar o
@@ -2195,15 +2204,27 @@ export function App(props: AppProps): React.ReactElement {
         lastEscRef.current = now;
 
         if (hasQueue && !isDoubleEsc && key.escape) {
-          // Enfileira o input corrente (se não-vazio) e NÃO interrompe o turno.
+          // Enfileira o input corrente do composer (se não-vazio) — preserva, não perde.
           const currentLine = expandAndReset(input).trim();
           if (currentLine !== '') {
-            enqueue(currentLine);
+            enqueue(currentLine); // atualiza `queueRef.current` de forma SÍNCRONA (inclui esta linha)
             setHistory((h) => [...h, currentLine]);
             setText('');
             setHistIdx(-1);
           }
-          return;
+          // DECISÃO DO DONO (a correção que faltava) — em turno NORMAL, ESC com fila NÃO é mais
+          // um NO-OP que deixava a msg "presa e nunca lida". Ele FORÇA o encaixe: cada item de
+          // TEXTO PURO da fila vira `injectInput('root', …)` no agente vivo (drena na próxima
+          // iteração do loop); bang/slash/anexo NÃO injetam como texto ⇒ FICAM na fila (rodam no
+          // repouso). Em /cycle mantém o NO-OP clássico (o escape do ciclo é o duplo-ESC, acima).
+          if (!state.cycleActive) {
+            const kept: string[] = [];
+            for (const q of queueRef.current) {
+              if (!injectIfPlainText(q)) kept.push(q);
+            }
+            setQueue(kept);
+          }
+          return; // NÃO interrompe (ESC com fila = "processa a fila agora")
         }
 
         // ADR-0126(C — pedido do dono) — ESC com TEXTO no composer = REDIRECIONAR (encaixa
@@ -2221,30 +2242,10 @@ export function App(props: AppProps): React.ReactElement {
           }
           // `/ask` sozinho (sem pergunta) ⇒ nada a injetar ⇒ cai na parada abaixo.
         }
-        // DECISÃO DO DONO (pedido recorrente) — ESC com composer VAZIO mas com FILA durante o
-        // trabalho NÃO para tudo. Em vez de o single-ESC ser NO-OP (a fila ficava parada e "nunca
-        // era lida"), ele agora FORÇA o encaixe: cada item de TEXTO PURO vira `injectInput` no
-        // agente vivo (drena na PRÓXIMA iteração, não no repouso final), preservando a ordem FIFO.
-        // Bang/slash/anexo NÃO dá p/ injetar como texto ⇒ PERMANECEM na fila (rodam no repouso).
-        // ESC vira "processa a fila AGORA", não "joga fora". FORA do /cycle (lá vale o F57: single-
-        // ESC no-op + duplo-ESC descarta — o escape do ciclo); o cenário do dono é turno normal.
-        // Só cai na PARADA abaixo quando não há nada a encaixar (fila vazia OU só /cycle).
-        if (input.trim() === '' && queueRef.current.length > 0 && !state.cycleActive) {
-          const kept: string[] = [];
-          let flushed = 0;
-          for (const q of queueRef.current) {
-            if (injectIfPlainText(q)) flushed += 1;
-            else kept.push(q); // bang/slash/anexo: não injeta como texto ⇒ fica na fila (roda no repouso)
-          }
-          if (flushed > 0) {
-            setQueue(kept);
-            return; // encaixou TEXTO no agente vivo — NÃO aborta (ESC = "processa a fila agora")
-          }
-          // fila só de bang/slash (nada de texto a encaixar) ⇒ cai na PARADA abaixo (ESC = parar).
-        }
+        // Aqui só se chega com FILA VAZIA (o caso com-fila foi tratado no bloco F57 acima, que
+        // encaixa e dá return). Logo: ESC com composer vazio E fila vazia = PARAR o turno
+        // (memória de músculo do ESC). Ctrl+C e duplo-ESC também caem aqui (hard stop).
         controller.interrupt();
-        // EST-0982 (P1-2) — ESC SEM msg pendente NEM fila = PARAR o turno. "Parar" é o gesto
-        // quando não há NADA a priorizar nem a forçar (fila vazia).
         clearQueue();
         return;
       }
@@ -3851,6 +3852,7 @@ export function App(props: AppProps): React.ReactElement {
         cursorPos={cursorPos}
         active={composerActive}
         showCursor={composerShowCursor}
+        maxRows={inlineComposerMaxRows}
         shellMode={input.startsWith('!')}
         {...(composerHint !== undefined ? { hint: composerHint } : {})}
         {...(state.meta.label !== undefined ? { sessionLabel: state.meta.label } : {})}
