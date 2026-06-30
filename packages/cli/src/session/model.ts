@@ -399,6 +399,26 @@ export interface PendingBudget {
 }
 
 /**
+ * ADR-0137 (Fatia 3) — estado do GATE DO TETO do `/cycle` que o `<CycleCeilingGate>`
+ * renderiza. O teto DURO (CLI-SEC-14) bateu, mas o JUIZ pediu `continue` — então em
+ * vez de parar no silêncio, o `/cycle` PERGUNTA ao humano (`[c] continua · [n] encerra`)
+ * exibindo o MOTIVO do juiz. O `reason` é DADO NÃO-CONFIÁVEL: já vem CLAMPADO a 1 linha
+ * (C2) e a UI o rotula como "motivo do juiz (local · não verificado)". `c` ⇒ estende
+ * EXATAMENTE um teto-worth (C4); `n`/timeout ⇒ ENCERRA (C3 — default seguro).
+ */
+export interface PendingCycleCeiling {
+  /** Qual teto duro bateu (p/ o texto legível do gate). */
+  readonly ceilingLabel: string;
+  /**
+   * O MOTIVO do juiz, JÁ clampado a 1 linha + N chars (C2) e redigido (CLI-SEC-6). DADO
+   * não-confiável — a UI o rotula como tal e NUNCA o trata como texto de sistema.
+   */
+  readonly reason: string;
+  /** Confiança do juiz (0..1) — display. */
+  readonly confidence: number;
+}
+
+/**
  * EST-0969 (watchdog de TRAVAMENTO) — estado da PAUSA-PEDE-DIREÇÃO que o
  * `<StuckGate>` renderiza. O watchdog do loop detectou que o agente gira sem
  * avançar (mesma tool/erro/turno-vazio/sem-progresso); a sessão PAUSA e mostra
@@ -496,6 +516,10 @@ export interface SessionState {
     | 'asking'
     | 'questioning'
     | 'budget'
+    // ADR-0137 (Fatia 3) — o teto DURO do `/cycle` bateu E o juiz pediu `continue`: a
+    // sessão PAUSA e PERGUNTA ao humano (`[c] continua · [n] encerra`) com o motivo do
+    // juiz. `n`/timeout = encerrar (default seguro). Some ao decidir.
+    | 'cycle-ceiling'
     | 'stuck'
     | 'retrying'
     | 'compacting'
@@ -518,6 +542,12 @@ export interface SessionState {
    */
   readonly pendingQuestion?: PendingQuestion | undefined;
   readonly pendingBudget?: PendingBudget | undefined;
+  /**
+   * ADR-0137 (Fatia 3) — o GATE DO TETO pendente (`undefined` fora dele). O controller o
+   * seta quando o teto duro do `/cycle` bate E o juiz pediu `continue`, e o limpa ao
+   * decidir (`c`/`n`/timeout). Mesma mecânica de campo `| undefined` do `pendingBudget`.
+   */
+  readonly pendingCycleCeiling?: PendingCycleCeiling | undefined;
   /**
    * EST-0969 (watchdog) — a pausa-pede-direção pendente (`undefined` fora dela). O
    * controller a seta quando o watchdog do loop dispara e a limpa ao resolver

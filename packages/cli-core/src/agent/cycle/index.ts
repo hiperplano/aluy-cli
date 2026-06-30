@@ -38,3 +38,20 @@ export {
   type Clock as CycleClock,
   type AbortableSleep,
 } from './cycle-engine.js';
+// ADR-0137 (Fatia 3) — POLÍTICA PURA de continuação de subciclo guiada pelo juiz
+// (JudgeEngine). KERNEL: provider-agnóstica, sem I/O, sem ollama. A borda (cli) injeta
+// o JudgeResult JÁ CALCULADO e a redação; o CycleEngine segue PURO/ignorante do juiz.
+export {
+  CYCLE_CONTINUE_OPTION_ID,
+  CYCLE_STOP_OPTION_ID,
+  CYCLE_JUDGE_OPTIONS,
+  CYCLE_JUDGE_QUESTION,
+  DEFAULT_JUDGE_REASON_MAX_CHARS,
+  buildRedactedSubcycleContext,
+  buildSubcycleJudgeInput,
+  judgeResultToContinuation,
+  clampReasonToLine,
+  type SubcycleSummaryInput,
+  type SubcycleBox,
+  type CycleContinuation,
+} from './cycle-judge-policy.js';

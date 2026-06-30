@@ -63,10 +63,19 @@ import {
   NoCeilingError,
   DEFAULT_CYCLE_ITERATIONS,
   DEFAULT_CYCLE_DURATION_MS,
+  // ADR-0137 (Fatia 3) — política PURA de continuação de subciclo guiada pelo juiz.
+  buildSubcycleJudgeInput,
+  judgeResultToContinuation,
+  clampReasonToLine,
+  type SubcycleBox,
+  type CycleContinuation,
+  type JudgeEngine,
   type CycleRunner,
   type CycleOutcome,
   type CycleRequest,
   type CycleStop,
+  type CycleCeilings,
+  type CycleRunResult,
   type CycleObserver,
   runWorkflow,
   type WorkflowActivityRunner,
@@ -597,6 +606,21 @@ export interface SessionControllerOptions {
   readonly memoryScope?: string;
   /** F-MEM — escopos de RECALL (novo + legado p/ migração). undefined ⇒ `[memoryScope]`. */
   readonly memoryRecallScopes?: readonly string[];
+  /**
+   * ADR-0137 (Fatia 3 · placeholder — confirmar nº livre em aluy-specs/01-arquitetura/) —
+   * JUIZ como AUTORIDADE DE CONTINUAÇÃO de subciclo do `/cycle`. PORTA pura (JudgeEngine);
+   * o wiring injeta o `OllamaJudgeEngine` concreto (loopback-only, anti-SSRF, fail-open,
+   * timeout 2.5s). O controller é a BORDA: consulta o juiz na fronteira de subciclo com
+   * contexto REDIGIDO (C1) e traduz o `JudgeResult` (DADO) em continue/stop — o CycleEngine
+   * permanece PURO/ignorante do juiz. Ausente OU `ALUY_CYCLE_JUDGE_OFF` ⇒ seam desligado,
+   * baseline determinístico bit-a-bit (C5).
+   */
+  readonly judge?: JudgeEngine;
+  /**
+   * ADR-0137 — env injetável p/ o knob `ALUY_CYCLE_JUDGE_OFF` (C5). Default `process.env`.
+   * Só p/ teste determinístico.
+   */
+  readonly cycleJudgeEnv?: Record<string, string | undefined>;
 }
 
 /**
@@ -1034,6 +1058,18 @@ export class SessionController {
   // EST-1158 — a instância do CycleEngine ATIVO, p/ `/cycle pause|resume|edit`
   // chegarem ao loop EM EXECUÇÃO. null quando não há ciclo rodando.
   private activeCycleEngine: CycleEngine | null = null;
+  // ADR-0137 (Fatia 3) — o JUIZ de continuação de subciclo, OU null quando o seam está
+  // desligado (sem juiz injetado OU `ALUY_CYCLE_JUDGE_OFF`). Resolvido no constructor.
+  private readonly cycleJudge: JudgeEngine | null = null;
+  // ADR-0137 — a ÚLTIMA decisão de continuação do juiz no `/cycle` corrente (DADO). Usada
+  // pelo gate do teto: se o teto bateu E o juiz pediu `continue` (modo llm, não degradado),
+  // o gate PERGUNTA ao humano em vez de parar em silêncio. `undefined` fora de um ciclo.
+  private lastCycleContinuation: CycleContinuation | undefined;
+  // ADR-0137 — o gate do teto pendente (a decisão `c`/`n` do humano). `undefined` fora dele.
+  // Reusa o desfecho seguro de timeout/`n` = ENCERRAR (C3).
+  private cycleCeilingGate:
+    | { resolve: (extend: boolean) => void; stop: CycleStop }
+    | undefined;
   // EST-1106 — UM `/workflows run` está ATIVO (espelha `cycleActive`).
   private workflowActive = false;
   // EST-1107 — SPAWNER de sub-agentes (construído no constructor quando subAgents habilitado).
@@ -1085,6 +1121,14 @@ export class SessionController {
     // StatusBar após cada tool. Só LEITURA aqui — a navegação é da tool `change_dir`.
     this.cwdPort = opts.ports.cwd ?? null;
     this.graphPort = opts.ports.graph; // FATIA 1 — leitura do plano p/ os subciclos
+    // ADR-0137 (Fatia 3) — juiz de continuação de subciclo + knob de desligamento (C5).
+    // O seam só liga se há juiz injetado E o knob não está OFF. Lido UMA vez no constructor.
+    {
+      const env = opts.cycleJudgeEnv ?? process.env;
+      const off = env.ALUY_CYCLE_JUDGE_OFF;
+      const knobOff = off === '1' || off === 'true' || off === 'yes';
+      this.cycleJudge = opts.judge && !knobOff ? opts.judge : null;
+    }
     this.tuiResolver = isTuiResolver(opts.askResolver) ? opts.askResolver : null;
     // EST-1110 · ADR-0114 — resolver de PERGUNTA (TUI), quando injetado pelo wiring.
     this.questionResolver = opts.questionResolver ?? null;
@@ -2177,6 +2221,9 @@ export class SessionController {
     // que o ciclo é aceito até o `finally`, `cycle()`/`submit()` públicos recusam.
     // O espelho no estado (`cycleActive`) segura a fila do type-ahead na TUI.
     this.cycleActive = true;
+    // ADR-0137 (Fatia 3) — começa SEM decisão de juiz herdada (cada ciclo decide do zero).
+    this.lastCycleContinuation = undefined;
+    this.cycleCeilingGate = undefined;
     this.dismissBoot();
     this.pushBlock({ kind: 'you', text: `/cycle ${input}` });
     // FATIA 1 (CICLOS/SUBCICLOS) — semeia o cache de render do progresso já no início:
@@ -2263,7 +2310,16 @@ export class SessionController {
         parentOwn.toolCalls += result.usage.toolCalls;
         parentOwn.iterations += result.usage.iterations;
         const progress = `work:${workDone}`;
-        const done = result.stop.kind === 'final' && isCompletionAnswer(result.stop.answer);
+        // DONE DETERMINÍSTICO (baseline, GS-L4): a tarefa concluiu sse o desfecho final
+        // declara conclusão. É o FALLBACK quando o juiz está OFF ou degradou (§4 fail-open).
+        const deterministicDone =
+          result.stop.kind === 'final' && isCompletionAnswer(result.stop.answer);
+        // ADR-0137 (Fatia 3) — SEAM do juiz na BORDA: na fronteira de subciclo, o juiz é a
+        // AUTORIDADE DE CONTINUAÇÃO. Consulta o juiz com contexto REDIGIDO (C1) e traduz o
+        // `JudgeResult` (DADO) em continue/stop. `continue` ⇒ NÃO concluir (segue); `stop` ⇒
+        // concluir. DEGRADADO (ollama fora/timeout) ⇒ ignora o juiz, usa o `done`
+        // determinístico (§4). O CycleEngine permanece PURO: só vê o `done` resultante.
+        const done = await this.applyCycleJudge(deterministicDone, task, stopSummaryOf(result));
         prevTokens += delta;
         return { done, progress, summary: stopSummaryOf(result) };
       },
@@ -2301,7 +2357,13 @@ export class SessionController {
     let ran = true;
     this.activeCycleEngine = engine; // EST-1158 — /cycle pause|resume|edit roteiam p/ ele
     try {
-      const res = await engine.run(parsed.task, rootSignal);
+      // ADR-0137 (Fatia 3) — laço do GATE DO TETO. `engine.run` para no teto DURO; se o juiz
+      // pediu `continue` (modo llm, não degradado) e o teto bateu, NÃO para no silêncio:
+      // PERGUNTA ao humano (C2/C3) e, no `c`, estende EXATAMENTE um teto-worth via
+      // `reconfigure` e RE-ARMA o gate (C4 — O(aprovações), nunca auto-aprovação). `n`/
+      // timeout/abort ⇒ para (C3). Os tetos seguem soberanos (o juiz NÃO os relaxa).
+      let res = await engine.run(parsed.task, rootSignal);
+      res = await this.runCycleCeilingGateLoop(engine, ceilings, res, rootSignal);
       // EST-0973 (hunt-budget) — a RAIZ recebe o uso PRÓPRIO do PAI acumulado entre
       // ciclos (não o agregado `res.usage`): os filhos já contam nos próprios nós, e
       // `totalAccounting()` soma raiz+filhos sem dobra (= o agregado, p/ o rodapé).
@@ -2321,6 +2383,10 @@ export class SessionController {
       // `state.cycleActive`) re-tenta — o efeito da fila re-roda nesta re-publicação.
       this.activeCycleEngine = null; // EST-1158
       this.cycleActive = false;
+      // ADR-0137 (Fatia 3) — LIMPA a decisão do juiz e qualquer gate de teto pendente: nada
+      // do ciclo que acabou pode vazar para o próximo (sem auto-aprovação herdada — C4).
+      this.lastCycleContinuation = undefined;
+      this.cycleCeilingGate = undefined;
       // FATIA 1 (CICLOS/SUBCICLOS) — LIMPA o cache de render do progresso junto da guarda:
       // sem ciclo ativo, a StatusBar não deve mais mostrar `↻ ciclo N/M` (some no repouso).
       this.patch({ cycleActive: false, cycleProgress: undefined });
@@ -2397,6 +2463,137 @@ export class SessionController {
       `  tarefa: ${c.task}`,
       `  max-iter: ${c.maxIterations} · intervalo: ${c.intervalMs}ms`,
     ]);
+  }
+
+  // ─── ADR-0137 (Fatia 3) — juiz como autoridade de continuação + gate do teto ─────
+
+  /**
+   * ADR-0137 — SEAM do juiz na fronteira de subciclo (BORDA, fora do CycleEngine puro).
+   * Recebe o `done` DETERMINÍSTICO e devolve o `done` EFETIVO após ponderar o juiz:
+   *  • Seam OFF (sem juiz / `ALUY_CYCLE_JUDGE_OFF`) ⇒ devolve o determinístico (C5 — baseline
+   *    bit-a-bit; nem sequer consulta o juiz).
+   *  • Juiz DEGRADADO (ollama fora/timeout/parse inválido ⇒ mode:'heuristic') ⇒ fail-open:
+   *    devolve o determinístico (§4 — nunca prolonga na falta do juiz).
+   *  • Juiz `continue` (llm) ⇒ `false` (NÃO concluir — segue). Juiz `stop` ⇒ `true`.
+   * O contexto enviado ao juiz é REDIGIDO (C1) por `buildSubcycleJudgeInput` (redação aplicada
+   * ANTES de devolver, dentro da política pura do cli-core). NUNCA lança (o juiz já é fail-open;
+   * por garantia, qualquer erro aqui cai no determinístico).
+   */
+  private async applyCycleJudge(
+    deterministicDone: boolean,
+    objective: string,
+    lastOutcome: string,
+  ): Promise<boolean> {
+    const judge = this.cycleJudge;
+    if (!judge) return deterministicDone; // C5 — seam OFF: baseline determinístico.
+    try {
+      // Resumo do subciclo: objetivo + caixas do plano + último desfecho — REDIGIDO (C1).
+      // A redação (redactOutputSecrets, CLI-SEC-6) é aplicada DENTRO de buildSubcycleJudgeInput,
+      // ANTES de virar JudgeInput.context — não há caminho com o texto cru chegando ao fetch.
+      const boxes: readonly SubcycleBox[] = (this.graphPort?.listBoxes() ?? []).map((b) => ({
+        label: b.label,
+        closed: b.closed,
+      }));
+      const input = buildSubcycleJudgeInput(
+        { objective, boxes, lastOutcome },
+        redactOutputSecrets,
+      );
+      const result = await judge.judge(input);
+      const cont = judgeResultToContinuation(result);
+      this.lastCycleContinuation = cont;
+      if (cont.degraded) return deterministicDone; // §4 fail-open.
+      return cont.decision === 'continue' ? false : true;
+    } catch {
+      // Defesa-em-profundidade: qualquer erro ⇒ determinístico (o juiz nunca devia lançar).
+      this.lastCycleContinuation = undefined;
+      return deterministicDone;
+    }
+  }
+
+  /**
+   * ADR-0137 — laço do GATE DO TETO (CLI-SEC-14 vira pergunta, não parede cega). Enquanto
+   * `engine.run` parar por um teto DURO (iterações/duração) E o juiz tiver pedido `continue`
+   * (modo llm, NÃO degradado), PERGUNTA ao humano: `c` ⇒ estende EXATAMENTE um teto-worth e
+   * RE-RODA (re-arma o gate ao bater de novo — C4, O(aprovações)); `n`/timeout/abort ⇒ para
+   * (C3 — default seguro). Os tetos seguem soberanos: o juiz NÃO os relaxa — só o `c` humano
+   * autoriza mais um teto-worth, via `reconfigure` (o cap NUNCA some). Budget/no-progress/
+   * abort NÃO disparam o gate (continuam parando duro — anti-runaway por outras vias).
+   */
+  private async runCycleCeilingGateLoop(
+    engine: CycleEngine,
+    ceilings: CycleCeilings,
+    initial: CycleRunResult,
+    signal: AbortSignal,
+  ): Promise<CycleRunResult> {
+    let res = initial;
+    for (;;) {
+      // Só os tetos de ITERAÇÕES/DURAÇÃO viram pergunta. Budget agregado, no-progress, abort
+      // e conclusão NÃO — param duro (anti-runaway/anti-loop seguem soberanos, C6).
+      const isHardCeiling = res.stop.kind === 'max-iterations' || res.stop.kind === 'max-duration';
+      const cont = this.lastCycleContinuation;
+      const judgeWantsMore = cont !== undefined && !cont.degraded && cont.decision === 'continue';
+      if (!isHardCeiling || !judgeWantsMore || signal.aborted) return res;
+
+      // PERGUNTA ao humano (C2/C3). O `reason` já vem do juiz; clampa a 1 linha (C2) e o
+      // gate o rotula como DADO não-confiável. `n`/timeout/abort ⇒ encerra (default seguro).
+      const extend = await this.askCycleCeiling(res.stop, cont!);
+      if (!extend || signal.aborted) return res; // C3 — não estende.
+
+      // C4 — ESTENDE EXATAMENTE UM TETO-WORTH e re-roda. `reconfigure` re-afirma o cap de
+      // iterações (≥1, CLI-SEC-14 — nunca some); re-rodar o engine zera `cyclesRun`/relógio,
+      // dando uma — e só uma — nova janela de teto. Budget agregado PERSISTE (não zera), então
+      // ele ainda corta cedo se estourar. Sem auto-aprovação: bater de novo ⇒ pergunta de novo.
+      engine.reconfigure({ maxIterations: ceilings.maxIterations });
+      this.lastCycleContinuation = undefined; // a próxima fronteira de subciclo decide do zero.
+      this.patch({ phase: 'thinking', workingLabel: 'em ciclo (estendido)' });
+      res = await engine.run(engine.currentConfig.task, signal);
+    }
+  }
+
+  /**
+   * ADR-0137 — arma o GATE DO TETO (fase `cycle-ceiling`) e AGUARDA a decisão do humano.
+   * Resolve `true` (estende) só no `c` explícito; `false` (encerra) no `n`/timeout/abort —
+   * o DEFAULT SEGURO (C3), reusando o mesmo desfecho do gate de budget. O `reason` do juiz
+   * é DADO NÃO-CONFIÁVEL: clampado a 1 LINHA (C2) antes de ir ao estado/tela.
+   */
+  private askCycleCeiling(stop: CycleStop, cont: CycleContinuation): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const settle = (extend: boolean): void => {
+        if (this.cycleCeilingGate === undefined) return; // já resolvido (idempotente).
+        this.cycleCeilingGate = undefined;
+        this.patch({ phase: 'thinking', pendingCycleCeiling: undefined });
+        resolve(extend);
+      };
+      this.cycleCeilingGate = { resolve: settle, stop };
+      this.patch({
+        phase: 'cycle-ceiling',
+        workingLabel: undefined,
+        pendingCycleCeiling: {
+          ceilingLabel: cycleCeilingLabel(stop),
+          // C2 — 1 linha + N chars: `[c]/[n]` NUNCA saem da tela; reason multilinha não vaza.
+          reason: clampReasonToLine(cont.reason),
+          confidence: cont.confidence,
+        },
+      });
+    });
+  }
+
+  /**
+   * ADR-0137 — `[c] continua` do gate do teto: AUTORIZA estender um teto-worth. Só vale na
+   * fase `cycle-ceiling` (no-op fora dela). O laço do gate retoma e re-roda o engine.
+   */
+  continueCycleCeiling(): void {
+    if (this.state.phase !== 'cycle-ceiling' || !this.cycleCeilingGate) return;
+    this.cycleCeilingGate.resolve(true);
+  }
+
+  /**
+   * ADR-0137 — `[n] encerra` (ou timeout) do gate do teto: ENCERRA o `/cycle` no teto (C3,
+   * default seguro). Só vale na fase `cycle-ceiling` (no-op fora dela).
+   */
+  stopCycleCeiling(): void {
+    if (this.state.phase !== 'cycle-ceiling' || !this.cycleCeilingGate) return;
+    this.cycleCeilingGate.resolve(false);
   }
 
   /**
@@ -2967,6 +3164,9 @@ export class SessionController {
     // EST-0969 (watchdog) — se há uma PAUSA-PEDE-DIREÇÃO pendente, esc/Ctrl-C a
     // resolve como `end` (fail-safe: o loop não fica pendurado esperando a tecla).
     this.cancelStuckPause();
+    // ADR-0137 (Fatia 3) — se há um GATE DO TETO pendente, esc/Ctrl-C o resolve como
+    // ENCERRAR (C3 — default seguro; o `/cycle` para no teto, não estende sem `c` humano).
+    this.cycleCeilingGate?.resolve(false);
     // EST-0948 (auto-retry) — se há um BACKOFF em curso, corta-o também (parável: esc/
     // Ctrl-C durante a espera cancela a re-tentativa). O abort da raiz já propaga p/ cá
     // (subscrição em `runBackoff`); abortar direto é defensivo/idempotente.
@@ -6349,6 +6549,21 @@ function cycleStopLines(
   })();
   const tokens = Math.max(aggregateTokens, consumedTokens);
   return [reason, `${cyclesRun} ciclo(s) · ${abbreviateCount(tokens)} tokens consumidos.`];
+}
+
+/**
+ * ADR-0137 (Fatia 3) — rótulo legível do teto DURO que bateu, p/ o texto do gate do teto.
+ * Só os tetos que viram pergunta (iterações/duração); os demais nem chegam ao gate.
+ */
+function cycleCeilingLabel(stop: CycleStop): string {
+  switch (stop.kind) {
+    case 'max-iterations':
+      return `teto de iterações (${stop.limit} ciclos)`;
+    case 'max-duration':
+      return `teto de duração (${formatDuration(stop.limitMs)})`;
+    default:
+      return 'teto do ciclo';
+  }
 }
 
 // Re-export p/ ergonomia do teste/wiring.

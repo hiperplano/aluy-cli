@@ -30,6 +30,7 @@ import {
   BrokerError,
   BudgetGate,
   StuckGate,
+  CycleCeilingGate,
   SlashMenu,
   CommandPalette,
   FilePicker,
@@ -2078,6 +2079,22 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
+    // ── ADR-0137 (Fatia 3) — gate do TETO do /cycle (juiz pediu continuar) ──────────
+    // O teto duro bateu, mas o juiz sugeriu seguir. `[c]` estende um teto-worth e re-roda;
+    // `[n]`/esc ENCERRA (C3 — default seguro). É decisão HUMANA consciente (o motivo do
+    // juiz é DADO rotulado, não instrução).
+    if (state.phase === 'cycle-ceiling') {
+      if (char === 'n') {
+        controller.stopCycleCeiling();
+        return;
+      }
+      if (char === 'c') {
+        controller.continueCycleCeiling();
+        return;
+      }
+      return;
+    }
+
     // ── EST-1015 · ADR-0072 §3b (opção (c) do dono) — CONFIRMAÇÃO de Tab→YOLO ──────────
     // Tab→unsafe (catraca off) não troca mais direto: arma esta confirmação modal single-key.
     // `[s]`/`[y]` ATIVA o YOLO; `[n]`/Esc CANCELA (fica no modo seguro). Bloqueia o resto
@@ -3599,6 +3616,15 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
 
+      {/* ADR-0137 (Fatia 3) — gate do TETO do /cycle: o teto duro bateu mas o juiz pediu
+          continuar; pergunta ao humano [c] continua / [n] encerra com o motivo do juiz
+          (DADO rotulado, 1 linha). Default seguro = encerrar (n/timeout/esc). */}
+      {state.phase === 'cycle-ceiling' && state.pendingCycleCeiling && (
+        <Box paddingTop={1}>
+          <CycleCeilingGate {...state.pendingCycleCeiling} />
+        </Box>
+      )}
+
       {/* EST-1015 · ADR-0072 §3b (opção (c) do dono) — CONFIRMAÇÃO de Tab→YOLO. Modal
           single-key: ativar o YOLO (catraca off) exige um [s] explícito, como o `--yolo`
           no boot. `warn` (accent forte) p/ o usuário PERCEBER que vai desligar a aprovação. */}
@@ -4382,6 +4408,9 @@ function hintStateOf(
         ? 'ask-destructive'
         : 'ask';
     case 'budget':
+      return 'budget';
+    // ADR-0137 (Fatia 3) — o gate do teto do /cycle reusa o hint de budget (`[c]/[n]`).
+    case 'cycle-ceiling':
       return 'budget';
     case 'error':
       return 'error';
