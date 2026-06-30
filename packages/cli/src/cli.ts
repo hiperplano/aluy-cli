@@ -187,6 +187,11 @@ export type CliAction =
       // cobertura quase universal mesmo em UTF-8 (terminal/fonte teimosos, ex.:
       // Terminator). Equivale a ALUY_SAFE_GLYPHS=1. Não persiste.
       safeGlyphs: boolean;
+      // ADR-0134/0135 — `--telegram` ATIVA a bridge Telegram no boot: o agente passa a
+      // RECEBER mensagens do dono allowlistado (long-poll) e pode responder (`telegram_send`).
+      // DORMENTE sem credencial: sem token no keychain a bridge NÃO sobe (avisa `aluy telegram
+      // login`) — zero egress. Só LIGA (não persiste; `false`/ausente ⇒ inerte, como hoje).
+      telegram: boolean;
       // EST-0990 — MODO VIEW AVANÇADO (split CHAT | LOG). `--split` LIGA na largada
       // (precedência flag > config `ui.splitView` > default OFF). `undefined` quando
       // a flag não veio (cai p/ a preferência salva). É a ÚNICA flag que MAPEIA p/ uma
@@ -652,6 +657,7 @@ const KNOWN_LONG_FLAGS: ReadonlySet<string> = new Set([
   'resume',
   'self-check',
   'split',
+  'telegram',
   'test',
   'tier',
   'unsafe',
@@ -904,6 +910,9 @@ export function parseArgs(argv: readonly string[]): CliAction {
   const dense = argv.includes('--dense');
   // EST-0984 — `--ascii` força o perfil SEGURO de glifos (opt-in explícito).
   const safeGlyphs = argv.includes('--ascii');
+  // ADR-0134/0135 — `--telegram` ATIVA a bridge no boot (só LIGA; ausente ⇒ inerte). A
+  // ativação real é DORMENTE: sem token no keychain a bridge não sobe (avisa e segue).
+  const telegram = argv.includes('--telegram');
   // EST-0990 — `--split` (alias `--view`) LIGA o modo view avançado na largada. Só
   // LIGA (não há `--no-split`); ausente ⇒ `undefined` (o wiring cai na pref salva).
   const split = argv.includes('--split') || argv.includes('--view') ? true : undefined;
@@ -1240,6 +1249,7 @@ export function parseArgs(argv: readonly string[]): CliAction {
     fresh,
     subAgents,
     safeGlyphs,
+    telegram, // ADR-0134/0135 — ativa a bridge Telegram no boot (dormente sem token).
     print, // EST-1007 — modo headless one-shot (`-p`/`--print`/`--exec`).
     ...(split !== undefined ? { split } : {}),
     ...(fullscreen !== undefined ? { fullscreen } : {}),

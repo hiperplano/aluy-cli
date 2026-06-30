@@ -528,6 +528,10 @@ async function main(): Promise<void> {
         // EST-0969 · ADR-0057 — sub-agentes locais paralelos (default ligado; opt-out
         // por `--no-subagents`). Repassado a buildSession via run.tsx (forma objeto).
         subAgents: { enabled: action.subAgents },
+        // ADR-0134/0135 — `--telegram` ATIVA a bridge no boot (dormente sem token). Só
+        // na sessão INTERATIVA (não no headless `-p` one-shot: um long-poll não faz sentido
+        // num turno único que sai logo). run.tsx faz a ativação real (keychain → connector).
+        ...(action.telegram && !action.print ? { telegram: true } : {}),
         // EST-1007 — no headless o objetivo é o prompt resolvido (arg/posicional/stdin);
         // fora do headless é o objetivo posicional cru (`aluy "obj"`).
         ...(headlessGoal !== undefined ? { goal: headlessGoal } : {}),

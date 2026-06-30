@@ -75,6 +75,9 @@ import {
   runAddDir,
 } from '../slash/handlers.js';
 import { KeychainConnectorSecretStore } from '../auth/connector-secret-store.js';
+import { activateTelegram } from '../connector/telegram-activation.js';
+import type { IngressSink, TelegramBridge } from '../connector/telegram-bridge.js';
+import type { SessionController } from './controller.js';
 import { createRegistryFetch } from '../mcp/registry-search.js';
 import { runDoctorLive } from '../doctor/slash.js';
 import { buildRepairGoal, gatherLogTails, SIDECAR_KINDS } from '../doctor/repair.js';
@@ -199,6 +202,19 @@ export interface RunSessionOptions extends BuildSessionOptions {
    * default). MAPEIA p/ a pref persistida `localBudget`.
    */
   readonly budget?: boolean;
+  /**
+   * ADR-0134/0135 — `--telegram`: ATIVA a bridge Telegram no boot (long-poll do dono
+   * allowlistado + tool `telegram_send`). DORMENTE: sem token no keychain a bridge NÃO sobe
+   * (avisa `aluy telegram login`, zero egress). Ausente/`false` ⇒ inerte (como hoje).
+   * Injetável p/ teste via `telegramActivate` (sem keychain/rede real).
+   */
+  readonly telegram?: boolean;
+  /**
+   * Override da ATIVAÇÃO do Telegram (teste) — recebe o sink e devolve o resultado, sem
+   * tocar keychain/rede. Default: `activateTelegram` (keychain + connector reais). Só é
+   * chamado quando `telegram` é `true`.
+   */
+  readonly telegramActivate?: typeof activateTelegram;
   /**
    * EST-1000 · ADR-0076 §4 — store do `/export` (grava o transcript redigido em
    * `~/.aluy/exports/`). Injetável p/ teste (baseDir tmpdir), sem tocar o `~/.aluy/` real.
@@ -712,10 +728,46 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             return loaded;
           },
         });
-  const mcpTools = opts.mcpTools ?? mcpSetup?.tools ?? [];
+  const mcpToolsBase = opts.mcpTools ?? mcpSetup?.tools ?? [];
   if (mcpSetup?.configError) {
     process.stderr.write(`aluy: MCP — ${mcpSetup.configError}\n`);
   }
+
+  // ADR-0134/0135 — ATIVAÇÃO da bridge Telegram (`--telegram`). Roda ANTES do `buildSession`
+  // p/ a tool `telegram_send` entrar no toolset (`mcpTools`, síncrono no build). O SINK é
+  // DEFERIDO: o pump injeta no `SessionController` que só existe APÓS o build — então o sink
+  // guarda uma ref mutável ao controller, preenchida logo depois. DORMENTE (C6): sem token,
+  // `activateTelegram` devolve `active:false` (nenhum client/egress) e só avisamos no stderr.
+  let telegramController: SessionController | undefined; // preenchido após o build (deferido).
+  const telegramSink: IngressSink = {
+    // INSTRUÇÃO do dono ⇒ canal `user` (MESMA via do "btw"; a catraca re-decide qualquer efeito).
+    injectInstruction: (text) => {
+      telegramController?.injectInput('root', text);
+    },
+    // DADO não-confiável ⇒ canal `observation` (envelopado DADO_NAO_CONFIAVEL, CLI-SEC-4).
+    injectData: (label, text) => {
+      telegramController?.ingestExternalData(label, text);
+    },
+  };
+  let telegramBridge: TelegramBridge | undefined;
+  if (opts.telegram === true) {
+    const activate = opts.telegramActivate ?? activateTelegram;
+    const result = await activate({ sink: telegramSink });
+    if (result.active) {
+      telegramBridge = result.bridge;
+      if (result.allowlistSize === 0) {
+        process.stderr.write(
+          'aluy: telegram — bridge ativa mas allowlist VAZIA (fechada): autorize seu chat com ' +
+            '`aluy telegram allow <chat-id>` para receber mensagens.\n',
+        );
+      }
+    } else {
+      // C6 — não ativou: avisa por que (sem token etc.) e segue SEM bridge (zero egress).
+      process.stderr.write(`aluy: telegram — ${result.reason}\n`);
+    }
+  }
+  // O `telegram_send` (gateado, alvo travado) entra no toolset SÓ quando a bridge subiu.
+  const mcpTools = telegramBridge ? [...mcpToolsBase, telegramBridge.sendTool()] : mcpToolsBase;
   // HUNT-CAP (#266) — avisos honestos do setup (ex.: server que estourou o teto de tools
   // por server e teve o excesso cortado). Não vazam segredo (nome + contagens).
   for (const w of mcpSetup?.warnings ?? []) {
@@ -2838,6 +2890,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     });
     built.controller.startMemoryMonitor();
 
+    // ADR-0134/0135 — LIGA a bridge Telegram agora que o `SessionController` existe: preenche
+    // a ref DEFERIDA do sink e dispara o PUMP do long-poll (em segundo plano). O pump roteia
+    // CADA mensagem pela malha (C2) e injeta SÓ o que ela autoriza. NÃO bloqueia o boot/render
+    // (`void`); um erro do pump é REDIGIDO (C1) e NÃO derruba a sessão. O `bridge.stop()` no
+    // teardown cancela o long-poll. Só existe quando a bridge subiu (token presente — C6).
+    if (telegramBridge) {
+      telegramController = built.controller;
+      void telegramBridge.pump();
+    }
+
     // EST-0974 — HOOKS de `session-start`: disparados UMA vez no boot, ATRÁS da catraca.
     // Em Plan, são NEGADOS (run_command é efeito); fora de Plan, sempre-ask ⇒ ask. O
     // disparo é best-effort (não bloqueia o render). Sem hooks de session-start ⇒ no-op.
@@ -2877,6 +2939,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       // waitUntilExit). Idempotente com o `finally` externo (re-remoção é no-op).
       signalReset.dispose();
     }
+    // ADR-0134/0135 — ENCERRA a bridge Telegram ao sair: aborta o long-poll (o connector
+    // termina o `incoming()`). Idempotente; no-op quando a bridge não subiu. Solta a ref
+    // deferida do sink (sem injetar em sessão já morta).
+    telegramBridge?.stop();
+    telegramController = undefined;
     // EST-0970 — fecha os processos-server MCP ao sair (sem vazar processo). Best-effort.
     if (mcpSetup) await mcpSetup.close();
     // EST-0963 — solta o observador do sino ao sair (sem timer/subscrição órfã).

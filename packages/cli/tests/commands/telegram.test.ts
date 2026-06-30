@@ -114,7 +114,7 @@ describe('runTelegram (ADR-0134/0135 — gestão do conector)', () => {
     expect(out.join('\n')).toContain('removido');
   });
 
-  it('status ⇒ mostra token (redigido) + allowlist + estado inerte', async () => {
+  it('status com token + allowlist ⇒ token (redigido) + allowlist + PRONTA (rode --telegram)', async () => {
     const { io, out } = fakeIO();
     const secret = fakeSecret(TOKEN);
     await runTelegram({ sub: 'allow', chatId: 555 }, { io, configStore });
@@ -123,7 +123,19 @@ describe('runTelegram (ADR-0134/0135 — gestão do conector)', () => {
     expect(text).toContain('presente');
     expect(text).toContain('555');
     expect(text).not.toContain('AAHk'); // não vaza o token
-    expect(text).toMatch(/não.*ativa|inert/i); // deixa claro que a bridge não está ligada
+    // ADR-0134/0135 — com token+allowlist a bridge está PRONTA: o `aluy --telegram` a ativa.
+    expect(text).toMatch(/pronta/i);
+    expect(text).toContain('--telegram');
+  });
+
+  it('status com token mas allowlist VAZIA ⇒ avisa p/ autorizar antes de --telegram', async () => {
+    const { io, out } = fakeIO();
+    const secret = fakeSecret(TOKEN);
+    await runTelegram({ sub: 'status' }, { io, secretStore: secret, configStore });
+    const text = out.join('\n');
+    expect(text).toContain('presente');
+    expect(text).toMatch(/VAZIA/);
+    expect(text).toMatch(/autorize/i);
   });
 
   it('status sem login ⇒ token ausente + allowlist vazia (bridge fechada)', async () => {
@@ -133,5 +145,7 @@ describe('runTelegram (ADR-0134/0135 — gestão do conector)', () => {
     const text = out.join('\n');
     expect(text).toMatch(/ausente/);
     expect(text).toMatch(/VAZIA/);
+    // C6 — sem token a bridge é INERTE (não sobe, nem com --telegram).
+    expect(text).toMatch(/INERTE|telegram login/i);
   });
 });

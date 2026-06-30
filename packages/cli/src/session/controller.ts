@@ -3123,6 +3123,35 @@ export class SessionController {
   }
 
   /**
+   * ADR-0134/0135 (bridge de conectores) — INGRESSO de DADO NÃO-CONFIÁVEL de um canal
+   * externo (ex.: Telegram). DISTINTO do `injectInput` (que é INSTRUÇÃO do dono, canal
+   * `user`): aqui o conteúdo entra SEMPRE como `observation` (DADO_NAO_CONFIAVEL, CLI-SEC-4)
+   * — o modelo o INTERPRETA, NUNCA o obedece como ordem (a fronteira de PROVENIÊNCIA, igual à
+   * saída de qualquer tool/sala). É a malha (mesh.ts) que DECIDE instrução×dado ANTES de
+   * chamar isto; este método só ENTREGA ao canal de dado, reusando o MESMO mecanismo do
+   * monitor (`monitorQueue`): VIVO ⇒ o loop drena mid-turn como observação; PARADO ⇒
+   * `pendingSeed` do próximo turno. NÃO toca a catraca; um efeito derivado RE-PASSA `decide()`.
+   * `label` é a ORIGEM visível (CLI-SEC-9). `text` vazio ⇒ no-op.
+   */
+  ingestExternalData(label: string, text: string): void {
+    const body = text.trim();
+    if (body === '') return;
+    // O MESMO canal de DADO do monitor (`monitorQueue`) serve aos DOIS estados: VIVO ⇒ o loop
+    // o drena mid-turn como `observation`; PARADO ⇒ `maybeWakeForMonitor` ACORDA a sessão e o
+    // injeta como `observation` no turno-wake. Em ambos é DADO_NAO_CONFIAVEL (CLI-SEC-4) —
+    // nunca instrução; a catraca é intocada. `monitorId` por-label COALESCE rajadas do mesmo
+    // canal (anti-flood, como o file-watch). O `enqueue` dispara `maybeWakeForMonitor` (porta).
+    this.monitorQueue.enqueue({
+      monitorId: `connector:${label}`,
+      label,
+      type: 'process-wait',
+      condition: 'mensagem de canal externo',
+      payload: body,
+      firedAt: new Date(this.clock()).toISOString(),
+    });
+  }
+
+  /**
    * EST-0982 (mid-turn) — `true` se o agente PRINCIPAL está num turno VIVO (a raiz da
    * FlowTree existe e ainda não terminou). É o discriminante do `injectInput('root')`:
    * vivo ⇒ injeção mid-turn (fila viva); parado ⇒ próximo turno.

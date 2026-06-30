@@ -134,6 +134,17 @@ async function statusCmd(
   io.out(
     `  allowlist: ${allow.length > 0 ? `[${allow.join(', ')}]` : 'VAZIA (bridge fechada — autorize com `aluy telegram allow <chat-id>`)'}`,
   );
-  io.out('  estado:    a bridge ainda NÃO está ativa (o `--telegram` chega numa próxima versão).');
+  // ADR-0134/0135 — a bridge é DORMENTE: existe e ativa com `aluy --telegram`, mas só sobe
+  // (abre o long-poll/egress) quando HÁ token. Sem token ⇒ inerte, mesmo com `--telegram`.
+  const ready = token !== null && allow.length > 0;
+  io.out(
+    `  estado:    ${
+      token === null
+        ? 'INERTE — sem token (a bridge não sobe; rode `aluy telegram login`).'
+        : ready
+          ? 'pronta — rode `aluy --telegram` para ativar a bridge nesta sessão.'
+          : 'token OK mas allowlist VAZIA — autorize seu chat e rode `aluy --telegram`.'
+    }`,
+  );
   return 0;
 }
