@@ -141,6 +141,43 @@ describe('HUNT-RESUME — /history AO VIVO não vaza a conversa anterior na sess
     expect(prompt).not.toContain('fato A2: a grama é verde');
   });
 
+  it('F193 — retomar uma sessão MORTA-NO-MEIO-DE-UM-TURNO reentrega o "btw" ao modelo', async () => {
+    // A causa-raiz do dono: matar uma sessão logo após um "btw" (inject mid-turn) e
+    // retomá-la deixava o modelo SEM o redirecionamento — ele via o objetivo original +
+    // a própria resposta (que respondia ao btw), sem a mensagem que a motivou: "perdeu a
+    // própria referência". Aqui provamos, PELO CONTEXTO QUE O MODELO VÊ, que o inject
+    // agora volta (via blocksToHistory→goal, consumido no pendingSeed do próximo submit).
+    const { caller, lastPromptText } = capturingCaller();
+    const c = buildController(caller);
+    c.dismissBoot();
+
+    // Record de uma sessão morta no meio de um turno: objetivo longo, o dono redireciona
+    // (inject), o modelo respondeu ao redirecionamento — e então foi morta (Ctrl-C + kill).
+    const killedMidTurn: SessionRecord = {
+      id: 'sessionMidTurn',
+      version: 1,
+      createdAt: 1,
+      updatedAt: 2,
+      cwd: '/proj',
+      tier: 'aluy-flux',
+      blocks: [
+        { kind: 'note', title: 'config', lines: ['MCP: 5 server(s)'] },
+        { kind: 'you', text: 'escreva um texto BEM LONGO sobre a história da computação' },
+        { kind: 'inject', text: 'na verdade so me diga: quanto é 7 vezes 8?' },
+        { kind: 'aluy', text: '7 vezes 8 é 56.', streaming: false },
+      ],
+    };
+    applyResumeRecord(killedMidTurn, resumeDeps(c));
+
+    await c.submit('continue de onde parou');
+    const prompt = lastPromptText();
+    // o REDIRECIONAMENTO do dono (inject) está no contexto — o modelo "se lê" de novo.
+    expect(prompt).toContain('quanto é 7 vezes 8?');
+    // a resposta do próprio modelo também volta (canal model), e o objetivo original.
+    expect(prompt).toContain('7 vezes 8 é 56.');
+    expect(prompt).toContain('escreva um texto BEM LONGO');
+  });
+
   it('sem resetContinuation (dep ausente) o vazamento REAPARECE — guarda contra regressão', async () => {
     // Prova que o reset é o que conserta: as MESMAS deps SEM `resetContinuation`
     // reproduzem o bug original (A vaza na retomada de B). Trava o fix no lugar.

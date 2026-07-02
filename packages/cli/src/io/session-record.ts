@@ -6,6 +6,8 @@
 //
 // CLI-SEC-4 (fronteira de proveniência) — ao reconstruir o histórico p/ o loop:
 //   - `you`   → `goal`        (canal user; é a fala do PRÓPRIO usuário).
+//   - `inject`→ `goal`        (F193 — canal user; a fala do dono ENCAIXADA mid-turn,
+//      `user_inject`. É conversa, não UI: sem ela a resposta do modelo perde a âncora).
 //   - `aluy`  → `model`       (canal assistant; é a fala do PRÓPRIO modelo).
 //   - `tool`/`bang`/`broker-error` → `observation` (canal user ENVELOPADO como
 //      DADO_NAO_CONFIAVEL por `buildMessages`). O conteúdo de tool/`!comando` foi
@@ -213,6 +215,27 @@ export function blocksToHistory(blocks: readonly SessionBlock[]): HistoryItem[] 
       case 'you':
         out.push({ role: 'goal', text: b.text });
         break;
+      // F193 (integridade de contexto na RETOMADA) — `inject` é a fala do PRÓPRIO
+      // usuário ENCAIXADA no meio de um turno vivo (`injectInput('root')` → `user_inject`,
+      // canal `user`, INSTRUÇÃO do dono — CLI-SEC-4, o MESMO canal que o `you`). ANTES ele
+      // caía no grupo dos DESCARTADOS junto de note/deny/doctor, sob a premissa de que o
+      // `user_inject` "já estava no contexto do turno vivo" — o que é VERDADE só EM MEMÓRIA
+      // (o `lastRunHistory` do loop o carrega). Ao SALVAR+RECARREGAR (retomada/`/history`/
+      // rewind) o histórico do loop se PERDE e a ÚNICA prova daquela fala do dono é ESTE
+      // bloco. Descartá-lo apagava a mensagem que MOTIVOU a resposta do modelo: numa sessão
+      // morta logo após um "btw" (objetivo "escreva um texto longo" → inject "na verdade
+      // quanto é 7×8?" → aluy "56"), a retomada reconstruía goal("texto longo") + model("56")
+      // SEM o redirecionamento — o modelo "perdia a própria referência" (a resposta não
+      // casava com o objetivo), embora a nota "↳ encaixado" AINDA aparecesse na tela
+      // (display OK, contexto quebrado). Agora o inject volta como `goal` (fala do dono),
+      // restaurando a coerência do diálogo. O texto é o eco REDIGIDO+clampado (CLI-SEC-6,
+      // `digestOf` — até 120 chars): pode ser um resumo de um inject longo, mas é FIEL ao
+      // canal e infinitamente melhor que sumir. SEM risco de duplicar: `blocksToHistory` só
+      // reconstrói A PARTIR DE BLOCOS (retomada/rewind), onde o `lastRunHistory` está zerado
+      // — nunca no meio de uma sessão viva contínua (lá o `user_inject` já vive no loop).
+      case 'inject':
+        if (b.text.trim() !== '') out.push({ role: 'goal', text: b.text });
+        break;
       case 'aluy':
         if (b.text.trim() !== '') out.push({ role: 'model', text: b.text });
         break;
@@ -242,16 +265,14 @@ export function blocksToHistory(blocks: readonly SessionBlock[]): HistoryItem[] 
       // um INDICADOR transiente de status por filho; o DADO real dos filhos já
       // voltou ao pai como observação via `spawn_agent` (CLI-SEC-4). Sem default que
       // reintroduza dado por engano.
-      // EST-0982 (mid-turn) — `inject` é a NOTA "↳ encaixado" (UI): o `user_inject`
-      // correspondente já entrou no contexto do turno VIVO (e foi persistido pela
-      // continuação do modelo). Restaurar a nota NÃO re-injeta no modelo — só UI.
       // HUNT-PERSIST — `doctor` é UI/sistema (saída de slash-command), igual a
       // `note`: NÃO vira mensagem p/ o modelo (fica só na transcrição visível).
+      // F193 — `inject` NÃO está mais aqui: é a fala do dono (canal `user`) e volta como
+      // `goal` no case dedicado acima (era o vazamento "display OK, contexto quebrado").
       case 'note':
       case 'deny':
       case 'subagents':
       case 'doctor':
-      case 'inject':
         break;
     }
   }
