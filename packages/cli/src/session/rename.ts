@@ -33,7 +33,9 @@ export interface SessionLabel {
 /** O resultado de rotear um `/rename`. PURO — o wiring decide o efeito. */
 export type RenameResult =
   // define/troca o rótulo (nome + cor resolvida). O wiring aplica + persiste + confirma.
-  | { readonly kind: 'set'; readonly label: SessionLabel }
+  // F176 — `notice` opcional: aviso NÃO-fatal a exibir junto (ex.: cor inválida ⇒ o
+  // nome válido AINDA aplica, com a cor automática, e o aviso explica o descarte da cor).
+  | { readonly kind: 'set'; readonly label: SessionLabel; readonly notice?: string }
   // LIMPA o rótulo (volta ao default — composer sem ●+nome). O wiring aplica + persiste.
   | { readonly kind: 'clear' }
   // `/rename` puro: só MOSTRA o estado atual (+ o uso). Não muda nada.
@@ -124,22 +126,27 @@ export function routeRename(args: string): RenameResult {
   }
 
   let color: SessionColorName;
-  if (rawColor !== undefined) {
-    if (rawColor === '' || !isSessionColorName(rawColor)) {
-      return {
-        kind: 'error',
-        message: `cor inválida${rawColor ? `: "${rawColor}"` : ''}. cores válidas: ${SESSION_COLOR_NAMES.join(
-          ', ',
-        )}.`,
-      };
-    }
+  let notice: string | undefined;
+  if (rawColor !== undefined && rawColor !== '' && isSessionColorName(rawColor)) {
     color = rawColor.trim().toLowerCase() as SessionColorName;
+  } else if (rawColor !== undefined) {
+    // F176 — cor INVÁLIDA com NOME válido: NÃO descarta o rename (o nome é o principal;
+    // a cor é secundária). Aplica o nome com a cor AUTOMÁTICA e AVISA que a cor caiu —
+    // antes, um `--cor xyz` errado abortava o rename inteiro e o nome válido se perdia
+    // silenciosamente (a mensagem só falava da cor, sem dizer que nada foi aplicado).
+    color = hashToSessionColor(sanitizeLabel(name));
+    const corLabel = rawColor === '' ? 'cor sem valor' : `cor inválida "${rawColor}"`;
+    notice = `${corLabel} — usei a cor automática. cores válidas: ${SESSION_COLOR_NAMES.join(', ')}.`;
   } else {
     // sem --cor: cor DEFAULT determinística pelo nome saneado (mesmo nome ⇒ mesma cor).
     color = hashToSessionColor(sanitizeLabel(name));
   }
 
-  return { kind: 'set', label: { label: sanitizeLabel(name), color } };
+  return {
+    kind: 'set',
+    label: { label: sanitizeLabel(name), color },
+    ...(notice !== undefined ? { notice } : {}),
+  };
 }
 
 /** Saída mínima do `/rename` linear (não-TTY) — `process.stdout` ou um fake. */
@@ -179,6 +186,8 @@ export function runRenameLinear(
     case 'set':
       deps.setLabel(result.label.label, result.label.color);
       deps.persist();
+      // F176 — ecoa o aviso não-fatal (cor inválida → cor automática) ANTES do OK.
+      if (result.notice !== undefined) out.write(`[rename] ${result.notice}\n`);
       out.write(`[rename] sessão: ● ${result.label.label} (cor: ${result.label.color})\n`);
       return true;
     case 'clear':

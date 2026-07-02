@@ -62,22 +62,26 @@ describe('routeRename — parse do /rename', () => {
     expect(r.label.label).toBe('proj');
   });
 
-  it('cor INVÁLIDA ⇒ erro listando as cores VÁLIDAS', () => {
+  it('F176 — cor INVÁLIDA com NOME válido ⇒ SET com cor automática + AVISO (não descarta o nome)', () => {
     const r = routeRename('proj --cor turquesa-neon');
-    expect(r.kind).toBe('error');
-    if (r.kind !== 'error') return;
-    expect(r.message).toContain('cor inválida');
-    // a mensagem ENSINA: lista todas as cores válidas da paleta do DS.
-    for (const name of SESSION_COLOR_NAMES) {
-      expect(r.message).toContain(name);
-    }
+    expect(r.kind).toBe('set');
+    if (r.kind !== 'set') return;
+    // o NOME válido aplica (antes o rename inteiro abortava e o nome se perdia).
+    expect(r.label.label).toBe('proj');
+    // cor cai na AUTOMÁTICA determinística do nome (mesma de `/rename proj` sem --cor).
+    expect(r.label.color).toBe((routeRename('proj') as { label: { color: string } }).label.color);
+    // e o AVISO ensina, listando as cores válidas.
+    expect(r.notice).toBeDefined();
+    expect(r.notice).toContain('cor inválida');
+    for (const name of SESSION_COLOR_NAMES) expect(r.notice).toContain(name);
   });
 
-  it('`--cor` SEM valor ⇒ erro (lista válidas)', () => {
+  it('F176 — `--cor` SEM valor com nome válido ⇒ SET + aviso "cor sem valor" (nome aplica)', () => {
     const r = routeRename('proj --cor');
-    expect(r.kind).toBe('error');
-    if (r.kind !== 'error') return;
-    expect(r.message).toContain('verde'); // alguma cor válida listada
+    expect(r.kind).toBe('set');
+    if (r.kind !== 'set') return;
+    expect(r.label.label).toBe('proj');
+    expect(r.notice).toContain('cor sem valor');
   });
 
   it('`--cor azul` SEM nome ⇒ erro de uso (cor exige nome)', () => {
@@ -254,11 +258,12 @@ describe('runRenameLinear — /rename no não-TTY', () => {
     expect(c.text()).toContain('verde');
   });
 
-  it('cor inválida ⇒ ecoa o erro, NÃO aplica', () => {
+  it('F176 — cor inválida com nome válido ⇒ APLICA o nome (cor automática) + ecoa o aviso', () => {
     const c = collector();
     const d = deps();
     expect(runRenameLinear('/rename proj --cor neon', c.out, d)).toBe(true);
-    expect(d.setLabel).not.toHaveBeenCalled();
-    expect(c.text()).toContain('cor inválida');
+    expect(d.setLabel).toHaveBeenCalled(); // o NOME válido aplica (antes: nada)
+    expect(c.text()).toContain('cor inválida'); // com o aviso educativo
+    expect(c.text()).toContain('● proj'); // e a confirmação do nome
   });
 });

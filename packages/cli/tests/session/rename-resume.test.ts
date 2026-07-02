@@ -160,16 +160,16 @@ describe('runSession — /rename persistência + resume (EST-0972)', { timeout: 
     expect(rec.labelColor).toBe('verde');
   });
 
-  it('cor INVÁLIDA ⇒ erro ecoado, NADA persistido', async () => {
+  it('F176 — cor INVÁLIDA com nome válido ⇒ aplica o NOME (cor automática) + persiste', async () => {
     const a = await run({ goal: 'oi' });
     const b = await run({
       goal: '/rename proj --cor neon',
       resume: { kind: 'continue' },
       store: a.store,
     });
-    expect(b.out.text()).toContain('cor inválida');
+    expect(b.out.text()).toContain('cor inválida'); // aviso educativo
     const rec = b.store.load(b.store.list()[0]!.id)!;
-    expect(rec.label).toBeUndefined();
+    expect(rec.label).toBe('proj'); // o NOME válido PERSISTE (antes: undefined)
   });
 
   it('`/rename --limpar` ⇒ remove o rótulo do record', async () => {
