@@ -55,6 +55,7 @@ vi.mock('node:os', async (importOriginal) => {
 
 import {
   parseCronCommand,
+  validateCronExpr,
   runCron,
   loadState,
   saveState,
@@ -186,6 +187,31 @@ describe('parseCronCommand — parser puro', () => {
   it('add com expressão cron de 5 campos válida (inclui */step)', () => {
     const c = parseCronCommand(['add', '*/15 8-17 * * 1-5', 'monitor']);
     expect(c).toMatchObject({ kind: 'add', quando: '*/15 8-17 * * 1-5' });
+  });
+
+  // F177 — validação de FAIXA (não só contagem de campos).
+  it('F177 — add com 5 campos mas VALOR fora da faixa (99 99 * * *) ⇒ erro do aluy (não crontab cru)', () => {
+    const c = parseCronCommand(['add', '99 99 * * *', 'tarefa']);
+    expect(c.kind).toBe('error');
+    const msg = (c as { message: string }).message;
+    expect(msg).toContain('minuto');
+    expect(msg).toContain('0-59');
+  });
+
+  it('F177 — validateCronExpr aceita sintaxe usual e rejeita faixas', () => {
+    // válidos
+    expect(validateCronExpr('0 9 * * 1-5')).toBeUndefined();
+    expect(validateCronExpr('*/15 8-17 * * *')).toBeUndefined();
+    expect(validateCronExpr('0 0 1,15 * *')).toBeUndefined();
+    expect(validateCronExpr('0 9 * jan-mar mon,fri')).toBeUndefined(); // nomes
+    expect(validateCronExpr('0 0 * * 7')).toBeUndefined(); // domingo = 7
+    // inválidos (faixa)
+    expect(validateCronExpr('0 24 * * *')).toContain('hora'); // hora max 23
+    expect(validateCronExpr('0 0 0 * *')).toContain('dia-do-mês'); // dom min 1
+    expect(validateCronExpr('0 0 * 13 *')).toContain('mês'); // mês max 12
+    expect(validateCronExpr('0 0 * * 8')).toContain('dia-da-semana'); // dow max 7
+    expect(validateCronExpr('*/0 * * * *')).toContain('passo'); // step 0
+    expect(validateCronExpr('0 9 * *')).toContain('5 campos'); // contagem ainda pega
   });
 
   // ── rm ──
