@@ -68,6 +68,14 @@ export interface LocalLoginDeps {
   readonly now?: () => number;
   /** F165 — sonda de cofre volátil injetável (testes): platform/leitor de /proc/keys. */
   readonly volatileProbe?: Omit<VolatileKeychainProbeOptions, 'service'>;
+  /**
+   * F167 — store de config INJETÁVEL. Sem isto, o `new UserConfigStore()` fixo
+   * gravava `backend/localProvider` no ~/.aluy/config.json REAL mesmo nos TESTES
+   * (que injetavam só o keychain): cada `npm test` CLOBBERAVA o provider real do
+   * usuário (tokenrouter → openrouter) ⇒ "perdi o login do token router" (o outro
+   * lado do F165). Default: o store real (produção inalterada).
+   */
+  readonly configStore?: UserConfigStore;
 }
 
 /** Crypto PKCE real (node:crypto). */
@@ -146,7 +154,7 @@ async function runApiKeyLogin(
   // este provider), sem depender do onboard nem de editar config à mão. Best-effort: uma
   // falha de escrita do config não derruba o login (a chave já está no keychain).
   try {
-    new UserConfigStore().save({ backend: 'local', localProvider: provider });
+    (deps.configStore ?? new UserConfigStore()).save({ backend: 'local', localProvider: provider });
     io.out(`  backend local + provider "${provider}" configurados. Rode:  aluy`);
   } catch {
     io.out(`  Use: aluy --backend local --local-provider ${provider}  (ou ALUY_BACKEND=local)`);

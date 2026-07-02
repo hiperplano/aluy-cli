@@ -1,8 +1,26 @@
 // ADR-0120 / EST-1113/1114 — `aluy login --provider <p> [--oauth]` (backend local).
-import { describe, expect, it, vi } from 'vitest';
+// F167 — TODO teste injeta um `configStore` de tmpdir: sem isso, o save de
+// `backend/localProvider` do login batia no ~/.aluy/config.json REAL do dev/dono
+// e cada `npm test` CLOBBERAVA o provider configurado ("perdi o login").
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { runLocalLogin, rejectNonGetCallback } from '../../src/commands/local-login.js';
+import { UserConfigStore } from '../../src/io/user-config.js';
 import type { TerminalIO } from '../../src/auth/io.js';
 import type { KeyringEntry } from '../../src/model/local/credential-resolver.js';
+
+// F167 — store de config isolado por teste (tmpdir), NUNCA o ~/.aluy real.
+const tmpDirs: string[] = [];
+function tmpConfigStore(): UserConfigStore {
+  const dir = mkdtempSync(join(tmpdir(), 'aluy-login-cfg-'));
+  tmpDirs.push(dir);
+  return new UserConfigStore({ baseDir: join(dir, '.aluy') });
+}
+afterEach(() => {
+  for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
 
 function fakeIO(answers: string[] = []): { io: TerminalIO; out: string[]; err: string[] } {
   const out: string[] = [];
@@ -39,11 +57,27 @@ describe('runLocalLogin — API key', () => {
     const { io, out } = fakeIO();
     const code = await runLocalLogin(
       { provider: 'anthropic', token: 'sk-ant-123' },
-      { io, entryFactory: fakeKeyring(mem) },
+      { configStore: tmpConfigStore(), io, entryFactory: fakeKeyring(mem) },
     );
     expect(code).toBe(0);
     expect(mem['anthropic:apikey']).toBe('sk-ant-123');
     expect(out.join('\n')).toMatch(/keychain/i);
+  });
+
+  it('F167 — o save de backend/localProvider vai ao store INJETADO (nunca ao ~/.aluy real)', async () => {
+    const { io } = fakeIO();
+    const store = tmpConfigStore();
+    const code = await runLocalLogin(
+      { provider: 'openrouter', token: 'sk-or-fake' },
+      { configStore: store, io, entryFactory: fakeKeyring({}) },
+    );
+    expect(code).toBe(0);
+    // O que o login configurou aterrissou no store isolado…
+    const cfg = store.load();
+    expect(cfg.backend).toBe('local');
+    expect(cfg.localProvider).toBe('openrouter');
+    // …e o caminho do store é o tmpdir do teste, não a HOME real.
+    expect(store.configPath.includes('aluy-login-cfg-')).toBe(true);
   });
 
   it('sem --token, lê a chave do prompt secreto', async () => {
@@ -51,7 +85,7 @@ describe('runLocalLogin — API key', () => {
     const { io } = fakeIO(['sk-prompted']);
     const code = await runLocalLogin(
       { provider: 'openrouter' },
-      { io, entryFactory: fakeKeyring(mem) },
+      { configStore: tmpConfigStore(), io, entryFactory: fakeKeyring(mem) },
     );
     expect(code).toBe(0);
     expect(mem['openrouter:apikey']).toBe('sk-prompted');
@@ -59,14 +93,20 @@ describe('runLocalLogin — API key', () => {
 
   it('provider inválido ⇒ exit 2', async () => {
     const { io, err } = fakeIO();
-    const code = await runLocalLogin({ provider: 'gemini' }, { io, entryFactory: fakeKeyring({}) });
+    const code = await runLocalLogin(
+      { provider: 'gemini' },
+      { configStore: tmpConfigStore(), io, entryFactory: fakeKeyring({}) },
+    );
     expect(code).toBe(2);
     expect(err.join('\n')).toMatch(/desconhecido/i);
   });
 
   it('chave vazia ⇒ exit 1', async () => {
     const { io } = fakeIO(['']);
-    const code = await runLocalLogin({ provider: 'openai' }, { io, entryFactory: fakeKeyring({}) });
+    const code = await runLocalLogin(
+      { provider: 'openai' },
+      { configStore: tmpConfigStore(), io, entryFactory: fakeKeyring({}) },
+    );
     expect(code).toBe(1);
   });
 });
@@ -145,6 +185,7 @@ describe('runLocalLogin — OAuth (PKCE) com colar-código', () => {
     const code = await runLocalLogin(
       { provider: 'anthropic', oauth: true },
       {
+        configStore: tmpConfigStore(),
         io,
         entryFactory: fakeKeyring(mem),
         fetch: fetch as never,
@@ -165,7 +206,7 @@ describe('runLocalLogin — OAuth (PKCE) com colar-código', () => {
     const { io, err } = fakeIO();
     const code = await runLocalLogin(
       { provider: 'anthropic', oauth: true },
-      { io, entryFactory: fakeKeyring({}), env: {} },
+      { configStore: tmpConfigStore(), io, entryFactory: fakeKeyring({}), env: {} },
     );
     expect(code).toBe(2);
     expect(err.join('\n')).toMatch(/client_id/i);
