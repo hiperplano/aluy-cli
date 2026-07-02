@@ -152,9 +152,22 @@ export function resolveResume(
   if (request.id !== undefined && request.id.trim() !== '') {
     const id = request.id.trim();
     const record = store.load(id);
+    if (record) return { kind: 'resumed', record };
+    // F169 (pedido do dono) — não achou por ID: tenta pelo NOME da sessão (`/rename`),
+    // case-insensitive. `aluy --resume FLUIDER-ORCHESTRATOR` funciona como o id.
+    //   · 1 sessão com o nome ⇒ retoma;
+    //   · 2+ com o MESMO nome ⇒ `pick` FILTRADO nelas (ambiguidade é do usuário decidir);
+    //   · nenhuma ⇒ `not-found` (aviso honesto de sempre, F110).
+    const wanted = id.toLowerCase();
+    const byName = store.list().filter((s) => (s.label ?? '').trim().toLowerCase() === wanted);
+    if (byName.length === 1) {
+      const rec = store.load(byName[0]!.id);
+      if (rec) return { kind: 'resumed', record: rec };
+    }
+    if (byName.length > 1) return { kind: 'pick', choices: byName };
     // F110 — id EXPLÍCITO mas não achou ⇒ `not-found` (NÃO `none`): o boot avisa em vez
     // de cair calado numa sessão nova (e, no TTY, evita a auto-oferta de uma sessão ALHEIA).
-    return record ? { kind: 'resumed', record } : { kind: 'not-found', requestedId: id };
+    return { kind: 'not-found', requestedId: id };
   }
   // sem id: lista p/ escolher (se houver alguma sessão).
   const choices = store.list();
