@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.86] — 2026-07-02
+
 ### Adicionado
 
 - 🟢 ESC "expedite" — acelerar o encaixe (F191, pedido do dono): com uma mensagem já ESPERANDO encaixe (`user_inject`), o ESC agora CORTA a geração de modelo em voo e SEGUE (drena o inject na volta seguinte), SEM parar o turno. Antes o ESC-com-inject-pendente era no-op. Soft-interrupt novo no core-loop (`ExpediteSignal`/`ExpeditePort` + `combineAbort`), distinto do hard-abort: `interrupt()`/Ctrl-C/ESC-com-tudo-vazio seguem sendo o ÚNICO freio total (precedência do hard-abort preservada). O parcial do turno `aluy` é descartado (o inject supersede). 7 testes cobrindo os invariantes.
