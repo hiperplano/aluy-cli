@@ -73,12 +73,21 @@ function buildController(): SessionController {
   });
 }
 
-function mount(): ReturnType<typeof render> & { controller: SessionController } {
+function mount(opts?: {
+  fileIndex?: { list: () => Promise<readonly string[]> };
+  attachReader?: { attach: (path: string, o?: unknown) => Promise<unknown> };
+}): ReturnType<typeof render> & { controller: SessionController } {
   const controller = buildController();
   const theme = resolveTheme({ env: ENV });
   const r = render(
     <ThemeProvider theme={theme}>
-      <App controller={controller} animate={false} bootMs={0} />
+      <App
+        controller={controller}
+        animate={false}
+        bootMs={0}
+        {...(opts?.fileIndex !== undefined ? { fileIndex: opts.fileIndex as never } : {})}
+        {...(opts?.attachReader !== undefined ? { attachReader: opts.attachReader as never } : {})}
+      />
     </ThemeProvider>,
   );
   controller.dismissBoot();
@@ -177,5 +186,40 @@ describe('App — duplo Ctrl+C p/ sair (EST-1015)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // F174 — ANEXO pendente (@arquivo) conta como conteúdo do composer: o Ctrl-C com
+  // texto vazio + chip deve LIMPAR o anexo (não armar a saída), e o chip não pode
+  // sobreviver ao "limpar" e grudar no próximo objetivo.
+  it('F174: Ctrl-C com só um chip de anexo pendente LIMPA o anexo (não arma saída)', async () => {
+    const attachItem = {
+      role: 'observation' as const,
+      toolName: 'attach',
+      text: 'conteúdo de xyzzy',
+    };
+    const fileIndex = { list: async (): Promise<readonly string[]> => ['src/xyzzy.ts'] };
+    const attachReader = {
+      attach: async (path: string): Promise<unknown> => ({
+        kind: 'ok',
+        path,
+        item: attachItem,
+        truncated: false,
+      }),
+    };
+    const { stdin, lastFrame, controller } = mount({ fileIndex, attachReader });
+    await flush();
+    // @-picker: digita `@xyzzy`, Enter anexa ⇒ chip no composer.
+    stdin.write('@xyzzy');
+    await flush();
+    stdin.write('\r');
+    await flush();
+    expect(plain(lastFrame())).toContain('xyzzy.ts'); // chip presente
+    // Ctrl-C: texto vazio + chip ⇒ deve LIMPAR o chip (não armar saída).
+    stdin.write(CTRL_C);
+    await flush();
+    const f = plain(lastFrame());
+    expect(f).not.toContain('xyzzy.ts'); // anexo LIMPO
+    expect(f).not.toContain('de novo'); // NÃO armou a saída
+    controller.dispose();
   });
 });

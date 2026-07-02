@@ -14,7 +14,9 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
-_(vazio)_
+### Corrigido
+
+- 🟡 TUI: anexo `@arquivo` pendente deixou de sobreviver ao Ctrl-C (F174) — o chip contava só o texto, então "limpar o composer" deixava o anexo pendurado (grudava no próximo objetivo) e, com texto vazio + chip, o Ctrl-C armava a saída em vez de limpar o anexo. Agora o Ctrl-C limpa texto E anexos.
 
 ## [1.0.0-rc.69] — 2026-07-02
 
