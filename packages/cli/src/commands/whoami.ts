@@ -1,9 +1,10 @@
 // `aluy whoami` — mostra a credencial corrente REDIGIDA (sem o segredo) (CA-1).
 
-import { LoginService } from '@hiperplano/aluy-cli-core';
+import { LoginService, resolveBackend } from '@hiperplano/aluy-cli-core';
 import { loadAuthConfig } from '../auth/config.js';
 import { NoKeychainError, KeychainCredentialStore } from '../auth/keychain-store.js';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
+import { UserConfigStore } from '../io/user-config.js';
 import type { CredentialStore } from '@hiperplano/aluy-cli-core';
 
 export interface WhoamiDeps {
@@ -16,6 +17,24 @@ export async function runWhoami(deps: WhoamiDeps = {}): Promise<number> {
   const env = deps.env ?? process.env;
   const io = deps.io ?? realTerminalIO();
   const store = deps.store ?? new KeychainCredentialStore();
+
+  // F183 — backend LOCAL (BYO): `whoami` é identidade de BROKER (device-flow/PAT), que
+  // NÃO se aplica ao BYO — o modelo vem do provider com a chave do usuário, sem login
+  // de broker. Antes reportava "não autenticado — rode aluy login" (exit 1), enganoso
+  // (o usuário ESTÁ configurado, só não no broker). Agora: mensagem honesta + exit 0.
+  // Espelha o F182 (doctor) e o `aluy models` (já backend-aware). Precedência real:
+  // env ALUY_BACKEND > config > default.
+  let configBackend: string | undefined;
+  try {
+    configBackend = new UserConfigStore().load().backend;
+  } catch {
+    /* sem config legível ⇒ cai no default */
+  }
+  if (resolveBackend({ env: env.ALUY_BACKEND, config: configBackend }) === 'local') {
+    io.out('backend local (BYO) — sem identidade de broker (`whoami` é do broker).');
+    io.out('a credencial é a chave do seu provider; veja `aluy models` / `aluy config`.');
+    return 0;
+  }
   const config = loadAuthConfig(env);
   const service = new LoginService({ ...config, baseUrl: config.identityBaseUrl, store });
 

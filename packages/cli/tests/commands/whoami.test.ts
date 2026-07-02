@@ -68,7 +68,7 @@ describe('runWhoami', () => {
     const { io, outLines, errLines } = makeFakeIo();
     const store = makeFakeStore(cred);
 
-    const exitCode = await runWhoami({ io, store, env: {} });
+    const exitCode = await runWhoami({ io, store, env: { ALUY_BACKEND: 'broker' } });
 
     expect(exitCode).toBe(0);
     expect(outLines[0]).toBe('user:    —');
@@ -99,7 +99,7 @@ describe('runWhoami', () => {
     const { io, outLines } = makeFakeIo();
     const store = makeFakeStore(cred);
 
-    const exitCode = await runWhoami({ io, store, env: {} });
+    const exitCode = await runWhoami({ io, store, env: { ALUY_BACKEND: 'broker' } });
 
     expect(exitCode).toBe(0);
     const joined = outLines.join('\n');
@@ -117,12 +117,39 @@ describe('runWhoami', () => {
     const { io, errLines } = makeFakeIo();
     const store = makeFakeStore('reject');
 
-    const exitCode = await runWhoami({ io, store, env: {} });
+    const exitCode = await runWhoami({ io, store, env: { ALUY_BACKEND: 'broker' } });
 
     expect(exitCode).toBe(1);
     expect(errLines.length).toBe(1);
     expect(errLines[0]).toBe(
       'erro: keychain do SO indisponível. A credencial não foi gravada — por segurança, ela nunca é guardada em texto em claro. No Linux, instale/ative o Secret Service (gnome-keyring/libsecret) e tente de novo.',
     );
+  });
+
+  // -----------------------------------------------------------------------
+  // F183 — backend LOCAL (BYO): whoami é identidade de BROKER, não se aplica.
+  // Antes reportava "não autenticado — rode aluy login" (exit 1), enganoso.
+  // Agora: mensagem honesta de BYO + exit 0, SEM tocar o store de credencial.
+  // -----------------------------------------------------------------------
+  it('F183 — backend local (ALUY_BACKEND=local) ⇒ mensagem BYO + exit 0, sem "aluy login"', async () => {
+    const { io, outLines } = makeFakeIo();
+    let storeTouched = false;
+    const store = makeFakeStore(null);
+    const spyStore: typeof store = {
+      ...store,
+      get() {
+        storeTouched = true;
+        return store.get();
+      },
+    };
+
+    const exitCode = await runWhoami({ io, store: spyStore, env: { ALUY_BACKEND: 'local' } });
+
+    expect(exitCode).toBe(0);
+    const joined = outLines.join('\n');
+    expect(joined).toMatch(/backend local \(BYO\)/i);
+    expect(joined).not.toContain('rode `aluy login`');
+    // NÃO tocou o keychain do broker (curto-circuito antes de whoami()).
+    expect(storeTouched).toBe(false);
   });
 });

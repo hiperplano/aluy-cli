@@ -127,7 +127,7 @@ describe('runLogin — PAT (CA-2)', () => {
   it('--token sem org ⇒ erro claro, exit 1, nada gravado', async () => {
     const io = new FakeIO();
     const store = new InMemoryStore();
-    const code = await runLogin({ token: PAT }, { io, store, env: {} });
+    const code = await runLogin({ token: PAT }, { io, store, env: { ALUY_BACKEND: 'broker' } });
     expect(code).toBe(1);
     expect(store.cred).toBeNull();
     expect(io.errLines.join('\n')).toContain('--org');
@@ -136,7 +136,10 @@ describe('runLogin — PAT (CA-2)', () => {
   it('PAT inválido ⇒ exit 1 e mensagem NÃO ecoa o token', async () => {
     const io = new FakeIO();
     const store = new InMemoryStore();
-    const code = await runLogin({ token: 'lixo-token', org: ORG }, { io, store, env: {} });
+    const code = await runLogin(
+      { token: 'lixo-token', org: ORG },
+      { io, store, env: { ALUY_BACKEND: 'broker' } },
+    );
     expect(code).toBe(1);
     expect(store.cred).toBeNull();
     expect(io.allText()).not.toContain('lixo-token');
@@ -146,7 +149,11 @@ describe('runLogin — PAT (CA-2)', () => {
 describe('runWhoami (CA-1) — sem vazar segredo', () => {
   it('sem login ⇒ exit 1', async () => {
     const io = new FakeIO();
-    const code = await runWhoami({ io, store: new InMemoryStore(), env: {} });
+    const code = await runWhoami({
+      io,
+      store: new InMemoryStore(),
+      env: { ALUY_BACKEND: 'broker' },
+    });
     expect(code).toBe(1);
     expect(io.outLines.join('\n')).toContain('não autenticado');
   });
@@ -154,9 +161,9 @@ describe('runWhoami (CA-1) — sem vazar segredo', () => {
   it('com login ⇒ mostra org/escopos/tipo, token redigido, SEM segredo', async () => {
     const io = new FakeIO();
     const store = new InMemoryStore();
-    await runLogin({ token: PAT, org: ORG }, { io, store, env: {} });
+    await runLogin({ token: PAT, org: ORG }, { io, store, env: { ALUY_BACKEND: 'broker' } });
     const io2 = new FakeIO();
-    const code = await runWhoami({ io: io2, store, env: {} });
+    const code = await runWhoami({ io: io2, store, env: { ALUY_BACKEND: 'broker' } });
     expect(code).toBe(0);
     const text = io2.outLines.join('\n');
     expect(text).toContain(ORG);
@@ -176,7 +183,7 @@ describe('runWhoami (CA-1) — sem vazar segredo', () => {
       expires_at: 9_999_999_999_999,
       v: 1,
     };
-    const code = await runWhoami({ io, store, env: {} });
+    const code = await runWhoami({ io, store, env: { ALUY_BACKEND: 'broker' } });
     expect(code).toBe(0);
     const text = io.outLines.join('\n');
     expect(text).toContain('user:');
@@ -189,9 +196,9 @@ describe('runWhoami (CA-1) — sem vazar segredo', () => {
   it('PAT ⇒ mostra user "—" com a nota (user_id não conhecido localmente)', async () => {
     const io = new FakeIO();
     const store = new InMemoryStore();
-    await runLogin({ token: PAT, org: ORG }, { io, store, env: {} });
+    await runLogin({ token: PAT, org: ORG }, { io, store, env: { ALUY_BACKEND: 'broker' } });
     const io2 = new FakeIO();
-    const code = await runWhoami({ io: io2, store, env: {} });
+    const code = await runWhoami({ io: io2, store, env: { ALUY_BACKEND: 'broker' } });
     expect(code).toBe(0);
     const text = io2.outLines.join('\n');
     expect(text).toContain('user:    —');
@@ -204,19 +211,23 @@ describe('runLogout (CA-5)', () => {
   it('PAT ⇒ apaga do store, exit 0', async () => {
     const io = new FakeIO();
     const store = new InMemoryStore();
-    await runLogin({ token: PAT, org: ORG }, { io, store, env: {} });
+    await runLogin({ token: PAT, org: ORG }, { io, store, env: { ALUY_BACKEND: 'broker' } });
     const io2 = new FakeIO();
-    const code = await runLogout({ io: io2, store, env: {} });
+    const code = await runLogout({ io: io2, store, env: { ALUY_BACKEND: 'broker' } });
     expect(code).toBe(0);
     expect(store.cred).toBeNull();
     // Uso subsequente (whoami) falha.
     const io3 = new FakeIO();
-    expect(await runWhoami({ io: io3, store, env: {} })).toBe(1);
+    expect(await runWhoami({ io: io3, store, env: { ALUY_BACKEND: 'broker' } })).toBe(1);
   });
 
   it('sem credencial ⇒ informa e exit 0', async () => {
     const io = new FakeIO();
-    const code = await runLogout({ io, store: new InMemoryStore(), env: {} });
+    const code = await runLogout({
+      io,
+      store: new InMemoryStore(),
+      env: { ALUY_BACKEND: 'broker' },
+    });
     expect(code).toBe(0);
     expect(io.outLines.join('\n')).toContain('nada a fazer');
   });
@@ -232,9 +243,12 @@ describe('CLI-SEC-2 — credencial nunca em claro fora do keychain (CA-3)', () =
     const ioLogin = new FakeIO();
     const ioWho = new FakeIO();
     const ioOut = new FakeIO();
-    await runLogin({ token: PAT, org: ORG }, { io: ioLogin, store, env: {} });
-    await runWhoami({ io: ioWho, store, env: {} });
-    await runLogout({ io: ioOut, store, env: {} });
+    await runLogin(
+      { token: PAT, org: ORG },
+      { io: ioLogin, store, env: { ALUY_BACKEND: 'broker' } },
+    );
+    await runWhoami({ io: ioWho, store, env: { ALUY_BACKEND: 'broker' } });
+    await runLogout({ io: ioOut, store, env: { ALUY_BACKEND: 'broker' } });
 
     const allOutput = [ioLogin.allText(), ioWho.allText(), ioOut.allText()].join('\n');
     expect(allOutput).not.toContain('TOPSECRETvalue');
@@ -270,7 +284,7 @@ describe('runLogin — device-flow (CA-1, via fetch injetado)', () => {
   it('device-flow sem org ⇒ erro e exit 1', async () => {
     const io = new FakeIO();
     const store = new InMemoryStore();
-    const code = await runLogin({}, { io, store, env: {} });
+    const code = await runLogin({}, { io, store, env: { ALUY_BACKEND: 'broker' } });
     expect(code).toBe(1);
     expect(io.errLines.join('\n')).toContain('--org');
   });
@@ -338,13 +352,21 @@ describe('comandos — ramo de erro (store lança)', () => {
   });
   it('logout com store que lança ⇒ exit 1', async () => {
     const io = new FakeIO();
-    const code = await runLogout({ io, store: new ThrowingStore(), env: {} });
+    const code = await runLogout({
+      io,
+      store: new ThrowingStore(),
+      env: { ALUY_BACKEND: 'broker' },
+    });
     expect(code).toBe(1);
     expect(io.errLines.join('\n')).toContain('erro');
   });
   it('whoami com store que lança ⇒ exit 1', async () => {
     const io = new FakeIO();
-    const code = await runWhoami({ io, store: new ThrowingStore(), env: {} });
+    const code = await runWhoami({
+      io,
+      store: new ThrowingStore(),
+      env: { ALUY_BACKEND: 'broker' },
+    });
     expect(code).toBe(1);
     expect(io.errLines.join('\n')).toContain('erro');
   });
