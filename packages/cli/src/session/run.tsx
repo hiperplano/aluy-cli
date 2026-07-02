@@ -137,7 +137,7 @@ import {
   type ResumeRequest,
   type ResumeResolution,
 } from './resume.js';
-import { formatSessionList, autoSaveSession } from './session-persist.js';
+import { formatSessionList, autoSaveSession, hasResumableContent } from './session-persist.js';
 import { applyResumeRecord, runHistoryLinear } from './history.js';
 import { createBootSplash, resolveSplashMinMs, type BootSplash } from './splash-controller.js';
 import { emitBootClear } from './run-clear.js';
@@ -1012,6 +1012,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // Helper de auto-save (best-effort): grava a transcrição corrente no store. Falha
   // de escrita NUNCA derruba a sessão (autoSaveSession engole o erro).
   const saveNow = (): void => {
+    // F190 — o gate de "tem o que retomar" vive no autoSaveSession (fonte única, testável).
     autoSaveSession(sessionStore, {
       id: activeSession.id,
       cwd: activeSession.cwd,
@@ -2961,7 +2962,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // Code). Só na saída INTERATIVA (TTY) e quando há conversa de fato — uma sessão vazia
     // (abriu e fechou) não imprime nada. O id é DADO (nome de arquivo em ~/.aluy/sessions/),
     // nunca credencial.
-    if (process.stdout.isTTY && built.controller.current.blocks.length > 0) {
+    if (
+      process.stdout.isTTY &&
+      hasResumableContent(built.controller.current.blocks, built.controller.label)
+    ) {
       // F188 — quando a conversa tem NOME (rótulo), oferece também a retomada por nome
       // (`aluy --resume <nome>` — F169), além do id. Nome com espaço é citado. O id fica
       // como forma canônica (único); o nome é o atalho amigável.

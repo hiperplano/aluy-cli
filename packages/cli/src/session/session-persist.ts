@@ -9,6 +9,23 @@ import type { SessionBlock } from './model.js';
 import type { SessionStore, SessionSummary } from '../io/index.js';
 
 /**
+ * F190 — uma sessão só tem o que RETOMAR quando houve mensagem (`you`/`aluy`) OU um
+ * rótulo (rename explícito). Uma sessão SÓ de notas de boot (config/tools/inventory/
+ * todo, sem interação) é RUÍDO — não deve ser persistida nem anunciada como "salva"
+ * (evita o acúmulo de arquivos fantasma no `~/.aluy/sessions/` — 17 de 50 no dogfooding).
+ * PURO: reusado pelo `autoSaveSession` (gate) E pelo epílogo de saída do run.tsx (p/
+ * não dizer "Sessão salva" sem ter salvado). A conversa de INSTALL (turnos `aluy` +
+ * tools, F187) TEM mensagem `aluy` ⇒ segue gravada/recuperável — só a lista a oculta.
+ */
+export function hasResumableContent(
+  blocks: readonly SessionBlock[],
+  label: string | undefined,
+): boolean {
+  if (label !== undefined && label.trim() !== '') return true;
+  return blocks.some((b) => b.kind === 'you' || b.kind === 'aluy');
+}
+
+/**
  * Grava a transcrição corrente no store (best-effort). NUNCA lança: uma falha de
  * escrita não derruba a sessão viva (só não persiste p/ a próxima). Não loga o
  * conteúdo. Retorna `true` se gravou (útil p/ teste).
@@ -35,9 +52,10 @@ export function autoSaveSession(
     readonly blocks: readonly SessionBlock[];
   },
 ): boolean {
-  // Não persiste uma transcrição VAZIA (sessão sem nenhuma interação) — evita poluir
-  // `~/.aluy/sessions/` com sessões fantasma de quem só abriu e fechou o `aluy`.
-  if (input.blocks.length === 0) return false;
+  // F190 — não persiste uma sessão sem CONTEÚDO RETOMÁVEL (só notas de boot, sem
+  // mensagem nem rótulo) — evita fantasmas no `~/.aluy/sessions/`. Antes o gate era
+  // `blocks.length === 0`, que NÃO pegava as sessões só-de-notas (blocks > 0).
+  if (!hasResumableContent(input.blocks, input.label)) return false;
   try {
     return store.save(input);
   } catch {
