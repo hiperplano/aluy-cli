@@ -1084,6 +1084,20 @@ export function parseArgs(argv: readonly string[]): CliAction {
     : undefined;
   // EST-1007 — formato de saída do headless (só sob `print`). `text` (default) | `json`.
   const outputFormat = print ? flagValue(argv, 'output-format') : undefined;
+  // F175 — VALIDA o valor de `--output-format` CEDO: um valor inválido (`xml`) era
+  // ACEITO silenciosamente e o headless RODAVA o turno (gasta modelo!) sem imprimir
+  // nada — nem text, nem json (o guard `format==='text'` era falso e não havia ramo).
+  // Recusa antes de qualquer efeito (exit 2), como `--effort`/`--tier custom`.
+  if (
+    outputFormat !== undefined &&
+    !['text', 'json', 'stream-json'].includes(outputFormat.trim())
+  ) {
+    return {
+      kind: 'usage-error',
+      message: `aluy: --output-format inválido "${outputFormat}" (use text | json | stream-json)`,
+      exitCode: 2,
+    };
+  }
 
   // EST-0972 (BUG 2) — `--new`: pula a oferta de retomar a sessão recente do cwd e
   // começa do ZERO. Sem ele, o boot oferece retomar a conversa anterior (se houver).
