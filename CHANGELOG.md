@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.81] — 2026-07-02
+
 ### Corrigido
 
 - 🟡 `aluy config`: a view de config efetiva agora lista os limites de orçamento `maxTokens`/`maxOutputTokens`/`maxIterations` (F185) — estavam ausentes apesar de serem config durável (ADR-0136), sobreponíveis por `ALUY_MAX_*` e mostrados pelo `doctor`. Com valor efetivo, origem (env/config/default) e precedência.
