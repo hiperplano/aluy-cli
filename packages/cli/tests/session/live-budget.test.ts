@@ -38,6 +38,7 @@ import {
   liveShellTailMaxLines,
   LIVE_SHELL_OUTPUT_MAX_LINES,
   NARROW_CHROME_MAX_COLS,
+  liveRegionMinRows,
 } from '../../src/session/live-budget.js';
 import type { SessionBlock, SessionState } from '../../src/session/model.js';
 import { visualLines } from '../../src/session/visual-lines.js';
@@ -766,6 +767,114 @@ describe('F163 — sessão gigante em tela baixa/estreita NÃO estoura `rows` (f
     );
     expect(liveOverheadLines({ live: [tool], phase: 'idle', hasBlocks: true, columns: 196 })).toBe(
       1,
+    );
+  });
+});
+
+// ── F196 — PISO ESTRUTURAL da região viva (anti "branco gigante no resize") ─────────
+//
+// O bug do dono: ao REDIMENSIONAR o terminal numa sessão cheia, o Ink caía no caminho
+// `outputHeight >= rows` (repaint total `clearTerminal + fullStaticOutput + output`), e o
+// `clearScreen()` do resize (que remonta o <Static>) fazia o Ink DUPLICAR o `fullStaticOutput`
+// a cada redimensionar ⇒ o repaint reescrevia 2×, 3×, … N× o scrollback (bloco/branco
+// gigante que só cresce). O <App> passa a PULAR o clearScreen exatamente quando a região viva
+// NÃO cabe em `rows` — e o sinal disso é `liveRegionMinRows(...) >= rows`. Aqui provamos, PURO:
+//   1) o piso é um LIMITE INFERIOR real (a viva NUNCA é menor que ele);
+//   2) em tela BAIXA (com stream) o piso ≥ rows ⇒ clearTerminal garantido ⇒ pular é seguro;
+//   3) em tela ALTA o piso < rows ⇒ caminho `fits` ⇒ o clearScreen segue valendo (não pula);
+//   4) o sinal é CONSERVADOR: só ≥ rows quando o estouro é garantido p/ QUALQUER fala.
+describe('F196 — liveRegionMinRows: piso estrutural que decide pular o clearScreen do resize', () => {
+  it('é um LIMITE INFERIOR: a altura REAL da região viva é sempre ≥ o piso', () => {
+    // Para vários rows/cols e composições, a altura desenhada (com a fala no seu teto) nunca
+    // fica ABAIXO do piso — que é o que garante que "piso ≥ rows" ⇒ "viva ≥ rows" (estoura).
+    for (const rows of [10, 12, 16, 24, 40]) {
+      for (const columns of [48, 70, 100]) {
+        for (const live of [
+          [longSpeech(30)],
+          [longSpeech(30), runningTool()],
+          [longSpeech(30), subagents(3)],
+        ] as SessionBlock[][]) {
+          const floor = liveRegionMinRows({
+            rows,
+            live,
+            phase: 'streaming',
+            hasBlocks: true,
+            mode: 'normal',
+            columns,
+          });
+          const real = liveRegionHeight({
+            rows,
+            live,
+            phase: 'streaming',
+            hasBlocks: true,
+            mode: 'normal',
+          });
+          expect(real).toBeGreaterThanOrEqual(floor);
+        }
+      }
+    }
+  });
+
+  it('tela BAIXA com stream (rows≤13) ⇒ piso ≥ rows ⇒ sinaliza PULAR o clearScreen', () => {
+    // Em 12×48 (split/pane pequeno, sessão viva) o chrome (8) + estreito (2) + cabeçalho/cursor/
+    // pad da fala (3) = 13 já não cabem em ≤13 ⇒ clearTerminal garantido ⇒ pular o clearScreen
+    // (que duplicaria o fullStaticOutput) é seguro. (Em 14 o piso 13<14 ⇒ pode caber ⇒ NÃO pula.)
+    for (const rows of [10, 12, 13]) {
+      const floor = liveRegionMinRows({
+        rows,
+        live: [longSpeech(30)],
+        phase: 'streaming',
+        hasBlocks: true,
+        mode: 'normal',
+        columns: 48,
+      });
+      expect(floor).toBeGreaterThanOrEqual(rows);
+    }
+  });
+
+  it('tela ALTA (rows≥24) ⇒ piso < rows ⇒ NÃO pula (caminho fits: clearScreen limpa órfãos)', () => {
+    for (const rows of [24, 40, 50]) {
+      const floor = liveRegionMinRows({
+        rows,
+        live: [longSpeech(30), runningTool()],
+        phase: 'streaming',
+        hasBlocks: true,
+        mode: 'normal',
+        columns: 100,
+      });
+      expect(floor).toBeLessThan(rows);
+    }
+  });
+
+  it('o sinal FLIPA no resize: mesma sessão, encolher rows cruza de fits→estoura', () => {
+    const live: SessionBlock[] = [longSpeech(30)];
+    const at = (rows: number, columns: number): boolean =>
+      liveRegionMinRows({
+        rows,
+        live,
+        phase: 'streaming',
+        hasBlocks: true,
+        mode: 'normal',
+        columns,
+      }) >= rows;
+    // Cresça/encolha a MESMA sessão: alto cabe (não pula), baixo estoura (pula) — o effect de
+    // resize (App.tsx, F196) lê exatamente este sinal a cada mudança de dimensão.
+    expect(at(40, 100)).toBe(false); // fits ⇒ clearScreen segue
+    expect(at(12, 48)).toBe(true); //  estoura ⇒ pula o clearScreen (mata a duplicação)
+  });
+
+  it('CONSERVADOR: o piso IGNORA o corpo da fala (a viva só pode ser MAIOR, nunca menor)', () => {
+    // Fala de 1 linha vs 100 linhas ⇒ MESMO piso (o corpo não entra). Garante que "piso ≥ rows"
+    // nunca é um falso-positivo por conteúdo curto: se o piso já estoura, QUALQUER fala estoura.
+    const base = {
+      rows: 12,
+      phase: 'streaming' as const,
+      hasBlocks: true,
+      mode: 'normal' as const,
+      columns: 48,
+    };
+    expect(liveRegionMinRows({ ...base, live: [longSpeech(1)] })).toBe(
+      liveRegionMinRows({ ...base, live: [longSpeech(100)] }),
     );
   });
 });
