@@ -109,15 +109,40 @@ export class SnapshotJournal {
    * contrato da tool não ver a API completa do journal.
    */
   get toolPort(): ToolJournalPort {
+    // F162 — o journal de undo é CONVENIÊNCIA, não gate: uma falha de persistência
+    // (disco cheio, ~/.aluy/undo apagado além do auto-reparo do store) NÃO pode
+    // derrubar a tool que ele só acompanha — na sessão real do dono, TODO
+    // `run_command` passou a falhar com o ENOENT do stack.jsonl, inclusive o
+    // comando que consertaria. Degrada: marca `degraded` (o /undo avisa que a
+    // cobertura tem lacuna) e deixa a tool seguir. Nunca loga conteúdo (R7).
     return {
       captureEdit: async (input) => {
-        await this.captureEdit(input);
+        try {
+          await this.captureEdit(input);
+        } catch {
+          this.degradedFlag = true;
+        }
       },
       markBarrier: async (command) => {
-        await this.markBarrier(command);
+        try {
+          await this.markBarrier(command);
+        } catch {
+          this.degradedFlag = true;
+        }
       },
     };
   }
+
+  /**
+   * F162 — `true` se ALGUMA captura/barreira falhou nesta sessão (undo com lacuna).
+   * O chamador pode avisar 1× ("undo indisponível p/ parte da sessão") — honesto
+   * sem bloquear o trabalho.
+   */
+  get degraded(): boolean {
+    return this.degradedFlag;
+  }
+
+  private degradedFlag = false;
 
   /**
    * Captura o `antes` de UMA edição aprovada (CA-1). Chamada pela `edit_file` no

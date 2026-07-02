@@ -49,6 +49,8 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ### Corrigido
 
+- 🔴 Undo: o journal deixou de DERRUBAR comandos — `~/.aluy/undo` apagado no meio da sessão recriava ENOENT eterno em TODO `run_command`; o store agora recria a árvore e tenta 1×, e o seam da tool degrada (marca `degraded`) em vez de propagar (F162).
+- TUI: `/model` no backend LOCAL (BYO) não oferece mais os tiers do broker (beco sem saída) — mostra a nota do caminho local (`/provider` · `ALUY_LOCAL_MODEL`/`--model`) (F161).
 - TUI: Esc SOZINHO volta a funcionar (fechar picker/dialog) — o guard de CSI-u (#18) retinha um `\x1b` solitário PARA SEMPRE aguardando o resto da sequência; agora um flush por timeout (75ms) o entrega como tecla quando a continuação não vem (F159).
 - TUI: saída por duplo Ctrl-C confiável — o armado vive num ref com timestamp (janela de 2,5s por tempo real), não no estado React do closure; dois Ctrl-C no mesmo tick do Ink agora SAEM (F160).
 - TUI: o ALVO das linhas de tool (`◌`/`⏺`) é clampado a 1 linha — um batch/heredoc de 100+ linhas como `command` não despeja mais o conteúdo inteiro no transcript (`clampTarget`: 1ª linha + `… (+N linhas)`).

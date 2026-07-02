@@ -1206,6 +1206,16 @@ export function App(props: AppProps): React.ReactElement {
         toggleFullscreen();
         return;
       }
+      // F161 — no backend LOCAL (BYO) os TIERS DO BROKER não se aplicam: abrir o
+      // seletor (Flui/Granito/…) ali era beco sem saída ("catálogo do broker
+      // indisponível"). Orienta o caminho local em vez de oferecer o que não existe.
+      if (command.id === 'model' && args.trim() === '' && state.meta.backend === 'local') {
+        controller.replaceNote('model-local', [
+          'Backend LOCAL (BYO): os tiers do broker não se aplicam aqui.',
+          'O modelo vem do seu provider — troque com /provider, ou defina ALUY_LOCAL_MODEL / --model.',
+        ]);
+        return;
+      }
       if (
         command.id === 'model' &&
         args.trim() === '' &&

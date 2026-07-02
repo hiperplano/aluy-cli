@@ -137,6 +137,26 @@ class MapCurrentReader implements CurrentReaderPort {
 }
 
 describe('EST-0960a · SnapshotJournal — mecânica portável', () => {
+  it('F162 — falha de persistência do store NÃO derruba a tool (toolPort degrada + marca)', async () => {
+    const store = new MemoryStore();
+    // Store quebrado (disco cheio / ~/.aluy/undo apagado além do auto-reparo).
+    store.appendEntry = async () => {
+      throw new Error('ENOENT: stack.jsonl');
+    };
+    store.putBlob = async () => {
+      throw new Error('ENOENT: blobs');
+    };
+    const journal = newJournal({ store, workspace: fakeWorkspace() });
+    expect(journal.degraded).toBe(false);
+    // O seam da tool NUNCA propaga (era o que matava todo run_command na sessão real)…
+    await expect(journal.toolPort.markBarrier('npm test')).resolves.toBeUndefined();
+    await expect(
+      journal.toolPort.captureEdit({ path: 'a.ts', before: 'x', after: 'y', createdByEdit: false }),
+    ).resolves.toBeUndefined();
+    // …e o journal se declara DEGRADADO (o chamador pode avisar 1×, honesto).
+    expect(journal.degraded).toBe(true);
+  });
+
   it('T1 — edit_file aprovado captura o conteúdo-antes (reusa o `before` do diff)', async () => {
     const store = new MemoryStore();
     const ws = fakeWorkspace();

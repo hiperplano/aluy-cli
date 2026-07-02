@@ -43,6 +43,35 @@ describe('NodeJournalStore — proteção do journal (R5/R6/R7)', () => {
 
   afterEach(() => rmSync(base, { recursive: true, force: true }));
 
+  it('F162 — dir do undo APAGADO no meio da sessão: append/putBlob RECRIAM e seguem (sem ENOENT eterno)', async () => {
+    const store = new NodeJournalStore({ sessionId: 's1', baseDir: journalBase });
+    await store.appendEntry({
+      kind: 'barrier',
+      seq: 0,
+      ts: 1,
+      tool: 'run_command',
+      targets: [],
+    } as never);
+    // Alguém apaga ~/.aluy/undo INTEIRO no meio da sessão (o caso real do dono).
+    rmSync(join(journalBase, 'undo'), { recursive: true, force: true });
+    // O append seguinte NÃO pode lançar (era o ENOENT que derrubava todo run_command)…
+    await expect(
+      store.appendEntry({
+        kind: 'barrier',
+        seq: 1,
+        ts: 2,
+        tool: 'run_command',
+        targets: [],
+      } as never),
+    ).resolves.toBeUndefined();
+    // …e o blob idem (árvore renasce 0700/0600).
+    const ref = await store.putBlob('conteudo');
+    expect(existsSync(join(journalBase, 'undo', 's1', 'blobs', ref))).toBe(true);
+    const stack = join(journalBase, 'undo', 's1', 'stack.jsonl');
+    expect(existsSync(stack)).toBe(true);
+    expect(mode(join(journalBase, 'undo', 's1'))).toBe(0o700);
+  });
+
   it('T2 — blob nasce 0600 e os dirs 0700 ATÔMICO (assert logo após criação)', async () => {
     const store = new NodeJournalStore({ sessionId: 's1', baseDir: journalBase });
     const ref = await store.putBlob('SEGREDO=abc123');
