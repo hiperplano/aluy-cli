@@ -14,7 +14,9 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
-_(vazio)_
+### Corrigido
+
+- 🟡 Modo tela cheia (cockpit, ADR-0076; segue DESATIVADO — escape hatch `ALUY_FULLSCREEN=1`): UX consertada de ponta a ponta (#5). F170 — a CONVERSA janelava por nº de BLOCOS (como se cada um ocupasse 1 linha): conteúdo estourava a região fixa e o Ink 5.2.1 MESCLAVA linhas ("texto embaralhado/sobreposto"); agora a janela é por LINHAS VISUAIS (`cockpit-conversa.ts`: medição espelho do render, wrap por palavra idêntico ao do Ink via `wrap-ansi`, clip NA FONTE do que não cabe — soma visível ≤ região por construção). F171 — o LOG estourava a Box fixa (tail de evento `running` não contado; bootInfo sem teto) e as notas de boot relocadas ficavam INVISÍVEIS (log recolhia p/ 1 linha); tudo bounded e contado no sinal adaptativo. F172 — scroll da conversa não alcançava o topo (clamp com unidades trocadas) e submeter com a vista rolada deixava a resposta fora da janela (agora snap p/ a cauda). Densidade: régua do log lisa (rótulo/estado dentro da região, com ▌ de foco a11y). Anti-flicker PROVADO no novo modo `cockpit` do `pty-flicker-stress`: 0 `\x1b[2J` em 24×80, 33×196, 22×60 e 50×220 com sessão gigante + saída viva.
 
 ## [1.0.0-rc.66] — 2026-07-02
 
