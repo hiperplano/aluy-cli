@@ -124,6 +124,9 @@ import {
   type MemoryEngine,
 } from '@hiperplano/aluy-cli-core';
 import { runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
+// F191 — primitivo de EXPEDITE ("acelerar o encaixe"): o controller o POSSUI e o passa
+// ao loop; `controller.expedite()` toca o sino p/ cortar a chamada de modelo em voo.
+import { ExpediteSignal } from '@hiperplano/aluy-cli-core';
 // FATIA 1 (CICLOS/SUBCICLOS) — mesmo critério `!closed` da continuação plano-pendente,
 // reusado p/ contar os subciclos do `cycleProgress` (cache de render da StatusBar).
 import { hasPendingPlanWork } from '@hiperplano/aluy-cli-core';
@@ -1022,6 +1025,12 @@ export class SessionController {
   // viva, na MESMA ordem. Quando o loop confirma a incorporação (`onProgress` inject),
   // drena-se este eco p/ a nota "↳ encaixado" — sem re-exibir texto cru/segredo.
   private pendingInjectEchoes: string[] = [];
+  // F191 — "sino" de EXPEDITE ("acelerar o encaixe"). O controller o POSSUI (uma
+  // instância viva por sessão, repetível) e o passa ao loop (`expedite`). O ESC-com-
+  // inject-pendente chama `controller.expedite()` ⇒ `fire()` ⇒ o loop corta a chamada
+  // de modelo EM VOO e drena o inject JÁ (sem parar o turno). Sem chamada em voo, o
+  // disparo não tem ouvinte ⇒ no-op. DISTINTO do `interrupt()` (freio total, hard-abort).
+  private readonly expediteBus = new ExpediteSignal();
   // EST-0969 (watchdog de TRAVAMENTO) — RESOLVEDOR pendente da pausa-pede-direção. O
   // `StuckResolver` que o controller passa ao loop é PROMISE-based (como o BudgetGate
   // pausa o turno): quando o watchdog dispara, o loop chama `resolve()` e ESPERA; o
@@ -1542,6 +1551,13 @@ export class SessionController {
         // turno antes da próxima chamada do modelo. A catraca é intocada (efeito derivado
         // RE-PASSA `decide()`). O `onProgress({kind:'inject'})` abaixo dá a nota "encaixado".
         pollInjected: () => this.drainLiveInjected(),
+        // F191 — porta de EXPEDITE ("acelerar o encaixe"): o loop se subscreve nela em
+        // torno de cada chamada de modelo. `controller.expedite()` (ESC-com-inject-
+        // pendente) toca o sino ⇒ o loop corta a chamada EM VOO e drena o inject na
+        // próxima volta, SEM parar o turno. Vai ao loop PRINCIPAL e ao FOCADO (/subagent)
+        // — ambos rodam no turno do dono, então o ESC dele os acelera. NÃO toca
+        // catraca/budget. Sem chamada em voo, o disparo é no-op (nenhum ouvinte).
+        expedite: this.expediteBus,
         // EST-0982 — observador de progresso do PAI: usado p/ a UX da injeção mid-turn
         // (nota "↳ encaixado" quando o loop incorpora o "btw"). NÃO toca catraca/budget.
         onProgress: (signal) => this.onParentProgress(signal),
@@ -3196,6 +3212,23 @@ export class SessionController {
     this.retryAbort?.abort();
   }
 
+  /**
+   * F191 — EXPEDITE ("acelerar o encaixe"): o dono aperta ESC com uma mensagem JÁ
+   * ESPERANDO encaixe (`pendingInjects`) e quer que ela entre RÁPIDO — corta a geração
+   * de modelo EM VOO e SEGUE (drena o `user_inject` na próxima volta do loop), SEM
+   * parar o turno. DISTINTO de `interrupt()` (freio total, hard-abort): aqui NÃO há
+   * cancelamento nem efeito (ADR-0063 §3 — cessar≠agir; só reordeno o PRÓPRIO contexto),
+   * por isso NÃO passa por auditoria de cancelamento nem toca a FlowTree/abort.
+   *
+   * Mecânica: toca o "sino" (`expediteBus.fire()`); o loop, subscrito SÓ durante uma
+   * chamada de modelo em voo, aborta o signal PRÓPRIO daquela chamada (não o hard),
+   * descarta o parcial e continua. Sem chamada em voo (ex.: entre iterações, ou durante
+   * uma tool longa), NÃO há ouvinte ⇒ NO-OP. Idempotente/seguro chamar a qualquer hora.
+   */
+  expedite(): void {
+    this.expediteBus.fire();
+  }
+
   // ── EST-0982 · ADR-0063 — os 3 VERBOS sobre a árvore de fluxos ────────────────────
   //
   // VER (drill-in), PARAR (um/todos), INTERAGIR (input num agente vivo). A mecânica
@@ -3410,6 +3443,27 @@ export class SessionController {
     // Arma a supressão p/ que esse turno `aluy` NÃO vire bloco visível (ver
     // `startAluyTurn`/`finishAluyTurn`). É um sinal de display — não toca catraca/budget.
     else if (signal.kind === 'self-check') this.selfCheckInFlight = true;
+    // F191 — o loop CORTOU a chamada de modelo em voo p/ acelerar o encaixe: o parcial
+    // do turno `aluy` (prosa já streamada) é DESCARTADO (o inject supersede — o dono
+    // re-direcionou). Remove o bloco vivo p/ não deixar prosa ÓRFÃ na tela antes da nota
+    // "↳ encaixado" que virá quando o inject drenar na próxima volta. Só de display —
+    // não toca catraca/budget/histórico do loop (o loop já descartou o `result`).
+    else if (signal.kind === 'expedite') this.discardStreamingAluyTurn();
+  }
+
+  /**
+   * F191 — DESCARTA o bloco `aluy` em voo (a prosa parcial que estava streamando) quando
+   * o loop EXPEDITOU: o dono re-direcionou, então o parcial não é mais a resposta — o
+   * inject supersede. No-op se não há bloco `aluy` streamando (ex.: expedite disparado
+   * na fase `thinking`, antes do 1º delta). O próximo `startAluyTurn` abre um turno novo.
+   */
+  private discardStreamingAluyTurn(): void {
+    const blocks = [...this.state.blocks];
+    const last = blocks[blocks.length - 1];
+    if (last && last.kind === 'aluy' && last.streaming) {
+      blocks.pop();
+      this.patch({ blocks });
+    }
   }
 
   /**

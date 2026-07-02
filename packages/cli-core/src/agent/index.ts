@@ -37,6 +37,8 @@ export {
   type ProgressSignal,
   type ProgressObserver,
   type InjectedInputPort,
+  ExpediteSignal,
+  type ExpeditePort,
   type PreToolGate,
   type PreToolGateVerdict,
   type WeakYoloGuardrailConfig,

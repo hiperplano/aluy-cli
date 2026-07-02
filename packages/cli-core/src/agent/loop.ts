@@ -178,7 +178,12 @@ export type ProgressSignal =
   // tagarelice de verificação. NÃO toca a catraca/budget — é puramente observação.
   | { readonly kind: 'self-check'; readonly attempt: number; readonly max: number }
   // EST-F54 — continuação do regente: o loop prosseguiu (nudge injetado)
-  | { readonly kind: 'continue'; readonly reason: string };
+  | { readonly kind: 'continue'; readonly reason: string }
+  // F191 — EXPEDITE: o loop CORTOU a chamada de modelo em voo p/ acelerar o encaixe
+  // (o dono apertou ESC com um `user_inject` esperando). O parcial foi DESCARTADO e a
+  // próxima volta drena o inject. É o gancho p/ a TUI descartar o bloco `aluy` parcial
+  // (o inject supersede). NÃO é `stop` — o loop segue. NÃO toca a catraca/budget.
+  | { readonly kind: 'expedite' };
 
 /** Callback de progresso (heartbeat). Ver {@link ProgressSignal}. */
 export type ProgressObserver = (signal: ProgressSignal) => void;
@@ -198,6 +203,81 @@ export type ProgressObserver = (signal: ProgressSignal) => void;
  * baseline (nenhuma injeção mid-turn). PORTÁVEL: só um callback, sem Ink/I/O.
  */
 export type InjectedInputPort = () => readonly HistoryItem[];
+
+/**
+ * F191 — PORTA de EXPEDITE ("acelerar o encaixe" / SOFT-INTERRUPT). É a contraparte
+ * do "btw" (`pollInjected`): quando o dono já tem uma mensagem ESPERANDO encaixe e
+ * aperta ESC, ele quer que o encaixe seja FORÇADO RÁPIDO — cortar a geração de modelo
+ * EM VOO e SEGUIR (drenar o `user_inject` JÁ), SEM parar a sessão.
+ *
+ * O loop SUBSCREVE um listener SÓ pela duração de cada chamada de modelo e o
+ * DESREGISTRA ao fim (uma chamada = uma subscrição). Quando o disparo ocorre, o loop
+ * aborta um `AbortSignal` PRÓPRIO da iteração (distinto do hard-abort `signal` que
+ * PARA o loop): a chamada retorna cancelada, o PARCIAL é DESCARTADO (o inject
+ * supersede) e o loop CONTINUA — a próxima volta drena o inject e re-planeja com a
+ * msg nova. Sem chamada de modelo em voo, o disparo não tem ouvinte ⇒ NO-OP natural.
+ *
+ * DISTINÇÃO CRÍTICA (invariante F191): o expedite NUNCA vira um `stop`. O hard-abort
+ * (`signal`) segue sendo o ÚNICO freio total (ESC-com-tudo-vazio / Ctrl-C). Quando os
+ * DOIS disparam juntos, o hard-abort TEM PRECEDÊNCIA (para o loop). PORTÁVEL: só
+ * AbortSignal/callback puro — sem Ink/I/O. Opcional: ausente ⇒ baseline (nunca expedita).
+ */
+export interface ExpeditePort {
+  /** Registra um ouvinte chamado quando o dono pede expedite; devolve o unsubscribe. */
+  subscribe(listener: () => void): () => void;
+}
+
+/**
+ * F191 — primitivo concreto de {@link ExpeditePort}: um "sino" que o dono TOCA
+ * (`fire()`) e o loop OUVE (`subscribe`) enquanto uma chamada de modelo está em voo.
+ * Repetível por natureza (≠ AbortSignal, que dispara uma vez só): serve a QUANTOS
+ * expedites o dono pedir ao longo da sessão. Portável (sem Ink/I/O) — a camada cli o
+ * possui e expõe via `controller.expedite()`. `fire()` sem ouvintes = no-op.
+ */
+export class ExpediteSignal implements ExpeditePort {
+  private readonly listeners = new Set<() => void>();
+
+  /** Dispara o expedite: notifica os ouvintes (a chamada de modelo em voo, se houver). */
+  fire(): void {
+    // Cópia defensiva: um listener que se desregistra durante a iteração não corrompe o set.
+    for (const l of [...this.listeners]) {
+      try {
+        l();
+      } catch {
+        /* um ouvinte nunca derruba o disparo (defesa best-effort). */
+      }
+    }
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+}
+
+/**
+ * F191 — combina o hard-abort do caller (`signal`, que PARA o loop) com o signal de
+ * EXPEDITE da iteração (que corta SÓ a chamada de modelo) num único `AbortSignal`
+ * derivado, passado à chamada de modelo. Qualquer um dos dois aborta a chamada; o
+ * loop DISTINGUE no `catch` (expedite ⇒ continua; hard-abort ⇒ para). `AbortSignal.any`
+ * (Node ≥20.3) quando disponível; senão um encadeamento manual equivalente.
+ */
+function combineAbort(hard: AbortSignal | undefined, expedite: AbortSignal): AbortSignal {
+  if (!hard) return expedite;
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([hard, expedite]);
+  // Fallback (Node 20.0–20.2): um controller derivado que aborta com o primeiro dos dois.
+  const ac = new AbortController();
+  if (hard.aborted || expedite.aborted) {
+    ac.abort();
+  } else {
+    const onAbort = (): void => ac.abort();
+    hard.addEventListener('abort', onAbort, { once: true });
+    expedite.addEventListener('abort', onAbort, { once: true });
+  }
+  return ac.signal;
+}
 
 /**
  * EST-0980 · CLI-SEC-3/H1 — PORTA de GATE de PRE-TOOL (hooks que podem VETAR uma tool).
@@ -473,6 +553,14 @@ export interface AgentLoopOptions {
    */
   readonly pollInjected?: InjectedInputPort;
   /**
+   * F191 — porta de EXPEDITE ("acelerar o encaixe"). O loop se SUBSCREVE nela em
+   * torno de cada chamada de modelo; ao disparar (o dono aperta ESC com um
+   * `user_inject` esperando), corta APENAS a chamada de modelo EM VOO e CONTINUA o
+   * loop — a próxima volta drena o inject via `pollInjected`. DISTINTA do hard-abort
+   * (`signal`, freio total). Sem porta ⇒ baseline (nunca expedita). Ver {@link ExpeditePort}.
+   */
+  readonly expedite?: ExpeditePort;
+  /**
    * EST-MON-1 · ADR-0079 (APR-0084) — fila de eventos de MONITOR. O loop a drena no
    * MESMO ponto do `pollInjected` (topo da iteração), mas os eventos entram como
    * `observation` (DADO NÃO-CONFIÁVEL, CLI-SEC-4), NÃO como `user_inject` (que é
@@ -598,6 +686,9 @@ export class AgentLoop {
   // EST-0982 (GS-C5) — porta de injeção mid-turn ("btw"). undefined ⇒ sem injeção
   // mid-turn (baseline). Consultada no topo de cada iteração; drena a fila viva.
   private readonly pollInjected?: InjectedInputPort;
+  // F191 — porta de EXPEDITE ("acelerar o encaixe"): soft-interrupt que corta SÓ a
+  // chamada de modelo em voo e faz o loop SEGUIR (drena o inject). undefined ⇒ baseline.
+  private readonly expedite?: ExpeditePort;
   // EST-MON-1 (ADR-0079) — fila de eventos de monitor (DADO). undefined ⇒ baseline.
   private readonly monitorQueue?: EventQueue;
   // EST-0944 — config do self-check de atenção (re-âncora + auto-verificação).
@@ -644,6 +735,7 @@ export class AgentLoop {
     if (opts.sessionCommands !== undefined) this.sessionCommands = opts.sessionCommands;
     if (opts.budget) this.sharedBudget = opts.budget;
     if (opts.pollInjected) this.pollInjected = opts.pollInjected;
+    if (opts.expedite) this.expedite = opts.expedite;
     if (opts.monitorQueue) this.monitorQueue = opts.monitorQueue;
     this.selfCheck = opts.selfCheck ?? SELF_CHECK_OFF;
     if (opts.weakYoloGuardrail) this.weakYoloGuardrail = opts.weakYoloGuardrail;
@@ -1098,12 +1190,25 @@ export class AgentLoop {
         this.availableAgents,
         this.sessionCommands,
       );
+      // F191 — EXPEDITE ("acelerar o encaixe"): subscreve um ouvinte SÓ pela duração
+      // desta chamada de modelo. Ao disparar (o dono aperta ESC com um `user_inject`
+      // esperando), aborta um controller PRÓPRIO da iteração — DISTINTO do hard-abort
+      // (`signal`, que para o loop). O signal derivado (`combineAbort`) corta a chamada
+      // por QUALQUER um dos dois; o `catch` DISTINGUE: expedite ⇒ descarta o parcial e
+      // SEGUE; hard-abort ⇒ para. Sem porta ⇒ `callSignal === signal` (baseline exato).
+      const expediteAc = new AbortController();
+      let expedited = false;
+      const unsubscribeExpedite = this.expedite?.subscribe(() => {
+        expedited = true;
+        expediteAc.abort();
+      });
+      const callSignal = this.expedite ? combineAbort(signal, expediteAc.signal) : signal;
       let result: ModelCallResult;
       try {
         result = await this.model.call({
           messages,
           idempotencyKey,
-          ...(signal ? { signal } : {}),
+          ...(callSignal ? { signal: callSignal } : {}),
         });
       } catch (err) {
         // EST-0969 (anti-runaway) — a GUARDA ANTI-REPETIÇÃO disparou DENTRO do
@@ -1120,7 +1225,22 @@ export class AgentLoop {
           emitDegenerationSignal(this.maestro?.bus, err.kind, err.repeats, err.sample);
           return this.stopAtDegenerate(own, history, err, sessionId);
         }
+        // F191 — o corte foi um EXPEDITE (soft), e NÃO o hard-abort? DESCARTA o parcial
+        // (não empurra `result` ao histórico — o inject supersede) e CONTINUA: a próxima
+        // volta drena o `user_inject` esperando (pollInjected) e re-planeja com a msg
+        // nova. Casa SÓ com `ModelCallAbortedError` (o cancelamento limpo do caller) —
+        // um erro de outra natureza (broker/transporte) sobe normalmente. PRECEDÊNCIA do
+        // hard-abort: se `signal` também abortou (ESC-tudo-vazio/Ctrl-C concomitante), NÃO
+        // é expedite — cai no `throw` abaixo e o loop PARA (invariante do freio total).
+        if (expedited && !signal?.aborted && err instanceof ModelCallAbortedError) {
+          this.onProgress?.({ kind: 'expedite' });
+          continue; // o `finally` desregistra o ouvinte antes de reentrar no loop.
+        }
         throw err;
+      } finally {
+        // F191 — uma chamada = uma subscrição: desregistra SEMPRE (sucesso, expedite,
+        // hard-abort ou erro), p/ o próximo disparo só atingir a chamada em voo dela.
+        unsubscribeExpedite?.();
       }
       const turnTokens = totalTokens(result.usage);
       budget.addTokens(turnTokens);
