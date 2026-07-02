@@ -1073,9 +1073,7 @@ export class SessionController {
   private lastCycleContinuation: CycleContinuation | undefined;
   // ADR-0137 — o gate do teto pendente (a decisão `c`/`n` do humano). `undefined` fora dele.
   // Reusa o desfecho seguro de timeout/`n` = ENCERRAR (C3).
-  private cycleCeilingGate:
-    | { resolve: (extend: boolean) => void; stop: CycleStop }
-    | undefined;
+  private cycleCeilingGate: { resolve: (extend: boolean) => void; stop: CycleStop } | undefined;
   // EST-1106 — UM `/workflows run` está ATIVO (espelha `cycleActive`).
   private workflowActive = false;
   // EST-1107 — SPAWNER de sub-agentes (construído no constructor quando subAgents habilitado).
@@ -2521,10 +2519,7 @@ export class SessionController {
         label: b.label,
         closed: b.closed,
       }));
-      const input = buildSubcycleJudgeInput(
-        { objective, boxes, lastOutcome },
-        redactOutputSecrets,
-      );
+      const input = buildSubcycleJudgeInput({ objective, boxes, lastOutcome }, redactOutputSecrets);
       const result = await judge.judge(input);
       const cont = judgeResultToContinuation(result);
       this.lastCycleContinuation = cont;
@@ -6132,6 +6127,16 @@ export class SessionController {
 
   private setPhase(phase: SessionState['phase']): void {
     this.patch({ phase });
+    // F168 — o "te aviso quando terminar" que NUNCA chegava: um evento de conclusão
+    // (fan-out/monitor) que aterrissa com o pai FORA de idle/done (ask aberto,
+    // retry, fim tardio do turno) era descartado pelo guard do wake — e NINGUÉM
+    // re-tentava quando a fase enfim assentava. Agora TODA assentada em idle/done
+    // re-arma o wake: se a fila tem evento pendente, o turno de incorporação nasce
+    // sozinho (mesmo runResolvedTurn, mesma catraca — CLI-SEC-4 intocado).
+    // queueMicrotask: deixa a finalização síncrona do turno terminar antes do wake.
+    if (phase === 'idle' || phase === 'done') {
+      queueMicrotask(() => this.maybeWakeForMonitor());
+    }
   }
 
   /**
