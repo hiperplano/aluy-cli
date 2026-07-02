@@ -33,7 +33,10 @@ async function flush(): Promise<void> {
 }
 
 function state(): SessionState {
-  const blocks = Array.from({ length: 6 }, (_, i) => ({
+  // EST-1015 — 2 blocos (não 6): a conversa agora janela por LINHAS VISUAIS (cada
+  // `you` ocupa 3: rótulo + fala + respiro). Com 6, nem todos caberiam em 24 rows —
+  // e estes testes provam o COMPOSER (o transcript deve seguir visível/estável).
+  const blocks = Array.from({ length: 2 }, (_, i) => ({
     kind: 'you' as const,
     text: `conversa ${i}`,
   }));
@@ -48,8 +51,7 @@ function state(): SessionState {
 function renderCockpit(input: string, cursorPos: number, rows = 24, cols = 100) {
   // o caller (App) deriva composerLines do input; aqui replicamos p/ o layout. Como o App
   // (task #14), usamos linhas VISUAIS (com soft-wrap) — p/ short lines é == lógicas.
-  const composerLines =
-    input.length === 0 ? 1 : visualLines(input, cols > 2 ? cols - 2 : cols);
+  const composerLines = input.length === 0 ? 1 : visualLines(input, cols > 2 ? cols - 2 : cols);
   const layout = resolveCockpitLayout(rows, cols, composerLines);
   if (layout.kind !== 'cockpit') throw new Error('layout deveria caber');
   const theme = resolveTheme({ env: ENV });
