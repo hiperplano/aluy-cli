@@ -25,17 +25,24 @@ describe('collectSettings — precedência env > config.json > default', () => {
     const s = collectSettings({}, { backend: 'local', localProvider: 'ollama' } as never);
     const backend = s.find((x) => x.key === 'backend');
     const provider = s.find((x) => x.key === 'localProvider');
-    expect(backend).toMatchObject({ value: 'local', origin: 'config.json', source: 'config.backend' });
+    expect(backend).toMatchObject({
+      value: 'local',
+      origin: 'config.json',
+      source: 'config.backend',
+    });
     expect(provider).toMatchObject({ value: 'ollama', origin: 'config.json' });
   });
 
   it('env ALUY_* vence o config.json; origem = env e a fonte é a env var', () => {
-    const s = collectSettings(
-      { ALUY_LOCAL_PROVIDER: 'openrouter' },
-      { localProvider: 'ollama' } as never,
-    );
+    const s = collectSettings({ ALUY_LOCAL_PROVIDER: 'openrouter' }, {
+      localProvider: 'ollama',
+    } as never);
     const provider = s.find((x) => x.key === 'localProvider');
-    expect(provider).toMatchObject({ value: 'openrouter', origin: 'env', source: 'ALUY_LOCAL_PROVIDER' });
+    expect(provider).toMatchObject({
+      value: 'openrouter',
+      origin: 'env',
+      source: 'ALUY_LOCAL_PROVIDER',
+    });
   });
 
   it('sem env nem config ⇒ origem = default (não inventa fonte)', () => {
@@ -49,14 +56,59 @@ describe('collectSettings — precedência env > config.json > default', () => {
 
   it('env vazia ("") NÃO conta como override — cai p/ config/default', () => {
     const s = collectSettings({ ALUY_BACKEND: '   ' }, { backend: 'broker' } as never);
-    expect(s.find((x) => x.key === 'backend')).toMatchObject({ value: 'broker', origin: 'config.json' });
+    expect(s.find((x) => x.key === 'backend')).toMatchObject({
+      value: 'broker',
+      origin: 'config.json',
+    });
+  });
+
+  // F185 — limites/orçamento (ADR-0136) agora aparecem na view de config efetiva.
+  it('F185 — maxTokens/maxOutputTokens/maxIterations com defaults quando ausentes', () => {
+    const s = collectSettings({}, {} as never);
+    expect(s.find((x) => x.key === 'maxTokens')).toMatchObject({
+      value: '10000000',
+      origin: 'default',
+    });
+    expect(s.find((x) => x.key === 'maxIterations')).toMatchObject({
+      value: '300',
+      origin: 'default',
+    });
+    expect(s.find((x) => x.key === 'maxOutputTokens')?.origin).toBe('default');
+  });
+
+  it('F185 — env ALUY_MAX_* vence; origem = env com a env var certa', () => {
+    const s = collectSettings({ ALUY_MAX_TOKENS: '555', ALUY_MAX_ITERATIONS: '7' }, {} as never);
+    expect(s.find((x) => x.key === 'maxTokens')).toMatchObject({
+      value: '555',
+      origin: 'env',
+      source: 'ALUY_MAX_TOKENS',
+    });
+    expect(s.find((x) => x.key === 'maxIterations')).toMatchObject({
+      value: '7',
+      origin: 'env',
+      source: 'ALUY_MAX_ITERATIONS',
+    });
+  });
+
+  it('F185 — config.limits.* vence o default; fonte = config.limits.<chave> (aninhada)', () => {
+    const s = collectSettings({}, { limits: { maxTokens: 42 } } as never);
+    expect(s.find((x) => x.key === 'maxTokens')).toMatchObject({
+      value: '42',
+      origin: 'config.json',
+      source: 'config.limits.maxTokens',
+    });
   });
 });
 
 describe('runConfig — saída', () => {
   it('texto: imprime a precedência, as chaves e o aviso de segredo; exit 0', () => {
     const { io, lines } = captureIO();
-    const code = runConfig({ io, env: {}, baseDir: '/tmp/x', configStore: fakeStore({ backend: 'local' }) });
+    const code = runConfig({
+      io,
+      env: {},
+      baseDir: '/tmp/x',
+      configStore: fakeStore({ backend: 'local' }),
+    });
     expect(code).toBe(0);
     const out = lines.join('\n');
     expect(out).toContain('flag > env (ALUY_*) > config.json > default');
