@@ -2865,6 +2865,23 @@ export function App(props: AppProps): React.ReactElement {
       }
       if (key.return || key.tab) {
         const entry = slashCommands[slashSel];
+        // F173 — `/comando` DESCONHECIDO (nenhum match) + Enter era TECLA MORTA: o
+        // menu ficava aberto, "enter executa" mentia e nada acontecia (mesma família
+        // do F159). Agora o Enter FECHA o menu, LIMPA o composer e AVISA qual comando
+        // não existe (nota honesta) — um `/xyz` NUNCA vira objetivo do modelo (não
+        // gasta turno). O Tab sem match segue no-op (nada a completar). Esc já fechava.
+        if (entry === undefined) {
+          if (key.return) {
+            const typed = input.trim().split(/\s+/)[0] ?? '';
+            setText('');
+            setSlashOpen(false);
+            setSlashSel(0);
+            controller.replaceNote('slash-unknown', [
+              `comando desconhecido: ${typed || '/'} — veja /help para a lista.`,
+            ]);
+          }
+          return;
+        }
         if (entry) {
           // EST-0974 — SUBcomando: SEMPRE completa `/<pai> <sub> ` no composer (precisa de
           // argumento; nunca executa direto). Comando-PAI (com subs) no TAB: drilla os subs
