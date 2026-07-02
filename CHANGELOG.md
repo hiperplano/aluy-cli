@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.72] — 2026-07-02
+
 ### Corrigido
 
 - 🟡 TUI: `/rename <nome> --cor <inválida>` não descarta mais o nome válido (F176) — aplica o nome com a cor automática e avisa que a cor caiu (antes o rename inteiro abortava e o nome se perdia). `--cor` sem nome segue erro.
