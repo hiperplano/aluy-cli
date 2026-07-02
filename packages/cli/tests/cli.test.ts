@@ -961,3 +961,45 @@ describe('textos', () => {
     expect(HELP_TEXT).toContain('ALUY_BUDGET');
   });
 });
+
+describe('F180 (OBS-1) — objetivo que é comando de SESSÃO vira usage-error (não turno do modelo)', () => {
+  it('`aluy add-dir /x` (comando de sessão) ⇒ usage-error exit 2, com hint p/ /add-dir', () => {
+    const a = parseArgs(['add-dir', '/x']);
+    expect(a.kind).toBe('usage-error');
+    if (a.kind === 'usage-error') {
+      expect(a.exitCode).toBe(2);
+      expect(a.message).toContain('/add-dir');
+      expect(a.message).toContain('comando de SESSÃO');
+    }
+  });
+
+  it('cobre rename/compact/undo/export/model (uma palavra exata) ⇒ usage-error', () => {
+    for (const w of ['rename', 'compact', 'undo', 'export', 'model', 'rooms', 'theme']) {
+      const a = parseArgs([w]);
+      expect(a.kind, `bare '${w}'`).toBe('usage-error');
+    }
+  });
+
+  it('`-p rename` (comando de sessão via -p) também é pego', () => {
+    const a = parseArgs(['-p', 'rename']);
+    expect(a.kind).toBe('usage-error');
+  });
+
+  it('multi-palavra com a palavra NÃO dispara (objetivo real intacto)', () => {
+    const a = parseArgs(['rename o arquivo auth.ts']);
+    expect(a.kind).toBe('launch');
+    if (a.kind === 'launch') expect(a.goal).toBe('rename o arquivo auth.ts');
+  });
+
+  it('objetivo comum de uma palavra (não-comando) segue launch normal', () => {
+    for (const w of ['oi', 'ola', 'status', 'refatore']) {
+      const a = parseArgs([w]);
+      expect(a.kind, `bare '${w}'`).toBe('launch');
+    }
+  });
+
+  it('`-p "rename the file"` (multi-palavra via -p) segue launch (não é o comando nu)', () => {
+    const a = parseArgs(['-p', 'rename the file']);
+    expect(a.kind).toBe('launch');
+  });
+});
