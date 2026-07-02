@@ -69,6 +69,12 @@ export interface AuthFact {
   readonly authValidated?: boolean;
   /** Status HTTP do toque de validação (quando houve resposta) — p/ o detalhe. */
   readonly authStatus?: number;
+  /**
+   * F182 — Backend local (BYO): a credencial do BROKER (`aluy login`) NÃO se aplica
+   * (o modelo vem do provider BYO via keychain/env). O check vira N/A (ok), não ✗
+   * "não autenticado" com conselho `aluy login` que não cabe. Espelha broker/catálogo.
+   */
+  readonly localSkip?: boolean;
 }
 
 /** Resultado de um ping HTTP leve (broker/catálogo/custom). */
@@ -221,6 +227,11 @@ export interface TierFact {
   readonly responded: boolean;
   /** Causa da falha (broker fora / sem crédito / provedor) quando `responded===false`. */
   readonly error?: string;
+  /**
+   * F182 — Backend local (BYO): "tier" é conceito do BROKER; o local usa modelo/base_url
+   * do provider. O ping de tier vira N/A (ok) — não ✗ "sessão expirou" (falso-negativo).
+   */
+  readonly localSkip?: boolean;
 }
 
 /** Todos os fatos coletados pelo probe — entrada da camada de checks. */
@@ -252,6 +263,16 @@ export interface DoctorReport {
 // ── builders por check (puros) ───────────────────────────────────────────────
 
 function checkAuth(f: AuthFact): DoctorCheck {
+  // F182 — backend local (BYO): a credencial do broker não se aplica ⇒ N/A (ok),
+  // não ✗ "não autenticado" (falso-negativo + conselho `aluy login` que não cabe).
+  if (f.localSkip) {
+    return {
+      id: 'auth',
+      label: 'credencial',
+      status: 'ok',
+      detail: 'N/A (backend local — credencial BYO via keychain/env, sem broker)',
+    };
+  }
   if (!f.keychainAvailable) {
     return {
       id: 'auth',
@@ -528,6 +549,15 @@ function checkConfig(f: ConfigFact): DoctorCheck {
 
 // ── #9 (--deep) tier ao vivo — opt-in que GASTA modelo ───────────────────────
 function checkTier(f: TierFact): DoctorCheck {
+  // F182 — backend local (BYO): não há tier de broker a testar ⇒ N/A (ok).
+  if (f.localSkip) {
+    return {
+      id: 'tier',
+      label: 'tier (--deep)',
+      status: 'ok',
+      detail: 'N/A (backend local — modelo BYO; use um turno real p/ testar)',
+    };
+  }
   if (f.responded) {
     return {
       id: 'tier',

@@ -88,6 +88,18 @@ describe('doctor/checks — mapeamento de fatos → ✓/⚠/✗', () => {
     expect(c.fix).toMatch(/keychain/i);
   });
 
+  // F182 — backend local (BYO): credencial do broker N/A, NÃO ✗ "não autenticado".
+  it('F182 — credencial com localSkip (backend local) ⇒ ✓ N/A, sem dica `aluy login`', () => {
+    const f = okFacts();
+    const c = checkOf(
+      { ...f, auth: { present: false, keychainAvailable: true, localSkip: true } },
+      'auth',
+    );
+    expect(c.status).toBe('ok');
+    expect(c.detail).toMatch(/N\/A.*local/i);
+    expect(c.fix ?? '').not.toContain('aluy login');
+  });
+
   // ── #2 broker ──────────────────────────────────────────────────────────────
   it('broker 200 ⇒ ✓ com host+status', () => {
     const c = checkOf(okFacts(), 'broker');
@@ -481,6 +493,18 @@ describe('doctor/checks — VALIDAÇÃO ATIVA (EST-0970)', () => {
     });
     expect(bad.checks.find((c) => c.id === 'tier')?.status).toBe('fail');
     expect(hasFailure(bad)).toBe(true);
+  });
+
+  // F182 — backend local (BYO): tier N/A (ok), NÃO ✗ "não respondeu/sessão expirou".
+  it('F182 — tier com localSkip (backend local) ⇒ ✓ N/A, sem falha', () => {
+    const r = buildDoctorReport({
+      ...okFacts(),
+      tier: { tier: '(local)', responded: false, localSkip: true },
+    });
+    const c = r.checks.find((x) => x.id === 'tier');
+    expect(c?.status).toBe('ok');
+    expect(c?.detail).toMatch(/N\/A.*local/i);
+    expect(hasFailure(r)).toBe(false);
   });
 });
 

@@ -129,6 +129,9 @@ describe('aluy doctor — exit code', () => {
 
   it('--deep (tierTester mockado): adiciona a linha de tier ✓; tier que falha ⇒ exit 1', async () => {
     const okProbe: DoctorProbeDeps = {
+      // F182 — tier de BROKER exige backend broker explícito (num box local/BYO o
+      // probe marca o tier N/A e o tester não roda).
+      env: { ALUY_BACKEND: 'broker', ALUY_BROKER_URL: 'https://broker.test' },
       ...probeOf(allOk()),
       tierTester: async () => ({ tier: 'aluy-granito', responded: true }),
     };
@@ -138,6 +141,7 @@ describe('aluy doctor — exit code', () => {
     expect(ok.out.join('\n')).toContain('tier (--deep)');
 
     const badProbe: DoctorProbeDeps = {
+      env: { ALUY_BACKEND: 'broker', ALUY_BROKER_URL: 'https://broker.test' },
       ...probeOf(allOk()),
       tierTester: async () => ({ tier: 'aluy-flux', responded: false, error: 'sem crédito' }),
     };

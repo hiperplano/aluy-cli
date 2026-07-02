@@ -139,6 +139,9 @@ describe('aluy doctor --json', () => {
       json: true,
       deep: true,
       probe: {
+        // F182 — o teste do tier de BROKER exige backend broker explícito (senão, num
+        // box de config local/BYO, o probe marca o tier N/A e o tester não roda).
+        env: { ALUY_BACKEND: 'broker', ALUY_BROKER_URL: 'https://broker.test' },
         ...probeFromFacts(okFacts()),
         tierTester: async () => ({
           tier: 'aluy-granito',

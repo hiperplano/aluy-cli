@@ -122,6 +122,7 @@ describe('/doctor — runner de sessão (ticks ao vivo)', () => {
       {
         login,
         memory: { count: async () => 0 },
+        env: { ALUY_BACKEND: 'broker', ALUY_BROKER_URL: 'https://broker.test' },
         probeOverride: {
           ...probeFromFacts(facts),
           tierTester: async () => {
@@ -149,6 +150,7 @@ describe('/doctor — runner de sessão (ticks ao vivo)', () => {
       {
         login,
         memory: { count: async () => 0 },
+        env: { ALUY_BACKEND: 'broker', ALUY_BROKER_URL: 'https://broker.test' },
         probeOverride: {
           ...probeFromFacts(facts),
           tierTester: async () => ({
