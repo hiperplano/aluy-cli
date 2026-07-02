@@ -14,6 +14,14 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Corrigido
+
+- 🟡 Resume: o boot não oferece mais retomar conversas SÓ do agente (instalação/conserto de sidecars, sem mensagem do usuário) (F187) — `countUserTurns` (só `you`) no boot-offer/`--continue`/lista do `--resume`; ficam gravadas e recuperáveis por id, só ocultas. Também some sessões vazias de boot da oferta.
+
+### Adicionado
+
+- 🟢 Resume: ao sair, a dica de retomada mostra também `aluy --resume <nome>` (além do id) quando a conversa tem rótulo (F188).
+
 _(vazio)_
 
 ## [1.0.0-rc.82] — 2026-07-02

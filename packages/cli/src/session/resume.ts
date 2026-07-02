@@ -144,8 +144,17 @@ export function resolveResume(
   if (request === undefined) return { kind: 'none' };
 
   if (request.kind === 'continue') {
+    // F187 — `--continue` retoma a última sessão COM turno do usuário deste cwd. Se a
+    // mais recente é SÓ do agente (install/conserto), pula p/ a última que o usuário
+    // de fato iniciou (varre a lista, já ordenada por updatedAt). Nenhuma ⇒ `none`.
     const record = store.latestForCwd(cwd);
-    return record ? { kind: 'resumed', record } : { kind: 'none' };
+    if (record && countUserTurns(record.blocks) > 0) return { kind: 'resumed', record };
+    for (const s of store.list()) {
+      if (s.cwd !== cwd || s.title === undefined) continue;
+      const rec = store.load(s.id);
+      if (rec) return { kind: 'resumed', record: rec };
+    }
+    return { kind: 'none' };
   }
 
   // request.kind === 'resume'
@@ -169,8 +178,10 @@ export function resolveResume(
     // de cair calado numa sessão nova (e, no TTY, evita a auto-oferta de uma sessão ALHEIA).
     return { kind: 'not-found', requestedId: id };
   }
-  // sem id: lista p/ escolher (se houver alguma sessão).
-  const choices = store.list();
+  // sem id: lista p/ escolher (se houver alguma sessão). F187 — oculta conversas SÓ do
+  // agente (sem `title` = sem turno do usuário), mantendo as rotuladas (rename explícito).
+  // Ficam gravadas e recuperáveis por id; só não poluem a lista.
+  const choices = store.list().filter((s) => s.title !== undefined || s.label !== undefined);
   return choices.length > 0 ? { kind: 'pick', choices } : { kind: 'none' };
 }
 
@@ -218,6 +229,22 @@ export function countMessages(blocks: SessionRecord['blocks']): number {
 }
 
 /**
+ * F187 — conta os TURNOS DO USUÁRIO (`you`) numa transcrição. Uma conversa SÓ do
+ * agente (ex.: a instalação/conserto de sidecars via `/doctor fix` ou o boot de turbo:
+ * notas + turnos `aluy` + tools, SEM nenhum `you`) NÃO é algo que o usuário iniciou —
+ * não deve ser oferecida no boot ("retomar a última sessão?") nem listada no `--resume`,
+ * senão o histórico fica poluído por conversas de sistema. `0` ⇒ sessão sem interação
+ * do usuário. (A sessão segue GRAVADA e recuperável por id explícito — só é OCULTA.)
+ */
+export function countUserTurns(blocks: SessionRecord['blocks']): number {
+  let n = 0;
+  for (const b of blocks) {
+    if (b.kind === 'you') n += 1;
+  }
+  return n;
+}
+
+/**
  * Decide se o boot deve OFERECER retomar a sessão anterior do cwd. PURO (só lê o
  * store). Regras (fail-safe em todo ramo):
  *   - QUALQUER flag de sessão (`--continue`/`--resume`/`--new`) ⇒ `explicit` (o
@@ -248,6 +275,10 @@ export function resolveAutoResume(
 
   const messageCount = countMessages(record.blocks);
   if (messageCount === 0) return { kind: 'none' }; // sessão vazia ⇒ nada a retomar.
+  // F187 — não oferece conversa SÓ do agente (install/conserto de sidecars: notas +
+  // turnos `aluy` + tools, sem `you`). O usuário não a iniciou ⇒ ofertá-la no boot
+  // ("retomar a última sessão?") é ruído. Fica gravada/recuperável por id.
+  if (countUserTurns(record.blocks) === 0) return { kind: 'none' };
 
   return { kind: 'offer', record, ageMs, messageCount };
 }

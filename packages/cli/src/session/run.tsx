@@ -2962,9 +2962,18 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // (abriu e fechou) não imprime nada. O id é DADO (nome de arquivo em ~/.aluy/sessions/),
     // nunca credencial.
     if (process.stdout.isTTY && built.controller.current.blocks.length > 0) {
+      // F188 — quando a conversa tem NOME (rótulo), oferece também a retomada por nome
+      // (`aluy --resume <nome>` — F169), além do id. Nome com espaço é citado. O id fica
+      // como forma canônica (único); o nome é o atalho amigável.
+      const label = built.controller.label;
+      const byName =
+        label !== undefined && label.trim() !== ''
+          ? `  ou pelo nome:                 aluy --resume ${/\s/.test(label) ? `"${label}"` : label}\n`
+          : '';
       process.stdout.write(
         `\n  Sessão salva — id: ${activeSession.id}\n` +
           `  Para retomar esta conversa:  aluy --resume ${activeSession.id}\n` +
+          byName +
           '  (ou `aluy --continue` para a sessão mais recente deste diretório)\n\n',
       );
     }
