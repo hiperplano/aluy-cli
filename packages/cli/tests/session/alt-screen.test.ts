@@ -86,7 +86,7 @@ describe('isBenignNetworkAbort — ESC-CRASH fix (não crashar em socket abortad
     expect(isBenignNetworkAbort(err)).toBe(true);
   });
   it('erro de LÓGICA real ⇒ false (segue crashando)', () => {
-    expect(isBenignNetworkAbort(new TypeError("Cannot read properties of undefined"))).toBe(false);
+    expect(isBenignNetworkAbort(new TypeError('Cannot read properties of undefined'))).toBe(false);
     expect(isBenignNetworkAbort(new Error('boom de verdade'))).toBe(false);
     expect(isBenignNetworkAbort(null)).toBe(false);
     expect(isBenignNetworkAbort('string')).toBe(false);
@@ -98,17 +98,19 @@ describe('isBenignNetworkAbort — ESC-CRASH fix (não crashar em socket abortad
     const scheduled: Array<() => void> = [];
     const proc = Object.assign(fakeProcess(), { nextTick: (cb: () => void) => scheduled.push(cb) });
     registerRestoreHandlers(stream, proc);
-    (proc as unknown as { emit: (e: string, ...a: unknown[]) => void }).emit(
-      'uncaughtException',
-      { code: 'ECONNRESET', message: 'socket hang up' },
-    );
+    (proc as unknown as { emit: (e: string, ...a: unknown[]) => void }).emit('uncaughtException', {
+      code: 'ECONNRESET',
+      message: 'socket hang up',
+    });
     expect(stream.writes.join('')).not.toContain(LEAVE_ALT_SCREEN); // tela NÃO restaurada
     expect(scheduled).toHaveLength(0); // NÃO re-lançou ⇒ app segue vivo
 
     // real: restaura a tela + agenda o re-throw (crash limpo).
     const stream2 = fakeStream();
     const scheduled2: Array<() => void> = [];
-    const proc2 = Object.assign(fakeProcess(), { nextTick: (cb: () => void) => scheduled2.push(cb) });
+    const proc2 = Object.assign(fakeProcess(), {
+      nextTick: (cb: () => void) => scheduled2.push(cb),
+    });
     registerRestoreHandlers(stream2, proc2);
     (proc2 as unknown as { emit: (e: string, ...a: unknown[]) => void }).emit(
       'uncaughtException',
@@ -152,11 +154,16 @@ function streamWriteThrows(): AltScreenStream & { rawModes: boolean[] } {
   };
 }
 
-/** Process fake com kill capturado (já definido em fakeProcess, mas aqui explícito). */
+/**
+ * Process fake com kill capturado e SEM `exit` — exercita o FALLBACK do onSignal
+ * (F181): quando nenhum `exit` é injetado, o handler cai no re-emit via `kill`.
+ * `nextTick` roda síncrono p/ a asserção não depender do agendamento real.
+ */
 function procWithKill(): ProcessLike & {
   listeners: Map<string, Array<(...a: unknown[]) => void>>;
   emit: (event: string, ...args: unknown[]) => void;
   kill: (pid: number, sig: string) => void;
+  nextTick: (cb: () => void) => void;
   pid: number;
   killCalls: Array<[number, string]>;
 } {
@@ -168,6 +175,7 @@ function procWithKill(): ProcessLike & {
     emit: base.emit,
     pid: base.pid,
     killCalls,
+    nextTick: (cb: () => void) => cb(),
     kill(pid: number, sig: string) {
       killCalls.push([pid, sig]);
     },
@@ -236,26 +244,52 @@ describe('registerRestoreHandlers — restauração à prova de tudo (§2)', () 
     expect(s.writes.join('')).toContain(LEAVE_ALT_SCREEN);
   });
 
-  it('GATE: SIGINT restaura ANTES de re-emitir o sinal', () => {
+  it('F181 — SIGINT restaura ANTES e ENCERRA de fato (exit 130, adiado p/ nextTick)', () => {
     const s = fakeStream();
-    const p = fakeProcess();
-    const killed: Array<[number, string]> = [];
-    p.kill = (pid, sig) => killed.push([pid, sig]);
+    const exits: number[] = [];
+    const p = Object.assign(fakeProcess(), {
+      exit: (c: number) => exits.push(c),
+      nextTick: (cb: () => void) => cb(), // roda síncrono no teste
+    });
     registerRestoreHandlers(s, p);
     p.emit('SIGINT');
+    // restaurou a tela ANTES de encerrar…
     expect(s.writes.join('')).toContain(LEAVE_ALT_SCREEN);
     expect(s.writes.join('')).toContain(SHOW_CURSOR);
-    // re-emitiu o sinal p/ o processo de fato encerrar (não engoliu o ctrl-c).
-    expect(killed).toEqual([[123, 'SIGINT']]);
+    // …e ENCERROU deterministicamente (antes só re-emitia o sinal, que o signal-reset
+    // engolia ⇒ processo não morria em kill/kill -INT). 130 = 128 + SIGINT(2).
+    expect(exits).toEqual([130]);
   });
 
-  it('GATE: SIGTERM restaura', () => {
+  it('F181 — SIGTERM restaura e ENCERRA (exit 143)', () => {
     const s = fakeStream();
-    const p = fakeProcess();
-    p.kill = () => {};
+    const exits: number[] = [];
+    const p = Object.assign(fakeProcess(), {
+      exit: (c: number) => exits.push(c),
+      nextTick: (cb: () => void) => cb(),
+    });
     registerRestoreHandlers(s, p);
     p.emit('SIGTERM');
     expect(s.writes.join('')).toContain(LEAVE_ALT_SCREEN);
+    expect(exits).toEqual([143]); // 128 + SIGTERM(15)
+  });
+
+  it('F181 — exit ADIADO: listeners SÍNCRONOS do mesmo sinal (reset) rodam ANTES do exit', () => {
+    const s = fakeStream();
+    const order: string[] = [];
+    const deferred: Array<() => void> = [];
+    const p = Object.assign(fakeProcess(), {
+      exit: () => order.push('exit'),
+      nextTick: (cb: () => void) => deferred.push(cb), // NÃO roda já
+    });
+    registerRestoreHandlers(s, p);
+    // um 2º listener do MESMO sinal (espelha o signal-reset.ts)
+    p.on('SIGTERM', () => order.push('reset'));
+    p.emit('SIGTERM');
+    // o exit foi ADIADO ⇒ o reset síncrono correu, exit ainda não.
+    expect(order).toEqual(['reset']);
+    deferred.forEach((cb) => cb());
+    expect(order).toEqual(['reset', 'exit']); // exit por último
   });
 
   it('GATE: crash (uncaughtException) restaura e RE-LANÇA o erro', () => {

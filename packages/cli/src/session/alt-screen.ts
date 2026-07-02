@@ -182,17 +182,39 @@ export function registerRestoreHandlers(
   const onExit = (): void => restoreScreen();
   const onSignal = (signal: 'SIGINT' | 'SIGTERM') => (): void => {
     restoreScreen();
-    // re-emite o término: solta NOSSO handler e re-mata o processo com o sinal, p/ o
-    // código de saída/efeito do sinal ser o esperado (o Ink também desmonta no SIGINT).
     cleanupListeners();
-    try {
-      (proc as unknown as { kill?: (pid: number, sig: string) => void }).kill?.(
-        (proc as unknown as { pid?: number }).pid ?? 0,
-        signal,
-      );
-    } catch {
-      /* sem kill (proc fake/teste) — a restauração já rodou; segue */
-    }
+    // F181 — ENCERRA de fato. ANTES re-emitíamos o sinal (`proc.kill`) contando com a
+    // ação DEFAULT do Node — mas há OUTRO handler de sinal SEMPRE registrado
+    // (`signal-reset.ts`, reset de terminal) que NÃO some no sinal ⇒ a default nunca
+    // dispara e o processo NÃO morria em `kill`/`kill -INT`/`-TERM` (só SIGHUP/SIGKILL).
+    // O comentário do signal-reset assumia que "o Ink encerra no SIGINT" — FALSO: o Ink
+    // trata Ctrl-C lendo o BYTE `\x03` do stdin, não o SINAL. [Em raw mode o Ctrl-C
+    // interativo vira byte, não sinal — então este exit NÃO afeta o duplo-Ctrl-C do
+    // F160; só age em sinal EXTERNO, que DEVE terminar.] `process.exit(128+num)` é
+    // determinístico; ADIADO p/ nextTick para os OUTROS listeners SÍNCRONOS do mesmo
+    // sinal (o reset do signal-reset) rodarem ANTES do exit. Código 130 (INT)/143 (TERM).
+    const code = signal === 'SIGINT' ? 130 : 143;
+    const exit = (proc as unknown as { exit?: (c: number) => void }).exit;
+    const nt =
+      (proc as { nextTick?: (cb: () => void) => void }).nextTick ??
+      (globalThis as { process?: { nextTick?: (cb: () => void) => void } }).process?.nextTick;
+    const doExit = (): void => {
+      if (typeof exit === 'function') {
+        exit(code);
+        return;
+      }
+      // Sem `exit` injetado (proc fake mínimo): fallback ao re-emit (comportamento antigo).
+      try {
+        (proc as unknown as { kill?: (pid: number, sig: string) => void }).kill?.(
+          (proc as unknown as { pid?: number }).pid ?? 0,
+          signal,
+        );
+      } catch {
+        /* sem kill — a restauração já rodou; segue */
+      }
+    };
+    if (typeof nt === 'function') nt(doExit);
+    else doExit();
   };
   const onCrash = (err: unknown): void => {
     // ESC-CRASH FIX (achado do dono) — um erro BENIGNO de socket ABORTADO escapando como
