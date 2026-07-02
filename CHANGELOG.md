@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.85] — 2026-07-02
+
 ### Corrigido
 
 - 🟢 Sessões: o aluy não grava mais sessões-fantasma sem conteúdo retomável (só notas de boot config/tools/inventory, sem mensagem nem rótulo) (F190) — o gate do auto-save era `blocks.length === 0`, que não pegava as sessões só-de-notas (17 de 50 no dogfooding acumuladas em `~/.aluy/sessions/`). Predicado único (`hasResumableContent`) no auto-save E no epílogo de saída (não anuncia "Sessão salva" sem ter salvado). A conversa de install (turnos do agente, F187) segue gravada.
