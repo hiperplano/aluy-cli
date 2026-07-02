@@ -128,12 +128,12 @@ describe('App — /permissions abre o painel interativo (EST-0968)', () => {
     );
     await pressUntil(
       () => stdin.write('\r'),
-      () => plain(lastFrame() ?? '').includes('TRAVADO por seguranca'),
+      () => plain(lastFrame() ?? '').includes('TRAVADO por segurança'),
     );
     const out = plain(lastFrame() ?? '');
-    expect(out).toContain('modo de sessao');
+    expect(out).toMatch(/modo de sess[aã]o/);
     expect(out).toContain('tools seguras');
-    expect(out).toContain('TRAVADO por seguranca');
+    expect(out).toContain('TRAVADO por segurança');
     unmount();
   });
 
@@ -147,7 +147,7 @@ describe('App — /permissions abre o painel interativo (EST-0968)', () => {
     );
     await pressUntil(
       () => stdin.write('\r'),
-      () => plain(lastFrame() ?? '').includes('TRAVADO por seguranca'),
+      () => plain(lastFrame() ?? '').includes('TRAVADO por segurança'),
     );
     // a linha 0 (modo) já está selecionada ⇒ Enter cicla normal→unsafe.
     await pressUntil(
@@ -170,7 +170,7 @@ describe('App — /permissions abre o painel interativo (EST-0968)', () => {
     );
     await pressUntil(
       () => stdin.write('\r'),
-      () => plain(lastFrame() ?? '').includes('TRAVADO por seguranca'),
+      () => plain(lastFrame() ?? '').includes('TRAVADO por segurança'),
     );
     // desce até uma linha travada (há 1 modo + 2 tools seguras = índice 3 é a 1a travada).
     for (let i = 0; i < 4; i++) {
