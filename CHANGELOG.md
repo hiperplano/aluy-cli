@@ -14,7 +14,9 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
-_(vazio)_
+### Corrigido
+
+- 🟡 Headless: `--output-format` com valor inválido (ex.: `xml`) agora falha CEDO com `usage-error` (exit 2) em vez de rodar o turno (gastando modelo) e não imprimir nada (F175).
 
 ## [1.0.0-rc.70] — 2026-07-02
 
