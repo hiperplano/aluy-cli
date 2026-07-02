@@ -49,7 +49,9 @@ export function migrateLegacyProvidersJson(baseDir?: string): readonly UserProvi
   }
   const arr = Array.isArray(raw)
     ? raw
-    : typeof raw === 'object' && raw !== null && Array.isArray((raw as Record<string, unknown>).providers)
+    : typeof raw === 'object' &&
+        raw !== null &&
+        Array.isArray((raw as Record<string, unknown>).providers)
       ? ((raw as Record<string, unknown>).providers as unknown[])
       : [];
   if (arr.length === 0) return already ?? [];

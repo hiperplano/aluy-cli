@@ -321,7 +321,11 @@ function sanitizeContext(raw: unknown): UserContextConfig | undefined {
   } else if (typeof o.autocompactAt === 'string' && o.autocompactAt.trim() !== '') {
     out.autocompactAt = o.autocompactAt.trim();
   }
-  if (typeof o.autocompactMax === 'number' && Number.isInteger(o.autocompactMax) && o.autocompactMax > 0) {
+  if (
+    typeof o.autocompactMax === 'number' &&
+    Number.isInteger(o.autocompactMax) &&
+    o.autocompactMax > 0
+  ) {
     out.autocompactMax = o.autocompactMax;
   }
   return Object.keys(out).length > 0 ? out : undefined;
@@ -338,7 +342,12 @@ function sanitizeConnectors(raw: unknown): UserConnectorsConfig | undefined {
       // chat-ids: inteiros finitos, dedup. Lixo descartado (entrada inválida não autoriza ninguém).
       const ids: number[] = [];
       for (const v of tg.allowlist) {
-        if (typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && !ids.includes(v)) {
+        if (
+          typeof v === 'number' &&
+          Number.isFinite(v) &&
+          Number.isInteger(v) &&
+          !ids.includes(v)
+        ) {
           ids.push(v);
         }
       }
@@ -355,8 +364,11 @@ function sanitizeConnectors(raw: unknown): UserConnectorsConfig | undefined {
 function sanitizeServices(raw: unknown): UserServicesConfig | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const o = raw as Record<string, unknown>;
-  const out: { ollama?: UserServiceEndpoint; mem0?: UserServiceEndpoint; headroom?: UserServiceEndpoint } =
-    {};
+  const out: {
+    ollama?: UserServiceEndpoint;
+    mem0?: UserServiceEndpoint;
+    headroom?: UserServiceEndpoint;
+  } = {};
   const ollama = sanitizeEndpoint(o.ollama);
   const mem0 = sanitizeEndpoint(o.mem0);
   const headroom = sanitizeEndpoint(o.headroom);
@@ -491,7 +503,8 @@ function sanitize(raw: unknown): UserConfig {
   // ADR-0120 — localModel: string opaca razoável (MESMA forma do tier).
   if (isReasonableOpaque(obj.localModel)) out.localModel = obj.localModel.trim();
   // ADR-0120 — localAuth: só `apikey`|`oauth` (lixo ⇒ descartado ⇒ default apikey).
-  if (obj.localAuth === 'apikey' || obj.localAuth === 'oauth' || obj.localAuth === 'none') out.localAuth = obj.localAuth;
+  if (obj.localAuth === 'apikey' || obj.localAuth === 'oauth' || obj.localAuth === 'none')
+    out.localAuth = obj.localAuth;
   // ADR-0120 — localBaseUrl: string opaca razoável; o anti-SSRF a valida no uso.
   if (isReasonableOpaque(obj.localBaseUrl)) out.localBaseUrl = obj.localBaseUrl.trim();
 
@@ -830,7 +843,8 @@ export function resolveEmbedderModel(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   const fromEnv = env['ALUY_MEM0_EMBEDDER']?.trim();
-  if (fromEnv !== undefined && fromEnv !== '' && embedderSpec(fromEnv) !== undefined) return fromEnv;
+  if (fromEnv !== undefined && fromEnv !== '' && embedderSpec(fromEnv) !== undefined)
+    return fromEnv;
   if (config.embedder !== undefined && embedderSpec(config.embedder) !== undefined)
     return config.embedder;
   return DEFAULT_EMBEDDER_MODEL;

@@ -9,7 +9,7 @@
 //   - load() pula .md grande demais (> 64KB)
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProjectAgentsLoader, PROJECT_AGENTS_DIRNAMES } from '../../src/io/project-agents.js';
@@ -48,6 +48,29 @@ describe('EST-1013 · ProjectAgentsLoader — load (cobertura endurecida)', () =
       expect(profiles[0]!.origin).toBe('project');
       expect(profiles[0]!.tools).toEqual(['read_file', 'grep']);
       expect(profiles[0]!.systemPrompt).toContain('revisor');
+    });
+
+    it('F154 — SYMLINK p/ .md dentro do workspace ENTRA no discovery (o caso specs→.aluy do dono)', () => {
+      // O setup real do dono: .aluy/agents/dev.md → symlink p/ aluy-specs/.claude/agents/dev.md
+      // (alvo DENTRO do workspace). Dirent.isFile() não segue o link ⇒ o perfil sumia.
+      mkdirSync(agentsDir, { recursive: true });
+      const specsDir = join(root, 'aluy-specs');
+      mkdirSync(specsDir, { recursive: true });
+      writeFileSync(join(specsDir, 'dev.md'), '---\nname: dev-backend\n---\npersona dev');
+      symlinkSync(join(specsDir, 'dev.md'), join(agentsDir, 'dev.md'));
+      const { profiles, errors } = makeLoader().load();
+      expect(errors).toEqual([]);
+      expect(profiles.map((p) => p.name)).toContain('dev-backend');
+    });
+
+    it('F154 — symlink ESCAPANDO o workspace segue REJEITADO (confinamento intacto)', () => {
+      mkdirSync(agentsDir, { recursive: true });
+      const fora = mkdtempSync(join(tmpdir(), 'aluy-fora-'));
+      writeFileSync(join(fora, 'mal.md'), '---\nname: intruso\n---\npersona');
+      symlinkSync(join(fora, 'mal.md'), join(agentsDir, 'mal.md'));
+      const { profiles } = makeLoader().load();
+      expect(profiles.map((p) => p.name)).not.toContain('intruso');
+      rmSync(fora, { recursive: true, force: true });
     });
 
     it('carrega múltiplos .md válidos ordenados alfabeticamente', () => {

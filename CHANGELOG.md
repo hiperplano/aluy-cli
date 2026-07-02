@@ -14,7 +14,9 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
-_(vazio)_
+### Corrigido
+
+- 🟡 Discovery de agentes/comandos/workflows aceita SYMLINKS p/ `.md` (F154) — `Dirent.isFile()` não segue o link e os perfis do projeto (symlinks p/ o specs) sumiam, forçando cópias como workaround. O confinamento fica intacto: symlink escapando o workspace segue rejeitado (resolveInside + statSync com teto). Fix nos 6 discoveries (project/user × agents/commands/workflows).
 
 ## [1.0.0-rc.65] — 2026-07-02
 
