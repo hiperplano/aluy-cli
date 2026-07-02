@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Corrigido
+
+- 🟡 CLI: `aluy <nome-de-comando-de-sessão>` (ex.: `aluy add-dir /x`, `aluy rename`) não vira mais um objetivo enviado ao modelo (gastava turno) — vira `usage-error` (exit 2) com hint p/ o slash equivalente (F180). Ultra-conservador: só quando o objetivo é EXATAMENTE uma palavra igual a um comando de sessão; multi-palavra (`aluy \"rename o arquivo X\"`) segue objetivo normal.
+
 _(vazio)_
 
 ## [1.0.0-rc.75] — 2026-07-02

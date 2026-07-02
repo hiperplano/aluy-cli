@@ -696,6 +696,48 @@ const VALUE_TAKING_FLAGS: readonly string[] = [
   '--resume',
 ];
 
+/**
+ * F180 (OBS-1) — comandos de SESSÃO (slash) que NÃO são subcomandos de CLI. Se um
+ * objetivo posicional/`-p` é EXATAMENTE uma destas palavras, é quase certo um engano
+ * (`aluy add-dir` em vez de `/add-dir` na sessão) — recusamos com hint em vez de gastar
+ * um turno do modelo. Deriva a semântica do NativeCommandId (session-only), mas fica
+ * como lista LITERAL aqui (o parser não deve importar o registry de slash — evita ciclo
+ * e mantém o guard barato/estático). Subcomandos reais (mcp/cron/config/…) já são
+ * despachados ACIMA, então nunca chegam ao `goal` — não entram nesta lista.
+ */
+const SESSION_ONLY_COMMANDS: ReadonlySet<string> = new Set([
+  'rename',
+  'theme',
+  'lang',
+  'compact',
+  'clear',
+  'undo',
+  'redo',
+  'rewind',
+  'memory',
+  'todo',
+  'tools',
+  'inventory',
+  'split',
+  'view',
+  'fullscreen',
+  'cockpit',
+  'cycle',
+  'notify',
+  'ask',
+  'rooms',
+  'subagent',
+  'back',
+  'export',
+  'usage',
+  'permissions',
+  'effort',
+  'provider',
+  'model',
+  'init',
+  'add-dir',
+]);
+
 /** Distância de edição (Levenshtein) clampada — p/ o "você quis dizer …?". PURA. */
 function editDistance(a: string, b: string): number {
   const m = a.length;
@@ -1214,6 +1256,28 @@ export function parseArgs(argv: readonly string[]): CliAction {
       i !== cyclesValueIdx &&
       i !== cycleForValueIdx,
   );
+
+  // F180 (OBS-1) — GUARD anti-objetivo-que-é-comando: um objetivo que é EXATAMENTE
+  // uma palavra igual a um comando de SESSÃO (`/rename`, `/add-dir`, …) quase nunca é
+  // um objetivo real — é o usuário tentando o comando pela linha do SO (`aluy add-dir`).
+  // Sem guard, cai no contrato "positional = objetivo" e vai ao MODELO (gasta turno; no
+  // dogfooding, 2 turnos + timeout). Recusa CEDO com hint, exit 2 — ANTES de qualquer
+  // efeito. ULTRA-conservador: só UMA palavra EXATA (multi-palavra `aluy rename o arquivo`
+  // segue objetivo normal, intacto); subcomandos reais (mcp/cron/…) já saíram acima, então
+  // o que chega aqui e casa a lista é sempre comando-de-sessão. Vale p/ posicional E `-p`.
+  const effectiveGoalWord = (printArg ?? goal ?? '').trim();
+  if (effectiveGoalWord !== '' && !/\s/.test(effectiveGoalWord)) {
+    if (SESSION_ONLY_COMMANDS.has(effectiveGoalWord.toLowerCase())) {
+      return {
+        kind: 'usage-error',
+        message:
+          `aluy: "${effectiveGoalWord}" é um comando de SESSÃO, não um objetivo. ` +
+          `Use /${effectiveGoalWord} DENTRO do aluy (rode \`aluy\` sem argumentos), ou veja \`aluy --help\`. ` +
+          `Se você quis MESMO um objetivo com essa palavra, dê mais contexto (ex.: \`aluy "${effectiveGoalWord} o arquivo X"\`).`,
+        exitCode: 2,
+      };
+    }
+  }
 
   const resume = hasContinue
     ? ({ kind: 'continue' } as const)
