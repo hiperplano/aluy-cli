@@ -166,6 +166,7 @@ export const en: PartialCatalog = {
   'cmd.mcp': 'list/manage MCP servers (add/remove/disable/enable · search <term>)',
   'cmd.doctor': 'diagnose the install · credential, broker, MCP, config (read-only)',
   'cmd.fullscreen': 'cockpit mode (full screen, alt-screen)',
+  'cmd.export': 'export this session REDACTED transcript to ~/.aluy/exports/ (0600)',
   'cmd.quit': 'quit aluy',
   'cmd.workflows': 'list mapped .md workflows (global + project · valid + rejected)',
   'cmd.todo': 'list the backlog (the agent notes items; done <id> / clear)',

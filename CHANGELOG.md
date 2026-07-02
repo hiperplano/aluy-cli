@@ -14,7 +14,9 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
-_(vazio)_
+### Adicionado
+
+- `/export` como comando (F179): grava o transcript REDIGIDO (CLI-SEC-6) desta sessão em `~/.aluy/exports/` (0600), em QUALQUER modo. Antes o hint do `/fullscreen` prometia `/export` mas o comando não existia ("comando desconhecido") — só havia o ctrl+s do cockpit (desativado).
 
 ## [1.0.0-rc.74] — 2026-07-02
 

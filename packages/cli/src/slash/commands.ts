@@ -49,6 +49,7 @@ export type NativeCommandId =
   | 'add-dir'
   | 'split'
   | 'fullscreen'
+  | 'export'
   | 'tools'
   | 'quit'
   | 'todo';
@@ -546,6 +547,17 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     section: 'sessão',
   },
   {
+    // F179 — `/export`: grava o transcript REDIGIDO (CLI-SEC-6) em ~/.aluy/exports/.
+    // Antes só existia via ctrl+s no COCKPIT (desativado); o hint do /fullscreen já
+    // prometia `/export`, mas o comando não existia ⇒ "comando desconhecido".
+    name: 'export',
+    summary: 'exporta o transcript REDIGIDO desta sessão p/ ~/.aluy/exports/ (0600)',
+    summaryKey: 'cmd.export',
+    source: 'native',
+    id: 'export',
+    section: 'sessão',
+  },
+  {
     name: 'undo',
     summary: 'desfaz a última edição de arquivo do agente',
     summaryKey: 'cmd.undo',
@@ -814,7 +826,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // agentes, comandos, skills, workflows, memória (+ contagens da StatusBar com os NOMES).
     // Read-only; reusa os loaders confinados. Espelha o `/skills`/`/workflows`.
     name: 'inventory',
-    summary: 'inventário do que foi carregado da .aluy/ (agentes·comandos·skills·workflows·memória + ALUY.md)',
+    summary:
+      'inventário do que foi carregado da .aluy/ (agentes·comandos·skills·workflows·memória + ALUY.md)',
     source: 'native',
     id: 'inventory',
     section: 'workspace',

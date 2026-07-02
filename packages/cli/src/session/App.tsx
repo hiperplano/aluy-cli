@@ -1220,6 +1220,24 @@ export function App(props: AppProps): React.ReactElement {
         toggleFullscreen();
         return;
       }
+      // F179 — `/export`: grava o transcript REDIGIDO (CLI-SEC-6) em ~/.aluy/exports/.
+      // Funciona em QUALQUER modo (não só cockpit/ctrl+s): o hint do /fullscreen já
+      // prometia `/export`, mas o comando não existia. Async; nota honesta ao concluir.
+      if (command.id === 'export') {
+        if (props.onExportTranscript) {
+          void props.onExportTranscript().then((r) => {
+            controller.pushNote(
+              'export',
+              r.ok && r.path
+                ? [`transcript exportado (redigido) → ${r.path}`]
+                : [r.error ?? 'export indisponível'],
+            );
+          });
+        } else {
+          controller.replaceNote('export', ['export indisponível nesta sessão.']);
+        }
+        return;
+      }
       // F161 — no backend LOCAL (BYO) os TIERS DO BROKER não se aplicam: abrir o
       // seletor (Flui/Granito/…) ali era beco sem saída ("catálogo do broker
       // indisponível"). Orienta o caminho local em vez de oferecer o que não existe.
