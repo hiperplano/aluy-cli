@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.88] — 2026-07-02
+
 ### Adicionado
 
 - 🟢 `/fullscreen` / `/cockpit` RELIGADO para o usuário (F194, pedido do dono): o comando estava desativado atrás do escape hatch `ALUY_FULLSCREEN=1` (só avisava "desativado nesta versão"). O gate foi removido — o modo tela cheia (cockpit) agora entra sob demanda. Já é anti-flicker (stress do cockpit: 0 `\x1b[2J`) e degrada pro inline com aviso quando a tela não cabe. Boot segue INLINE por padrão.
