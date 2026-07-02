@@ -28,9 +28,10 @@ import { BlockView } from './App.js';
 import type { SessionState, SessionBlock } from './model.js';
 import { abbreviateCount } from './model.js';
 import type { LogSection } from './activity-log.js';
-import { resolveViewport } from './viewport.js';
 import type { CockpitLayout } from './cockpit-layout.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
+import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
+import { useTheme } from '../ui/theme/index.js';
 
 /**
  * EST-1015 (fix fullscreen "texto embaralhado/sobreposto" — bug #1 do dono) — clipa as
@@ -148,6 +149,8 @@ function Rule(props: {
 function ConversaRegion(props: {
   readonly blocks: readonly SessionBlock[];
   readonly rows: number;
+  /** Altura TOTAL do terminal (linhas) — p/ o cap adaptativo da cauda viva (F163). */
+  readonly screenRows: number;
   readonly columns: number;
   readonly focused: boolean;
   readonly scroll: number;
@@ -155,15 +158,22 @@ function ConversaRegion(props: {
   readonly overlay?: React.ReactNode;
 }): React.ReactElement {
   const { t } = useI18n();
+  const theme = useTheme();
   const blocks = props.blocks;
   // 1 linha p/ o rótulo da região; o resto p/ os blocos.
   const room = Math.max(1, props.rows - 1);
-  const vp = resolveViewport(blocks.length, room, props.scroll);
-  // EST-1015 — clipa cada bloco `note` p/ caber em `room` ANTES do render: um único bloco
-  // alto (o /help) é o gatilho do mis-clip do Ink. Não depende do `overflow:hidden` (que
-  // corrompe com conteúdo alto/aninhado). Não-note passa igual (turnos you/aluy longos são
-  // caso separado/raro). Ver `clipNoteToFit`.
-  const visible = blocks.slice(vp.start, vp.end).map((b) => clipNoteToFit(b, room));
+  // EST-1015 (fix "texto embaralhado/sobreposto") — a janela é por LINHAS VISUAIS, não
+  // por nº de blocos: `fitConversaWindow` MEDE cada bloco como o <BlockView> renderiza e
+  // só deixa entrar o que CABE em `room` (clipando NA FONTE o que sozinho não cabe). O
+  // conteúdo NUNCA estoura a Box ⇒ o mis-clip do Ink (que MESCLA linhas) nem é exercitado.
+  const ctx = {
+    columns: props.columns,
+    rows: props.screenRows,
+    mono: theme.colorMode === 'mono',
+    streamMaxLines: streamPreviewMaxLines(room),
+  };
+  const vp = fitConversaWindow(blocks, room, props.scroll, ctx);
+  const visible = vp.blocks;
   // EST-1000 (#157 fix) — POPOVER: quando há overlay de `/` aberto, ele OCUPA a região da
   // conversa (o foco do usuário está nele, não nos turnos). O rótulo da região vira
   // `conversa · /menu` p/ sinalizar a sobreposição (a11y). A altura segue cravada em
@@ -218,6 +228,13 @@ function ConversaRegion(props: {
   return (
     <Box flexDirection="column" height={props.rows}>
       <Box>
+        {/* ▌ marca o FOCO (a11y: sentido sem cor — espelha o log e o empty-state). */}
+        {props.focused && (
+          <>
+            <Glyph name="you" role="accent" />
+            <Text> </Text>
+          </>
+        )}
         <Role name={props.focused ? 'accent' : 'fgDim'}>{t('cockpit.conversa')}</Role>
         {vp.hiddenAbove > 0 && <Role name="fgDim"> · ↑{vp.hiddenAbove}</Role>}
         {vp.hiddenBelow === 0 ? (
@@ -241,12 +258,14 @@ function ConversaRegion(props: {
             isCurrent={vp.start + i === blocks.length - 1}
             frame={props.frame}
             columns={props.columns}
-            // EST-1015 (irmão do #371) — CAPPA a prévia VIVA do aluy streaming à altura da
-            // região (`room`): sem isto, uma resposta longa STREAMANDO no cockpit não tinha
-            // teto (o inline já cappa via live-budget) e estourava `room` ⇒ o mesmo mis-clip
-            // do Ink ("falhas sob streaming" que o cockpit avisa). O AluyBlock só usa maxLines
-            // no streaming; bloco concluído cai no clip por bloco (`note`) / é raro p/ você/aluy.
-            maxLines={room}
+            // F163 — altura do TERMINAL p/ a cauda viva de shell (tool/bang) usar o cap
+            // adaptativo `liveShellTailMaxLines` — o MESMO que `fitConversaWindow` mediu.
+            rows={props.screenRows}
+            // EST-1015 (irmão do #371) — CAPPA a prévia VIVA do aluy streaming ABAIXO da
+            // altura da região (`streamPreviewMaxLines(room)` = room − overhead do bloco):
+            // sem teto, uma resposta longa streamando estourava `room` ⇒ mis-clip do Ink.
+            // TEM de ser o MESMO valor usado na medição (ctx.streamMaxLines).
+            maxLines={ctx.streamMaxLines}
           />
         ))}
       </Box>
@@ -285,13 +304,17 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
       <ConversaRegion
         blocks={conversation}
         rows={layout.regions.conversaRows}
+        screenRows={layout.rows}
         columns={props.columns}
         focused={props.focus === 'conversa'}
         scroll={props.conversaScroll}
         frame={props.frame}
         overlay={props.overlay}
       />
-      <Rule columns={props.columns} label={t('cockpit.log')} focused={props.focus === 'log'} />
+      {/* EST-1015 (densidade) — régua LISA: o rótulo/estado do log (`LOG · ▼ ao vivo` +
+          ▌ de foco) já vive DENTRO da região (<ActivityLog>), como na conversa. A régua
+          rotulada duplicava ("── log ──" + "LOG · …" na linha seguinte). */}
+      <Rule columns={props.columns} />
 
       {/* ── 3) LOG (FlowTree/ActivityLog — altura cheia, scroll próprio) ──────── */}
       <Box height={layout.regions.logRows}>

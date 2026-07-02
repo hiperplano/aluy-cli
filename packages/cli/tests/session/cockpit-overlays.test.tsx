@@ -142,7 +142,7 @@ async function mountCockpit(extra: Partial<AppProps> = {}) {
   // confirma que entrou no cockpit (rótulos das 6 regiões).
   await waitFor(() => {
     const f = plain(r.lastFrame() ?? '');
-    return f.includes('conversa') && f.includes('log');
+    return f.includes('conversa') && f.includes('LOG');
   });
   await warmup(r.stdin, r.lastFrame);
   return r;
@@ -160,7 +160,7 @@ describe('App — cockpit: overlays de `/` PINTAM (FIX #157)', () => {
     // o popover sinaliza a sobreposição (rótulo `conversa · /menu` na região da conversa).
     expect(f).toContain('conversa · /menu');
     // as regiões do cockpit não sumiram: a régua/rótulo do LOG segue no lugar (grid íntegro).
-    expect(f).toContain('── log');
+    expect(f).toContain('LOG ·');
     r.controller.dispose();
   });
 
@@ -212,7 +212,7 @@ describe('App — INLINE NÃO regride: overlays seguem onde estavam (#129)', () 
     expect(f).toContain('/help');
     // INLINE não usa o popover do cockpit nem os rótulos de região (conversa · /menu / ── log).
     expect(f).not.toContain('conversa · /menu');
-    expect(f).not.toContain('── log');
+    expect(f).not.toContain('LOG ·');
     r.controller.dispose();
   });
 });

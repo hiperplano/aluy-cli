@@ -3,6 +3,12 @@
 // Semeia N blocos concluídos (Static enorme) e streama um !comando com linhas largas.
 // A análise (fora daqui) conta clearTerminal (\x1b[2J) e bytes totais no cap do `script`.
 // Rodar: script -qec 'node pty-flicker-stress.mjs big|small' /dev/null > cap-<modo>.bin
+//
+// EST-1015 — modo `cockpit`: o MESMO stress, mas no MODO TELA CHEIA (ADR-0076): monta a
+// pilha REAL do run.tsx (wrapStdoutWithSync + enterAltScreen ANTES do 1º frame + differ
+// do alt-screen) com sessão gigante + saída viva. A análise prova 0 `\x1b[2J` após o
+// marcador de fase (o differ troca o clearTerminal do Ink por diff por-linha — §5).
+// Rodar: ALUY_FULLSCREEN=1 script -qec 'stty rows R cols C; node pty-flicker-stress.mjs cockpit' /dev/null > cap.bin
 
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,10 +23,15 @@ const { SessionController } = await import('../packages/cli/dist/session/control
 const { TuiAskResolver } = await import('../packages/cli/dist/ask/ask-resolver.js');
 const { NodeShellPort } = await import('../packages/cli/dist/io/shell-port.js');
 const { NodeWorkspace } = await import('../packages/cli/dist/io/workspace.js');
+const { wrapStdoutWithSync } = await import('../packages/cli/dist/session/synchronized-output.js');
+const { enterAltScreen, registerRestoreHandlers } =
+  await import('../packages/cli/dist/session/alt-screen.js');
+const { resolveCockpitLayout } = await import('../packages/cli/dist/session/cockpit-layout.js');
 import { PolicyPermissionEngine } from '@hiperplano/aluy-cli-core';
 
 const mode = process.argv[2] ?? 'big';
-const SEED = mode === 'big' ? 500 : 4;
+const COCKPIT = mode === 'cockpit';
+const SEED = mode === 'small' ? 4 : 500;
 
 const base = mkdtempSync(join(tmpdir(), 'aluy-flicker-'));
 const root = join(base, 'project');
@@ -79,13 +90,46 @@ for (let i = 0; i < SEED; i += 1) {
 controller.restoreBlocks(blocks);
 
 const theme = resolveTheme({ env: { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' } });
+
+// EST-1015 — modo COCKPIT: a pilha de tela REAL do run.tsx (envelope + alt-screen + differ).
+// Fora do cockpit, render cru de sempre (modos big/small INALTERADOS).
+let appProps = { controller, animate: true, bootMs: 0 };
+let renderOpts = { exitOnCtrlC: false };
+let sync;
+if (COCKPIT) {
+  const baseStdout = process.stdout;
+  registerRestoreHandlers(baseStdout, process);
+  sync = wrapStdoutWithSync(baseStdout, { sync: true, overwrite: true });
+  const fits =
+    resolveCockpitLayout(baseStdout.rows ?? 0, baseStdout.columns ?? 0).kind === 'cockpit';
+  if (fits) {
+    enterAltScreen(baseStdout);
+    sync.setCockpit(true);
+  }
+  appProps = {
+    ...appProps,
+    syncActive: true,
+    initialFullscreen: true,
+    cockpitEnteredAtBoot: fits,
+    cockpitScreen: {
+      enter: () => {
+        enterAltScreen(baseStdout);
+        sync.setCockpit(true);
+      },
+      leave: () => {
+        sync.setCockpit(false);
+        baseStdout.write('\x1b[?1049l\x1b[?25h\x1b[2J\x1b[3J\x1b[H');
+        sync.resetDiffer();
+      },
+      resetDiffer: () => sync.resetDiffer(),
+    },
+  };
+  renderOpts = { ...renderOpts, stdout: sync.stdout };
+}
+
 const { unmount } = render(
-  React.createElement(
-    ThemeProvider,
-    { theme },
-    React.createElement(App, { controller, animate: true, bootMs: 0 }),
-  ),
-  { exitOnCtrlC: false },
+  React.createElement(ThemeProvider, { theme }, React.createElement(App, appProps)),
+  renderOpts,
 );
 
 // Marca o fim do MOUNT (o clear inicial é legítimo) p/ a análise separar as fases.
@@ -101,5 +145,6 @@ setTimeout(() => {
 setTimeout(() => {
   process.stdout.write('\n__FIM__\n');
   unmount();
+  sync?.cleanup();
   process.exit(0);
 }, 3800);

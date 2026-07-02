@@ -18,6 +18,7 @@ import { Box, Text } from 'ink';
 import { Glyph, Role } from '../theme/index.js';
 import { abbreviateCount, formatDuration } from '../../session/model.js';
 import { displayWidth } from '../../session/visual-lines.js';
+import { wrappedLineCount } from '../../session/cockpit-conversa.js';
 import { truncateToWidth } from '../markdown/table-layout.js';
 import type { LogSection, LogEvent } from '../../session/activity-log.js';
 import type { FlowPhase } from '@hiperplano/aluy-cli-core';
@@ -215,6 +216,30 @@ function flatten(sections: readonly LogSection[]): FlatLine[] {
   return out;
 }
 
+/**
+ * EST-1015 (cockpit, anti-mesclagem) — ALTURA VISUAL de uma FlatLine como renderizada.
+ * Uma linha LÓGICA pode ocupar VÁRIAS linhas visuais: o `<Text wrap="wrap">` do EventRow
+ * quebra quando label+detalhe+meta passam da coluna, e um evento `running` com `tail`
+ * pinta uma linha EXTRA. A janela antiga contava 1 por linha lógica ⇒ numa região de
+ * altura FIXA (cockpit) o excedente estourava a Box e o Ink MESCLAVA linhas (o mesmo
+ * mis-clip da conversa). A janela agora acumula ALTURAS até encher `room`.
+ */
+function flatLineRows(ln: FlatLine, cols: number): number {
+  if (ln.t === 'header') {
+    const s = ln.section;
+    const composed = `x [${s.label}] ${PHASE_WORD[s.phase]} · ${sectionStat(s)}${s.collapsed ? ' (colapsado)' : ''}`;
+    return wrappedLineCount(composed, Math.max(4, cols - (s.kind === 'root' ? 0 : 1)));
+  }
+  const e = ln.event;
+  const detailRoom = Math.max(4, cols - 4 - displayWidth(e.label) - 1);
+  const meta = eventMeta(e);
+  const summary = e.summary !== undefined && e.summary !== '' ? e.summary : statusWord(e.status);
+  const composed = `x ${e.label}${e.detail !== '' ? ` ${elide(e.detail, detailRoom)}` : ''} · ${summary}${meta !== '' ? ` · ${meta}` : ''}`;
+  const rows = wrappedLineCount(composed, Math.max(4, cols - 2));
+  const tailRow = e.status === 'running' && e.tail !== undefined && e.tail !== '' ? 1 : 0;
+  return rows + tailRow;
+}
+
 export function ActivityLog(props: ActivityLogProps): React.ReactElement {
   const cols = props.columns ?? 40;
   const flat = flatten(props.sections);
@@ -223,47 +248,87 @@ export function ActivityLog(props: ActivityLogProps): React.ReactElement {
     // EST-1015 (cockpit idle) — sem atividade: em vez de uma região BARREN, preenche com o
     // DIAGNÓSTICO de boot (config/agentes) quando o Cockpit o passa. `bootInfo` ausente/vazio
     // (split inline) ⇒ o "sem atividade ainda" de sempre.
+    // BOUNDED (anti-mesclagem): as notas de boot são CLIPADAS ao `visibleRows` da região
+    // (título+linhas, 1 linha visual cada — já elididas na largura). Sem o clamp, um boot
+    // com muitas linhas estourava a Box fixa do cockpit (Ink mescla linhas ao estourar).
     const boot = (props.bootInfo ?? []).filter((b) => b.lines.length > 0);
+    // Achata (título + linhas, 1 linha visual cada — já elididas na largura) e CLIPA ao
+    // orçamento: `visibleRows - 1` (o rótulo `LOG · …` consome 1). Se não cabe tudo, a
+    // última linha vira `…` (clipado, não sumido).
+    const flatBoot: Array<{ key: string; kind: 'title' | 'line'; text: string }> = [];
+    for (const b of boot) {
+      flatBoot.push({ key: b.title, kind: 'title', text: b.title });
+      b.lines.forEach((ln, i) => flatBoot.push({ key: `${b.title}:${i}`, kind: 'line', text: ln }));
+    }
+    const budget = Math.max(0, props.visibleRows - 1);
+    const shown =
+      flatBoot.length > budget
+        ? [
+            ...flatBoot.slice(0, Math.max(0, budget - 1)),
+            { key: '…', kind: 'line' as const, text: '…' },
+          ]
+        : flatBoot;
+    const bootRows = shown.map((row) =>
+      row.kind === 'title' ? (
+        <Box key={row.key}>
+          <Glyph name="clock" role="fgDim" />
+          <Text> </Text>
+          <Role name="accent">{row.text}</Role>
+        </Box>
+      ) : (
+        <Box key={row.key} paddingLeft={2}>
+          <Role name="fgDim">{elide(row.text, Math.max(4, cols - 2))}</Role>
+        </Box>
+      ),
+    );
     return (
       <Box flexDirection="column">
         <Box>
+          {props.focused && (
+            <>
+              <Glyph name="you" role="accent" />
+              <Text> </Text>
+            </>
+          )}
           <Role name={props.focused ? 'accent' : 'fgDim'}>LOG</Role>
           <Role name="fgDim"> · sem atividade ainda</Role>
         </Box>
-        {boot.map((b) => (
-          <Box key={b.title} flexDirection="column">
-            <Box>
-              <Glyph name="clock" role="fgDim" />
-              <Text> </Text>
-              <Role name="accent">{b.title}</Role>
-            </Box>
-            {b.lines.map((ln, i) => (
-              <Box key={`${b.title}:${i}`} paddingLeft={2}>
-                <Role name="fgDim">{elide(ln, Math.max(4, cols - 2))}</Role>
-              </Box>
-            ))}
-          </Box>
-        ))}
+        {bootRows}
       </Box>
     );
   }
 
-  // Janela pela CAUDA: reserva 1 linha p/ o rótulo `▼ ao vivo`/`↑N acima`.
+  // Janela pela CAUDA: reserva 1 linha p/ o rótulo `▼ ao vivo`/`↑N acima`. A janela
+  // acumula ALTURAS VISUAIS (flatLineRows) — nunca passa de `room` (anti-mesclagem).
   const room = Math.max(1, props.visibleRows - 1);
   const total = flat.length;
-  // scrollOffset 0 = colado na cauda; cresce p/ cima (clamp).
-  const maxOffset = Math.max(0, total - room);
+  // scrollOffset 0 = colado na cauda; cresce p/ cima (clamp: até só a 1ª linha lógica).
+  const maxOffset = Math.max(0, total - 1);
   const offset = Math.min(Math.max(0, props.scrollOffset), maxOffset);
   const end = total - offset;
-  const start = Math.max(0, end - room);
+  let used = 0;
+  let start = end;
+  for (let i = end - 1; i >= 0; i -= 1) {
+    const h = flatLineRows(flat[i]!, cols);
+    if (used + h > room) break;
+    used += h;
+    start = i;
+  }
   const window = flat.slice(start, end);
   const hiddenAbove = start;
   const hiddenBelow = total - end;
 
   return (
     <Box flexDirection="column">
-      {/* Rótulo da coluna + estado da janela. `▼ ao vivo` quando colado na cauda. */}
+      {/* Rótulo da coluna + estado da janela. `▼ ao vivo` quando colado na cauda. O ▌
+          marca o FOCO (a11y: sentido sem cor — espelha a região de conversa). */}
       <Box>
+        {props.focused && (
+          <>
+            <Glyph name="you" role="accent" />
+            <Text> </Text>
+          </>
+        )}
         <Role name={props.focused ? 'accent' : 'fgDim'}>LOG</Role>
         {hiddenAbove > 0 && <Role name="fgDim"> · ↑{hiddenAbove} acima</Role>}
         {hiddenBelow === 0 ? (
