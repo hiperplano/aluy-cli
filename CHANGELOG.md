@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.69] — 2026-07-02
+
 ### Corrigido
 
 - 🟡 TUI: `/comando` DESCONHECIDO + Enter deixou de ser tecla morta (F173) — com o slash-menu aberto e nenhum match, o Enter fecha o menu, limpa o composer e avisa `comando desconhecido: /xyz — veja /help` (antes: nada acontecia, o rodapé "enter executa" mentia). Um `/xyz` nunca vira objetivo do modelo.
