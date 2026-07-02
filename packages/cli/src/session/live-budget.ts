@@ -32,7 +32,7 @@
 // ausente/0 ⇒ cai p/ linhas-fonte (degradação graciosa, comportamento antigo).
 
 import type { SessionBlock, SessionState } from './model.js';
-import { visualLines } from './visual-lines.js';
+import { displayWidth, visualLines } from './visual-lines.js';
 
 /** Fase da sessão (do model) — o que distingue `thinking` (pré-stream) dos demais. */
 type SessionPhase = SessionState['phase'];
@@ -156,6 +156,26 @@ export function modeIndicatorOverhead(mode: SessionMode): number {
  */
 export const SAFETY_MARGIN = 2;
 
+/**
+ * F163 — EXCEDENTE do chrome em TERMINAL ESTREITO. O chrome base conta 1 linha p/
+ * <StatusBar> e 1 p/ <FooterHints>, mas ambos são linhas LARGAS (status: tier ·
+ * provider/modelo · cwd · janela · sessão ≈ 70–120 colunas; hints ≈ 66–70) — em
+ * colunas < 80 QUEBRAM (wrap) p/ 2 linhas visuais CADA, sem entrar no orçamento.
+ * Em telas com sobra o SAFETY_MARGIN absorvia; em telas BAIXAS (≤ 22 linhas) o
+ * frame cruzava `rows` e o Ink caía no caminho `clearTerminal + fullStaticOutput`
+ * A CADA FRAME — numa sessão gigante isso reescreve o histórico INTEIRO por frame
+ * (medido no stress do F163: 22x60 ⇒ 32 clears / 15 MB reescritos em ~3s; 24x60 e
+ * 20x80 limpos — a fronteira é a LARGURA que dobra o chrome). Mesmo padrão do
+ * excedente do banner unsafe: base no chrome, excedente por condição, medido e
+ * ancorado por teste. `columns` ausente/0 ⇒ 0 (comportamento antigo).
+ */
+export const NARROW_CHROME_MAX_COLS = 80;
+export function narrowChromeOverhead(columns?: number): number {
+  if (columns === undefined || columns <= 0) return 0;
+  // < 80 colunas: StatusBar +1 e FooterHints +1 (cada um quebra p/ 2 visuais).
+  return columns < NARROW_CHROME_MAX_COLS ? 2 : 0;
+}
+
 /** Piso do teto da fala: nunca menos que isto, mesmo em terminais minúsculos. */
 export const MIN_SPEECH_LINES = 4;
 
@@ -169,6 +189,30 @@ export const MIN_SPEECH_LINES = 4;
  * vai no resultado final (já no Static) — aqui é só a prévia viva.
  */
 export const LIVE_SHELL_OUTPUT_MAX_LINES = 6;
+
+/**
+ * F163 — cap ADAPTATIVO da cauda viva de shell: `LIVE_SHELL_OUTPUT_MAX_LINES` era
+ * FIXO (6), mas em tela BAIXA (≤ 22 linhas) + chrome estreito o frame não tem 6
+ * linhas p/ dar — a cauda cheia cruzava `rows` e o Ink caía no `clearTerminal +
+ * fullStaticOutput` a cada frame (medido no stress do F163: o frame vivo somava 23
+ * linhas num terminal de 22). Reserva: chrome base + excedente estreito + folga +
+ * `LIVE_SHELL_RESERVED_ROWS` (cabeçalho `◌ running` que quebra em até 3 + marcador
+ * `…N acima` + os paddings do bloco — medidos no capture). Piso 1 (sempre mostra
+ * progresso); teto `LIVE_SHELL_OUTPUT_MAX_LINES` (telas normais ficam IDÊNTICAS).
+ * É o MESMO cap que o render usa (<ToolLine>/<BangBlock> via App) e que o orçamento
+ * conta (`liveShellOutputLines`) — uma fonte só, a conta fecha por construção.
+ */
+export const LIVE_SHELL_RESERVED_ROWS = 6;
+export function liveShellTailMaxLines(rows: number, columns?: number): number {
+  if (!(rows > 0)) return LIVE_SHELL_OUTPUT_MAX_LINES;
+  const available =
+    rows -
+    LIVE_CHROME_BASE_ROWS -
+    narrowChromeOverhead(columns) -
+    SAFETY_MARGIN -
+    LIVE_SHELL_RESERVED_ROWS;
+  return Math.max(1, Math.min(LIVE_SHELL_OUTPUT_MAX_LINES, available));
+}
 
 /**
  * HUNT-RENDER — teto de CARACTERES (não linhas) do raw string da saída ao vivo de
@@ -253,17 +297,30 @@ export const LIVE_OUTPUT_INDENT = 4;
  *
  * A prévia de FALA (aluy streaming) NÃO entra aqui — é o que ESTAMOS orçando.
  */
-function nonSpeechBlockLines(block: SessionBlock, columns: number): number {
+function nonSpeechBlockLines(
+  block: SessionBlock,
+  columns: number,
+  tailMax: number = LIVE_SHELL_OUTPUT_MAX_LINES,
+): number {
   if (block.kind === 'tool') {
     // Só a tool `running` é viva; a concluída já desceu p/ o Static.
-    // EST-0982 — a tool `running` é 1 linha (◌ in-flight) + a SAÍDA AO VIVO bounded
+    // EST-0982 — a tool `running` é a linha `◌ in-flight` + a SAÍDA AO VIVO bounded
     // (`run_command` streamando): até `LIVE_SHELL_OUTPUT_MAX_LINES` linhas VISUAIS + 1
     // do marcador `…N acima` quando corta. Orçar isso evita estouro ⇒ anti-flicker.
-    return block.status === 'running' ? 1 + liveShellOutputLines(block.liveOutput, columns) : 0;
+    // F163 — a linha `◌ <gerúndio> <alvo>` era contada como 1 FIXA, mas o alvo
+    // (clampado a ~100 chars) QUEBRA p/ 2+ visuais em terminal estreito.
+    return block.status === 'running'
+      ? runningHeaderVisualLines(`${block.verbGerund ?? 'rodando'} ${block.target}`, columns) +
+          liveShellOutputLines(block.liveOutput, columns, tailMax)
+      : 0;
   }
   // EST-0982 — o `!comando` (bang) em `running` também streama: mesma conta.
+  // F163 — idem: o cabeçalho `! <comando>` largo quebra em terminal estreito.
   if (block.kind === 'bang') {
-    return block.status === 'running' ? 1 + liveShellOutputLines(block.liveOutput, columns) : 0;
+    return block.status === 'running'
+      ? runningHeaderVisualLines(block.command, columns) +
+          liveShellOutputLines(block.liveOutput, columns, tailMax)
+      : 0;
   }
   if (block.kind === 'subagents') {
     // cabeçalho (1) + paddingBottom (1) + as linhas VISUAIS de cada filho. F87 —
@@ -298,14 +355,34 @@ function nonSpeechBlockLines(block: SessionBlock, columns: number): number {
  * quebras finais (idêntico ao render). Zero quando não há saída ainda. `columns ≤ 0`
  * ⇒ conta linhas-fonte (degradação graciosa).
  */
-function liveShellOutputLines(liveOutput: string | undefined, columns: number): number {
+/**
+ * F163 — linhas VISUAIS do CABEÇALHO `◌ running` de um tool/bang vivo (a linha do
+ * <Working>/<BangBlock> com o rótulo). Era contada como 1 FIXA, mas o rótulo é largo
+ * (alvo clampado a ~100 chars; comando de bang arbitrário) e QUEBRA em terminal
+ * estreito ⇒ o bloco ficava mais alto que o orçado ⇒ estouro ⇒ clearTerminal
+ * reescrevendo o histórico INTEIRO (o flicker de sessão gigante). Reconstrói a
+ * largura: paddingLeft(2) + glifo/onda/reticências (~12, o <Working> põe `◌` + a
+ * onda `～～›` antes do rótulo) + o rótulo — over-contar é SEGURO (anti-flicker).
+ * `columns ≤ 0` ⇒ 1 (linha-fonte, degradação graciosa).
+ */
+const RUNNING_HEADER_CHROME_COLS = 14;
+function runningHeaderVisualLines(label: string, columns: number): number {
+  if (!(columns > 0)) return 1;
+  return Math.max(1, Math.ceil((displayWidth(label) + RUNNING_HEADER_CHROME_COLS) / columns));
+}
+
+function liveShellOutputLines(
+  liveOutput: string | undefined,
+  columns: number,
+  tailMax: number = LIVE_SHELL_OUTPUT_MAX_LINES,
+): number {
   const text = (liveOutput ?? '').replace(/\n+$/, '');
   if (text.length === 0) return 0;
   const cols = columns > 0 ? columns - LIVE_OUTPUT_INDENT : 0;
   const visual = visualLines(text, cols);
-  if (visual <= LIVE_SHELL_OUTPUT_MAX_LINES) return visual;
+  if (visual <= tailMax) return visual;
   // cortado: teto VISUAL + 1 (marcador `…N acima`).
-  return LIVE_SHELL_OUTPUT_MAX_LINES + 1;
+  return tailMax + 1;
 }
 
 /**
@@ -364,12 +441,24 @@ export interface LiveOverheadInput {
    * AO VIVO de comandos vivos (linhas largas quebram). Ausente/0 ⇒ linhas-fonte.
    */
   readonly columns?: number;
+  /**
+   * F163 — altura do terminal (linhas). Com ela, a cauda viva de shell é orçada pelo
+   * cap ADAPTATIVO (`liveShellTailMaxLines` — o MESMO que o render usa): em tela
+   * baixa a cauda encolhe. Ausente ⇒ cap cheio (comportamento antigo).
+   */
+  readonly rows?: number;
 }
 
 /** Linhas ocupadas pelos elementos vivos NÃO-fala no frame (ver doc do input). */
 export function liveOverheadLines(input: LiveOverheadInput): number {
   const { live, phase, hasBlocks } = input;
   const columns = input.columns ?? 0;
+  // F163 — com `rows` conhecido, a cauda viva de shell é orçada pelo cap ADAPTATIVO
+  // (o MESMO do render); sem `rows`, cap cheio (comportamento antigo).
+  const tailMax =
+    input.rows !== undefined
+      ? liveShellTailMaxLines(input.rows, input.columns)
+      : LIVE_SHELL_OUTPUT_MAX_LINES;
   let lines = 0;
 
   // Há uma prévia de FALA viva (aluy streaming) neste frame?
@@ -383,7 +472,7 @@ export function liveOverheadLines(input: LiveOverheadInput): number {
       lines += 3;
       continue;
     }
-    lines += nonSpeechBlockLines(b, columns);
+    lines += nonSpeechBlockLines(b, columns, tailMax);
   }
 
   // <Working> de `thinking` (pré-stream) e <ProgressBar> de `compacting` (EST-0973):
@@ -448,10 +537,14 @@ export function slashMenuMaxRows(args: {
     LIVE_CHROME_BASE_ROWS +
     respiroOverhead(args.rows) +
     modeIndicatorOverhead(args.mode) +
+    // F163 — chrome estreito custa +2 (StatusBar/FooterHints em wrap); mesmo
+    // desconto do speechMaxLines p/ `menu + viva ≤ rows-1` valer em tela estreita.
+    narrowChromeOverhead(args.columns) +
     liveOverheadLines({
       live: args.live,
       phase: args.phase,
       hasBlocks: args.hasBlocks,
+      rows: args.rows,
       ...(args.columns !== undefined ? { columns: args.columns } : {}),
     }) +
     MIN_SPEECH_LINES +
@@ -495,6 +588,7 @@ export function speechMaxLines(args: {
     live: args.live,
     phase: args.phase,
     hasBlocks: args.hasBlocks,
+    rows: args.rows,
     ...(args.columns !== undefined ? { columns: args.columns } : {}),
   });
   // +1: reserva da linha do marcador `… (N linhas acima)` (ver doc).
@@ -508,6 +602,10 @@ export function speechMaxLines(args: {
     SAFETY_MARGIN -
     overhead -
     modeIndicatorOverhead(args.mode) -
+    // F163 — StatusBar/FooterHints quebram p/ 2 linhas em colunas < 80; sem este
+    // desconto o frame cruzava `rows` em tela baixa+estreita ⇒ clearTerminal
+    // reescrevendo o histórico INTEIRO a cada frame (o flicker de sessão gigante).
+    narrowChromeOverhead(args.columns) -
     (args.queuedLines ?? 0) -
     (args.overlayLines ?? 0) -
     (args.composerOverflow ?? 0) -

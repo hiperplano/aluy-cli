@@ -78,6 +78,21 @@ paths = [
   '''packages/cli/tests/session/controller-flow-control\.test\.ts$''',
 ]
 
+# ── Allowlist de FIXTURES da REDAÇÃO do JUIZ de subciclo (ADR-0137 · C1, path fechado) ─
+# Ciclos Fatia 3: estes 2 arquivos provam o C1 — o context que vai ao JUIZ local
+# (`buildRedactedSubcycleContext`/JudgeInput) é REDIGIDO, nenhum segredo cru chega ao
+# seam. Por natureza plantam segredos SINTÉTICOS (a AKIAIOSFODNN7EXAMPLE da doc da
+# AWS, `github_pat_…` e `sk-…` FAKE) — o insumo que prova a redação; os próprios
+# testes assertam `.not.toContain(...)`. Descobertos ao trocar a gitleaks-action
+# (que nunca rodou — sem licença) pelo CLI pinado, que varre o histórico de verdade.
+# Cobertura por PATH EXATO; mesma política honesta dos fixtures acima.
+[[allowlists]]
+description = "Fixtures sintéticas da redação do juiz de subciclo (ADR-0137 C1) — só estes paths, nunca segredo real."
+paths = [
+  '''packages/cli-core/tests/agent/cycle-judge-policy\.test\.ts$''',
+  '''packages/cli/tests/session/controller-cycle-judge\.test\.ts$''',
+]
+
 # ── Allowlist de FIXTURE da REDAÇÃO do /export — MODO COCKPIT (EST-1000/RES-C-1) ─
 # EST-1000/ADR-0076 §4 / CLI-SEC-6: este arquivo testa que o `/export` REDIGE o
 # segredo ANTES de montar o transcript E de gravá-lo no disco (~/.aluy/exports/,

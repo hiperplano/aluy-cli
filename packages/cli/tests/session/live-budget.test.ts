@@ -34,6 +34,10 @@ import {
   MIN_SPEECH_LINES,
   MODE_INDICATOR_BASE_ROWS,
   UNSAFE_INDICATOR_ROWS,
+  narrowChromeOverhead,
+  liveShellTailMaxLines,
+  LIVE_SHELL_OUTPUT_MAX_LINES,
+  NARROW_CHROME_MAX_COLS,
 } from '../../src/session/live-budget.js';
 import type { SessionBlock, SessionState } from '../../src/session/model.js';
 import { visualLines } from '../../src/session/visual-lines.js';
@@ -687,5 +691,81 @@ describe('F88 — slashMenuMaxRows: menu + região viva NÃO estoura `rows` (sem
       columns: 40,
     });
     expect(cap).toBe(4);
+  });
+});
+
+describe('F163 — sessão gigante em tela baixa/estreita NÃO estoura `rows` (fim do clearTerminal em loop)', () => {
+  it('narrowChromeOverhead: +2 abaixo de 80 colunas (StatusBar/FooterHints em wrap); 0 acima', () => {
+    expect(narrowChromeOverhead(60)).toBe(2);
+    expect(narrowChromeOverhead(NARROW_CHROME_MAX_COLS - 1)).toBe(2);
+    expect(narrowChromeOverhead(NARROW_CHROME_MAX_COLS)).toBe(0);
+    expect(narrowChromeOverhead(196)).toBe(0);
+    // largura desconhecida ⇒ 0 (comportamento antigo, degradação graciosa).
+    expect(narrowChromeOverhead(undefined)).toBe(0);
+    expect(narrowChromeOverhead(0)).toBe(0);
+  });
+
+  it('liveShellTailMaxLines: encolhe em tela baixa (o caso medido 22x60 ⇒ 4) e mantém 6 em tela normal', () => {
+    // O stress do F163 mediu: em 22x60 o frame vivo somava 23 linhas com a cauda
+    // cheia (6) — precisava de ≤ 4 p/ caber em rows-1. A conta fecha exatamente:
+    expect(liveShellTailMaxLines(22, 60)).toBe(4);
+    expect(liveShellTailMaxLines(20, 60)).toBe(2);
+    // telas normais: cap cheio (comportamento IDÊNTICO ao de antes).
+    expect(liveShellTailMaxLines(24, 80)).toBe(LIVE_SHELL_OUTPUT_MAX_LINES);
+    expect(liveShellTailMaxLines(33, 196)).toBe(LIVE_SHELL_OUTPUT_MAX_LINES);
+    // piso 1: sempre mostra progresso, mesmo em terminal minúsculo.
+    expect(liveShellTailMaxLines(10, 40)).toBe(1);
+    // rows desconhecido ⇒ cap cheio (antigo).
+    expect(liveShellTailMaxLines(0, 60)).toBe(LIVE_SHELL_OUTPUT_MAX_LINES);
+  });
+
+  it('o orçamento usa o MESMO cap adaptativo do render (bang streamando em 22x60)', () => {
+    // bang vivo com 60 linhas largas (155 chars ⇒ 3 visuais a 56 cols) — o overhead
+    // orçado tem que refletir a cauda ENCOLHIDA (4+1 marcador), não a cheia (6+1).
+    const bang = {
+      kind: 'bang',
+      command:
+        'for i in $(seq 1 60); do printf "arquivo-%03d " "$i"; head -c 140 /dev/zero; echo; done',
+      status: 'running',
+      liveOutput: Array.from({ length: 60 }, (_, i) => `arquivo-${i} ${'='.repeat(140)}`).join(
+        '\n',
+      ),
+    } as never;
+    const withRows = liveOverheadLines({
+      live: [bang],
+      phase: 'idle',
+      hasBlocks: true,
+      rows: 22,
+      columns: 60,
+    });
+    const without = liveOverheadLines({
+      live: [bang],
+      phase: 'idle',
+      hasBlocks: true,
+      columns: 60,
+    });
+    // com rows: cabeçalho (2 visuais a 60 cols) + cauda 4 + marcador 1 = 7;
+    // sem rows (antigo): cabeçalho 2 + cauda 6 + marcador 1 = 9.
+    expect(withRows).toBeLessThan(without);
+    expect(withRows).toBe(2 + liveShellTailMaxLines(22, 60) + 1);
+  });
+
+  it('cabeçalho `◌ running` largo conta as linhas VISUAIS (não 1 fixa) em terminal estreito', () => {
+    const tool = {
+      kind: 'tool',
+      verb: 'bash',
+      target: 'x'.repeat(100),
+      result: '',
+      status: 'running',
+      verbGerund: 'rodando',
+    } as never;
+    // 100 chars de alvo + gerúndio (8) + chrome do <Working> (14) = 122 colunas
+    // ⇒ 3 visuais a 60 cols (over-contar é seguro no anti-flicker), 1 a 196.
+    expect(liveOverheadLines({ live: [tool], phase: 'idle', hasBlocks: true, columns: 60 })).toBe(
+      3,
+    );
+    expect(liveOverheadLines({ live: [tool], phase: 'idle', hasBlocks: true, columns: 196 })).toBe(
+      1,
+    );
   });
 });

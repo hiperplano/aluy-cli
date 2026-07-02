@@ -26,6 +26,7 @@
 import type { SessionBlock, SessionState } from './model.js';
 import {
   LIVE_CHROME_BASE_ROWS,
+  narrowChromeOverhead,
   SAFETY_MARGIN,
   MIN_SPEECH_LINES,
   respiroOverhead,
@@ -188,6 +189,7 @@ export interface SplitLiveBudgetInput {
  */
 export function splitLiveBudget(input: SplitLiveBudgetInput): number {
   const overhead = liveOverheadLines({
+    rows: input.rows,
     live: input.live,
     phase: input.phase,
     hasBlocks: input.hasBlocks,
@@ -205,6 +207,9 @@ export function splitLiveBudget(input: SplitLiveBudgetInput): number {
     extraChrome -
     SAFETY_MARGIN -
     modeIndicatorOverhead(input.mode) -
+    // F163 — StatusBar/FooterHints quebram p/ 2 linhas em colunas < 80 (mesmo
+    // desconto do speechMaxLines; em split a coluna é ainda mais estreita).
+    narrowChromeOverhead(input.columns) -
     (input.queuedLines ?? 0) -
     (input.composerOverflow ?? 0) -
     1; // reserva do marcador `…N acima`

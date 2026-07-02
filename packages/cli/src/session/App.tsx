@@ -95,6 +95,7 @@ import {
   speechMaxLines,
   slashMenuMaxRows,
   LIVE_SHELL_OUTPUT_MAX_LINES,
+  liveShellTailMaxLines,
   RESPIRO_MIN_ROWS,
 } from './live-budget.js';
 import { composerIndentCols, visualLines } from './visual-lines.js';
@@ -3591,6 +3592,7 @@ export function App(props: AppProps): React.ReactElement {
             frame={frame}
             maxLines={splitMaxLines}
             columns={splitLayout === 'side' ? splitRes.chatCols : columns}
+            rows={rows}
           />
         ))
       )}
@@ -4247,6 +4249,8 @@ export function BlockView(props: {
   readonly maxLines?: number;
   /** Largura do terminal (colunas) — p/ medir a altura VISUAL (wrap) da prévia. */
   readonly columns?: number;
+  /** F163 — altura do terminal (linhas): encolhe a cauda viva de shell em tela baixa. */
+  readonly rows?: number;
 }): React.ReactElement {
   const b = props.block;
   switch (b.kind) {
@@ -4280,7 +4284,11 @@ export function BlockView(props: {
           {...(b.verbGerund !== undefined ? { verbGerund: b.verbGerund } : {})}
           {...(b.output !== undefined ? { output: b.output } : {})}
           {...(b.liveOutput !== undefined ? { liveOutput: b.liveOutput } : {})}
-          maxLines={LIVE_SHELL_OUTPUT_MAX_LINES}
+          maxLines={
+            props.rows !== undefined
+              ? liveShellTailMaxLines(props.rows, props.columns)
+              : LIVE_SHELL_OUTPUT_MAX_LINES
+          }
           {...(props.columns !== undefined ? { columns: props.columns } : {})}
         />
       );
@@ -4300,7 +4308,11 @@ export function BlockView(props: {
             frame={props.frame}
             {...(b.output !== undefined ? { output: b.output } : {})}
             {...(b.liveOutput !== undefined ? { liveOutput: b.liveOutput } : {})}
-            maxLines={LIVE_SHELL_OUTPUT_MAX_LINES}
+            maxLines={
+              props.rows !== undefined
+                ? liveShellTailMaxLines(props.rows, props.columns)
+                : LIVE_SHELL_OUTPUT_MAX_LINES
+            }
             {...(props.columns !== undefined ? { columns: props.columns } : {})}
           />
         </Box>
