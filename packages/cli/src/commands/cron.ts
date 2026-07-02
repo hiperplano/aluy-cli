@@ -179,6 +179,72 @@ Notas:
   - Anti-runaway: tetos do --cycle são herdados (CLI-SEC-14).
 `;
 
+/**
+ * F177 — VALIDAÇÃO DE FAIXA dos 5 campos cron. Antes só a CONTAGEM (5 campos) era
+ * checada: `99 99 * * *` passava, o job era SALVO em jobs.json e o `crontab` do SO
+ * rejeitava com erro CRU (`"-":1: bad minute`) — e o job-lixo ficava persistido
+ * falhando pra sempre. Aqui validamos cada campo (min/max), aceitando a sintaxe cron
+ * usual: estrela, passo (barra-N), intervalo (a-b), intervalo com passo, listas
+ * (a,b,c) e nomes de mês/dia-da-semana.
+ * `undefined` = válido; string = a razão do erro (nome do campo + faixa). PURO.
+ */
+const CRON_FIELDS: readonly {
+  name: string;
+  min: number;
+  max: number;
+  names?: readonly string[];
+}[] = [
+  { name: 'minuto', min: 0, max: 59 },
+  { name: 'hora', min: 0, max: 23 },
+  { name: 'dia-do-mês', min: 1, max: 31 },
+  {
+    name: 'mês',
+    min: 1,
+    max: 12,
+    names: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+  },
+  {
+    name: 'dia-da-semana',
+    min: 0,
+    max: 7,
+    names: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'],
+  },
+];
+
+export function validateCronExpr(expr: string): string | undefined {
+  const campos = expr.trim().split(/\s+/);
+  if (campos.length !== 5) {
+    return `use 5 campos cron (ex.: "0 9 * * 1-5") — recebidos ${campos.length}.`;
+  }
+  const num = (tok: string, f: (typeof CRON_FIELDS)[number]): number | undefined => {
+    const named = f.names?.indexOf(tok.toLowerCase());
+    if (named !== undefined && named >= 0) return f.min === 0 ? named : named + 1;
+    return /^\d+$/.test(tok) ? Number(tok) : undefined;
+  };
+  for (let i = 0; i < 5; i++) {
+    const f = CRON_FIELDS[i]!;
+    const field = campos[i]!;
+    for (const part of field.split(',')) {
+      if (part === '') return `campo ${f.name}: item vazio (lista malformada).`;
+      const [rangeOrStar, step] = part.split('/');
+      if (step !== undefined && (!/^\d+$/.test(step) || Number(step) < 1)) {
+        return `campo ${f.name}: passo inválido "/${step}" (use /N com N≥1).`;
+      }
+      if (rangeOrStar === '*') continue;
+      const bounds = (rangeOrStar ?? '').split('-');
+      if (bounds.length > 2) return `campo ${f.name}: intervalo malformado "${rangeOrStar}".`;
+      for (const b of bounds) {
+        const v = num(b, f);
+        if (v === undefined) return `campo ${f.name}: valor inválido "${b}".`;
+        if (v < f.min || v > f.max) {
+          return `campo ${f.name}: "${b}" fora da faixa ${f.min}-${f.max}.`;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
 export function parseCronCommand(argv: readonly string[]): CronCommand {
   const sub = argv[0];
   if (sub === undefined || sub === 'help' || sub === '-h' || sub === '--help') {
@@ -199,13 +265,11 @@ export function parseCronCommand(argv: readonly string[]): CronCommand {
     if (!quando) return { kind: 'error', message: 'cron add: falta o <quando> (expressão cron).' };
     if (!tarefa) return { kind: 'error', message: 'cron add: falta a "<tarefa>".' };
 
-    // Validação básica da expressão cron (5 campos)
-    const campos = quando.trim().split(/\s+/);
-    if (campos.length !== 5) {
-      return {
-        kind: 'error',
-        message: `cron add: <quando> inválido "${quando}" — use 5 campos cron (ex.: "0 9 * * 1-5").`,
-      };
+    // F177 — validação de FAIXA (não só contagem): recusa CEDO com msg do aluy, antes
+    // de salvar o job e antes que o crontab do SO rejeite com erro cru.
+    const bad = validateCronExpr(quando);
+    if (bad !== undefined) {
+      return { kind: 'error', message: `cron add: <quando> inválido "${quando}" — ${bad}` };
     }
 
     return { kind: 'add', quando, tarefa, yolo };
@@ -249,11 +313,11 @@ export function parseCronCommand(argv: readonly string[]): CronCommand {
           'cron edit: nada a mudar — use --quando "<cron>", --tarefa "<txt>" e/ou --yolo|--no-yolo.',
       };
     }
-    if (quando !== undefined && quando.trim().split(/\s+/).length !== 5) {
-      return {
-        kind: 'error',
-        message: `cron edit: --quando inválido "${quando}" — use 5 campos cron (ex.: "0 9 * * 1-5").`,
-      };
+    if (quando !== undefined) {
+      const bad = validateCronExpr(quando);
+      if (bad !== undefined) {
+        return { kind: 'error', message: `cron edit: --quando inválido "${quando}" — ${bad}` };
+      }
     }
     return {
       kind: 'edit',
