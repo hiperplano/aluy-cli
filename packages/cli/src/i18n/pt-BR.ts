@@ -168,6 +168,7 @@ export const ptBR: FullCatalog = {
   'cmd.mcp': 'lista/gerencia servers MCP (add/remove/disable/enable · search <termo>)',
   'cmd.doctor': 'diagnóstico da instalação · credencial, broker, MCP, config (read-only)',
   'cmd.fullscreen': 'modo cockpit (tela cheia, alt-screen)',
+  'cmd.export': 'exporta o transcript REDIGIDO desta sessão p/ ~/.aluy/exports/ (0600)',
   'cmd.quit': 'sair do aluy',
   'cmd.workflows': 'fluxos de atividades que coordenam o agente — lista, executa e ativa',
   'cmd.tools': 'inventário unificado das ferramentas · nativas, MCP, permissão (read-only)',

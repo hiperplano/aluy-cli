@@ -669,6 +669,22 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           ],
         },
       };
+    case 'export':
+      // F179 — o `/export` REAL grava o transcript REDIGIDO (CLI-SEC-6) em
+      // ~/.aluy/exports/; é roteado ANTES em run.tsx/App via `onExportTranscript`
+      // (precisa dos blocos vivos + store + catraca). Cair aqui só sem esse roteamento
+      // (não-TTY/linear): explica o comando, sem gravar nada.
+      return {
+        kind: 'note',
+        note: {
+          title: 'export',
+          lines: [
+            'grava o transcript desta sessão num arquivo markdown em ~/.aluy/exports/',
+            '(0600), JÁ REDIGIDO (CLI-SEC-6): segredos/tokens que apareceram na tela',
+            'saem como ‹redigido› no arquivo. Útil p/ copiar/compartilhar a conversa.',
+          ],
+        },
+      };
     case 'mcp':
       // EST-0970 — o `/mcp` REAL (lista os servers + tools + estado da descoberta AO
       // VIVO) é roteado ANTES em run.tsx via `buildMcpNote(listing)` (precisa da config
@@ -1191,7 +1207,10 @@ export async function runTelegramSlash(
   }
   if (sub === 'logout') {
     await deps.secretStore.clear().catch(() => undefined);
-    return { title: 'telegram', lines: ['token do bot removido do keychain (a bridge não autentica mais).'] };
+    return {
+      title: 'telegram',
+      lines: ['token do bot removido do keychain (a bridge não autentica mais).'],
+    };
   }
   if (sub === 'login') {
     return {

@@ -106,6 +106,15 @@ describe('routeInput', () => {
     expect(r.kind).toBe('unknown-command');
   });
 
+  it('F179 — /export é nativo (antes: unknown-command, apesar do hint prometê-lo)', () => {
+    const r = routeInput('/export');
+    expect(r.kind).toBe('command');
+    if (r.kind === 'command') {
+      expect(r.command.id).toBe('export');
+      expect(r.command.source).toBe('native');
+    }
+  });
+
   it('case-insensitive no nome do comando', () => {
     const r = routeInput('/HELP');
     expect(r.kind).toBe('command');

@@ -249,6 +249,8 @@ export interface Catalog {
   'cmd.tools': string;
   /** EST-1000 · ADR-0076 — `/fullscreen` (alias `/cockpit`). */
   'cmd.fullscreen': string;
+  /** F179 — `/export` (transcript redigido em ~/.aluy/exports/). */
+  'cmd.export': string;
   'cmd.quit': string;
   /** EST-1105 · ADR-workflows — `/workflows`: lista os workflows .md mapeados. */
   'cmd.workflows': string;
