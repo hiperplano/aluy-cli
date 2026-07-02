@@ -162,6 +162,13 @@ function fileMap(baseDir: string): Array<{ path: string; role: string; exists: b
     f('hooks.json', 'hooks (fronteira de execução; o agente nunca escreve)'),
     f('providers.json', 'catálogo de providers (override do usuário)'),
     f('update-check.json', 'estado/cache (reescrito pela máquina)'),
+    // F186 — estado do usuário que faltava na descoberta: sessões (histórico das
+    // conversas), auditoria (trilha dos efeitos — CLI-SEC), agendamentos, exports e undo.
+    f('sessions', 'histórico das sessões/conversas (retomável com --resume)'),
+    f('audit.jsonl', 'trilha de auditoria dos efeitos (append-only — CLI-SEC)'),
+    f('cron', 'tarefas agendadas (aluy cron)'),
+    f('exports', 'transcrições exportadas (/export)'),
+    f('undo', 'pilha de undo das edições do agente'),
     f('memory', 'store do mem0 (chromadb + history)'),
     f('logs', 'logs dos sidecars (mem0/ollama/headroom)'),
   ];
