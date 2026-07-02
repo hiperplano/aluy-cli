@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.89] — 2026-07-02
+
 ### Corrigido
 
 - 🔴 Retomada de sessão: uma sessão morta no MEIO de um turno (Ctrl-C) logo após uma mensagem "encaixada" (btw) perdia o CONTEXTO do modelo ao reabrir (F193) — o transcript aparecia todo na tela, mas o modelo não "se lia" (perdia a própria referência). Causa: `blocksToHistory` DESCARTAVA os blocos `inject` (a fala do usuário injetada mid-turn) ao reconstruir o histórico — a única prova daquela mensagem após save+reload. Agora o `inject` volta como `goal` (canal `user`, como o `you`), com guarda de vazio. Vale p/ `--resume`/`/history`/rewind.
