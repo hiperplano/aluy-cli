@@ -7,7 +7,11 @@ import {
   formatRelativeAge,
   formatResumeOffer,
   formatSessionList,
+  autoSaveSession,
+  hasResumableContent,
 } from '../../src/session/session-persist.js';
+import type { SessionBlock } from '../../src/session/model.js';
+import type { SessionStore } from '../../src/io/index.js';
 
 // ---------------------------------------------------------------------------
 // formatRelativeAge
@@ -131,5 +135,43 @@ describe('formatSessionList', () => {
     expect(result.join('\n')).toContain('bbb');
     expect(result.join('\n')).toContain('primeira');
     expect(result.join('\n')).toContain('(sem objetivo)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F190 — não persistir sessão sem conteúdo retomável (só notas de boot)
+// ---------------------------------------------------------------------------
+describe('F190 — hasResumableContent / autoSaveSession gate', () => {
+  const note: SessionBlock = { kind: 'note', title: 'config', lines: ['MCP: 5'] };
+  const you: SessionBlock = { kind: 'you', text: 'oi' };
+  const aluy: SessionBlock = { kind: 'aluy', text: 'olá', streaming: false };
+
+  it('hasResumableContent: só notas ⇒ false; com you/aluy ⇒ true; com rótulo ⇒ true', () => {
+    expect(hasResumableContent([note], undefined)).toBe(false);
+    expect(hasResumableContent([], undefined)).toBe(false);
+    expect(hasResumableContent([note, you], undefined)).toBe(true);
+    expect(hasResumableContent([note, aluy], undefined)).toBe(true); // conversa de install (F187)
+    expect(hasResumableContent([note], 'setup')).toBe(true); // rótulo explícito
+    expect(hasResumableContent([note], '   ')).toBe(false); // rótulo em branco não conta
+  });
+
+  it('autoSaveSession NÃO grava uma sessão só de notas (retorna false, não chama save)', () => {
+    let saved = 0;
+    const store = { save: () => (saved++, true) } as unknown as SessionStore;
+    const ok = autoSaveSession(store, { id: 'x', cwd: '/p', tier: 't', blocks: [note] });
+    expect(ok).toBe(false);
+    expect(saved).toBe(0);
+  });
+
+  it('autoSaveSession grava quando há mensagem OU rótulo', () => {
+    let saved = 0;
+    const store = { save: () => (saved++, true) } as unknown as SessionStore;
+    expect(autoSaveSession(store, { id: 'x', cwd: '/p', tier: 't', blocks: [note, you] })).toBe(
+      true,
+    );
+    expect(
+      autoSaveSession(store, { id: 'y', cwd: '/p', tier: 't', blocks: [note], label: 'setup' }),
+    ).toBe(true);
+    expect(saved).toBe(2);
   });
 });
