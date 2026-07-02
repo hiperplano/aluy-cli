@@ -50,7 +50,7 @@ describe('PermissionsPanel — render', () => {
   it('mostra as três secoes mutáveis: modo, tools seguras, grants', () => {
     const { lastFrame } = wrap(<PermissionsPanel rows={sampleRows()} selected={0} mode="normal" />);
     const out = plain(lastFrame() ?? '');
-    expect(out).toContain('modo de sessao');
+    expect(out).toMatch(/modo de sess[aã]o/);
     expect(out).toContain('tools seguras');
     expect(out).toContain('read_file');
     expect(out).toContain('grep');
