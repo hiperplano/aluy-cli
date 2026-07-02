@@ -41,7 +41,7 @@ opcionais. Funciona em **Linux, macOS e Windows** — o terminal recomendado é 
 aluy                          # sessão interativa (TUI)
 aluy "refatore o módulo X"    # dá um objetivo direto e acompanha o agente trabalhar
 aluy -p "liste os TODOs"      # modo headless (one-shot), ideal p/ scripts/CI
-aluy --resume <id>            # retoma uma conversa anterior (o id aparece ao sair)
+aluy --resume <id|nome>       # retoma uma conversa anterior (id ao sair, ou o nome do /rename)
 aluy --continue               # retoma a sessão mais recente deste diretório
 ```
 

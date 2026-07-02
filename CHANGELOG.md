@@ -14,7 +14,13 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
-_(vazio — tudo do lote de estabilização saiu na rc.64)_
+### Adicionado
+
+- `--resume <nome>` (F169, pedido do dono): retomada de sessão também pelo NOME dado no `/rename` (case-insensitive), não só pelo id. Nome ambíguo (2+ sessões) ⇒ abre o seletor filtrado nelas; id literal sempre vence o nome.
+
+### Corrigido
+
+- 🟠 "Te aviso quando terminar" agora AVISA (F168): um evento de conclusão (fan-out/monitor/conector) que chegava com o pai fora de idle/done era descartado pelo guard do wake e ninguém re-tentava — o resultado ficava preso até o usuário cutucar. `setPhase(idle|done)` re-arma o wake: o turno de incorporação nasce sozinho (mesma catraca; prova-vermelho executada).
 
 ## [1.0.0-rc.64] — 2026-07-02
 

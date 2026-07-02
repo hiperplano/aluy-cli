@@ -61,6 +61,40 @@ describe('resolveResume (EST-0972)', () => {
     if (r.kind === 'resumed') expect(r.record.id).toBe('alvo');
   });
 
+  it('F169 — `--resume <nome>` retoma pelo RÓTULO do /rename (case-insensitive)', () => {
+    store.save({
+      id: 'abc123',
+      cwd: '/p',
+      tier: 't',
+      blocks: [you],
+      label: 'FLUIDER-ORCHESTRATOR',
+    });
+    const r = resolveResume({ kind: 'resume', id: 'fluider-orchestrator' }, store, '/q');
+    expect(r.kind).toBe('resumed');
+    if (r.kind === 'resumed') expect(r.record.id).toBe('abc123');
+  });
+
+  it('F169 — nome AMBÍGUO (2+ sessões com o mesmo rótulo) ⇒ pick FILTRADO nelas', () => {
+    store.save({ id: 's1', cwd: '/p', tier: 't', blocks: [you], label: 'aluy' });
+    clock += 10;
+    store.save({ id: 's2', cwd: '/p', tier: 't', blocks: [you], label: 'ALUY' });
+    clock += 10;
+    store.save({ id: 's3', cwd: '/p', tier: 't', blocks: [you], label: 'outra' });
+    const r = resolveResume({ kind: 'resume', id: 'aluy' }, store, '/q');
+    expect(r.kind).toBe('pick');
+    if (r.kind === 'pick') {
+      expect(r.choices.map((c) => c.id).sort()).toEqual(['s1', 's2']);
+    }
+  });
+
+  it('F169 — id LITERAL vence o nome (sessão cujo id colide com rótulo alheio)', () => {
+    store.save({ id: 'alvo', cwd: '/p', tier: 't', blocks: [you] });
+    store.save({ id: 'outra', cwd: '/p', tier: 't', blocks: [you], label: 'alvo' });
+    const r = resolveResume({ kind: 'resume', id: 'alvo' }, store, '/q');
+    expect(r.kind).toBe('resumed');
+    if (r.kind === 'resumed') expect(r.record.id).toBe('alvo');
+  });
+
   it('F110 — `--resume <id>` inexistente ⇒ not-found (com o id), NÃO none (p/ o boot AVISAR)', () => {
     // Distinto de `none` (nada pedido): o id explícito não-achado vira `not-found` p/ o
     // boot avisar "sessão <id> não encontrada — nova" em vez de cair calado numa sessão branca.

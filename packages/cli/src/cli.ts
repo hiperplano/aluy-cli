@@ -327,7 +327,8 @@ Opções:
                   (não dá p/ configurar infinito). Não persiste.
   --continue      Retoma a ÚLTIMA sessão deste diretório (carrega o histórico no
                   contexto e segue). Sem sessão neste cwd ⇒ começa uma nova.
-  --resume [<id>] Lista as sessões salvas p/ escolher e retomar. Com <id>, retoma
+  --resume [<id|nome>] Lista as sessões salvas p/ escolher e retomar. Com <id> (ou o
+                  NOME dado no /rename), retoma
                   direto aquela sessão. Sessão ausente/corrompida ⇒ começa uma nova.
                   A transcrição salva mora em ~/.aluy/sessions/ (0600, fora do
                   workspace) — pode conter saída de comando/arquivo; nunca credencial.
