@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.77] — 2026-07-02
+
 ### Corrigido
 
 - 🔴 Sinais: o aluy agora ENCERRA em SIGINT/SIGTERM externos (F181) — `kill`, `kill -INT`, `kill -TERM`, systemd/`docker stop` não o derrubavam (só SIGHUP/SIGKILL), porque dois handlers de sinal restauravam o terminal mas nenhum chamava exit (a suposição "o Ink encerra no SIGINT" era falsa — o Ink lê o byte \x03 do stdin, não o sinal). O handler de restauração agora encerra deterministicamente (exit 130/143), sem afetar o duplo-Ctrl-C interativo (raw mode ⇒ Ctrl-C é byte, não sinal).
