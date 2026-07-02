@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.73] — 2026-07-02
+
 ### Corrigido
 
 - 🟡 `aluy cron add/edit`: valida a FAIXA dos campos cron (minuto 0-59, hora 0-23, …), não só a contagem (F177) — antes um `99 99 * * *` era salvo e o crontab do SO rejeitava com erro cru (exit 0, job-lixo persistido); agora falha cedo com mensagem clara e exit 1, sem salvar.
