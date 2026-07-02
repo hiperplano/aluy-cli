@@ -47,22 +47,22 @@ export interface PermissionsPanelProps {
 /** Palavra do modo (a11y: a palavra carrega o sentido, nao so a cor). */
 const MODE_WORD: Readonly<Record<SessionMode, string>> = {
   plan: 'PLAN (read-only)',
-  normal: 'NORMAL (catraca padrao)',
+  normal: 'NORMAL (catraca padrão)',
   // EST-0959 — nome de PRODUTO do modo `unsafe` e YOLO (`--yolo`).
-  unsafe: 'YOLO (aprovacao DESLIGADA)',
+  unsafe: 'YOLO (aprovação DESLIGADA)',
 };
 
 /** Cabecalho de secao injetado quando o tipo de linha muda. */
 function sectionHeader(kind: PanelRow['kind']): string {
   switch (kind) {
     case 'mode':
-      return 'modo de sessao · enter cicla plan → normal → yolo';
+      return 'modo de sessão · enter cicla plan → normal → yolo';
     case 'safe-tool':
       return 'tools seguras (leitura) · enter alterna allow ⇄ ask';
     case 'grant':
-      return 'liberados nesta sessao · enter REVOGA';
+      return 'liberados nesta sessão · enter REVOGA';
     case 'locked':
-      return 'TRAVADO por seguranca · so via --yolo';
+      return 'TRAVADO por segurança · só via --yolo';
   }
 }
 
@@ -194,7 +194,7 @@ export function PermissionsPanel(props: PermissionsPanelProps): React.ReactEleme
       </Box>
       <Box>
         <Role name="fgDim">
-          o painel nao relaxa as categorias travadas — o unico bypass total e --yolo
+          o painel não relaxa as categorias travadas — o único bypass total é --yolo
         </Role>
       </Box>
     </Box>
