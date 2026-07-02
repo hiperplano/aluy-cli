@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { PolicyPermissionEngine, type PermissionPolicy, type ToolCall } from '../../src/index.js';
+import { NATIVE_TOOLS } from '../../src/index.js';
 
 function call(name: string, input: Record<string, unknown>): ToolCall {
   return { name, input };
@@ -383,6 +384,15 @@ describe('CA-5 · grants de sessão (NUNCA persistido)', () => {
     );
     // e grantSession RECUSA memorizar a própria escrita fora (categoria sempre-ask).
     expect(e.grantSession(call('edit_file', { path: '/etc/hosts', content: 'evil' }))).toBe(false);
+  });
+
+  it('F192 (hardening/seguranca) — o SENTINELA `file_write` não colide com nenhuma tool nativa', () => {
+    // O `keyFor` funde write_file/edit_file no token sintético `file_write`. Se algum dia
+    // uma tool nativa se chamar literalmente `file_write`, um grant de escrita cobriria essa
+    // tool no mesmo path (footgun apontado na revisão de segurança do F192). Este guarda
+    // falha ALTO se o nome reservado for introduzido — forçando reconsiderar o sentinela.
+    const names = NATIVE_TOOLS.map((t) => t.name);
+    expect(names).not.toContain('file_write');
   });
 });
 
