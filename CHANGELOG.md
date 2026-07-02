@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.74] — 2026-07-02
+
 ### Corrigido
 
 - Painel `/permissions`: strings acentuadas (F178) — "catraca padrão", "aprovação DESLIGADA", "modo de sessão", "TRAVADO por segurança · só via --yolo", "o painel não relaxa… o único bypass total é --yolo" (antes sem acento, destoando do resto da UI PT-BR).
