@@ -153,6 +153,7 @@ import { withToolReport, type ToolReporter } from './tool-reporter.js';
 import {
   abbreviateCwd,
   abbreviateCount,
+  clampTarget,
   gerundOf,
   formatDuration,
   type BangBlock,
@@ -6489,15 +6490,20 @@ function verbOfTool(name: string): string {
   }
 }
 
-/** Alvo legível (path/comando/padrão) a partir do input do tool-call. */
+/**
+ * Alvo legível (path/comando/padrão) a partir do input do tool-call. SEMPRE clampado
+ * a 1 linha (`clampTarget`, MESMA regra do `tool-reporter.targetOf` — a linha `◌`
+ * criada no start e a `⏺` resolvida no fim precisam BATER p/ a atualização in-place):
+ * um batch/heredoc como `command` não pode despejar 100+ linhas no transcript.
+ */
 function targetOfCall(call: ToolCall): string {
   const input = call.input;
   const cmd = input['command'];
-  if (typeof cmd === 'string') return cmd;
+  if (typeof cmd === 'string') return clampTarget(cmd);
   const path = input['path'];
-  if (typeof path === 'string') return path;
+  if (typeof path === 'string') return clampTarget(path);
   const pattern = input['pattern'];
-  if (typeof pattern === 'string') return `/${pattern}/`;
+  if (typeof pattern === 'string') return clampTarget(`/${pattern}/`);
   return '';
 }
 

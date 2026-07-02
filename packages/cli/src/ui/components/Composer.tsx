@@ -16,7 +16,7 @@ import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { useI18n } from '../../i18n/index.js';
 import { windowComposerVisual } from '../../session/composer-edit.js';
-import { visualLines } from '../../session/visual-lines.js';
+import { composerIndentCols, visualLines } from '../../session/visual-lines.js';
 
 export interface ComposerProps {
   readonly value: string;
@@ -203,11 +203,17 @@ export function Composer(props: ComposerProps): React.ReactElement {
   // O cálculo passou de linhas LÓGICAS p/ VISUAIS: uma ÚNICA linha lógica longa (1300 chars
   // sem `\n`) é 1 linha lógica mas QUEBRA em N visuais — antes não janelava e crescia sem
   // teto comendo o transcript. Sem `maxRows` (caso ilimitado) ⇒ render IDÊNTICO ao de antes.
-  // A largura efetiva desconta o indent do prompt/tag (≈2 cols) p/ o orçamento bater com o
-  // wrap real do terminal. `columns` ausente/≤0 ⇒ degrada p/ janela lógica (comportamento
-  // antigo) dentro de `windowComposerVisual`.
+  // A largura efetiva desconta o indent REAL do prompt+tag (GAP-FIX): em sessão renomeada
+  // a tag `● <nome> ` (EST-0972) empurra o texto ~nome+3 colunas além do `› ` — descontar
+  // 2 fixo subestimava o wrap e o frame estourava `rows` (gap acumulando a cada tecla).
+  // `composerIndentCols` é a MESMA conta do orçamento no App (uma fonte só). `columns`
+  // ausente/≤0 ⇒ degrada p/ janela lógica (comportamento antigo) dentro de `windowComposerVisual`.
   const maxRows = props.maxRows;
-  const effCols = props.columns !== undefined && props.columns > 2 ? props.columns - 2 : (props.columns ?? 0);
+  const indentCols = composerIndentCols(props.sessionLabel);
+  const effCols =
+    props.columns !== undefined && props.columns > indentCols
+      ? props.columns - indentCols
+      : (props.columns ?? 0);
   // Estoura SÓ se a altura VISUAL passa do teto CHEIO (`maxRows`). Igual ao gate antigo
   // (`lineCount > maxRows`), mas VISUAL: cobre a linha lógica única longa que faz soft-wrap.
   const overflowing =

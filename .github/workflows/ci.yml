@@ -36,4 +36,8 @@ jobs:
         run: npm run build
 
       - name: testes
-        run: npm test -- --exclude '**/headless-exit.test.ts' --exclude '**/headless-yolo-bin.test.ts' --maxWorkers=2
+        # F166 — SEM excludes: os testes de binário (headless-exit/headless-yolo-bin)
+        # estavam EXCLUÍDOS da esteira (known-red mascarado — o token de teste
+        # 'stub-token' reprovava no `isPat` do fallback ALUY_TOKEN). O token foi
+        # corrigido p/ o formato válido e a suíte volta a rodar INTEIRA (CI honesta).
+        run: npm test -- --maxWorkers=2

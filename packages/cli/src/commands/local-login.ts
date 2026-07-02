@@ -22,7 +22,17 @@ import {
   type LocalProviderKind,
 } from '@hiperplano/aluy-cli-core';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
-import { storeApiKey, type KeyringEntry } from '../model/local/credential-resolver.js';
+import {
+  storeApiKey,
+  genericApiKeyEnvName,
+  LOCAL_KEYCHAIN_SERVICE,
+  type KeyringEntry,
+} from '../model/local/credential-resolver.js';
+import {
+  keychainIsVolatile,
+  volatileKeychainWarning,
+  type VolatileKeychainProbeOptions,
+} from '../auth/keychain-volatility.js';
 import { loadLocalProviderCatalog } from '../io/providers-config.js';
 import { UserConfigStore } from '../io/user-config.js';
 import { OAuthTokenStore } from '../model/local/oauth-store.js';
@@ -56,6 +66,16 @@ export interface LocalLoginDeps {
   /** Crypto PKCE (testes determinísticos). Default: node:crypto. */
   readonly crypto?: PkceCrypto;
   readonly now?: () => number;
+  /** F165 — sonda de cofre volátil injetável (testes): platform/leitor de /proc/keys. */
+  readonly volatileProbe?: Omit<VolatileKeychainProbeOptions, 'service'>;
+  /**
+   * F167 — store de config INJETÁVEL. Sem isto, o `new UserConfigStore()` fixo
+   * gravava `backend/localProvider` no ~/.aluy/config.json REAL mesmo nos TESTES
+   * (que injetavam só o keychain): cada `npm test` CLOBBERAVA o provider real do
+   * usuário (tokenrouter → openrouter) ⇒ "perdi o login do token router" (o outro
+   * lado do F165). Default: o store real (produção inalterada).
+   */
+  readonly configStore?: UserConfigStore;
 }
 
 /** Crypto PKCE real (node:crypto). */
@@ -123,12 +143,18 @@ async function runApiKeyLogin(
     return 1;
   }
   io.out(`✓ API key de ${provider} guardada no keychain do SO.`);
+  // F165 — sem Secret Service, o write acima caiu no keyring do KERNEL (memória):
+  // a chave "some" no próximo reboot e o dono redescobre na pior hora. Avisa AGORA,
+  // com o caminho de correção (Secret Service ou a env que o resolvedor lê).
+  if (keychainIsVolatile({ service: LOCAL_KEYCHAIN_SERVICE, ...(deps.volatileProbe ?? {}) })) {
+    for (const line of volatileKeychainWarning(genericApiKeyEnvName(provider))) io.err(line);
+  }
   // DETERMINÍSTICO — configura `backend:local` + provider de uma vez. Assim
   // `aluy login --provider X --token Y` deixa TUDO pronto (a sessão já abre em local com
   // este provider), sem depender do onboard nem de editar config à mão. Best-effort: uma
   // falha de escrita do config não derruba o login (a chave já está no keychain).
   try {
-    new UserConfigStore().save({ backend: 'local', localProvider: provider });
+    (deps.configStore ?? new UserConfigStore()).save({ backend: 'local', localProvider: provider });
     io.out(`  backend local + provider "${provider}" configurados. Rode:  aluy`);
   } catch {
     io.out(`  Use: aluy --backend local --local-provider ${provider}  (ou ALUY_BACKEND=local)`);

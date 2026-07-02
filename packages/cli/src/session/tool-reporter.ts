@@ -9,7 +9,7 @@
 // do core (`NativeTool`/`ToolResult`) — não toca I/O.
 
 import { QUESTION_TOOL_NAME, type NativeTool, type ToolPorts, type ToolResult, type ToolRunContext } from '@hiperplano/aluy-cli-core';
-import type { ToolLineBlock } from './model.js';
+import { clampTarget, type ToolLineBlock } from './model.js';
 
 /** Para onde as linhas de tool são emitidas (a UI). */
 export interface ToolReporter {
@@ -36,14 +36,18 @@ function verbOf(name: string): string {
   }
 }
 
-/** Alvo legível (path/comando/padrão/pergunta) a partir do input. */
+/**
+ * Alvo legível (path/comando/padrão/pergunta) a partir do input. SEMPRE clampado a
+ * 1 linha (`clampTarget`): um batch/heredoc como `command` não pode despejar 100+
+ * linhas no transcript — o alvo identifica a ação, não a reproduz.
+ */
 function targetOf(input: Readonly<Record<string, unknown>>): string {
   const cmd = input['command'];
-  if (typeof cmd === 'string') return cmd;
+  if (typeof cmd === 'string') return clampTarget(cmd);
   const path = input['path'];
-  if (typeof path === 'string') return path;
+  if (typeof path === 'string') return clampTarget(path);
   const pattern = input['pattern'];
-  if (typeof pattern === 'string') return `/${pattern}/`;
+  if (typeof pattern === 'string') return clampTarget(`/${pattern}/`);
   // `perguntar`: o "alvo" é a própria pergunta (curta, entre aspas) — assim o histórico
   // fica `⏺ perguntar "Qual stack?" → React`, e não um `⏺ perguntar  ok` mudo.
   const q = input['question'] ?? input['prompt'] ?? input['text'] ?? input['message'];

@@ -139,7 +139,9 @@ describe('binário aluy — YOLO headless (EST-1007 · AG-0008)', () => {
     ALUY_MEM_OFF: '1', // mem0 é independente do maestro (kill-switch próprio)
     ALUY_MAESTRO_OFF: '1', // turbo OFF (mem0/headroom) → hermético no CI sem serviços
     ALUY_BROKER_URL: brokerUrl,
-    ALUY_TOKEN: 'stub-token',
+    // PAT sintético de FORMATO válido — `isPat` valida o fallback de env (ver
+    // headless-exit.test.ts; 'stub-token' reprovava ⇒ "sem credencial").
+    ALUY_TOKEN: 'pat_0123456789abcdef0123456789abcdef_stub-secret',
     NO_COLOR: '1',
     // NOTA: NÃO setamos ALUY_YOLO_HEADLESS — a prova é que o `--yolo` basta sozinho.
   });

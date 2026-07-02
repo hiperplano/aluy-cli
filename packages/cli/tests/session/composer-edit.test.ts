@@ -361,6 +361,17 @@ describe('composer-edit — windowComposerVisual (janela VISUAL, task #14)', () 
     expect(w.cursor).toBeLessThanOrEqual(w.text.length);
   });
 
+  it('hiddenAbove/Below em LINHAS VISUAIS, não chars (fix do marcador `↑1307 linhas`)', () => {
+    const cols = 20;
+    const maxRows = 3;
+    const long = 'Z'.repeat(1300); // 65 linhas visuais a 20 cols; janela mostra ~3
+    const w = windowComposerVisual(long, long.length, maxRows, cols);
+    // ~62 linhas ficaram acima — o marcador diz "linhas", então a ORDEM tem que ser
+    // essa (dezenas), nunca a contagem de CHARS (~1240) que aparecia antes.
+    expect(w.hiddenAbove).toBeGreaterThan(50);
+    expect(w.hiddenAbove).toBeLessThanOrEqual(65);
+  });
+
   it('maxRows ≥ altura visual ⇒ devolve tudo (sem janelar)', () => {
     const text = 'Z'.repeat(30); // 30 chars
     const cols = 80; // cabe em 1 linha visual

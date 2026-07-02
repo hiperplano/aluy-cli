@@ -136,11 +136,24 @@ export class NodeJournalStore implements JournalStorePort {
     // R5 — ATÔMICO: O_CREAT|O_EXCL|O_WRONLY com mode 0600. O arquivo NASCE 0600;
     // não há instante em que exista com permissão larga. O_EXCL garante que não
     // sobrescrevemos um blob plantado (ref é único por construção).
-    const fd = openSync(
-      abs,
-      fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
-      FILE_MODE,
-    );
+    let fd: number;
+    try {
+      fd = openSync(
+        abs,
+        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
+        FILE_MODE,
+      );
+    } catch {
+      // F162 — blobsDir apagado no meio da sessão: recria a árvore e tenta 1×
+      // (mesma defesa do appendEntry; O_EXCL segue valendo no retry).
+      this.sessionReady = false;
+      this.ensureSession();
+      fd = openSync(
+        abs,
+        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
+        FILE_MODE,
+      );
+    }
     try {
       writeSync(fd, content, 0, 'utf8');
     } finally {
@@ -167,7 +180,20 @@ export class NodeJournalStore implements JournalStorePort {
     const sep = this.stackHasTornTail() ? '\n' : '';
     // Append-log da pilha (JSONL). O arquivo já nasce 0600 (criado no ensure);
     // appendFileSync com mode preserva (não relaxa). NUNCA logamos isto em stdout.
-    appendFileSync(this.stackFile, sep + JSON.stringify(entry) + '\n', { mode: FILE_MODE });
+    const line = sep + JSON.stringify(entry) + '\n';
+    try {
+      appendFileSync(this.stackFile, line, { mode: FILE_MODE });
+    } catch {
+      // F162 — o dir da sessão foi APAGADO no meio da sessão (rm -rf ~/.aluy/undo,
+      // limpeza externa): `sessionReady` ficava true, o ensure virava no-op e TODO
+      // append lançava ENOENT p/ sempre — derrubando o comando que o undo deveria
+      // apenas acompanhar. Recria a árvore e tenta 1× (se falhar de novo, propaga —
+      // o chamador degrada sem undo, ver journal.toolPort).
+      this.sessionReady = false;
+      this.stackLineCount = -1; // o stack renasce vazio — re-conta do disco.
+      this.ensureSession();
+      appendFileSync(this.stackFile, line, { mode: FILE_MODE });
+    }
     // EST-1011 (rotação) — conta a 1ª vez do disco (cobre stack herdado já grande),
     // depois incrementa em memória. Ao passar do teto, reescreve compactado.
     if (this.stackLineCount < 0) this.stackLineCount = this.countStackLines();

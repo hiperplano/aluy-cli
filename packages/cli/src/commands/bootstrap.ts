@@ -14,14 +14,23 @@ import { runProvisioner } from '../provisioner/sidecar-provisioner.js';
 import {
   storeApiKey,
   apiKeyAccount,
+  genericApiKeyEnvName,
   LOCAL_KEYCHAIN_SERVICE,
   type KeyringEntry,
 } from '../model/local/credential-resolver.js';
+import { keychainIsVolatile, volatileKeychainWarning } from '../auth/keychain-volatility.js';
 import { resolveLocalProviderConfig } from '../model/local/config.js';
-import { defaultLocalCatalog, findProvider, type LocalProviderKind } from '@hiperplano/aluy-cli-core';
+import {
+  defaultLocalCatalog,
+  findProvider,
+  type LocalProviderKind,
+} from '@hiperplano/aluy-cli-core';
 
 /** Função de fetch injetável (testes) — assinatura mínima usada pelo preflight. */
-export type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<{ status: number }>;
+export type FetchLike = (
+  url: string,
+  init?: { signal?: AbortSignal },
+) => Promise<{ status: number }>;
 
 /**
  * Preflight de ACESSIBILIDADE do modelo local (BYO) p/ o caminho via AGENTE — que PRECISA de
@@ -174,9 +183,16 @@ export async function runFirstRunWizard(opts: {
     try {
       storeApiKey(provider, key, entryFactory);
       out('✓ Chave guardada no keychain do SO.');
+      // F165 — cofre volátil (keyring do kernel, sem Secret Service): avisa AGORA
+      // que a chave não sobrevive a reboot, com o caminho de correção.
+      if (keychainIsVolatile({ service: LOCAL_KEYCHAIN_SERVICE })) {
+        for (const line of volatileKeychainWarning(genericApiKeyEnvName(provider))) err(line);
+      }
     } catch (e) {
       err(`Falha ao gravar no keychain: ${e instanceof Error ? e.message : String(e)}`);
-      err('(Por segurança, a credencial nunca é gravada em texto. Instale o Secret Service no Linux.)');
+      err(
+        '(Por segurança, a credencial nunca é gravada em texto. Instale o Secret Service no Linux.)',
+      );
       return false;
     }
     out('');
@@ -334,10 +350,14 @@ export async function runInit(opts: {
   }
   if (useAgent) {
     out('  Instalando os complementos com o próprio aluy — ele detecta o sistema, instala o que');
-    out('  faltar (Python, pip, etc.) e os complementos. ⚠ Acesso total à máquina (com sudo quando');
+    out(
+      '  faltar (Python, pip, etc.) e os complementos. ⚠ Acesso total à máquina (com sudo quando',
+    );
     out('  preciso). Você verá o progresso de cada um abaixo.');
   } else {
-    out('  Instalando os complementos pelo caminho direto (--no-agent; requer Python já pronto)...');
+    out(
+      '  Instalando os complementos pelo caminho direto (--no-agent; requer Python já pronto)...',
+    );
   }
   out('');
 

@@ -5,7 +5,12 @@
 // `visualLines` (e a janela de cauda visual) no comportamento de wrap, sem TUI.
 
 import { describe, expect, it } from 'vitest';
-import { displayWidth, visualLines, windowTailVisual } from '../../src/session/visual-lines.js';
+import {
+  composerIndentCols,
+  displayWidth,
+  visualLines,
+  windowTailVisual,
+} from '../../src/session/visual-lines.js';
 
 describe('visualLines — conta linhas VISUAIS (com WRAP), não linhas-fonte', () => {
   it('linha de 200 chars em columns=80 ⇒ 3 visuais (ceil(200/80))', () => {
@@ -40,6 +45,27 @@ describe('visualLines — conta linhas VISUAIS (com WRAP), não linhas-fonte', (
     const wide = Array.from({ length: 5 }, () => 'a'.repeat(250)).join('\n');
     expect(visualLines(wide, 0)).toBe(5);
     expect(visualLines(wide, -1)).toBe(5);
+  });
+});
+
+describe('composerIndentCols — indent REAL do composer (GAP-FIX da sessão renomeada)', () => {
+  it('sem tag de sessão ⇒ só o prompt `› ` (2 cols, comportamento antigo)', () => {
+    expect(composerIndentCols()).toBe(2);
+    expect(composerIndentCols('')).toBe(2);
+    expect(composerIndentCols('   ')).toBe(2);
+  });
+  it('sessão renomeada ⇒ 2 (prompt) + nome + 3 (`● ` + espaço de junção)', () => {
+    // `FLUIDER-ORCHESTRATOR` (20 chars) — o caso real do gap: indent 2+20+3 = 25.
+    expect(composerIndentCols('FLUIDER-ORCHESTRATOR')).toBe(25);
+    expect(composerIndentCols('ALUY-CLI')).toBe(2 + 8 + 3);
+  });
+  it('a conta muda a altura VISUAL medida (a causa do gap acumulado)', () => {
+    // 156 chars em columns=80: com indent 2 (antigo) ⇒ 2 visuais; com o indent real
+    // de um nome de 20 chars (banda de 55 cols) ⇒ 3 visuais. Era esse 1 a mais que
+    // estourava `rows` e fazia o Ink acumular gap a cada tecla.
+    const text = 'x'.repeat(156);
+    expect(visualLines(text, 80 - 2)).toBe(2);
+    expect(visualLines(text, 80 - composerIndentCols('FLUIDER-ORCHESTRATOR'))).toBe(3);
   });
 });
 

@@ -11,6 +11,7 @@ import {
   createCsiUFilter,
   pendingCsiULen,
   installCsiUGuard,
+  ESC_FLUSH_MS,
 } from '../../src/session/csi-u-guard.js';
 
 const ESC = '\x1b';
@@ -175,5 +176,106 @@ describe('installCsiUGuard — interpõe o filtro no stdin.read()', () => {
     installCsiUGuard(stdin);
     expect(stdin.read()).toBe(''); // a seq vira vazio.
     expect(stdin.read()).toBe(null); // EOF REAL do stream ⇒ null repassado (laço encerra).
+  });
+});
+
+describe('F159 — flush do Esc retido (Esc humano NÃO pode virar tecla morta)', () => {
+  function fakeStdin(chunks: (string | null)[]) {
+    let i = 0;
+    return {
+      read: vi.fn(() => {
+        if (i >= chunks.length) return null;
+        const c = chunks[i];
+        i += 1;
+        return c;
+      }),
+      emit: vi.fn(),
+    };
+  }
+
+  it('Esc SOLITÁRIO: retido no read(), LIBERADO CRU após ESC_FLUSH_MS (+ acorda o laço)', () => {
+    vi.useFakeTimers();
+    try {
+      const stdin = fakeStdin([ESC]);
+      installCsiUGuard(stdin);
+      // O chunk do Esc chega: retido (era potencial início de CSI-u) ⇒ string vazia.
+      expect(stdin.read()).toBe('');
+      // A continuação NÃO veio no prazo ⇒ era Esc humano: flush + 'readable' p/ o Ink reler.
+      vi.advanceTimersByTime(ESC_FLUSH_MS + 5);
+      expect(stdin.emit).toHaveBeenCalledWith('readable');
+      // A releitura entrega o `\x1b` CRU (sem re-filtrar) ⇒ o Ink vê `key.escape`.
+      expect(stdin.read()).toBe(ESC);
+      // E nada sobra depois.
+      expect(stdin.read()).toBe(null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('CSI-u REAL cortada no boundary segue filtrada quando o resto chega ANTES do prazo', () => {
+    vi.useFakeTimers();
+    try {
+      const stdin = fakeStdin([`${ESC}[5741`, '4uZ']);
+      installCsiUGuard(stdin);
+      expect(stdin.read()).toBe(''); // parcial retida.
+      vi.advanceTimersByTime(ESC_FLUSH_MS - 20); // resto chega DENTRO do prazo…
+      expect(stdin.read()).toBe('Z'); // …a seq completa some; só o texto passa.
+      vi.advanceTimersByTime(ESC_FLUSH_MS * 3); // e o prazo antigo NÃO ressuscita nada.
+      expect(stdin.read()).toBe(null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Esc + tecla seguinte no MESMO prazo: o flush não dispara em dobro (re-arma por chunk)', () => {
+    vi.useFakeTimers();
+    try {
+      const stdin = fakeStdin([ESC, `${ESC}`]);
+      installCsiUGuard(stdin);
+      expect(stdin.read()).toBe(''); // 1º Esc retido.
+      // 2º Esc chega antes do prazo: o 1º é liberado pelo feed (não é CSI-u), o 2º fica retido.
+      expect(stdin.read()).toBe(ESC);
+      vi.advanceTimersByTime(ESC_FLUSH_MS + 5); // agora o flush libera o 2º.
+      expect(stdin.read()).toBe(ESC);
+      expect(stdin.read()).toBe(null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restore() cancela o flush pendente (sem timer órfão pós-unmount)', () => {
+    vi.useFakeTimers();
+    try {
+      const stdin = fakeStdin([ESC]);
+      const restore = installCsiUGuard(stdin);
+      expect(stdin.read()).toBe('');
+      restore();
+      vi.advanceTimersByTime(ESC_FLUSH_MS * 2);
+      expect(stdin.emit).not.toHaveBeenCalled(); // nada acorda o laço após o restore.
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('mock SEM emit não derruba o flush (best-effort)', () => {
+    vi.useFakeTimers();
+    try {
+      let first = true;
+      const stdin = {
+        read: vi.fn(() => {
+          if (first) {
+            first = false;
+            return ESC;
+          }
+          return null;
+        }),
+      };
+      installCsiUGuard(stdin);
+      expect(stdin.read()).toBe('');
+      expect(() => vi.advanceTimersByTime(ESC_FLUSH_MS + 5)).not.toThrow();
+      expect(stdin.read()).toBe(ESC); // liberado mesmo sem o wake (sai na próxima leitura).
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
