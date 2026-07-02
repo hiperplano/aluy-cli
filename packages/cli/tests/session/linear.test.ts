@@ -109,6 +109,20 @@ describe('linearize — serializa cada bloco em texto plano rotulado (sem ANSI)'
       block: { kind: 'broker-error', message: 'broker fora', status: 502 },
       expects: '[erro de broker] broker fora (502)',
     },
+    {
+      // F184 — sem backend (retrocompat) ⇒ "erro de broker".
+      block: { kind: 'broker-error', message: 'broker fora', backend: 'broker' as const },
+      expects: '[erro de broker] broker fora',
+    },
+    {
+      // F184 — backend local (BYO) ⇒ "erro do provider local" (não contradiz a msg).
+      block: {
+        kind: 'broker-error',
+        message: 'não consegui falar com o provider local.',
+        backend: 'local' as const,
+      },
+      expects: '[erro do provider local] não consegui falar com o provider local.',
+    },
   ];
 
   for (const { block, expects } of cases) {

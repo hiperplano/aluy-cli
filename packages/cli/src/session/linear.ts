@@ -5,7 +5,11 @@
 // o AskResolver nega por fail-safe (deny por inação); o agente segue e a linha
 // registra a recusa.
 
-import { cleanAluyForDisplay, type HistoryItem, type TierCatalogEntry } from '@hiperplano/aluy-cli-core';
+import {
+  cleanAluyForDisplay,
+  type HistoryItem,
+  type TierCatalogEntry,
+} from '@hiperplano/aluy-cli-core';
 import type { SessionController } from './controller.js';
 import type { SessionBlock } from './model.js';
 import { parseAtMentions, stripMentions, type AttachReader } from '../attach/index.js';
@@ -18,6 +22,16 @@ import { parseClearCommand, runClearCommand, isDestructiveClear } from '../slash
 import type { ThemeName } from '../ui/theme/themes.js';
 import type { Lang } from '../i18n/index.js';
 import type { AgentMemory } from '@hiperplano/aluy-cli-core';
+
+/**
+ * F184 — rótulo do diagnóstico de erro de chamada ao modelo, backend-aware. No BYO
+ * (`backend === 'local'`) NÃO há broker ⇒ "erro do provider local" (a mensagem do bloco
+ * já diz "…provider local"; o prefixo fixo "erro de broker" a contradizia). Ausente ⇒
+ * "erro de broker" (retrocompat: blocos/testes sem o campo mantêm o rótulo original).
+ */
+function brokerErrorLabel(backend: 'local' | 'broker' | undefined): string {
+  return backend === 'local' ? 'erro do provider local' : 'erro de broker';
+}
 
 /** Saída mínima p/ a escrita linear — `process.stdout` ou um fake de teste. */
 export interface LinearOut {
@@ -298,7 +312,7 @@ export async function runHeadlessPrint(
     return {
       result: '',
       ok: false,
-      diagnostic: `erro de broker: ${brokerError.message}${
+      diagnostic: `${brokerErrorLabel(brokerError.backend)}: ${brokerError.message}${
         brokerError.status !== undefined ? ` (${brokerError.status})` : ''
       }`,
     };
@@ -471,7 +485,7 @@ export async function runHeadlessStreamJson(
     const result = {
       result: '',
       ok: false,
-      diagnostic: `erro de broker: ${brokerError.message}${brokerError.status !== undefined ? ` (${brokerError.status})` : ''}`,
+      diagnostic: `${brokerErrorLabel(brokerError.backend)}: ${brokerError.message}${brokerError.status !== undefined ? ` (${brokerError.status})` : ''}`,
     };
     out.write(JSON.stringify({ type: 'result', result: '', ok: false }) + '\n');
     return result;
@@ -902,7 +916,7 @@ export function linearize(block: SessionBlock): string {
     case 'deny':
       return `[negado] ${block.verb} ${block.exact}`;
     case 'broker-error':
-      return `[erro de broker] ${block.message}${block.status !== undefined ? ` (${block.status})` : ''}`;
+      return `[${brokerErrorLabel(block.backend)}] ${block.message}${block.status !== undefined ? ` (${block.status})` : ''}`;
     case 'note':
       return `[${block.title}] ${block.lines.join(' · ')}`;
     case 'doctor': {
