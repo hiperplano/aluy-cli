@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.67] — 2026-07-02
+
 ### Corrigido
 
 - 🟡 Salas: `room_read`/`room_post` de sala inexistente deixou de ser beco sem saída (F157) — o erro lista as salas VIVAS da sessão e explica como salas nascem (`spawn_agent room:"<código>"` · `/rooms`); antes o agente tentava variações às cegas.
