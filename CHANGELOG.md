@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.82] — 2026-07-02
+
 ### Corrigido
 
 - 🟡 `aluy config`: a lista de arquivos de `~/.aluy/` agora inclui o estado do usuário antes ausente (F186) — `sessions/` (histórico das conversas), `audit.jsonl` (trilha de auditoria), `cron`, `exports/` e `undo/`. Antes só mostrava config/mcp/hooks/providers/memory/logs.
