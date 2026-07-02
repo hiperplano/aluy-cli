@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Corrigido
+
+- 🟡 `aluy whoami` no backend LOCAL (BYO): não reporta mais o falso `não autenticado — rode aluy login` (exit 1) (F183) — agora mostra mensagem honesta de BYO (a credencial é a chave do provider; veja `aluy models`/`aluy config`) + exit 0, sem tocar o keychain do broker. Irmão do F182 (doctor).
+
 _(vazio)_
 
 ## [1.0.0-rc.78] — 2026-07-02
