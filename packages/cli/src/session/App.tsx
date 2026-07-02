@@ -1164,18 +1164,11 @@ export function App(props: AppProps): React.ReactElement {
   // estado, mas o render CAI no inline com o aviso (cockpitActive=false) — não prende o
   // alt-screen (só chamamos enter() quando o layout CABE).
   const toggleFullscreen = useCallback(() => {
-    // Tela cheia (cockpit, `/fullscreen`/`/cockpit`) DESATIVADA p/ o usuário nesta versão —
-    // a experiência ainda não está boa o bastante (decisão do dono). O comando só AVISA e
-    // seguimos no inline. O CÓDIGO do cockpit segue intacto e testável via o escape hatch
-    // `ALUY_FULLSCREEN=1` (QA/testes e p/ religar a feature quando voltar). O boot também
-    // ignora `--fullscreen`/`ui.fullscreen` sem o env (ver run.tsx).
-    if (process.env.ALUY_FULLSCREEN !== '1') {
-      controller.replaceNote('fullscreen', [
-        'O modo tela cheia (/fullscreen) está desativado nesta versão — ainda em ajustes.',
-        'A sessão continua no modo inline (o padrão), que é o recomendado.',
-      ]);
-      return;
-    }
+    // F194 — `/fullscreen`/`/cockpit` RELIGADO para o usuário (pedido do dono): o gate
+    // `ALUY_FULLSCREEN=1` que só AVISAVA "desativado" foi removido. O cockpit já é
+    // anti-flicker (stress F163/cockpit: 0 `\x1b[2J`) e degrada pro inline com aviso
+    // quando a tela não cabe (abaixo). O boot segue INLINE por padrão (não força cockpit
+    // na largada); o comando entra sob demanda.
     setFullscreen((on) => {
       const next = !on;
       const fits = resolveCockpitLayout(rows, columns).kind === 'cockpit';
