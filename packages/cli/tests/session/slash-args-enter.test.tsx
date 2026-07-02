@@ -249,6 +249,29 @@ describe('App — slash COM args (char-a-char): Enter SUBMETE a linha (EST-0948)
     expect(calls[0]?.args).toBe('rode pra sempre');
     unmount();
   });
+
+  // F173 — `/comando` DESCONHECIDO (menu aberto, ZERO match) + Enter era TECLA MORTA.
+  it('F173 — `/naoexiste` + Enter FECHA o menu, LIMPA o composer e AVISA (não é tecla morta)', async () => {
+    const calls: { cmd: SlashCommand; args: string }[] = [];
+    const { stdin, lastFrame, unmount } = await mountApp({
+      onCommand: (cmd, args) => calls.push({ cmd, args }),
+    });
+
+    // `/naoexiste` — nome que não casa NENHUM comando ⇒ menu aberto, lista vazia.
+    await typeCharByChar(stdin, '/naoexiste');
+    await waitFor(() => menuOpen(lastFrame));
+    expect(menuOpen(lastFrame)).toBe(true);
+
+    // Enter: antes era no-op (entry undefined ⇒ só return). Agora fecha + avisa.
+    await pressEnterUntil(stdin, () => !menuOpen(lastFrame));
+    const frame = plain(lastFrame() ?? '');
+    expect(menuOpen(lastFrame)).toBe(false); // menu FECHOU
+    expect(frame).toContain('comando desconhecido'); // nota HONESTA
+    expect(frame).toContain('/naoexiste'); // com o token digitado
+    expect(composerLine(lastFrame).includes('/naoexiste')).toBe(false); // composer LIMPO
+    expect(calls.length).toBe(0); // NUNCA virou objetivo do modelo
+    unmount();
+  });
 });
 
 describe('App — NÃO-REGRESSÃO do slash-menu/pickers com o fix (EST-0948)', () => {
