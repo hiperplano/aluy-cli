@@ -87,7 +87,8 @@ export function buildSkillsNote(input: SkillsListInput): SkillsListNote {
       title: 'skills',
       lines: [
         `nenhuma skill mapeada — crie uma em ${globalDir}/<nome>/SKILL.md`,
-        'manifesto mínimo: frontmatter com `name` e `description`;',
+        // F189 — `name` é obrigatório; `description` é opcional (senão usa a 1ª linha das instruções).
+        'manifesto: frontmatter com `name` (obrigatório); `description` opcional;',
         'o corpo do SKILL.md são as instruções/capacidade injetadas quando invocada.',
         'invoque por nome: `/skill <nome>` (injeta as instruções no contexto sob demanda).',
       ],
