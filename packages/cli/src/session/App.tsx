@@ -2390,12 +2390,18 @@ export function App(props: AppProps): React.ReactElement {
         const hasComposer = composer !== '';
 
         if (hasQueue || hasInjects || hasComposer) {
+          // F191 — rastreia se, após tratar composer/fila, há QUALQUER msg ESPERANDO
+          // encaixe (pré-existente OU recém-criada). Só então vale ACELERAR (expedite):
+          // cortar a geração em voo p/ o loop drenar JÁ. `/ask` sozinho (nada injetado)
+          // NÃO expedita — não há msg esperando p/ apressar.
+          let injectedSomething = hasInjects;
           // (1) ACELERA a msg do composer: REDIRECIONA p/ o agente vivo (não enfileira p/ o fim).
           if (hasComposer) {
             const action = decideEscAction(composer);
             if (action.kind === 'redirect') {
               controller.injectInput('root', action.inject);
               setHistory((h) => [...h, action.inject]);
+              injectedSomething = true;
             }
             // `/ask` sozinho ⇒ nada a injetar; só limpamos o composer (segue sem parar).
             setText('');
@@ -2407,9 +2413,16 @@ export function App(props: AppProps): React.ReactElement {
             const kept: string[] = [];
             for (const q of queueRef.current) {
               if (!injectIfPlainText(q)) kept.push(q);
+              else injectedSomething = true;
             }
             setQueue(kept);
           }
+          // (3) F191 — FORÇA O ENCAIXE RÁPIDO: havendo msg esperando (injects pré-existentes,
+          //     composer redirecionado ou fila encaixada), CORTA a geração de modelo EM VOO
+          //     p/ o loop drenar o `user_inject` JÁ na volta seguinte — SEM parar o turno.
+          //     No-op quando não há chamada de modelo em voo (ex.: durante uma tool longa).
+          //     Só ACELERA; nunca PARA (o freio total segue sendo o ESC-com-tudo-vazio).
+          if (injectedSomething) controller.expedite();
           return; // NÃO interrompe — havendo pendência, o ESC só acelera o encaixe.
         }
 
