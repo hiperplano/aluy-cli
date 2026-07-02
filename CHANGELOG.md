@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.80] — 2026-07-02
+
 ### Corrigido
 
 - 🟡 Diagnóstico de erro de modelo no backend LOCAL (BYO): não sai mais como `erro de broker: …provider local` (prefixo contradizendo o corpo) (F184) — agora `erro do provider local: …`. O bloco já sabia o backend (F52); faltava usá-lo no render linear/headless. Família do F182/F183.
