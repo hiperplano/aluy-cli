@@ -33,6 +33,15 @@ export function apiKeyAccount(provider: LocalProviderKind): string {
   return `${provider}:apikey`;
 }
 
+/**
+ * Nome da env var GENÉRICA de API key de um provider (`ALUY_<PROVIDER>_API_KEY`) —
+ * o fallback que o resolvedor consulta p/ QUALQUER provider (incl. custom). Exportado
+ * p/ o aviso F165 (cofre volátil) citar exatamente a env que o resolvedor lê.
+ */
+export function genericApiKeyEnvName(provider: string): string {
+  return `ALUY_${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+}
+
 /** Conta do keychain p/ os tokens OAuth de um provider (EST-1114). */
 export function oauthAccount(provider: LocalProviderKind): string {
   return `${provider}:oauth`;
@@ -129,7 +138,7 @@ export function createLocalCredentialProvider(
     // p/ o provider local ATIVO). Assim provider CUSTOM (ex.: tokenrouter) também tem env.
     const fromKeychain = readKeychain(opts.entryFactory, apiKeyAccount(provider));
     const provEnvName = ENV_API_KEY[provider];
-    const genericEnvName = `ALUY_${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+    const genericEnvName = genericApiKeyEnvName(provider);
     const fromEnv =
       (provEnvName !== undefined ? env[provEnvName] : undefined) ??
       env[genericEnvName] ??

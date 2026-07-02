@@ -2,6 +2,9 @@
 //
 // Renderiza o EFEITO EXATO que a engine (EST-0945) devolveu — o COMANDO `$ ...`,
 // o DIFF unificado com `-`/`+`, ou a URL/destino — NUNCA um resumo vago (CLI-SEC-9).
+// F164 (decisão do dono, 2026-07-02): efeito GIGANTE (batch/heredoc/diff de 100+
+// linhas) é JANELADO (cabeça + `… (+N linhas ocultas)` + cauda) — recorte com
+// marcador explícito, nunca paráfrase; `[e] editar` dá o efeito completo.
 // E oferece as ações `[a]/[s]/[n]/[e]`. A TUI NÃO decide permissão (handoff §10
 // regra 3 / CA-2): recebe o `AskRequest` e DEVOLVE a escolha via `onResolve`.
 //
@@ -28,6 +31,37 @@ function langFromPath(path: string | undefined): string | undefined {
   if (!path) return undefined;
   const ext = path.split('.').pop();
   return ext && ext !== path ? ext : undefined;
+}
+
+/**
+ * F164 (decisão do dono, 2026-07-02) — JANELA do corpo do efeito no ask. Um
+ * batch/heredoc ou diff de 100+ linhas despejado INTEIRO no box da catraca não
+ * melhora a revisão — PIORA: o box estoura a tela e o COMEÇO do comando (a parte
+ * mais importante) rola p/ fora antes de o usuário decidir. A janela mostra a
+ * CABEÇA (o comando/começo do diff) + a CAUDA (o fim, onde heredoc/redireção
+ * terminam) + a contagem EXPLÍCITA do oculto — e `[e] editar` segue dando acesso
+ * ao efeito completo. CLI-SEC-9 continua honesto: nada é RESUMIDO/parafraseado,
+ * só recortado com marcador visível; abaixo do teto o render é IDÊNTICO ao de antes.
+ */
+export const ASK_EFFECT_MAX_LINES = 14;
+const ASK_EFFECT_HEAD_LINES = 9;
+const ASK_EFFECT_TAIL_LINES = 4; // cabeça + marcador (1) + cauda = ASK_EFFECT_MAX_LINES
+
+export interface EffectWindow {
+  readonly head: readonly string[];
+  /** Linhas OCULTAS entre a cabeça e a cauda (0 = coube inteiro, sem marcador). */
+  readonly hidden: number;
+  readonly tail: readonly string[];
+}
+
+/** PURA (testável sem Ink): janela cabeça+cauda das linhas do efeito. */
+export function windowEffectLines(lines: readonly string[]): EffectWindow {
+  if (lines.length <= ASK_EFFECT_MAX_LINES) return { head: lines, hidden: 0, tail: [] };
+  return {
+    head: lines.slice(0, ASK_EFFECT_HEAD_LINES),
+    hidden: lines.length - ASK_EFFECT_HEAD_LINES - ASK_EFFECT_TAIL_LINES,
+    tail: lines.slice(lines.length - ASK_EFFECT_TAIL_LINES),
+  };
 }
 
 export interface AskDialogProps {
@@ -197,34 +231,53 @@ function promptCopy(req: AskRequest): string {
   return 'executar este comando?';
 }
 
-/** Renderiza o corpo do efeito EXATO conforme o tipo (CLI-SEC-9). */
+/** Renderiza o corpo do efeito EXATO conforme o tipo (CLI-SEC-9 + janela F164). */
 function EffectBody(props: { readonly request: AskRequest }): React.ReactElement {
   const theme = useTheme();
   const eff = props.request.effect;
+  // F164 — janela cabeça+cauda (ver windowEffectLines): efeito curto = idêntico ao
+  // de antes; efeito gigante = cabeça + `… (+N linhas ocultas)` + cauda.
+  const win = windowEffectLines(eff.exact.split('\n'));
+  // Destrutivo NÃO oferece `[e]` (§2.10) — o marcador não pode sugerir tecla inexistente.
+  const editHint = isDestructive(props.request) ? '' : ' — [e] editar mostra tudo';
+  const marker = (key: string): React.ReactElement => (
+    <Box key={key}>
+      <Role name="accent">{theme.box.vertical} </Role>
+      <Role name="fgDim">
+        … (+{win.hidden} linhas ocultas{editHint})
+      </Role>
+    </Box>
+  );
 
   if (eff.kind === 'diff') {
     const lang = resolveLanguage(langFromPath(eff.path ?? eff.exact));
+    const diffLine = (line: string, key: string): React.ReactElement => (
+      <Box key={key}>
+        <Role name="accent">{theme.box.vertical} </Role>
+        <DiffLine line={line} lang={lang ?? undefined} />
+      </Box>
+    );
     return (
       <Box flexDirection="column">
-        {eff.exact.split('\n').map((line, i) => (
-          <Box key={i}>
-            <Role name="accent">{theme.box.vertical} </Role>
-            <DiffLine line={line} lang={lang ?? undefined} />
-          </Box>
-        ))}
+        {win.head.map((line, i) => diffLine(line, `h${i}`))}
+        {win.hidden > 0 && marker('m')}
+        {win.tail.map((line, i) => diffLine(line, `t${i}`))}
       </Box>
     );
   }
 
   // command / network / path: mostra a verdade literal (`$ cmd` já vem no exact).
+  const cmdLine = (line: string, key: string): React.ReactElement => (
+    <Box key={key}>
+      <Role name="accent">{theme.box.vertical} </Role>
+      <Role name="fg">{line}</Role>
+    </Box>
+  );
   return (
     <Box flexDirection="column">
-      {eff.exact.split('\n').map((line, i) => (
-        <Box key={i}>
-          <Role name="accent">{theme.box.vertical} </Role>
-          <Role name="fg">{line}</Role>
-        </Box>
-      ))}
+      {win.head.map((line, i) => cmdLine(line, `h${i}`))}
+      {win.hidden > 0 && marker('m')}
+      {win.tail.map((line, i) => cmdLine(line, `t${i}`))}
     </Box>
   );
 }
