@@ -93,7 +93,13 @@ export class UserAgentsLoader {
       return { profiles: [], errors: [] }; // dir ausente/ilegível ⇒ sem agentes.
     }
     const mdNames = entries
-      .filter((e) => e.isFile() && e.name.toLowerCase().endsWith('.md'))
+      .filter(
+        // F154 — symlink p/ .md TAMBÉM entra: `Dirent.isFile()` não segue o link e
+        // os perfis do projeto (symlinks p/ o specs) sumiam do discovery. O readOne
+        // re-checa confinamento (resolveInside/HOME) e o statSync (segue o link)
+        // exige isFile() + teto de bytes — symlink p/ fora/dir/loop segue rejeitado.
+        (e) => (e.isFile() || e.isSymbolicLink()) && e.name.toLowerCase().endsWith('.md'),
+      )
       .map((e) => e.name)
       .sort((a, b) => a.localeCompare(b));
 

@@ -24,9 +24,7 @@ interface UpdateCache {
 
 function disabled(env: NodeJS.ProcessEnv): boolean {
   return (
-    env['ALUY_NO_UPDATE_CHECK'] === '1' ||
-    env['NO_UPDATE_NOTIFIER'] === '1' ||
-    env['CI'] === 'true'
+    env['ALUY_NO_UPDATE_CHECK'] === '1' || env['NO_UPDATE_NOTIFIER'] === '1' || env['CI'] === 'true'
   );
 }
 
@@ -47,10 +45,7 @@ function readCache(): UpdateCache | null {
  * Nota de update a partir do CACHE (síncrono, offline). `undefined` quando não há o que
  * avisar (sem cache, versão atual já é a mais nova, ou desligado por env).
  */
-export function readUpdateNote(
-  installed: string,
-  env: NodeJS.ProcessEnv,
-): string | undefined {
+export function readUpdateNote(installed: string, env: NodeJS.ProcessEnv): string | undefined {
   if (disabled(env)) return undefined;
   const c = readCache();
   if (c && isNewer(c.latest, installed)) {
@@ -63,10 +58,7 @@ export function readUpdateNote(
  * Refresca o cache (no máx. 1x/dia) com o `latest` do npm. ASYNC, FAIL-SOFT: erro de
  * rede / offline / parse ⇒ silêncio (não escreve, não lança). Fire-and-forget no boot.
  */
-export async function refreshUpdateCheck(
-  installed: string,
-  env: NodeJS.ProcessEnv,
-): Promise<void> {
+export async function refreshUpdateCheck(installed: string, env: NodeJS.ProcessEnv): Promise<void> {
   void installed; // (mantido p/ simetria de assinatura / futuro tracking)
   if (disabled(env)) return;
   const c = readCache();
@@ -79,11 +71,9 @@ export async function refreshUpdateCheck(
     const latest = data.version;
     if (typeof latest !== 'string') return;
     mkdirSync(ALUY_DIR, { recursive: true });
-    writeFileSync(
-      CACHE,
-      JSON.stringify({ lastCheck: Date.now(), latest } satisfies UpdateCache),
-      { mode: 0o600 },
-    );
+    writeFileSync(CACHE, JSON.stringify({ lastCheck: Date.now(), latest } satisfies UpdateCache), {
+      mode: 0o600,
+    });
   } catch {
     // offline / timeout / erro ⇒ silêncio (o boot nunca depende disto)
   }
