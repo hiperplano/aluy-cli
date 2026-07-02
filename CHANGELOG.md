@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Corrigido
+
+- 🟢 `aluy agents` / `aluy skills`: o texto de ajuda do estado vazio dizia "frontmatter mínimo: name, description", mas só `name` é obrigatório (fail-closed) — `description`/`tools` são opcionais (sem `description`, o corpo/1ª linha das instruções vira o resumo). Texto corrigido p/ refletir o comportamento real (F189).
+
 _(vazio)_
 
 ## [1.0.0-rc.83] — 2026-07-02

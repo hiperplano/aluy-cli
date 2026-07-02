@@ -101,7 +101,9 @@ export function buildAgentsNote(input: AgentsListInput): AgentsListNote {
       title: 'agents',
       lines: [
         `nenhum agente .md mapeado — crie um em ${globalDir}/<nome>.md`,
-        'frontmatter mínimo: `name`, `description` e (opcional) `tools:` (lista ⊆ pai);',
+        // F189 — só `name` é obrigatório (sem ele o perfil é rejeitado, fail-closed);
+        // `description` e `tools:` são opcionais. Sem `description`, o corpo vira o resumo.
+        'frontmatter: `name` (obrigatório); `description` e `tools:` (lista ⊆ pai) opcionais;',
         'o corpo do .md é a persona (system prompt) do sub-agente.',
         'são os perfis que o `spawn_agent` (sub-agentes) invoca por nome.',
       ],
@@ -116,7 +118,9 @@ export function buildAgentsNote(input: AgentsListInput): AgentsListNote {
       p.tools === undefined ? 'herda do pai' : p.tools.length ? p.tools.join(', ') : '(nenhuma)',
       agentPersonaLine(p),
     ]);
-    lines.push(...boxTable(['agente', 'escopo', 'tools', 'sobre'], rows, { maxWidths: [18, 8, 24, 44] }));
+    lines.push(
+      ...boxTable(['agente', 'escopo', 'tools', 'sobre'], rows, { maxWidths: [18, 8, 24, 44] }),
+    );
   }
 
   if (rejected.length > 0) {
