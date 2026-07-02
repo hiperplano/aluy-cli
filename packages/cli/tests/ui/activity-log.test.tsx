@@ -260,3 +260,68 @@ describe('<ActivityLog> — dado RICO (#142) por evento (EST-1000)', () => {
     expect(out).not.toContain('�'); // nenhum surrogate partido.
   });
 });
+
+// ── EST-1015 (cockpit) — a janela NUNCA pinta mais linhas VISUAIS que `visibleRows` ──
+// No cockpit a região do log é uma Box de altura FIXA; pintar além dela dispara o
+// mis-clip do Ink (linhas MESCLADAS — mesma classe do bug da conversa). Duas fontes de
+// estouro provadas aqui (FALHA-SEM/PASSA-COM):
+//  (a) evento `running` com `tail` pinta 2 linhas, mas a janela antiga contava 1;
+//  (b) o `bootInfo` do empty-state não tinha teto (um boot verboso estourava a região).
+describe('<ActivityLog> — janela bounded por linhas VISUAIS (EST-1015, cockpit)', () => {
+  it('eventos running com tail NÃO estouram visibleRows', () => {
+    const busy: readonly LogSection[] = [
+      {
+        id: 'root',
+        kind: 'root',
+        label: 'root',
+        phase: 'tool',
+        tokens: 100,
+        toolCalls: 4,
+        durationMs: 100,
+        collapsed: false,
+        events: Array.from({ length: 4 }, (_, i) => ({
+          kind: 'tool' as const,
+          label: 'bash',
+          detail: `cmd-${i}`,
+          status: 'running' as const,
+          tail: `saída viva ${i}`,
+        })),
+      } as LogSection,
+    ];
+    const visibleRows = 5;
+    const out = frameInWidth(
+      <ActivityLog
+        sections={busy}
+        visibleRows={visibleRows}
+        scrollOffset={0}
+        focused={false}
+        columns={120}
+      />,
+      120,
+    );
+    expect(out.split('\n').length).toBeLessThanOrEqual(visibleRows);
+    // a CAUDA (evento mais novo) está visível.
+    expect(out).toContain('cmd-3');
+  });
+
+  it('bootInfo do empty-state é CLIPADO ao visibleRows (com …)', () => {
+    const boot = [
+      { title: 'config', lines: Array.from({ length: 10 }, (_, i) => `item ${i}`) },
+      { title: 'agentes', lines: Array.from({ length: 10 }, (_, i) => `perfil ${i}`) },
+    ];
+    const visibleRows = 6;
+    const out = frameInWidth(
+      <ActivityLog
+        sections={[]}
+        visibleRows={visibleRows}
+        scrollOffset={0}
+        focused={false}
+        columns={120}
+        bootInfo={boot}
+      />,
+      120,
+    );
+    expect(out.split('\n').length).toBeLessThanOrEqual(visibleRows);
+    expect(out).toContain('…'); // sinaliza que há mais (clipado, não sumido).
+  });
+});

@@ -108,6 +108,7 @@ import {
   type SplitLayout,
 } from './split-budget.js';
 import { buildActivityLog, countActivityLines } from './activity-log.js';
+import { partitionCockpitBlocks } from './cockpit-blocks.js';
 import { Cockpit, type CockpitFocus } from './Cockpit.js';
 import { resolveCockpitLayout } from './cockpit-layout.js';
 import { scrollOffset, type ScrollKey } from './viewport.js';
@@ -706,10 +707,22 @@ export function App(props: AppProps): React.ReactElement {
       s.kind === 'subagent' &&
       (s.phase === 'thinking' || s.phase === 'tool' || s.phase === 'asking'),
   ).length;
+  // EST-1015 — as notas de DIAGNÓSTICO de boot (config/agentes) RELOCADAS p/ o LOG
+  // (partitionCockpitBlocks) contam como conteúdo do log no SINAL adaptativo: sem isto,
+  // o log RECOLHIA p/ 1 linha (hasActivity=false) e as notas relocadas ficavam
+  // INVISÍVEIS (a feature morria). 1 linha por título + 1 por linha de nota (o mesmo
+  // que o <ActivityLog> pinta no empty-state).
+  const cockpitBootNotes = fullscreen ? partitionCockpitBlocks(state.blocks).startupNotes : [];
+  // +1 = a linha do rótulo `LOG · …` (o <ActivityLog> a pinta ANTES do conteúdo e ela
+  // consome 1 das `visibleRows`); sem ela na conta, a última linha de nota vira `…`.
+  const cockpitBootLines =
+    cockpitBootNotes.length > 0
+      ? 1 + cockpitBootNotes.reduce((acc, n) => acc + 1 + n.lines.length, 0)
+      : 0;
   const cockpitLogHint = fullscreen
     ? {
-        lines: countActivityLines(cockpitLogSections),
-        hasActivity: cockpitLogSections.length > 0,
+        lines: countActivityLines(cockpitLogSections) + cockpitBootLines,
+        hasActivity: cockpitLogSections.length > 0 || cockpitBootLines > 0,
         activeAgents: cockpitActiveAgents,
         focused: cockpitFocus === 'log',
       }
@@ -1364,6 +1377,12 @@ export function App(props: AppProps): React.ReactElement {
 
   const submit = useCallback(
     (line: string) => {
+      // EST-1015 (cockpit) — SNAP p/ a cauda ao SUBMETER: se o usuário rolou a conversa/
+      // log p/ cima e então envia algo (objetivo//comando/!bang), a resposta nasce na
+      // CAUDA — fora da janela rolada, invisível. Submeter é "quero ver o agora" ⇒ volta
+      // ao `▼ ao vivo`. Inócuo no inline (os offsets só regem as regiões do cockpit).
+      setConversaScroll(0);
+      setLogScroll(0);
       const route = routeInput(line, userCommands);
       if (route.kind === 'goal') {
         // EST-0957 — leva os arquivos anexados (chips) como DADO rotulado/confinado
@@ -1799,8 +1818,23 @@ export function App(props: AppProps): React.ReactElement {
                 : undefined;
         if (scrollKey !== undefined) {
           if (cockpitFocus === 'conversa') {
-            const visible = Math.max(1, layout.regions.conversaRows - 1);
-            setConversaScroll((s) => scrollOffset(scrollKey, s, state.blocks.length, visible));
+            // EST-1015 — o scroll da conversa é em BLOCOS (a janela agora é por LINHAS
+            // VISUAIS — fitConversaWindow). Uma "página" ≈ uma telada de blocos (~4
+            // linhas/bloco); o teto deixa chegar ao TOPO (só o bloco mais antigo visível)
+            // — antes o clamp `total - visible` (em unidades trocadas) travava o scroll
+            // longe do topo. O clamp fino (janela real) é do fitConversaWindow.
+            const page = Math.max(1, Math.round((layout.regions.conversaRows - 1) / 4));
+            const delta =
+              scrollKey === 'up'
+                ? 1
+                : scrollKey === 'down'
+                  ? -1
+                  : scrollKey === 'pageUp'
+                    ? page
+                    : -page;
+            setConversaScroll((s) =>
+              Math.min(Math.max(0, s + delta), Math.max(0, state.blocks.length - 1)),
+            );
           } else {
             const visible = Math.max(1, layout.regions.logRows - 1);
             setLogScroll((s) => scrollOffset(scrollKey, s, cockpitLogSections.length + 1, visible));

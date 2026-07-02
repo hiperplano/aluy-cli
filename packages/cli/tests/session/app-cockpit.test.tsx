@@ -122,7 +122,7 @@ describe('App — MODO COCKPIT: entrada via /fullscreen', () => {
     const frame = plain(lastFrame() ?? '');
     // as 6 regiões: rótulos de conversa + log + os componentes de chrome reusados.
     expect(frame).toContain('conversa');
-    expect(frame).toContain('log');
+    expect(frame).toContain('LOG');
     controller.dispose();
   });
 
@@ -176,7 +176,7 @@ describe('App — MODO COCKPIT: entrada via /fullscreen', () => {
     expect(enter).not.toHaveBeenCalled(); // o wiring já emitiu o ?1049h — nada de duplo enter.
     const frame = plain(lastFrame() ?? '');
     expect(frame).toContain('conversa'); // mas o cockpit ESTÁ na tela (6 regiões montadas).
-    expect(frame).toContain('log');
+    expect(frame).toContain('LOG');
     controller.dispose();
   });
 });
@@ -194,6 +194,30 @@ describe('App — cockpit: foco (Tab) e export (ctrl+s)', () => {
     stdin.write('\x13');
     await flush();
     expect(onExportTranscript).toHaveBeenCalled();
+    controller.dispose();
+  });
+});
+
+describe('App — cockpit: notas de boot RELOCADAS expandem o LOG (EST-1015)', () => {
+  it('nota `config` pré-turno aparece INTEIRA na região do LOG (o log não recolhe p/ 1 linha)', async () => {
+    // FALHA-SEM/PASSA-COM: o sinal adaptativo (cockpitLogHint) ignorava as notas de boot
+    // relocadas ⇒ hasActivity=false ⇒ log RECOLHIDO (1 linha) ⇒ as notas ficavam
+    // invisíveis (a realocação do EST-1015 morria). Agora elas contam no hint.
+    const { lastFrame, controller } = renderApp(100, {
+      initialFullscreen: true,
+      cockpitScreen: { enter: vi.fn(), leave: vi.fn() },
+    });
+    controller.restoreBlocks([
+      { kind: 'note', title: 'config', lines: ['instruções: CLAUDE.md', '2 servers MCP'] },
+    ]);
+    await flush();
+    const frame = plain(lastFrame() ?? '');
+    // as DUAS linhas da nota estão visíveis no frame do cockpit (nenhum `…` as comeu).
+    expect(frame).toContain('config');
+    expect(frame).toContain('instruções: CLAUDE.md');
+    expect(frame).toContain('2 servers MCP');
+    // e a CONVERSA segue no boas-vindas (a nota foi relocada, não duplicada).
+    expect(frame).toContain('Λluy — cockpit');
     controller.dispose();
   });
 });
