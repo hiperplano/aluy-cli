@@ -933,7 +933,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // BACKEND LOCAL: o provider do `meta` é o LOCAL resolvido (`tokenrouter`), não o do
     // tier/`--provider` — senão o status mostra `◷ local · openai · …` (o wireFormat/tier)
     // em vez do provider real. Pro broker, mantém a lógica do tier custom abaixo.
-    ...(resolvedBackend === 'local' && localProviderForMeta !== undefined && localProviderForMeta !== ''
+    ...(resolvedBackend === 'local' &&
+    localProviderForMeta !== undefined &&
+    localProviderForMeta !== ''
       ? { provider: localProviderForMeta }
       : resolvedTier === 'custom' &&
           opts.provider !== undefined &&
@@ -1856,8 +1858,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         const code = rest.join(' ').trim();
         if (code === '') void built.controller.roomReadPick();
         else void built.controller.roomRead(code);
-      }
-      else if (sub === 'watch') void built.controller.roomWatch(rest.join(' '));
+      } else if (sub === 'watch') void built.controller.roomWatch(rest.join(' '));
       else
         built.controller.pushNote('/rooms', [
           `subcomando "${sub}" — use list | new | read <código> | watch <código>.`,
@@ -1884,6 +1885,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           setWindowTitle(`aluy · ${result.label.label}`); // título da janela = o nome
           saveNow(); // consolida o rótulo+cor no arquivo da sessão JÁ.
           built.controller.pushNote('rename', [
+            // F176 — aviso não-fatal PRIMEIRO (ex.: cor inválida → cor automática), p/
+            // o usuário ver que a cor caiu MAS o nome aplicou.
+            ...(result.notice !== undefined ? [result.notice] : []),
             `sessão: ● ${result.label.label}`,
             `cor: ${result.label.color}`,
             'o ●+nome aparece no composer e no /history. troque a cor com `--cor <cor>`;',
