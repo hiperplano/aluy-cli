@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.65] — 2026-07-02
+
 ### Adicionado
 
 - `--resume <nome>` (F169, pedido do dono): retomada de sessão também pelo NOME dado no `/rename` (case-insensitive), não só pelo id. Nome ambíguo (2+ sessões) ⇒ abre o seletor filtrado nelas; id literal sempre vence o nome.
