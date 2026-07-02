@@ -97,6 +97,7 @@ import {
   LIVE_SHELL_OUTPUT_MAX_LINES,
   liveShellTailMaxLines,
   RESPIRO_MIN_ROWS,
+  liveRegionMinRows,
 } from './live-budget.js';
 import { composerIndentCols, visualLines } from './visual-lines.js';
 import { debugRenderLog } from './debug-render.js';
@@ -1111,6 +1112,12 @@ export function App(props: AppProps): React.ReactElement {
   // inline: em fullscreen o effect de cockpit cuida (e clearScreen brigaria com o
   // alt-screen). Ref semeada com a dimensão do mount ⇒ não dispara um clear no 1º render.
   const inlineResizeDimRef = useRef<{ rows: number; columns: number }>({ rows, columns });
+  // F196 — sinal (atualizado no corpo do render) de que a região viva NÃO cabe em `rows`
+  // ⇒ o Ink está no caminho `outputHeight >= rows` (repaint total por frame). Nesse regime
+  // o `clearScreen()` do resize é redundante e DUPLICA o `fullStaticOutput` do Ink (branco
+  // gigante que cresce). O effect abaixo lê a ref p/ PULAR o clearScreen só aí. Semeada
+  // `false` (caminho `fits` no mount) — a 1ª medida real vem no 1º render.
+  const liveRegionExceedsRowsRef = useRef<boolean>(false);
   useEffect(() => {
     if (fullscreen) {
       // Em cockpit o differ trata o resize; só sincroniza a ref p/ a 1ª volta ao inline
@@ -1120,6 +1127,22 @@ export function App(props: AppProps): React.ReactElement {
     }
     const prev = inlineResizeDimRef.current;
     if (prev.rows === rows && prev.columns === columns) return; // sem mudança real
+    // F196 (anti "espaço em branco GIGANTESCO no resize") — se a região viva NÃO cabe em
+    // `rows` (Ink no caminho `outputHeight >= rows`), o próprio Ink já repinta TUDO
+    // (`clearTerminal + fullStaticOutput + output`) a cada frame na dimensão nova — então o
+    // clearScreen é REDUNDANTE. Pior: ele remonta o <Static> (staticKey++), e o Ink ANEXA o
+    // histórico INTEIRO ao `fullStaticOutput` (que ele NUNCA reseta), fazendo o repaint
+    // reescrever 2×, 3×, … N× o scrollback a cada resize — o bloco/branco GIGANTE que só
+    // cresce. Pulamos o clearScreen NESSE regime (sincronizando a ref de dimensão p/ não
+    // re-disparar). No caminho `fits` (viva cabe) seguimos com o clearScreen — ele limpa os
+    // órfãos que o reflow do terminal deixa na região viva (o motivo original do EST-1015).
+    if (liveRegionExceedsRowsRef.current) {
+      inlineResizeDimRef.current = { rows, columns };
+      debugRenderLog(
+        `resize ${prev.rows}x${prev.columns} → ${rows}x${columns} (F196: viva > rows ⇒ PULA clearScreen; Ink repinta via clearTerminal)`,
+      );
+      return;
+    }
     // F-FLICKER (debug) — mudança de DIMENSÃO detectada. No Windows o conhost pode
     // reportar dims diferentes ao escrever output pesado (reflow) ⇒ dispara clearScreen
     // ESPÚRIO. Se isto loga sem o usuário redimensionar, é a causa do flicker "milenar".
@@ -3387,6 +3410,29 @@ export function App(props: AppProps): React.ReactElement {
     // RESIZE-FIX — excedente VISUAL do composer (wrap) desconta do teto (anti-gap inline).
     composerOverflow,
   });
+
+  // F196 (anti "espaço em branco GIGANTESCO no resize") — a região viva CABE em `rows`
+  // neste frame, ou o Ink será OBRIGADO ao caminho `outputHeight >= rows` (repaint total
+  // `clearTerminal + fullStaticOutput + output` a cada frame)? Comparamos o PISO ESTRUTURAL
+  // da viva (`liveRegionMinRows` — chrome + outros vivos + staged/overlay/composer, SEM o
+  // corpo da fala) com `rows`. Piso `≥ rows` ⇒ NÃO cabe p/ QUALQUER conteúdo ⇒ o Ink já
+  // repinta tudo sozinho ⇒ o `clearScreen()` do resize (remonta o <Static>) é redundante E
+  // duplica o `fullStaticOutput` do Ink (que ele nunca reseta) ⇒ o resize passa a reescrever
+  // N× o scrollback (o "branco gigante" que cresce). Guardamos o sinal numa ref p/ o effect
+  // de resize (abaixo) PULAR o clearScreen exatamente nesse regime. No caminho `fits`
+  // (piso `< rows`) segue `false` ⇒ o clearScreen continua limpando os órfãos do reflow.
+  liveRegionExceedsRowsRef.current =
+    liveRegionMinRows({
+      rows,
+      live,
+      phase: state.phase,
+      hasBlocks: state.blocks.length > 0,
+      mode: state.mode,
+      columns,
+      stagedLines,
+      overlayLines,
+      composerOverflow,
+    }) >= rows;
 
   // ── EST-0990 — MODO VIEW AVANÇADO (split CHAT | LOG): projeção do log + orçamento ──
   // O LOG lê a PROJEÇÃO da FlowTree (`flowOverview` + `drillInFlow`, JÁ REDIGIDA —

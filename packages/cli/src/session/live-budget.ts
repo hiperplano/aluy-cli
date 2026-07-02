@@ -612,3 +612,65 @@ export function speechMaxLines(args: {
     1;
   return Math.max(MIN_SPEECH_LINES, budget);
 }
+
+/**
+ * F196 (anti "espaço em branco GIGANTESCO no resize") — PISO ESTRUTURAL (linhas) da
+ * região viva NESTE frame, IGNORANDO o corpo da fala (que varia com o conteúdo). É a
+ * altura MÍNIMA que a região viva ocupa dê no que der: o chrome fixo do rodapé + os
+ * excedentes condicionais (respiro/unsafe/estreito) + a altura dos OUTROS blocos vivos
+ * (`liveOverheadLines` — que JÁ inclui o cabeçalho `Λ aluy` + cursor + pad da fala e o(s)
+ * tool/subagents/working) + o excedente de wrap do composer. NÃO soma nenhuma linha de
+ * CORPO de fala (a fala pode ter 1 linha só) — por isso é um PISO conservador: a região
+ * viva REAL é sempre `≥` este valor.
+ *
+ * PARA QUE SERVE (o bug do dono): quando ESTE piso já `≥ rows`, a região viva NÃO CABE em
+ * `rows` de jeito nenhum ⇒ o Ink É OBRIGADO a usar o caminho `outputHeight >= rows`
+ * (`ink.js`), que a CADA frame reescreve `clearTerminal + fullStaticOutput + output` — um
+ * REPAINT COMPLETO (via `overwriteInPlace`, sem flicker). Nesse regime, o `clearScreen()`
+ * do RESIZE (que REMONTA o `<Static>` bumpando a `staticKey`) é (a) REDUNDANTE — o Ink já
+ * repinta tudo sozinho — e (b) NOCIVO: cada remonta faz o Ink ANEXAR o histórico INTEIRO
+ * ao seu `fullStaticOutput` DE NOVO (o Ink NUNCA reseta esse buffer), então a cada resize
+ * o `clearTerminal` passa a reescrever 2×, 3×, … N× o scrollback — o "bloco/branco
+ * gigantesco" que CRESCE a cada redimensionar e NUNCA encolhe (provado por captura de
+ * bytes: 1→2→3→… cópias do header por resize). Com este piso o <App> PULA o `clearScreen`
+ * do resize exatamente nesse regime (ver App.tsx, F196), matando a duplicação SEM regredir
+ * a limpeza de órfãos do caminho `fits` (onde o piso `< rows` e o clearScreen segue valendo).
+ *
+ * CONSERVADOR DE PROPÓSITO: só devolve um piso `≥ rows` (⇒ pular o clearScreen) quando o
+ * clearTerminal é GARANTIDO p/ QUALQUER conteúdo de fala. Se a fala coubesse (piso
+ * `< rows`), NÃO pulamos — não há risco de perder o histórico/órfão no caminho `fits`. PURO.
+ */
+export function liveRegionMinRows(args: {
+  readonly rows: number;
+  readonly live: readonly SessionBlock[];
+  readonly phase: SessionPhase;
+  readonly hasBlocks: boolean;
+  readonly mode: SessionMode;
+  readonly columns?: number;
+  /** Fila/encaixando abaixo da viva (EST-0982) — também ocupa altura de frame. Default 0. */
+  readonly stagedLines?: number;
+  /** Overlay `/` aberto que coexiste com o stream (EST-1015). Default 0. */
+  readonly overlayLines?: number;
+  /** Excedente VISUAL do composer (wrap) além da 1 linha do chrome (RESIZE-FIX). Default 0. */
+  readonly composerOverflow?: number;
+}): number {
+  const overhead = liveOverheadLines({
+    live: args.live,
+    phase: args.phase,
+    hasBlocks: args.hasBlocks,
+    rows: args.rows,
+    ...(args.columns !== undefined ? { columns: args.columns } : {}),
+  });
+  // Piso = chrome fixo + excedentes condicionais + outros blocos vivos + staged/overlay/
+  // composer. SEM corpo de fala (o mínimo é 0 linhas de corpo) ⇒ a viva REAL é sempre ≥.
+  return (
+    LIVE_CHROME_BASE_ROWS +
+    respiroOverhead(args.rows) +
+    modeIndicatorOverhead(args.mode) +
+    narrowChromeOverhead(args.columns) +
+    overhead +
+    (args.stagedLines ?? 0) +
+    (args.overlayLines ?? 0) +
+    (args.composerOverflow ?? 0)
+  );
+}

@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Corrigido
+
+- 🔴 Resize: redimensionar o terminal com a sessão CHEIA (região viva ≥ rows) não gera mais um "espaço em branco gigantesco" que CRESCE a cada resize (F196). Causa: o Ink nunca reseta o `fullStaticOutput`, e o `clearScreen` do resize remontava o `<Static>` → o Ink re-anexava o histórico inteiro → o repaint reescrevia 2×,3×,…N× o scrollback (provado por bytes). Nova `liveRegionMinRows()`: no regime de estouro garantido, o `<App>` PULA o `clearScreen` do resize (redundante+nocivo); o caminho que cabe mantém o clearScreen (limpeza de órfãos intacta). Teste prova por bytes (≤1 cópia por repaint).
+
 _(vazio)_
 
 ## [1.0.0-rc.89] — 2026-07-02
