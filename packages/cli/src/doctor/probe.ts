@@ -169,6 +169,11 @@ function aluyHomeOf(deps: DoctorProbeDeps): string {
 // ── #1 credencial/auth (reusa o whoami do #82) + validação ATIVA via GET ──────
 async function gatherAuth(deps: DoctorProbeDeps): Promise<AuthFact> {
   const env = deps.env ?? process.env;
+  // F182 — backend local (BYO): a credencial do broker não é usada ⇒ N/A (não probe
+  // o keychain/broker do device-flow). Espelha gatherBroker/gatherCatalog.
+  if (isLocalBackend(deps)) {
+    return { present: false, keychainAvailable: true, localSkip: true };
+  }
   try {
     const cfg = loadAuthConfig(env);
     const store = new KeychainCredentialStore();
@@ -761,11 +766,18 @@ export async function gatherDoctorFacts(deps: DoctorProbeDeps = {}): Promise<Doc
   // acenderam — não faz sentido bater o modelo se a credencial já falhou, mas mantemos
   // simples e honesto: o tester degrada sozinho). Ausente ⇒ `facts.tier` undefined.
   if (deps.tierTester) {
-    await settle(
-      'tier',
-      deps.tierTester().then((t): TierFact => t),
-      'tier',
-    );
+    // F182 — backend local (BYO): NÃO há tier de broker a testar; o tester bateria o
+    // broker (falha "sessão expirou") ou gastaria um turno do modelo BYO. Marca N/A
+    // SEM chamar o tester. Espelha broker/catálogo/auth.
+    if (isLocalBackend(deps)) {
+      acc.tier = { tier: '(local)', responded: false, localSkip: true };
+    } else {
+      await settle(
+        'tier',
+        deps.tierTester().then((t): TierFact => t),
+        'tier',
+      );
+    }
   }
 
   return {

@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Corrigido
+
+- 🟡 `aluy doctor` no backend LOCAL (BYO): `credencial` e `tier (--deep)` não reportam mais falsos-negativos (F182) — antes davam `✗ não autenticado`/`✗ sessão expirou` com conselho de broker (`aluy login`) que não cabe no BYO; agora viram `N/A (backend local)` como `broker`/`catálogo` já faziam. Sem probar o broker nem gastar turno do modelo.
+
 _(vazio)_
 
 ## [1.0.0-rc.77] — 2026-07-02
