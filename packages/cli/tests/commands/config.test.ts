@@ -140,4 +140,23 @@ describe('runConfig — saída', () => {
     });
     expect(parsed.files.some((f) => f.path.endsWith('mcp.json'))).toBe(true);
   });
+
+  // F186 — a lista de arquivos inclui o estado do usuário antes ausente da descoberta.
+  it('F186 — files[] inclui sessions, audit.jsonl, cron, exports e undo', () => {
+    const { io, lines } = captureIO();
+    runConfig({
+      io,
+      env: {},
+      baseDir: '/tmp/x',
+      json: true,
+      configStore: fakeStore({}),
+    });
+    const parsed = JSON.parse(lines.join('\n')) as { files: Array<{ path: string }> };
+    for (const name of ['sessions', 'audit.jsonl', 'cron', 'exports', 'undo']) {
+      expect(
+        parsed.files.some((f) => f.path.endsWith(name)),
+        `falta ${name}`,
+      ).toBe(true);
+    }
+  });
 });
