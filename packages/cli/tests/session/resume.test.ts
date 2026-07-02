@@ -10,6 +10,7 @@ import {
   resolveAutoResume,
   decideBootResume,
   countMessages,
+  countUserTurns,
   resolveResumedModel,
   resolvePreferredModel,
   RESUME_CUSTOM_FALLBACK_TIER,
@@ -465,5 +466,68 @@ describe('resolvePreferredModel (EST-0962 — BUG Custom na pref salva)', () => 
 
   it('fallbackTier injetável casa com o DEFAULT_TIER do wiring', () => {
     expect(resolvePreferredModel({ tier: 'custom' }, 'aluy-strata').tier).toBe('aluy-strata');
+  });
+});
+
+describe('F187 — conversas SÓ do agente (install/conserto) ficam ocultas do resume', () => {
+  const note: SessionBlock = { kind: 'note', title: 'config', lines: ['MCP: 5 server(s)'] };
+  const tool: SessionBlock = {
+    kind: 'tool',
+    verb: 'bash',
+    target: 'aluy bootstrap',
+    result: '',
+    status: 'ok',
+  };
+  const agentOnly: SessionBlock[] = [note, aluy, tool]; // sem nenhum `you`
+
+  let base: string;
+  let store: SessionStore;
+  let clock: number;
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'aluy-f187-'));
+    clock = 1_000;
+    store = new SessionStore({ baseDir: join(base, '.aluy'), now: () => clock });
+  });
+  afterEach(() => rmSync(base, { recursive: true, force: true }));
+
+  it('boot NÃO oferece uma sessão só do agente (sem turno do usuário)', () => {
+    clock = 5_000;
+    store.save({ id: 'install', cwd: '/p', tier: 't', blocks: agentOnly });
+    const r = resolveAutoResume(undefined, false, store, '/p', 5_100, DEFAULT_AUTORESUME_WINDOW_MS);
+    expect(r.kind).toBe('none'); // antes: 'offer' (contava os turnos `aluy`)
+  });
+
+  it('boot OFERECE quando há turno do usuário', () => {
+    clock = 5_000;
+    store.save({ id: 'real', cwd: '/p', tier: 't', blocks: [note, you, aluy] });
+    const r = resolveAutoResume(undefined, false, store, '/p', 5_100, DEFAULT_AUTORESUME_WINDOW_MS);
+    expect(r.kind).toBe('offer');
+  });
+
+  it('--continue pula a sessão só-do-agente e pega a última COM turno do usuário', () => {
+    clock = 100;
+    store.save({ id: 'user', cwd: '/p', tier: 't', blocks: [you, aluy] });
+    clock = 200; // a MAIS recente é só do agente
+    store.save({ id: 'install', cwd: '/p', tier: 't', blocks: agentOnly });
+    const r = resolveResume({ kind: 'continue' }, store, '/p');
+    expect(r.kind).toBe('resumed');
+    if (r.kind === 'resumed') expect(r.record.id).toBe('user');
+  });
+
+  it('--resume (lista) oculta a sessão só-do-agente, mostra as com usuário/rótulo', () => {
+    store.save({ id: 'install', cwd: '/p', tier: 't', blocks: agentOnly });
+    store.save({ id: 'user', cwd: '/p', tier: 't', blocks: [you] });
+    store.save({ id: 'rotulada', cwd: '/p', tier: 't', blocks: agentOnly, label: 'setup' });
+    const r = resolveResume({ kind: 'resume' }, store, '/p');
+    expect(r.kind).toBe('pick');
+    if (r.kind === 'pick') {
+      const ids = r.choices.map((c) => c.id).sort();
+      expect(ids).toEqual(['rotulada', 'user']); // 'install' oculta; rotulada mantida
+    }
+  });
+
+  it('countUserTurns conta só `you` (não `aluy`)', () => {
+    expect(countUserTurns([note, aluy, tool])).toBe(0);
+    expect(countUserTurns([you, aluy, you])).toBe(2);
   });
 });
