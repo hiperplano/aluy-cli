@@ -93,6 +93,20 @@ paths = [
   '''packages/cli/tests/session/controller-cycle-judge\.test\.ts$''',
 ]
 
+# ── Allowlist do PAT SINTÉTICO dos testes de binário headless (F166, path fechado) ─
+# Os testes que spawnam o binário REAL semeiam `ALUY_TOKEN` com um PAT de FORMATO
+# válido (`pat_<32hex>_<secret>`) — obrigatório porque o fallback de env valida o
+# formato (`isPat`); era o antigo 'stub-token' inválido que os deixava quebrados e
+# EXCLUÍDOS da CI. O valor é `pat_0123…def_stub-secret`: hex SEQUENCIAL (entropia
+# zero) + sufixo '-stub-' — sintético por construção, nunca uma credencial viva.
+# Cobertura por PATH EXATO; mesma política honesta dos fixtures acima.
+[[allowlists]]
+description = "PAT sintético dos testes de binário headless (F166) — só estes paths, nunca segredo real."
+paths = [
+  '''packages/cli/tests/session/headless-exit\.test\.ts$''',
+  '''packages/cli/tests/session/headless-yolo-bin\.test\.ts$''',
+]
+
 # ── Allowlist de FIXTURE da REDAÇÃO do /export — MODO COCKPIT (EST-1000/RES-C-1) ─
 # EST-1000/ADR-0076 §4 / CLI-SEC-6: este arquivo testa que o `/export` REDIGE o
 # segredo ANTES de montar o transcript E de gravá-lo no disco (~/.aluy/exports/,
