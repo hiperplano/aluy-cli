@@ -165,6 +165,13 @@ export function decideCtrlC(composerText: string, exitArmed: boolean): CtrlCActi
   return exitArmed ? 'exit' : 'arm';
 }
 
+/**
+ * F160 — JANELA do 2º Ctrl+C (ms). O armado é decidido por TIMESTAMP contra esta janela
+ * (ref síncrono no App, não estado React) — o timer só apaga a dica do footer. 2.5s dá
+ * tempo de LER "ctrl-c de novo para sair" e reagir sem pressa.
+ */
+export const CTRL_C_WINDOW_MS = 2500;
+
 // EST-0965 — bytes de CONTROLE de edição que podem vir EMBUTIDOS num chunk de input
 // (xrdp/SSH/paste entregam texto+edição num único `read`): backspace físico (DEL,
 // 0x7f) e ^H (0x08) apagam à esquerda; o Ink só seta `key.backspace`/`key.delete`

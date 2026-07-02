@@ -91,6 +91,10 @@ export function pendingCsiULen(s: string): number {
 export interface CsiUFilter {
   /** Strippa as CSI-u COMPLETAS do chunk (reanexando a cauda parcial do chunk anterior). */
   feed(chunk: string): string;
+  /** Há cauda parcial retida aguardando o resto da sequência? (p/ o flush por timeout) */
+  hasPending(): boolean;
+  /** Devolve E LIMPA a cauda retida (flush F159 — o resto da sequência não veio). */
+  takePending(): string;
 }
 
 export function createCsiUFilter(): CsiUFilter {
@@ -108,13 +112,33 @@ export function createCsiUFilter(): CsiUFilter {
     }
     return s;
   };
-  return { feed };
+  return {
+    feed,
+    hasPending: () => pending !== '',
+    takePending: () => {
+      const p = pending;
+      pending = '';
+      return p;
+    },
+  };
 }
 
 /** O mínimo do stdin que o interpositor precisa (facilita o mock no teste). */
 export interface ReadableStdin {
   read?: (size?: number) => unknown;
+  /** Best-effort: usado p/ ACORDAR o laço de leitura do Ink no flush F159. */
+  emit?: (event: string) => unknown;
 }
+
+/**
+ * F159 — prazo p/ a CONTINUAÇÃO de uma sequência retida chegar. Um terminal emite a
+ * sequência CSI-u ATOMICAMENTE (ou os chunks chegam no mesmo tick de I/O); se em
+ * `ESC_FLUSH_MS` não veio o resto, NÃO era sequência — era um **Esc humano** (ou Esc
+ * seguido de digitação). Sem este flush, o `\x1b` solitário retido pelo filtro ficava
+ * PRESO PARA SEMPRE: Esc virava TECLA MORTA (não fechava picker/dialog) até a PRÓXIMA
+ * tecla chegar e empurrá-lo — o "só Esc duplo fecha o /model" do F159.
+ */
+export const ESC_FLUSH_MS = 75;
 
 /**
  * INTERPÕE no `stdin.read()` o filtro de CSI-u: o Ink lê o teclado via `stdin.read()` num
@@ -152,8 +176,34 @@ export function installCsiUGuard(stdin: ReadableStdin): () => void {
   const original = target.read as (this: unknown, size?: number) => unknown;
   const filter = createCsiUFilter();
 
+  // F159 — bytes LIBERADOS pelo flush (a continuação não veio ⇒ era Esc humano). São
+  // entregues CRUS na próxima leitura (NÃO repassam pelo filtro — já foram retidos 1×;
+  // re-filtrar os re-prenderia p/ sempre).
+  let flushed = '';
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const scheduleFlush = (): void => {
+    if (flushTimer !== undefined) {
+      clearTimeout(flushTimer);
+      flushTimer = undefined;
+    }
+    if (!filter.hasPending()) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = undefined;
+      flushed += filter.takePending();
+      // ACORDA o laço de leitura do Ink (`'readable'` → `read()` até `null`): sem isto o
+      // `\x1b` liberado só sairia na PRÓXIMA tecla — o Esc continuaria morto até lá.
+      target.emit?.('readable');
+    }, ESC_FLUSH_MS);
+    // Não segura o processo vivo só pelo flush (headless/`-p` sai limpo).
+    (flushTimer as { unref?: () => void }).unref?.();
+  };
+
   const wrapped = function (this: unknown, size?: number): unknown {
     const chunk = size === undefined ? original.call(this) : original.call(this, size);
+    // F159 — entrega primeiro o que o flush liberou (bytes crus, sem re-filtrar).
+    const head = flushed;
+    flushed = '';
     // SÓ repassa o sentinela de FIM-DE-STREAM real (`null`/`undefined`) — NUNCA o
     // sintetizamos. Sintetizar `null` quando o chunk foi consumido faz o Node tratar como
     // EOF de stdin em alguns caminhos (medido: a TUI SAÍA limpa ao receber a seq), além de
@@ -161,9 +211,14 @@ export function installCsiUGuard(stdin: ReadableStdin): () => void {
     // devolvemos a STRING VAZIA: o Ink a parseia como `input=''` (no-op, NÃO crasha) e, na
     // próxima iteração do laço, o `read()` original devolve o `null` REAL (stream drenado),
     // encerrando o laço normalmente — sem EOF sintético.
-    if (chunk === null || chunk === undefined) return chunk;
+    if (chunk === null || chunk === undefined) {
+      return head !== '' ? head : chunk;
+    }
     const asStr = typeof chunk === 'string' ? chunk : String(chunk);
-    return filter.feed(asStr);
+    const out = head + filter.feed(asStr);
+    // Re-arma o prazo da cauda retida (se sobrou uma) a cada chunk novo.
+    scheduleFlush();
+    return out;
   };
 
   target.read = wrapped;
@@ -172,6 +227,10 @@ export function installCsiUGuard(stdin: ReadableStdin): () => void {
   return (): void => {
     // Restaura SÓ se ainda for o nosso wrap (não pisa num wrap posterior de terceiros).
     if (target.read === wrapped) {
+      if (flushTimer !== undefined) {
+        clearTimeout(flushTimer);
+        flushTimer = undefined;
+      }
       target.read = original as typeof target.read;
       target[WRAP_FLAG] = false;
     }

@@ -124,6 +124,7 @@ import {
   deleteToEnd,
   deleteWordBack,
   decideCtrlC,
+  CTRL_C_WINDOW_MS,
   type EditState,
 } from './composer-edit.js';
 import {
@@ -623,7 +624,14 @@ export function App(props: AppProps): React.ReactElement {
   // ARMA a saída (o footer mostra "ctrl-c de novo para sair"); o 2º dentro de uma janela
   // curta encerra; senão DESARMA sozinho. (Com texto no composer, o 1º Ctrl+C LIMPA o texto.)
   // Durante o TRABALHO o Ctrl+C segue como interrupt (cancela o turno) — outro caminho.
+  // F160 — a FONTE DE VERDADE do armado é um REF com TIMESTAMP (`ctrlCArmedAtRef`), não o
+  // estado React: o Ink entrega teclas SÍNCRONAS antes de um commit (mesmo problema do
+  // composer, ver `setComposer` acima) — com `useState` no closure, dois Ctrl+C no MESMO
+  // tick viam ambos `armed=false` e SÓ armavam (nunca saíam). O timestamp também decide a
+  // janela por TEMPO REAL (determinístico), não só pelo timer; o `useState` fica apenas p/
+  // o footer re-renderizar a dica.
   const [ctrlCArmed, setCtrlCArmed] = useState(false);
+  const ctrlCArmedAtRef = useRef<number | undefined>(undefined);
   const ctrlCTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // EST-XXXX — Esc-Esc (composer vazio) abre o `/rewind`. Marca quando o 1º Esc foi
   // visto + um timer p/ a JANELA do chord (~600ms). Ref (não estado): o handler de
@@ -635,6 +643,7 @@ export function App(props: AppProps): React.ReactElement {
       clearTimeout(ctrlCTimerRef.current);
       ctrlCTimerRef.current = undefined;
     }
+    ctrlCArmedAtRef.current = undefined; // F160 — o ref é a fonte de verdade.
     setCtrlCArmed(false);
   }, []);
   // Solta o timer de saída-armada no unmount (não vaza handle nem seta estado fora da tela).
@@ -2883,7 +2892,13 @@ export function App(props: AppProps): React.ReactElement {
     // LIMPA o composer; vazio, o 1º ARMA a saída (footer avisa) e só o 2º (dentro da janela)
     // encerra. Qualquer OUTRA tecla desarma (abaixo). Mata "uma vez já derruba a app".
     if (key.ctrl && char === 'c') {
-      const action = decideCtrlC(input, ctrlCArmed); // PURO (composer-edit) — testado à parte.
+      // F160 — armado decidido pelo REF+TIMESTAMP (síncrono, janela por tempo real): dois
+      // Ctrl+C no MESMO tick do Ink funcionam (o `useState` no closure via `false` nos dois
+      // e a saída nunca acontecia — "duplo Ctrl-C instável" do achado).
+      const now = Date.now();
+      const armedNow =
+        ctrlCArmedAtRef.current !== undefined && now - ctrlCArmedAtRef.current <= CTRL_C_WINDOW_MS;
+      const action = decideCtrlC(input, armedNow); // PURO (composer-edit) — testado à parte.
       if (action === 'clear') {
         // há texto digitado ⇒ limpa (e desarma, se estava armado de antes).
         setText('');
@@ -2896,10 +2911,11 @@ export function App(props: AppProps): React.ReactElement {
         exit();
         return;
       }
-      // 'arm' — 1º Ctrl+C com composer vazio ⇒ ARMA + auto-desarma após a janela (~2.5s).
+      // 'arm' — 1º Ctrl+C com composer vazio ⇒ ARMA + auto-desarma após a janela.
+      ctrlCArmedAtRef.current = now;
       setCtrlCArmed(true);
       if (ctrlCTimerRef.current !== undefined) clearTimeout(ctrlCTimerRef.current);
-      ctrlCTimerRef.current = setTimeout(() => setCtrlCArmed(false), 2500);
+      ctrlCTimerRef.current = setTimeout(disarmCtrlC, CTRL_C_WINDOW_MS);
       return;
     }
     // Qualquer tecla que NÃO seja Ctrl+C desarma a saída pendente (atividade = cancela o

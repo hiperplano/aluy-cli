@@ -7,7 +7,7 @@
 // pela lógica; aqui provamos o que é OBSERVÁVEL sem desmontar (a 1ª não sai + a dica arma).
 
 import React from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render } from 'ink-testing-library';
 import {
   PolicyPermissionEngine,
@@ -23,6 +23,7 @@ import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { App } from '../../src/session/App.js';
 import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
+import { CTRL_C_WINDOW_MS } from '../../src/session/composer-edit.js';
 
 const ENV = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' };
 const ESC = String.fromCharCode(27);
@@ -123,5 +124,58 @@ describe('App — duplo Ctrl+C p/ sair (EST-1015)', () => {
     expect(f).not.toContain('rascunho'); // texto sumiu
     expect(f).not.toContain('de novo'); // e NÃO armou a saída
     controller.dispose();
+  });
+
+  // F160 — dois Ctrl+C em eventos SÍNCRONOS (mesmo tick, SEM commit do React entre eles —
+  // o `useEffect` do useInput ainda não re-subscreveu ⇒ o 2º evento roda no closure VELHO)
+  // precisam SAIR: o armado vive num REF+timestamp, não no estado do closure. Antes, os
+  // dois viam `armed=false` ⇒ só armavam ⇒ "duplo Ctrl-C instável" (3 tentativas p/ sair).
+  // OBSERVÁVEL: o exit() desmonta a árvore ⇒ o frame CONGELA — uma tecla-marcador escrita
+  // depois NÃO aparece. (A dica "de novo" PODE estar no frame congelado — foi commitada
+  // pelo 1º Ctrl+C antes do unmount; não a assertamos.)
+  it('F160: dois Ctrl+C no MESMO tick SAEM (ref síncrono, não estado stale)', async () => {
+    const { stdin, lastFrame, controller } = mount();
+    await flush();
+    stdin.write(CTRL_C);
+    stdin.write(CTRL_C); // mesmo tick — SEM flush entre os dois.
+    await flush();
+    stdin.write('zqzq'); // marcador: só apareceria se o composer seguisse VIVO.
+    await flush();
+    expect(plain(lastFrame())).not.toContain('zqzq');
+    controller.dispose();
+  });
+
+  it('F160: 2º Ctrl+C DENTRO da janela (ticks separados) segue saindo', async () => {
+    const { stdin, lastFrame, controller } = mount();
+    await flush();
+    stdin.write(CTRL_C);
+    await flush();
+    expect(plain(lastFrame())).toContain('de novo'); // armado e visível
+    stdin.write(CTRL_C); // 2º dentro da janela (bem < 2.5s)
+    await flush();
+    stdin.write('zqzq');
+    await flush();
+    expect(plain(lastFrame())).not.toContain('zqzq'); // saiu — sem composer vivo.
+    controller.dispose();
+  });
+
+  it('F160: 2º Ctrl+C FORA da janela NÃO sai (re-arma) — a app segue viva', async () => {
+    vi.useFakeTimers();
+    try {
+      const { stdin, lastFrame, controller } = mount();
+      await vi.advanceTimersByTimeAsync(20);
+      stdin.write(CTRL_C);
+      await vi.advanceTimersByTimeAsync(20);
+      // Deixa a janela EXPIRAR (2.5s) — o timestamp do ref envelhece.
+      await vi.advanceTimersByTimeAsync(CTRL_C_WINDOW_MS + 200);
+      stdin.write(CTRL_C); // fora da janela ⇒ re-ARMA (não sai).
+      await vi.advanceTimersByTimeAsync(20);
+      stdin.write('zqzq'); // app viva ⇒ o marcador entra no composer…
+      await vi.advanceTimersByTimeAsync(20);
+      expect(plain(lastFrame())).toContain('zqzq');
+      controller.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
