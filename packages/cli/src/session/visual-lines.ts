@@ -113,6 +113,23 @@ export function visualLines(text: string, columns: number): number {
 }
 
 /**
+ * GAP-FIX (sessão renomeada) — INDENT REAL (colunas) do texto do composer inline.
+ * O input não começa na coluna 0: há o prompt `› ` (2 cols) e, em sessão RENOMEADA
+ * (`/rename`), a tag `● <nome> ` ANTES dele (EST-0972) — e o Ink guarda as linhas
+ * seguintes na MESMA banda de colunas do texto. Medir o wrap com `columns - 2` fixo
+ * SUBESTIMA a altura visual quando há tag (um nome de ~20 chars come ~23 colunas):
+ * o frame passa de `rows`, o Ink cai no `clearTerminal` (que não reseta o
+ * `previousLineCount`) e o GAP entre o transcript e o composer CRESCE a cada tecla.
+ * Esta é a ÚNICA fonte do indent — App (orçamento `composerVisualLines`) e
+ * <Composer> (janela `effCols`) usam a MESMA conta p/ nunca divergirem. PURO.
+ */
+export function composerIndentCols(sessionLabel?: string): number {
+  const label = (sessionLabel ?? '').trim();
+  // prompt `›` + espaço = 2; tag `● <nome> ` = glifo(1) + espaço(1) + nome + espaço(1).
+  return 2 + (label === '' ? 0 : displayWidth(label) + 3);
+}
+
+/**
  * JANELA DE CAUDA por linhas VISUAIS (com WRAP). Devolve o SUFIXO de linhas-fonte de
  * `text` cuja altura visual (em `columns` colunas) cabe em `maxLines` linhas visuais,
  * e `hidden` = quantas linhas-FONTE ficaram acima (o que o marcador `…N acima`

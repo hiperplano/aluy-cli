@@ -689,6 +689,30 @@ export function gerundOf(toolName: string): string {
   }
 }
 
+/**
+ * Teto de caracteres do ALVO de uma linha de tool (`⏺ bash <alvo>`). 1 linha de
+ * terminal comum; acima disso o alvo deixa de identificar e passa a inundar.
+ */
+export const MAX_TARGET_CHARS = 100;
+
+/**
+ * Clampa o ALVO de uma linha de tool (`⏺`/`◌`) a UMA linha curta. Um batch/heredoc
+ * de 100+ linhas passado como `command` NÃO pode virar o "alvo" — o transcript vira
+ * um despejo (o alvo existe p/ IDENTIFICAR a ação, não p/ reproduzi-la; a saída/erro
+ * têm canal próprio, já janelado). Multi-linha ⇒ 1ª linha não-vazia + `… (+N linhas)`;
+ * linha longa ⇒ corte em `MAX_TARGET_CHARS` + `…`. Pura/determinística (testável sem Ink).
+ */
+export function clampTarget(target: string, maxChars: number = MAX_TARGET_CHARS): string {
+  const lines = target.split('\n');
+  // 1ª linha NÃO-VAZIA identifica melhor (um heredoc pode começar com quebra).
+  const firstIdx = lines.findIndex((l) => l.trim() !== '');
+  if (firstIdx < 0) return '';
+  const extra = lines.length - 1 - firstIdx;
+  let head = lines[firstIdx] ?? '';
+  if (head.length > maxChars) head = `${head.slice(0, maxChars - 1)}…`;
+  return extra > 0 ? `${head} … (+${extra} ${extra === 1 ? 'linha' : 'linhas'})` : head;
+}
+
 /** Abrevia uma contagem de tokens p/ a status bar (`12.4k`, `1.2M`). */
 export function abbreviateCount(n: number): string {
   if (n < 1000) return String(n);

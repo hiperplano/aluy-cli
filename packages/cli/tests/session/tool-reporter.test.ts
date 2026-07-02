@@ -76,6 +76,19 @@ describe('withToolReport — quantifica o resultado por tool', () => {
     expect(lines[1]!.output).toContain('exit=2');
   });
 
+  it('run_command com batch/heredoc de 100+ linhas ⇒ alvo clampado a 1 linha (anti-despejo)', async () => {
+    const { reporter, lines } = capture();
+    const tool = withToolReport(
+      fakeTool('run_command', { ok: true, observation: 'exit=0' }),
+      reporter,
+    );
+    const batch = `cat > relatorio.md <<'EOF'\n${'conteúdo do arquivo\n'.repeat(120)}EOF`;
+    await tool.run({ command: batch }, ports);
+    const target = lines[0]!.target;
+    expect(target).toBe("cat > relatorio.md <<'EOF' … (+121 linhas)");
+    expect(target).not.toContain('\n');
+  });
+
   it('grep ⇒ "N hits" / "0 hits"', async () => {
     const { reporter, lines } = capture();
     const hit = withToolReport(

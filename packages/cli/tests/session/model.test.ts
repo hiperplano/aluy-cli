@@ -6,8 +6,10 @@ import { describe, expect, it } from 'vitest';
 import {
   abbreviateCount,
   abbreviateCwd,
+  clampTarget,
   gerundOf,
   formatElapsed,
+  MAX_TARGET_CHARS,
 } from '../../src/session/model.js';
 
 describe('gerundOf — verbo no gerúndio p/ o in-flight (§2.6/§8)', () => {
@@ -19,6 +21,35 @@ describe('gerundOf — verbo no gerúndio p/ o in-flight (§2.6/§8)', () => {
   });
   it('tool desconhecida cai num gerúndio genérico', () => {
     expect(gerundOf('some_mcp_tool')).toBe('processando');
+  });
+});
+
+describe('clampTarget — alvo da linha de tool clampado a 1 linha (anti-despejo)', () => {
+  it('linha única curta passa intacta', () => {
+    expect(clampTarget('npm test')).toBe('npm test');
+    expect(clampTarget('packages/cli/src/session/model.ts')).toBe(
+      'packages/cli/src/session/model.ts',
+    );
+  });
+  it('batch/heredoc multi-linha ⇒ 1ª linha + contagem do oculto', () => {
+    const batch = `cat > out.txt <<EOF\n${'linha\n'.repeat(120)}EOF`;
+    expect(clampTarget(batch)).toBe('cat > out.txt <<EOF … (+121 linhas)');
+  });
+  it('multi-linha de 2 linhas usa o singular', () => {
+    expect(clampTarget('echo a\necho b')).toBe('echo a … (+1 linha)');
+  });
+  it('linha única longa corta no teto com reticência', () => {
+    const long = 'x'.repeat(500);
+    const out = clampTarget(long);
+    expect(out.length).toBe(MAX_TARGET_CHARS);
+    expect(out.endsWith('…')).toBe(true);
+  });
+  it('1ª linha vazia (heredoc começando com quebra) ⇒ identifica pela 1ª NÃO-vazia', () => {
+    expect(clampTarget('\n\nnpm run build\nnpm test')).toBe('npm run build … (+1 linha)');
+  });
+  it('só quebras/vazio ⇒ vazio (nunca lança)', () => {
+    expect(clampTarget('')).toBe('');
+    expect(clampTarget('\n\n\n')).toBe('');
   });
 });
 

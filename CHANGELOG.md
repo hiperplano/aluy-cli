@@ -49,6 +49,9 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ### Corrigido
 
+- TUI: o ALVO das linhas de tool (`◌`/`⏺`) é clampado a 1 linha — um batch/heredoc de 100+ linhas como `command` não despeja mais o conteúdo inteiro no transcript (`clampTarget`: 1ª linha + `… (+N linhas)`).
+- 🔴 TUI: gap infinito entre o transcript e o composer em sessão RENOMEADA — o orçamento anti-flicker media o wrap do composer com indent fixo de 2 colunas, ignorando a tag `● <nome> ` do `/rename`; com nome longo o frame estourava `rows` e o Ink acumulava linhas em branco a cada tecla (`composerIndentCols`: indent real, uma fonte só p/ App e Composer).
+- TUI: o marcador `↑N linhas` da janela do composer contava CHARS no recorte de linha única longa (ex.: `↑1307 linhas` num input de ~16) — agora converte p/ linhas visuais.
 - 🔴 TUI: sequência CSI-u de tecla funcional do kitty keyboard protocol (ex.: `\x1b[57414u`) não derruba mais o app — um guard no canal RAW filtra a sequência antes de chegar ao `parseKeypress` do Ink, que crashava em `use-input.js` (`startsWith` sobre `undefined`) (#18).
 - Splash: elimina reticências duplicado em "carregando…/descobrindo MCP…" (#229).
 - Cockpit: overflow `hidden` na região de conversa — fim da sangria/perda de conteúdo (#224).

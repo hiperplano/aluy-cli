@@ -97,7 +97,7 @@ import {
   LIVE_SHELL_OUTPUT_MAX_LINES,
   RESPIRO_MIN_ROWS,
 } from './live-budget.js';
-import { visualLines } from './visual-lines.js';
+import { composerIndentCols, visualLines } from './visual-lines.js';
 import { debugRenderLog } from './debug-render.js';
 import { answerInParallelWhileSubagents } from './mid-turn-routing.js';
 import {
@@ -655,12 +655,18 @@ export function App(props: AppProps): React.ReactElement {
   // piso narrow/short é decidido com composer=1 (chamadas de resize abaixo), então o limiar
   // de recusa NÃO muda — só a partição quando já cabe.
   // RESIZE-FIX (bug do gap inline) — o `<Composer>` inline renderiza o input CRU e o terminal
-  // o QUEBRA (wrap) em N linhas VISUAIS na largura `columns` (o prompt come ~2 cols de indent).
-  // `composerLines` (linhas-FONTE) não vê o wrap. Medimos o VISUAL p/ descontar o EXCEDENTE
-  // (além da 1 linha já contada no chrome) do orçamento da fala — senão o frame cruza `rows`,
-  // o Ink cai no `clearTerminal` (que não reseta `previousLineCount`) e ACUMULA gap a cada tecla.
+  // o QUEBRA (wrap) em N linhas VISUAIS na largura `columns`. `composerLines` (linhas-FONTE)
+  // não vê o wrap. Medimos o VISUAL p/ descontar o EXCEDENTE (além da 1 linha já contada no
+  // chrome) do orçamento da fala — senão o frame cruza `rows`, o Ink cai no `clearTerminal`
+  // (que não reseta `previousLineCount`) e ACUMULA gap a cada tecla.
+  // GAP-FIX (sessão renomeada) — o indent REAL inclui a tag `● <nome> ` do `/rename`
+  // (EST-0972), não só o prompt `› `: com nome longo o wrap real vem ~20+ colunas antes
+  // do medido e o gap voltava. `composerIndentCols` é a MESMA conta do <Composer>.
+  const composerIndent = composerIndentCols(state.meta.label);
   const composerVisualLines =
-    input.length === 0 ? 1 : visualLines(input, columns > 2 ? columns - 2 : columns);
+    input.length === 0
+      ? 1
+      : visualLines(input, columns > composerIndent ? columns - composerIndent : columns);
   // MULTI-LINHA FIX (achado do dono) — TETO de altura do composer no INLINE. Sem ele o composer
   // crescia SEM LIMITE ao digitar várias linhas, o frame estourava `rows` e o Ink caía no
   // `clearTerminal` (que não reseta `previousLineCount`) ⇒ ESPAÇO EM BRANCO acumulado entre o

@@ -322,7 +322,7 @@ export function windowComposerVisual(
  * Recorta a LINHA LÓGICA que contém o cursor (dentro de uma `ComposerWindow` base) p/ uma
  * faixa VISUAL de `maxRows` linhas em torno do cursor, mantendo o cursor visível. Centra a
  * janela na coluna do cursor (com viés de cauda) e marca com `…` os cortes de cabeça/cauda.
- * Os `…` contam como char escondido (acumulam em hiddenAbove/Below p/ o marcador). PURO.
+ * O corte acumula em hiddenAbove/Below em LINHAS VISUAIS (unidade do marcador `↑N`). PURO.
  */
 function clampLineAroundCursor(
   base: ComposerWindow,
@@ -403,14 +403,18 @@ function clampLineAroundCursor(
   let beforeLen = 0;
   for (let i = 0; i < li; i++) beforeLen += (outLines[i] as string).length + 1;
   const outCursor = clampCursor(outText, beforeLen + newColInLine);
-  // Conta o "escondido": chars cortados da cabeça somam acima, da cauda somam abaixo.
-  const hiddenHeadChars = headCut ? from : 0;
-  const hiddenTailChars = tailCut ? chars.length - to : 0;
+  // Conta o "escondido" em LINHAS VISUAIS (não chars): o marcador do <Composer> diz
+  // "↑N linhas" — somar CHARS aqui fazia `↑1307 linhas` num input de ~16 linhas
+  // (unidade errada, número sem sentido). Converte a largura cortada p/ linhas de
+  // `columns` colunas (ceil, mín. 1 quando houve corte) — mesma unidade da janela lógica.
+  const cols = Math.max(1, columns);
+  const hiddenHeadLines = headCut ? Math.max(1, Math.ceil(widthOf(0, from) / cols)) : 0;
+  const hiddenTailLines = tailCut ? Math.max(1, Math.ceil(widthOf(to, chars.length) / cols)) : 0;
   return {
     text: outText,
     cursor: outCursor,
-    hiddenAbove: base.hiddenAbove + (hiddenHeadChars > 0 ? hiddenHeadChars : 0),
-    hiddenBelow: base.hiddenBelow + (hiddenTailChars > 0 ? hiddenTailChars : 0),
+    hiddenAbove: base.hiddenAbove + hiddenHeadLines,
+    hiddenBelow: base.hiddenBelow + hiddenTailLines,
   };
 }
 
