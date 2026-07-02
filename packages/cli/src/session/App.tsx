@@ -2960,10 +2960,17 @@ export function App(props: AppProps): React.ReactElement {
       const now = Date.now();
       const armedNow =
         ctrlCArmedAtRef.current !== undefined && now - ctrlCArmedAtRef.current <= CTRL_C_WINDOW_MS;
-      const action = decideCtrlC(input, armedNow); // PURO (composer-edit) — testado à parte.
+      // F174 — CHIPS de anexo (`@arquivo`) pendentes CONTAM como conteúdo do composer:
+      // sem isto, o Ctrl-C só olhava o TEXTO — um anexo pendente sobrevivia ao "limpar"
+      // e GRUDAVA no próximo objetivo sem o usuário perceber; pior, com texto vazio +
+      // chip, o Ctrl-C ARMAVA a saída em vez de limpar o anexo. Agora "limpar o
+      // composer" = texto E anexos: o 1º Ctrl-C com qualquer conteúdo LIMPA tudo.
+      const hasChips = picker.attachments.length > 0;
+      const action = hasChips && input.trim() === '' ? 'clear' : decideCtrlC(input, armedNow); // PURO — testado à parte.
       if (action === 'clear') {
-        // há texto digitado ⇒ limpa (e desarma, se estava armado de antes).
+        // há texto e/ou anexo ⇒ limpa AMBOS (e desarma, se estava armado de antes).
         setText('');
+        if (hasChips) picker.clear();
         disarmCtrlC();
         return;
       }
