@@ -139,7 +139,10 @@ function buildController(text: string, gate: Promise<void>): SessionController {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
+// F196 — timeout GENEROSO (10s): o render Ink real + stream de deltas + resize é
+// timing-sensível; 2s passava local mas estourava no CI saturado (waitFor não assentava).
+// Local ainda assenta em ~ms (o deadline só dá folga p/ a máquina de CI sob carga).
+async function waitFor(cond: () => boolean, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!cond()) {
     if (Date.now() > deadline) throw new Error('waitFor: condição não assentou no prazo');
@@ -201,5 +204,7 @@ describe('App — RESIZE não duplica o fullStaticOutput do Ink (regime clearTer
     release();
     await sleep(20);
     inst.unmount();
-  });
+    // F196 — timeout de teste GENEROSO (20s): render Ink real + stream + 5 resizes com
+    // sleeps + waitFor até 10s pode passar dos 5s default do vitest no CI sob carga.
+  }, 20_000);
 });
