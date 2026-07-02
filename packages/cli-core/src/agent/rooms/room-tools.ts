@@ -75,6 +75,34 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /** Constrói os tools `room_post` + `room_read` ligados ao store/identidade da sessão. */
+
+/**
+ * F157 — erro DESCOBRÍVEL de sala inexistente: o agente só tem room_post/room_read
+ * (sem tool de criar/listar), então "não encontrada" seco era um beco: ele tentava
+ * variações do código às cegas. A mensagem agora LISTA as salas vivas (só códigos —
+ * dado da própria sessão, mesma classe de leitura do room_read) e explica COMO uma
+ * sala nasce (spawn_agent room:"<código>" · /rooms do usuário). Best-effort: falha
+ * do list() degrada p/ a mensagem base.
+ */
+async function roomNotFoundMsg(code: string, store: RoomStore): Promise<string> {
+  let vivas = '';
+  try {
+    const rooms = await store.list();
+    const codes = rooms.filter((r) => !r.revoked).map((r) => r.code);
+    vivas =
+      codes.length > 0
+        ? ` Salas vivas nesta sessão: ${codes.join(', ')}.`
+        : ' Não há NENHUMA sala viva nesta sessão.';
+  } catch {
+    /* degrada */
+  }
+  return (
+    `sala "${code}" não encontrada.${vivas} ` +
+    'Salas nascem no spawn_agent (room:"<código>") ou pelo usuário via /rooms — ' +
+    'não existe tool de criar sala avulsa.'
+  );
+}
+
 export function buildRoomTools(deps: RoomToolsDeps): NativeTool[] {
   const roomPost: NativeTool = {
     name: ROOM_POST_TOOL_NAME,
@@ -98,7 +126,8 @@ export function buildRoomTools(deps: RoomToolsDeps): NativeTool[] {
     async run(input): Promise<ToolResult> {
       const code = String(input.code ?? '').trim();
       const room = await deps.store.get(code);
-      if (room === undefined) return { ok: false, observation: `sala "${code}" não encontrada.` };
+      if (room === undefined)
+        return { ok: false, observation: await roomNotFoundMsg(code, deps.store) };
       const kind = input.kind as AgentMessageKind;
       if (!KINDS.includes(kind))
         return { ok: false, observation: `room_post: kind inválido (use ${KINDS.join('|')}).` };
@@ -181,7 +210,8 @@ export function buildRoomTools(deps: RoomToolsDeps): NativeTool[] {
           observation: `room_read: a sala "${code}" não pôde ser lida — ${reason}`,
         };
       }
-      if (room === undefined) return { ok: false, observation: `sala "${code}" não encontrada.` };
+      if (room === undefined)
+        return { ok: false, observation: await roomNotFoundMsg(code, deps.store) };
 
       // EST-ROOMS-WAIT — modo de ESPERA (opcional). Sem `wait_for_writers`, é o
       // SNAPSHOT de sempre (compat total). A LÓGICA (quem postou/quando parar/nota)

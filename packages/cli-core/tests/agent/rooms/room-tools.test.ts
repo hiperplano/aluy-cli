@@ -135,6 +135,25 @@ describe('buildRoomTools — room_post + room_read (ADR-0081)', () => {
 });
 
 // EST-ROOMS-WAIT — modo de ESPERA produtor-consumidor do room_read (corrida do dogfood).
+describe('F157 — sala inexistente vira erro DESCOBRÍVEL (lista as vivas + como nascem)', () => {
+  it('room_read de código errado lista as salas vivas e explica o ciclo de vida', async () => {
+    const { roomRead, code } = await setup();
+    const r = await run(roomRead, { code: 'nao-existe' });
+    expect(r.ok).toBe(false);
+    expect(r.observation).toContain('não encontrada');
+    expect(r.observation).toContain(code); // a sala VIVA aparece na dica
+    expect(r.observation).toContain('spawn_agent'); // como salas nascem
+  });
+
+  it('room_post sem NENHUMA sala viva diz isso com todas as letras', async () => {
+    const { roomPost, store, code } = await setup();
+    await store.remove(code);
+    const r = await run(roomPost, { code: 'x', kind: 'inform', to: 'b', body: 'oi' });
+    expect(r.ok).toBe(false);
+    expect(r.observation).toContain('NENHUMA sala viva');
+  });
+});
+
 describe('room_read wait_for_writers — espera produtor-consumidor (ADR-0081)', () => {
   // Relógio mutável: o sleep fake o AVANÇA (sem timer real); a cada tick um hook
   // opcional posta uma mensagem, simulando um produtor que termina DURANTE a espera.
