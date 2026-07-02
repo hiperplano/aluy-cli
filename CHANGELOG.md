@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio)_
+
+## [1.0.0-rc.87] — 2026-07-02
+
 ### Corrigido
 
 - 🟡 Permissão: "sempre nesta sessão" numa CRIAÇÃO de arquivo (`write_file`) agora cobre EDIÇÕES subsequentes (`edit_file`) do MESMO arquivo (F192). O grant era chaveado pelo nome cru da tool, então aprovar-sessão ao criar não cobria editar depois (re-perguntava a cada mudança), apesar de `categories.ts` já tratar `write_file`/`edit_file` como a mesma classe. A chave normaliza os dois p/ `file_write` (mantendo o path — segue path-específico). **Segurança:** NÃO relaxa o gate always-ask (destrutivo/fora-do-workspace/sensível), checado à parte em `grantSession` — invariante provado por teste. Session-only, nunca persistido.
