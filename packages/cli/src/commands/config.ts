@@ -13,6 +13,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_MAX_TOKENS, DEFAULT_MAX_ITERATIONS } from '@hiperplano/aluy-cli-core';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
 import { UserConfigStore } from '../io/user-config.js';
 import { resolveLocalProviderConfig, resolveModelBackend } from '../model/local/config.js';
@@ -41,18 +42,28 @@ interface Setting {
   readonly source: string;
 }
 
-/** Resolve um setting env-sobreponível: env ALUY_* > config.json > default. */
+/**
+ * Resolve um setting env-sobreponível: env ALUY_* > config.json > default. `sourcePath`
+ * é o rótulo da origem em config.json (default `config.${key}`); passado explícito p/
+ * chaves ANINHADAS (ex.: `limits.maxTokens` mora em `config.limits.maxTokens`, F185).
+ */
 function pickEnvConfig(
   key: string,
   envVar: string,
   envVal: string | undefined,
   configVal: unknown,
   defaultVal: string,
+  sourcePath?: string,
 ): Setting {
   const e = envVal?.trim();
   if (e !== undefined && e !== '') return { key, value: e, origin: 'env', source: envVar };
   if (configVal !== undefined && configVal !== null)
-    return { key, value: String(configVal), origin: 'config.json', source: `config.${key}` };
+    return {
+      key,
+      value: String(configVal),
+      origin: 'config.json',
+      source: sourcePath ?? `config.${key}`,
+    };
   return { key, value: defaultVal, origin: 'default', source: '—' };
 }
 
@@ -64,23 +75,77 @@ function pickConfig(key: string, configVal: unknown, defaultVal: string): Settin
 }
 
 /** Constrói a lista de settings efetivos com origem (a precedência real do boot). */
-export function collectSettings(env: NodeJS.ProcessEnv, config: ReturnType<UserConfigStore['load']>): Setting[] {
+export function collectSettings(
+  env: NodeJS.ProcessEnv,
+  config: ReturnType<UserConfigStore['load']>,
+): Setting[] {
   // Defaults puros: resolve com env/config VAZIOS p/ extrair o que o catálogo/domínio default.
   const def = resolveLocalProviderConfig({ env: {}, config: {} });
   const defaultBaseUrl = def.baseUrl ?? '—';
 
   const settings: Setting[] = [
-    pickEnvConfig('backend', 'ALUY_BACKEND', env.ALUY_BACKEND, config.backend, resolveModelBackend({ env: {}, config: {} })),
-    pickEnvConfig('localProvider', 'ALUY_LOCAL_PROVIDER', env.ALUY_LOCAL_PROVIDER, config.localProvider, def.provider),
-    pickEnvConfig('localModel', 'ALUY_LOCAL_MODEL', env.ALUY_LOCAL_MODEL, config.localModel, def.model),
+    pickEnvConfig(
+      'backend',
+      'ALUY_BACKEND',
+      env.ALUY_BACKEND,
+      config.backend,
+      resolveModelBackend({ env: {}, config: {} }),
+    ),
+    pickEnvConfig(
+      'localProvider',
+      'ALUY_LOCAL_PROVIDER',
+      env.ALUY_LOCAL_PROVIDER,
+      config.localProvider,
+      def.provider,
+    ),
+    pickEnvConfig(
+      'localModel',
+      'ALUY_LOCAL_MODEL',
+      env.ALUY_LOCAL_MODEL,
+      config.localModel,
+      def.model,
+    ),
     pickEnvConfig('localAuth', 'ALUY_LOCAL_AUTH', env.ALUY_LOCAL_AUTH, config.localAuth, def.auth),
-    pickEnvConfig('localBaseUrl', 'ALUY_LOCAL_BASE_URL', env.ALUY_LOCAL_BASE_URL, config.localBaseUrl, defaultBaseUrl),
+    pickEnvConfig(
+      'localBaseUrl',
+      'ALUY_LOCAL_BASE_URL',
+      env.ALUY_LOCAL_BASE_URL,
+      config.localBaseUrl,
+      defaultBaseUrl,
+    ),
     pickConfig('profile', config.profile, 'turbo'),
     pickConfig('sidecar.ollama', config.sidecarToggles?.ollama, 'on (default)'),
     pickConfig('sidecar.mem0', config.sidecarToggles?.mem0, 'on (default)'),
     pickConfig('sidecar.headroom', config.sidecarToggles?.headroom, 'on (default)'),
     pickConfig('lang', config.lang, 'auto'),
     pickConfig('theme', config.theme, 'default'),
+    // F185 — limites/orçamento (ADR-0136 balde a): env ALUY_MAX_* > config.limits > default.
+    // Estavam AUSENTES da view de config efetiva, apesar de o doctor os mostrar e serem
+    // env-sobreponíveis — quem depurava orçamento não via o valor efetivo nem a origem.
+    pickEnvConfig(
+      'maxTokens',
+      'ALUY_MAX_TOKENS',
+      env.ALUY_MAX_TOKENS,
+      config.limits?.maxTokens,
+      String(DEFAULT_MAX_TOKENS),
+      'config.limits.maxTokens',
+    ),
+    pickEnvConfig(
+      'maxOutputTokens',
+      'ALUY_MAX_OUTPUT_TOKENS',
+      env.ALUY_MAX_OUTPUT_TOKENS,
+      config.limits?.maxOutputTokens,
+      '— (do servidor/tier)',
+      'config.limits.maxOutputTokens',
+    ),
+    pickEnvConfig(
+      'maxIterations',
+      'ALUY_MAX_ITERATIONS',
+      env.ALUY_MAX_ITERATIONS,
+      config.limits?.maxIterations,
+      String(DEFAULT_MAX_ITERATIONS),
+      'config.limits.maxIterations',
+    ),
   ];
   return settings;
 }
@@ -126,7 +191,12 @@ export function runConfig(deps: ConfigCommandDeps = {}): number {
       JSON.stringify(
         {
           configPath: join(baseDir, 'config.json'),
-          settings: settings.map((s) => ({ key: s.key, value: s.value, origin: s.origin, source: s.source })),
+          settings: settings.map((s) => ({
+            key: s.key,
+            value: s.value,
+            origin: s.origin,
+            source: s.source,
+          })),
           files: files.map((x) => ({ path: x.path, role: x.role, exists: x.exists })),
         },
         null,
