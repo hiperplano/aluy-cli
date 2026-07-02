@@ -233,7 +233,8 @@ export function blocksToHistory(blocks: readonly SessionBlock[]): HistoryItem[] 
         out.push({
           role: 'observation',
           toolName: RESTORED_TOOL_LABEL,
-          text: `(erro de broker anterior: ${b.message})`,
+          // F184 — rótulo backend-aware (BYO ⇒ "provider local", não "broker").
+          text: `(${b.backend === 'local' ? 'erro do provider local' : 'erro de broker'} anterior: ${b.message})`,
         });
         break;
       // `note`/`deny`/`subagents` são UI/sistema — não viram mensagem p/ o modelo

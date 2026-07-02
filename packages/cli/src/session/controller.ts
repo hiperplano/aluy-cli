@@ -2093,6 +2093,7 @@ export class SessionController {
       kind: 'broker-error',
       ...(status !== undefined ? { status } : {}),
       message: `não consegui falar com o ${where}. — vou tentar de novo.`,
+      ...(this.state.meta.backend !== undefined ? { backend: this.state.meta.backend } : {}),
       attempt: nextAttempt,
       maxAttempts: this.maxAttempts,
       retryInSeconds: totalSecs,
