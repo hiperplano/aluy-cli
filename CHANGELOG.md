@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+_(vazio — tudo do lote de estabilização saiu na rc.64)_
+
+## [1.0.0-rc.64] — 2026-07-02
+
+> Lote de estabilização do dogfooding (PR #2, squash `843e4df`): F159–F167 + anti-despejo + anti-flicker de sessão gigante + gitleaks via CLI pinado + suíte 100% na esteira.
+
 ### Adicionado
 
 - Paste/colapso: colapsa pastes grandes em chip no composer e expande no submit (#230).
