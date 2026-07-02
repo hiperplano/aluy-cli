@@ -349,6 +349,41 @@ describe('CA-5 · grants de sessão (NUNCA persistido)', () => {
     expect(e.grantSession(destr)).toBe(false);
     expect(e.decide(destr).decision).toBe('ask'); // continua perguntando SEMPRE
   });
+
+  it('F192 — grant numa CRIAÇÃO (write_file) cobre EDIÇÕES (edit_file) do MESMO arquivo', () => {
+    const e = new PolicyPermissionEngine();
+    const create = call('write_file', { path: 'src/a.ts', content: 'VERSAO-1' });
+    expect(e.decide(create).decision).toBe('ask');
+    expect(e.grantSession(create)).toBe(true);
+    // ANTES (bug): edit_file re-perguntava (chave era `edit_file …` ≠ `write_file …`).
+    const edit = call('edit_file', { path: 'src/a.ts', content: 'VERSAO-2' });
+    expect(e.decide(edit).decision).toBe('allow');
+    // e vice-versa: grant numa edição cobre uma reescrita (write_file) do mesmo arquivo.
+    const e2 = new PolicyPermissionEngine();
+    expect(e2.grantSession(call('edit_file', { path: 'src/b.ts', content: 'x' }))).toBe(true);
+    expect(e2.decide(call('write_file', { path: 'src/b.ts', content: 'y' })).decision).toBe(
+      'allow',
+    );
+  });
+
+  it('F192 — o grant é PATH-específico: outro arquivo continua perguntando (sem vazar)', () => {
+    const e = new PolicyPermissionEngine();
+    e.grantSession(call('write_file', { path: 'src/a.ts', content: 'x' }));
+    expect(e.decide(call('edit_file', { path: 'src/OUTRO.ts', content: 'y' })).decision).toBe(
+      'ask',
+    );
+  });
+
+  it('F192 — INVARIANTE DE SEGURANÇA: always-ask (escrita FORA do workspace) NÃO é coberto', () => {
+    const e = new PolicyPermissionEngine();
+    // grant numa escrita NORMAL (in-workspace) NÃO pode relaxar uma escrita FORA (always-ask).
+    expect(e.grantSession(call('write_file', { path: 'src/a.ts', content: 'x' }))).toBe(true);
+    expect(e.decide(call('edit_file', { path: '/etc/hosts', content: 'evil' })).decision).toBe(
+      'ask',
+    );
+    // e grantSession RECUSA memorizar a própria escrita fora (categoria sempre-ask).
+    expect(e.grantSession(call('edit_file', { path: '/etc/hosts', content: 'evil' }))).toBe(false);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
