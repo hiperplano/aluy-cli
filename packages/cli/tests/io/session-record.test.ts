@@ -234,12 +234,38 @@ describe('HUNT-PERSIST — inject/doctor round-trippam (não somem na sanitizaç
     expect(out.map((b) => b.kind)).toEqual(['you', 'inject', 'doctor', 'aluy']);
   });
 
-  it('inject/doctor são UI — NÃO viram mensagem p/ o modelo (blocksToHistory)', () => {
+  it('doctor é UI — NÃO vira mensagem p/ o modelo (blocksToHistory)', () => {
+    // `inject` foi separado no F193 (agora vira `goal`); `doctor` segue UI (dropado).
     const blocks: SessionBlock[] = [
-      { kind: 'inject', text: 'btw' },
       { kind: 'doctor', checks: [{ id: 'a', label: 'A', status: 'ok' }] },
       { kind: 'you', text: 'oi' },
     ];
     expect(blocksToHistory(blocks)).toEqual([{ role: 'goal', text: 'oi' }]);
+  });
+});
+
+// ── F193 (integridade de contexto na RETOMADA) — inject volta ao contexto do modelo ──
+// A causa-raiz do "display OK, contexto quebrado": um `inject` (fala do dono encaixada
+// mid-turn) era DESCARTADO por `blocksToHistory`. Numa sessão morta logo após um "btw",
+// a retomada reconstruía o objetivo + a resposta do modelo SEM o redirecionamento que a
+// motivou — o modelo "perdia a própria referência". Agora o inject volta como `goal`.
+describe('F193 — inject (fala do dono mid-turn) vira `goal` no contexto retomado', () => {
+  it('inject→goal, na ordem, entre o objetivo e a resposta do modelo', () => {
+    // Cenário REAL (session ca42f228): objetivo longo → o dono redireciona → aluy responde
+    // ao redirecionamento. Sem o inject no contexto, model("56") não casa com goal("texto").
+    const blocks: SessionBlock[] = [
+      { kind: 'you', text: 'escreva um texto bem longo sobre a história da computação' },
+      { kind: 'inject', text: 'na verdade so me diga: quanto é 7 vezes 8?' },
+      { kind: 'aluy', text: '7 vezes 8 é 56.', streaming: false },
+    ];
+    expect(blocksToHistory(blocks)).toEqual([
+      { role: 'goal', text: 'escreva um texto bem longo sobre a história da computação' },
+      { role: 'goal', text: 'na verdade so me diga: quanto é 7 vezes 8?' },
+      { role: 'model', text: '7 vezes 8 é 56.' },
+    ]);
+  });
+
+  it('inject vazio/só-espaço NÃO vira mensagem (conservador, como o aluy vazio)', () => {
+    expect(blocksToHistory([{ kind: 'inject', text: '   ' }])).toEqual([]);
   });
 });
