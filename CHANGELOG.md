@@ -16,6 +16,15 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 _(vazio)_
 
+## [1.0.0-rc.94] — 2026-07-03
+
+### Alterado
+
+- ✨ Splash: o "pisca-pisca" (a sombra 3D que respirava) foi trocado por um **shimmer/brilho** que desliza da ESQUERDA pra DIREITA sobre o wordmark Λluy, em laço com pausa calma (F198). Frame-driven, anti-flicker (6 linhas estáveis), reduced-motion ⇒ estático.
+- 🎨 Degradê do pulso e do shimmer agora é **TODO ÂMBAR** (accent→accentMid→accentDim), sem o teal do papel `depth`. Novo papel de tema `accentMid` (âmbar-500) nos 6 temas.
+
+_(vazio)_
+
 ## [1.0.0-rc.93] — 2026-07-03
 
 ### Corrigido
