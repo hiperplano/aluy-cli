@@ -35,6 +35,53 @@ describe('resolveCockpitLayout — 6 regiões somam rows (invariante §5)', () =
   }
 });
 
+// GUARD DURO (crash `RangeError: Invalid array length` no Ink, achado do dono) — dimensões
+// INVÁLIDAS (NaN/Infinity/0/negativas/fracionárias) NUNCA podem produzir alturas de região
+// inválidas: o Ink faria `new Array(height)` e MATARIA o processo. O layout deve RECUSAR
+// (cair pro inline) e jamais devolver NaN/negativo/não-inteiro numa região `cockpit`.
+describe('resolveCockpitLayout — GUARD de dimensão inválida (crash Invalid array length)', () => {
+  const finiteInt = (n: number): boolean => Number.isInteger(n);
+  for (const bad of [NaN, Infinity, -Infinity, 0, -1, -40, 1.5]) {
+    it(`rows=${bad} ⇒ recusa (não estoura o Ink) e nenhuma altura NaN/neg`, () => {
+      const l = resolveCockpitLayout(bad, 120);
+      // ou recusa, ou — se por acaso couber — todas as alturas são inteiras ≥ 1.
+      if (l.kind === 'cockpit') {
+        for (const h of [
+          l.rows,
+          l.headerRows,
+          l.statusRows,
+          l.composerRows,
+          l.hintsRows,
+          l.regions.conversaRows,
+          l.regions.logRows,
+        ]) {
+          expect(finiteInt(h) && h >= 1, `altura inválida ${h} p/ rows=${bad}`).toBe(true);
+        }
+      } else {
+        expect(l.kind).toBe('refuse');
+      }
+    });
+    it(`cols=${bad} ⇒ recusa (não estoura o Ink)`, () => {
+      const l = resolveCockpitLayout(40, bad);
+      expect(l.kind).toBe('refuse');
+    });
+  }
+
+  it('rows=NaN NÃO vaza como cockpit (o bug: NaN < MIN === false driblava o check)', () => {
+    const l = resolveCockpitLayout(NaN, 120);
+    expect(l.kind).toBe('refuse');
+  });
+
+  it('rows GIGANTE (não-inteiro/enorme) ⇒ ainda inteiro e soma consistente quando aceita', () => {
+    const l = resolveCockpitLayout(41.9, 120);
+    expect(l.kind).toBe('cockpit');
+    if (l.kind !== 'cockpit') return;
+    // 41.9 é FLOORADO p/ 41 ⇒ soma == 41 (inteiro), sem fração vazando p/ o Ink.
+    expect(cockpitRegionSum(l)).toBe(41);
+    expect(Number.isInteger(l.rows)).toBe(true);
+  });
+});
+
 describe('resolveCockpitLayout — degradação narrow/short (§6, decisão (a))', () => {
   it('recusa NARROW abaixo de 80 col', () => {
     const layout = resolveCockpitLayout(40, COCKPIT_MIN_COLS - 1);

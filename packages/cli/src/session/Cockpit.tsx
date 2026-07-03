@@ -61,6 +61,17 @@ export function clipNoteToFit(b: SessionBlock, maxLines: number): SessionBlock {
   };
 }
 
+/**
+ * GUARD DURO (crash `RangeError: Invalid array length` no Ink, achado do dono) — última
+ * linha de defesa ANTES do Ink: toda `height=` de região sai por aqui. Se uma dimensão
+ * inválida (NaN/Infinity/≤0/fracionária) escapar do layout (transição resume+cockpit+resize),
+ * o Ink faria `new Array(height)` no `Output.get` ⇒ CRASH que mata o processo. Clampa p/
+ * inteiro ≥ 1. (A fonte já é sanitizada em `resolveCockpitLayout`/`safeDim`; isto é a rede.)
+ */
+function clampH(h: number): number {
+  return Number.isFinite(h) && h >= 1 ? Math.floor(h) : 1;
+}
+
 /** Qual região tem o FOCO de scroll (Tab alterna). */
 export type CockpitFocus = 'conversa' | 'log';
 
@@ -181,7 +192,7 @@ function ConversaRegion(props: {
   // `props.rows` (Box fixo) ⇒ o overlay é clipado, o grid NÃO reflui (anti-flicker §5).
   if (props.overlay !== undefined && props.overlay !== null) {
     return (
-      <Box flexDirection="column" height={props.rows}>
+      <Box flexDirection="column" height={clampH(props.rows)}>
         <Box>
           <Role name="accent">{t('cockpit.conversa')}</Role>
           <Role name="fgDim"> · /menu</Role>
@@ -191,7 +202,7 @@ function ConversaRegion(props: {
             p/ NUNCA estourar `conversaRows` ⇒ a soma das regiões segue == rows e o grid
             não reflui/corrompe (anti-flicker §5). O usuário filtra (digita) p/ reduzir a
             lista; o popover mostra o topo (cabeçalho + os 1ºs itens) sempre alinhado. */}
-        <Box flexDirection="column" height={room} overflow="hidden">
+        <Box flexDirection="column" height={clampH(room)} overflow="hidden">
           {props.overlay}
         </Box>
       </Box>
@@ -200,9 +211,19 @@ function ConversaRegion(props: {
   // EST-1015 (cockpit idle "horrível") — CONVERSA vazia (até o 1º objetivo, com as notas de
   // boot já realocadas p/ o LOG): em vez de uma região barren, um BOAS-VINDAS calmo CENTRADO
   // (vertical+horizontal). A altura segue cravada em `props.rows` ⇒ grid não reflui (§5).
-  if (blocks.length === 0) {
+  //
+  // FIX (vão gigante na conversa vazia, achado do dono) — o gatilho era `blocks.length===0`,
+  // mas uma sessão NOVA em fullscreen já traz NOTAS transitórias (◷ cockpit entrou, ◷ yolo…)
+  // na conversa ⇒ `length>0` ⇒ caía no ramo `flex-end` e a nota única boiava no RODAPÉ com
+  // ~40 linhas EM BRANCO empurradas pro topo (horrível). Agora o empty-state dispara quando
+  // NÃO HÁ TURNO REAL (só notas): mostra a dica de boas-vindas + as notas VERTICALMENTE
+  // CENTRADAS (não um bloco enorme de nada no topo). As notas SEGUEM visíveis (a nota de
+  // entrada "◷ cockpit — modo cockpit…" #386 aparece); no 1º turno o ramo de baixo (flex-end,
+  // chat) assume. `overflow:hidden` crava a região (nunca estoura `room`, §5).
+  const hasTurns = blocks.some((b) => b.kind !== 'note');
+  if (!hasTurns) {
     return (
-      <Box flexDirection="column" height={props.rows}>
+      <Box flexDirection="column" height={clampH(props.rows)}>
         <Box>
           {props.focused === true && (
             <>
@@ -214,20 +235,38 @@ function ConversaRegion(props: {
           <Role name="fgDim"> · ▼ ao vivo</Role>
         </Box>
         <Box
-          height={room}
+          height={clampH(room)}
           width={props.columns}
           flexDirection="column"
           alignItems="center"
           justifyContent="center"
+          overflow="hidden"
         >
           <Role name="accent">{t('cockpit.welcomeTitle')}</Role>
           <Role name="fgDim">{t('cockpit.welcomeHint')}</Role>
+          {/* as notas transitórias (entrada do cockpit, yolo…) — visíveis, logo abaixo da
+              dica, no MESMO grupo centrado ⇒ sem o vão gigante. `marginTop` só quando há nota. */}
+          {blocks.length > 0 && (
+            <Box flexDirection="column" alignItems="center" marginTop={1}>
+              {blocks.map((b, i) => (
+                <BlockView
+                  key={i}
+                  block={b}
+                  isCurrent={false}
+                  frame={props.frame}
+                  columns={props.columns}
+                  rows={props.screenRows}
+                  maxLines={ctx.streamMaxLines}
+                />
+              ))}
+            </Box>
+          )}
         </Box>
       </Box>
     );
   }
   return (
-    <Box flexDirection="column" height={props.rows}>
+    <Box flexDirection="column" height={clampH(props.rows)}>
       <Box>
         {/* ▌ marca o FOCO (a11y: sentido sem cor — espelha o log e o empty-state). */}
         {props.focused && (
@@ -251,7 +290,7 @@ function ConversaRegion(props: {
           `flex-end` clipa o TOPO (mais antigo) — o que se QUER num "▼ ao vivo" (ver o
           novo). O windowing por bloco do viewport (`vp`) e os indicadores `↑N`/`↓N`
           seguem corretos (são contagem de blocos, independem do âncora visual). */}
-      <Box flexDirection="column" height={room} overflow="hidden" justifyContent="flex-end">
+      <Box flexDirection="column" height={clampH(room)} overflow="hidden" justifyContent="flex-end">
         {visible.map((b, i) => (
           <BlockView
             key={vp.start + i}
@@ -289,9 +328,16 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
   const bootInfo = startupNotes.map((n) => ({ title: n.title, lines: n.lines }));
 
   return (
-    <Box flexDirection="column" width={props.columns} height={layout.rows}>
+    // FIX (fantasma do composer no differ) — `overflow="hidden"` CRAVA o frame em `rows`:
+    // se QUALQUER região passar da sua altura (ex.: um transiente do composer/log durante uma
+    // mudança de altura), o Ink CLIPA em vez de estourar `rows`. Sem isto, um frame de `rows+1`
+    // linhas fazia o terminal ROLAR 1 linha ⇒ o modelo por-linha ABSOLUTO do CockpitDiffer
+    // (ADR-0076 §5) dessincronizava do terminal e deixava a linha ANTIGA do composer como
+    // FANTASMA (composer duplicado no rodapé) até um full-paint. Cravar a altura mantém o
+    // invariante sum==rows SEMPRE verdadeiro na tela, não só no cálculo do layout.
+    <Box flexDirection="column" width={props.columns} height={clampH(layout.rows)} overflow="hidden">
       {/* ── 1) HEADER (fixo) ─────────────────────────────────────────────────── */}
-      <Box height={layout.headerRows}>
+      <Box height={clampH(layout.headerRows)}>
         <Header
           tier={props.tierDisplay}
           columns={props.columns}
@@ -318,7 +364,9 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
       <Rule columns={props.columns} />
 
       {/* ── 3) LOG (FlowTree/ActivityLog — altura cheia, scroll próprio) ──────── */}
-      <Box height={layout.regions.logRows}>
+      {/* overflow:hidden — CRAVA a região (a altura do log é ADAPTATIVA; um transiente não
+          pode empurrar as regiões de baixo / estourar `rows`). Ver o topo. */}
+      <Box height={clampH(layout.regions.logRows)} overflow="hidden" flexShrink={0}>
         <ActivityLog
           sections={props.logSections}
           visibleRows={layout.regions.logRows}
@@ -331,7 +379,7 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
       <Rule columns={props.columns} />
 
       {/* ── 4) STATUS (fixo, vivo) ───────────────────────────────────────────── */}
-      <Box height={layout.statusRows}>
+      <Box height={clampH(layout.statusRows)}>
         <StatusBar
           cwd={props.cwd}
           tier={props.tierDisplay}
@@ -358,7 +406,11 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
       </Box>
 
       {/* ── 5) COMPOSER (fixo) ───────────────────────────────────────────────── */}
-      <Box height={layout.composerRows}>
+      {/* overflow:hidden — o composer SELF-CLIPA em `composerRows`: se o input crescer/encolher
+          e um frame transiente tiver mais linhas visuais que a região, o excedente é CORTADO
+          AQUI (não empurra os hints nem estoura `rows`) ⇒ sem rolagem ⇒ sem fantasma no differ.
+          Em regime o windowComposerVisual já cabe; isto é a rede de segurança do invariante. */}
+      <Box height={clampH(layout.composerRows)} overflow="hidden" flexShrink={0}>
         <Composer
           value={props.input}
           cursorPos={props.cursorPos}
@@ -377,7 +429,7 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
       </Box>
 
       {/* ── 6) HINTS (fixo, contextual) ──────────────────────────────────────── */}
-      <Box height={layout.hintsRows}>
+      <Box height={clampH(layout.hintsRows)}>
         {/* No idle/streaming o cockpit ensina seus próprios atalhos (tab/pgup/ctrl-s);
             nos estados de ask/budget/erro mantém os hints do inline (decididos a montante).
             `null` (compact) ⇒ ao menos o atalho-base do cockpit (a região existe no grid). */}
