@@ -43,14 +43,9 @@ export function shadowShade(frame: number): string {
 /** As linhas combinadas (Λ + GAP + luy) da marca block-art, como strings. */
 function combinedMarkRows(): string[] {
   const rows = Math.max(WORDMARK_MARK_BLOCK.length, WORDMARK_LUY_BLOCK.length);
-  // Largura do bloco do Λ — p/ PADDAR as linhas do Λ que não existem (o "luy" tem 1 linha
-  // de descender a mais, p/ o rabo curvado do y): sem isso, a linha extra do "luy" colaria
-  // à esquerda (no lugar do Λ vazio) em vez de alinhar na sua coluna. F195.
-  const markWidth = WORDMARK_MARK_BLOCK.reduce((m, l) => Math.max(m, l.length), 0);
   const out: string[] = [];
   for (let r = 0; r < rows; r += 1) {
-    const markRow = (WORDMARK_MARK_BLOCK[r] ?? '').padEnd(markWidth, ' ');
-    out.push(`${markRow}${GAP}${WORDMARK_LUY_BLOCK[r] ?? ''}`);
+    out.push(`${WORDMARK_MARK_BLOCK[r] ?? ''}${GAP}${WORDMARK_LUY_BLOCK[r] ?? ''}`);
   }
   return out;
 }

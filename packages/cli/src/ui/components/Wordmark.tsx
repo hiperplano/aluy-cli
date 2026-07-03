@@ -47,12 +47,12 @@ export const WORDMARK_MARK_BLOCK: readonly string[] = [
 
 /**
  * "luy" em block-art MINÚSCULO (altura-x menor: o topo das letras com altura-x — u,
- * y — fica vazio; só o `l` é ascender de corpo inteiro). A grade tem 7 linhas: a
- * BASELINE é a linha 5 (índice 4 — onde `l` e `u` terminam) e as linhas 6-7 (índices
- * 5-6) são o DESCENDER do `y`, ABAIXO da baseline. O `y` tem o RABO CURVADO de verdade
- * (F195, pedido do dono): a haste direita desce abaixo da baseline (linha 5) e o rabo
- * CURVA/GANCHA p/ a ESQUERDA no fim (linha 6) — o gancho arredondado do "y" do logo,
- * não uma haste reta. `l`/`u` deixam as linhas do descender vazias. Cor `depth`.
+ * y — fica vazio; só o `l` é ascender de corpo inteiro). A grade tem 6 linhas: a
+ * BASELINE é a linha 5 (índice 4 — onde `l` e `u` terminam) e a linha 6 (índice 5) é o
+ * DESCENDER do `y`, ABAIXO da baseline. O `y` tem o RABO CURVADO (F195): a haste direita
+ * desce abaixo da baseline e JÁ GANCHA p/ a ESQUERDA numa única linha — o gancho
+ * arredondado do "y" do logo, curto (perninha enxuta, pedido do dono), não uma haste
+ * reta. `l`/`u` deixam a linha do descender vazia. Cor `depth`.
  */
 export const WORDMARK_LUY_BLOCK: readonly string[] = [
   '██                ',
@@ -60,8 +60,7 @@ export const WORDMARK_LUY_BLOCK: readonly string[] = [
   '██  ██  ██  ██  ██',
   '██  ██  ██   █████',
   '██   █████      ██', // BASELINE: l termina, u fecha a tigela, y ainda tem a haste
-  '                ██', // DESCENDER 1: a haste do y desce reto abaixo da baseline
-  '            █████ ', // DESCENDER 2: o RABO curva/gancha p/ a ESQUERDA (gancho do y)
+  '             ████ ', // DESCENDER: a haste do y desce e JÁ GANCHA p/ a ESQUERDA (rabo curto)
 ];
 
 /**
@@ -81,8 +80,8 @@ export const WORDMARK_MARK_ASCII: readonly string[] = [
 
 /**
  * Fallback ASCII de "luy" (`#`), minúsculo, baseline alinhada. O `y` tem o RABO CURVADO
- * (descender de 2 linhas): a haste desce (linha 5) e GANCHA p/ a ESQUERDA no fim (linha 6)
- * — espelha 1:1 o block-art unicode (mesmas colunas, `#` no lugar de `█`). `depth`.
+ * (descender de 1 linha): a haste desce e GANCHA p/ a ESQUERDA (rabo curto) — espelha 1:1
+ * o block-art unicode (mesmas colunas, `#` no lugar de `█`). `depth`.
  */
 export const WORDMARK_LUY_ASCII: readonly string[] = [
   '##                ',
@@ -90,8 +89,7 @@ export const WORDMARK_LUY_ASCII: readonly string[] = [
   '##  ##  ##  ##  ##',
   '##  ##  ##   #####',
   '##   #####      ##', // BASELINE
-  '                ##', // DESCENDER 1: a haste do y desce reto
-  '            ##### ', // DESCENDER 2: o rabo gancha p/ a ESQUERDA
+  '             #### ', // DESCENDER: a haste do y desce e JÁ GANCHA p/ a ESQUERDA (rabo curto)
 ];
 
 /** Espaço (col) entre o Λ e "luy" no wordmark grande. 1 col de respiro (pedido do dono:

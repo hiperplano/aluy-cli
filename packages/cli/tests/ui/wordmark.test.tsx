@@ -82,39 +82,36 @@ describe('Wordmark — "Λluy" (Λ accent + luy minúsculo) · EST-0989', () => 
     expect(out).not.toContain('█');
   });
 
-  it('o "y" tem RABO CURVADO: descender de 2 linhas que GANCHA p/ a ESQUERDA · F195', () => {
+  it('o "y" tem RABO CURVADO CURTO: descender de 1 linha que GANCHA p/ a ESQUERDA · F195', () => {
     const out = plain(wrap(<Wordmark columns={100} />).lastFrame() ?? '');
     const lines = out.split('\n').filter((l) => l.length > 0);
     const blocks = (s: string): number => (s.match(/█/g) ?? []).length;
-    // 7 linhas: 5 de corpo + 2 de descender do y (a haste desce + o rabo gancha à esquerda).
-    expect(lines.length).toBeGreaterThanOrEqual(7);
-    const baseline = lines[lines.length - 3]!; // baseline (l/u/y terminam) — muitos blocos
-    const stem = lines[lines.length - 2]!; // descender 1: haste do y desce reto
-    const hook = lines[lines.length - 1]!; // descender 2: o rabo gancha p/ a esquerda
+    // 6 linhas: 5 de corpo + 1 de descender do y (a haste JÁ ganchando à esquerda — rabo curto).
+    expect(lines.length).toBeGreaterThanOrEqual(6);
+    const baseline = lines[lines.length - 2]!; // baseline (l/u/y terminam) — muitos blocos
+    const hook = lines[lines.length - 1]!; // descender: o rabo do y, gancha p/ a esquerda
     // a baseline tem o corpo das letras (l, u fechando, y a haste): vários blocos.
     expect(blocks(baseline)).toBeGreaterThan(2);
     // o descender é SÓ o y (poucos blocos), não o corpo inteiro:
-    expect(blocks(stem)).toBeGreaterThanOrEqual(2);
-    expect(blocks(stem)).toBeLessThan(blocks(baseline));
     expect(blocks(hook)).toBeGreaterThanOrEqual(2);
     expect(blocks(hook)).toBeLessThan(blocks(baseline));
-    // o GANCHO: o rabo (última linha) começa MAIS À ESQUERDA que a haste (linha acima) —
-    // é a CURVA/volta do y p/ a esquerda (não uma haste reta descendo).
-    expect(hook.indexOf('█')).toBeLessThan(stem.indexOf('█'));
-    // e o descender está à DIREITA (é o y): a haste começa depois do início da baseline.
-    expect(stem.indexOf('█')).toBeGreaterThan(baseline.indexOf('█'));
+    // está à DIREITA (é o y, a última letra): o rabo fica na metade direita da marca.
+    expect(hook.indexOf('█')).toBeGreaterThan(baseline.indexOf('█'));
+    // o GANCHO p/ a ESQUERDA: o rabo começa À ESQUERDA da haste do y (o bloco mais à
+    // direita da baseline) — é a CURVA/volta do y, não uma haste reta descendo.
+    expect(hook.indexOf('█')).toBeLessThan(baseline.lastIndexOf('█'));
   });
 
-  it('ASCII: o "y" também tem RABO CURVADO (gancho p/ a esquerda na última linha) · F195', () => {
+  it('ASCII: o "y" também tem RABO CURVADO CURTO (gancho p/ a esquerda, 1 linha) · F195', () => {
     const out = plain(wrap(<Wordmark columns={100} />, { TERM: 'linux' }).lastFrame() ?? '');
     const lines = out.split('\n').filter((l) => l.length > 0);
-    expect(lines.length).toBeGreaterThanOrEqual(7);
-    const stem = lines[lines.length - 2]!;
+    expect(lines.length).toBeGreaterThanOrEqual(6);
+    const baseline = lines[lines.length - 2]!;
     const hook = lines[lines.length - 1]!;
     // a última linha (rabo) carrega o gancho do y em ASCII (`#`), curvando p/ a esquerda.
     expect(hook).toContain('#');
     expect((hook.match(/#/g) ?? []).length).toBeLessThan(6); // só o y, não o corpo
-    expect(hook.indexOf('#')).toBeLessThan(stem.indexOf('#')); // gancha p/ a ESQUERDA
+    expect(hook.indexOf('#')).toBeLessThan(baseline.lastIndexOf('#')); // gancha p/ a ESQUERDA
   });
 
   // F195 — a block-art do Λ ficou FIEL ao logo do site: uma LAMBDA bold, PICO estreito no
@@ -123,13 +120,20 @@ describe('Wordmark — "Λluy" (Λ accent + luy minúsculo) · EST-0989', () => 
   describe('forma do Λ (fidelidade ao logo · F195)', () => {
     const filled = (s: string): number => (s.match(/[█/\\]/g) ?? []).length;
 
-    it('Λ tem 6 linhas; "luy" tem 7 (1 descender a mais p/ o rabo do y) — baseline alinhada', () => {
+    it('Λ e "luy" têm 6 linhas (5 corpo + 1 descender) — grade alinhada pela baseline', () => {
       expect(WORDMARK_MARK_BLOCK.length).toBe(6);
       expect(WORDMARK_MARK_ASCII.length).toBe(6);
-      // o "luy" tem 1 LINHA a mais que o Λ: o rabo CURVADO do y usa 2 linhas de descender.
-      // A grade alinha pela BASELINE (índice 4), não pelo total de linhas.
-      expect(WORDMARK_LUY_BLOCK.length).toBe(WORDMARK_MARK_BLOCK.length + 1);
+      // o "luy" tem a MESMA altura do Λ (6): o rabo do y usa 1 linha de descender (rabo curto).
+      // A grade alinha pela BASELINE (índice 4).
+      expect(WORDMARK_LUY_BLOCK.length).toBe(WORDMARK_MARK_BLOCK.length);
       expect(WORDMARK_LUY_ASCII.length).toBe(WORDMARK_LUY_BLOCK.length);
+      // o RABO do y (descender, índice 5) GANCHA p/ a ESQUERDA: começa à esquerda da haste
+      // do y na baseline (o bloco mais à direita da baseline) e não passa dela p/ a direita.
+      const baseY = WORDMARK_LUY_BLOCK[4]!;
+      const tail = WORDMARK_LUY_BLOCK[5]!;
+      expect(tail.indexOf('█')).toBeLessThan(baseY.lastIndexOf('█')); // curva p/ a esquerda
+      expect(tail.lastIndexOf('█')).toBeLessThanOrEqual(baseY.lastIndexOf('█')); // não vai p/ a direita
+      expect(tail.indexOf('█')).toBeGreaterThan(baseY.length / 2); // é o y (metade direita)
     });
 
     it('bloco: ÁPICE afiado no topo, SPLAY largo até a base (apex ≪ base, pés nos cantos)', () => {
