@@ -4325,6 +4325,8 @@ export function App(props: AppProps): React.ReactElement {
         {...(!cycleUiOff && state.cycleProgress !== undefined
           ? { cycleProgress: state.cycleProgress }
           : {})}
+        busy={busy}
+        frame={frame}
       />
       {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
           descansa). Sempre visível (glifo+palavra, a11y): plan=read-only (petrol),

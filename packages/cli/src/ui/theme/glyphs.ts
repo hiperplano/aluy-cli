@@ -42,7 +42,8 @@ export type GlyphName =
   | 'subagents' // + indicador de sub-agentes paralelos 〔EST-0969/0984〕
   | 'sessionDot' // ● identificação colorida da sessão (/rename) 〔EST-0972〕
   | 'barFull' // ▰ célula PREENCHIDA da barra de progresso determinada 〔EST-0973〕
-  | 'barEmpty'; // ▱ célula VAZIA da barra de progresso determinada 〔EST-0973〕
+  | 'barEmpty' // ▱ célula VAZIA da barra de progresso determinada 〔EST-0973〕
+  | 'pulseBlock'; // █ bloco GROSSO do pulso "trabalhando" na StatusBar (enche/esvazia) 〔F195〕
 
 /**
  * Marca do Aluy — o Λ do logo (U+039B GREEK CAPITAL LETTER LAMBDA), 1 célula,
@@ -109,6 +110,10 @@ export const UNICODE_GLYPHS: Readonly<Record<GlyphName, string>> = {
   // e o contraste cheio/vazado lê o avanço SEM depender de cor (a11y §6).
   barFull: '▰',
   barEmpty: '▱',
+  // F195 — o pulso "trabalhando" da StatusBar: bloco GROSSO (o "cursor grosso" que o
+  // dono pediu). █ (2588 full block) tem cobertura UNIVERSAL em mono e é o glifo mais
+  // "grosso"/cheio — uma barra dele enchendo/esvaziando lê como trabalho VIVO em curso.
+  pulseBlock: '█',
 };
 
 /**
@@ -151,6 +156,7 @@ export const SAFE_GLYPHS: Readonly<Record<GlyphName, string>> = {
   // limitada; cai p/ os blocos cheio/sombra (█/░), de cobertura quase universal.
   barFull: '█',
   barEmpty: '░',
+  pulseBlock: '█', // F195 — no perfil seguro o bloco cheio segue █ (cobertura universal)
 };
 
 /** Fallback ASCII (spec §3.3, coluna "Fallback ASCII"). */
@@ -182,6 +188,7 @@ export const ASCII_GLYPHS: Readonly<Record<GlyphName, string>> = {
   // universal de progresso em terminal 7-bit. O componente cola os colchetes.
   barFull: '#',
   barEmpty: '.',
+  pulseBlock: '#', // F195 — ASCII puro: `#` é o bloco "grosso" do pulso (a cor carrega o vivo)
 };
 
 /**
