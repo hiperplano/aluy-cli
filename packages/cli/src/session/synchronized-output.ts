@@ -483,8 +483,17 @@ function chunkIsFrameContent(chunk: string): boolean {
   return false;
 }
 
-/** Cria um renderer diferencial (1 por envelope). Estado: o buffer do frame anterior. */
-export function createCockpitDiffer(): CockpitDiffer {
+/**
+ * Cria um renderer diferencial (1 por envelope). Estado: o buffer do frame anterior.
+ *
+ * `rowsOf` devolve a ALTURA REAL do terminal de saída (linhas) — usada p/ CLIPAR o prefixo
+ * obsoleto do `fullStaticOutput` do Ink (ver `transform`). Deve apontar p/ o MESMO stream
+ * que recebe os bytes (no envelope, o `original`); default `process.stdout.rows` p/ uso
+ * direto. `undefined`/0 ⇒ sem clip (degrada p/ o comportamento antigo).
+ */
+export function createCockpitDiffer(
+  rowsOf: () => number | undefined = () => process.stdout.rows,
+): CockpitDiffer {
   let prevLines: string[] | undefined; // undefined ⇒ não há frame anterior (pinta tudo).
 
   const transform = (chunk: string): string => {
@@ -504,7 +513,25 @@ export function createCockpitDiffer(): CockpitDiffer {
       return `${CURSOR_HOME}${ERASE_TO_EOS}`;
     }
 
-    const nextLines = splitFrameLines(body);
+    const rawLines = splitFrameLines(body);
+    // FIX (fantasma/composer duplicado no cockpit, achado do dono) — CLIPA o PREFIXO obsoleto
+    // do `fullStaticOutput` do Ink. O Ink escreve `clearTerminal + fullStaticOutput + output`
+    // no caminho `outputHeight>=rows` (que o cockpit SEMPRE usa por encher `rows`), e NUNCA
+    // reseta o `fullStaticOutput` — o scrollback INLINE (splash + notas de boot, ~13 linhas)
+    // fica PENDURADO e é PREPENDIDO a CADA frame do cockpit. Isso empurra o grid p/ além de
+    // `rows` (ex.: 53 linhas num terminal de 40) ⇒ o terminal ROLA ⇒ o diff por-linha
+    // ABSOLUTO (CUP) deste differ dessincroniza do que está na tela ⇒ a linha ANTIGA do
+    // composer sobra como FANTASMA (composer duplicado) até um full-paint. O frame REAL do
+    // cockpit é SEMPRE as ÚLTIMAS `rows` linhas (o <Cockpit> crava `height=rows`; o prefixo
+    // é o excedente do Static). Clipamos p/ as últimas `rows` ⇒ frame == grid, zero rolagem,
+    // o modelo absoluto volta a bater com a tela. (Inline não passa por aqui.)
+    const termRows = rowsOf();
+    const clipped =
+      typeof termRows === 'number' && termRows > 0 && rawLines.length > termRows;
+    const nextLines = clipped ? rawLines.slice(-termRows) : rawLines;
+    // `body` recomposto do frame CLIPADO — p/ o `frameEndCursor` (onde o caret assenta) medir
+    // a posição na tela REAL, não no frame inflado pelo Static. Sem clip, reusa o body cru.
+    const effectiveBody = clipped ? nextLines.join('\n') : body;
 
     // 1º frame (sem anterior): PINTA TUDO no lugar. Usado na ENTRADA do alt-screen (#145, tela
     // já limpa pelo `?1049h`) E após `resetDiffer()` no RESIZE (tela COM conteúdo velho da
@@ -551,7 +578,7 @@ export function createCockpitDiffer(): CockpitDiffer {
     // devolve a MESMA {row,col} que escrever o body inteiro a partir do home deixaria — o
     // diff vira IDÊNTICO ao full-paint na posição final do cursor, só sem repintar o que
     // não mudou. Se NADA mudou, `out` é '' ⇒ só o reposicionamento final (sem repaint).
-    const end = frameEndCursor(body);
+    const end = frameEndCursor(effectiveBody);
     return `${out}${cursorToRC(end.row, end.col)}`;
   };
 
@@ -650,7 +677,9 @@ export function wrapStdoutWithSync(
   let cockpitActive = false;
   // O renderer diferencial carrega o FRAME ANTERIOR (estado por envelope). Resetado ao
   // ENTRAR no cockpit (`setCockpit(true)`) ⇒ o 1º frame pinta tudo (pinta na entrada, #145).
-  const cockpitDiffer = createCockpitDiffer();
+  // clipa o prefixo do `fullStaticOutput` pela altura REAL do stream de saída (não o
+  // `process.stdout` global — pode diferir em teste/redirect). Ver `createCockpitDiffer`.
+  const cockpitDiffer = createCockpitDiffer(() => original.rows);
 
   const wrappedWrite = ((
     chunk: string | Uint8Array,

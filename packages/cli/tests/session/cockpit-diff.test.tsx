@@ -193,6 +193,70 @@ describe('EST-0965 · ADR-0076 §5 — renderer diferencial: 1 char ⇒ só a(s)
   });
 });
 
+// ── Regressão (achado do dono): composer DUPLICADO / fantasma no cockpit ─────────────────
+// CAUSA-RAIZ (provada por bytes ao vivo): o Ink escreve `clearTerminal + fullStaticOutput +
+// output` no caminho `outputHeight>=rows` e NUNCA reseta o `fullStaticOutput`. Ao entrar no
+// cockpit DEPOIS do inline, o scrollback inline (splash + notas de boot, ~13 linhas) fica
+// PREPENDIDO a CADA frame do cockpit ⇒ o frame vira `rows+13` linhas num terminal de `rows`
+// ⇒ o terminal ROLA ⇒ o diff por-linha ABSOLUTO do differ dessincroniza ⇒ a linha ANTIGA do
+// composer sobra como FANTASMA (composer duplicado). O fix CLIPA o frame p/ as ÚLTIMAS `rows`
+// linhas (o grid crava `height=rows`; o prefixo é o excedente do Static).
+describe('createCockpitDiffer — clipa o prefixo obsoleto do fullStaticOutput (fantasma do composer)', () => {
+  const CLEAR = `${ESC}2J${ESC}3J${ESC}H`;
+  const TERM_ROWS = 40;
+  // linhas-alvo dos CUP `\x1b[<n>;1H` no stream (via RegExp construído — o ESC fora da fonte
+  // literal p/ não disparar `no-control-regex`, mesma pegadinha do `CUP_RE` acima).
+  const CUP_ROW_RE = new RegExp(`${ESC.replace('[', '\\[')}(\\d+);1H`, 'g');
+  const cupRows = (s: string): number[] => [...s.matchAll(CUP_ROW_RE)].map((m) => Number(m[1]));
+  // 13 linhas de "scrollback inline" que o Ink prepende (splash + notas de boot).
+  const staticPrefix = Array.from({ length: 13 }, (_, i) => `STATIC_LEAK_${i}`);
+  // o grid do cockpit: `rows` linhas cravadas, a última é o composer.
+  const cockpitBody = (composer: string): string[] => [
+    ...Array.from({ length: TERM_ROWS - 1 }, (_, i) => `cockpit_${i}`),
+    `› ${composer}`,
+  ];
+  const leakedFrame = (composer: string): string =>
+    `${CLEAR}${[...staticPrefix, ...cockpitBody(composer)].join('\n')}`;
+
+  it('o 1º frame pinta SÓ as últimas `rows` linhas (o cockpit) — o prefixo do Static NÃO vaza', () => {
+    const differ = createCockpitDiffer(() => TERM_ROWS);
+    const painted = differ.transform(leakedFrame('ola'));
+    // o grid do cockpit saiu…
+    expect(painted.includes('cockpit_0')).toBe(true);
+    expect(painted.includes('› ola')).toBe(true);
+    // …mas NENHUMA linha do prefixo inline vazado (senão o frame passaria de `rows` ⇒ rola).
+    expect(painted.includes('STATIC_LEAK'), 'o prefixo do fullStaticOutput vazou p/ o frame').toBe(
+      false,
+    );
+    // e o cursor NUNCA é posicionado além de `rows` (o que faria o terminal rolar).
+    const maxRow = Math.max(0, ...cupRows(painted));
+    expect(maxRow, 'CUP além de rows ⇒ rolagem ⇒ fantasma').toBeLessThanOrEqual(TERM_ROWS);
+  });
+
+  it('encolher o composer (2→1 linha) NÃO deixa fantasma: a linha do composer é reescrita, sem sobra', () => {
+    const differ = createCockpitDiffer(() => TERM_ROWS);
+    // frame A: composer com 2 "linhas" (simulado por um texto que muda) — ambos frames têm
+    // EXATAMENTE `rows` linhas de grid + o mesmo prefixo de 13; o clip mantém os dois em `rows`.
+    differ.transform(leakedFrame('texto grande no composer'));
+    const diff = differ.transform(leakedFrame('')); // "encolheu" p/ vazio
+    // a linha nova (composer vazio) foi reescrita na sua posição…
+    expect(diff.includes('›')).toBe(true);
+    // …e o diff NÃO reescreve as `cockpit_*` que não mudaram (seria full-paint = flicker)…
+    expect(diff.includes('cockpit_0')).toBe(false);
+    // …e, crucialmente, nenhum CUP além de `rows` (o prefixo clipado não desloca as linhas).
+    expect(Math.max(0, ...cupRows(diff))).toBeLessThanOrEqual(TERM_ROWS);
+    // o prefixo do Static segue fora do stream.
+    expect(diff.includes('STATIC_LEAK')).toBe(false);
+  });
+
+  it('sem prefixo (frame já == `rows`) ⇒ comportamento INALTERADO (não clipa nada)', () => {
+    const differ = createCockpitDiffer(() => TERM_ROWS);
+    const painted = differ.transform(`${CLEAR}${cockpitBody('ola').join('\n')}`);
+    expect(painted.includes('cockpit_0')).toBe(true);
+    expect(painted.includes('› ola')).toBe(true);
+  });
+});
+
 // ── Unidade do renderer diferencial (puro, sem Ink) — borda a borda ──────────────────────
 describe('createCockpitDiffer — diff por-linha (unidade)', () => {
   const cockpitFrame = (body: string): string => `${CLEAR_TERMINAL}${body}`;
