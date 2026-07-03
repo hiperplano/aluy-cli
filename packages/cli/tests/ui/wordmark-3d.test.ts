@@ -30,8 +30,9 @@ describe('composeShadowedWordmark — marca + sombra 3D', () => {
   const grid = composeShadowedWordmark(2); // frame 2 ⇒ tom ▓
 
   it('grade tem 1 linha e 1 coluna a mais (espaço da sombra ↓→)', () => {
-    // a marca block-art tem 6 linhas ⇒ grade 7; a sombra projeta 1 col à direita.
-    expect(grid.length).toBe(7);
+    // a marca block-art tem 7 linhas (o "luy" tem 2 de descender p/ o rabo curvado do y)
+    // ⇒ grade 8; a sombra projeta 1 col à direita e 1 linha abaixo.
+    expect(grid.length).toBe(8);
     const widths = new Set(grid.map((r) => r.length));
     expect(widths.size).toBe(1); // todas as linhas com a mesma largura (retângulo)
   });

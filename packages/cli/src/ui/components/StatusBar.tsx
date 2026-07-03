@@ -25,11 +25,8 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { BUDGET_WARN_PCT } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role } from '../theme/index.js';
-import {
-  abbreviateCount,
-  type GovernanceCounts,
-  type CycleProgress,
-} from '../../session/model.js';
+import { BusyPulse } from './BusyPulse.js';
+import { abbreviateCount, type GovernanceCounts, type CycleProgress } from '../../session/model.js';
 import { useI18n } from '../../i18n/index.js';
 
 /** Nível de consumo de quota (#125) — espelha os limiares do core (70/90%). */
@@ -99,6 +96,19 @@ export interface StatusBarProps {
    * O knob `ALUY_CYCLE_UI_OFF` (lido pela App) suprime tudo via omitir esta prop.
    */
   readonly cycleProgress?: CycleProgress;
+  /**
+   * F195 (pedido do dono) — TRABALHO EM CURSO: quando `true`, a barra ganha ao FIM um
+   * PULSO de blocos grossos (<BusyPulse>) que enche/esvazia com o `frame` — o "cursor
+   * grosso" sinalizando processamento, ADICIONAL ao Λ que pisca e ao verbo vivo. A App
+   * liga isto nas fases ativas (thinking/streaming/retrying/compacting). Ausente/false
+   * ⇒ sem pulso (idle). Cai no narrow (é supplementar; o tier/⚠ têm prioridade).
+   */
+  readonly busy?: boolean;
+  /**
+   * F195 — frame do tick central que anima o <BusyPulse>. Só usado quando `busy`. A
+   * StatusBar já re-renderiza a cada frame (EST-0989), então o pulso avança junto.
+   */
+  readonly frame?: number;
 }
 
 /** Papel de cor do `⛁ janela %` por nível (§4). */
@@ -272,6 +282,15 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
         <>
           <Text> </Text>
           <Glyph name="ask" role="danger" />
+        </>
+      )}
+
+      {/* F195 — PULSO "trabalhando" (blocos grossos que enchem/esvaziam) no FIM da barra,
+          quando o agente processa. Supplementar (some no narrow); deriva do `frame`. */}
+      {props.busy === true && !narrow && (
+        <>
+          <Text> </Text>
+          <BusyPulse {...(props.frame !== undefined ? { frame: props.frame } : {})} />
         </>
       )}
     </Box>

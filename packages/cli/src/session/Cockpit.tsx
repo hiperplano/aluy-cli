@@ -30,6 +30,7 @@ import { abbreviateCount } from './model.js';
 import type { LogSection } from './activity-log.js';
 import type { CockpitLayout } from './cockpit-layout.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
+import { elapsedTickEnabled } from './tick-policy.js';
 import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
 import { useTheme } from '../ui/theme/index.js';
 
@@ -345,6 +346,8 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
           windowPct={windowPct}
           columns={props.columns}
           error={props.state.phase === 'error'}
+          busy={elapsedTickEnabled(props.state.phase)}
+          frame={props.frame}
           {...(props.state.meta.focus !== undefined ? { focus: props.state.meta.focus } : {})}
           {...(process.env.ALUY_CYCLE_UI_OFF !== '1' &&
           process.env.ALUY_CYCLE_UI_OFF !== 'true' &&

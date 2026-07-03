@@ -31,6 +31,7 @@ import type { Theme } from '../ui/theme/theme.js';
 import { useTick } from '../ui/hooks/useTick.js';
 import { SplashScreen, type BootPrompt } from '../ui/components/SplashScreen.js';
 import { emitBootClear } from './run-clear.js';
+import { CLI_VERSION } from '../version.js';
 
 /** Cadência LENTA da cauda de pontinhos do "carregando" (ms). ~3 pontos/s — calmo,
  *  bem abaixo do tick de stream (anti-flicker: a marca não treme, só a cauda muda). */
@@ -292,6 +293,7 @@ function Splash(props: {
       rows={rows}
       status={props.status}
       frame={props.frame}
+      version={CLI_VERSION}
       {...(props.prompt !== undefined ? { prompt: props.prompt } : {})}
     />
   );
