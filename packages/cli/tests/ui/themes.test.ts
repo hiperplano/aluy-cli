@@ -36,6 +36,7 @@ const COLORED_ROLES: readonly TermRole[] = [
   'fg',
   'fgDim',
   'accent',
+  'accentMid',
   'accentDim',
   'danger',
   'success',
@@ -63,7 +64,7 @@ describe('catálogo de temas (/theme) — os 3 do aluy web', () => {
     expect(new Set(bgs).size).toBe(3);
   });
 
-  it('os 3 temas têm os MESMOS 7 papéis (paridade DS)', () => {
+  it('os 3 temas têm os MESMOS 8 papéis (paridade DS)', () => {
     for (const t of THEMES) {
       expect(Object.keys(t.palette).sort()).toEqual([...COLORED_ROLES].sort());
     }

@@ -56,17 +56,18 @@ export interface BusyPulseProps {
 }
 
 /**
- * Papel (cor do tema) de cada célula do pulso, formando o DEGRADÊ. PURA. `i` é o índice da
- * célula (0…width-1) e `lit` o nº de células acesas da esquerda:
- * - `i >= lit`  ⇒ apagada        → `accentDim` (âmbar calmo)
+ * Papel (cor do tema) de cada célula do pulso, formando o DEGRADÊ ÂMBAR. PURA. `i` é o
+ * índice da célula (0…width-1) e `lit` o nº de células acesas da esquerda:
+ * - `i >= lit`  ⇒ apagada        → `accentDim` (âmbar-600, calmo)
  * - `i === lit-1` ⇒ CABEÇA da onda → `accent` (âmbar-400, o mais vivo)
- * - senão (corpo aceso)          → `depth` (âmbar-500, médio)
- * Resultado: ponta brilhante que esmaece na cauda — degradê de 3 tons, todos por PAPEL.
+ * - senão (corpo aceso)          → `accentMid` (âmbar-500, médio)
+ * Resultado: ponta brilhante que esmaece na cauda — degradê de 3 tons TODOS ÂMBAR (pedido
+ * do dono: nada de teal), por PAPEL do tema (nunca cor crua).
  */
-export function pulseCellRole(i: number, lit: number): 'accent' | 'depth' | 'accentDim' {
+export function pulseCellRole(i: number, lit: number): 'accent' | 'accentMid' | 'accentDim' {
   if (i >= lit) return 'accentDim';
   if (i === lit - 1) return 'accent';
-  return 'depth';
+  return 'accentMid';
 }
 
 /**

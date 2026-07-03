@@ -107,8 +107,8 @@ describe('pulseCellRole — degradê de 3 tons', () => {
   it('cabeça da onda (i===lit-1) = accent; corpo aceso = depth; apagado = accentDim', () => {
     const lit = 4;
     expect(pulseCellRole(3, lit)).toBe('accent'); // cabeça (última acesa)
-    expect(pulseCellRole(2, lit)).toBe('depth'); // corpo
-    expect(pulseCellRole(0, lit)).toBe('depth'); // corpo
+    expect(pulseCellRole(2, lit)).toBe('accentMid'); // corpo (âmbar do meio)
+    expect(pulseCellRole(0, lit)).toBe('accentMid'); // corpo (âmbar do meio)
     expect(pulseCellRole(4, lit)).toBe('accentDim'); // apagada
     expect(pulseCellRole(6, lit)).toBe('accentDim'); // apagada
   });
