@@ -2512,7 +2512,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // Só envelopa se ALGUMA camada está ligada (ambas off ⇒ stdout cru, sem custo).
   const sync =
     syncOn || overwriteOn
-      ? wrapStdoutWithSync(baseStdout, { sync: syncOn, overwrite: overwriteOn })
+      ? wrapStdoutWithSync(baseStdout, {
+          sync: syncOn,
+          overwrite: overwriteOn,
+          // F198 — quando a região viva SAI do regime clearTerminal (a resposta LONGA finaliza
+          // e encolhe abaixo de `rows`), o Ink deixa o `previousLineCount` do `log-update`
+          // obsoleto ⇒ o próximo `eraseLines` apaga ~1 tela de scrollback JÁ COMMITADO (o bloco
+          // gigante de linhas em branco entre `▌ você` e `Λ aluy`). A App re-emite o histórico
+          // limpo via clearScreen (cursor ao HOME ⇒ o eraseLines obsoleto fica inócuo). O
+          // holder `clearScreenFn` é preenchido no `registerClearScreen` da App (após o mount).
+          onOverflowRegimeExit: () => clearScreenFn?.(),
+        })
       : undefined;
   const renderStdout = sync?.stdout ?? baseStdout;
 

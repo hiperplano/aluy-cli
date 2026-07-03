@@ -16,6 +16,19 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 _(vazio)_
 
+## [1.0.0-rc.93] — 2026-07-03
+
+### Corrigido
+
+- 🔴 Espaço em branco gigante com resposta LONGA: uma resposta mais alta que o terminal, streamando, gerava um bloco de dezenas de linhas em branco no scrollback. Fix via **synchronized output mode** do terminal (`\x1b[?2026h/l`) — o terminal bufferiza a atualização e não expõe estados parciais em branco.
+
+### Alterado
+
+- 🎨 Logo Λluy: a perninha (rabo) do "y" foi encurtada (descender de 2→1 linha, ainda ganchando à esquerda) — mais enxuta, fiel ao site.
+- 🎨 Pulso de progresso da status bar: maior (4→7 blocos) e com **degradê de 3 tons âmbar** (cabeça `accent` → corpo `depth` → cauda `accentDim`), ligado ao tema.
+
+_(vazio)_
+
 ## [1.0.0-rc.92] — 2026-07-03
 
 ### Adicionado

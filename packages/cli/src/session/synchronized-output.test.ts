@@ -11,6 +11,8 @@ import {
   wrapStdoutWithSync,
   syncOutputEnabled,
   overwriteRenderEnabled,
+  classifyInlineWrite,
+  createOverflowRegimeTracker,
   BEGIN_SYNC,
   END_SYNC,
 } from './synchronized-output.js';
@@ -333,6 +335,46 @@ describe('wrapStdoutWithSync — composição das camadas no fio do stdout', () 
     // sem prefixo de erase ⇒ overwriteInPlace devolve cru ⇒ conteúdo intacto.
     expect(writes[0]).toBe(staticLine);
   });
+
+  // F198 (anti bloco gigante de branco na resposta longa) — o `onOverflowRegimeExit` dispara
+  // (deferido, 1×) SÓ quando a região viva SAI do regime clearTerminal (`outputHeight>=rows`):
+  // a sequência real de bytes de uma resposta longa que enche a tela e depois finaliza.
+  it('F198: onOverflowRegimeExit dispara no 1º write não-clearterm pós-regime (não antes)', async () => {
+    const { stream } = makeStub();
+    const onExit = vi.fn();
+    const { stdout } = wrapStdoutWithSync(stream, {
+      sync: false,
+      overwrite: true,
+      onOverflowRegimeExit: onExit,
+    });
+    // Streaming da resposta LONGA: o Ink escreve clearTerminal+frame (viva > rows) a cada tick.
+    stdout.write(cockpitFrame('▌ você\n  pergunta\nΛ aluy\n  ...resposta longa...\n'));
+    stdout.write(cockpitFrame('▌ você\n  pergunta\nΛ aluy\n  ...mais texto...\n'));
+    await Promise.resolve(); // drena microtasks
+    expect(onExit).not.toHaveBeenCalled(); // ainda DENTRO do regime ⇒ nada.
+    // Finalização: a fala vira bloco no <Static> (append cru). Com previousLineCount possivelmente
+    // 0, ESTE append (1º write não-clearterm) já É a borda de saída ⇒ dispara UMA vez.
+    stdout.write('Λ aluy\n  resposta consolidada\n');
+    stdout.write(inkFrame(23, '› \n')); // eraseLines do chrome — NÃO re-dispara (episódio fechado).
+    await Promise.resolve();
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('F198: onOverflowRegimeExit NUNCA dispara quando a viva sempre CABE (só eraseLines)', async () => {
+    const { stream } = makeStub();
+    const onExit = vi.fn();
+    const { stdout } = wrapStdoutWithSync(stream, {
+      sync: false,
+      overwrite: true,
+      onOverflowRegimeExit: onExit,
+    });
+    // Terminal normal: NUNCA entra no clearTerminal ⇒ só frames `eraseLines` ⇒ zero disparo.
+    stdout.write(inkFrame(0, 'a\n'));
+    stdout.write(inkFrame(1, 'a\nb\n'));
+    stdout.write(inkFrame(2, 'a\nb\nc\n'));
+    await Promise.resolve();
+    expect(onExit).not.toHaveBeenCalled();
+  });
 });
 
 // EST-0965 · ADR-0076 §5 — setCockpit: no MODO COCKPIT o envelope usa o transform do
@@ -457,5 +499,72 @@ describe('cockpit — cursor final (caret) respeita a LARGURA de exibição (CJK
   it('combinante (largura 0): `e + U+0301` (é decomposto) conta 1 coluna, não 2 ⇒ col 2', () => {
     // 'e' (1 col) + U+0301 (combining acute, 0 col) = 1 coluna ⇒ caret na col 2.
     expect(lastLineCaret('e\u0301')).toEqual({ row: 2, col: 2 });
+  });
+});
+
+// F198 (anti "BLOCO GIGANTE de linhas em branco na resposta LONGA") — o detector PURO do
+// regime de repaint do Ink. A causa-raiz: quando a região viva > `rows`, o Ink escreve
+// `clearTerminal`+frame DIRETO (bypassa o `log-update`), congelando o `previousLineCount`
+// obsoleto; ao VOLTAR ao `eraseLines` (a fala finaliza), o `log.clear()` obsoleto apaga ~1 tela
+// de scrollback JÁ COMMITADO ⇒ o bloco de branco entre `▌ você` e `Λ aluy`. O tracker detecta a
+// BORDA de saída pelos BYTES (imune a erro de orçamento) p/ o caller re-emitir o histórico limpo.
+describe('classifyInlineWrite — classifica o write do Ink quanto ao regime de repaint', () => {
+  it('clearTerminal + frame ⇒ "clearterm" (caminho outputHeight>=rows)', () => {
+    expect(classifyInlineWrite(cockpitFrame('Λ aluy\n  x\n'))).toBe('clearterm');
+    expect(classifyInlineWrite(CLEAR_TERMINAL)).toBe('clearterm'); // clearTerminal puro.
+  });
+  it('eraseLines + frame ⇒ "erase" (caminho fits, log-update)', () => {
+    expect(classifyInlineWrite(inkFrame(3, 'a\nb\nc\n'))).toBe('erase');
+    expect(classifyInlineWrite(inkFrame(1, 'z\n'))).toBe('erase'); // N=1.
+  });
+  it('Static append / 1º frame / write parcial ⇒ "other" (não muda o regime)', () => {
+    expect(classifyInlineWrite('Λ aluy\n  resposta\n')).toBe('other'); // Static append.
+    expect(classifyInlineWrite(inkFrame(0, 'a\n'))).toBe('other'); // eraseLines(0) = sem erase.
+    expect(classifyInlineWrite('')).toBe('other');
+  });
+});
+
+describe('createOverflowRegimeTracker — borda de SAÍDA do regime clearTerminal (F198)', () => {
+  it('sinaliza no 1º write NÃO-clearterm depois de um episódio clearTerminal (via eraseLines)', () => {
+    const t = createOverflowRegimeTracker();
+    // Streaming da resposta longa: clearTerminal a cada tick (viva > rows) ⇒ nunca sinaliza.
+    expect(t.feed(cockpitFrame('Λ aluy\n  ...\n'))).toBe(false);
+    expect(t.feed(cockpitFrame('Λ aluy\n  ......\n'))).toBe(false);
+    // 1º write não-clearterm (aqui o eraseLines do frame fits) = a BORDA ⇒ sinaliza UMA vez.
+    expect(t.feed(inkFrame(23, '› \n'))).toBe(true);
+    // Frames fits subsequentes NÃO re-sinalizam (o episódio já fechou).
+    expect(t.feed(inkFrame(1, '› \n'))).toBe(false);
+    expect(t.feed(inkFrame(1, '› x\n'))).toBe(false);
+  });
+
+  it('viva estourou desde o 1º frame (previousLineCount=0) ⇒ a BORDA é o append de Static', () => {
+    const t = createOverflowRegimeTracker();
+    // Regime desde o começo: só clearTerminal (o log-update nunca rodou ⇒ previousLineCount=0).
+    expect(t.feed(cockpitFrame('▌ você\n  pergunta\nΛ aluy\n  ...\n'))).toBe(false);
+    expect(t.feed(cockpitFrame('▌ você\n  pergunta\nΛ aluy\n  ......\n'))).toBe(false);
+    // Finalização: `log.clear()` = eraseLines(0) = VAZIO (nem chega ao tracker). O 1º write real
+    // não-clearterm é o append da fala no <Static> ('other') ⇒ É a borda de saída.
+    expect(t.feed('Λ aluy\n  resposta consolidada\n')).toBe(true);
+    // O eraseLines do chrome que vem logo depois NÃO re-sinaliza (o episódio já fechou).
+    expect(t.feed(inkFrame(9, '› \n'))).toBe(false);
+  });
+
+  it('viva SEMPRE cabe (só eraseLines) ⇒ NUNCA sinaliza (não-regressão do caso comum)', () => {
+    const t = createOverflowRegimeTracker();
+    for (const n of [0, 1, 2, 3, 2, 1]) expect(t.feed(inkFrame(n, 'x\n'))).toBe(false);
+    // Static appends FORA de regime também são inertes (nunca houve clearTerminal).
+    expect(t.feed('▌ aluy\n  bloco\n')).toBe(false);
+  });
+
+  it('DOIS episódios (duas respostas longas) ⇒ sinaliza uma vez POR episódio', () => {
+    const t = createOverflowRegimeTracker();
+    // 1º episódio.
+    t.feed(cockpitFrame('a\n'));
+    expect(t.feed(inkFrame(20, '› \n'))).toBe(true);
+    // entre episódios, frames fits normais.
+    expect(t.feed(inkFrame(1, '› \n'))).toBe(false);
+    // 2º episódio.
+    t.feed(cockpitFrame('b\n'));
+    expect(t.feed(inkFrame(20, '› \n'))).toBe(true);
   });
 });
