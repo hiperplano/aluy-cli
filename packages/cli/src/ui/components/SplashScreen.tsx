@@ -38,6 +38,13 @@ import { splashQuip } from './splash-quips.js';
 const LOADING_DOTS_CYCLE = 4;
 
 /**
+ * F195 — TAGLINE âmbar default sob a marca (pedido do dono: "tela profissional, tagline
+ * âmbar"). Curta e fiel à marca do site ("o agente de terminal", help.html PT). Papel
+ * `accentDim` (âmbar calmo, não crua). O caller pode sobrescrever via prop `tagline`.
+ */
+export const DEFAULT_TAGLINE = 'agente de terminal';
+
+/**
  * Cauda de pontinhos do "carregando" em função do `frame` do tick central. PURO:
  * `0..3` pontos, em laço. Cadência lenta (deriva do tick ~120ms) ⇒ respiro calmo,
  * sem flicker. `frame` ausente / reduced-motion ⇒ caller passa 0 (cauda vazia,
@@ -69,6 +76,16 @@ export interface SplashScreenProps {
    * vez, bem formatada. Ausente ⇒ só a marca + "carregando".
    */
   readonly prompt?: BootPrompt;
+  /**
+   * F195 — versão do binário (`CLI_VERSION`), passada pelo splash-controller. Renderizada
+   * DISCRETA no rodapé do card (`Aluy CLI · v<versão>`, papel `depth`). Ausente ⇒ a linha
+   * de versão some (degradação graciosa; tela mais limpa ainda).
+   */
+  readonly version?: string;
+  /**
+   * F195 — tagline âmbar sob a marca. Ausente ⇒ `DEFAULT_TAGLINE` ("agente de terminal").
+   */
+  readonly tagline?: string;
 }
 
 /**
@@ -97,11 +114,38 @@ export function SplashScreen(props: SplashScreenProps): React.ReactElement {
   const rows = props.rows;
   const frame = props.frame ?? 0;
   const status = props.status ?? 'carregando';
+  const tagline = props.tagline ?? DEFAULT_TAGLINE;
   // SÓ no splash, COM Unicode e animação ligada (não reduced-motion) e largura que
   // comporta a marca grande: o wordmark ganha a SOMBRA 3D que respira. Senão, a marca
   // ESTÁTICA <Wordmark> (idêntica ao header) — fallback fiel, sem efeito.
   const wants3d = theme.animate && theme.unicode && columns >= MIN_WORDMARK_COLS;
+  const mark = wants3d ? <ShadowedWordmark frame={frame} /> : <Wordmark columns={columns} />;
 
+  // F195 — quando há PERGUNTA de boot, a tela é a DECISÃO: marca + <BootPromptBox>
+  // focada (comportamento herdado, sem card em volta — evita moldura dentro de moldura).
+  if (props.prompt !== undefined) {
+    return (
+      <Box
+        width={columns}
+        height={rows}
+        flexDirection="column"
+        alignItems="center"
+        justifyContent="center"
+      >
+        {mark}
+        <Box paddingTop={1}>
+          <BootPromptBox prompt={props.prompt} columns={columns} />
+        </Box>
+      </Box>
+    );
+  }
+
+  // F195 (feedback do dono: "tira a borda") — TELA DE CARGA arejada, SEM moldura/box: só
+  // o miolo centrado e com respiro. Empilhado: marca 3D → TAGLINE âmbar → "carregando…"
+  // divertido → versão discreta. NADA de box-drawing (o dono achou o card horrível). O
+  // respiro vem de `paddingTop` entre os blocos; a centralização nos dois eixos vem do
+  // contêiner do tamanho da janela. Anti-flicker: a marca/altura seguem estáveis (só a
+  // sombra 3D e a cauda do quip animam) — sem borda, nada a refluir.
   return (
     // Contêiner do TAMANHO da janela: centraliza o miolo nos dois eixos. `height`
     // fixa a moldura vertical (o Ink alinha o conteúdo ao centro). Sem `height` o
@@ -114,17 +158,44 @@ export function SplashScreen(props: SplashScreenProps): React.ReactElement {
       alignItems="center"
       justifyContent="center"
     >
-      {wants3d ? <ShadowedWordmark frame={frame} /> : <Wordmark columns={columns} />}
-
-      {props.prompt !== undefined ? (
+      {mark}
+      <Box paddingTop={1}>
+        <Tagline text={tagline} />
+      </Box>
+      <Box paddingTop={1}>
+        <Loading status={status} frame={frame} />
+      </Box>
+      {props.version !== undefined && props.version !== '' && (
         <Box paddingTop={1}>
-          <BootPromptBox prompt={props.prompt} columns={columns} />
-        </Box>
-      ) : (
-        <Box paddingTop={1}>
-          <Loading status={status} frame={frame} />
+          <VersionLine version={props.version} />
         </Box>
       )}
+    </Box>
+  );
+}
+
+/**
+ * F195 — a TAGLINE âmbar sob a marca (papel `accentDim` — nunca cor crua). É a linha de
+ * identidade calma que dá o ar "profissional/produto" ao splash, sem competir com a marca.
+ */
+function Tagline(props: { readonly text: string }): React.ReactElement {
+  return (
+    <Box>
+      <Role name="accentDim">{props.text}</Role>
+    </Box>
+  );
+}
+
+/**
+ * F195 — a linha de VERSÃO discreta no rodapé do card: `Aluy CLI · v<versão>`. `Aluy CLI`
+ * em `fgDim` (meta), o `v<versão>` em `depth` (o mesmo papel da versão no <Header>). Sem
+ * hardcode: a versão chega por prop (`CLI_VERSION`, sincronizada do package.json).
+ */
+function VersionLine(props: { readonly version: string }): React.ReactElement {
+  return (
+    <Box>
+      <Role name="fgDim">Aluy CLI · </Role>
+      <Role name="depth">v{props.version}</Role>
     </Box>
   );
 }

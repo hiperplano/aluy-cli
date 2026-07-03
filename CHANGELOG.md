@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Adicionado
+
+- 🟢 Splash & marca (F195): (1) splash **sem borda** — layout arejado centrado (marca 3D → tagline âmbar → carregando → versão), estilo profissional, degradação limpa (ASCII/NO_COLOR/estreito); (2) **wordmark Λluy refeito fiel ao logo do site** — Λ com ápice simétrico + splay geométrico até base larga, e o "y" com o rabo CURVADO (gancho à esquerda) do logo real; (3) novo **indicador de progresso `████`** (cursor grosso) na status bar que enche/esvazia quando algo processa, adicional ao Λ piscando. Anti-flicker (frame estável, sem setInterval), fonte-única (splash+header), cores por papel do tema.
+
 _(vazio)_
 
 ## [1.0.0-rc.90] — 2026-07-02

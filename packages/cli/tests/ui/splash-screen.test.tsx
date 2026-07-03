@@ -15,7 +15,12 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
-import { SplashScreen, BootPromptBox, loadingDots } from '../../src/ui/components/SplashScreen.js';
+import {
+  SplashScreen,
+  BootPromptBox,
+  loadingDots,
+  DEFAULT_TAGLINE,
+} from '../../src/ui/components/SplashScreen.js';
 import { SPLASH_QUIPS } from '../../src/ui/components/splash-quips.js';
 import { parseBootPrompt } from '../../src/session/splash-controller.js';
 
@@ -81,6 +86,58 @@ describe('SplashScreen — carregando (EST-0989)', () => {
     expect(plain(raw)).toContain(SPLASH_QUIPS[0]);
     // NO_COLOR ⇒ sem sequências de cor SGR no frame.
     expect(raw).not.toMatch(new RegExp(ESC + '\\[[0-9;]*3[0-9]m'));
+  });
+});
+
+// F195 — a tela de carga foi ELEVADA (referência opencode): tagline âmbar sob a marca,
+// versão discreta e um CARD sutil (moldura) centrado. Degrada limpo (ASCII/estreito sem
+// borda) e mantém os INVARIANTES (marca + carregando + fallbacks).
+describe('SplashScreen — tela profissional: tagline + versão + card (F195)', () => {
+  it('mostra a TAGLINE âmbar sob a marca (default "agente de terminal")', () => {
+    const { lastFrame } = wrap(<SplashScreen columns={80} rows={22} frame={0} />);
+    expect(plain(lastFrame() ?? '')).toContain(DEFAULT_TAGLINE);
+  });
+
+  it('tagline CUSTOM sobrescreve o default', () => {
+    const { lastFrame } = wrap(
+      <SplashScreen columns={80} rows={22} frame={0} tagline="seu agente local" />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('seu agente local');
+    expect(out).not.toContain(DEFAULT_TAGLINE);
+  });
+
+  it('mostra a VERSÃO discreta quando passada (`Aluy CLI · v<versão>`)', () => {
+    const { lastFrame } = wrap(
+      <SplashScreen columns={80} rows={22} frame={0} version="1.2.3-rc.4" />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('Aluy CLI');
+    expect(out).toContain('v1.2.3-rc.4');
+  });
+
+  it('SEM versão: a linha de versão some (degradação graciosa, tela mais limpa)', () => {
+    const { lastFrame } = wrap(<SplashScreen columns={80} rows={22} frame={0} />);
+    expect(plain(lastFrame() ?? '')).not.toContain('Aluy CLI ·');
+  });
+
+  it('SEM BORDA/moldura na tela de carga (feedback do dono): nenhum box-drawing', () => {
+    // Unicode largo: mesmo com box-drawing DISPONÍVEL, a splash de carga NÃO desenha card —
+    // é arejada, sem moldura (o dono achou o card horrível). Só o miolo centrado.
+    const { lastFrame } = wrap(<SplashScreen columns={80} rows={22} frame={0} />);
+    const out = plain(lastFrame() ?? '');
+    expect(out).not.toMatch(/[╭╮╰╯│─]/); // nada de moldura
+    expect(out).toContain('██'); // a marca segue
+    expect(out).toContain(DEFAULT_TAGLINE); // e a tagline
+  });
+
+  it('ASCII (TERM=linux): SEM moldura Unicode — layout arejado, ainda com tagline', () => {
+    const { lastFrame } = wrap(<SplashScreen columns={80} rows={22} frame={0} />, {
+      TERM: 'linux',
+    });
+    const out = plain(lastFrame() ?? '');
+    expect(out).not.toMatch(/[╭╮╰╯]/); // nada de box-drawing Unicode em TERM=linux
+    expect(out).toContain(DEFAULT_TAGLINE); // conteúdo preservado
   });
 });
 
