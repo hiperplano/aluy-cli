@@ -89,6 +89,16 @@ export interface UserConfig {
    */
   readonly fullscreen?: boolean;
   /**
+   * F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab, estilo "suggested next steps"). Ao
+   * fim de um turno, com o composer vazio, a TUI mostra uma sugestão dim do que pedir a
+   * seguir; Tab a aceita. É uma OPÇÃO togglável (`/suggest on|off`), default LIGADO
+   * (ausente ⇒ ON). MESMA disciplina de UI dos flat-booleans `splitView`/`fullscreen`:
+   * só sobrevive como boolean genuíno; lixo/ausente ⇒ default ON. Precedência:
+   * `ALUY_SUGGESTIONS` (env, 0/1) > este campo > default(ON). Só pref de UI — jamais
+   * segredo (CLI-SEC-7). A heurística é LOCAL (sem modelo/tokens) — não gasta o BYO.
+   */
+  readonly suggestions?: boolean;
+  /**
    * ADR-0120 / EST-1113 — BACKEND de modelo salvo: `broker` (default) | `local`
    * (BYO). Preferência de roteamento (NÃO credencial — CLI-SEC-7): diz por QUAL
    * caminho o modelo é chamado, não COM qual segredo. Precedência: `--backend`
@@ -452,6 +462,7 @@ function sanitize(raw: unknown): UserConfig {
     splitView?: boolean;
     lang?: Lang;
     fullscreen?: boolean;
+    suggestions?: boolean;
     backend?: 'broker' | 'local';
     localProvider?: string;
     localModel?: string;
@@ -494,6 +505,10 @@ function sanitize(raw: unknown): UserConfig {
   // EST-1000 · ADR-0076 §1 — fullscreen (cockpit): booleano de UI, MESMA disciplina do
   // splitView. Só sobrevive como boolean genuíno; lixo/ausente ⇒ default INLINE. NUNCA lança.
   if (typeof obj.fullscreen === 'boolean') out.fullscreen = obj.fullscreen;
+  // F197 — suggestions (próximo prompt): booleano de UI, MESMA disciplina do split/
+  // fullscreen. Só sobrevive como boolean genuíno; lixo/ausente ⇒ default ON (resolvido
+  // em `resolveInitialSuggestions`, não aqui — aqui só preservamos o que foi salvo). NUNCA lança.
+  if (typeof obj.suggestions === 'boolean') out.suggestions = obj.suggestions;
   // ADR-0120 — backend: só `broker`|`local` (lixo ⇒ descartado ⇒ default broker).
   if (obj.backend === 'broker' || obj.backend === 'local') out.backend = obj.backend;
   // ADR-0120 / ADR-0118 — localProvider: SLUG opaco razoável (ABERTO/config-driven).
@@ -707,6 +722,15 @@ export class UserConfigStore {
   }
 
   /**
+   * F197 — Açúcar: persiste a preferência da SUGESTÃO DE PRÓXIMO PROMPT (`/suggest on|off`),
+   * preservando as demais. `true` ⇒ a próxima sessão reabre com sugestões; `false` ⇒ off.
+   * Só pref de UI (booleano) — jamais segredo (CLI-SEC-7).
+   */
+  saveSuggestions(suggestions: boolean): boolean {
+    return this.save({ suggestions });
+  }
+
+  /**
    * EST-1112 · ADR-0119 — Açúcar: persiste a preferência de budget local
    * (`/budget`/`--budget`), preservando as demais. `true` ⇒ a próxima sessão
    * local reabre com budget ON; `false` ⇒ budget OFF no local. NÃO tem efeito
@@ -822,6 +846,23 @@ export function resolveInitialSplitView(flag: boolean | undefined, config: UserC
 export function resolveInitialFullscreen(flag: boolean | undefined, config: UserConfig): boolean {
   if (flag === true) return true;
   return config.fullscreen ?? false;
+}
+
+/**
+ * F197 — Resolve se a SUGESTÃO DE PRÓXIMO PROMPT nasce LIGADA. Precedência: env
+ * `ALUY_SUGGESTIONS` (`0`/`false` desliga, `1`/`true` liga — override de sessão, estilo
+ * dos demais `ALUY_*`) > `config.suggestions` (pref salva pelo `/suggest`) > default ON
+ * (é uma OPÇÃO default-LIGADA, desligável). PURO. Diferente do split/fullscreen (default
+ * OFF): aqui o default é ON por decisão do dono ("uma OPÇÃO ... default LIGADO").
+ */
+export function resolveInitialSuggestions(
+  config: UserConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const raw = env['ALUY_SUGGESTIONS']?.trim().toLowerCase();
+  if (raw === '0' || raw === 'false' || raw === 'off' || raw === 'no') return false;
+  if (raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes') return true;
+  return config.suggestions ?? true;
 }
 
 /**

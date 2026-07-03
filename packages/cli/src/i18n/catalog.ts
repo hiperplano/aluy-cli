@@ -48,6 +48,19 @@ export interface Catalog {
   'hints.ctrlcAgain': string;
   // EST-1000 · ADR-0076 §3/§4 — atalhos do MODO COCKPIT (alt-screen, 6 regiões).
   'hints.cockpit': string;
+  // F197 — dica anexada ao footer idle quando há uma sugestão de próximo prompt pendente.
+  'hints.suggest': string;
+
+  // ── F197 — sugestão de PRÓXIMO PROMPT (ghost + Tab). Cada chave é a FRASE que vira o
+  //    texto do composer ao aceitar a sugestão (é um objetivo real, acionável). Uma por
+  //    `NextSuggestionId` do core (`suggest.<camelCase>`). ──────────────────────────────
+  'suggest.runTests': string;
+  'suggest.fixFailing': string;
+  'suggest.summarize': string;
+  'suggest.retryDifferent': string;
+  'suggest.implement': string;
+  'suggest.explain': string;
+  'suggest.nextStep': string;
 
   // ── Cockpit (ADR-0076) — rótulos das regiões + avisos de modo/degradação ──
   /** Rótulo da região de CONVERSA (scroll próprio). */

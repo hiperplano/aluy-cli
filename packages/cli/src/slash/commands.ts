@@ -49,6 +49,7 @@ export type NativeCommandId =
   | 'add-dir'
   | 'split'
   | 'fullscreen'
+  | 'suggest'
   | 'export'
   | 'tools'
   | 'quit'
@@ -544,6 +545,17 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.fullscreen',
     source: 'native',
     id: 'fullscreen',
+    section: 'sessão',
+  },
+  {
+    // F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab). Toggle in-session: `/suggest`
+    // alterna, `/suggest on|off` força. UI pura — não toca turno/contexto; persiste a
+    // pref (best-effort). A geração é heurística LOCAL (sem modelo/tokens — não gasta o BYO).
+    name: 'suggest',
+    summary: 'liga/desliga a sugestão de próximo prompt (ghost · Tab aceita)',
+    usage: '[on|off]',
+    source: 'native',
+    id: 'suggest',
     section: 'sessão',
   },
   {
