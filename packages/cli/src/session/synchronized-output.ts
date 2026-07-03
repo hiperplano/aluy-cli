@@ -179,6 +179,72 @@ function matchEraseLines(chunk: string): { lines: number; bodyStart: number } | 
 }
 
 /**
+ * F198 (anti "BLOCO GIGANTE de linhas em branco na resposta longa") — CLASSIFICA um write do
+ * Ink no INLINE quanto ao REGIME de repaint, p/ detectar a SAÍDA do caminho `outputHeight >=
+ * rows` (clearTerminal). PURO.
+ *  · 'clearterm' — o Ink pintou a tela via `clearTerminal` (a região viva > `rows`, `ink.js`:
+ *                  `outputHeight >= rows` ⇒ escreve `clearTerminal + fullStaticOutput + output`
+ *                  DIRETO, bypassando o `log-update`);
+ *  · 'erase'     — frame normal `eraseLines` (a região viva CABE em `rows`; o `log-update` gere);
+ *  · 'other'     — Static append / 1º frame / write parcial (não muda o regime).
+ */
+export function classifyInlineWrite(body: string): 'clearterm' | 'erase' | 'other' {
+  if (body.startsWith(CLEAR_TERMINAL)) return 'clearterm';
+  if (matchEraseLines(body)) return 'erase';
+  return 'other';
+}
+
+/**
+ * F198 — detector de SAÍDA do regime clearTerminal (região viva > `rows`) no INLINE.
+ *
+ * CAUSA-RAIZ do bug (medida): quando a região viva fica MAIOR que `rows` (resposta LONGA, ou
+ * tool/sub-agentes inflando a viva além do orçado, ou terminal baixo), o Ink usa o caminho
+ * `outputHeight >= rows` — escreve `clearTerminal`+frame DIRETO e NÃO chama o `log-update`,
+ * então o `previousLineCount` do `log-update` CONGELA obsoleto (≈ a altura da tela, o último
+ * valor do caminho `fits`). Quando a viva FINALIZA e encolhe abaixo de `rows` (a fala vira
+ * bloco concluído no `<Static>`), o Ink volta ao caminho `fits` e chama `log.clear()` =
+ * `eraseLines(previousLineCount_obsoleto)`: sobe ~1 TELA e apaga linhas JÁ COMMITADAS no
+ * scrollback, deixando um BLOCO GIGANTE de linhas em branco entre a mensagem do usuário
+ * (`▌ você`) e o cabeçalho da resposta (`Λ aluy`). (O `overwriteInPlace` acima traduz o
+ * `eraseLines` obsoleto em `cursor-up(N-1) + eraseBelow` — mesmo efeito: branqueia o commit.)
+ *
+ * Não há como resetar o `previousLineCount` interno do Ink por fora. Então DETECTAMOS a
+ * transição pelos BYTES (a fonte de verdade do regime, imune a erro de orçamento) e
+ * SINALIZAMOS o caller p/ LIMPAR a tela + re-emitir o histórico (clearScreen) — o cursor vai
+ * ao HOME e o `eraseLines` obsoleto seguinte fica INÓCUO (nada acima do topo p/ apagar), então
+ * o scrollback re-emitido sai LIMPO. `feed(body)` devolve `true` na BORDA de saída (o 1º write
+ * que NÃO é clearTerminal depois de um episódio clearTerminal).
+ *
+ * POR QUE "1º write não-clearterm" (e não "1º eraseLines"): DENTRO do regime o Ink escreve
+ * EXCLUSIVAMENTE `clearTerminal`+frame e retorna cedo (`ink.js` — nunca emite `eraseLines` nem
+ * append de `<Static>` ali). Então o PRIMEIRO write que não seja `clearTerminal` já É a saída.
+ * Esperar um `eraseLines` NÃO basta: se a viva estourou desde o 1º frame, o `previousLineCount`
+ * ficou 0 e o `log.clear()` da finalização emite `eraseLines(0)` = VAZIO (o wrapper nem alimenta
+ * o tracker com write vazio) — a 1ª evidência de saída vira o append de `staticOutput` (a fala
+ * virando bloco no `<Static>`), um write 'other'. Contá-lo é seguro: qualquer write não-clearterm
+ * só chega aqui com `inClearTerm` (durante o regime não há esses writes) ⇒ é a saída real.
+ *
+ * Só INLINE: o cockpit (alt-screen) não tem scrollback e usa seu próprio differ. PURO/estável.
+ */
+export function createOverflowRegimeTracker(): { feed(body: string): boolean } {
+  let inClearTerm = false;
+  return {
+    feed(body: string): boolean {
+      if (classifyInlineWrite(body) === 'clearterm') {
+        inClearTerm = true;
+        return false;
+      }
+      // 1º write não-clearterm depois do regime = a BORDA de saída (a viva voltou a caber).
+      if (inClearTerm) {
+        inClearTerm = false;
+        return true;
+      }
+      return false;
+    },
+  };
+}
+
+/**
  * Acrescenta `\x1b[K` (limpa-FIM-de-linha) ao fim de CADA linha do conteúdo, p/ tirar a
  * cauda de uma linha anterior mais comprida SEM branquear a linha inteira. Preserva os
  * `\n` (e os `\r\n`) byte a byte — só INSERE o `\x1b[K` ANTES de cada quebra (e no fim,
@@ -539,6 +605,15 @@ export interface WrapOptions {
   readonly sync?: boolean;
   /** Aplicar o overwrite-in-place. Default ON (`ALUY_OVERWRITE_RENDER≠0`). */
   readonly overwrite?: boolean;
+  /**
+   * F198 — chamado (deferido, 1×) na SAÍDA do regime clearTerminal do INLINE (região viva
+   * VOLTA a caber em `rows`, ver `createOverflowRegimeTracker`). O caller (run.tsx) liga isto
+   * ao `clearScreen` da App p/ LIMPAR a tela + re-emitir o histórico e neutralizar o desync do
+   * `previousLineCount` do Ink (o BLOCO GIGANTE de linhas em branco). Ausente ⇒ sem detecção
+   * (comportamento antigo). Só dispara quando o regime foi de fato ENTRADO — zero custo/efeito
+   * em terminais onde a viva sempre cabe (o caso comum).
+   */
+  readonly onOverflowRegimeExit?: () => void;
 }
 
 /**
@@ -563,6 +638,9 @@ export function wrapStdoutWithSync(
 ): SyncStdout {
   const useSync = options.sync ?? true;
   const useOverwrite = options.overwrite ?? true;
+  const onOverflowRegimeExit = options.onOverflowRegimeExit;
+  // F198 — rastreia o regime clearTerminal (inline) pelos BYTES p/ sinalizar a borda de saída.
+  const overflowRegime = createOverflowRegimeTracker();
   let cleanedUp = false;
   // EST-0965 · ADR-0076 §5 — MODO COCKPIT: enquanto ativo, usa o RENDERER DIFERENCIAL do
   // alt-screen (`cockpitDiffer`, diff por-linha contra o frame anterior) em vez do transform
@@ -593,6 +671,14 @@ export function wrapStdoutWithSync(
     }
 
     const body = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    // F198 — no INLINE, detecta a SAÍDA do regime clearTerminal (`outputHeight >= rows`) pelos
+    // BYTES e sinaliza o caller (deferido, fora do write reentrante) p/ limpar+re-emitir o
+    // histórico — neutraliza o `previousLineCount` obsoleto do Ink (bloco gigante de branco na
+    // resposta longa). Independe do `overwrite` (o regime é do Ink, não do transform). O cockpit
+    // (alt-screen) não tem scrollback ⇒ fora do detector. Zero efeito quando a viva sempre cabe.
+    if (onOverflowRegimeExit !== undefined && !cockpitActive && overflowRegime.feed(body)) {
+      queueMicrotask(onOverflowRegimeExit);
+    }
     // EST-0965 · ADR-0076 §5 — o anti-flicker tem padrão DIFERENTE em cada superfície
     // (o Ink emite bytes diferentes em cada uma):
     //  · COCKPIT (alt-screen): o Ink usa `clearTerminal` (`\x1b[2J\x1b[3J\x1b[H`) + frame
