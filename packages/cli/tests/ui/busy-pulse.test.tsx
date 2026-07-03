@@ -8,7 +8,12 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
-import { BusyPulse, pulseLit, DEFAULT_PULSE_WIDTH } from '../../src/ui/components/BusyPulse.js';
+import {
+  BusyPulse,
+  pulseLit,
+  pulseCellRole,
+  DEFAULT_PULSE_WIDTH,
+} from '../../src/ui/components/BusyPulse.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 
 const ESC = String.fromCharCode(27);
@@ -93,5 +98,28 @@ describe('StatusBar — pulso de trabalho no fim da barra (F195)', () => {
   it('narrow (<60 col): o pulso CAI (supplementar; tier/⚠ têm prioridade)', () => {
     const out = plain(wrap(<StatusBar {...base} columns={50} busy frame={3} />).lastFrame() ?? '');
     expect(out).not.toContain('█');
+  });
+});
+
+// F195+ — degradê de 3 tons (pedido do dono "mais cores + maiorzinha"): cabeça `accent`,
+// corpo `depth`, apagado `accentDim`; e a largura default subiu p/ 7.
+describe('pulseCellRole — degradê de 3 tons', () => {
+  it('cabeça da onda (i===lit-1) = accent; corpo aceso = depth; apagado = accentDim', () => {
+    const lit = 4;
+    expect(pulseCellRole(3, lit)).toBe('accent'); // cabeça (última acesa)
+    expect(pulseCellRole(2, lit)).toBe('depth'); // corpo
+    expect(pulseCellRole(0, lit)).toBe('depth'); // corpo
+    expect(pulseCellRole(4, lit)).toBe('accentDim'); // apagada
+    expect(pulseCellRole(6, lit)).toBe('accentDim'); // apagada
+  });
+
+  it('lit===1 ⇒ a única acesa é a cabeça (accent); lit===0 ⇒ tudo accentDim', () => {
+    expect(pulseCellRole(0, 1)).toBe('accent');
+    expect(pulseCellRole(1, 1)).toBe('accentDim');
+    expect(pulseCellRole(0, 0)).toBe('accentDim');
+  });
+
+  it('a largura default do pulso é 7 (maior)', () => {
+    expect(DEFAULT_PULSE_WIDTH).toBe(7);
   });
 });
