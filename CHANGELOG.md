@@ -16,6 +16,16 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 _(vazio)_
 
+## [1.0.0-rc.95] — 2026-07-03
+
+### Corrigido
+
+- 🔴 Fullscreen (cockpit): o COMPOSER se desconstruía ao digitar texto que quebra em várias linhas — o texto fragmentava e o cursor descasava. Causa: a linha do input eram `<Text>` IRMÃOS (prompt·texto·cursor) e o Ink não flui `<Text>` irmãos como texto contínuo. Fix: virou um `<Text wrap>` único com os segmentos aninhados.
+- 🔴 Fullscreen: COMPOSER FANTASMA (duplicado) após transições — ao entrar no /fullscreen vindo do inline, o scrollback antigo prependava cada frame do cockpit, estourava `rows`, o terminal rolava e o diff por-linha dessincronizava. Fix: o differ do cockpit clipa o frame para as últimas `rows` linhas + `overflow:hidden` nas regiões de altura cravada.
+- 🎨 Fullscreen: o LOG ocupava espaço morto (dimensionava para conteúdo não pintado) e a conversa VAZIA deixava um vão gigante. Agora o LOG casa o conteúdo real e a sessão vazia mostra uma dica + notas centradas.
+
+_(vazio)_
+
 ## [1.0.0-rc.94] — 2026-07-03
 
 ### Alterado
