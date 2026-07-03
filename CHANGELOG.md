@@ -20,6 +20,10 @@ _(vazio)_
 
 ### Corrigido
 
+- 🔴 CRASH duro no fullscreen (`RangeError: Invalid array length`): em transições (retomar sessão + entrar no alt-screen + resize) o `stdout.rows` chegava `NaN`, driblava o guard `rows < MIN` (pois `NaN < MIN` é `false`), virava altura de região `NaN` e o Ink fazia `new Array(NaN)` → o processo MORRIA (e levava o Ctrl-C junto). Guard duro: toda dimensão é clampada para inteiro ≥ 1 (ou recusa pro inline) antes de chegar ao Ink/differ.
+- 🔴 `/clear` no fullscreen deixava a TELA BRANCA (o differ mantinha o frame velho e só repintava a conversa). Agora `/clear` reseta o differ → full-repaint do cockpit vazio.
+- 🎨 Fullscreen: o menu de `/` ficava preso ao limpar o composer com Ctrl-C; agora fecha junto.
+
 - 🔴 Fullscreen (cockpit): o COMPOSER se desconstruía ao digitar texto que quebra em várias linhas — o texto fragmentava e o cursor descasava. Causa: a linha do input eram `<Text>` IRMÃOS (prompt·texto·cursor) e o Ink não flui `<Text>` irmãos como texto contínuo. Fix: virou um `<Text wrap>` único com os segmentos aninhados.
 - 🔴 Fullscreen: COMPOSER FANTASMA (duplicado) após transições — ao entrar no /fullscreen vindo do inline, o scrollback antigo prependava cada frame do cockpit, estourava `rows`, o terminal rolava e o diff por-linha dessincronizava. Fix: o differ do cockpit clipa o frame para as últimas `rows` linhas + `overflow:hidden` nas regiões de altura cravada.
 - 🎨 Fullscreen: o LOG ocupava espaço morto (dimensionava para conteúdo não pintado) e a conversa VAZIA deixava um vão gigante. Agora o LOG casa o conteúdo real e a sessão vazia mostra uma dica + notas centradas.
