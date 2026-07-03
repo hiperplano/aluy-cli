@@ -255,6 +255,21 @@ describe('createCockpitDiffer — clipa o prefixo obsoleto do fullStaticOutput (
     expect(painted.includes('cockpit_0')).toBe(true);
     expect(painted.includes('› ola')).toBe(true);
   });
+
+  // GUARD DURO (crash) — `rowsOf()` inválido (NaN/0/undefined/Infinity) NÃO pode explodir o
+  // clip (`slice(-termRows)` com lixo) nem passar dimensão inválida adiante: degrada p/ "não
+  // clipa" (seguro). Prova que o differ nunca lança nem devolve algo corrompido.
+  for (const badRows of [NaN, 0, -5, Infinity, undefined]) {
+    it(`rowsOf()=${String(badRows)} ⇒ NÃO lança, não clipa (degrada seguro)`, () => {
+      const differ = createCockpitDiffer(() => badRows as unknown as number);
+      const frame = `${CLEAR}${[...staticPrefix, ...cockpitBody('ola')].join('\n')}`;
+      expect(() => {
+        const out = differ.transform(frame);
+        // sem clip válido ⇒ pinta o frame inteiro (inclui o prefixo) — mas NUNCA crasha.
+        expect(typeof out).toBe('string');
+      }).not.toThrow();
+    });
+  }
 });
 
 // ── Unidade do renderer diferencial (puro, sem Ink) — borda a borda ──────────────────────

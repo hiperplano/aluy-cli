@@ -525,9 +525,14 @@ export function createCockpitDiffer(
     // cockpit é SEMPRE as ÚLTIMAS `rows` linhas (o <Cockpit> crava `height=rows`; o prefixo
     // é o excedente do Static). Clipamos p/ as últimas `rows` ⇒ frame == grid, zero rolagem,
     // o modelo absoluto volta a bater com a tela. (Inline não passa por aqui.)
-    const termRows = rowsOf();
-    const clipped =
-      typeof termRows === 'number' && termRows > 0 && rawLines.length > termRows;
+    // GUARD DURO — `rowsOf()` pode vir 0/NaN/undefined em transição/resize; só clipamos com
+    // um inteiro ≥ 1 (senão `slice(-termRows)` receberia lixo). Inválido ⇒ não clipa (seguro).
+    const rawRows = rowsOf();
+    const termRows =
+      typeof rawRows === 'number' && Number.isFinite(rawRows) && rawRows >= 1
+        ? Math.floor(rawRows)
+        : 0;
+    const clipped = termRows > 0 && rawLines.length > termRows;
     const nextLines = clipped ? rawLines.slice(-termRows) : rawLines;
     // `body` recomposto do frame CLIPADO — p/ o `frameEndCursor` (onde o caret assenta) medir
     // a posição na tela REAL, não no frame inflado pelo Static. Sem clip, reusa o body cru.

@@ -167,7 +167,9 @@ function resolveLogRows(managedTotal: number, hint: LogActivityHint | undefined)
   }
   // EXPANDIDO (foco/agentes) ⇒ até 60%; NATURAL ⇒ até 50%. Nunca maior que as linhas reais.
   const cap = Math.floor(managedTotal * (hint.focused || hint.activeAgents > 0 ? 0.6 : 0.5));
-  const want = Math.max(1, hint.lines);
+  // GUARD — `hint.lines` NaN/Infinity (contagem instável em transição) ⇒ trata como 1 (não
+  // propaga NaN p/ a altura da região, que viraria `new Array(NaN)` no Ink).
+  const want = Math.max(1, Number.isFinite(hint.lines) ? hint.lines : 1);
   return Math.min(managedTotal - 1, Math.max(floor, Math.min(cap, want)));
 }
 
@@ -177,6 +179,17 @@ export function resolveCockpitLayout(
   composerLines = COMPOSER_ROWS,
   logHint?: LogActivityHint,
 ): CockpitLayout {
+  // GUARD DURO (crash `RangeError: Invalid array length` no Ink, achado do dono) — dimensões
+  // INVÁLIDAS (NaN, Infinity, ≤0, fracionárias) vindas de `stdout.rows/columns` em transições
+  // (resume + cockpit + resize) ESCAPAVAM dos checks `< MIN` abaixo, porque `NaN < x === false`
+  // ⇒ a função seguia com `rows=NaN` e devolvia alturas de região NaN/negativas ⇒ o Ink fazia
+  // `new Array(height)` no `Output.get` ⇒ CRASH que MATA o processo (e o Ctrl-C junto). Aqui
+  // normalizamos p/ inteiros e, se não formam uma tela válida, RECUSAMOS (cai pro inline
+  // seguro) — NUNCA propagamos dimensão inválida adiante. PURO/determinístico.
+  const safeRows = Number.isFinite(rows) ? Math.floor(rows) : 0;
+  const safeCols = Number.isFinite(cols) ? Math.floor(cols) : 0;
+  rows = safeRows;
+  cols = safeCols;
   if (cols < COCKPIT_MIN_COLS) {
     return { kind: 'refuse', reason: 'narrow', rows, cols };
   }

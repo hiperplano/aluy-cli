@@ -458,6 +458,18 @@ const NOOP_PERMISSION: PermissionEngineControl = {
   setSafeToolDefault: () => false,
 };
 
+/**
+ * GUARD DURO (crash `RangeError: Invalid array length` no Ink) — devolve uma DIMENSÃO de
+ * terminal SEGURA (inteiro ≥ 1): `stdout.rows/columns` chega 0/NaN/negativo/`undefined` em
+ * transições (resume + entrar no alt-screen + resize), e o Ink faz `new Array(dim)` no
+ * `Output.get` ⇒ um valor inválido MATA o processo. `?? default` NÃO cobre 0/NaN (só nullish),
+ * por isso este helper. Inválido ⇒ o `fallback` (default do terminal). PURO.
+ */
+function safeDim(value: number | undefined, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 1) return Math.floor(value);
+  return fallback;
+}
+
 export function App(props: AppProps): React.ReactElement {
   const { controller } = props;
   const { exit } = useApp();
@@ -492,8 +504,13 @@ export function App(props: AppProps): React.ReactElement {
   // Lê a dimensão ATUAL do stdout a cada render (sempre reflete a largura real, sem congelar
   // no mount); o tick acima dispara o re-render quando ela muda, e o effect de resize do
   // cockpit (P1-A/B/P2-D, keyed em `[columns, rows, fullscreen]`) então enxerga o novo valor.
-  const columns = stdout?.columns ?? 80;
-  const rows = stdout?.rows ?? 24;
+  // GUARD DURO (crash `Invalid array length` no Ink) — `stdout.rows/columns` pode chegar 0,
+  // NaN ou `undefined` em transições (resume + entrar no alt-screen + resize): o `?? N` só
+  // cobre `undefined`/`null`, NÃO 0/NaN ⇒ um 0/NaN vazava p/ `resolveCockpitLayout` e p/
+  // `height={rows}`, e o Ink fazia `new Array(rows)` ⇒ crash que MATA o processo. Sanitizamos
+  // p/ um inteiro seguro (fallback ao default só quando inválido). `safeDim` é a fonte ÚNICA.
+  const columns = safeDim(stdout?.columns, 80);
+  const rows = safeDim(stdout?.rows, 24);
   const showHints = theme.density !== 'compact';
   // EST-0985 — divisórias de HIERARQUIA (chrome estático, fora da região viva).
   // Em `compact` omitimos as do HEADER (mais sutil — espelha o `showHints` que já
@@ -1165,7 +1182,17 @@ export function App(props: AppProps): React.ReactElement {
     debugRenderLog('clearScreen() → \\x1b[2J\\x1b[3J + staticKey++ (REEMITE histórico)');
     stdout?.write('\x1b[H\x1b[2J\x1b[3J');
     setStaticKey((k) => k + 1);
-  }, [stdout]);
+    // FIX (`/clear` no cockpit → TELA BRANCA, achado do dono) — no alt-screen o
+    // `CockpitDiffer` mantém o FRAME ANTERIOR e só reescreve as linhas que MUDARAM. O
+    // `\x1b[2J\x1b[3J` acima BRANQUEIA a tela CRU (passa raw pelo differ — ordem H;2J;3J de
+    // propósito, ver acima), mas o `prevLines` do differ segue o frame VELHO ⇒ o próximo
+    // frame do cockpit (conversa zerada → empty-state) só repinta a REGIÃO da conversa e
+    // considera header/log/status/composer "iguais" ⇒ NÃO os reescreve ⇒ ficam BRANCOS (a
+    // tela toda em branco). Resetar o differ força o PRÓXIMO frame a FULL-PAINT (pinta tudo
+    // de novo sobre a tela limpa) ⇒ o cockpit vazio reaparece inteiro. No inline é no-op (o
+    // differ do cockpit não está no caminho). Ver `createCockpitDiffer`/`resetDiffer`.
+    if (fullscreen) props.cockpitScreen?.resetDiffer?.();
+  }, [stdout, fullscreen, props.cockpitScreen]);
 
   // EST-0983 — entrega o `clearScreen` ao WIRING (que decide QUANDO a sessão zera —
   // `/clear` sempre; `/clear full` só na confirmação; `/clear memory` nunca). Registro
@@ -3121,6 +3148,14 @@ export function App(props: AppProps): React.ReactElement {
         // há texto e/ou anexo ⇒ limpa AMBOS (e desarma, se estava armado de antes).
         setText('');
         if (hasChips) picker.clear();
+        // FIX (achado do dono) — o menu de `/` é DERIVADO do texto, mas seu `slashOpen` é
+        // estado à parte (só re-sincroniza ao DIGITAR). Ao limpar o composer com Ctrl-C
+        // enquanto o menu está aberto (ex.: `/ful` + Ctrl-C), o texto some mas o OVERLAY do
+        // `/` FICAVA aberto (no cockpit ele ocupa a região da conversa) — dava a sensação de
+        // "composer travado". Fechamos o menu junto do clear (texto vazio ⇒ menu não faz
+        // sentido). `setText('')` já esvaziou; aqui só garantimos o overlay fechado.
+        setSlashOpen(false);
+        setSlashSel(0);
         disarmCtrlC();
         return;
       }
