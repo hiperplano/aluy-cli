@@ -90,10 +90,10 @@ describe('shimmerAt — degradê: pico anda com o frame, halo em volta, fora esc
   });
 });
 
-describe('shimmerRole — intensidade → papel do tema (accent→depth→accentDim)', () => {
-  it('mapeia os 3 níveis nos 3 papéis do degradê', () => {
+describe('shimmerRole — intensidade → papel do tema (accent→accentMid→accentDim)', () => {
+  it('mapeia os 3 níveis nos 3 papéis do degradê ÂMBAR', () => {
     expect(shimmerRole(2)).toBe('accent');
-    expect(shimmerRole(1)).toBe('depth');
+    expect(shimmerRole(1)).toBe('accentMid');
     expect(shimmerRole(0)).toBe('accentDim');
   });
 });
@@ -121,7 +121,7 @@ describe('composeShadowedWordmark — marca com brilho + sombra fixa', () => {
     expect(chars(13)).toBe(chars(0));
   });
 
-  it('a marca usa os 3 papéis do brilho ao longo dos frames (accent/depth/accentDim)', () => {
+  it('a marca usa os 3 papéis do brilho ao longo dos frames (accent/accentMid/accentDim)', () => {
     const markRolesAt = (f: number): Set<string> =>
       new Set(
         composeShadowedWordmark(f)
@@ -131,25 +131,26 @@ describe('composeShadowedWordmark — marca com brilho + sombra fixa', () => {
       );
     // a união dos papéis vistos na marca ao longo de um ciclo cobre os 3 tons do degradê.
     const seen = new Set<string>();
-    for (let f = 0; f < WIDTH + SHIMMER_TAIL; f += 1)
-      for (const r of markRolesAt(f)) seen.add(r);
+    for (let f = 0; f < WIDTH + SHIMMER_TAIL; f += 1) for (const r of markRolesAt(f)) seen.add(r);
     expect(seen).toContain('accent');
-    expect(seen).toContain('depth');
+    expect(seen).toContain('accentMid');
     expect(seen).toContain('accentDim');
   });
 
-  it('a SOMBRA é FIXA (tom SHADOW_SHADE `depth`, não respira mais)', () => {
-    // as células de SOMBRA são as com o glifo SHADOW_SHADE (a marca é `█`; o halo do brilho
-    // também usa o papel `depth`, então filtramos pelo CHAR, não pelo papel).
+  it('a SOMBRA é FIXA (tom SHADOW_SHADE `accentDim`, não respira mais)', () => {
+    // as células de SOMBRA são as com o glifo SHADOW_SHADE (a marca é `█`; o corpo do brilho
+    // também pode usar `accentDim`, então filtramos pelo CHAR, não pelo papel).
     const shadowCells = (f: number): Cell[] =>
       composeShadowedWordmark(f)
         .flat()
         .filter((c) => c.char === SHADOW_SHADE);
     expect(shadowCells(0).length).toBeGreaterThan(0);
-    // a sombra é sempre o mesmo glifo E sempre no papel `depth`, em qualquer frame
-    // (não é fonte de movimento — anti-flicker).
+    // a sombra é sempre o mesmo glifo E sempre no papel `accentDim` (âmbar escuro), em qualquer
+    // frame (não é fonte de movimento — anti-flicker).
     for (const f of [0, 3, 9, 20]) {
-      expect(shadowCells(f).every((c) => c.char === SHADOW_SHADE && c.role === 'depth')).toBe(true);
+      expect(shadowCells(f).every((c) => c.char === SHADOW_SHADE && c.role === 'accentDim')).toBe(
+        true,
+      );
     }
     // e a QUANTIDADE de células de sombra é estável entre frames (não aparece/some).
     expect(shadowCells(9).length).toBe(shadowCells(0).length);
@@ -179,8 +180,7 @@ describe('reduced-motion (animate=false) — SEM brilho, marca estática em acce
   });
 
   it('a grade estática é IDÊNTICA entre frames (nada anima)', () => {
-    const dump = (f: number): string =>
-      JSON.stringify(composeShadowedWordmark(f, false));
+    const dump = (f: number): string => JSON.stringify(composeShadowedWordmark(f, false));
     expect(dump(1)).toBe(dump(0));
     expect(dump(15)).toBe(dump(0));
   });
@@ -192,12 +192,12 @@ describe('rowSegments — agrupa células de mesmo papel', () => {
       { role: 'accent', char: '█' },
       { role: 'accent', char: '█' },
       { role: null, char: ' ' },
-      { role: 'depth', char: '▒' },
+      { role: 'accentDim', char: '▒' },
     ];
     expect(rowSegments(row)).toEqual([
       { role: 'accent', text: '██' },
       { role: null, text: ' ' },
-      { role: 'depth', text: '▒' },
+      { role: 'accentDim', text: '▒' },
     ]);
   });
 });

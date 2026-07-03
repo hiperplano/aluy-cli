@@ -10,6 +10,7 @@ export type TermRole =
   | 'fg' // texto primário (fala, código)
   | 'fgDim' // cronologia, meta, contagens, captions
   | 'accent' // marca + ask (◇ aluy, ⚠ ask, › prompt, [a]/[s])
+  | 'accentMid' // âmbar-500 — tom ÂMBAR do meio (degradê do pulso/shimmer: accent→accentMid→accentDim)
   | 'accentDim' // wordmark de boot, realce calmo
   | 'danger' // deny + erro (✗, [n], linha − do diff)
   | 'success' // ✓, linha + do diff, "0 erros"
@@ -37,6 +38,7 @@ export const TRUECOLOR_DARK: Palette = {
   fg: { color: '#F2EEE8' },
   fgDim: { color: '#8A7F6D', dimColor: true },
   accent: { color: '#DDA13F', bold: true },
+  accentMid: { color: '#C8821E', bold: true }, // --amber-500 (tom do meio)
   accentDim: { color: '#A66A14', bold: true },
   danger: { color: '#E5897C', bold: true },
   success: { color: '#82CF9E' },
@@ -52,6 +54,7 @@ export const TRUECOLOR_LIGHT: Palette = {
   // (#544B3C ≈ 6.9:1 sobre o fundo claro) — legível, ainda hierarquicamente abaixo do fg.
   fgDim: { color: '#544B3C' },
   accent: { color: '#82530F', bold: true },
+  accentMid: { color: '#82530F', bold: true }, // light colapsa os tons de âmbar (fundo claro)
   accentDim: { color: '#82530F', bold: true },
   danger: { color: '#B23A2A', bold: true },
   // EST-0966: escurecido de #2E7D4F (4.37:1, abaixo de AA) p/ #1F6B3A (5.64:1) —
@@ -65,6 +68,7 @@ export const ANSI16_DARK: Palette = {
   fg: { color: 'white' },
   fgDim: { color: 'gray', dimColor: true },
   accent: { color: 'yellow', bold: true },
+  accentMid: { color: 'yellow', bold: true },
   accentDim: { color: 'yellow', bold: true },
   danger: { color: 'red', bold: true },
   success: { color: 'green' },
@@ -75,6 +79,7 @@ export const ANSI16_LIGHT: Palette = {
   fg: { color: 'black' },
   fgDim: { color: 'gray', dimColor: true },
   accent: { color: 'yellow', bold: true },
+  accentMid: { color: 'yellow', bold: true },
   accentDim: { color: 'yellow', bold: true },
   danger: { color: 'red', bold: true },
   success: { color: 'green' },
@@ -91,6 +96,7 @@ export const TRUECOLOR_SLATE: Palette = {
   fg: { color: '#F2EEE8' }, // --stone-100 (creme)
   fgDim: { color: '#B0A593', dimColor: true }, // --stone-400 (areia warm)
   accent: { color: '#DDA13F', bold: true }, // --amber-400
+  accentMid: { color: '#C8821E', bold: true }, // --amber-500 (tom do meio)
   accentDim: { color: '#A66A14', bold: true }, // --amber-600
   danger: { color: '#E5897C', bold: true },
   success: { color: '#82CF9E' },
@@ -104,6 +110,7 @@ export const MONO: Palette = {
   fg: {},
   fgDim: { dimColor: true },
   accent: { bold: true },
+  accentMid: { bold: true },
   accentDim: { bold: true },
   danger: { bold: true, inverse: true },
   success: {},

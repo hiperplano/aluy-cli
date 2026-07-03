@@ -82,7 +82,7 @@ export const SHIMMER_TAIL = 8;
 export type ShimmerLevel = 0 | 1 | 2;
 
 /** Papéis (cores do tema) do degradê do brilho — mesma escala do <BusyPulse>, por PAPEL. */
-export type ShimmerRole = 'accent' | 'depth' | 'accentDim';
+export type ShimmerRole = 'accent' | 'accentMid' | 'accentDim';
 
 /** Uma célula da grade composta: o papel do DS + o glifo. `null` = vazio (espaço). */
 export interface Cell {
@@ -120,7 +120,7 @@ export function shimmerAt(col: number, frame: number, width: number): ShimmerLev
 /** Mapeia a intensidade do brilho p/ o PAPEL do tema (nunca cor crua). PURO. */
 export function shimmerRole(level: ShimmerLevel): ShimmerRole {
   if (level === 2) return 'accent';
-  if (level === 1) return 'depth';
+  if (level === 1) return 'accentMid'; // halo = âmbar-500 (degradê ÂMBAR, sem teal — pedido do dono)
   return 'accentDim';
 }
 
@@ -163,7 +163,9 @@ export function composeShadowedWordmark(frame: number, animate = true): Cell[][]
         row.push({ role: markRole(c), char: FILL });
       } else if (filled(r - 1, c - 1)) {
         // sombra projetada ↓→ pela célula da marca acima-à-esquerda (tom FIXO — não respira).
-        row.push({ role: 'depth', char: SHADOW_SHADE });
+        // Sombra 3D em âmbar ESCURO (accentDim), não mais teal — mantém o splash TODO âmbar
+        // (pedido do dono); o contraste com a marca vem do CHAR (`▒` sombra vs `█` marca).
+        row.push({ role: 'accentDim', char: SHADOW_SHADE });
       } else {
         row.push({ role: null, char: ' ' });
       }
@@ -177,9 +179,7 @@ export function composeShadowedWordmark(frame: number, animate = true): Cell[][]
  * Agrupa uma linha de células em SEGMENTOS consecutivos de MESMO papel (p/ a UI emitir
  * um <Text> por papel, não um por célula). PURO. Células vazias viram segmento `null`.
  */
-export function rowSegments(
-  row: readonly Cell[],
-): { role: ShimmerRole | null; text: string }[] {
+export function rowSegments(row: readonly Cell[]): { role: ShimmerRole | null; text: string }[] {
   const segs: { role: ShimmerRole | null; text: string }[] = [];
   for (const cell of row) {
     const last = segs[segs.length - 1];
