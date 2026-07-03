@@ -22,7 +22,7 @@
 // (a marca já cai p/ `/\`+`#`; a caixa cai p/ box ASCII via Ink).
 //
 // As cores saem SEMPRE de papéis semânticos (nunca cor crua):
-//   - wordmark   → accent/depth (dentro de <Wordmark>)
+//   - wordmark   → accent/depth/accentDim (o BRILHO horizontal F198 no splash; accent estático no header)
 //   - "carregando" → fgDim (discreto)
 //   - moldura da caixa → accent (borderColor lido do papel — token, não cor crua)
 //   - título da caixa  → accent ; opções → fg ; dica → fgDim
@@ -116,8 +116,8 @@ export function SplashScreen(props: SplashScreenProps): React.ReactElement {
   const status = props.status ?? 'carregando';
   const tagline = props.tagline ?? DEFAULT_TAGLINE;
   // SÓ no splash, COM Unicode e animação ligada (não reduced-motion) e largura que
-  // comporta a marca grande: o wordmark ganha a SOMBRA 3D que respira. Senão, a marca
-  // ESTÁTICA <Wordmark> (idêntica ao header) — fallback fiel, sem efeito.
+  // comporta a marca grande: o wordmark ganha a SOMBRA 3D + o BRILHO horizontal que varre a
+  // marca (F198). Senão, a marca ESTÁTICA <Wordmark> (idêntica ao header) — fallback fiel, sem efeito.
   const wants3d = theme.animate && theme.unicode && columns >= MIN_WORDMARK_COLS;
   const mark = wants3d ? <ShadowedWordmark frame={frame} /> : <Wordmark columns={columns} />;
 
@@ -201,12 +201,16 @@ function VersionLine(props: { readonly version: string }): React.ReactElement {
 }
 
 /**
- * O wordmark `Λluy` COM a sombra 3D que respira (splash-only). Compõe a grade
- * {marca `accent` · sombra `depth`} pelo `frame` (PURO, em `wordmark-3d.ts`) e emite
- * um <Text> por papel em cada linha. NÃO usado no header (lá a marca é estática).
+ * F198 — o wordmark `Λluy` COM sombra 3D + o BRILHO horizontal que varre a marca da
+ * esquerda p/ a direita (splash-only). Compõe a grade {marca com shimmer · sombra `depth`
+ * FIXA} pelo `frame` (PURO, em `wordmark-3d.ts`) e emite um <Text> por papel em cada linha.
+ * Passa `theme.animate` p/ o gate reduced-motion (sem brilho ⇒ marca `accent` estática) —
+ * ainda que este componente só seja montado quando `animate` (via `wants3d` no SplashScreen),
+ * repassar mantém a função pura honesta. NÃO usado no header (lá a marca é estática).
  */
 function ShadowedWordmark(props: { readonly frame: number }): React.ReactElement {
-  const grid = composeShadowedWordmark(props.frame);
+  const theme = useTheme();
+  const grid = composeShadowedWordmark(props.frame, theme.animate);
   return (
     <Box flexDirection="column">
       {grid.map((row, r) => (
