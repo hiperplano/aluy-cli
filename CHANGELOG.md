@@ -16,6 +16,14 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 _(vazio)_
 
+## [1.0.0-rc.92] — 2026-07-03
+
+### Adicionado
+
+- 🟢 Sugestão de próximo prompt (F197): após um turno terminar, o composer mostra um **ghost dim** com uma sugestão do que pedir a seguir; **Tab** aceita (só inline + composer vazio, sem quebrar o Tab de foco/modo); digitar descarta. Heurística LOCAL (custo ZERO de token do provider BYO). Opção togglável: `/suggest on|off`, `ALUY_SUGGESTIONS=0`, `ui.suggestions`. Cérebro portável no cli-core, anti-flicker, cor por papel.
+
+_(vazio)_
+
 ## [1.0.0-rc.91] — 2026-07-03
 
 ### Adicionado
