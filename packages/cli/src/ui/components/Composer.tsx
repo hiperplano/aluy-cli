@@ -169,7 +169,11 @@ export function Composer(props: ComposerProps): React.ReactElement {
   if (props.shellMode) {
     const showCursor = props.active && props.showCursor !== false;
     return (
-      <Box>
+      // FIX (cockpit multi-linha) — UM único <Text> (não um <Box> de <Text> IRMÃOS): o Ink
+      // NÃO flui <Text> irmãos como texto contínuo — cada irmão embrulha por conta própria e
+      // o CURSOR-irmão pousa na 1ª quebra de wrap (não no fim do texto), fragmentando o input
+      // longo. Aninhado num só <Text wrap>, o wrap é contínuo e o cursor assenta certo.
+      <Text wrap="wrap">
         <SessionTag
           {...(props.sessionLabel !== undefined ? { label: props.sessionLabel } : {})}
           {...(props.sessionColor !== undefined ? { color: props.sessionColor } : {})}
@@ -184,7 +188,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
         />
         <Text> </Text>
         <Role name="fgDim">{t('composer.shellHint')}</Role>
-      </Box>
+      </Text>
     );
   }
   // Placeholder FANTASMA (sombra/background): a dica esmaecida só aparece quando o
@@ -225,7 +229,13 @@ export function Composer(props: ComposerProps): React.ReactElement {
     : { text: props.value, cursor: pos, hiddenAbove: 0, hiddenBelow: 0 };
   return (
     <Box flexDirection="column">
-      <Box>
+      {/* FIX (cockpit multi-linha, achado do dono) — a linha do input é UM único <Text>
+          (não um <Box> de <Text> IRMÃOS). O Ink NÃO flui <Text> irmãos como texto
+          contínuo: cada irmão embrulha isolado e o CURSOR-irmão (`●`) pousava na 1ª
+          quebra de wrap do texto — não no fim — jogando o miolo p/ a 2ª linha e o cursor
+          no lugar errado (input longo no fullscreen "se desconstruía"). Aninhados num só
+          <Text wrap>, o wrap flui e o cursor assenta certo. Prova: tests/.../composer. */}
+      <Text wrap="wrap">
         <SessionTag
           {...(props.sessionLabel !== undefined ? { label: props.sessionLabel } : {})}
           {...(props.sessionColor !== undefined ? { color: props.sessionColor } : {})}
@@ -256,7 +266,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
             <Role name="fgDim">{props.hint}</Role>
           </>
         )}
-      </Box>
+      </Text>
       {/* Marcador de linhas escondidas (cockpit, input multi-linha que estoura a região).
           a11y: os números `↑N`/`↓M` carregam o sentido (há mais acima/abaixo) — nunca só
           cor. Só aparece quando de fato janelou (`overflowing`). */}

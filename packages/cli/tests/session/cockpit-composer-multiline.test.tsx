@@ -48,7 +48,7 @@ function state(): SessionState {
   } as unknown as SessionState;
 }
 
-function renderCockpit(input: string, cursorPos: number, rows = 24, cols = 100) {
+function renderCockpit(input: string, cursorPos: number, rows = 24, cols = 100, showCursor = false) {
   // o caller (App) deriva composerLines do input; aqui replicamos p/ o layout. Como o App
   // (task #14), usamos linhas VISUAIS (com soft-wrap) — p/ short lines é == lógicas.
   const composerLines = input.length === 0 ? 1 : visualLines(input, cols > 2 ? cols - 2 : cols);
@@ -68,7 +68,7 @@ function renderCockpit(input: string, cursorPos: number, rows = 24, cols = 100) 
           input={input}
           cursorPos={cursorPos}
           composerActive
-          showCursor={false}
+          showCursor={showCursor}
           hintState="idle"
           tierDisplay="Flux"
           isDefaultTier
@@ -126,6 +126,38 @@ describe('cockpit composer multi-linha (BUG P2-C)', () => {
     // o composer saturou no teto e o frame cabe em rows (§5 preservado).
     expect(layout.composerRows).toBe(5);
     expect(frame.split('\n').length).toBeLessThanOrEqual(24);
+    r.unmount();
+  });
+
+  it('SOFT-WRAP (achado do dono) — 1 linha lógica que embrulha em 2 visuais: TODO o texto e o cursor NO FIM', async () => {
+    // REGRESSÃO do bug "o composer se desconstrói no fullscreen": uma ÚNICA linha lógica
+    // (sem `\n`) que só EMBRULHA (soft-wrap) em ~2 linhas visuais. O composer renderizava a
+    // linha do input e o cursor como <Text> IRMÃOS num <Box>; o Ink NÃO flui irmãos como
+    // texto contínuo ⇒ o cursor-irmão `●` pousava na 1ª QUEBRA de wrap (fim do 1º trecho),
+    // o miolo ia p/ a 2ª linha e o cursor ficava no lugar errado. Aninhando tudo num só
+    // <Text wrap>, o wrap flui e o cursor assenta no FIM. Cabe em 140 col p/ embrulhar em 2.
+    const cols = 140;
+    const rows = 40;
+    // ~200 chars, sem `\n` — 1 linha lógica que embrulha em 2 visuais a 140 col.
+    const groups = ['AAAAAAAAAA', 'bbbbbbbbbb', 'CCCCCCCCCC', 'dddddddddd', 'EEEEEEEEEE'];
+    const input = Array.from({ length: 24 }, (_, i) => groups[i % groups.length]).join(' ') + ' FIM';
+    const { r } = renderCockpit(input, input.length, rows, cols, /* showCursor */ true);
+    await flush();
+    const frame = plain(r.lastFrame() ?? '');
+    // (a) NADA some: o 1º e o último trecho do input estão no frame.
+    expect(frame).toContain('AAAAAAAAAA');
+    expect(frame).toContain('FIM');
+    // (b) o CURSOR está colado no FIM do texto (`FIM●`), não numa quebra de wrap no meio.
+    //     `●` (theme glyph 'cursor') vem IMEDIATAMENTE após o último char do input.
+    expect(frame).toMatch(/FIM●/);
+    // (c) 1 linha lógica ⇒ SEM marcador de linhas escondidas (cabe, só embrulhou).
+    expect(frame).not.toMatch(/↑\d|↓\d/);
+    // (d) o frame NÃO estoura rows (não invade as regiões acima / não empurra os hints p/
+    //     fora ⇒ anti-flicker §5 e sum==rows preservados).
+    expect(frame.split('\n').length).toBeLessThanOrEqual(rows);
+    expect(frame).not.toContain('\x1b[2J');
+    // (e) os hints (última região) seguem visíveis ABAIXO do composer (não foram empurrados).
+    expect(frame).toMatch(/tab foca/);
     r.unmount();
   });
 

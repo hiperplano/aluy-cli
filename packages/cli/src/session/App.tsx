@@ -757,9 +757,19 @@ export function App(props: AppProps): React.ReactElement {
     cockpitBootNotes.length > 0
       ? 1 + cockpitBootNotes.reduce((acc, n) => acc + 1 + n.lines.length, 0)
       : 0;
+  // FIX (espaço morto do LOG) — o <ActivityLog> mostra OU a atividade real OU o diagnóstico
+  // de boot (empty-state), NUNCA os dois: assim que há atividade (`cockpitLogSections`), as
+  // notas de boot SOMEM do render. Somar `cockpitBootLines` À atividade dimensionava a região
+  // p/ conteúdo que não é pintado ⇒ o LOG ficava ~1/3 da tela com metade em branco. Contamos
+  // o que REALMENTE renderiza: com atividade, as linhas da atividade + 1 (o rótulo `LOG · …`,
+  // que o <ActivityLog> pinta antes do conteúdo e consome 1 linha); sem atividade, as linhas
+  // de boot (que já embutem o +1 do rótulo). Assim a altura casa o conteúdo — sem buraco.
   const cockpitLogHint = fullscreen
     ? {
-        lines: countActivityLines(cockpitLogSections) + cockpitBootLines,
+        lines:
+          cockpitLogSections.length > 0
+            ? 1 + countActivityLines(cockpitLogSections)
+            : cockpitBootLines,
         hasActivity: cockpitLogSections.length > 0 || cockpitBootLines > 0,
         activeAgents: cockpitActiveAgents,
         focused: cockpitFocus === 'log',
