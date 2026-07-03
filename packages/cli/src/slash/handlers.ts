@@ -651,6 +651,22 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           ],
         },
       };
+    case 'suggest':
+      // F197 — o `/suggest [on|off]` (sugestão de próximo prompt) é UI PURA: a App o
+      // intercepta no `runCommand` e alterna o ghost AO VIVO, SEM chegar aqui. Cair aqui
+      // só sem TUI (não-TTY/linear): explica o comando, sem efeito.
+      return {
+        kind: 'note',
+        note: {
+          title: 'suggest',
+          lines: [
+            'liga/desliga a SUGESTÃO DE PRÓXIMO PROMPT: ao fim de um turno, com o composer',
+            'vazio, aparece um ghost (dim) do que pedir a seguir; Tab o aceita no composer.',
+            'a geração é heurística LOCAL (sem modelo/tokens — não gasta seu provider).',
+            'default LIGADO. `/suggest on|off` força; a preferência PERSISTE (ui.suggestions).',
+          ],
+        },
+      };
     case 'fullscreen':
       // EST-1000 · ADR-0076 — o `/fullscreen` (alias `/cockpit`) é UI PURA: a App o
       // intercepta no `runCommand` e alterna o MODO COCKPIT AO VIVO, SEM chegar aqui.

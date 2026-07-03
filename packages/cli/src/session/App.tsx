@@ -137,6 +137,8 @@ import {
   type InputPasteGate,
 } from './bracketed-paste.js';
 import { isUnrecognizedEscapeTail } from './escape-leak.js';
+// F197 — sugestão de próximo prompt (ghost + Tab): blocos+i18n → texto do composer.
+import { resolveSuggestionText } from './suggest.js';
 import {
   createPasteRegistry,
   shouldCollapse,
@@ -401,6 +403,19 @@ export interface AppProps {
    */
   readonly onFullscreenChange?: (on: boolean) => void;
   /**
+   * F197 — estado INICIAL da SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab). Resolvido pelo
+   * wiring (`ALUY_SUGGESTIONS` > `config.suggestions` > default ON, via
+   * `resolveInitialSuggestions`). Ausente ⇒ `true` (default LIGADO — é uma OPÇÃO, mas
+   * default-on por decisão do dono). O toggle `/suggest` em sessão grava de volta.
+   */
+  readonly initialSuggestions?: boolean;
+  /**
+   * F197 — persiste a preferência da sugestão ao alternar (`/suggest on|off`). O wiring
+   * injeta `store.saveSuggestions`. Ausente ⇒ o toggle vale só na sessão (degradação
+   * segura; testes). É pref de UI (booleano) — nunca segredo (CLI-SEC-7).
+   */
+  readonly onSuggestionsChange?: (on: boolean) => void;
+  /**
    * EST-1000 · ADR-0076 §4 / CLI-SEC-6 / RES-C-1 — exporta o transcript REDIGIDO p/
    * arquivo (`/export` / ctrl+s). O wiring injeta o gravador (passa pela catraca +
    * redação). Devolve o caminho gravado (p/ a nota de confirmação) ou um erro. Ausente ⇒
@@ -546,6 +561,28 @@ export function App(props: AppProps): React.ReactElement {
   // histórico de inputs (↑↓ no composer vazio, §4.4); -1 = "fora do histórico".
   const [history, setHistory] = useState<readonly string[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
+
+  // F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab, estilo "suggested next steps").
+  //   • `suggestionsOn` — a OPÇÃO está ligada? (default do wiring; `/suggest on|off` alterna).
+  //   • `suggestion`    — o TEXTO da sugestão pendente (ghost no composer), ou `undefined`.
+  // A sugestão é estado DERIVADO estável (anti-flicker EST-0965): computada UMA vez na
+  // BORDA de fim-de-turno (efeito abaixo), NÃO a cada render/token. A geração é heurística
+  // LOCAL (resolveSuggestionText → core, sem modelo/tokens) — não gasta o BYO do dono.
+  const [suggestionsOn, setSuggestionsOn] = useState(props.initialSuggestions !== false);
+  const [suggestion, setSuggestion] = useState<string | undefined>(undefined);
+  // Fase ANTERIOR (ref, não estado — não re-renderiza) p/ detectar a BORDA trabalho→idle:
+  // a sugestão nasce só na TRANSIÇÃO p/ o repouso (não em cada render em idle).
+  const prevPhaseRef = useRef<SessionState['phase']>(controller.current.phase);
+  // F197 — ESPELHOS síncronos p/ o handler de tecla (MESMO motivo do `queueRef`/
+  // `ctrlCArmedAtRef`): o Ink pode chamar um `useInput` com CLOSURE VELHO — em especial
+  // aqui, a sugestão é setada por um EFEITO (assíncrono, fora do handler), então o closure
+  // do handler NÃO enxerga o valor novo (medido: o ghost aparece na tela mas o Tab lia
+  // `suggestion=undefined`). O ref, atualizado NO RENDER, é a verdade-do-instante que o Tab
+  // consulta p/ decidir aceitar (e p/ o gate "composer VAZIO" ser confiável mesmo em burst).
+  const suggestionRef = useRef<string | undefined>(undefined);
+  suggestionRef.current = suggestion;
+  const composerRef = useRef(composer);
+  composerRef.current = composer;
 
   // EST-0982 (type-ahead) — FILA de mensagens digitadas ENQUANTO o agente trabalha
   // (`thinking`/`streaming`/`retrying`): Enter no composer durante o trabalho NÃO
@@ -1041,6 +1078,43 @@ export function App(props: AppProps): React.ReactElement {
     setComposer({ text, cursor: clampCursor(text, cursor ?? text.length) });
   }, []);
 
+  // F197 — CICLO DE VIDA da sugestão de próximo prompt (borda de fase). A sugestão nasce
+  // na TRANSIÇÃO trabalho→repouso (o turno TERMINOU) e morre quando um novo trabalho começa
+  // (não deixamos ghost velho por cima do próximo turno). Ler o edge por um REF (fase
+  // anterior) — não por `state.phase` no corpo — mantém a sugestão como estado DERIVADO
+  // ESTÁVEL: computada UMA vez por turno, sem redesenho por token (anti-flicker EST-0965).
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    const now = state.phase;
+    prevPhaseRef.current = now;
+    if (prev === now) return; // sem mudança de fase ⇒ nada de sugestão a (re)computar.
+    const settled = now === 'idle' || now === 'done';
+    // "estava trabalhando" = qualquer fase que não seja repouso/boot (o boot→idle da
+    // largada NÃO conta: sessão fresca não tem turno p/ sugerir um próximo passo).
+    const wasWorking = prev !== 'idle' && prev !== 'done' && prev !== 'boot';
+    if (settled && wasWorking) {
+      // Turno terminou. Só sugere com o composer VAZIO e SEM fila (type-ahead pendente):
+      // se o dono já está digitando / há algo p/ auto-submeter, a sugestão só atrapalharia.
+      if (suggestionsOn && input === '' && queue.length === 0) {
+        setSuggestion(resolveSuggestionText(state.blocks, t));
+      }
+    } else if (!settled) {
+      // Novo trabalho (ou qualquer fase não-repouso): descarta a sugestão pendente.
+      setSuggestion(undefined);
+    }
+    // Deps: a BORDA é `state.phase`; os demais são lidos no instante da borda (mesmo render).
+    // `state.blocks` muda muito em streaming, mas aí `prev===now` (return acima) ⇒ no-op.
+  }, [state.phase, state.blocks, input, queue.length, suggestionsOn, t]);
+
+  // F197 — "começar a digitar DESCARTA a sugestão". Ponto ÚNICO: qualquer caminho que torne
+  // o composer não-vazio (char, paste, ↑histórico, Ctrl+V…) some com o ghost. Como a
+  // sugestão só é renderizada com o composer VAZIO, isto não causa flicker — só garante que
+  // ela não RESSURJA se o dono apagar o que digitou (o descarte é definitivo p/ este turno).
+  // `setSuggestion(undefined)` com valor já `undefined` é no-op no React (bail-out) ⇒ barato.
+  useEffect(() => {
+    if (input !== '') setSuggestion(undefined);
+  }, [input]);
+
   /**
    * EST-0982 (slash-menu durante o trabalho) — FONTE ÚNICA de sincronia do slash-menu
    * com o texto do composer. Ao mudar o composer (digitar/apagar) chamamos isto p/
@@ -1236,6 +1310,22 @@ export function App(props: AppProps): React.ReactElement {
         toggleFullscreen();
         return;
       }
+      // F197 — `/suggest [on|off]`: alterna a SUGESTÃO DE PRÓXIMO PROMPT. Sem arg = toggle;
+      // `on`/`off` forçam. UI pura (não toca turno/contexto): persiste a pref (best-effort)
+      // e empurra uma nota honesta. Ao DESLIGAR, some com o ghost pendente na hora.
+      if (command.id === 'suggest') {
+        const arg = args.trim().toLowerCase();
+        const next = arg === 'on' ? true : arg === 'off' ? false : !suggestionsOn;
+        setSuggestionsOn(next);
+        props.onSuggestionsChange?.(next);
+        if (!next) setSuggestion(undefined);
+        controller.replaceNote('suggest', [
+          next
+            ? 'sugestão de próximo prompt LIGADA — Tab aceita o ghost no composer.'
+            : 'sugestão de próximo prompt DESLIGADA.',
+        ]);
+        return;
+      }
       // F179 — `/export`: grava o transcript REDIGIDO (CLI-SEC-6) em ~/.aluy/exports/.
       // Funciona em QUALQUER modo (não só cockpit/ctrl+s): o hint do /fullscreen já
       // prometia `/export`, mas o comando não existia. Async; nota honesta ao concluir.
@@ -1387,6 +1477,9 @@ export function App(props: AppProps): React.ReactElement {
       rewindPicker,
       clearScreen,
       toggleSplit,
+      // F197 — o `/suggest` lê `suggestionsOn` p/ o toggle sem-arg; mantê-lo aqui evita
+      // fechar sobre um valor velho (defensivo — este projeto não força exhaustive-deps).
+      suggestionsOn,
     ],
   );
 
@@ -3078,6 +3171,24 @@ export function App(props: AppProps): React.ReactElement {
       palette.openPalette();
       return;
     }
+    // F197 — Tab ACEITA a sugestão de próximo prompt (ghost) — MAS SÓ com o composer VAZIO
+    // e uma sugestão PENDENTE. Esta guarda vem ANTES do Tab→cicla-modo (abaixo) e é
+    // ESTRITA: composer com texto OU sem sugestão ⇒ NÃO entra aqui e o Tab segue com o
+    // comportamento ANTIGO (ciclar o modo). Assim não quebramos o Tab de foco/navegação
+    // (no cockpit o Tab já foi capturado bem acima) nem o ciclo de modo do idle. Aceitar =
+    // escrever a sugestão NO composer (editável, cursor no fim) e limpar o ghost; a partir
+    // daí é texto normal (Enter envia). O slash-menu (Tab completa comando) tem prioridade
+    // pelo `!slashOpen` (idêntico ao guard do ciclo de modo logo abaixo).
+    if (
+      key.tab &&
+      !slashOpen &&
+      composerRef.current.text === '' &&
+      suggestionRef.current !== undefined
+    ) {
+      setText(suggestionRef.current);
+      setSuggestion(undefined);
+      return;
+    }
     // EST-1015 (opção (c)) — Tab cicla o MODO (`normal → plan → unsafe → normal`, INVERTIDO)
     // quando o slash-menu NÃO está aberto (lá o Tab completa o comando). A aresta `→unsafe`
     // não troca direto: recusa como root OU arma a confirmação (gate acima). O indicador
@@ -3305,6 +3416,20 @@ export function App(props: AppProps): React.ReactElement {
   // trabalho segue na região viva, mas agora o foco textual é o composer. Fora do
   // trabalho (idle/done) o composer manda no cursor normalmente.
   const composerShowCursor = props.animate !== false && (input !== '' || !isWorkPhase);
+
+  // F197 — a SUGESTÃO como GHOST (placeholder dim do <Composer>): só quando há sugestão
+  // pendente E estamos em REPOUSO (idle/done). Reusa o mecanismo de PLACEHOLDER FANTASMA
+  // que já existe (aparece com o composer VAZIO+ativo, some no 1º char) — nenhum caminho
+  // de render novo (anti-flicker). No COCKPIT o Tab é reservado ao foco (conversa↔log,
+  // capturado bem acima) ⇒ NÃO oferecemos o ghost lá (não haveria como aceitar sem
+  // conflitar com o Tab de foco); a feature vale no INLINE (o modo default). Fora de
+  // repouso o ghost fica OFF (o placeholder padrão do composer volta a valer).
+  const showSuggestion =
+    suggestion !== undefined &&
+    !cockpitActive &&
+    (state.phase === 'idle' || state.phase === 'done');
+  // Narrow p/ o spread do placeholder (exactOptionalPropertyTypes: nunca `placeholder: undefined`).
+  const ghostSuggestion: string | undefined = showSuggestion ? suggestion : undefined;
 
   // egress enrichment p/ o AskDialog (CLI-SEC-5)
   const askEgress = computeEgress(state, props.egress);
@@ -4126,6 +4251,10 @@ export function App(props: AppProps): React.ReactElement {
         maxRows={inlineComposerMaxRows}
         columns={columns}
         shellMode={input.startsWith('!')}
+        // F197 — sugestão de próximo prompt como placeholder FANTASMA (ghost dim). Só quando
+        // pendente+repouso (showSuggestion); senão o <Composer> usa seu placeholder padrão.
+        // Tab (composer vazio) aceita.
+        {...(ghostSuggestion !== undefined ? { placeholder: ghostSuggestion } : {})}
         {...(composerHint !== undefined ? { hint: composerHint } : {})}
         {...(state.meta.label !== undefined ? { sessionLabel: state.meta.label } : {})}
         {...(state.meta.labelColor !== undefined ? { sessionColor: state.meta.labelColor } : {})}
@@ -4362,6 +4491,7 @@ export function App(props: AppProps): React.ReactElement {
           state={hintState}
           {...(elapsed !== undefined ? { elapsed } : {})}
           {...(ctrlCArmed ? { armedExit: true } : {})}
+          {...(showSuggestion ? { suggesting: true } : {})}
         />
       )}
     </Box>

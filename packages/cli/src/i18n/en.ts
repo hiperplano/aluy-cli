@@ -33,6 +33,17 @@ export const en: PartialCatalog = {
   'hints.ctrlcAgain': 'press ctrl-c again to quit',
   'hints.cockpit':
     'tab focuses · pgup/pgdn scroll · ctrl-s export · /fullscreen exits · ctrl-c×2 quit',
+  // F197 — next-prompt suggestion: Tab accepts the ghost into the composer.
+  'hints.suggest': 'tab accepts the suggestion',
+
+  // ── F197 — suggestion phrases (become the composer text when accepted) ─────────────────
+  'suggest.runTests': 'run the tests and show me the result',
+  'suggest.fixFailing': 'investigate and fix the failing tests',
+  'suggest.summarize': 'summarize what changed in this turn',
+  'suggest.retryDifferent': 'try a different approach to solve this',
+  'suggest.implement': 'implement the change we discussed',
+  'suggest.explain': 'explain what you did and why',
+  'suggest.nextStep': 'what should I review or do next?',
 
   // ── Cockpit (ADR-0076) ────────────────────────────────────────────────────
   'cockpit.conversa': 'conversation',

@@ -122,6 +122,7 @@ import {
   resolveInitialTier,
   resolveInitialSplitView,
   resolveInitialFullscreen,
+  resolveInitialSuggestions,
   configuredLang,
   type UserConfig,
 } from '../io/user-config.js';
@@ -555,6 +556,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     process.env.ALUY_FULLSCREEN === '1'
       ? resolveInitialFullscreen(opts.fullscreen, savedConfig)
       : false;
+  // F197 — estado INICIAL da SUGESTÃO DE PRÓXIMO PROMPT. Precedência: `ALUY_SUGGESTIONS`
+  // (env, 0/1) > `config.suggestions` (pref do `/suggest`) > default ON. É uma OPÇÃO
+  // default-LIGADA (decisão do dono); o toggle em sessão grava de volta p/ a próxima.
+  const initialSuggestions = resolveInitialSuggestions(savedConfig, env);
 
   // EST-0972 — PERSISTÊNCIA de SESSÃO (`--continue`/`--resume`). Resolve a retomada
   // ANTES de fiar a sessão (precisa do id p/ reusar o MESMO arquivo de sessão E o
@@ -2750,6 +2755,13 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // EST-1000 · ADR-0076 §1 — persiste a pref do cockpit p/ a próxima sessão
           // (best-effort). Só UI (booleano) — jamais segredo (CLI-SEC-7).
           configStore.saveFullscreen(on);
+        }}
+        // F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab). Estado inicial + persistência.
+        initialSuggestions={initialSuggestions}
+        onSuggestionsChange={(on) => {
+          // F197 — persiste a pref do `/suggest` p/ a próxima sessão (best-effort). Só UI
+          // (booleano) — jamais segredo (CLI-SEC-7).
+          configStore.saveSuggestions(on);
         }}
         onExportTranscript={exportTranscript}
         onSelectTier={(tier, model, opts) => {

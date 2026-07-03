@@ -30,6 +30,17 @@ export const ptBR: FullCatalog = {
   'hints.idleSubagents': 'enter envia · F8 para os sub-agentes · ctrl-t ver/parar · ctrl-c×2 sair',
   'hints.ctrlcAgain': 'pressione ctrl-c de novo para sair',
   'hints.cockpit': 'tab foca · pgup/pgdn rola · ctrl-s exporta · /fullscreen sai · ctrl-c×2 sair',
+  // F197 — sugestão de próximo prompt: Tab aceita o ghost no composer.
+  'hints.suggest': 'tab aceita a sugestão',
+
+  // ── F197 — frases de sugestão (viram o texto do composer ao aceitar) ──────────────────
+  'suggest.runTests': 'rode os testes e me mostre o resultado',
+  'suggest.fixFailing': 'investigue e corrija os testes que falharam',
+  'suggest.summarize': 'resuma o que mudou neste turno',
+  'suggest.retryDifferent': 'tente outra abordagem para resolver isso',
+  'suggest.implement': 'implemente a mudança que discutimos',
+  'suggest.explain': 'explique o que você fez e por quê',
+  'suggest.nextStep': 'o que devo revisar ou fazer a seguir?',
 
   // ── Cockpit (ADR-0076) ────────────────────────────────────────────────────
   'cockpit.conversa': 'conversa',

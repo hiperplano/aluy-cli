@@ -69,6 +69,13 @@ export interface FooterHintsProps {
    * enquanto armado ⇒ a dica de saída SUBSTITUI a do estado. Evita matar a app sem querer.
    */
   readonly armedExit?: boolean;
+  /**
+   * F197 — há uma SUGESTÃO DE PRÓXIMO PROMPT pendente (ghost no composer)? Quando `true`
+   * E o estado é `idle`, o footer anexa a cola `tab aceita a sugestão` (afordância do Tab).
+   * Fora do idle / sem sugestão ⇒ ignorado (a dica base do estado vale). Não compete com o
+   * `armedExit` (a confirmação de saída sempre vence).
+   */
+  readonly suggesting?: boolean;
 }
 
 export function FooterHints(props: FooterHintsProps): React.ReactElement {
@@ -80,5 +87,11 @@ export function FooterHints(props: FooterHintsProps): React.ReactElement {
   const base = t(HINT_KEYS[props.state]);
   const showElapsed =
     props.elapsed !== undefined && props.elapsed !== '' && BUSY_HINTS.has(props.state);
+  // F197 — no idle com sugestão pendente, anexa a afordância do Tab (`tab aceita a
+  // sugestão`). Só no idle (é lá que o ghost aparece) e nunca junto do elapsed (idle não
+  // tem relógio) — sem conflito de sufixos.
+  if (props.suggesting === true && props.state === 'idle') {
+    return <Role name="fgDim">{`${base} · ${t('hints.suggest')}`}</Role>;
+  }
   return <Role name="fgDim">{showElapsed ? `${base} · ${props.elapsed}` : base}</Role>;
 }
