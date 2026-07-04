@@ -451,3 +451,72 @@ describe('EST-1155 · CA-7 — TUI e headless: mesmos sinônimos', () => {
     expect(tui.task).toBe('monitore preços');
   });
 });
+
+describe('ADR-0150 (balde b) — resolveCycleCeilings(req, configDefaults) troca os DEFAULT_CYCLE_*', () => {
+  it('SEM configDefaults, comportamento idêntico ao baseline (não-regressão)', () => {
+    const c = resolveCycleCeilings({ rhythm: 'fixed', intervalMs: 5 * 60_000 });
+    expect(c.maxDurationMs).toBe(DEFAULT_CYCLE_DURATION_MS);
+    expect(c.maxIterations).toBe(DEFAULT_CYCLE_ITERATIONS);
+  });
+
+  it('configDefaults.defaultDurationMs substitui o default QUANDO o usuário omite --por', () => {
+    const c = resolveCycleCeilings(
+      { rhythm: 'fixed', maxIterations: 3 },
+      { defaultDurationMs: 45 * 60_000 },
+    );
+    expect(c.maxDurationMs).toBe(45 * 60_000);
+  });
+
+  it('configDefaults.defaultIterations substitui o default QUANDO o usuário omite --max-iter', () => {
+    const c = resolveCycleCeilings(
+      { rhythm: 'fixed', maxDurationMs: 10 * 60_000 },
+      { defaultIterations: 50 },
+    );
+    expect(c.maxIterations).toBe(50);
+  });
+
+  it('a FLAG do usuário (req) sempre VENCE o configDefaults', () => {
+    const c = resolveCycleCeilings(
+      { rhythm: 'fixed', maxDurationMs: 10 * 60_000, maxIterations: 3 },
+      { defaultDurationMs: 45 * 60_000, defaultIterations: 50 },
+    );
+    expect(c.maxDurationMs).toBe(10 * 60_000);
+    expect(c.maxIterations).toBe(3);
+  });
+
+  it('configDefaults NUNCA escapa o TETO-TETO duro (CLI-SEC-14, intocado)', () => {
+    // intervalo explícito satisfaz "sem teto ⇒ não inicia"; duração/iterações vêm
+    // do configDefaults (absurdos) e devem ser clampados aos teto-teto duros.
+    const c = resolveCycleCeilings(
+      { rhythm: 'fixed', intervalMs: 1_000 },
+      { defaultDurationMs: 999 * 60 * 60_000, defaultIterations: 99_999 },
+    );
+    expect(c.maxDurationMs).toBe(MAX_CYCLE_DURATION_MS);
+    expect(c.maxIterations).toBe(MAX_CYCLE_ITERATIONS);
+  });
+
+  it('configDefaults NÃO desativa a regra "sem teto ⇒ não inicia" (GS-L2/RES-L-1)', () => {
+    // configDefaults SÓ troca o VALOR do default — a regra "sem teto" olha o `req`
+    // (o que o usuário pediu), nunca o config. Sem NENHUM teto no `req`, ainda recusa,
+    // mesmo com configDefaults presente (config não é um substituto de teto pedido).
+    expect(() =>
+      resolveCycleCeilings(
+        { rhythm: 'fixed' },
+        { defaultDurationMs: 10 * 60_000, defaultIterations: 5 },
+      ),
+    ).toThrow(NoCeilingError);
+  });
+
+  it('configDefaults.defaultIntervalMs (incl. 0, valor válido) substitui o default do ritmo fixo', () => {
+    const c = resolveCycleCeilings(
+      { rhythm: 'fixed', maxIterations: 3 },
+      { defaultIntervalMs: 15_000 },
+    );
+    expect(c.intervalMs).toBe(15_000);
+    const zero = resolveCycleCeilings(
+      { rhythm: 'fixed', maxIterations: 3 },
+      { defaultIntervalMs: 0 },
+    );
+    expect(zero.intervalMs).toBe(0);
+  });
+});

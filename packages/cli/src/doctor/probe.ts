@@ -663,7 +663,7 @@ async function gatherSidecars(deps: DoctorProbeDeps): Promise<SidecarsFact> {
   // resolvers env-configuráveis (ALUY_{MEM0,OLLAMA,HEADROOM}_URL) — o doctor proba
   // ONDE o engine REALMENTE fala, não uma porta hardcodada. Default = porta canônica.
   const env = deps.env ?? process.env;
-  // services (ADR-0136 §8/§9): porta/host salvos no config — proba ONDE o engine fala.
+  // services (ADR-0150 §8/§9): porta/host salvos no config — proba ONDE o engine fala.
   let services: UserServicesConfig | undefined;
   try {
     services = new UserConfigStore({ baseDir: aluyHomeOf(deps) }).load().services;

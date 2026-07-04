@@ -84,6 +84,20 @@ export interface CycleCeilings {
   readonly rhythm: CycleRhythm;
 }
 
+/**
+ * ADR-0150 (balde b) — DEFAULTS config-driven de `/cycle` (`~/.aluy/config.json` →
+ * `cycle.defaultDurationMs`/`defaultIterations`/`defaultIntervalMs`), injetados pelo
+ * `cli` (o core não lê arquivo). Substituem os DEFAULT_CYCLE_* hardcoded SÓ quando o
+ * usuário OMITE a flag correspondente (`--por`/`--max-iter`/intervalo) — os
+ * TETO-TETO duros (`MAX_CYCLE_DURATION_MS`/`MAX_CYCLE_ITERATIONS`, CLI-SEC-14) NÃO
+ * mudam: o config aqui é clampado a eles, igual ao default embutido.
+ */
+export interface CycleConfigDefaults {
+  readonly defaultDurationMs?: number;
+  readonly defaultIterations?: number;
+  readonly defaultIntervalMs?: number;
+}
+
 /** O que o usuário PEDIU (flags/sintaxe) — antes de resolver/validar/clampar. */
 export interface CycleRequest {
   /** Intervalo entre ciclos em ms (ritmo fixo). `undefined` ⇒ não deu intervalo. */
@@ -126,8 +140,18 @@ export class NoCeilingError extends Error {
  *    conservador de tokens da sessão (DEFAULT_LIMITS.maxTokens). NUNCA undefined
  *    (auto-pacing multiplica volume — budget é obrigatório).
  *  • `--unsafe`/`--yolo` NÃO entram aqui: as paradas duras independem do modo.
+ *
+ * ADR-0150 (balde b) — `configDefaults` (opcional) troca os DEFAULT_CYCLE_* internos
+ * pelos valores de `~/.aluy/config.json` QUANDO o usuário omite a dimensão correspondente
+ * (mesmo papel que os `DEFAULT_CYCLE_*` hardcoded faziam antes). NÃO afeta a regra "sem
+ * teto ⇒ não inicia" (que olha só `req`, nunca o config) nem os teto-teto duros
+ * (`MAX_CYCLE_DURATION_MS`/`MAX_CYCLE_ITERATIONS`) — o valor do config é clampado a eles
+ * exatamente como o default embutido.
  */
-export function resolveCycleCeilings(req: CycleRequest): CycleCeilings {
+export function resolveCycleCeilings(
+  req: CycleRequest,
+  configDefaults?: CycleConfigDefaults,
+): CycleCeilings {
   const hasDuration = isPositive(req.maxDurationMs);
   const hasIterations = isPositive(req.maxIterations);
   const hasInterval = isPositive(req.intervalMs);
@@ -146,12 +170,22 @@ export function resolveCycleCeilings(req: CycleRequest): CycleCeilings {
   // DEFAULTS CONSERVADORES CODIFICADOS: um intervalo sem duração-total recai num
   // default DURO de duração total (intervalo sozinho ≠ infinito). Se nem intervalo
   // nem duração, mas há iterações, a duração cai no default também (cinto+suspensório).
+  // ADR-0150 (balde b) — `configDefaults` (config.json) substitui o DEFAULT_CYCLE_*
+  // hardcoded QUANDO o usuário omitiu a dimensão (mesmo papel, valor customizável); o
+  // `clampPositive`/`clampPositiveInt` abaixo CONTINUA aplicando o teto-teto duro
+  // (`MAX_CYCLE_DURATION_MS`/`MAX_CYCLE_ITERATIONS`, CLI-SEC-14, intocado).
+  const effectiveDefaultDurationMs = isPositive(configDefaults?.defaultDurationMs)
+    ? configDefaults!.defaultDurationMs!
+    : DEFAULT_CYCLE_DURATION_MS;
+  const effectiveDefaultIterations = isPositive(configDefaults?.defaultIterations)
+    ? configDefaults!.defaultIterations!
+    : DEFAULT_CYCLE_ITERATIONS;
   const maxDurationMs = clampPositive(
-    hasDuration ? req.maxDurationMs! : DEFAULT_CYCLE_DURATION_MS,
+    hasDuration ? req.maxDurationMs! : effectiveDefaultDurationMs,
     MAX_CYCLE_DURATION_MS,
   );
   const maxIterations = clampPositiveInt(
-    hasIterations ? req.maxIterations! : DEFAULT_CYCLE_ITERATIONS,
+    hasIterations ? req.maxIterations! : effectiveDefaultIterations,
     MAX_CYCLE_ITERATIONS,
   );
   // BUDGET AGREGADO sempre existe (obrigatório — ADR-0062 §2(c)). Default conservador
@@ -160,11 +194,20 @@ export function resolveCycleCeilings(req: CycleRequest): CycleCeilings {
     ? req.maxTokens!
     : (DEFAULT_LIMITS.maxTokens ?? 200_000);
 
+  // ADR-0150 — `configDefaults.defaultIntervalMs` (≥0, `0` é um valor válido — "sem
+  // espera fixa") substitui o `DEFAULT_CYCLE_INTERVAL_MS` hardcoded quando o usuário
+  // não deu intervalo explícito.
+  const effectiveDefaultIntervalMs =
+    configDefaults?.defaultIntervalMs !== undefined &&
+    Number.isFinite(configDefaults.defaultIntervalMs) &&
+    configDefaults.defaultIntervalMs >= 0
+      ? configDefaults.defaultIntervalMs
+      : DEFAULT_CYCLE_INTERVAL_MS;
   const intervalMs =
     req.rhythm === 'fixed'
       ? hasInterval
         ? Math.max(0, req.intervalMs!)
-        : DEFAULT_CYCLE_INTERVAL_MS
+        : effectiveDefaultIntervalMs
       : 0; // auto-pace não tem intervalo fixo.
 
   return { maxDurationMs, maxIterations, maxTokens, intervalMs, rhythm: req.rhythm };

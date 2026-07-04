@@ -165,7 +165,7 @@ export const NOMIC_EMBEDDER_MODEL_DIGEST =
 export const OLLAMA_PULL_TIMEOUT_MS = 600_000; // 10 min
 
 /** Porta loopback do Ollama (localhost, sem bind externo). */
-export const OLLAMA_LOOPBACK_PORT = OLLAMA_PORT; // single-source: boot-contract (ADR-0136 §10)
+export const OLLAMA_LOOPBACK_PORT = OLLAMA_PORT; // single-source: boot-contract (ADR-0150 §10)
 
 /** Host loopback do Ollama. */
 export const OLLAMA_LOOPBACK_HOST = '127.0.0.1';
@@ -198,7 +198,7 @@ export const HEADROOM_VENV_DIR = 'hr-venv';
 export const HEADROOM_PIP_PACKAGES: readonly string[] = ['headroom-ai[proxy]==0.25.0'];
 
 /** Porta loopback do proxy headroom (compressão de contexto, ADR-0108). */
-export const HEADROOM_LOOPBACK_PORT = HEADROOM_PORT; // single-source: boot-contract (ADR-0136 §10)
+export const HEADROOM_LOOPBACK_PORT = HEADROOM_PORT; // single-source: boot-contract (ADR-0150 §10)
 
 /** Versão do Python requerida p/ o venv do Mem0. */
 export const MEM0_MIN_PYTHON = '3.10';

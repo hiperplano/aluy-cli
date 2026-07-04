@@ -100,6 +100,12 @@ export {
   SESSIONS_DIRNAME,
   SESSION_RECORD_VERSION,
   hasAnySession,
+  // ADR-0150 (balde b) — resolve `session.gcMaxAgeMs`/`gcMaxCount` do config único.
+  resolveSessionGcOptions,
+  MIN_GC_MAX_AGE_MS,
+  MIN_GC_MAX_COUNT,
+  DEFAULT_GC_MAX_AGE_MS,
+  DEFAULT_GC_MAX_COUNT,
 } from './session-store.js';
 export type {
   SessionRecord,

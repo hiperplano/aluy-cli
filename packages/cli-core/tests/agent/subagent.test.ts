@@ -21,6 +21,13 @@ import {
   resolveIdleTimeoutMs,
   DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS,
   SUBAGENT_IDLE_TIMEOUT_ENV,
+  MIN_SUBAGENT_IDLE_TIMEOUT_MS,
+  MAX_SUBAGENT_IDLE_TIMEOUT_MS,
+  MAX_SUBAGENTS_PER_CALL,
+  MAX_SUBAGENTS_PER_CALL_CEILING,
+  resolveMaxSubagentsPerCall,
+  MAX_SUBAGENT_CONCURRENCY_CEILING,
+  resolveMaxConcurrency,
   type ModelCaller,
   type SubAgentProfile,
   type SubAgentOutcome,
@@ -457,6 +464,73 @@ describe('EST-0969 · anti-runaway', () => {
     });
     await spawner.spawn(Array.from({ length: 6 }, (_v, i) => ({ label: `c${i}`, goal: 'g' })));
     expect(peak).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('ADR-0150 (balde b) — resolveMaxSubagentsPerCall / resolveMaxConcurrency (env > config > default + clamp)', () => {
+  it('resolveMaxSubagentsPerCall: default = MAX_SUBAGENTS_PER_CALL (8)', () => {
+    expect(resolveMaxSubagentsPerCall()).toBe(MAX_SUBAGENTS_PER_CALL);
+  });
+
+  it('resolveMaxSubagentsPerCall: config vence o default', () => {
+    expect(resolveMaxSubagentsPerCall(undefined, 16)).toBe(16);
+  });
+
+  it('resolveMaxSubagentsPerCall: env vence o config', () => {
+    expect(resolveMaxSubagentsPerCall('20', 16)).toBe(20);
+  });
+
+  it('resolveMaxSubagentsPerCall: CLAMPA ao teto-teto — config pedindo 10000 ⇒ clampa a 32', () => {
+    expect(resolveMaxSubagentsPerCall(undefined, 10_000)).toBe(MAX_SUBAGENTS_PER_CALL_CEILING);
+    expect(MAX_SUBAGENTS_PER_CALL_CEILING).toBe(32);
+  });
+
+  it('resolveMaxConcurrency: default = DEFAULT_MAX_CONCURRENCY (4)', () => {
+    expect(resolveMaxConcurrency()).toBe(4);
+  });
+
+  it('resolveMaxConcurrency: flag > env > config > default', () => {
+    expect(resolveMaxConcurrency(undefined, undefined, 10)).toBe(10);
+    expect(resolveMaxConcurrency(undefined, '8', 10)).toBe(8);
+    expect(resolveMaxConcurrency(6, '8', 10)).toBe(6);
+  });
+
+  it('resolveMaxConcurrency: CLAMPA ao teto-teto — config pedindo 10000 ⇒ clampa a 16', () => {
+    expect(resolveMaxConcurrency(undefined, undefined, 10_000)).toBe(
+      MAX_SUBAGENT_CONCURRENCY_CEILING,
+    );
+    expect(MAX_SUBAGENT_CONCURRENCY_CEILING).toBe(16);
+  });
+
+  it('spawn(): `configDefaults.maxPerCall` SOBE o teto efetivo além do MAX_SUBAGENTS_PER_CALL antigo, mas nunca além do teto-teto', async () => {
+    const model = new RoutingModel(() => 'ok.');
+    // config pede 20 (acima do antigo default de 8) — deve caber.
+    const spawner = new SubAgentSpawner({
+      model,
+      permission: new PolicyPermissionEngine(),
+      ports: ports(),
+      baseTools: [...NATIVE_TOOLS],
+      configDefaults: { maxPerCall: 20 },
+    });
+    const profiles: SubAgentProfile[] = Array.from({ length: 12 }, (_v, i) => ({
+      label: `y${i}`,
+      goal: 'g',
+    }));
+    await expect(spawner.spawn(profiles)).resolves.toHaveLength(12);
+
+    // acima do teto-teto (32) mesmo com config absurdo ⇒ ainda recusa.
+    const spawner2 = new SubAgentSpawner({
+      model,
+      permission: new PolicyPermissionEngine(),
+      ports: ports(),
+      baseTools: [...NATIVE_TOOLS],
+      configDefaults: { maxPerCall: 10_000 },
+    });
+    const tooMany: SubAgentProfile[] = Array.from({ length: 33 }, (_v, i) => ({
+      label: `z${i}`,
+      goal: 'g',
+    }));
+    await expect(spawner2.spawn(tooMany)).rejects.toThrow(/anti-runaway|excede/i);
   });
 });
 
@@ -935,6 +1009,19 @@ describe('EST-0969 — resolveIdleTimeoutMs (flag > env > default + clamp)', () 
     expect(resolveIdleTimeoutMs(-1, { [SUBAGENT_IDLE_TIMEOUT_ENV]: '7s' })).toBe(7_000);
     // fracionário ⇒ piso inteiro.
     expect(resolveIdleTimeoutMs(1500.9, {})).toBe(1500);
+  });
+
+  it('ADR-0150 — o nível CONFIG (3º arg) é usado quando flag/env ausentes, e CLAMPADO em [5s,30min]', () => {
+    // config dentro da faixa ⇒ passa direto.
+    expect(resolveIdleTimeoutMs(undefined, {}, 60_000)).toBe(60_000);
+    // config ABAIXO do piso (5s) ⇒ clampado a 5000.
+    expect(resolveIdleTimeoutMs(undefined, {}, 1_000)).toBe(MIN_SUBAGENT_IDLE_TIMEOUT_MS);
+    // config ACIMA do teto (30min) ⇒ clampado a 1_800_000.
+    expect(resolveIdleTimeoutMs(undefined, {}, 999_999_999)).toBe(MAX_SUBAGENT_IDLE_TIMEOUT_MS);
+    // env ainda vence o config (config é o nível MAIS BAIXO antes do default).
+    expect(resolveIdleTimeoutMs(undefined, { [SUBAGENT_IDLE_TIMEOUT_ENV]: '7s' }, 60_000)).toBe(
+      7_000,
+    );
   });
 
   it('override por ENV mata um filho travado no tempo CURTO configurado', async () => {

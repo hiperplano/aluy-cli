@@ -128,8 +128,11 @@ export const MAX_OBSERVATION_CHARS_CEILING = 500_000;
  * O CLAMP é o que preserva o anti-OOM mesmo sob config errada/maliciosa — `0` ou
  * `999999999` NÃO desligam o teto: caem no piso/teto-teto.
  */
-export function resolveMaxObservationChars(value?: string | number | undefined): number {
-  const parsed = parseObservationCharsSetting(value);
+export function resolveMaxObservationChars(
+  value?: string | number | undefined,
+  config?: string | number | undefined, // ADR-0150 (balde b, Tier 2): config.advanced.webFetch.maxObservationChars
+): number {
+  const parsed = parseObservationCharsSetting(value) ?? parseObservationCharsSetting(config);
   const chosen = parsed ?? DEFAULT_MAX_OBSERVATION_CHARS;
   return Math.min(MAX_OBSERVATION_CHARS_CEILING, Math.max(MIN_MAX_OBSERVATION_CHARS, chosen));
 }

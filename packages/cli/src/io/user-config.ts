@@ -179,7 +179,7 @@ export interface UserConfig {
    */
   readonly recallMinScore?: number;
   /**
-   * ADR-0136 (config único) — catálogo de providers LOCAIS do usuário, ABSORVIDO do
+   * ADR-0150 (config único) — catálogo de providers LOCAIS do usuário, ABSORVIDO do
    * antigo `~/.aluy/providers.json` (que passa a `.migrated`). É DADO PÚBLICO
    * (id/label/base_url/slug — CLI-SEC-7), NUNCA credencial (essa fica no keychain/env
    * por provider). Cada entrada espelha `LocalProviderEntry` cru; a validação profunda
@@ -187,7 +187,7 @@ export interface UserConfig {
    */
   readonly providers?: readonly UserProviderEntry[];
   /**
-   * ADR-0136 EMENDA-1 (§8) — porta/host dos sidecars locais (Ollama/Mem0/headroom).
+   * ADR-0150 EMENDA-1 (§8) — porta/host dos sidecars locais (Ollama/Mem0/headroom).
    * PREFERÊNCIA REAL (balde a): quem já roda Ollama em `:11500` salva aqui em vez de
    * reexportar env toda sessão. Precedência: `*_URL` (env) > `*_HOST`/`*_PORT` (env) >
    * este campo > default. `port` fora de 1..65535 ⇒ descartado (default); `host` só
@@ -202,14 +202,14 @@ export interface UserConfig {
    */
   readonly connectors?: UserConnectorsConfig;
   /**
-   * ADR-0136 balde (a) — limites/orçamento PROMOVIDOS das env (`ALUY_MAX_TOKENS`,
+   * ADR-0150 balde (a) — limites/orçamento PROMOVIDOS das env (`ALUY_MAX_TOKENS`,
    * `ALUY_MAX_OUTPUT_TOKENS`, `ALUY_MAX_ITERATIONS`). Preferência durável de custo/guarda-
    * corpo. Precedência: flag > env > este campo > default. Os resolvers do core RE-VALIDAM
    * e CLAMPAM (anti-runaway CLI-SEC-8 não-relaxável) — aqui só guardamos inteiros positivos.
    */
   readonly limits?: UserLimitsConfig;
   /**
-   * ADR-0136 balde (a) — janela/auto-compactação PROMOVIDAS das env (`ALUY_CONTEXT_WINDOW`,
+   * ADR-0150 balde (a) — janela/auto-compactação PROMOVIDAS das env (`ALUY_CONTEXT_WINDOW`,
    * `ALUY_AUTOCOMPACT_AT`, `ALUY_AUTOCOMPACT_MAX`). Precedência flag > env > este campo >
    * default. `window` só vale p/ tier `custom` (no tier conhecido, a janela vem do catálogo).
    * Os resolvers do core RE-VALIDAM/CLAMPAM (anti-overflow/anti-loop).
@@ -226,6 +226,51 @@ export interface UserConfig {
    * valida o VOCABULÁRIO de fato, no uso. Ausente ⇒ `same-as-parent` (zero regressão).
    */
   readonly subAgent?: UserSubAgentConfig;
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // ADR-0150 (balde b) — TUNABLES DE OPERAÇÃO NOVOS (Tier 1): limites/timeouts/
+  // tetos que hoje eram hardcoded, promovidos a `~/.aluy/config.json`. MESMA
+  // disciplina de `limits`/`context` acima: sanitize SHAPE-ONLY aqui (inteiro
+  // positivo); o resolver PURO do core (ou do `cli`, p/ os tunables que não moram
+  // no core) RE-VALIDA e CLAMPA a um teto-teto hardcoded, NÃO configurável.
+  // ───────────────────────────────────────────────────────────────────────────
+  /**
+   * ADR-0150 — sub-agentes locais paralelos (CLI-SEC-11): teto de filhos por
+   * chamada, concorrência e timeout de inatividade. Precedência env > este campo >
+   * default (sem flag hoje); o core clampa a `MAX_SUBAGENTS_PER_CALL_CEILING` (32),
+   * `MAX_SUBAGENT_CONCURRENCY_CEILING` (16) e
+   * `[MIN_SUBAGENT_IDLE_TIMEOUT_MS, MAX_SUBAGENT_IDLE_TIMEOUT_MS]` (5s..30min).
+   */
+  readonly subagents?: UserSubagentsConfig;
+  /**
+   * ADR-0150 — DEFAULTS do `/cycle` (CLI-SEC-14) quando o usuário OMITE
+   * `--por`/`--max-iter`/intervalo. Os teto-teto duros (`MAX_CYCLE_DURATION_MS`=2h,
+   * `MAX_CYCLE_ITERATIONS`=200) permanecem hardcoded e INTOCADOS — este campo só
+   * troca o DEFAULT dentro deles (clampado pelo core, `resolveCycleCeilings`).
+   */
+  readonly cycle?: UserCycleConfig;
+  /**
+   * ADR-0150 — timeouts de handshake/chamada dos servers MCP locais (CLI-SEC-12).
+   * Já tinham override por env (`ALUY_MCP_CONNECT_TIMEOUT_MS`/`ALUY_MCP_TIMEOUT_MS`)
+   * com teto-teto hardcoded (`[1s,2min]`/`[1s,10min]`); este campo só "termina o
+   * padrão" — precedência env > este campo > default, MESMO teto-teto (intocado).
+   */
+  readonly mcp?: UserMcpConfig;
+  /**
+   * ADR-0150 — retenção/GC das sessões (`~/.aluy/sessions/`) e janela da AUTO-OFERTA
+   * de retomada no boot. Sem env hoje; precedência config > default, com sanidade
+   * MÍNIMA aplicada pelo `cli` (idade ≥1 dia, contagem ≥1, janela de auto-resume
+   * ≤7 dias) — não é anti-runaway (não toca custo/segurança de efeito), mas ainda
+   * ganha um piso/teto sensato p/ não virar um config absurdo (0 dias, janela ∞).
+   */
+  readonly session?: UserSessionConfig;
+  /**
+   * ADR-0150 (Tier 2) — tunables que JÁ tinham override por env + clamp
+   * (mem-pressure/self-check/web-fetch); este campo só "termina o padrão" (config
+   * como nível ENTRE env e default). Escopo v1.1-dentro-do-v1 por decisão do dono
+   * (Tier 1 + Tier 2 juntos). Ver ADR-0150 §Tier 2.
+   */
+  readonly advanced?: UserAdvancedConfig;
 }
 
 /** ADR-0146 (D4) — dial de sub-agentes (só DADO/tier, nunca credencial — CLI-SEC-7). */
@@ -233,14 +278,99 @@ export interface UserSubAgentConfig {
   readonly model?: string;
 }
 
-/** Limites de orçamento de sessão (ADR-0136 §5). Inteiros positivos; o core clampa no uso. */
+/** Limites de orçamento de sessão (ADR-0150 §5). Inteiros positivos; o core clampa no uso. */
 export interface UserLimitsConfig {
   readonly maxTokens?: number;
   readonly maxOutputTokens?: number;
   readonly maxIterations?: number;
+  /**
+   * ADR-0150 (balde b) — teto de gravações AUTÔNOMAS de memória (`remember`) por
+   * sessão (CLI-SEC-15/GS-M2). Inteiro positivo; o core clampa em
+   * `[1, MAX_MEMORY_WRITES_PER_SESSION_CEILING=100]` (`resolveMaxMemoryWritesPerSession`).
+   */
+  readonly maxMemoryWritesPerSession?: number;
 }
 
-/** Janela/auto-compactação (ADR-0136 §5). O core re-valida/clampa no uso. */
+/**
+ * ADR-0150 (balde b) — seção `subagents` do config único: sub-agentes locais
+ * PARALELOS (CLI-SEC-11). Inteiros positivos; o core clampa no uso (ver
+ * `resolveMaxSubagentsPerCall`/`resolveMaxConcurrency`/`resolveIdleTimeoutMs`).
+ */
+export interface UserSubagentsConfig {
+  /** Teto de filhos por chamada de `spawn_agent`. Clamp core `[1,32]`. */
+  readonly maxPerCall?: number;
+  /** Máx. de filhos vivos ao mesmo tempo (fan-out). Clamp core `[1,16]`. */
+  readonly maxConcurrency?: number;
+  /** Timeout de INATIVIDADE por filho (ms, não relógio total). Clamp core `[5000,1800000]`. */
+  readonly idleTimeoutMs?: number;
+}
+
+/**
+ * ADR-0150 (balde b) — seção `cycle` do config único: DEFAULTS de `/cycle`
+ * (CLI-SEC-14) quando o usuário omite a dimensão. Os teto-teto duros do `/cycle`
+ * NÃO estão aqui — são hardcoded no core e intocados por este ADR.
+ */
+export interface UserCycleConfig {
+  /** Default de duração total (ms) quando `--por` é omitido. Clamp core ao teto de 2h. */
+  readonly defaultDurationMs?: number;
+  /** Default de nº de ciclos quando `--max-iter` é omitido. Clamp core ao teto de 200. */
+  readonly defaultIterations?: number;
+  /** Default do intervalo entre ciclos (ms) no ritmo fixo, sem intervalo explícito. */
+  readonly defaultIntervalMs?: number;
+}
+
+/**
+ * ADR-0150 (balde b) — seção `mcp` do config único: timeouts dos servers MCP
+ * locais (CLI-SEC-12). O core clampa aos MESMOS teto-teto já existentes
+ * (`resolveMcpConnectTimeoutMs`/`resolveMcpCallTimeoutMs`).
+ */
+export interface UserMcpConfig {
+  /** Teto do HANDSHAKE (connect+listTools) na descoberta. Clamp `[1000,120000]`. */
+  readonly connectTimeoutMs?: number;
+  /** Teto de UMA chamada `callTool`. Clamp `[1000,600000]`. */
+  readonly callTimeoutMs?: number;
+}
+
+/**
+ * ADR-0150 (balde b) — seção `session` do config único: retenção das sessões
+ * salvas + janela da auto-oferta de retomada no boot. Sanidade aplicada pelo
+ * `cli` (não é anti-runaway; ver `resolveSessionGcOptions`/`resolveAutoResumeWindowMs`).
+ */
+export interface UserSessionConfig {
+  /** Idade máxima (ms) de uma sessão salva antes do GC. Sanidade: mín. 1 dia. */
+  readonly gcMaxAgeMs?: number;
+  /** Teto de sessões mantidas (as mais recentes). Sanidade: mín. 1. */
+  readonly gcMaxCount?: number;
+  /** Janela (ms) de "recente" p/ a auto-oferta de retomada no boot. Sanidade: máx. 7 dias. */
+  readonly autoResumeWindowMs?: number;
+}
+
+/**
+ * ADR-0150 (Tier 2) — tunables config-driven que JÁ tinham override por env+clamp.
+ * Precedência flag/env > este campo > default; o core RE-VALIDA/CLAMPA no uso, MESMOS
+ * teto-teto já existentes (nenhum novo teto-teto nasce aqui).
+ */
+export interface UserAdvancedConfig {
+  /** `agent/self-check.ts` — re-âncora de objetivo + auto-verificação pré-"pronto". */
+  readonly selfCheck?: {
+    /** `everyKEnv` (ALUY_SELF_CHECK_EVERY) vence. Clamp core `[1,1000]`. */
+    readonly everyK?: number;
+    /** `maxVerificationsEnv` (ALUY_SELF_CHECK_MAX) vence. Clamp core `[1,10]`. */
+    readonly maxVerifications?: number;
+  };
+  /** `agent/mem-pressure.ts` — limiar BASE do backstop de OOM (heap). */
+  readonly memPressure?: {
+    /** `ALUY_MEM_PRESSURE_AT` vence. Razão `0..1` ou `%`. Clamp core `[0.5,0.99]`. */
+    readonly compactAt?: number | string;
+  };
+  /** `agent/web/fetcher.ts` — teto de caracteres da observação do `web_fetch`. */
+  readonly webFetch?: {
+    /** `ALUY_WEB_FETCH_MAX_CHARS` vence. Clamp core `[256,500000]`. */
+    readonly maxObservationChars?: number;
+  };
+}
+
+/** Janela/auto-compactação (ADR-0150 §5). O core re-valida/clampa no uso. */
 export interface UserContextConfig {
   /** Janela assumida (tokens) — só p/ tier custom. Inteiro positivo. */
   readonly window?: number;
@@ -261,7 +391,7 @@ export interface UserTelegramConfig {
   readonly allowlist?: readonly number[];
 }
 
-/** Porta/host de um sidecar (ADR-0136 §8). Ambos opcionais; ausente ⇒ default. */
+/** Porta/host de um sidecar (ADR-0150 §8). Ambos opcionais; ausente ⇒ default. */
 export interface UserServiceEndpoint {
   readonly host?: string;
   readonly port?: number;
@@ -307,7 +437,7 @@ function okPort(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 65535;
 }
 
-/** Sanitiza um endpoint `{host?, port?}` (ADR-0136 §8). Campos inválidos descartados. */
+/** Sanitiza um endpoint `{host?, port?}` (ADR-0150 §8). Campos inválidos descartados. */
 function sanitizeEndpoint(raw: unknown): UserServiceEndpoint | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const o = raw as Record<string, unknown>;
@@ -317,23 +447,158 @@ function sanitizeEndpoint(raw: unknown): UserServiceEndpoint | undefined {
   return ep.host !== undefined || ep.port !== undefined ? ep : undefined;
 }
 
-/** Sanitiza `limits` (ADR-0136 §5). Só inteiros positivos; o core re-valida/clampa no uso. */
+/** Sanitiza `limits` (ADR-0150 §5). Só inteiros positivos; o core re-valida/clampa no uso. */
 function sanitizeLimits(raw: unknown): UserLimitsConfig | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const o = raw as Record<string, unknown>;
   const posInt = (v: unknown): number | undefined =>
     typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
-  const out: { maxTokens?: number; maxOutputTokens?: number; maxIterations?: number } = {};
+  const out: {
+    maxTokens?: number;
+    maxOutputTokens?: number;
+    maxIterations?: number;
+    maxMemoryWritesPerSession?: number;
+  } = {};
   const mt = posInt(o.maxTokens);
   const mo = posInt(o.maxOutputTokens);
   const mi = posInt(o.maxIterations);
+  // ADR-0150 (balde b) — teto de gravações de memória por sessão; shape-only aqui
+  // (o core clampa em `[1, MAX_MEMORY_WRITES_PER_SESSION_CEILING=100]` no uso).
+  const mw = posInt(o.maxMemoryWritesPerSession);
   if (mt !== undefined) out.maxTokens = mt;
   if (mo !== undefined) out.maxOutputTokens = mo;
   if (mi !== undefined) out.maxIterations = mi;
+  if (mw !== undefined) out.maxMemoryWritesPerSession = mw;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-/** Sanitiza `context` (ADR-0136 §5). O core re-valida/clampa no uso; aqui só a forma. */
+/**
+ * ADR-0150 (balde b) — sanitiza `subagents`. Só inteiros positivos; o core re-valida/
+ * clampa no uso (`resolveMaxSubagentsPerCall`/`resolveMaxConcurrency`/`resolveIdleTimeoutMs`).
+ */
+function sanitizeSubagents(raw: unknown): UserSubagentsConfig | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const posInt = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+  const out: { maxPerCall?: number; maxConcurrency?: number; idleTimeoutMs?: number } = {};
+  const mpc = posInt(o.maxPerCall);
+  const mc = posInt(o.maxConcurrency);
+  const it = posInt(o.idleTimeoutMs);
+  if (mpc !== undefined) out.maxPerCall = mpc;
+  if (mc !== undefined) out.maxConcurrency = mc;
+  if (it !== undefined) out.idleTimeoutMs = it;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * ADR-0150 (balde b) — sanitiza `cycle`. Só inteiros; `defaultIntervalMs` aceita `0`
+ * (valor válido — "sem espera fixa"), os demais exigem positivo. O core re-valida/
+ * clampa aos teto-teto duros do `/cycle` (`resolveCycleCeilings`).
+ */
+function sanitizeCycle(raw: unknown): UserCycleConfig | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const posInt = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+  const nonNegInt = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : undefined;
+  const out: {
+    defaultDurationMs?: number;
+    defaultIterations?: number;
+    defaultIntervalMs?: number;
+  } = {};
+  const dd = posInt(o.defaultDurationMs);
+  const di = posInt(o.defaultIterations);
+  const dim = nonNegInt(o.defaultIntervalMs);
+  if (dd !== undefined) out.defaultDurationMs = dd;
+  if (di !== undefined) out.defaultIterations = di;
+  if (dim !== undefined) out.defaultIntervalMs = dim;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * ADR-0150 (balde b) — sanitiza `mcp`. Só inteiros positivos; o core re-valida/clampa
+ * aos MESMOS teto-teto já existentes (`resolveMcpConnectTimeoutMs`/`resolveMcpCallTimeoutMs`).
+ */
+function sanitizeMcp(raw: unknown): UserMcpConfig | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const posInt = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+  const out: { connectTimeoutMs?: number; callTimeoutMs?: number } = {};
+  const ct = posInt(o.connectTimeoutMs);
+  const cl = posInt(o.callTimeoutMs);
+  if (ct !== undefined) out.connectTimeoutMs = ct;
+  if (cl !== undefined) out.callTimeoutMs = cl;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * ADR-0150 (balde b) — sanitiza `session`. Só inteiros positivos; o `cli` aplica a
+ * sanidade MÍNIMA (não anti-runaway) no uso (`resolveSessionGcOptions`/
+ * `resolveAutoResumeWindowMs`).
+ */
+function sanitizeSession(raw: unknown): UserSessionConfig | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const posInt = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+  const out: { gcMaxAgeMs?: number; gcMaxCount?: number; autoResumeWindowMs?: number } = {};
+  const ga = posInt(o.gcMaxAgeMs);
+  const gc = posInt(o.gcMaxCount);
+  const aw = posInt(o.autoResumeWindowMs);
+  if (ga !== undefined) out.gcMaxAgeMs = ga;
+  if (gc !== undefined) out.gcMaxCount = gc;
+  if (aw !== undefined) out.autoResumeWindowMs = aw;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * ADR-0150 (Tier 2) — sanitiza `advanced`. Shape-only (o core re-valida/clampa no
+ * uso, MESMOS teto-teto já existentes de cada tunable — nenhum novo aqui).
+ */
+function sanitizeAdvanced(raw: unknown): UserAdvancedConfig | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const posInt = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+  const out: {
+    selfCheck?: { everyK?: number; maxVerifications?: number };
+    memPressure?: { compactAt?: number | string };
+    webFetch?: { maxObservationChars?: number };
+  } = {};
+
+  if (typeof o.selfCheck === 'object' && o.selfCheck !== null) {
+    const sc = o.selfCheck as Record<string, unknown>;
+    const clean: { everyK?: number; maxVerifications?: number } = {};
+    const ek = posInt(sc.everyK);
+    const mv = posInt(sc.maxVerifications);
+    if (ek !== undefined) clean.everyK = ek;
+    if (mv !== undefined) clean.maxVerifications = mv;
+    if (Object.keys(clean).length > 0) out.selfCheck = clean;
+  }
+
+  if (typeof o.memPressure === 'object' && o.memPressure !== null) {
+    const mp = o.memPressure as Record<string, unknown>;
+    // razão 0..1 (número) OU string (o core parseia/clampa — mesma forma do env).
+    if (typeof mp.compactAt === 'number' && Number.isFinite(mp.compactAt) && mp.compactAt > 0) {
+      out.memPressure = { compactAt: mp.compactAt };
+    } else if (typeof mp.compactAt === 'string' && mp.compactAt.trim() !== '') {
+      out.memPressure = { compactAt: mp.compactAt.trim() };
+    }
+  }
+
+  if (typeof o.webFetch === 'object' && o.webFetch !== null) {
+    const wf = o.webFetch as Record<string, unknown>;
+    const moc = posInt(wf.maxObservationChars);
+    if (moc !== undefined) out.webFetch = { maxObservationChars: moc };
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Sanitiza `context` (ADR-0150 §5). O core re-valida/clampa no uso; aqui só a forma. */
 function sanitizeContext(raw: unknown): UserContextConfig | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const o = raw as Record<string, unknown>;
@@ -398,7 +663,7 @@ function sanitizeSubAgent(raw: unknown): UserSubAgentConfig | undefined {
   return undefined;
 }
 
-/** Sanitiza a seção `services` (ADR-0136 §8). Só sub-endpoints válidos sobrevivem. */
+/** Sanitiza a seção `services` (ADR-0150 §8). Só sub-endpoints válidos sobrevivem. */
 function sanitizeServices(raw: unknown): UserServicesConfig | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const o = raw as Record<string, unknown>;
@@ -417,7 +682,7 @@ function sanitizeServices(raw: unknown): UserServicesConfig | undefined {
 }
 
 /**
- * Sanitiza o array de providers do config (ADR-0136). Mantém só entradas BEM-FORMADAS
+ * Sanitiza o array de providers do config (ADR-0150). Mantém só entradas BEM-FORMADAS
  * (id/baseUrl/defaultModel string não-vazia + wireFormat conhecido); descarta o resto.
  * Copia só campos reconhecidos (nunca credencial). Array vazio/sem válidas ⇒ undefined.
  */
@@ -508,6 +773,12 @@ function sanitize(raw: unknown): UserConfig {
     limits?: UserLimitsConfig;
     context?: UserContextConfig;
     subAgent?: UserSubAgentConfig;
+    // ADR-0150 (balde b) — tunables novos (bloco separado, ver §sanitize abaixo).
+    subagents?: UserSubagentsConfig;
+    cycle?: UserCycleConfig;
+    mcp?: UserMcpConfig;
+    session?: UserSessionConfig;
+    advanced?: UserAdvancedConfig;
   } = {};
   // theme: precisa ser um nome conhecido do catálogo (senão ignora → default dark).
   if (typeof obj.theme === 'string') {
@@ -602,11 +873,11 @@ function sanitize(raw: unknown): UserConfig {
     }
   }
 
-  // ADR-0136 (config único) — providers absorvidos do antigo providers.json.
+  // ADR-0150 (config único) — providers absorvidos do antigo providers.json.
   const providers = sanitizeProviderEntries(obj.providers);
   if (providers) out.providers = providers;
 
-  // ADR-0136 EMENDA-1 (§8) — seção services (porta/host dos sidecars).
+  // ADR-0150 EMENDA-1 (§8) — seção services (porta/host dos sidecars).
   const services = sanitizeServices(obj.services);
   if (services) out.services = services;
 
@@ -614,17 +885,39 @@ function sanitize(raw: unknown): UserConfig {
   const connectors = sanitizeConnectors(obj.connectors);
   if (connectors) out.connectors = connectors;
 
-  // ADR-0136 §5 (balde a) — limits promovidos das env (maxTokens/maxOutputTokens/maxIterations).
+  // ADR-0150 §5 (balde a) — limits promovidos das env (maxTokens/maxOutputTokens/maxIterations).
   const limits = sanitizeLimits(obj.limits);
   if (limits) out.limits = limits;
 
-  // ADR-0136 §5 (balde a) — context promovido das env (window/autocompactAt/autocompactMax).
+  // ADR-0150 §5 (balde a) — context promovido das env (window/autocompactAt/autocompactMax).
   const context = sanitizeContext(obj.context);
   if (context) out.context = context;
 
   // ADR-0146 (D4) — dial global de modelo/tier dos sub-agentes.
   const subAgent = sanitizeSubAgent(obj.subAgent);
   if (subAgent) out.subAgent = subAgent;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ADR-0150 (balde b) — TUNABLES NOVOS (subagents/cycle/mcp/session). Bloco
+  // separado de propósito (ver nota de coordenação no topo do arquivo) para
+  // minimizar conflito com outras adições paralelas a este `sanitize()`.
+  // ─────────────────────────────────────────────────────────────────────────
+  const subagents = sanitizeSubagents(obj.subagents);
+  if (subagents) out.subagents = subagents;
+
+  const cycle = sanitizeCycle(obj.cycle);
+  if (cycle) out.cycle = cycle;
+
+  const mcp = sanitizeMcp(obj.mcp);
+  if (mcp) out.mcp = mcp;
+
+  const session = sanitizeSession(obj.session);
+  if (session) out.session = session;
+
+  // ADR-0150 (Tier 2) — advanced (self-check/mem-pressure/web-fetch): tunables que
+  // já tinham override por env+clamp; config só "termina o padrão".
+  const advanced = sanitizeAdvanced(obj.advanced);
+  if (advanced) out.advanced = advanced;
 
   return out;
 }

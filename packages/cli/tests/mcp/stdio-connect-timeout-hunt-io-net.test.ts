@@ -87,4 +87,16 @@ describe('HUNT-IO-NET · StdioMcpTransport.connect — TIMEOUT de handshake (ant
     );
     expect(resolveMcpConnectTimeoutMs({ ALUY_MCP_CONNECT_TIMEOUT_MS: '10' })).toBe(1_000);
   });
+
+  it('ADR-0150 (balde b) — config (2º arg): env > config > default, MESMO clamp', () => {
+    expect(resolveMcpConnectTimeoutMs({}, 45_000)).toBe(45_000);
+    // env vence o config.
+    expect(resolveMcpConnectTimeoutMs({ ALUY_MCP_CONNECT_TIMEOUT_MS: '5000' }, 45_000)).toBe(5000);
+    // config fora do teto-teto ⇒ clampado ao MESMO [1s,2min] do env.
+    expect(resolveMcpConnectTimeoutMs({}, 999_999)).toBe(120_000);
+    expect(resolveMcpConnectTimeoutMs({}, 10)).toBe(1_000);
+    // config ausente/inválido ⇒ default.
+    expect(resolveMcpConnectTimeoutMs({}, undefined)).toBe(DEFAULT_MCP_CONNECT_TIMEOUT_MS);
+    expect(resolveMcpConnectTimeoutMs({}, -5)).toBe(DEFAULT_MCP_CONNECT_TIMEOUT_MS);
+  });
 });

@@ -104,9 +104,9 @@ export class StreamByteCap {
   }
 }
 
-function parsePositiveInt(raw: string | undefined): number | undefined {
+function parsePositiveInt(raw: string | number | undefined): number | undefined {
   if (raw === undefined) return undefined;
-  const s = raw.trim();
+  const s = typeof raw === 'number' ? String(raw) : raw.trim();
   if (s === '') return undefined;
   const n = Number(s);
   if (!Number.isFinite(n) || n <= 0) return undefined;
@@ -123,10 +123,20 @@ function isStreamCapDisabled(env: Record<string, string | undefined>): boolean {
  * (`StreamingModelCaller`) e o agregado (`BrokerModelClient.call`) usam ESTA
  * mesma config). Lê o toggle + o teto do env (`env` injetável p/ teste).
  * Ligado por default; `ALUY_STREAM_CAP_OFF` ⇒ teto desligado (max 0).
+ *
+ * ADR-0150 (balde b, Tier 2) — `configMaxBytes` (opcional) é o nível
+ * `config.advanced.stream.maxStreamBytes`, ENTRE env e default (env > config >
+ * default). NÃO wired a um call-site hoje (`newStreamByteCap()` segue chamado
+ * sem args em `streaming-caller.ts`); o parâmetro existe para uso futuro/teste isolado.
  */
 export function newStreamByteCap(
   env: Record<string, string | undefined> = process.env,
+  configMaxBytes?: number | undefined,
 ): StreamByteCap {
   if (isStreamCapDisabled(env)) return new StreamByteCap(0);
-  return new StreamByteCap(parsePositiveInt(env[STREAM_MAX_BYTES_ENV]) ?? DEFAULT_MAX_STREAM_BYTES);
+  return new StreamByteCap(
+    parsePositiveInt(env[STREAM_MAX_BYTES_ENV]) ??
+      parsePositiveInt(configMaxBytes) ??
+      DEFAULT_MAX_STREAM_BYTES,
+  );
 }

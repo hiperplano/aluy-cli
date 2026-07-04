@@ -86,11 +86,13 @@ describe('EST-0973 — resolveAutoCompact (gating flag>env>default)', () => {
     expect(c2.at).toBe(0);
   });
 
-  it('ADR-0136: config.context entra entre env e default (flag>env>config>default)', () => {
+  it('ADR-0150: config.context entra entre env e default (flag>env>config>default)', () => {
     // só config define o limiar
     expect(resolveAutoCompact({ atConfig: 0.7, contextWindow: WINDOW }).at).toBeCloseTo(0.7);
     // env vence config
-    expect(resolveAutoCompact({ atEnv: '0.8', atConfig: 0.7, contextWindow: WINDOW }).at).toBeCloseTo(0.8);
+    expect(
+      resolveAutoCompact({ atEnv: '0.8', atConfig: 0.7, contextWindow: WINDOW }).at,
+    ).toBeCloseTo(0.8);
     // flag vence tudo
     expect(
       resolveAutoCompact({ atFlag: '0.9', atEnv: '0.8', atConfig: 0.7, contextWindow: WINDOW }).at,

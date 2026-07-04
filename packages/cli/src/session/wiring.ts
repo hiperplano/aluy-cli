@@ -23,6 +23,7 @@ import {
   resolveMaxIterations,
   resolveMaxOutputTokens,
   resolveMaxObservationChars,
+  resolveMaxMemoryWritesPerSession,
   resolveSelfCheck,
   LoginService,
   PolicyPermissionEngine,
@@ -89,7 +90,14 @@ import { makePreToolGate } from './pre-tool-gate.js';
 import { HookRunner, selectHooks, type HooksConfig } from '@hiperplano/aluy-cli-core';
 import { resolveContextWindow } from '../model/catalog.js';
 import { resolveMaestro, resolveContinuationCfg, resolveMemory } from '../maestro/wiring.js';
-import type { UserServicesConfig, UserLimitsConfig, UserContextConfig } from '../io/user-config.js';
+import type {
+  UserServicesConfig,
+  UserLimitsConfig,
+  UserContextConfig,
+  UserSubagentsConfig,
+  UserCycleConfig,
+  UserAdvancedConfig,
+} from '../io/user-config.js';
 import type { SessionMeta } from './model.js';
 
 /** Tier default da sessão (HG-2: só o tier sai do cliente; o broker resolve). */
@@ -101,7 +109,7 @@ export const DEFAULT_EXEC_TIMEOUT_MS = 120_000;
 export interface BuildSessionOptions {
   readonly env?: NodeJS.ProcessEnv;
   /**
-   * Seção `services` do config único (ADR-0136 §8/§9): porta/host dos sidecars.
+   * Seção `services` do config único (ADR-0150 §8/§9): porta/host dos sidecars.
    * Resolvido em run.tsx (savedConfig.services) e repassado ao Maestro/Memória, p/ o
    * judge/recall AO VIVO falarem ONDE o usuário configurou (não só o warmup/doctor).
    */
@@ -113,17 +121,37 @@ export interface BuildSessionOptions {
    */
   readonly headroomUrl?: string;
   /**
-   * ADR-0136 §5 (balde a) — limits do config (maxTokens/maxOutputTokens/maxIterations).
+   * ADR-0150 §5 (balde a) — limits do config (maxTokens/maxOutputTokens/maxIterations).
    * Resolvido em run.tsx (savedConfig.limits) e repassado; entra como nível ENTRE env e
    * default na precedência (flag > env > config > default). O core RE-VALIDA e CLAMPA.
    */
   readonly limits?: UserLimitsConfig;
   /**
-   * ADR-0136 §5 (balde a) — context do config (window/autocompactAt/autocompactMax).
+   * ADR-0150 §5 (balde a) — context do config (window/autocompactAt/autocompactMax).
    * Resolvido em run.tsx (savedConfig.context); entra ENTRE env e default na janela custom
    * e na auto-compactação (flag > env > config > default). O core re-valida/clampa.
    */
   readonly context?: UserContextConfig;
+  /**
+   * ADR-0150 (balde b) — seção `subagents` do config (`maxPerCall`/`maxConcurrency`/
+   * `idleTimeoutMs`). Resolvido em run.tsx (savedConfig.subagents); entra como o nível
+   * `configDefaults` do `SubAgentSpawner` (ENTRE env e default), clampado pelo core.
+   */
+  readonly subagentsConfig?: UserSubagentsConfig;
+  /**
+   * ADR-0150 (balde b) — seção `cycle` do config (`defaultDurationMs`/`defaultIterations`/
+   * `defaultIntervalMs`). Resolvido em run.tsx (savedConfig.cycle); repassado ao
+   * controller p/ `resolveCycleCeilings` usar como DEFAULT quando o `/cycle` omite a
+   * dimensão. Os teto-teto duros (CLI-SEC-14) não mudam.
+   */
+  readonly cycleConfig?: UserCycleConfig;
+  /**
+   * ADR-0150 (Tier 2) — seção `advanced` do config (self-check/mem-pressure/
+   * web-fetch). Resolvido em run.tsx (savedConfig.advanced); cada campo entra
+   * como o nível ENTRE env e default do resolver correspondente — env já existia
+   * e segue vencendo.
+   */
+  readonly advanced?: UserAdvancedConfig;
   /** Raiz do workspace (cwd preso). Default: process.cwd(). */
   readonly workspaceRoot?: string;
   /**
@@ -268,8 +296,11 @@ export interface BuildSessionOptions {
    */
   readonly todoBaseDir?: string;
   /**
-   * EST-0983 — teto de gravações de memória (`remember`) por sessão (GS-M2/RES-M-2).
-   * Default `DEFAULT_MAX_MEMORY_WRITES_PER_SESSION` (na engine). Injetável p/ teste.
+   * EST-0983 · ADR-0150 (balde b) — teto de gravações de memória (`remember`) por
+   * sessão (GS-M2/RES-M-2). Nível mais alto da precedência (equivalente a "flag";
+   * injetável p/ teste). Resolvido junto com `env.ALUY_MAX_MEMORY_WRITES_PER_SESSION`
+   * e `limits?.maxMemoryWritesPerSession` (config) por `resolveMaxMemoryWritesPerSession`,
+   * SEMPRE clampado a `MAX_MEMORY_WRITES_PER_SESSION_CEILING` (100) no core.
    */
   readonly maxMemoryWritesPerSession?: number;
   /**
@@ -580,7 +611,12 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // EST-0970 (fix OOM) — teto de CARACTERES da observação do web_fetch (o blob que
   // entra no contexto). flag/env (`ALUY_WEB_FETCH_MAX_CHARS`) > default, clampado em
   // [MIN, CEILING] (anti-OOM duro: config errada NÃO desliga o teto). SEMPRE na policy.
-  const maxObservationChars = resolveMaxObservationChars(env.ALUY_WEB_FETCH_MAX_CHARS);
+  // ADR-0150 (Tier 2) — config.advanced.webFetch.maxObservationChars (nível ENTRE
+  // env e default; env já existia e segue vencendo).
+  const maxObservationChars = resolveMaxObservationChars(
+    env.ALUY_WEB_FETCH_MAX_CHARS,
+    opts.advanced?.webFetch?.maxObservationChars,
+  );
   const web = createWebPort({
     egress,
     policy: { maxObservationChars, ...(yolo ? { allowInternalHosts: true } : {}) },
@@ -691,10 +727,14 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
       oldText !== undefined
         ? unifiedDiff(path, oldText, newText, true)
         : unifiedDiff(path, '', newText, false),
-    // EST-0983 · CLI-SEC-15 (GS-M2) — teto de gravações de memória por sessão.
-    ...(opts.maxMemoryWritesPerSession !== undefined
-      ? { maxMemoryWritesPerSession: opts.maxMemoryWritesPerSession }
-      : {}),
+    // EST-0983 · CLI-SEC-15 (GS-M2) · ADR-0150 (balde b) — teto de gravações de
+    // memória por sessão: precedência flag(opção) > env > config > default,
+    // SEMPRE clampada a `MAX_MEMORY_WRITES_PER_SESSION_CEILING` (100) no core.
+    maxMemoryWritesPerSession: resolveMaxMemoryWritesPerSession(
+      opts.maxMemoryWritesPerSession,
+      env.ALUY_MAX_MEMORY_WRITES_PER_SESSION,
+      opts.limits?.maxMemoryWritesPerSession,
+    ),
   });
 
   // ── ask resolver da TUI (0948 — fail-safe deny em timeout/abort) ────────────
@@ -802,6 +842,13 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     tier,
     everyKEnv: env.ALUY_SELF_CHECK_EVERY,
     maxVerificationsEnv: env.ALUY_SELF_CHECK_MAX,
+    // ADR-0150 (Tier 2) — config.advanced.selfCheck (nível ENTRE env e default).
+    ...(opts.advanced?.selfCheck?.everyK !== undefined
+      ? { everyKConfig: opts.advanced.selfCheck.everyK }
+      : {}),
+    ...(opts.advanced?.selfCheck?.maxVerifications !== undefined
+      ? { maxVerificationsConfig: opts.advanced.selfCheck.maxVerifications }
+      : {}),
   });
   const meta: SessionMeta = {
     // EST-0982 — arranca no `sessionCwd` (= raiz no boot). O controller o RE-ESPELHA
@@ -1057,8 +1104,13 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // (a flag vence o env). O controller resolve flag>env>default 0.85 com a janela do
     // modelo (`contextWindow`). Sem a flag, cai no env/default (ligada por padrão).
     ...(opts.autoCompactAt !== undefined ? { autoCompactAt: opts.autoCompactAt } : {}),
-    // ADR-0136 §5 — config.context (autocompactAt/Max/window): nível ENTRE env e default.
+    // ADR-0150 §5 — config.context (autocompactAt/Max/window): nível ENTRE env e default.
     ...(opts.context ? { contextConfig: opts.context } : {}),
+    // ADR-0150 (balde b) — config.cycle (defaultDurationMs/defaultIterations/
+    // defaultIntervalMs): DEFAULTS do `/cycle` quando o usuário omite a dimensão. Os
+    // teto-teto duros do `/cycle` (CLI-SEC-14) não mudam — só o controller repassa a
+    // `resolveCycleCeilings` no momento de iniciar um ciclo.
+    ...(opts.cycleConfig ? { cycleConfig: opts.cycleConfig } : {}),
     // EST-0973 (fix) — JANELA DE CONTEXTO do tier ativo (denominador da % janela +
     // auto-compactação). Resolvida do catálogo (ex.: 128k p/ Strata, 256k p/ Flui,
     // 200k p/ Cortex, 0 p/ Custom). SEMPRE passada (≠200k hardcoded). O controller
@@ -1095,6 +1147,24 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
             // `ALUY_FANOUT_DETACH_ON_INJECT` (Fatia 2). `opts.subAgents.env` (se vier)
             // tem precedência (teste); senão o env da sessão (produção). Default OFF.
             env: opts.subAgents.env ?? env,
+            // ADR-0150 (balde b) — seção `subagents` do config.json, nível ENTRE a
+            // opção acima (`maxConcurrency`/`timeoutMs`) e o DEFAULT do core. O core
+            // (`SubAgentSpawner`) resolve/clampa (env > config > default).
+            ...(opts.subagentsConfig
+              ? {
+                  configDefaults: {
+                    ...(opts.subagentsConfig.maxPerCall !== undefined
+                      ? { maxPerCall: opts.subagentsConfig.maxPerCall }
+                      : {}),
+                    ...(opts.subagentsConfig.maxConcurrency !== undefined
+                      ? { maxConcurrency: opts.subagentsConfig.maxConcurrency }
+                      : {}),
+                    ...(opts.subagentsConfig.idleTimeoutMs !== undefined
+                      ? { idleTimeoutMs: opts.subagentsConfig.idleTimeoutMs }
+                      : {}),
+                  },
+                }
+              : {}),
             ...(selectHooks(hooksConfig, 'subagent-stop').length > 0
               ? {
                   observer: {
@@ -1162,6 +1232,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
             env,
             ...(opts.memoryMonitor.sampleIntervalMs !== undefined
               ? { sampleIntervalMs: opts.memoryMonitor.sampleIntervalMs }
+              : {}),
+            // ADR-0150 (Tier 2) — config.advanced.memPressure.compactAt.
+            ...(opts.advanced?.memPressure?.compactAt !== undefined
+              ? { pressureAtConfig: opts.advanced.memPressure.compactAt }
               : {}),
           },
         }

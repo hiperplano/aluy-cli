@@ -29,7 +29,12 @@ import {
 } from '@hiperplano/aluy-cli-core';
 import type { BwrapSandboxLauncher } from '../sandbox/index.js';
 import { McpConfigStore } from './mcp-config-store.js';
-import { StdioMcpTransport } from './stdio-transport.js';
+import {
+  StdioMcpTransport,
+  resolveMcpCallTimeoutMs,
+  resolveMcpConnectTimeoutMs,
+} from './stdio-transport.js';
+import type { UserMcpConfig } from '../io/user-config.js';
 
 /**
  * AVISO DE CONFIANÇA (E-B3 / FU-VAU-11-bis) — exibido no `--help`/docs do MCP. Por
@@ -85,6 +90,13 @@ export interface SetupMcpOptions {
    * intocado (server cru). O wiring o injeta a partir de `createSandbox()`.
    */
   readonly sandboxLauncher?: BwrapSandboxLauncher;
+  /**
+   * ADR-0150 (balde b) — seção `mcp` do config único (`~/.aluy/config.json`):
+   * timeouts de handshake/chamada dos servers locais. Precedência env > este campo >
+   * default, MESMO teto-teto hardcoded já existente (`resolveMcpConnectTimeoutMs`/
+   * `resolveMcpCallTimeoutMs`, intocado por este ADR).
+   */
+  readonly mcpConfig?: UserMcpConfig;
 }
 
 /** Resultado do setup: tools adaptadas (p/ o registro) + transports (p/ fechar). */
@@ -150,12 +162,20 @@ export async function setupMcp(opts: SetupMcpOptions = {}): Promise<McpSetup> {
       .filter((e): e is string => typeof e === 'string')
       .join(' | ') || undefined;
 
+  // ADR-0150 (balde b) — resolve os timeouts JÁ COM o config (env > config > default),
+  // clampados ao MESMO teto-teto hardcoded (intocado). Env explícito continua vencendo.
+  const mcpEnv = opts.parentEnv ?? process.env;
+  const callTimeoutMs = resolveMcpCallTimeoutMs(mcpEnv, opts.mcpConfig?.callTimeoutMs);
+  const connectTimeoutMs = resolveMcpConnectTimeoutMs(mcpEnv, opts.mcpConfig?.connectTimeoutMs);
+
   const makeTransport =
     opts.makeTransport ??
     ((): McpTransport =>
       new StdioMcpTransport({
         cwd,
         ...(opts.parentEnv ? { parentEnv: opts.parentEnv } : {}),
+        callTimeoutMs,
+        connectTimeoutMs,
         // EST-1011 — sandbox de SO do processo-server (opt-in `ALUY_SANDBOX_MCP`). O
         // workspace montado RW é o `cwd` (o server opera em arquivos do projeto). A
         // rede fica net-deny por default (sem aprovação ⇒ server sem socket). AUSENTE

@@ -28,7 +28,7 @@ import { UserConfigStore, type UserProviderEntry } from './user-config.js';
 export const PROVIDERS_FILENAME = 'providers.json';
 
 /**
- * ADR-0136 (config único) — MIGRAÇÃO one-shot do legado `~/.aluy/providers.json` para a
+ * ADR-0150 (config único) — MIGRAÇÃO one-shot do legado `~/.aluy/providers.json` para a
  * seção `providers` do `~/.aluy/config.json`. Idempotente e FAIL-SAFE (nunca lança):
  *   - config já tem `providers` ⇒ no-op (já migrado).
  *   - providers.json ausente/ilegível/vazio ⇒ no-op.
@@ -90,7 +90,7 @@ export function providersConfigPath(baseDir?: string): string {
  * descartadas pelo sanitize do core). NUNCA lança.
  */
 export function loadLocalProviderCatalog(opts: LoadProvidersOptions = {}): LocalProviderCatalog {
-  // ADR-0136 (config único): a fonte de verdade é o config.json. Migra o legado
+  // ADR-0150 (config único): a fonte de verdade é o config.json. Migra o legado
   // providers.json (one-shot, fail-safe) e lê dali. Sem entradas ⇒ default embutido.
   const entries = migrateLegacyProvidersJson(opts.baseDir);
   if (entries.length === 0) return defaultLocalCatalog();
@@ -113,7 +113,7 @@ export interface ProviderOverrideInput {
  * ESCRITA do provider custom (merge por `id`, o novo SUBSTITUI). Usado pelo
  * `aluy onboard` (opção "custom OpenAI-compatível") e por `aluy provider add`.
  *
- * ADR-0136 (config único): grava na seção `providers` do `config.json` (via store,
+ * ADR-0150 (config único): grava na seção `providers` do `config.json` (via store,
  * sanitizado), NÃO mais em providers.json. Migra o legado antes (one-shot). Best-effort
  * na persistência (o store nunca derruba a sessão).
  */
