@@ -97,6 +97,25 @@ export interface ToolRunContext {
 }
 
 /**
+ * ADR-0145 (frente d) — AGRUPAMENTO por INTENÇÃO de uma tool nativa. Alimenta DOIS
+ * consumidores a partir da MESMA fonte (`NativeTool.group`): o MENU do `capabilities`
+ * (agrupa por intenção) e, no futuro, qualquer outra vista por-intenção. Tool MCP
+ * (`mcp__<server>__<tool>`) NÃO declara `group` — é inferido como `'mcp'` por quem
+ * monta o snapshot (dado de terceiro, sem grupo auto-declarado confiável).
+ */
+export type CapabilityGroup =
+  | 'arquivo'
+  | 'busca'
+  | 'execucao'
+  | 'delegacao'
+  | 'memoria'
+  | 'assincrono'
+  | 'web'
+  | 'plano'
+  | 'mcp'
+  | 'outro';
+
+/**
  * Contrato de uma tool nativa. `run` recebe o input já parseado (do protocolo), a
  * porta de I/O concreta e um CONTEXTO opcional (EST-0982: abort + streaming). NÃO
  * consulta o gate — o gate é responsabilidade do LOOP (ponto único; a tool não pode
@@ -108,6 +127,21 @@ export interface NativeTool<Ports = unknown> {
   readonly effect: ToolEffect;
   /** Descrição curta p/ o prompt do agente (o modelo aprende a tool por aqui). */
   readonly description: string;
+  /**
+   * ADR-0145 (frente b/d) — FONTE ÚNICA do "quando usar": uma frase curta, em
+   * PT-BR, iniciada por um verbo/contexto de uso (ex.: "localizar ONDE algo está
+   * ANTES de editar"), SEM ponto final. Alimenta DOIS lugares a partir do MESMO
+   * texto (autorado uma vez, sem duplicar verdade):
+   *  - a `description` da tool (frente b) embute este texto ("Use QUANDO: …");
+   *  - o menu do `capabilities` (frente d) o exibe junto ao nome da tool.
+   * OPCIONAL: tools MCP NÃO declaram `when` (dado de terceiro, não-confiável) — o
+   * campo fica ausente e o `capabilities` simplesmente omite a coluna "quando" p/
+   * elas. Tools nativas sem `when` (a maioria — já têm gatilho claro, ex.:
+   * `spawn_agent`/`recall`/`monitor`) também podem omiti-lo sem regressão.
+   */
+  readonly when?: string;
+  /** ADR-0145 (frente d) — grupo de intenção (ver `CapabilityGroup`). OPCIONAL. */
+  readonly group?: CapabilityGroup;
   /**
    * JSON Schema do INPUT da tool (objeto) — FONTE ÚNICA dos parâmetros, consumida
    * pelos DOIS caminhos de tool-calling (EST-0996 nativo + EST-0970 texto):
@@ -464,4 +498,85 @@ export interface ToolPorts {
    * concreto (@hiperplano/aluy-cli) liga esta porta ao `TuiQuestionResolver` (controlador da TUI).
    */
   readonly question?: import('./question.js').QuestionPort;
+  /**
+   * ADR-0145 (frente d) · CLI-SEC-4 — porta do MENU VIVO de capacidades (OPCIONAL).
+   * Quando presente, a tool `capabilities` (e o sinônimo `list_tools`) a consulta p/
+   * devolver, SOB DEMANDA, o que o agente pode disparar AGORA — agrupado por
+   * intenção, com ESTADO VIVO (MCP conectados neste boot, agentes `.md`, monitores
+   * armados, nº de fatos na memória, skills descobertas). A tool SÓ FORMATA o
+   * snapshot (sem I/O próprio); o locus concreto (`@hiperplano/aluy-cli`) monta o
+   * snapshot a partir do que JÁ TEM em mãos no controller (mesmo padrão das portas
+   * `memory`/`subAgents`/`question`). Sem a porta, `capabilities` devolve erro claro
+   * (fail-safe) — não-regressão. Tipada por `import(...)` p/ não acoplar este
+   * contrato ao módulo concreto da tool (evita ciclo; mesma técnica de plan/memory/web).
+   */
+  readonly capabilities?: CapabilitiesPort;
+}
+
+/**
+ * ADR-0145 (frente d) — um item de tool NATIVA no snapshot de `capabilities`. `group`
+ * vem de `NativeTool.group` (tool MCP ⇒ sempre `'mcp'`, inferido pelo prefixo
+ * `mcp__<server>__`, nunca auto-declarado pelo server). `when` vem de `NativeTool.when`
+ * (ausente p/ MCP — dado de terceiro).
+ */
+export interface CapabilityToolInfo {
+  readonly name: string;
+  readonly effect: ToolEffect;
+  readonly group: CapabilityGroup;
+  readonly when?: string;
+}
+
+/**
+ * ADR-0145 (frente d/e) — um item NOMEADO (agente `.md` ou skill) no snapshot.
+ * `summary` é UMA linha (a `description` do agente/skill, ou a 1ª linha do corpo —
+ * já SANITIZADA por quem monta o snapshot quando `origin==='project'`, CLI-SEC-4: DADO
+ * de terceiro nunca vira instrução via este canal). `invocable` só faz sentido p/
+ * skills (ADR-0145 §e): `true` SÓ para `origin==='global'` — skill `project` é
+ * DESCOBERTA-APENAS (o agente a menciona/recomenda, nunca a injeta sozinho).
+ * Agentes `.md` não usam `invocable` (delegação já é via `spawn_agent`, tool própria).
+ */
+export interface CapabilityNamedItem {
+  readonly name: string;
+  readonly summary: string;
+  readonly origin: 'global' | 'project';
+  readonly invocable?: boolean;
+}
+
+/** ADR-0145 (frente d) — um SERVER MCP conectado (metadado NOSSO, não a description de terceiro). */
+export interface CapabilityMcpServer {
+  readonly server: string;
+  readonly toolCount: number;
+  /** Prefixo de nome das tools deste server (ex.: `"mcp__playwright__"`). */
+  readonly prefix: string;
+}
+
+/**
+ * ADR-0145 (frente d) — o MENU VIVO completo. CONDIÇÕES DE SEGURANÇA (AG-0008,
+ * obrigatórias — ver `capabilities.ts` e os testes anti-vazamento):
+ *  - NUNCA carrega credencial/provider/base_url/api_key/`model`/`tier` — só nomes,
+ *    efeitos, contadores e agrupamento (o que já está, em prosa, no `system`).
+ *  - `mcpServers` NUNCA leva a `description` da tool MCP de terceiro — só
+ *    `server`/`toolCount`/`prefix` (metadado NOSSO).
+ *  - `memory` NUNCA leva o conteúdo dos fatos — só `factCount`.
+ *  - Summaries de origem `project` (agentes/skills) chegam JÁ sanitizadas
+ *    (`sanitizeUntrustedDoc`) por quem monta o snapshot.
+ */
+export interface CapabilitiesSnapshot {
+  readonly tools: readonly CapabilityToolInfo[];
+  readonly agents: readonly CapabilityNamedItem[];
+  readonly skills: readonly CapabilityNamedItem[];
+  readonly mcpServers: readonly CapabilityMcpServer[];
+  readonly memory?: { readonly factCount: number };
+  readonly monitors?: readonly { readonly id: string; readonly label: string; readonly type: string }[];
+  /** Comandos `/…` que o HUMANO digita (nunca invocados pelo agente) — auto-conhecimento do produto. */
+  readonly sessionCommands: readonly { readonly name: string; readonly about: string }[];
+}
+
+/**
+ * ADR-0145 (frente d) — porta que o locus concreto implementa p/ montar o snapshot
+ * (mesmo padrão de `memory`/`subAgents`/`question`: o core define o CONTRATO puro; o
+ * `@hiperplano/aluy-cli` monta o dado concreto a partir do que já tem no controller).
+ */
+export interface CapabilitiesPort {
+  snapshot(): CapabilitiesSnapshot | Promise<CapabilitiesSnapshot>;
 }

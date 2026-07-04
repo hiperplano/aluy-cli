@@ -428,3 +428,89 @@ describe('createCockpitDiffer — diff por-linha (unidade)', () => {
     expect(out).toBe(`${CURSOR_HOME}a${ERASE_TO_EOL}\nb${ERASE_TO_EOL}\nc${ERASE_TO_EOS}`);
   });
 });
+
+// ── EST-1015 (hardening — CAMADA 1: differ AUTO-CORRETIVO, achado do dono) ────────────────
+//
+// CAUSA-RAIZ do fantasma no SCROLL de sessão grande: o cockpit MEDE a altura de cada bloco
+// à mão (measureConversaBlock/flatLineRows), uma reimplementação PARALELA do render real. Se
+// essa medição diverge do render de fato — nem que por 1 linha —, o corpo REAL do frame sai
+// mais alto/baixo que `rows`, e o diff por-linha ABSOLUTO (CUP) deste differ passa a comparar
+// contra um `prevLines` de OUTRA geometria: tudo abaixo do ponto de erro é escrito na linha
+// FÍSICA errada — e SEM auto-correção o desalinhamento PERSISTE (só reseta em resize/clear/
+// toggle, nunca sozinho) ⇒ fantasmas EMPILHAM a cada frame seguinte.
+//
+// O FIX: o caller (a App) já sabe `layout.rows` — a altura que a ÁRVORE de fato usou — e
+// repassa isso ao differ via `expectedRowsOf` (2º parâmetro de `createCockpitDiffer`). Se o
+// corpo do frame (após o clip do prefixo conhecido) NÃO bate com o valor esperado, o differ
+// força um FULL-REPAINT (mesmo caminho de "sem frame anterior") em vez de confiar cegamente
+// no `prevLines` acumulado — convertendo a corrupção CUMULATIVA e silenciosa em, no pior
+// caso, 1 frame de full-repaint (sem `\x1b[2J`, então sem flash de tela).
+describe('createCockpitDiffer — auto-correção (expectedRowsOf): mismatch força FULL-REPAINT', () => {
+  const cockpitFrame = (body: string): string => `${CLEAR_TERMINAL}${body}`;
+
+  it('corpo BATE com o esperado ⇒ diff normal (só a linha mudada)', () => {
+    const d = createCockpitDiffer(undefined, () => 3);
+    d.transform(cockpitFrame('a\nb\nc')); // 3 linhas == esperado ⇒ assenta normal.
+    const out = d.transform(cockpitFrame('a\nX\nc')); // ainda 3 linhas == esperado.
+    expect(countCursorTo(out)).toBe(1); // diff normal: só a linha 2 reescrita.
+    expect(out.includes('a')).toBe(false);
+  });
+
+  it('corpo NÃO bate (medição divergiu do render real) ⇒ força FULL-REPAINT, não diff parcial', () => {
+    const d = createCockpitDiffer(undefined, () => 4); // a App espera 4 linhas neste frame…
+    d.transform(cockpitFrame('a\nb\nc\nd')); // 1º frame: bate (4) ⇒ assenta normal.
+    // 2º frame: o RENDER REAL saiu com 3 linhas (ex.: uma medição de altura subestimou um
+    // bloco e o Ink colapsou uma linha) — diverge do esperado (4). Em vez de diffar contra o
+    // `prevLines` de 4 linhas (que compararia índices ERRADOS), força full-repaint.
+    const out = d.transform(cockpitFrame('a\nX\nc'));
+    // full-repaint: TODAS as linhas do corpo NOVO saem pintadas (não só a que mudou), no
+    // MESMO formato do "sem frame anterior" (home + `\x1b[K` por linha + `\x1b[J`).
+    expect(out).toBe(`${CURSOR_HOME}a${ERASE_TO_EOL}\nX${ERASE_TO_EOL}\nc${ERASE_TO_EOS}`);
+    // prova negativa: um diff PARCIAL emitiria só 1 CUP (a linha mudada) — aqui não há CUP
+    // algum (o full-repaint usa `CURSOR_HOME`, não CUP por-linha).
+    expect(countCursorTo(out)).toBe(0);
+  });
+
+  it('após o full-repaint forçado, o frame SEGUINTE (já saudável) volta a diffar normal — sem fantasma persistente', () => {
+    const d = createCockpitDiffer(undefined, () => 4);
+    d.transform(cockpitFrame('a\nb\nc\nd')); // 1º: bate (4) ⇒ assenta normal.
+    d.transform(cockpitFrame('a\nX\nc')); // 2º: DIVERGE (3≠4) ⇒ full-repaint forçado (provado acima).
+    const out = d.transform(cockpitFrame('a\nX\nc\nY')); // 3º: já SAUDÁVEL de novo (4==4).
+    // volta ao diff PARCIAL normal (CUP na linha que mudou) — NÃO outro full-repaint.
+    expect(out.startsWith(CURSOR_HOME), 'não deveria repetir o full-repaint num frame saudável').toBe(
+      false,
+    );
+    expect(countCursorTo(out)).toBeGreaterThanOrEqual(1);
+  });
+
+  it('a auto-correção respeita o CLIP do prefixo (compara o corpo JÁ CLIPADO, não o cru)', () => {
+    // Reproduz o "fantasma do composer": o Ink prepende um prefixo do Static (13 linhas) ao
+    // corpo REAL do cockpit (`rows`=4). A auto-correção deve comparar o esperado (4) contra o
+    // corpo APÓS o clip (as últimas 4 linhas) — não contra o total bruto (13+4=17), senão
+    // dispararia full-repaint em TODO frame saudável (falso positivo).
+    const prefix = Array.from({ length: 13 }, (_, i) => `STATIC_LEAK_${i}`).join('\n');
+    const d = createCockpitDiffer(undefined, () => 4);
+    const painted = d.transform(`${CLEAR_TERMINAL}${prefix}\na\nb\nc\nd`);
+    // saudável (corpo clipado == esperado) ⇒ pinta normal, sem vazar o prefixo.
+    expect(painted.includes('STATIC_LEAK')).toBe(false);
+    expect(painted.includes('a')).toBe(true);
+    // 2º frame, ainda saudável (mesmo prefixo vazado, mesma altura esperada) ⇒ diff parcial.
+    const out = d.transform(`${CLEAR_TERMINAL}${prefix}\na\nX\nc\nd`);
+    expect(countCursorTo(out)).toBe(1); // NÃO full-repaint — o clip absorveu o prefixo.
+  });
+
+  it('sem expectedRowsOf (ausente/inválido) ⇒ SEM checagem, comportamento antigo (degradação segura)', () => {
+    // `undefined` (default) e valores inválidos (0/NaN/negativo) desligam a auto-correção —
+    // testes/legado que não injetam o 2º parâmetro seguem se comportando como antes.
+    for (const bad of [undefined, () => NaN, () => 0, () => -1] as const) {
+      const d = typeof bad === 'function' ? createCockpitDiffer(undefined, bad) : createCockpitDiffer();
+      d.transform(cockpitFrame('a\nb\nc'));
+      // corpo MUDA de tamanho (2 linhas) sem nenhum "esperado" válido ⇒ segue o caminho comum
+      // (reescreve as mudadas + varre as órfãs), NUNCA um full-repaint espúrio por mismatch.
+      const out = d.transform(cockpitFrame('a\nb'));
+      expect(out.startsWith(CURSOR_HOME), 'sem expectedRowsOf válido não deve forçar full-repaint').toBe(
+        false,
+      );
+    }
+  });
+});

@@ -182,10 +182,14 @@ describe('EST-0959 · R1 — allow-list FECHADA, default-deny (nomes, não flags
     // é o ponto do modo Plan. Sinalizado ao `seguranca` (AG-0008) por tocar o ADR-0055.
     // EST-1110 — `perguntar` (pergunta ao usuário, SEM efeito externo) entra: esclarecer
     // COM o usuário é o caso de uso do planejamento (gate AG-0008, estado de UI local).
+    // ADR-0145 — `capabilities`/`list_tools` (menu vivo, SÓ formata dado já resolvido,
+    // sem I/O) entram: em dúvida sobre a capacidade, o agente pode checar até em Plan.
     expect([...PLAN_READ_ALLOWLIST].sort()).toEqual([
+      'capabilities',
       'change_dir',
       'glob',
       'grep',
+      'list_tools',
       'ls',
       'perguntar',
       'read_file',

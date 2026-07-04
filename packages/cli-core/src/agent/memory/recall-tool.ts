@@ -68,6 +68,7 @@ function factLine(f: MemoryFact): string {
 export const recallTool: NativeTool<ToolPorts> = {
   name: RECALL_TOOL_NAME,
   effect: 'read',
+  group: 'memoria', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
   description:
     'CONSULTA a memória de agente (os fatos que você gravou com `remember` em sessões ' +
     'anteriores) SOB DEMANDA, no meio da conversa. Use quando precisar relembrar uma ' +

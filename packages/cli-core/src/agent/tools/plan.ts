@@ -439,6 +439,7 @@ const UPDATE_PLAN_SCHEMA = Object.freeze({
 export const PLAN_TOOL: NativeTool<ToolPorts> = {
   name: PLAN_TOOL_NAME,
   effect: 'read',
+  group: 'plano', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
   description:
     'Declara/atualiza um PLANO visível (checklist de passos). Use ao iniciar uma tarefa ' +
     'com VÁRIOS passos e a cada progresso: re-emita a lista TODA marcando o status de cada ' +

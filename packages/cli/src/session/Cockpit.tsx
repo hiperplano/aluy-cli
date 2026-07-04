@@ -98,8 +98,16 @@ export interface CockpitProps {
   readonly showCursor: boolean;
   /** Estado do footer de hints (idle/thinking/streaming/…) ou `null` (compact = sem hints). */
   readonly hintState: HintState | null;
-  /** Nome de exibição do tier (`Granito`), nunca a key crua (HG-2). */
+  /** Nome de exibição do tier (`Granito`), nunca a key crua (HG-2) — usado no RODAPÉ. */
   readonly tierDisplay: string;
+  /**
+   * FIX (dono) — texto do tier para o HEADER (fixo, topo). Distinto de `tierDisplay`: no
+   * backend `local`, o dono via o indicador "local"/`◍ local` DUPLICADO — no header (fixo)
+   * E no rodapé (`<StatusBar>`, vivo). Aqui entra a variante SEM a palavra "local" (mantém
+   * provider/modelo, que ainda orientam); o rodapé segue com `tierDisplay` cheio (única
+   * casa do indicador de backend). Ausente ⇒ cai em `tierDisplay` (compat).
+   */
+  readonly headerTierDisplay?: string;
   /** `true` quando o tier é o default (status bar neutro vs accent). */
   readonly isDefaultTier: boolean;
   /** Largura/altura do terminal (== layout.cols/rows; passados p/ os componentes). */
@@ -339,7 +347,7 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
       {/* ── 1) HEADER (fixo) ─────────────────────────────────────────────────── */}
       <Box height={clampH(layout.headerRows)}>
         <Header
-          tier={props.tierDisplay}
+          tier={props.headerTierDisplay ?? props.tierDisplay}
           columns={props.columns}
           rows={1}
           {...(props.version !== undefined ? { version: props.version } : {})}

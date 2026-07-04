@@ -53,6 +53,9 @@ import {
   type AgentRegistry,
   type AgentProfile,
   type RoomStore,
+  // ADR-0145 (frente d/e) — SKILLS já carregadas pelo caller (run.tsx), repassadas ao
+  // controller SÓ p/ o menu (descoberta) de `capabilities`.
+  type Skill,
 } from '@hiperplano/aluy-cli-core';
 import { loadAuthConfig, CLI_CLIENT_ID } from '../auth/config.js';
 import { loadBrokerConfig } from '../model/config.js';
@@ -327,6 +330,14 @@ export interface BuildSessionOptions {
    * registro (persona/toolset⊆pai/tier). Ausente ⇒ só sub-agentes genéricos (EST-0969).
    */
   readonly agentRegistry?: AgentRegistry;
+  /**
+   * ADR-0145 (frente d/e) — SKILLS já carregadas pelo CALLER (run.tsx, MESMOS loaders
+   * do `/skills`: globais `~/.aluy/skills/` + projeto `.claude/skills/`/`.aluy/skills/`).
+   * Usadas SÓ pelo menu de `capabilities` (DESCOBERTA — buraco #3): nome + 1 linha +
+   * origem. Independente de `subAgents` (skills não são sub-agentes). Ausente/vazio ⇒
+   * o menu simplesmente não lista skills (não-regressão).
+   */
+  readonly skills?: readonly Skill[];
   /**
    * GS-MD7 (fix registry-cwd) — callback que relê os agentes de PROJETO (`.claude/agents/`) do
    * cwd CORRENTE da sessão. O controller o usa LAZY no `spawnNamed` p/ reconstruir o registro
@@ -1034,6 +1045,9 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // habilitados): habilita `spawn_agent({ agent: "<nome>" })` com persona/toolset
     // (⊆ pai)/tier do `.md`. Nome desconhecido ⇒ erro visível (GS-MD7).
     ...(opts.subAgents?.enabled && opts.agentRegistry ? { agentRegistry: opts.agentRegistry } : {}),
+    // ADR-0145 (frente d/e) — skills p/ o menu de `capabilities` (DESCOBERTA), sem
+    // depender de `subAgents` (não é uma capacidade de delegação).
+    ...(opts.skills && opts.skills.length > 0 ? { skills: opts.skills } : {}),
     // GS-MD7 (fix registry-cwd) — relê os agentes de PROJETO do cwd corrente no spawnNamed.
     ...(opts.subAgents?.enabled && opts.reloadProjectAgents
       ? { reloadProjectAgents: opts.reloadProjectAgents }

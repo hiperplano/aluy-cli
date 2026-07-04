@@ -113,6 +113,10 @@ describe('EST-0982 · /add-dir — o agente NÃO se auto-amplia (CLI-SEC)', () =
       'add_todo',
       'list_todos',
       'done_todo',
+      // ADR-0145 (frente d) — `capabilities` (+ sinônimo `list_tools`): menu vivo de
+      // auto-descoberta, effect:'read' puro (sem ampliação de raiz/superfície).
+      'capabilities',
+      'list_tools',
     ]);
     expect(names.some((n) => /add[-_]?(dir|root)/i.test(n))).toBe(false);
   });

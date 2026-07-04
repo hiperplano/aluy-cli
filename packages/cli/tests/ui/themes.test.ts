@@ -4,7 +4,9 @@
 // (canônico/apelido/inválido); `resolveThemeByName` mapeia a PALETA + brilho do tema e
 // PRESERVA as capacidades do env (NO_COLOR / densidade); o accent ÂMBAR nos três; o
 // PISO de contraste AA — cada papel COLORIDO de CADA tema ≥ 4.5:1 (texto normal, WCAG
-// AA) sobre o `bg` do próprio tema (accentDim é AA-large, ≥3:1: dívida de DS).
+// AA) sobre o `bg` do próprio tema (accentDim e a sombra shadowAmber/shadowAmberDim são
+// AA-large, ≥3:1: realce/chrome DECORATIVO calmo — a sombra 3D é de-propósito subdada
+// (âmbar escuro abaixo da marca) — dívida de DS não-bloqueante).
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -41,6 +43,8 @@ const COLORED_ROLES: readonly TermRole[] = [
   'danger',
   'success',
   'depth',
+  'shadowAmber',
+  'shadowAmberDim',
 ];
 
 describe('catálogo de temas (/theme) — os 3 do aluy web', () => {
@@ -64,7 +68,7 @@ describe('catálogo de temas (/theme) — os 3 do aluy web', () => {
     expect(new Set(bgs).size).toBe(3);
   });
 
-  it('os 3 temas têm os MESMOS 8 papéis (paridade DS)', () => {
+  it('os 3 temas têm os MESMOS 10 papéis (paridade DS)', () => {
     for (const t of THEMES) {
       expect(Object.keys(t.palette).sort()).toEqual([...COLORED_ROLES].sort());
     }
@@ -167,9 +171,11 @@ describe('resolveThemeByName — troca a PALETA por tema, preserva capacidades d
 
 describe('contraste AA — cada papel colorido ≥ AA sobre o --bg do PRÓPRIO tema', () => {
   // accentDim é realce CALMO (wordmark de boot, bold/grande) ⇒ piso AA-large (≥3:1),
-  // como já documentado p/ o dark (dívida de DS não-bloqueante). Os demais: AA pleno.
+  // como já documentado p/ o dark (dívida de DS não-bloqueante). shadowAmber/shadowAmberDim
+  // são os tons da SOMBRA 3D (F200c) — âmbar escuro DE-PROPÓSITO abaixo da marca (drop-shadow
+  // decorativa, não texto) ⇒ mesma natureza calma/decorativa ⇒ mesmo piso relaxado. Demais: AA pleno.
   function floorFor(role: TermRole): number {
-    return role === 'accentDim' ? 3 : 4.5;
+    return role === 'accentDim' || role === 'shadowAmber' || role === 'shadowAmberDim' ? 3 : 4.5;
   }
   for (const theme of THEMES) {
     describe(`${theme.label} (${theme.name}) sobre ${theme.bg}`, () => {

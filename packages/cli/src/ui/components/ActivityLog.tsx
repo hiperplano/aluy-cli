@@ -203,11 +203,13 @@ function Section(props: {
  * SEÇÃO inteira quando cabe; quando uma seção é maior que a janela, mostramos a cauda
  * de seus eventos. Simples e bounded (anti-flicker).
  */
-type FlatLine =
+// EST-1015 (hardening — teste de paridade) — exportados (junto de `flatLineRows`) p/ o
+// teste montar a MESMA lista achatada que o render consome e somar as alturas esperadas.
+export type FlatLine =
   | { readonly t: 'header'; readonly section: LogSection }
   | { readonly t: 'event'; readonly section: LogSection; readonly event: LogEvent };
 
-function flatten(sections: readonly LogSection[]): FlatLine[] {
+export function flatten(sections: readonly LogSection[]): FlatLine[] {
   const out: FlatLine[] = [];
   for (const s of sections) {
     out.push({ t: 'header', section: s });
@@ -224,7 +226,10 @@ function flatten(sections: readonly LogSection[]): FlatLine[] {
  * altura FIXA (cockpit) o excedente estourava a Box e o Ink MESCLAVA linhas (o mesmo
  * mis-clip da conversa). A janela agora acumula ALTURAS até encher `room`.
  */
-function flatLineRows(ln: FlatLine, cols: number): number {
+// EST-1015 (hardening — teste de paridade medida×render) — exportada p/ o teste de
+// unidade comparar contra a altura REAL do `<ActivityLog>` renderizado (ink-testing-
+// library), a mesma técnica do `measureConversaBlock` p/ o `<BlockView>` da conversa.
+export function flatLineRows(ln: FlatLine, cols: number): number {
   if (ln.t === 'header') {
     const s = ln.section;
     const composed = `x [${s.label}] ${PHASE_WORD[s.phase]} · ${sectionStat(s)}${s.collapsed ? ' (colapsado)' : ''}`;

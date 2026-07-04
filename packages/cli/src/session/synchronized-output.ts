@@ -490,9 +490,17 @@ function chunkIsFrameContent(chunk: string): boolean {
  * obsoleto do `fullStaticOutput` do Ink (ver `transform`). Deve apontar p/ o MESMO stream
  * que recebe os bytes (no envelope, o `original`); default `process.stdout.rows` p/ uso
  * direto. `undefined`/0 ⇒ sem clip (degrada p/ o comportamento antigo).
+ *
+ * `expectedRowsOf` (EST-1015 hardening, achado do dono — duplicação/fantasma no SCROLL de
+ * sessão grande) — devolve a altura ESPERADA do frame deste render: o `layout.rows` que a
+ * App CALCULOU p/ montar a árvore do cockpit (ver `resolveCockpitLayout`), não a leitura
+ * crua de `stdout.rows`. É a fonte de verdade MAIS confiável (o valor que a App de fato
+ * usou), preferida ao `rowsOf` tanto p/ o clip do prefixo quanto p/ a AUTO-CORREÇÃO abaixo.
+ * `undefined` (default) ⇒ o differ cai no `rowsOf` (comportamento antigo, testes/legado).
  */
 export function createCockpitDiffer(
   rowsOf: () => number | undefined = () => process.stdout.rows,
+  expectedRowsOf: () => number | undefined = () => undefined,
 ): CockpitDiffer {
   let prevLines: string[] | undefined; // undefined ⇒ não há frame anterior (pinta tudo).
 
@@ -532,11 +540,43 @@ export function createCockpitDiffer(
       typeof rawRows === 'number' && Number.isFinite(rawRows) && rawRows >= 1
         ? Math.floor(rawRows)
         : 0;
-    const clipped = termRows > 0 && rawLines.length > termRows;
-    const nextLines = clipped ? rawLines.slice(-termRows) : rawLines;
+    // EST-1015 (hardening — auto-correção) — `expectedRowsOf()` é o `layout.rows` que a App
+    // efetivamente calculou p/ ESTE frame (ver doc de `createCockpitDiffer`), preferido ao
+    // `rowsOf` (leitura crua do terminal) tanto p/ o clip quanto p/ o CHECK abaixo. Mesmo
+    // guard duro do `termRows` (inteiro ≥ 1; inválido ⇒ ausente, cai no `termRows`).
+    const rawExpected = expectedRowsOf();
+    const expectedRows =
+      typeof rawExpected === 'number' && Number.isFinite(rawExpected) && rawExpected >= 1
+        ? Math.floor(rawExpected)
+        : undefined;
+    const clipRows = expectedRows ?? termRows;
+    const clipped = clipRows > 0 && rawLines.length > clipRows;
+    const nextLines = clipped ? rawLines.slice(-clipRows) : rawLines;
     // `body` recomposto do frame CLIPADO — p/ o `frameEndCursor` (onde o caret assenta) medir
     // a posição na tela REAL, não no frame inflado pelo Static. Sem clip, reusa o body cru.
     const effectiveBody = clipped ? nextLines.join('\n') : body;
+
+    // FIX (auto-corretivo — hardening pedido pelo dono) — CAUSA-RAIZ do fantasma no SCROLL de
+    // sessão grande: o cockpit MEDE a altura de cada bloco à mão (measureConversaBlock/
+    // flatLineRows), uma reimplementação PARALELA do render real (Markdown/wrap-ansi/Ink); se
+    // essa medição diverge do render de fato — nem que por 1 linha —, o corpo real acaba mais
+    // ALTO/BAIXO que `rows`, e o diff por-linha ABSOLUTO (CUP) deste differ passa a comparar
+    // contra um `prevLines` de OUTRA geometria: tudo abaixo do ponto de erro é escrito na
+    // linha FÍSICA errada, e NÃO há auto-correção — o desalinhamento PERSISTE (só reset em
+    // resize/clear/toggle) ⇒ fantasmas EMPILHAM a cada frame seguinte.
+    //
+    // Aqui SABEMOS a altura esperada deste frame (`expectedRows`, o `layout.rows` da App). Se o
+    // corpo do frame (já descontado o prefixo conhecido do Static, ver clip acima) NÃO bate com
+    // ela, o `prevLines` acumulado é INCERTO p/ diffar — em vez de confiar cegamente e deixar a
+    // corrupção ACUMULAR silenciosamente, force o MESMO caminho de "sem frame anterior" (full-
+    // repaint, linha-a-linha, sem `\x1b[2J` ⇒ sem flash): pinta tudo de novo na geometria NOVA.
+    // Converte a corrupção CUMULATIVA e silenciosa em, no pior caso, 1 frame de full-repaint —
+    // e como o full-repaint já é sobrescreve-no-lugar, o "pior caso" visual é discreto (não um
+    // branqueamento). Sem `expectedRows` (ausente/inválido) ⇒ sem checagem (comportamento
+    // antigo — testes/legado que não injetam o valor).
+    if (expectedRows !== undefined && nextLines.length !== expectedRows) {
+      prevLines = undefined;
+    }
 
     // 1º frame (sem anterior): PINTA TUDO no lugar. Usado na ENTRADA do alt-screen (#145, tela
     // já limpa pelo `?1049h`) E após `resetDiffer()` no RESIZE (tela COM conteúdo velho da
@@ -629,6 +669,19 @@ export interface SyncStdout {
    * No-op fora do cockpit (o transform do inline não usa o differ). Idempotente.
    */
   resetDiffer(): void;
+  /**
+   * EST-1015 (hardening — auto-correção do CockpitDiffer, achado do dono) — informa a
+   * altura ESPERADA do PRÓXIMO frame do cockpit: o `layout.rows` que a App calculou p/
+   * montar a árvore (`resolveCockpitLayout`), a fonte de verdade mais confiável que a
+   * leitura crua de `stdout.rows` (ver doc de `createCockpitDiffer`). O caller (a App,
+   * via `cockpitScreen`) chama isto a CADA render — síncrono, sem I/O — para o differ
+   * comparar o corpo do frame que está PRESTES a escrever contra o valor que a árvore
+   * React de fato usou, e forçar full-repaint se divergir (em vez de acumular corrupção
+   * silenciosamente). `undefined` (fora do cockpit) ⇒ desliga a checagem (degrada pro
+   * `rowsOf`/comportamento antigo). No-op fora do modo cockpit (o transform do inline
+   * não lê este valor).
+   */
+  setExpectedCockpitRows(rows: number | undefined): void;
 }
 
 /** Opções do wrapper — ambos os toggles default ON. Injetáveis p/ teste. */
@@ -680,11 +733,18 @@ export function wrapStdoutWithSync(
   // o default); o wiring liga/desliga no toggle do `/fullscreen` e no boot `--fullscreen`.
   // Mutável de propósito: o MESMO envelope serve as duas superfícies ao longo da sessão.
   let cockpitActive = false;
+  // EST-1015 (hardening — auto-correção) — a altura ESPERADA do PRÓXIMO frame do cockpit
+  // (o `layout.rows` que a App calculou), atualizada a cada render via
+  // `setExpectedCockpitRows`. `undefined` ⇒ o differ cai no `rowsOf` (comportamento antigo).
+  let expectedCockpitRows: number | undefined;
   // O renderer diferencial carrega o FRAME ANTERIOR (estado por envelope). Resetado ao
   // ENTRAR no cockpit (`setCockpit(true)`) ⇒ o 1º frame pinta tudo (pinta na entrada, #145).
   // clipa o prefixo do `fullStaticOutput` pela altura REAL do stream de saída (não o
   // `process.stdout` global — pode diferir em teste/redirect). Ver `createCockpitDiffer`.
-  const cockpitDiffer = createCockpitDiffer(() => original.rows);
+  const cockpitDiffer = createCockpitDiffer(
+    () => original.rows,
+    () => expectedCockpitRows,
+  );
 
   const wrappedWrite = ((
     chunk: string | Uint8Array,
@@ -777,5 +837,13 @@ export function wrapStdoutWithSync(
     cockpitDiffer.reset();
   };
 
-  return { stdout: proxy, cleanup, setCockpit, resetDiffer };
+  // EST-1015 (hardening — auto-correção) — atualiza a altura ESPERADA do PRÓXIMO frame
+  // (o `layout.rows` da App). Só armazena o valor (sem I/O, sem resetar o differ) — a
+  // AUTO-CORREÇÃO acontece dentro do `transform` no PRÓXIMO write, comparando o corpo
+  // real contra este valor. Ver doc completa em `SyncStdout.setExpectedCockpitRows`.
+  const setExpectedCockpitRows = (rows: number | undefined): void => {
+    expectedCockpitRows = rows;
+  };
+
+  return { stdout: proxy, cleanup, setCockpit, resetDiffer, setExpectedCockpitRows };
 }

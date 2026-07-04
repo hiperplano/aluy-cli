@@ -1,17 +1,21 @@
 // F198 — Splash 3D: SHIMMER/GLINT horizontal (troca o antigo "pisca" da sombra). Testa a
 // lógica PURA: a cabeça do brilho ANDA com o frame e é CÍCLICA; o degradê (pico→halo→fora)
-// mapeia nos 3 papéis; a grade tem LARGURA/ALTURA estáveis entre frames (anti-flicker) e só a
-// COR da marca muda; a sombra é FIXA (não respira mais); e o gate reduced-motion (marca toda
-// `accent`, sem brilho).
-// F200 — pedido do dono: a marca é ÂMBAR (accent/accentMid/accentDim, degradê do brilho) e a
-// SOMBRA 3D passa de `accentDim` (âmbar escuro) p/ `depth` (VERDE/TEAL) — contraste de matiz:
-// luz âmbar, sombra fria teal. O efeito visual em si é verificado no TTY pelo dono.
+// mapeia nos 3 papéis; a grade tem LARGURA/ALTURA estáveis entre frames (anti-flicker) e só o
+// PAPEL (cor) da marca/sombra muda; e o gate reduced-motion (marca toda `accent`, sombra toda
+// `shadowAmber`, sem brilho).
+// F200 — pedido do dono: a marca é ÂMBAR (accent/accentMid/accentDim, degradê do brilho).
+// F200b — a luz que varre a marca passa TAMBÉM pela sombra, em sincronia (mecanismo mantido).
+// F200c — pedido do dono: a sombra volta a ser ÂMBAR (não teal), porém ÂMBAR ESCURO —
+// distintamente mais escura que a marca (lê como sombra) — mantendo o shimmer sincronizado. A
+// sombra tem seu degradê âmbar-escuro (shadowAmber lit / shadowAmberDim repouso), mapeado do
+// `shimmerAt` da coluna-FONTE que a projeta. O efeito visual em si é verificado no TTY pelo dono.
 
 import { describe, expect, it } from 'vitest';
 import {
   shimmerHead,
   shimmerAt,
   shimmerRole,
+  shadowRole,
   composeShadowedWordmark,
   rowSegments,
   SHADOW_SHADE,
@@ -101,7 +105,15 @@ describe('shimmerRole — intensidade → papel do tema (accent→accentMid→ac
   });
 });
 
-describe('composeShadowedWordmark — marca com brilho + sombra fixa', () => {
+describe('shadowRole — a MESMA intensidade → o degradê ÂMBAR-ESCURO da sombra (F200c)', () => {
+  it('pico E halo = shadowAmber (banda LIT), fora = shadowAmberDim (repouso mais escuro)', () => {
+    expect(shadowRole(2)).toBe('shadowAmber');
+    expect(shadowRole(1)).toBe('shadowAmber');
+    expect(shadowRole(0)).toBe('shadowAmberDim');
+  });
+});
+
+describe('composeShadowedWordmark — marca com brilho + sombra âmbar sincronizada (F200c)', () => {
   it('grade tem 1 linha e 1 coluna a mais (espaço da sombra ↓→) e é retangular', () => {
     const grid = composeShadowedWordmark(2);
     expect(grid.length).toBe(7); // 6 linhas da marca + 1 da sombra
@@ -140,19 +152,36 @@ describe('composeShadowedWordmark — marca com brilho + sombra fixa', () => {
     expect(seen).toContain('accentDim');
   });
 
-  it('a SOMBRA é FIXA (tom SHADOW_SHADE `depth` — VERDE/TEAL, F200) e não respira', () => {
+  it('a SOMBRA usa os 2 papéis do degradê ÂMBAR-ESCURO ao longo dos frames (F200c — shimmeia também)', () => {
     // as células de SOMBRA são as com o glifo SHADOW_SHADE (a marca é `█`, âmbar accent/
-    // accentMid/accentDim; a sombra é `▒` em `depth` — filtramos pelo CHAR, não pelo papel).
+    // accentMid/accentDim; a sombra é `▒` em shadowAmber/shadowAmberDim — filtramos pelo
+    // CHAR, não pelo papel, já que agora o papel da sombra MUDA com o frame).
     const shadowCells = (f: number): Cell[] =>
       composeShadowedWordmark(f)
         .flat()
         .filter((c) => c.char === SHADOW_SHADE);
     expect(shadowCells(0).length).toBeGreaterThan(0);
-    // a sombra é sempre o mesmo glifo E sempre no papel `depth` (verde/teal), em qualquer
-    // frame (não é fonte de movimento — anti-flicker).
+    // o CHAR da sombra nunca muda (anti-flicker) e o papel é sempre um dos tons ÂMBAR-ESCUROS.
+    const shadowRoles = new Set(['shadowAmber', 'shadowAmberDim']);
     for (const f of [0, 3, 9, 20]) {
-      expect(shadowCells(f).every((c) => c.char === SHADOW_SHADE && c.role === 'depth')).toBe(true);
+      expect(
+        shadowCells(f).every((c) => c.char === SHADOW_SHADE && shadowRoles.has(c.role as string)),
+      ).toBe(true);
     }
+    // NENHUMA célula de sombra usa papel da MARCA (accent/accentMid/accentDim) — a sombra é
+    // SEMPRE mais escura (papel próprio), nunca do tom da marca.
+    const markRoles = new Set(['accent', 'accentMid', 'accentDim']);
+    for (const f of [0, 5, 12]) {
+      expect(shadowCells(f).some((c) => markRoles.has(c.role as string))).toBe(false);
+    }
+    // a união dos papéis vistos na sombra ao longo de um ciclo cobre os 2 tons ÂMBAR-ESCUROS —
+    // a luz atravessa a sombra (lit) e ela repousa escura (dim) entre passadas.
+    const seen = new Set<string>();
+    for (let f = 0; f < WIDTH + SHIMMER_TAIL; f += 1) {
+      for (const c of shadowCells(f)) seen.add(c.role as string);
+    }
+    expect(seen).toContain('shadowAmber');
+    expect(seen).toContain('shadowAmberDim');
     // e a QUANTIDADE de células de sombra é estável entre frames (não aparece/some).
     expect(shadowCells(9).length).toBe(shadowCells(0).length);
   });
@@ -166,9 +195,28 @@ describe('composeShadowedWordmark — marca com brilho + sombra fixa', () => {
         .join(',');
     expect(markRoleString(0)).not.toBe(markRoleString(4)); // brilho em posições diferentes
   });
+
+  it('a sombra shimmeia em SINCRONIA com a marca: seu papel é sempre shadowRole(shimmerAt(coluna-fonte))', () => {
+    // a sombra em (r,c) é projetada pela marca em (r-1,c-1) — a coluna-FONTE é c-1. Para
+    // TODA célula de sombra, em TODO frame, o papel tem de bater exatamente com
+    // shadowRole(shimmerAt(c-1, frame, width)) — prova direta de que a mesma luz que varre a
+    // marca (mesmo shimmerAt) governa o degradê âmbar-escuro da sombra, não um tom fixo.
+    for (const frame of [0, 3, 9, 20]) {
+      const grid = composeShadowedWordmark(frame);
+      for (const row of grid) {
+        for (let c = 0; c < row.length; c += 1) {
+          const cell = row[c]!;
+          if (cell.char === SHADOW_SHADE) {
+            const expected = shadowRole(shimmerAt(c - 1, frame, WIDTH));
+            expect(cell.role).toBe(expected);
+          }
+        }
+      }
+    }
+  });
 });
 
-describe('reduced-motion (animate=false) — SEM brilho, marca estática em accent', () => {
+describe('reduced-motion (animate=false) — SEM brilho, marca em accent E sombra em shadowAmber (estáticas)', () => {
   it('toda célula da marca sai em `accent` (realce fixo), independente do frame', () => {
     for (const f of [0, 3, 7, 20]) {
       const markRoles = composeShadowedWordmark(f, false)
@@ -177,6 +225,17 @@ describe('reduced-motion (animate=false) — SEM brilho, marca estática em acce
         .map((c) => c.role);
       expect(markRoles.length).toBeGreaterThan(0);
       expect(markRoles.every((r) => r === 'accent')).toBe(true);
+    }
+  });
+
+  it('F200c — toda célula de SOMBRA sai em `shadowAmber` fixo (âmbar escuro médio, sem degradê), independente do frame', () => {
+    for (const f of [0, 3, 7, 20]) {
+      const shadowRoles = composeShadowedWordmark(f, false)
+        .flat()
+        .filter((c) => c.char === SHADOW_SHADE)
+        .map((c) => c.role);
+      expect(shadowRoles.length).toBeGreaterThan(0);
+      expect(shadowRoles.every((r) => r === 'shadowAmber')).toBe(true);
     }
   });
 

@@ -19,6 +19,9 @@ import { GlobSyntaxError } from './glob-match.js';
 import { PLAN_TOOL } from './plan.js';
 import { QUESTION_TOOL } from './question.js';
 import { addTodoTool, listTodosTool, doneTodoTool } from '../todo/todo-tools.js';
+// ADR-0145 (frente d) — tool `capabilities` (+ sinônimo `list_tools`): o MENU VIVO
+// de auto-descoberta. Ver capabilities.ts (formatação pura + segurança anti-vazamento).
+import { capabilitiesTool, listToolsTool } from './capabilities.js';
 
 // EST-1108 — re-exportadas p/ o barrel tools/index.ts.
 export { addTodoTool, listTodosTool, doneTodoTool };
@@ -180,11 +183,21 @@ const GLOB_SCHEMA = Object.freeze({
   additionalProperties: false,
 });
 
+// ADR-0145 (frente b) — FONTE ÚNICA do "quando usar" de `read_file`: alimenta a
+// `description` (abaixo) E o menu do `capabilities` (mesmo campo `when`, sem duplicar
+// verdade). Encadeamento: localizado por grep/glob ⇒ read_file ⇒ (se for editar)
+// copie o old_string EXATO do que leu ⇒ edit_file ⇒ run_tests p/ validar.
+const WHEN_READ_FILE =
+  'depois de localizar um arquivo (grep/glob) e ANTES de editar — copie o old_string ' +
+  'EXATO do que você ler; depois de editar, RODE run_tests/run_command p/ validar';
+
 /** read_file — lê um arquivo. Efeito `read` (não passa por confirmação de efeito). */
 export const readFileTool: NativeTool<ToolPorts> = {
   name: 'read_file',
   effect: 'read',
-  description: 'Lê o conteúdo de um arquivo. Input: { "path": string }.',
+  group: 'arquivo',
+  when: WHEN_READ_FILE,
+  description: `Lê o conteúdo de um arquivo. Use QUANDO: ${WHEN_READ_FILE}. Input: { "path": string }.`,
   parameters: READ_FILE_SCHEMA,
   async run(input, ports): Promise<ToolResult> {
     const path = reqString(input, 'path');
@@ -213,6 +226,9 @@ export const readFileTool: NativeTool<ToolPorts> = {
 export const editFileTool: NativeTool<ToolPorts> = {
   name: 'edit_file',
   effect: 'write',
+  // ADR-0145 (frente d) — só o AGRUPAMENTO (menu do capabilities); a description já
+  // tinha gatilho/encadeamento claro na auditoria (buraco #2 não a citou como fraca).
+  group: 'arquivo',
   description:
     'Edita um arquivo EXISTENTE substituindo um trecho EXATO. NÃO re-emita o arquivo ' +
     'inteiro: dê o trecho a trocar (old_string) e o novo (new_string) — o resto é ' +
@@ -332,6 +348,7 @@ function looksLikeRegex(pattern: string): boolean {
 export const writeFileTool: NativeTool<ToolPorts> = {
   name: 'write_file',
   effect: 'write',
+  group: 'arquivo',
   description:
     'Cria um arquivo NOVO com o conteúdo completo (ou, com overwrite:true, reescreve um ' +
     'existente DE PROPÓSITO). Para EDITAR um arquivo existente, use edit_file (old_string/' +
@@ -418,10 +435,17 @@ export const writeFileTool: NativeTool<ToolPorts> = {
  *
  * Backward-compatible: sem `ctx`, roda igual (sem cancelamento dirigido nem stream).
  */
+// ADR-0145 (frente b) — fonte única do "quando" de `run_command` (description + menu).
+const WHEN_RUN_COMMAND =
+  'para RODAR/instalar/validar algo no shell (build, install, script, git) — depois de ' +
+  'edit_file/write_file, RODE aqui (ou run_tests) p/ confirmar o efeito; não pare no arquivo editado';
+
 export const runCommandTool: NativeTool<ToolPorts> = {
   name: 'run_command',
   effect: 'exec',
-  description: 'Executa um comando de shell. Input: { "command": string }.',
+  group: 'execucao',
+  when: WHEN_RUN_COMMAND,
+  description: `Executa um comando de shell. Use QUANDO: ${WHEN_RUN_COMMAND}. Input: { "command": string }.`,
   parameters: RUN_COMMAND_SCHEMA,
   async run(input, ports, ctx): Promise<ToolResult> {
     const command = reqString(input, 'command');
@@ -476,14 +500,21 @@ export const runCommandTool: NativeTool<ToolPorts> = {
  * raiz canonicalizada do workspace (`cd ..`/`cd /etc` além da raiz ⇒ NEGADO/clampado —
  * o `sessionCwd` NUNCA escapa). Input: { "path": string } (relativo ao cwd ou absoluto).
  */
+// ADR-0145 (frente b) — fonte única do "quando" de `change_dir` (description + menu).
+const WHEN_CHANGE_DIR =
+  'para ENTRAR numa subpasta do projeto ANTES de rodar comandos/ler-editar arquivos ' +
+  'relativos nela — use no lugar de "cd x && ..." dentro de run_command (não persiste)';
+
 export const changeDirTool: NativeTool<ToolPorts> = {
   name: 'change_dir',
   effect: 'read',
+  group: 'arquivo',
+  when: WHEN_CHANGE_DIR,
   description:
     'Muda o diretório de trabalho da SESSÃO (cd). A partir daí run_command roda nele e ' +
     'os caminhos relativos (read_file/edit_file/grep/@arquivo) resolvem nele. Sempre ' +
     'confinado às raízes AUTORIZADAS do workspace (não escapa; pode navegar entre elas). ' +
-    'Input: { "path": string }.',
+    `Use QUANDO: ${WHEN_CHANGE_DIR}. Input: { "path": string }.`,
   parameters: CHANGE_DIR_SCHEMA,
   async run(input, ports): Promise<ToolResult> {
     const path = reqString(input, 'path');
@@ -527,11 +558,20 @@ function relCwd(root: string, cwd: string): string {
 }
 
 /** grep — busca um padrão. Efeito `read`. Input: { "pattern": string, "path"?: string }. */
+// ADR-0145 (frente b) — fonte única do "quando" de `grep` (description + menu).
+const WHEN_GREP =
+  'para LOCALIZAR onde um termo/símbolo aparece no código ANTES de editar — encadeie: ' +
+  'grep (localizar) → read_file (inspecionar) → edit_file (mudar)';
+
 export const grepTool: NativeTool<ToolPorts> = {
   name: 'grep',
   effect: 'read',
+  group: 'busca',
+  when: WHEN_GREP,
   description:
-    'Busca uma SUBSTRING LITERAL (NÃO regex) em arquivos — caracteres como ^ $ | \\ . * são TEXTO, não metacaracteres. Input: { "pattern": string, "path"?: string (default ".") }.',
+    'Busca uma SUBSTRING LITERAL (NÃO regex) em arquivos — caracteres como ^ $ | \\ . * são ' +
+    `TEXTO, não metacaracteres. Use QUANDO: ${WHEN_GREP}. Input: { "pattern": string, "path"?: ` +
+    'string (default ".") }.',
   parameters: GREP_SCHEMA,
   async run(input, ports): Promise<ToolResult> {
     const pattern = reqString(input, 'pattern');
@@ -600,13 +640,20 @@ function truncationNote(truncated: SearchTruncation): string | undefined {
  * Espelha o `grepTool`: 0 acertos ⇒ observação CLARA (não silêncio); truncamento ⇒
  * nota HONESTA (F6/F18); padrão inválido ⇒ erro VISÍVEL. Input: { pattern, path? }.
  */
+// ADR-0145 (frente b) — fonte única do "quando" de `glob` (description + menu).
+const WHEN_GLOB =
+  'para ACHAR arquivos por NOME/padrão (não conteúdo) ANTES de editar — encadeie: glob ' +
+  '(achar o arquivo) → read_file → edit_file; p/ buscar CONTEÚDO use grep, não glob';
+
 export const globTool: NativeTool<ToolPorts> = {
   name: 'glob',
   effect: 'read',
+  group: 'busca',
+  when: WHEN_GLOB,
   description:
     'Acha ARQUIVOS por padrão de caminho (NÃO busca conteúdo — use grep p/ isso). Sintaxe: ' +
     '* (um segmento), ** (cruza /), ?, [abc], {a,b}. Ex.: "**/*.ts", "src/**/test_*.py". ' +
-    'Input: { "pattern": string, "path"?: string (default ".") }.',
+    `Use QUANDO: ${WHEN_GLOB}. Input: { "pattern": string, "path"?: string (default ".") }.`,
   parameters: GLOB_SCHEMA,
   async run(input, ports): Promise<ToolResult> {
     const pattern = reqString(input, 'pattern');
@@ -678,6 +725,7 @@ const RUN_TESTS_SCHEMA = Object.freeze({
 export const runTestsTool: NativeTool<ToolPorts> = {
   name: 'run_tests',
   effect: 'exec',
+  group: 'execucao',
   description:
     'Roda testes (vitest/jest/pytest/go test) e mostra resultado ao vivo: ✓/✗ passou/falhou, ' +
     'placar, barra de progresso. Input: { "command": string (req), "label"?: string }. ' +
@@ -770,6 +818,10 @@ export const NATIVE_TOOLS: readonly NativeTool<ToolPorts>[] = [
   addTodoTool,
   listTodosTool,
   doneTodoTool,
+  // ADR-0145 (frente d) — `capabilities` (+ sinônimo `list_tools`): menu vivo de
+  // auto-descoberta (effect:'read' puro; inerte sem a porta `capabilities`).
+  capabilitiesTool,
+  listToolsTool,
 ];
 
 function errMsg(e: unknown): string {

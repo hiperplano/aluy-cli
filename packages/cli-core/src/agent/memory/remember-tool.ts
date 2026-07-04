@@ -86,6 +86,7 @@ const REMEMBER_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
 export const rememberTool: NativeTool<ToolPorts> = {
   name: REMEMBER_TOOL_NAME,
   effect: 'memory',
+  group: 'memoria', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
   parameters: REMEMBER_SCHEMA,
   description:
     'Grava um FATO curto e factual na memória de agente para lembrar em sessões futuras ' +

@@ -66,6 +66,7 @@ function fmtItem(t: TodoItem): string {
 export const addTodoTool: NativeTool<ToolPorts> = {
   name: ADD_TODO_TOOL_NAME,
   effect: 'memory', // mesmo carve-out de escrita confinada do remember
+  group: 'plano', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
   parameters: ADD_TODO_SCHEMA,
   description:
     'Anota um item PENDENTE no backlog/TODO para fazer DEPOIS. Use quando o usuário pedir algo ' +
@@ -107,6 +108,7 @@ export const addTodoTool: NativeTool<ToolPorts> = {
 export const listTodosTool: NativeTool<ToolPorts> = {
   name: LIST_TODOS_TOOL_NAME,
   effect: 'read',
+  group: 'plano', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
   parameters: LIST_TODOS_SCHEMA,
   description:
     'Lista o backlog/TODO persistente (itens pendentes e concluídos). Use para ver o que está ' +
@@ -157,6 +159,7 @@ export const listTodosTool: NativeTool<ToolPorts> = {
 export const doneTodoTool: NativeTool<ToolPorts> = {
   name: DONE_TODO_TOOL_NAME,
   effect: 'memory', // mesmo carve-out: escrita confinada (marca done)
+  group: 'plano', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
   parameters: DONE_TODO_SCHEMA,
   description:
     'Marca um item do backlog/TODO como CONCLUÍDO. Use ao terminar uma tarefa que estava anotada. ' +

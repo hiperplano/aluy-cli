@@ -23,6 +23,10 @@ import type { ToolCall } from './gate.js';
 import { RECALL_TOOL_NAME } from '../agent/memory/contract.js';
 import { PLAN_TOOL_NAME } from '../agent/tools/plan.js';
 import { QUESTION_TOOL_NAME } from '../agent/tools/question.js';
+import {
+  CAPABILITIES_TOOL_NAME,
+  CAPABILITIES_TOOL_ALIAS,
+} from '../agent/tools/capabilities.js';
 
 /**
  * R1 — a ALLOW-LIST FECHADA de tools NATIVAS de LEITURA LOCAL permitidas em Plan.
@@ -65,6 +69,15 @@ export const PLAN_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   // read-only. R2 (alvo remoto) nunca morde — não há URL/host. → sinalizado ao
   // `seguranca` (AG-0008): estado de UI local, mesma classe do `update_plan`.
   QUESTION_TOOL_NAME,
+  // ADR-0145 · AG-0008 — `capabilities` (+ sinônimo `list_tools`) SÓ FORMATA um
+  // snapshot que o locus concreto já tem em mãos (nomes/efeitos/contadores) — NÃO
+  // lê filesystem, NÃO faz rede, NÃO fala com outro agente. Mesma classe de
+  // `update_plan`/`perguntar` acima (estado local sem I/O de efeito); R2 (alvo
+  // remoto) nunca morde — não há URL/host no input (`filter` é só um termo de
+  // busca em cima de dado já resolvido). Permitida em Plan: em DÚVIDA sobre o que
+  // pode fazer, o agente deve poder checar mesmo no modo mais restrito.
+  CAPABILITIES_TOOL_NAME,
+  CAPABILITIES_TOOL_ALIAS,
 ]);
 
 /**

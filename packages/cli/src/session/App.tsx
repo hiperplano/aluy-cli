@@ -395,6 +395,17 @@ export interface AppProps {
      * segura; testes/legado). O `enter()` já reseta — este é só p/ o resize-em-tamanho.
      */
     readonly resetDiffer?: () => void;
+    /**
+     * EST-1015 (hardening — auto-correção do CockpitDiffer, achado do dono) — informa a
+     * altura ESPERADA (`layout.rows`) do frame que a App está PRESTES a fazer o Ink
+     * escrever. Chamado a CADA render (síncrono, sem I/O) — o differ compara o corpo real
+     * do próximo write contra este valor e força um FULL-REPAINT se divergir, em vez de
+     * acumular corrupção silenciosamente (a causa-raiz do fantasma/duplicação no SCROLL de
+     * sessão grande: a medição de altura à mão — measureConversaBlock/flatLineRows — pode
+     * divergir do render real). `undefined` fora do cockpit. Ausente ⇒ no-op (degradação
+     * segura; testes/legado que não injetam este método).
+     */
+    readonly setExpectedRows?: (rows: number | undefined) => void;
   };
   /**
    * EST-1000 · ADR-0076 §1 — persiste a preferência do cockpit ao alternar (`/fullscreen`/
@@ -802,6 +813,16 @@ export function App(props: AppProps): React.ReactElement {
   // renderiza o INLINE (degrada) e mostra o aviso. O alt-screen real (entrar/sair) é
   // disparado no TOGGLE (handler abaixo), espelhando este "ativo".
   const cockpitActive = fullscreen && cockpitLayout.kind === 'cockpit';
+
+  // EST-1015 (hardening — auto-correção do CockpitDiffer, achado do dono) — informa o
+  // `layout.rows` DESTE render ao envelope do stdout, ANTES de o Ink escrever o frame (o
+  // corpo da função ainda roda ANTES de a árvore retornada chegar ao commit/write do Ink,
+  // então este valor está pronto quando o `transform` do differ rodar). É a fonte de
+  // verdade que a ÁRVORE de fato usou (`resolveCockpitLayout`), mais confiável que a
+  // leitura crua de `stdout.rows` (pode divergir/atrasar em resize). Fora do cockpit (ou
+  // recusado) ⇒ `undefined` — o differ cai no `rowsOf`, sem a checagem (o cockpit nem
+  // está ativo no envelope). Ver `SyncStdout.setExpectedCockpitRows`.
+  props.cockpitScreen?.setExpectedRows?.(cockpitActive ? cockpitLayout.rows : undefined);
 
   // EST-0990 — RESOLUÇÃO do layout do split pela LARGURA corrente (puro). `single` (OFF
   // ou desabilitado por largura), `side` (≥100, lado-a-lado) ou `tabs` (60–99, alterna).
@@ -3743,6 +3764,18 @@ export function App(props: AppProps): React.ReactElement {
         .join(' · ') || 'local'
     : `broker · ${tierDisplayName(state.meta.tier, modelPicker.tiers)}`;
 
+  // FIX (dono) — o HEADER (chrome mais estático — EST-0989) NÃO deve repetir o indicador
+  // de backend "local", que já mora, VIVO, no rodapé (`<StatusBar>`, via `tierDisplay`):
+  // o dono via `◍ local`/`◷ local · <provider> · <modelo>` 2x (header E footer, inline E
+  // fullscreen). Pro header, quando o backend é local, tiramos só a palavra "local" do
+  // texto — mantém provider/modelo (ainda orientam), sem repetir o rótulo do modo. Sem
+  // provider NEM modelo (raro, cedo no boot) cai de volta no `tierDisplay` cheio (degrada
+  // sem ficar em branco). Broker segue IGUAL a `tierDisplay` (sem queixa, sem mudança).
+  const headerTierDisplay = localByModel
+    ? [localProviderName, localModelName].filter((v) => v !== undefined && v !== '').join(' · ') ||
+      tierDisplay
+    : tierDisplay;
+
   // ── EST-1000 · ADR-0076 — OVERLAYS de `/` (SlashMenu + pickers + paleta) ─────────
   // EST-1000 (#157 fix) — o <SlashMenu>, os pickers abertos POR `/` (model/theme/lang/
   // history) e a <CommandPalette> (Ctrl+P) são overlays MODAIS: abrem SOBRE a superfície
@@ -3897,6 +3930,7 @@ export function App(props: AppProps): React.ReactElement {
         showCursor={composerShowCursor}
         hintState={hintState}
         tierDisplay={tierDisplay}
+        headerTierDisplay={headerTierDisplay}
         isDefaultTier={isDefaultTier}
         columns={columns}
         frame={frame}
@@ -4092,11 +4126,10 @@ export function App(props: AppProps): React.ReactElement {
                 {/* EST-0987 (1/3) — divisória ACIMA do header. */}
                 {showHeaderDivider && <Divider columns={columns} />}
                 <Header
-                  tier={tierDisplay}
+                  tier={headerTierDisplay}
                   columns={columns}
                   rows={rows}
                   {...(props.version !== undefined ? { version: props.version } : {})}
-                  {...(state.meta.backend !== undefined ? { backend: state.meta.backend } : {})}
                 />
                 {/* EST-0985 (1/3) — divisória SOB o header: separa o chrome
                     (marca/tier) do corpo da conversa. */}

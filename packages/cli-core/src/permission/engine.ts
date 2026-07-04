@@ -93,6 +93,10 @@ import { REMEMBER_TOOL_NAME, RECALL_TOOL_NAME } from '../agent/memory/contract.j
 import { ROOM_POST_TOOL_NAME } from '../agent/rooms/room-tools.js';
 import { PLAN_TOOL_NAME } from '../agent/tools/plan.js';
 import { QUESTION_TOOL_NAME } from '../agent/tools/question.js';
+import {
+  CAPABILITIES_TOOL_NAME,
+  CAPABILITIES_TOOL_ALIAS,
+} from '../agent/tools/capabilities.js';
 import { EMPTY_POLICY, evaluatePolicyRules, type PermissionPolicy } from './policy.js';
 import { runHooks, type PreToolUseHook } from './hooks.js';
 import { SessionGrants } from './ask.js';
@@ -136,6 +140,14 @@ const READ_TOOLS = new Set([
   // UI do usuário); allow SILENCIOSO como as leituras locais (senão cairia em `ask` a cada
   // pergunta — UX péssima). Sinalizado ao `seguranca` (AG-0008): estado de UI, não efeito.
   QUESTION_TOOL_NAME,
+  // ADR-0145 · AG-0008 — `capabilities` (+ sinônimo `list_tools`) SÓ FORMATA um
+  // snapshot que o locus concreto já tem em mãos (nomes/efeitos/contadores de
+  // tools/agentes/skills/MCP/memória/monitores) — SEM ler filesystem, SEM rede, SEM
+  // falar com outro agente. allow SILENCIOSO como as demais leituras locais (senão
+  // "em dúvida, confira o `capabilities`" viraria `ask` a cada chamada — o oposto do
+  // que a onda pede: o agente deve poder checar suas capacidades sem fricção).
+  CAPABILITIES_TOOL_NAME,
+  CAPABILITIES_TOOL_ALIAS,
 ]);
 
 export interface PermissionEngineOptions {
