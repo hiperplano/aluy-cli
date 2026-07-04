@@ -4,7 +4,8 @@
 // (canônico/apelido/inválido); `resolveThemeByName` mapeia a PALETA + brilho do tema e
 // PRESERVA as capacidades do env (NO_COLOR / densidade); o accent ÂMBAR nos três; o
 // PISO de contraste AA — cada papel COLORIDO de CADA tema ≥ 4.5:1 (texto normal, WCAG
-// AA) sobre o `bg` do próprio tema (accentDim é AA-large, ≥3:1: dívida de DS).
+// AA) sobre o `bg` do próprio tema (accentDim/depthDim são AA-large, ≥3:1: tons calmos
+// de repouso dos degradês âmbar/teal — dívida de DS não-bloqueante).
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -41,6 +42,8 @@ const COLORED_ROLES: readonly TermRole[] = [
   'danger',
   'success',
   'depth',
+  'depthBright',
+  'depthDim',
 ];
 
 describe('catálogo de temas (/theme) — os 3 do aluy web', () => {
@@ -64,7 +67,7 @@ describe('catálogo de temas (/theme) — os 3 do aluy web', () => {
     expect(new Set(bgs).size).toBe(3);
   });
 
-  it('os 3 temas têm os MESMOS 8 papéis (paridade DS)', () => {
+  it('os 3 temas têm os MESMOS 10 papéis (paridade DS)', () => {
     for (const t of THEMES) {
       expect(Object.keys(t.palette).sort()).toEqual([...COLORED_ROLES].sort());
     }
@@ -167,9 +170,11 @@ describe('resolveThemeByName — troca a PALETA por tema, preserva capacidades d
 
 describe('contraste AA — cada papel colorido ≥ AA sobre o --bg do PRÓPRIO tema', () => {
   // accentDim é realce CALMO (wordmark de boot, bold/grande) ⇒ piso AA-large (≥3:1),
-  // como já documentado p/ o dark (dívida de DS não-bloqueante). Os demais: AA pleno.
+  // como já documentado p/ o dark (dívida de DS não-bloqueante). depthDim é o tom de
+  // REPOUSO do degradê teal da sombra 3D (F200b) — mesma natureza calma/decorativa
+  // de accentDim ⇒ mesmo piso relaxado. Os demais: AA pleno.
   function floorFor(role: TermRole): number {
-    return role === 'accentDim' ? 3 : 4.5;
+    return role === 'accentDim' || role === 'depthDim' ? 3 : 4.5;
   }
   for (const theme of THEMES) {
     describe(`${theme.label} (${theme.name}) sobre ${theme.bg}`, () => {
