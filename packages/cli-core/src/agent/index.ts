@@ -324,7 +324,17 @@ export {
   type AgentsListNote,
   type AgentsListInput,
 } from './agents-list.js';
-export { resolveModelTier, ALUY_TIER_KEYS, type AluyTierKey } from './agent-model-tier.js';
+export {
+  resolveModelTier,
+  ALUY_TIER_KEYS,
+  knownModelNames,
+  suggestModelName,
+  formatUnknownModelError,
+  isCostlierTier,
+  formatResolvedModelLabel,
+  type AluyTierKey,
+  type ModelTierResolution,
+} from './agent-model-tier.js';
 // EST-1112 · ADR-0116 (proposto) — SKILLS definidas em `SKILL.md` (capacidade invocável
 // empacotada num diretório). Parser PURO do manifesto (frontmatter name/description +
 // corpo = instruções; FALHA FECHADA RES-MD-3) + o FORMATADOR PURO que lista as skills

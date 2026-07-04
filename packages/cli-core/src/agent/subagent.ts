@@ -288,8 +288,15 @@ export interface SubAgentOutcome {
 
 /** Observador OPCIONAL do ciclo de vida dos filhos (a UI do @hiperplano/aluy-cli pluga). */
 export interface SubAgentObserver {
-  onChildStart?(label: string): void;
-  onChildEnd?(label: string, outcome: SubAgentOutcome): void;
+  /**
+   * ADR-0146 (D5) — `model` é a preferência CRUA do PERFIL deste filho (`profile.model`,
+   * a MESMA string que `childCallerFor` traduz) — NUNCA provider/credencial (HG-2). O
+   * locus concreto a formata (via `resolveModelTier`/`formatResolvedModelLabel`) p/ o
+   * campo de tier exibido no indicador `<SubAgents>`. `undefined` ⇒ sem `model` no
+   * perfil (herda o pai — o formatador resolve o rótulo "herdado (...)").
+   */
+  onChildStart?(label: string, model?: string): void;
+  onChildEnd?(label: string, outcome: SubAgentOutcome, model?: string): void;
 }
 
 /**
@@ -329,6 +336,16 @@ export interface SubAgentSpawnerOptions {
    * DADO de catálogo (o broker valida — 422 se inservível); NUNCA credencial.
    */
   readonly callerForTier?: (tier: string) => ModelCaller;
+  /**
+   * ADR-0146 (D3) — FÁBRICA de caller CUSTOM/BYO por-filho. Quando o `model:` de um
+   * filho resolve em `kind:'custom'` (sentinela `custom`/`custom:<slug>`), o spawner
+   * usa `customCallerFor(slug)` PRA AQUELE FILHO: o locus concreto (@hiperplano/aluy-cli)
+   * constrói um caller que fala pelo MESMO provider BYO do pai (credencial/base_url
+   * NUNCA saem do cliente — CLI-SEC-7), com o slug indicado ou, sem slug, o corrente
+   * do pai. Ausente ⇒ o filho cai no caller do PAI (`parentCaller`/`childModel`) —
+   * fail-safe, nunca eleva. Fecha o gap BYO/Custom do ADR-0146 (D3).
+   */
+  readonly customCallerFor?: (slug?: string) => ModelCaller;
   /** A MESMA engine de permissão do pai (mesmo SessionMode, sempre-ask, hooks). */
   readonly permission: PermissionEngine;
   /** As MESMAS ports confinadas do pai (workspace/path-deny/egress). Escopo ⊆ pai. */
@@ -639,6 +656,10 @@ export class SubAgentSpawner {
    * Quando o `.md` do filho declara `model:` que resolve num tier, o spawner usa
    * `callerForTier(tier)` PRA AQUELE FILHO; ausente ⇒ todos os filhos usam o do pai. */
   private readonly callerForTier?: (tier: string) => ModelCaller;
+  /** ADR-0146 (D3) — fábrica de caller CUSTOM/BYO por-filho (porta injetada do
+   * @hiperplano/aluy-cli). Quando o `model` do filho resolve em `kind:'custom'`, o
+   * spawner usa `customCallerFor(slug)` PRA AQUELE FILHO; ausente ⇒ cai no caller do pai. */
+  private readonly customCallerFor?: (slug?: string) => ModelCaller;
   private readonly permission: PermissionEngine;
   private readonly ports: ToolPorts;
   private readonly childTools: readonly NativeTool<ToolPorts>[];
@@ -670,6 +691,7 @@ export class SubAgentSpawner {
     // EST-SUBAGENT-MODEL — fábrica POR TIER (porta). Ausente ⇒ todos os filhos usam o
     // caller do pai (`this.model`) — comportamento de hoje (back-compat).
     if (opts.callerForTier) this.callerForTier = opts.callerForTier;
+    if (opts.customCallerFor) this.customCallerFor = opts.customCallerFor;
     this.permission = opts.permission;
     this.ports = opts.ports;
     // E-A1: o toolset do FILHO é o do pai SEM `spawn_agent` (filhos não delegam) e
@@ -748,7 +770,7 @@ export class SubAgentSpawner {
         next += 1;
         if (i >= profiles.length) return;
         const profile = profiles[i]!;
-        this.observer?.onChildStart?.(profile.label);
+        this.observer?.onChildStart?.(profile.label, profile.model);
         const outcome = await this.runChild(
           profile,
           signal,
@@ -760,7 +782,7 @@ export class SubAgentSpawner {
           roomCode,
         );
         outcomes[i] = outcome;
-        this.observer?.onChildEnd?.(profile.label, outcome);
+        this.observer?.onChildEnd?.(profile.label, outcome, profile.model);
       }
     };
 
@@ -805,7 +827,12 @@ export class SubAgentSpawner {
     // verdade, ADR-0073). Sem model-no-`.md` (ou sem fábrica/sem cara de tier) ⇒ o filho
     // usa o caller do PAI (`this.model`) — back-compat. A SEGURANÇA não muda: mesma
     // rota de broker (CLI-SEC-7), só varia a pista de tier (HG-2).
-    const childCaller = childCallerFor(profile, this.model, this.callerForTier);
+    const childCaller = childCallerFor(
+      profile,
+      this.model,
+      this.callerForTier,
+      this.customCallerFor,
+    );
 
     // E-A3/CLI-SEC-9: o ask do filho carimba a ORIGEM. Filhos paralelos ⇒ rótulos
     // distintos ⇒ confirmações distintas.
@@ -1032,27 +1059,49 @@ function personaAndContext(profile: SubAgentProfile): string | undefined {
 }
 
 /**
- * EST-SUBAGENT-MODEL · ADR-0073 · CLI-SEC-7 — ESCOLHE o `ModelCaller` de UM filho
- * (PURO/testável — o juízo "qual tier por filho" mora aqui, num ponto só):
+ * EST-SUBAGENT-MODEL · ADR-0073 · ADR-0146 (D3) · CLI-SEC-7 — ESCOLHE o `ModelCaller`
+ * de UM filho (PURO/testável — o juízo "qual caller por filho" mora aqui, num ponto
+ * só). `resolveModelTier(profile.model)` classifica a preferência CRUA numa
+ * `ModelTierResolution` tipada; o roteamento casa sobre o `kind`:
  *
- *  - se o `.md` do filho declara `model:` (`profile.model`) que `resolveModelTier`
- *    traduz numa CHAVE DE TIER **e** a fábrica `callerForTier` está disponível ⇒
- *    devolve `callerForTier(tier)` — o filho fala AQUELE tier ao broker (o broker
- *    resolve provider/credencial/quota; valida — 422 se inservível, degrade honesto);
- *  - caso contrário (sem `model`, model sem cara de tier = provider cru, OU sem a
- *    fábrica) ⇒ devolve `parentCaller` (o caller do PAI) — BACK-COMPAT: é o
- *    comportamento de hoje (todos os filhos no caller do pai).
+ *  - `kind:'tier'` (sinônimo/`aluy-*` conhecido ou não) **e** a fábrica
+ *    `callerForTier` disponível ⇒ `callerForTier(key)` — o filho fala AQUELE tier
+ *    hospedado ao broker (que resolve provider/credencial/quota e valida — 422 se
+ *    inservível, degrade honesto). Sem a fábrica ⇒ `parentCaller` (back-compat).
+ *  - `kind:'custom'` (`custom`/`custom:<slug>` — D3, fecha o gap BYO) **e** a fábrica
+ *    `customCallerFor` disponível ⇒ `customCallerFor(slug)` — o filho fala pelo
+ *    provider BYO do PAI (credencial/base_url NUNCA saem do cliente), com o slug
+ *    indicado ou, sem slug, o corrente do pai (a fábrica decide). Sem a fábrica ⇒
+ *    `parentCaller` (fail-safe — nunca crasha, nunca eleva).
+ *  - `kind:'inherit'` (ausência de `model`, OU o sentinela explícito
+ *    `same-as-parent`/`parent`/`inherit`) ⇒ `parentCaller` — é literalmente o
+ *    caminho A já existente (o `parentCaller` já segue o pai AO VIVO via
+ *    `tierSource`, incl. sob `tier:'custom'` — HG-2 intocado).
+ *  - `kind:'unknown'` (string sem cara de tier/sentinela — candidato a ERRO do probe
+ *    D2, que roda ANTES do fan-out) ⇒ `parentCaller` — REDE de segurança (defesa em
+ *    profundidade): o probe já devia ter barrado este filho ANTES de chegar aqui;
+ *    se por algum caminho chegou, o fallback é o MESMO de sempre (nunca um tier
+ *    elevado por engano — GS-SAM6).
  *
- * O tier vem do PERFIL EM DISCO (capacidade declarada, HG-2), não de input do modelo
- * não-confiável. NÃO toca catraca/escopo/budget — só roteia a PISTA de tier (CLI-SEC-7).
+ * O `model` vem do PERFIL EM DISCO/spawn (capacidade declarada, HG-2), não de input
+ * do modelo não-confiável interpretado aqui. NÃO toca catraca/escopo/budget — só
+ * roteia a PISTA de tier (CLI-SEC-7).
  */
 export function childCallerFor(
   profile: SubAgentProfile,
   parentCaller: ModelCaller,
   callerForTier?: (tier: string) => ModelCaller,
+  customCallerFor?: (slug?: string) => ModelCaller,
 ): ModelCaller {
-  if (callerForTier === undefined) return parentCaller;
-  const tier = resolveModelTier(profile.model);
-  if (tier === undefined) return parentCaller;
-  return callerForTier(tier);
+  const resolution = resolveModelTier(profile.model);
+  switch (resolution.kind) {
+    case 'tier':
+      return callerForTier ? callerForTier(resolution.key) : parentCaller;
+    case 'custom':
+      return customCallerFor ? customCallerFor(resolution.slug) : parentCaller;
+    case 'inherit':
+    case 'unknown':
+    default:
+      return parentCaller;
+  }
 }
