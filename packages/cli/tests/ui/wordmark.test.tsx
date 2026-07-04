@@ -1,8 +1,8 @@
 // EST-0989 — WORDMARK "Λluy": o glifo `aluy` (Λ — a marca, A MESMA do loader/header/
-// thinking) como o "A" em DESTAQUE (accent), seguido de "luy" em MINÚSCULAS (block-art,
-// na cor de marca `depth`). Fallback ASCII (`/\` p/ o Λ + `#` p/ "luy") e degradação
-// p/ terminal estreito (`Λ luy` / `/\ luy`). FONTE ÚNICA: Boot e Header consomem este
-// mesmo <Wordmark> — testado lá (components.test.tsx) que não divergem.
+// thinking) como o "A" em DESTAQUE (accent), seguido de "luy" em MINÚSCULAS (block-art),
+// EQUALIZADO no mesmo papel de marca `accent` (âmbar). Fallback ASCII (`/\` p/ o Λ + `#`
+// p/ "luy") e degradação p/ terminal estreito (`Λ luy` / `/\ luy`). FONTE ÚNICA: Boot e
+// Header consomem este mesmo <Wordmark> — testado lá (components.test.tsx) que não divergem.
 
 import React from 'react';
 import { describe, expect, it } from 'vitest';

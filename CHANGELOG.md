@@ -16,6 +16,14 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 _(vazio)_
 
+## [1.0.0-rc.96] — 2026-07-04
+
+### Alterado
+
+- 🎨 Splash: a SOMBRA 3D do wordmark Λluy voltou a ser TEAL (verde, papel `depth`), destacando o logo e o shimmer âmbar por cima. O logo/shimmer seguem âmbar (accent/accentMid).
+
+_(vazio)_
+
 ## [1.0.0-rc.95] — 2026-07-03
 
 ### Corrigido
