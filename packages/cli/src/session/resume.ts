@@ -198,6 +198,25 @@ export function resolveResume(
 export const DEFAULT_AUTORESUME_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * ADR-0150 (balde b) — TETO-TETO de sanidade (não anti-runaway) da janela de
+ * auto-oferta: acima de 7 dias, a "última conversa" já não é mais "recente" — não
+ * faz sentido oferecer retomar algo tão velho sem pedido explícito (`--resume`).
+ */
+export const MAX_AUTORESUME_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 dias
+
+/**
+ * ADR-0150 — resolve a janela EFETIVA de auto-oferta a partir de
+ * `config.session.autoResumeWindowMs`, clampada em `[1, MAX_AUTORESUME_WINDOW_MS]`.
+ * Ausente/inválido ⇒ `DEFAULT_AUTORESUME_WINDOW_MS`. PURO — sem I/O.
+ */
+export function resolveAutoResumeWindowMs(config?: number | undefined): number {
+  if (config !== undefined && Number.isFinite(config) && config > 0) {
+    return Math.min(MAX_AUTORESUME_WINDOW_MS, Math.floor(config));
+  }
+  return DEFAULT_AUTORESUME_WINDOW_MS;
+}
+
+/**
  * O que a auto-oferta resolveu (boot SEM flag de sessão):
  *  - `explicit` : veio `--resume`/`--continue`/`--new` ⇒ NÃO auto-ofertar (o caller
  *                 segue o caminho explícito de `resolveResume`/sessão-nova).

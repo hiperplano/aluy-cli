@@ -15,6 +15,8 @@ import {
   resolvePreferredModel,
   RESUME_CUSTOM_FALLBACK_TIER,
   DEFAULT_AUTORESUME_WINDOW_MS,
+  resolveAutoResumeWindowMs,
+  MAX_AUTORESUME_WINDOW_MS,
 } from '../../src/session/resume.js';
 import type { SessionBlock } from '../../src/session/model.js';
 
@@ -529,5 +531,23 @@ describe('F187 — conversas SÓ do agente (install/conserto) ficam ocultas do r
   it('countUserTurns conta só `you` (não `aluy`)', () => {
     expect(countUserTurns([note, aluy, tool])).toBe(0);
     expect(countUserTurns([you, aluy, you])).toBe(2);
+  });
+});
+
+describe('ADR-0150 (balde b) — resolveAutoResumeWindowMs (config.session.autoResumeWindowMs)', () => {
+  it('ausente/inválido ⇒ DEFAULT_AUTORESUME_WINDOW_MS (24h)', () => {
+    expect(resolveAutoResumeWindowMs()).toBe(DEFAULT_AUTORESUME_WINDOW_MS);
+    expect(resolveAutoResumeWindowMs(undefined)).toBe(DEFAULT_AUTORESUME_WINDOW_MS);
+    expect(resolveAutoResumeWindowMs(-5)).toBe(DEFAULT_AUTORESUME_WINDOW_MS);
+    expect(resolveAutoResumeWindowMs(Number.NaN)).toBe(DEFAULT_AUTORESUME_WINDOW_MS);
+  });
+
+  it('valor válido dentro do teto passa direto', () => {
+    expect(resolveAutoResumeWindowMs(2 * 24 * 60 * 60 * 1000)).toBe(2 * 24 * 60 * 60 * 1000);
+  });
+
+  it('CLAMPA ao teto-teto de sanidade — config pedindo 30 dias ⇒ clampa a 7 dias', () => {
+    expect(resolveAutoResumeWindowMs(30 * 24 * 60 * 60 * 1000)).toBe(MAX_AUTORESUME_WINDOW_MS);
+    expect(MAX_AUTORESUME_WINDOW_MS).toBe(7 * 24 * 60 * 60 * 1000);
   });
 });

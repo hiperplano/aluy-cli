@@ -342,7 +342,7 @@ export interface SessionControllerOptions {
    */
   readonly autoCompactEnv?: Record<string, string | undefined>;
   /**
-   * ADR-0136 §5 (balde a) — `config.context` (autocompactAt/autocompactMax/window). Entra
+   * ADR-0150 §5 (balde a) — `config.context` (autocompactAt/autocompactMax/window). Entra
    * como nível ENTRE env e default na resolução da auto-compactação e da janela custom
    * (precedência flag > env > config > default). O core re-valida/clampa.
    */
@@ -350,6 +350,18 @@ export interface SessionControllerOptions {
     readonly window?: number;
     readonly autocompactAt?: number | string;
     readonly autocompactMax?: number;
+  };
+  /**
+   * ADR-0150 (balde b) — `config.cycle` (defaultDurationMs/defaultIterations/
+   * defaultIntervalMs). DEFAULTS do `/cycle` (CLI-SEC-14) quando o usuário OMITE a
+   * dimensão correspondente (`--por`/`--max-iter`/intervalo). Os teto-teto duros
+   * (`MAX_CYCLE_DURATION_MS`/`MAX_CYCLE_ITERATIONS`) permanecem hardcoded e intocados
+   * no core — este campo só é repassado a `resolveCycleCeilings` como `configDefaults`.
+   */
+  readonly cycleConfig?: {
+    readonly defaultDurationMs?: number;
+    readonly defaultIterations?: number;
+    readonly defaultIntervalMs?: number;
   };
   /**
    * Anti-flicker — opções do THROTTLE de flush do streaming. Os deltas de token
@@ -457,6 +469,16 @@ export interface SessionControllerOptions {
      * desta flag e é sempre ativa).
      */
     readonly env?: Record<string, string | undefined>;
+    /**
+     * ADR-0150 (balde b) — seção `subagents` do config.json, nível ENTRE esta opção
+     * (`maxConcurrency`/`timeoutMs`, equivalente a "flag") e o DEFAULT do core.
+     * Repassado tal-qual ao `SubAgentSpawner` (que resolve/clampa env > config > default).
+     */
+    readonly configDefaults?: {
+      readonly maxPerCall?: number;
+      readonly maxConcurrency?: number;
+      readonly idleTimeoutMs?: number;
+    };
   };
   /**
    * EST-0977/0978 · ADR-0061 — REGISTRO de agentes-`.md` nomeados (já carregado pelo
@@ -577,6 +599,11 @@ export interface SessionControllerOptions {
     readonly env?: Record<string, string | undefined>;
     /** Período de amostragem (ms). Default `DEFAULT_MEM_SAMPLE_MS`. Injetável p/ teste. */
     readonly sampleIntervalMs?: number;
+    /**
+     * ADR-0150 (Tier 2) — `config.advanced.memPressure.compactAt`. Nível ENTRE env
+     * (`ALUY_MEM_PRESSURE_AT`, que segue vencendo) e o default do core.
+     */
+    readonly pressureAtConfig?: string | number;
   };
   /**
    * EST-XXXX (CHECKPOINTS / REWIND) — gancho chamado no INÍCIO de cada PROMPT do
@@ -851,12 +878,21 @@ export class SessionController {
   private readonly autoCompactAt: string | undefined;
   // EST-0973 — env da auto-compactação (p/ re-resolver na troca de tier).
   private readonly autoCompactEnv: Record<string, string | undefined>;
-  // ADR-0136 §5 — config.context (autocompactAt/Max/window) p/ re-resolver na troca de tier.
+  // ADR-0150 §5 — config.context (autocompactAt/Max/window) p/ re-resolver na troca de tier.
   private readonly contextConfig:
     | {
         readonly window?: number;
         readonly autocompactAt?: number | string;
         readonly autocompactMax?: number;
+      }
+    | undefined;
+  // ADR-0150 (balde b) — config.cycle (defaultDurationMs/defaultIterations/
+  // defaultIntervalMs), repassado a `resolveCycleCeilings` em `cycle()`.
+  private readonly cycleConfig:
+    | {
+        readonly defaultDurationMs?: number;
+        readonly defaultIterations?: number;
+        readonly defaultIntervalMs?: number;
       }
     | undefined;
   // EST-0973 — config RESOLVIDA da AUTO-COMPACTAÇÃO da janela (limiar + janela +
@@ -1161,6 +1197,7 @@ export class SessionController {
     this.autoCompactEnv = opts.autoCompactEnv ?? process.env;
     this.autoCompactAt = opts.autoCompactAt;
     this.contextConfig = opts.contextConfig;
+    this.cycleConfig = opts.cycleConfig;
     this.contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
     // EST-0973 — AUTO-COMPACTAÇÃO da JANELA: resolve o limiar (flag `--autocompact-at`
     // > env `ALUY_AUTOCOMPACT_AT` > default 0.85) + a JANELA do modelo (`contextWindow`)
@@ -1189,6 +1226,11 @@ export class SessionController {
         this.memPressureCfg = resolveMemPressure({
           heapLimitMb: opts.memory.heapLimitMb,
           pressureAtEnv: memEnv.ALUY_MEM_PRESSURE_AT,
+          // ADR-0150 (Tier 2) — config.advanced.memPressure.compactAt (nível ENTRE
+          // env e default; env acima segue vencendo).
+          ...(opts.memory.pressureAtConfig !== undefined
+            ? { pressureAtConfig: opts.memory.pressureAtConfig }
+            : {}),
         });
         this.memSampleHeapUsed = opts.memory.sampleHeapUsed;
         this.memShutdown = opts.memory.shutdown ?? null;
@@ -1389,6 +1431,9 @@ export class SessionController {
         ...(opts.subAgents.timeoutMs !== undefined
           ? { idleTimeoutMs: opts.subAgents.timeoutMs }
           : {}),
+        // ADR-0150 (balde b) — seção `subagents` do config.json (nível ENTRE a opção
+        // acima e o DEFAULT do core). Repassado tal-qual; o spawner resolve/clampa.
+        ...(opts.subAgents.configDefaults ? { configDefaults: opts.subAgents.configDefaults } : {}),
         observer: displayObserver,
         ...(opts.limits !== undefined ? { limits: opts.limits } : {}),
         // EST-0982 (semântica do esc) — o sinal de PARADA de cada filho é o do NÓ dele
@@ -2243,7 +2288,10 @@ export class SessionController {
       // segue sendo a ÚNICA fonte do "sem teto ⇒ NÃO inicia" (a invariante NÃO muda).
       const request: CycleRequest = applyCycleOverrides(parsed.request, overrides);
       // GS-L2/RES-L-1 — porta "sem teto ⇒ NÃO inicia" (falha-fechada). Lança se não há teto.
-      ceilings = resolveCycleCeilings(request);
+      // ADR-0150 (balde b) — `this.cycleConfig` troca os DEFAULT_CYCLE_* hardcoded
+      // pelos valores de config.json QUANDO o usuário omitiu a dimensão; a regra
+      // "sem teto ⇒ não inicia" e os teto-teto duros (CLI-SEC-14) não mudam.
+      ceilings = resolveCycleCeilings(request, this.cycleConfig);
     } catch (err) {
       if (err instanceof CycleParseError || err instanceof NoCeilingError) {
         this.pushNote('/cycle', [err.message]);

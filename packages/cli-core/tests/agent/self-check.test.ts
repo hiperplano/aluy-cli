@@ -102,6 +102,32 @@ describe('EST-0944 · self-check — números (K / cap) com default e override c
   it('DESLIGADO: os números não importam (config é SELF_CHECK_OFF)', () => {
     expect(resolveSelfCheck({ env: '0', everyKEnv: '3' })).toEqual(SELF_CHECK_OFF);
   });
+
+  // ADR-0150 (Tier 2) — config.advanced.selfCheck (nível ENTRE env e default).
+  it('ADR-0150 — config (everyKConfig/maxVerificationsConfig) vence o default', () => {
+    const c = resolveSelfCheck({ flag: '1', everyKConfig: 5, maxVerificationsConfig: 6 });
+    expect(c.reanchorEveryK).toBe(5);
+    expect(c.maxVerifications).toBe(6);
+  });
+
+  it('ADR-0150 — env AINDA vence o config (config é o nível mais baixo antes do default)', () => {
+    const c = resolveSelfCheck({
+      flag: '1',
+      everyKEnv: '3',
+      everyKConfig: 5,
+      maxVerificationsEnv: '4',
+      maxVerificationsConfig: 6,
+    });
+    expect(c.reanchorEveryK).toBe(3);
+    expect(c.maxVerifications).toBe(4);
+  });
+
+  it('ADR-0150 — config CLAMPADO aos MESMOS tetos do env (nenhum teto novo)', () => {
+    expect(resolveSelfCheck({ flag: '1', maxVerificationsConfig: 999 }).maxVerifications).toBe(10);
+    expect(resolveSelfCheck({ flag: '1', everyKConfig: 0 }).reanchorEveryK).toBe(
+      DEFAULT_REANCHOR_EVERY_K,
+    );
+  });
 });
 
 describe('EST-0944 · self-check — redatores (re-âncora / probe / nota de cap)', () => {

@@ -54,7 +54,7 @@ export interface ResolveMaestroOptions {
   /** MemoryEngine injetável (teste). Default: new Mem0MemoryEngine(). */
   readonly memory?: MemoryEngine;
 
-  /** Seção `services` do config único (ADR-0136 §8/§9): porta/host do sidecar Ollama (judge). */
+  /** Seção `services` do config único (ADR-0150 §8/§9): porta/host do sidecar Ollama (judge). */
   readonly services?: UserServicesConfig;
 }
 
@@ -224,7 +224,7 @@ export function resolveMemory(opts?: {
   env?: Record<string, string | undefined>;
   memory?: MemoryEngine;
   cwd?: string;
-  /** Seção `services` do config único (ADR-0136 §8/§9): porta/host do sidecar Mem0. */
+  /** Seção `services` do config único (ADR-0150 §8/§9): porta/host do sidecar Mem0. */
   services?: UserServicesConfig;
 }):
   | { memory: MemoryEngine; memoryScope: string; memoryRecallScopes: readonly string[] }
@@ -244,7 +244,8 @@ export function resolveMemory(opts?: {
   // (ver memory-scope.ts). STORE no escopo novo; RECALL nos dois (migração sem
   // reset das memórias já gravadas).
   const { scope, recallScopes } = deriveMemoryScope(cwd);
-  const memory = opts?.memory ?? new Mem0MemoryEngine({ mem0Url: resolveMem0Url(e, opts?.services) });
+  const memory =
+    opts?.memory ?? new Mem0MemoryEngine({ mem0Url: resolveMem0Url(e, opts?.services) });
   return { memory, memoryScope: scope, memoryRecallScopes: recallScopes };
 }
 

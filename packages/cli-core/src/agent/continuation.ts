@@ -55,6 +55,19 @@ function floorAtLeast(v: string | undefined, floor: number, def: number): number
 }
 
 /**
+ * ADR-0150 (balde b, Tier 2) — DEFAULTS config-driven (`config.advanced.continuation`),
+ * injetáveis pelo `cli`. Nível ENTRE env e default (env > config > default). NÃO
+ * wired a um call-site hoje (a mecânica ATIVA em produção é `resolveContinuationCfg`
+ * do Maestro, `packages/cli/src/maestro/wiring.ts` — achado de governança, ver ADR);
+ * o resolver aceita o parâmetro para uso futuro/teste isolado.
+ */
+export interface ContinuationConfigDefaults {
+  readonly maxContinuations?: number;
+  readonly nudgeAt?: number;
+  readonly giveUpAt?: number;
+}
+
+/**
  * Resolve a config de continuação do ambiente. Disciplina `floorAtLeast`: cada
  * campo tem piso ≥1 p/ um valor minúsculo não desarmar a proteção. O `giveUpAt`
  * é clampado para NUNCA ultrapassar `maxContinuations` (não faz sentido desistir
@@ -62,10 +75,23 @@ function floorAtLeast(v: string | undefined, floor: number, def: number): number
  */
 export function resolveContinuationConfig(
   env: Record<string, string | undefined>,
+  configDefaults?: ContinuationConfigDefaults,
 ): ContinuationConfig {
-  const maxContinuations = floorAtLeast(env[CONT_MAX_ENV], MIN_CAP, DEFAULT_MAX_CONTINUATIONS);
-  const nudgeAt = floorAtLeast(env[CONT_NUDGE_ENV], MIN_NUDGE, DEFAULT_NUDGE_AT);
-  const giveUpAt = floorAtLeast(env[CONT_GIVEUP_ENV], MIN_GIVEUP, DEFAULT_GIVEUP_AT);
+  const maxContinuations = floorAtLeast(
+    env[CONT_MAX_ENV],
+    MIN_CAP,
+    configDefaults?.maxContinuations ?? DEFAULT_MAX_CONTINUATIONS,
+  );
+  const nudgeAt = floorAtLeast(
+    env[CONT_NUDGE_ENV],
+    MIN_NUDGE,
+    configDefaults?.nudgeAt ?? DEFAULT_NUDGE_AT,
+  );
+  const giveUpAt = floorAtLeast(
+    env[CONT_GIVEUP_ENV],
+    MIN_GIVEUP,
+    configDefaults?.giveUpAt ?? DEFAULT_GIVEUP_AT,
+  );
   // giveUpAt NUNCA pode ultrapassar maxContinuations (se cap é 4, desistir no 5 = nunca).
   const clampedGiveUp = Math.min(giveUpAt, maxContinuations);
   return { maxContinuations, nudgeAt, giveUpAt: clampedGiveUp };

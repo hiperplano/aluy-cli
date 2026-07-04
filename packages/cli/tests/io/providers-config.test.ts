@@ -80,7 +80,7 @@ describe('loadLocalProviderCatalog — default embutido + override do usuário (
     expect(findProvider(cat, 'openrouter')?.defaultModel).toBe('x/y');
   });
 
-  it('legado JSON inválido ⇒ default embutido, fail-soft (ADR-0136: sem warn-once)', () => {
+  it('legado JSON inválido ⇒ default embutido, fail-soft (ADR-0150: sem warn-once)', () => {
     writeProviders('{ not valid json,,,');
     const cat = loadLocalProviderCatalog({ baseDir: base });
     expect(cat.entries).toEqual(defaultLocalCatalog().entries);
@@ -117,7 +117,7 @@ describe('loadLocalProviderCatalog — default embutido + override do usuário (
   });
 });
 
-describe('config único (ADR-0136) — migração providers.json → config.json', () => {
+describe('config único (ADR-0150) — migração providers.json → config.json', () => {
   let base: string;
   beforeEach(() => {
     base = mkdtempSync(join(tmpdir(), 'aluy-cfgmig-'));
@@ -154,7 +154,12 @@ describe('config único (ADR-0136) — migração providers.json → config.json
 
   it('add/remove escrevem na seção providers do config (não em providers.json)', () => {
     addLocalProviderOverride(
-      { id: 'tokenrouter', wireFormat: 'openai-compat', baseUrl: 'https://tr/v1', defaultModel: 'x' },
+      {
+        id: 'tokenrouter',
+        wireFormat: 'openai-compat',
+        baseUrl: 'https://tr/v1',
+        defaultModel: 'x',
+      },
       base,
     );
     const store = new UserConfigStore({ baseDir: base });

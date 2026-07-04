@@ -230,6 +230,19 @@ describe('resolveMcpCallTimeoutMs — env ALUY_MCP_TIMEOUT_MS (EST-1010)', () =>
       600_000,
     );
   });
+
+  it('ADR-0150 (balde b) — config (2º arg): env > config > default, MESMO clamp', () => {
+    expect(resolveMcpCallTimeoutMs({} as NodeJS.ProcessEnv, 90_000)).toBe(90_000);
+    expect(
+      resolveMcpCallTimeoutMs({ ALUY_MCP_TIMEOUT_MS: '5000' } as NodeJS.ProcessEnv, 90_000),
+    ).toBe(5000);
+    expect(resolveMcpCallTimeoutMs({} as NodeJS.ProcessEnv, 999_999_999)).toBe(600_000);
+    expect(resolveMcpCallTimeoutMs({} as NodeJS.ProcessEnv, 10)).toBe(1_000);
+    expect(resolveMcpCallTimeoutMs({} as NodeJS.ProcessEnv, undefined)).toBe(
+      DEFAULT_MCP_CALL_TIMEOUT_MS,
+    );
+    expect(resolveMcpCallTimeoutMs({} as NodeJS.ProcessEnv, -5)).toBe(DEFAULT_MCP_CALL_TIMEOUT_MS);
+  });
 });
 
 describe('extractTextContent / clipBytes — CAP POR-BLOCO antes de concatenar (anti-OOM, EST-1010)', () => {

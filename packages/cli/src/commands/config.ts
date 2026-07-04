@@ -13,10 +13,26 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_MAX_TOKENS, DEFAULT_MAX_ITERATIONS } from '@hiperplano/aluy-cli-core';
+import {
+  DEFAULT_MAX_TOKENS,
+  DEFAULT_MAX_ITERATIONS,
+  DEFAULT_MAX_MEMORY_WRITES_PER_SESSION,
+  MAX_SUBAGENTS_PER_CALL,
+  DEFAULT_MAX_CONCURRENCY,
+  DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS,
+  DEFAULT_CYCLE_DURATION_MS,
+  DEFAULT_CYCLE_ITERATIONS,
+  DEFAULT_CYCLE_INTERVAL_MS,
+} from '@hiperplano/aluy-cli-core';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
 import { UserConfigStore } from '../io/user-config.js';
+import { DEFAULT_GC_MAX_AGE_MS, DEFAULT_GC_MAX_COUNT } from '../io/session-store.js';
+import { DEFAULT_AUTORESUME_WINDOW_MS } from '../session/resume.js';
 import { resolveLocalProviderConfig, resolveModelBackend } from '../model/local/config.js';
+import {
+  DEFAULT_MCP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MCP_CALL_TIMEOUT_MS,
+} from '../mcp/stdio-transport.js';
 
 export interface ConfigCommandDeps {
   readonly io?: TerminalIO;
@@ -119,7 +135,7 @@ export function collectSettings(
     pickConfig('sidecar.headroom', config.sidecarToggles?.headroom, 'on (default)'),
     pickConfig('lang', config.lang, 'auto'),
     pickConfig('theme', config.theme, 'default'),
-    // F185 — limites/orçamento (ADR-0136 balde a): env ALUY_MAX_* > config.limits > default.
+    // F185 — limites/orçamento (ADR-0150 balde a): env ALUY_MAX_* > config.limits > default.
     // Estavam AUSENTES da view de config efetiva, apesar de o doctor os mostrar e serem
     // env-sobreponíveis — quem depurava orçamento não via o valor efetivo nem a origem.
     pickEnvConfig(
@@ -145,6 +161,79 @@ export function collectSettings(
       config.limits?.maxIterations,
       String(DEFAULT_MAX_ITERATIONS),
       'config.limits.maxIterations',
+    ),
+    // ADR-0150 (balde b) — os 10 tunables NOVOS (Tier 1): mesmo padrão pickEnvConfig/
+    // pickConfig acima. Cada um tem um teto-teto hardcoded no core/cli (não aparece
+    // aqui — só o valor EFETIVO + origem, como os demais).
+    pickEnvConfig(
+      'limits.maxMemoryWritesPerSession',
+      'ALUY_MAX_MEMORY_WRITES_PER_SESSION',
+      env.ALUY_MAX_MEMORY_WRITES_PER_SESSION,
+      config.limits?.maxMemoryWritesPerSession,
+      String(DEFAULT_MAX_MEMORY_WRITES_PER_SESSION),
+      'config.limits.maxMemoryWritesPerSession',
+    ),
+    pickEnvConfig(
+      'subagents.maxPerCall',
+      'ALUY_SUBAGENT_MAX_PER_CALL',
+      env.ALUY_SUBAGENT_MAX_PER_CALL,
+      config.subagents?.maxPerCall,
+      String(MAX_SUBAGENTS_PER_CALL),
+      'config.subagents.maxPerCall',
+    ),
+    pickEnvConfig(
+      'subagents.maxConcurrency',
+      'ALUY_SUBAGENT_MAX_CONCURRENCY',
+      env.ALUY_SUBAGENT_MAX_CONCURRENCY,
+      config.subagents?.maxConcurrency,
+      String(DEFAULT_MAX_CONCURRENCY),
+      'config.subagents.maxConcurrency',
+    ),
+    pickEnvConfig(
+      'subagents.idleTimeoutMs',
+      'ALUY_SUBAGENT_IDLE_TIMEOUT',
+      env.ALUY_SUBAGENT_IDLE_TIMEOUT,
+      config.subagents?.idleTimeoutMs,
+      String(DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS),
+      'config.subagents.idleTimeoutMs',
+    ),
+    pickConfig(
+      'cycle.defaultDurationMs',
+      config.cycle?.defaultDurationMs,
+      String(DEFAULT_CYCLE_DURATION_MS),
+    ),
+    pickConfig(
+      'cycle.defaultIterations',
+      config.cycle?.defaultIterations,
+      String(DEFAULT_CYCLE_ITERATIONS),
+    ),
+    pickConfig(
+      'cycle.defaultIntervalMs',
+      config.cycle?.defaultIntervalMs,
+      String(DEFAULT_CYCLE_INTERVAL_MS),
+    ),
+    pickEnvConfig(
+      'mcp.connectTimeoutMs',
+      'ALUY_MCP_CONNECT_TIMEOUT_MS',
+      env.ALUY_MCP_CONNECT_TIMEOUT_MS,
+      config.mcp?.connectTimeoutMs,
+      String(DEFAULT_MCP_CONNECT_TIMEOUT_MS),
+      'config.mcp.connectTimeoutMs',
+    ),
+    pickEnvConfig(
+      'mcp.callTimeoutMs',
+      'ALUY_MCP_TIMEOUT_MS',
+      env.ALUY_MCP_TIMEOUT_MS,
+      config.mcp?.callTimeoutMs,
+      String(DEFAULT_MCP_CALL_TIMEOUT_MS),
+      'config.mcp.callTimeoutMs',
+    ),
+    pickConfig('session.gcMaxAgeMs', config.session?.gcMaxAgeMs, String(DEFAULT_GC_MAX_AGE_MS)),
+    pickConfig('session.gcMaxCount', config.session?.gcMaxCount, String(DEFAULT_GC_MAX_COUNT)),
+    pickConfig(
+      'session.autoResumeWindowMs',
+      config.session?.autoResumeWindowMs,
+      String(DEFAULT_AUTORESUME_WINDOW_MS),
     ),
   ];
   return settings;

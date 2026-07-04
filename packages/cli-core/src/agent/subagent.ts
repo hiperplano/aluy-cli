@@ -84,8 +84,93 @@ export const DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS = 120_000;
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS;
 /** Var de ambiente que sobrescreve o timeout de inatividade (s ou ms — ver clamp). */
 export const SUBAGENT_IDLE_TIMEOUT_ENV = 'ALUY_SUBAGENT_IDLE_TIMEOUT';
-/** Teto DURO de filhos por chamada de `spawn_agent` (anti exaustão de recursos). */
+/**
+ * DEFAULT de filhos por chamada de `spawn_agent` (anti exaustão de recursos). ADR-0150
+ * (balde b) — deixa de ser o teto-teto DURO (isso agora é `MAX_SUBAGENTS_PER_CALL_CEILING`)
+ * e vira o DEFAULT config-driven (`subagents.maxPerCall`, resolvido por
+ * `resolveMaxSubagentsPerCall`), CLAMPADO ao teto-teto novo. Mantido como export estável
+ * (usado hoje como fonte única do `maxItems`/texto do schema do `spawn_agent` — guia
+ * ESTÁTICO do modelo; a ENFORCEMENT real de runtime usa o valor RESOLVIDO/clampado, ver
+ * `SubAgentSpawner.spawn`).
+ */
 export const MAX_SUBAGENTS_PER_CALL = 8;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0150 (balde b) — `subagents.maxPerCall` e `subagents.maxConcurrency` viram
+// TUNABLES de config (~/.aluy/config.json), com a MESMA disciplina de
+// `resolveMaxTokens` (limits.ts): precedência ENV > CONFIG > DEFAULT, CLAMPADA
+// SEMPRE a um teto-teto NOVO e hardcoded. CLI-SEC-11 segue não-relaxável.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ADR-0150 — TETO-TETO DURO de filhos por chamada de `spawn_agent` (anti-runaway,
+ * exaustão de recursos). Aprovado pelo dono: 32 (4× o default de 8). O config/env
+ * NUNCA escapa deste limite.
+ */
+export const MAX_SUBAGENTS_PER_CALL_CEILING = 32;
+
+/** ADR-0150 — env que sobrepõe o default/config do teto de filhos por chamada. */
+export const SUBAGENTS_MAX_PER_CALL_ENV = 'ALUY_SUBAGENT_MAX_PER_CALL';
+
+/**
+ * ADR-0150 — resolve o TETO EFETIVO de filhos por chamada, precedência
+ * ENV > CONFIG > DEFAULT (`MAX_SUBAGENTS_PER_CALL`), sempre CLAMPADO em
+ * `[1, MAX_SUBAGENTS_PER_CALL_CEILING]`. Puro/determinístico (env/config são dados
+ * injetados pelo `cli`, sem I/O aqui).
+ */
+export function resolveMaxSubagentsPerCall(
+  env?: string | undefined,
+  config?: number | undefined,
+): number {
+  const fromEnv = parsePositiveIntSetting(env);
+  const fromConfig = parsePositiveIntSetting(config);
+  const chosen = fromEnv ?? fromConfig ?? MAX_SUBAGENTS_PER_CALL;
+  return Math.min(MAX_SUBAGENTS_PER_CALL_CEILING, Math.max(1, chosen));
+}
+
+/**
+ * ADR-0150 — TETO-TETO DURO de concorrência do fan-out (anti-runaway, exaustão de
+ * fds/processos/memória). Aprovado pelo dono: 16 (4× o default de 4). O config/env
+ * NUNCA escapa deste limite.
+ */
+export const MAX_SUBAGENT_CONCURRENCY_CEILING = 16;
+
+/** ADR-0150 — env que sobrepõe o default/config da concorrência do fan-out. */
+export const SUBAGENT_MAX_CONCURRENCY_ENV = 'ALUY_SUBAGENT_MAX_CONCURRENCY';
+
+/**
+ * ADR-0150 — resolve a CONCORRÊNCIA EFETIVA do fan-out, precedência
+ * FLAG (opção `maxConcurrency` do spawner) > ENV > CONFIG > DEFAULT
+ * (`DEFAULT_MAX_CONCURRENCY`), sempre CLAMPADA em `[1, MAX_SUBAGENT_CONCURRENCY_CEILING]`.
+ */
+export function resolveMaxConcurrency(
+  flag?: number | undefined,
+  env?: string | undefined,
+  config?: number | undefined,
+): number {
+  const fromFlag = parsePositiveIntSetting(flag);
+  const fromEnv = parsePositiveIntSetting(env);
+  const fromConfig = parsePositiveIntSetting(config);
+  const chosen = fromFlag ?? fromEnv ?? fromConfig ?? DEFAULT_MAX_CONCURRENCY;
+  return Math.min(MAX_SUBAGENT_CONCURRENCY_CEILING, Math.max(1, chosen));
+}
+
+/** Parseia um inteiro positivo (string ou número) — `undefined` se ausente/inválido. */
+function parsePositiveIntSetting(v: string | number | undefined): number | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = typeof v === 'number' ? v : Number(String(v).trim());
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) return undefined;
+  return n;
+}
+
+/**
+ * ADR-0150 — TETO-TETO DURO do timeout de INATIVIDADE por filho (floor/ceiling
+ * sensatos, aprovados pelo dono): entre 5s (nunca tão curto que mate um filho
+ * lento-mas-vivo por acidente) e 30min (nunca tão longo que um filho travado
+ * pendure a sessão quase indefinidamente).
+ */
+export const MIN_SUBAGENT_IDLE_TIMEOUT_MS = 5_000;
+export const MAX_SUBAGENT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * EST-1121 · ADR-0122 §F51 — PADRÕES de articulação de sala declarativos
@@ -360,6 +445,22 @@ export interface SubAgentSpawnerOptions {
    * INATIVIDADE (heartbeat). `idleTimeoutMs` tem precedência se ambos vierem.
    */
   readonly timeoutMs?: number;
+  /**
+   * ADR-0150 (balde b) — seção `subagents` de `~/.aluy/config.json`, JÁ LIDA pelo
+   * `cli` (wiring/controller) e injetada aqui (o core NÃO lê arquivo/env — fronteira
+   * ADR-0053 §8). Nível ENTRE a opção acima (`maxConcurrency`/`idleTimeoutMs`,
+   * equivalente a "flag") e o DEFAULT — MESMA precedência de `resolveMaxTokens`
+   * (flag > env > config > default). Cada campo é resolvido/clampado por
+   * `resolveMaxSubagentsPerCall`/`resolveMaxConcurrency`/`resolveIdleTimeoutMs`.
+   */
+  readonly configDefaults?: {
+    /** `subagents.maxPerCall` — clampado em `[1, MAX_SUBAGENTS_PER_CALL_CEILING]`. */
+    readonly maxPerCall?: number;
+    /** `subagents.maxConcurrency` — clampado em `[1, MAX_SUBAGENT_CONCURRENCY_CEILING]`. */
+    readonly maxConcurrency?: number;
+    /** `subagents.idleTimeoutMs` — clampado em `[MIN_SUBAGENT_IDLE_TIMEOUT_MS, MAX_SUBAGENT_IDLE_TIMEOUT_MS]`. */
+    readonly idleTimeoutMs?: number;
+  };
   /** Observador da UI (opcional). */
   readonly observer?: SubAgentObserver;
   /**
@@ -588,6 +689,7 @@ export function resolveIdleTimeoutMs(
   env: Record<string, string | undefined> = (
     globalThis as { process?: { env?: Record<string, string | undefined> } }
   ).process?.env ?? {},
+  config?: number | undefined, // ADR-0150 (balde b): config.subagents.idleTimeoutMs
 ): number {
   // 1) flag (opção do spawner) — só se for um positivo finito.
   if (flagMs !== undefined && Number.isFinite(flagMs) && flagMs > 0) {
@@ -596,7 +698,18 @@ export function resolveIdleTimeoutMs(
   // 2) env (s/ms) — parse tolerante.
   const fromEnv = parseDurationMs(env[SUBAGENT_IDLE_TIMEOUT_ENV]);
   if (fromEnv !== undefined) return fromEnv;
-  // 3) default.
+  // 3) ADR-0150 — config (durável entre sessões). Só ESTE nível é CLAMPADO ao
+  // floor/ceiling sensato (`[MIN_SUBAGENT_IDLE_TIMEOUT_MS, MAX_SUBAGENT_IDLE_TIMEOUT_MS]`
+  // = 5s..30min): flag/env acima seguem SEM clamp (back-compat — testes injetam ms
+  // curtos p/ não esperar tempo real; a flag/env são escolha explícita e pontual da
+  // sessão, não um default persistido que precise de guarda-corpo).
+  if (config !== undefined && Number.isFinite(config) && config > 0) {
+    return Math.min(
+      MAX_SUBAGENT_IDLE_TIMEOUT_MS,
+      Math.max(MIN_SUBAGENT_IDLE_TIMEOUT_MS, Math.floor(config)),
+    );
+  }
+  // 4) default.
   return DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS;
 }
 
@@ -647,6 +760,8 @@ export class SubAgentSpawner {
   private readonly maxConcurrency: number;
   /** EST-0969 — timeout de INATIVIDADE por filho (não de relógio total). */
   private readonly idleTimeoutMs: number;
+  /** ADR-0150 (balde b) — teto EFETIVO/resolvido de filhos por chamada (`spawn()` o lê). */
+  private readonly maxSubagentsPerCall: number;
   private readonly observer?: SubAgentObserver;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** EST-0982 — sinal de parada POR FILHO (nó da FlowTree), resolvido pelo rótulo. */
@@ -681,10 +796,33 @@ export class SubAgentSpawner {
     );
     if (opts.askResolver) this.askResolver = opts.askResolver;
     this.budget = opts.sharedBudget ?? new SharedBudget(opts.limits ?? DEFAULT_LIMITS);
-    this.maxConcurrency = clampPositive(opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY);
+    // ADR-0150 (balde b) — precedência opção(flag) > env > config > default, clampada
+    // ao teto-teto NOVO (`MAX_SUBAGENT_CONCURRENCY_CEILING`). Substitui o antigo
+    // `clampPositive(opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY)` (sem env/config nem
+    // teto-teto — só clampava ao PISO ≥1).
+    this.maxConcurrency = resolveMaxConcurrency(
+      opts.maxConcurrency,
+      readProcessEnv()[SUBAGENT_MAX_CONCURRENCY_ENV],
+      opts.configDefaults?.maxConcurrency,
+    );
+    // ADR-0150 (balde b) — teto de filhos por chamada: precedência env > config >
+    // default (`MAX_SUBAGENTS_PER_CALL`), clampada ao teto-teto NOVO
+    // (`MAX_SUBAGENTS_PER_CALL_CEILING`). `spawn()` usa ESTE valor resolvido (não o
+    // módulo-constante `MAX_SUBAGENTS_PER_CALL`, que segue só como DEFAULT/guia estático
+    // do schema do `spawn_agent`, EST-0970).
+    this.maxSubagentsPerCall = resolveMaxSubagentsPerCall(
+      readProcessEnv()[SUBAGENTS_MAX_PER_CALL_ENV],
+      opts.configDefaults?.maxPerCall,
+    );
     // EST-0969 — precedência flag > env > default. `idleTimeoutMs` tem precedência
     // sobre o alias deprecado `timeoutMs` (ambos AGORA são INATIVIDADE, não total).
-    this.idleTimeoutMs = resolveIdleTimeoutMs(opts.idleTimeoutMs ?? opts.timeoutMs);
+    // ADR-0150 (balde b) — `configDefaults.idleTimeoutMs` entra como o nível ENTRE env e
+    // default, clampado em `[MIN_SUBAGENT_IDLE_TIMEOUT_MS, MAX_SUBAGENT_IDLE_TIMEOUT_MS]`.
+    this.idleTimeoutMs = resolveIdleTimeoutMs(
+      opts.idleTimeoutMs ?? opts.timeoutMs,
+      undefined,
+      opts.configDefaults?.idleTimeoutMs,
+    );
     if (opts.observer) this.observer = opts.observer;
     this.sleep = opts.sleep ?? defaultSleep;
     if (opts.childSignalOf) this.childSignalOf = opts.childSignalOf;
@@ -703,8 +841,10 @@ export class SubAgentSpawner {
   /**
    * Dispara os sub-agentes em PARALELO (respeitando o teto de concorrência) e
    * devolve os desfechos na ORDEM dos perfis. `signal` propaga o cancelamento do
-   * pai (Ctrl-C) a todos os filhos. Filhos > `MAX_SUBAGENTS_PER_CALL` são
-   * recusados (anti-runaway) ANTES de qualquer execução.
+   * pai (Ctrl-C) a todos os filhos. Filhos > o teto RESOLVIDO (ADR-0150 —
+   * `resolveMaxSubagentsPerCall`, config-driven e clampado a
+   * `MAX_SUBAGENTS_PER_CALL_CEILING`) são recusados (anti-runaway) ANTES de
+   * qualquer execução.
    */
   async spawn(
     profiles: readonly SubAgentProfile[],
@@ -712,9 +852,9 @@ export class SubAgentSpawner {
     opts?: { room?: boolean; pattern?: string },
   ): Promise<readonly SubAgentOutcome[]> {
     if (profiles.length === 0) return [];
-    if (profiles.length > MAX_SUBAGENTS_PER_CALL) {
+    if (profiles.length > this.maxSubagentsPerCall) {
       throw new Error(
-        `spawn_agent: ${profiles.length} sub-agentes excede o teto de ${MAX_SUBAGENTS_PER_CALL} por chamada (anti-runaway)`,
+        `spawn_agent: ${profiles.length} sub-agentes excede o teto de ${this.maxSubagentsPerCall} por chamada (anti-runaway)`,
       );
     }
 
@@ -1008,9 +1148,11 @@ export class SubAgentSpawner {
   }
 }
 
-function clampPositive(v: number | undefined, def: number): number {
-  if (v === undefined || !Number.isFinite(v) || v <= 0) return def;
-  return Math.floor(v);
+/** ADR-0150 — leitura DEFENSIVA de `process.env` (ausente em runtimes sem Node global). */
+function readProcessEnv(): Record<string, string | undefined> {
+  return (
+    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {}
+  );
 }
 
 /**

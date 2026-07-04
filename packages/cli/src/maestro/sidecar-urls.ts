@@ -1,5 +1,5 @@
 // FONTE ÚNICA das URLs dos sidecars — CONFIGURÁVEIS por env E pela seção `services` do
-// config único (ADR-0136 EMENDA-1 §8/§9). Antes a URL do Mem0/Ollama estava HARDCODADA
+// config único (ADR-0150 EMENDA-1 §8/§9). Antes a URL do Mem0/Ollama estava HARDCODADA
 // espalhada pelo engine + wiring + doctor; depois virou `ALUY_<X>_URL` (env). Agora a
 // porta/host é PREFERÊNCIA REAL salvável (quem já roda Ollama em `:11500` grava no config
 // em vez de reexportar env toda sessão).

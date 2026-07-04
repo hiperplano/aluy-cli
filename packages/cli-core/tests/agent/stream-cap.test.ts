@@ -65,4 +65,12 @@ describe('StreamByteCap — contrato do teto de bytes', () => {
     expect(off.limit).toBe(0);
     expect(off.addText('x'.repeat(50_000_000))).toBe(false);
   });
+
+  // ADR-0150 (Tier 2) — configMaxBytes (2º arg), nível ENTRE env e default. Ainda
+  // NÃO wired a um call-site em produção (`newStreamByteCap()` segue chamado sem
+  // args em streaming-caller.ts) — cobertura do resolver puro.
+  it('ADR-0150 — configMaxBytes vence o default; env AINDA vence o config', () => {
+    expect(newStreamByteCap({}, 512).limit).toBe(512);
+    expect(newStreamByteCap({ ALUY_STREAM_MAX_BYTES: '128' }, 512).limit).toBe(128);
+  });
 });

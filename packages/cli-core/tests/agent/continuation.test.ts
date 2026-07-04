@@ -293,6 +293,32 @@ describe('resolveContinuationConfig — env overrides', () => {
   });
 });
 
+// ─── 9. ADR-0150 (Tier 2) — configDefaults (2º arg), nível ENTRE env e default. ──
+// Ainda NÃO wired a um call-site em produção (a mecânica ATIVA é a do Maestro,
+// `resolveContinuationCfg` em maestro/wiring.ts — achado de governança, ver ADR).
+
+describe('ADR-0150 (Tier 2) — resolveContinuationConfig(env, configDefaults)', () => {
+  it('configDefaults vence o default', () => {
+    const cfg = resolveContinuationConfig({}, { maxContinuations: 8, nudgeAt: 2, giveUpAt: 5 });
+    expect(cfg.maxContinuations).toBe(8);
+    expect(cfg.nudgeAt).toBe(2);
+    expect(cfg.giveUpAt).toBe(5);
+  });
+
+  it('env AINDA vence o configDefaults', () => {
+    const cfg = resolveContinuationConfig(
+      { ALUY_CONT_MAX: '6' },
+      { maxContinuations: 8, giveUpAt: 5 },
+    );
+    expect(cfg.maxContinuations).toBe(6);
+  });
+
+  it('giveUpAt do configDefaults AINDA é clampado ao maxContinuations resolvido', () => {
+    const cfg = resolveContinuationConfig({}, { maxContinuations: 2, giveUpAt: 99 });
+    expect(cfg.giveUpAt).toBe(2);
+  });
+});
+
 // ─── 9. isAnnounceNoTool ────────────────────────────────────────────────
 
 describe('isAnnounceNoTool — detecção de anúncio-sem-tool', () => {

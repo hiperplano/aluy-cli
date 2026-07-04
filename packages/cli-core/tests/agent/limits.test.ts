@@ -15,6 +15,9 @@ import {
   MIN_TOKENS_FLOOR,
   MIN_ITERATIONS_FLOOR,
   BUDGET_WARN_PCT,
+  resolveMaxMemoryWritesPerSession,
+  DEFAULT_MAX_MEMORY_WRITES_PER_SESSION,
+  MAX_MEMORY_WRITES_PER_SESSION_CEILING,
 } from '../../src/agent/limits.js';
 
 describe('EST-0944 · CLI-SEC-8 — SessionBudget (circuit-breaker)', () => {
@@ -164,11 +167,13 @@ describe('EST-0948 — resolveMaxTokens (precedência flag>env>default, validaç
     expect(resolveMaxTokens(String(MIN_TOKENS_FLOOR))).toBe(MIN_TOKENS_FLOOR);
   });
 
-  it('ADR-0136: config.limits.maxTokens entra entre env e default (flag>env>config>default)', () => {
+  it('ADR-0150: config.limits.maxTokens entra entre env e default (flag>env>config>default)', () => {
     expect(resolveMaxTokens(undefined, undefined, 500000)).toBe(500_000); // só config
     expect(resolveMaxTokens(undefined, '750000', 500000)).toBe(750_000); // env vence config
     expect(resolveMaxTokens('600000', '750000', 500000)).toBe(600_000); // flag vence tudo
-    expect(resolveMaxTokens(undefined, undefined, MAX_TOKENS_CEILING * 10)).toBe(MAX_TOKENS_CEILING); // config clampada
+    expect(resolveMaxTokens(undefined, undefined, MAX_TOKENS_CEILING * 10)).toBe(
+      MAX_TOKENS_CEILING,
+    ); // config clampada
   });
 });
 
@@ -211,7 +216,7 @@ describe('EST-0948 — resolveMaxIterations (precedência flag>env>default, vali
     expect(resolveMaxIterations('', undefined)).toBe(DEFAULT_MAX_ITERATIONS);
   });
 
-  it('ADR-0136: config.limits.maxIterations entra entre env e default (flag>env>config>default)', () => {
+  it('ADR-0150: config.limits.maxIterations entra entre env e default (flag>env>config>default)', () => {
     expect(resolveMaxIterations(undefined, undefined, 500)).toBe(500); // só config
     expect(resolveMaxIterations(undefined, '400', 500)).toBe(400); // env vence config
     expect(resolveMaxIterations('600', '400', 500)).toBe(600); // flag vence tudo
@@ -259,11 +264,13 @@ describe('EST-0948 — resolveMaxOutputTokens (max_tokens de OUTPUT por chamada;
 
   it('flag inválida ⇒ cai p/ o env (precedência preservada), avisa do typo da flag', () => {
     const warns: string[] = [];
-    expect(resolveMaxOutputTokens('abc', '16384', undefined, (m) => void warns.push(m))).toBe(16384);
+    expect(resolveMaxOutputTokens('abc', '16384', undefined, (m) => void warns.push(m))).toBe(
+      16384,
+    );
     expect(warns.length).toBe(1); // só o aviso da flag inválida; o env era válido
   });
 
-  it('ADR-0136: config.limits.maxOutputTokens entra entre env e UNSET (flag>env>config)', () => {
+  it('ADR-0150: config.limits.maxOutputTokens entra entre env e UNSET (flag>env>config)', () => {
     expect(resolveMaxOutputTokens(undefined, undefined, 16384)).toBe(16384); // só config
     expect(resolveMaxOutputTokens(undefined, '8192', 16384)).toBe(8192); // env vence config
     expect(resolveMaxOutputTokens('4096', '8192', 16384)).toBe(4096); // flag vence tudo
@@ -339,5 +346,44 @@ describe('EST-0948 — budgetPct (% do teto consumido, p/ os indicadores)', () =
 
   it('o limiar de aviso é 70%', () => {
     expect(BUDGET_WARN_PCT).toBe(70);
+  });
+});
+
+describe('ADR-0150 (balde b) — resolveMaxMemoryWritesPerSession (flag > env > config > default + clamp)', () => {
+  it('default quando nada é dado', () => {
+    expect(resolveMaxMemoryWritesPerSession()).toBe(DEFAULT_MAX_MEMORY_WRITES_PER_SESSION);
+  });
+
+  it('config vence o default', () => {
+    expect(resolveMaxMemoryWritesPerSession(undefined, undefined, 50)).toBe(50);
+  });
+
+  it('env vence o config', () => {
+    expect(resolveMaxMemoryWritesPerSession(undefined, '30', 50)).toBe(30);
+  });
+
+  it('flag vence tudo', () => {
+    expect(resolveMaxMemoryWritesPerSession(10, '30', 50)).toBe(10);
+  });
+
+  it('CLAMPA ao teto-teto — config pedindo 10000 ⇒ clampa a 100', () => {
+    expect(resolveMaxMemoryWritesPerSession(undefined, undefined, 10_000)).toBe(
+      MAX_MEMORY_WRITES_PER_SESSION_CEILING,
+    );
+    expect(MAX_MEMORY_WRITES_PER_SESSION_CEILING).toBe(100);
+  });
+
+  it('piso — nunca abaixo de 1 (config ≤0 ⇒ ignorado, cai no default)', () => {
+    expect(resolveMaxMemoryWritesPerSession(undefined, undefined, 0)).toBe(
+      DEFAULT_MAX_MEMORY_WRITES_PER_SESSION,
+    );
+    expect(resolveMaxMemoryWritesPerSession(undefined, undefined, -5)).toBe(
+      DEFAULT_MAX_MEMORY_WRITES_PER_SESSION,
+    );
+  });
+
+  it('entrada inválida (não-inteiro/lixo) ⇒ ignorada, cai no próximo nível', () => {
+    expect(resolveMaxMemoryWritesPerSession('abc', undefined, 25)).toBe(25);
+    expect(resolveMaxMemoryWritesPerSession(undefined, 'lixo', 25)).toBe(25);
   });
 });

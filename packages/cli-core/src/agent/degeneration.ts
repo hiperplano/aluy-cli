@@ -83,6 +83,18 @@ export const DEGENERATION_MIN_CYCLE_SPAN_ENV = 'ALUY_DEGENERATE_CYCLE_SPAN';
 export const DEGENERATION_DISABLE_ENV = 'ALUY_DEGENERATE_OFF';
 
 /**
+ * ADR-0150 (balde b, Tier 2) — DEFAULTS config-driven (`config.advanced.degeneration`),
+ * injetáveis pelo `cli` (o core não lê arquivo). Nível ENTRE env e default (env >
+ * config > default) — `resolveDegenerationConfig` os usa quando a env correspondente
+ * está ausente. NÃO wired a um call-site hoje (`newDegenerationSink` segue só-env);
+ * o resolver aceita o parâmetro para uso futuro/teste isolado.
+ */
+export interface DegenerationConfigDefaults {
+  readonly maxConsecutiveLineRepeats?: number;
+  readonly minCycleSpanChars?: number;
+}
+
+/**
  * Resolve a config a partir do ambiente (consolidação `ALUY_*`), tolerante:
  * valor inválido/≤0 ⇒ cai no default (NUNCA desarma a guarda por engano). O teto
  * de repetição tem um PISO sensato (≥3) p/ um valor minúsculo não virar
@@ -92,9 +104,14 @@ export function resolveDegenerationConfig(
   env: Record<string, string | undefined> = (
     globalThis as { process?: { env?: Record<string, string | undefined> } }
   ).process?.env ?? {},
+  configDefaults?: DegenerationConfigDefaults,
 ): DegenerationConfig {
-  const repeats = parsePositiveInt(env[DEGENERATION_MAX_LINE_REPEATS_ENV]);
-  const span = parsePositiveInt(env[DEGENERATION_MIN_CYCLE_SPAN_ENV]);
+  const repeats =
+    parsePositiveInt(env[DEGENERATION_MAX_LINE_REPEATS_ENV]) ??
+    parsePositiveInt(configDefaults?.maxConsecutiveLineRepeats);
+  const span =
+    parsePositiveInt(env[DEGENERATION_MIN_CYCLE_SPAN_ENV]) ??
+    parsePositiveInt(configDefaults?.minCycleSpanChars);
   return {
     maxConsecutiveLineRepeats:
       repeats !== undefined ? Math.max(3, repeats) : DEFAULT_MAX_CONSECUTIVE_LINE_REPEATS,
@@ -337,9 +354,9 @@ function clampSample(s: string): string {
   return oneLine.length <= SAMPLE_MAX ? oneLine : `${oneLine.slice(0, SAMPLE_MAX)}…`;
 }
 
-function parsePositiveInt(raw: string | undefined): number | undefined {
+function parsePositiveInt(raw: string | number | undefined): number | undefined {
   if (raw === undefined) return undefined;
-  const s = raw.trim();
+  const s = typeof raw === 'number' ? String(raw) : raw.trim();
   if (s === '') return undefined;
   const n = Number(s);
   if (!Number.isFinite(n) || n <= 0) return undefined;

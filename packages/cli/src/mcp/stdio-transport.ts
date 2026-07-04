@@ -227,13 +227,25 @@ export const DEFAULT_MCP_CALL_TIMEOUT_MS = 60_000;
 const MIN_MCP_CALL_TIMEOUT_MS = 1_000;
 const MAX_MCP_CALL_TIMEOUT_MS = 600_000;
 
-/** Resolve o teto de `callTool` a partir do env (clamp + fallback ao default). */
-export function resolveMcpCallTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+/**
+ * Resolve o teto de `callTool`: precedência ENV > CONFIG > DEFAULT (ADR-0150 balde b —
+ * `config.mcp.callTimeoutMs` "termina o padrão"; o env já existia). SEMPRE clampado no
+ * MESMO teto-teto hardcoded (`[MIN_MCP_CALL_TIMEOUT_MS, MAX_MCP_CALL_TIMEOUT_MS]`), que
+ * este ADR não altera.
+ */
+export function resolveMcpCallTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+  config?: number | undefined, // ADR-0150 (balde b): config.mcp.callTimeoutMs
+): number {
   const raw = env['ALUY_MCP_TIMEOUT_MS'];
-  if (typeof raw !== 'string' || raw.trim() === '') return DEFAULT_MCP_CALL_TIMEOUT_MS;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return DEFAULT_MCP_CALL_TIMEOUT_MS;
-  return Math.min(MAX_MCP_CALL_TIMEOUT_MS, Math.max(MIN_MCP_CALL_TIMEOUT_MS, Math.round(n)));
+  const n = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : Number.NaN;
+  if (Number.isFinite(n) && n > 0) {
+    return Math.min(MAX_MCP_CALL_TIMEOUT_MS, Math.max(MIN_MCP_CALL_TIMEOUT_MS, Math.round(n)));
+  }
+  if (config !== undefined && Number.isFinite(config) && config > 0) {
+    return Math.min(MAX_MCP_CALL_TIMEOUT_MS, Math.max(MIN_MCP_CALL_TIMEOUT_MS, Math.round(config)));
+  }
+  return DEFAULT_MCP_CALL_TIMEOUT_MS;
 }
 
 /**
@@ -249,13 +261,31 @@ export const DEFAULT_MCP_CONNECT_TIMEOUT_MS = 20_000;
 const MIN_MCP_CONNECT_TIMEOUT_MS = 1_000;
 const MAX_MCP_CONNECT_TIMEOUT_MS = 120_000;
 
-/** Resolve o teto do handshake a partir do env (clamp + fallback ao default). */
-export function resolveMcpConnectTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+/**
+ * Resolve o teto do handshake: precedência ENV > CONFIG > DEFAULT (ADR-0150 balde b —
+ * `config.mcp.connectTimeoutMs` "termina o padrão"; o env já existia). SEMPRE clampado
+ * no MESMO teto-teto hardcoded (`[MIN_MCP_CONNECT_TIMEOUT_MS, MAX_MCP_CONNECT_TIMEOUT_MS]`),
+ * que este ADR não altera.
+ */
+export function resolveMcpConnectTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+  config?: number | undefined, // ADR-0150 (balde b): config.mcp.connectTimeoutMs
+): number {
   const raw = env['ALUY_MCP_CONNECT_TIMEOUT_MS'];
-  if (typeof raw !== 'string' || raw.trim() === '') return DEFAULT_MCP_CONNECT_TIMEOUT_MS;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return DEFAULT_MCP_CONNECT_TIMEOUT_MS;
-  return Math.min(MAX_MCP_CONNECT_TIMEOUT_MS, Math.max(MIN_MCP_CONNECT_TIMEOUT_MS, Math.round(n)));
+  const n = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : Number.NaN;
+  if (Number.isFinite(n) && n > 0) {
+    return Math.min(
+      MAX_MCP_CONNECT_TIMEOUT_MS,
+      Math.max(MIN_MCP_CONNECT_TIMEOUT_MS, Math.round(n)),
+    );
+  }
+  if (config !== undefined && Number.isFinite(config) && config > 0) {
+    return Math.min(
+      MAX_MCP_CONNECT_TIMEOUT_MS,
+      Math.max(MIN_MCP_CONNECT_TIMEOUT_MS, Math.round(config)),
+    );
+  }
+  return DEFAULT_MCP_CONNECT_TIMEOUT_MS;
 }
 
 /**

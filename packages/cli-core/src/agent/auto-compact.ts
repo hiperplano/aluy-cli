@@ -195,13 +195,13 @@ export interface AutoCompactInputs {
    */
   readonly atFlag?: string | number | undefined;
   readonly atEnv?: string | undefined;
-  /** ADR-0136 balde(a): `config.context.autocompactAt` — entra ENTRE env e default. */
+  /** ADR-0150 balde(a): `config.context.autocompactAt` — entra ENTRE env e default. */
   readonly atConfig?: string | number | undefined;
   /** Tamanho da janela do modelo (tokens). `<=0`/ausente ⇒ auto-compactação inerte. */
   readonly contextWindow?: number | undefined;
   /** `ALUY_AUTOCOMPACT_MAX` (env) — override do teto do anti-loop. */
   readonly maxConsecutiveEnv?: string | undefined;
-  /** ADR-0136 balde(a): `config.context.autocompactMax` — entra ENTRE env e default. */
+  /** ADR-0150 balde(a): `config.context.autocompactMax` — entra ENTRE env e default. */
   readonly maxConsecutiveConfig?: string | number | undefined;
 }
 
@@ -223,7 +223,7 @@ export function resolveAutoCompact(inputs: AutoCompactInputs): AutoCompactConfig
   const fromFlag = parseAutoCompactAt(inputs.atFlag);
   const fromEnv = parseAutoCompactAt(inputs.atEnv);
   const fromConfig = parseAutoCompactAt(inputs.atConfig);
-  // Precedência ADR-0136: flag > env > config > default. `off`/0 em qualquer um desliga.
+  // Precedência ADR-0150: flag > env > config > default. `off`/0 em qualquer um desliga.
   const rawAt = fromFlag ?? fromEnv ?? fromConfig ?? DEFAULT_AUTOCOMPACT_AT;
   if (rawAt <= 0 || contextWindow <= 0) {
     return { ...AUTOCOMPACT_OFF, contextWindow: Math.max(0, contextWindow) };

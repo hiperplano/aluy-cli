@@ -62,7 +62,7 @@ describe('collectSettings — precedência env > config.json > default', () => {
     });
   });
 
-  // F185 — limites/orçamento (ADR-0136) agora aparecem na view de config efetiva.
+  // F185 — limites/orçamento (ADR-0150) agora aparecem na view de config efetiva.
   it('F185 — maxTokens/maxOutputTokens/maxIterations com defaults quando ausentes', () => {
     const s = collectSettings({}, {} as never);
     expect(s.find((x) => x.key === 'maxTokens')).toMatchObject({
