@@ -25,6 +25,7 @@ export function buildMonitorTools(
   const monitor: NativeTool = {
     name: 'monitor',
     effect: 'read',
+    group: 'assincrono', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
     description:
       'Arma um VIGIA assíncrono read-only. type "file-watch": avisa quando um arquivo/dir muda (campo path). type "process-wait": avisa quando um PID encerra (campo pid). Quando dispara, você recebe o evento como DADO entre os turnos — sem parar o trabalho em curso. Retorna o id do monitor (use em monitor_cancel).',
     parameters: {
@@ -90,6 +91,7 @@ export function buildMonitorTools(
   const monitors: NativeTool = {
     name: 'monitors',
     effect: 'read',
+    group: 'assincrono', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
     description: 'Lista os monitores ativos (id · rótulo · tipo).',
     parameters: { type: 'object', properties: {} },
     async run(): Promise<ToolResult> {
@@ -105,6 +107,7 @@ export function buildMonitorTools(
   const monitorCancel: NativeTool = {
     name: 'monitor_cancel',
     effect: 'read',
+    group: 'assincrono', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
     description: 'Cancela um monitor ativo pelo id (para o vigia).',
     parameters: {
       type: 'object',
@@ -126,6 +129,7 @@ export function buildMonitorTools(
   const watchCommand: NativeTool = {
     name: 'watch_command',
     effect: 'exec',
+    group: 'assincrono', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
     description:
       'Roda um comando de shell em background (detached, stdio próprio) e te avisa quando ele terminar, com o exit code. Diferente de run_command, NÃO bloqueia — o comando roda solto e você recebe o resultado como um evento de monitor entre os turnos. Use para atividades longas (build, teste, deploy) que você quer disparar e continuar trabalhando. Input: { "command": string (obrigatório), "label": string (obrigatório) }. O label aparece no evento de conclusão para você identificar qual comando terminou.',
     parameters: {

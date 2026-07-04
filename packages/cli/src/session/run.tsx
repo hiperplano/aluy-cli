@@ -798,6 +798,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const agentRegistry = new AgentRegistry(globalAgents.profiles, projectAgents.profiles);
   const agentLoadErrors = [...globalAgents.errors, ...projectAgents.errors];
 
+  // ADR-0145 (frente d/e) — SKILLS carregadas AQUI (antes do `buildSession`) p/ ir ao
+  // menu de `capabilities` (DESCOBERTA-APENAS — a invocação de skill NÃO é desta onda).
+  // Reusa os MESMOS loaders confinados do `/skills` (global `~/.aluy/skills/` + projeto
+  // `.claude/skills/`/`.aluy/skills/`); o array é reaproveitado abaixo p/ a contagem de
+  // governança (`setGovernanceCounts`), sem reler o filesystem duas vezes.
+  const loadedSkills = [
+    ...new UserSkillsLoader().load().skills,
+    ...new ProjectSkillsLoader({ workspace: cwdWorkspace }).load().skills,
+  ];
+
   // ── ADR-0120 / EST-1113 — BACKEND LOCAL (BYO) ─────────────────────────────────
   // Resolve o backend (flag>env>config>default broker). Sob `local`, MONTA o
   // LocalModelClient (provider direto + credencial BYO + anti-SSRF do base_url) e o
@@ -895,6 +905,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     ...(effectiveMode !== undefined ? { mode: effectiveMode } : {}),
     // EST-0977/0978 — registro de agentes-`.md` (só usado com sub-agentes habilitados).
     agentRegistry,
+    // ADR-0145 (frente d/e) — skills já carregadas, p/ o menu de `capabilities` (descoberta).
+    ...(loadedSkills.length > 0 ? { skills: loadedSkills } : {}),
     // GS-MD7 (fix registry-cwd) — relê os agentes de PROJETO do cwd CORRENTE no spawnNamed. O
     // `projectAgentsLoader` está ancorado no `cwdWorkspace` (= cwdPort), cujo `load()` resolve
     // `.claude/agents/` relativo ao sessionCwd — então segue o `cd`. Globais ficam fixos do boot.
@@ -1068,10 +1080,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // `/skills`/`/workflows`). Memória de projeto = fatos com escopo `projeto` no `.aluy/memory/`.
   // Fail-safe: qualquer fonte ausente ⇒ 0 (nunca derruba o boot).
   {
-    const skills = [
-      ...new UserSkillsLoader().load().skills,
-      ...new ProjectSkillsLoader({ workspace: cwdWorkspace }).load().skills,
-    ];
+    // ADR-0145 — reusa `loadedSkills` (já carregado acima p/ o `capabilities`), sem
+    // reler o filesystem de skills uma 2ª vez.
+    const skills = loadedSkills;
     const workflows = [
       ...new UserWorkflowsLoader().load().workflows,
       ...new ProjectWorkflowsLoader({ workspace: cwdWorkspace }).load().workflows,

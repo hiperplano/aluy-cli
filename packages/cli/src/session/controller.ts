@@ -122,7 +122,24 @@ import {
   type MaestroPort,
   type ContinuationConfig,
   type MemoryEngine,
+  // ADR-0145 (frente d) — tipos do MENU VIVO de `capabilities` (o contrato puro vem
+  // do core; a MONTAGEM concreta usa os helpers PUROS de `capabilities-snapshot.ts`).
+  type CapabilitiesPort,
+  type CapabilitiesSnapshot,
+  type Skill,
 } from '@hiperplano/aluy-cli-core';
+// ADR-0145 (frente d) — comandos NATIVOS da sessão (mesma fonte que `buildSessionCommandsNote`
+// já usa no wiring): o menu do `capabilities` lista {name, about} ESTRUTURADO (não a nota
+// pré-formatada em prosa, que já entra no `system` por outro campo).
+import { NATIVE_COMMANDS } from '../slash/commands.js';
+// ADR-0145 (frente d/e) — helpers PUROS (testáveis isolados) que montam as peças do
+// `CapabilitiesSnapshot` a partir do dado que o controller já tem em mãos.
+import {
+  mapToolsToCapabilityInfo,
+  mapAgentsToCapabilityItems,
+  mapSkillsToCapabilityItems,
+  groupMcpServers,
+} from './capabilities-snapshot.js';
 import { runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
 // F191 — primitivo de EXPEDITE ("acelerar o encaixe"): o controller o POSSUI e o passa
 // ao loop; `controller.expedite()` toca o sino p/ cortar a chamada de modelo em voo.
@@ -467,6 +484,15 @@ export interface SessionControllerOptions {
    * sub-agentes genéricos (EST-0969, comportamento idêntico ao baseline).
    */
   readonly agentRegistry?: AgentRegistry;
+  /**
+   * ADR-0145 (frente d/e) — SKILLS já carregadas pelo wiring (globais `~/.aluy/skills/`
+   * + projeto `.claude/skills/`/`.aluy/skills/`, MESMOS loaders do `/skills`). Usadas
+   * SÓ p/ a tool `capabilities` listar (DESCOBERTA, buraco #3): nome + 1 linha +
+   * origem. `invocable` no snapshot é `true` SÓ p/ `origin==='global'` (§e — skill de
+   * `project` é descoberta-apenas, nunca injetada sozinha). Ausente ⇒ `[]` (o menu de
+   * `capabilities` simplesmente não lista skills — não-regressão).
+   */
+  readonly skills?: readonly Skill[];
   /**
    * GS-MD7 (fix registry-cwd) — relê os agentes de PROJETO (`.claude/agents/`) do cwd
    * CORRENTE da sessão (o `cd`/change_dir move o cwd; o registro do boot ficava preso no dir
@@ -1447,6 +1473,60 @@ export class SessionController {
       allTools.map((t) => withToolReport(t, reporter)),
     );
 
+    // ADR-0145 (frente d) — CapabilitiesPort: o controller MONTA o snapshot a partir
+    // do que JÁ TEM em mãos (mesmo padrão das portas `memory`/`subAgents`/`question` —
+    // o core define o CONTRATO puro em `types.ts`; aqui entra o DADO concreto):
+    //  - `tools`  ← `this.toolRegistry.list()` (nome/efeito/grupo/when de CADA tool já
+    //    registrada — nativas+web+memória+monitor+MCP+spawn_agent; MCP tem o `group`
+    //    INFERIDO do prefixo `mcp__<server>__`, nunca de um rótulo auto-declarado);
+    //  - `agents` ← `opts.agentRegistry.list()` (mesma fonte de `buildAvailableAgentsNote`);
+    //  - `skills` ← `opts.skills` (já carregados pelo wiring, mesmos loaders do `/skills`);
+    //  - `mcpServers` ← agrupamento de `opts.mcpTools` por server (SÓ contador/prefixo —
+    //    NUNCA a description de terceiro, que nem entra no `CapabilityMcpServer`);
+    //  - `memory.factCount` ← `MemoryReadPort.searchFacts` (usa só o `.total`, nunca o
+    //    conteúdo dos fatos — `limit:1` minimiza o que é sequer buscado);
+    //  - `monitors` ← `this.monitorStore.list()` (já uma projeção sem o trigger interno);
+    //  - `sessionCommands` ← `NATIVE_COMMANDS` (comandos do HUMANO, nunca invocados
+    //    pelo agente — o menu só os RECOMENDA).
+    // SEGURANÇA (AG-0008): nenhum destes campos carrega credencial/provider/base_url/
+    // api_key/model/tier — o TIPO (`CapabilitiesSnapshot`, core) não tem onde guardar
+    // isso; ver o teste anti-vazamento em `tests/agent/capabilities.test.ts`.
+    const capabilitiesAgents = opts.agentRegistry?.list() ?? [];
+    const capabilitiesSkills = opts.skills ?? [];
+    const mcpToolsForCapabilities = opts.mcpTools ?? [];
+    const capabilitiesPort: CapabilitiesPort = {
+      snapshot: async (): Promise<CapabilitiesSnapshot> => {
+        // Memória — SÓ a contagem (`total` do `searchFacts`, NUNCA o array de fatos em
+        // si). Sem `searchFacts` (porta write-only/ausente) ⇒ campo `memory` omitido.
+        let factCount: number | undefined;
+        const memoryPort = opts.ports.memory;
+        if (memoryPort?.searchFacts) {
+          try {
+            const res = await memoryPort.searchFacts(undefined, 1);
+            factCount = res.total;
+          } catch {
+            factCount = undefined; // best-effort — o menu nunca quebra por causa disto.
+          }
+        }
+
+        return {
+          tools: mapToolsToCapabilityInfo(this.toolRegistry.list()),
+          agents: mapAgentsToCapabilityItems(capabilitiesAgents),
+          skills: mapSkillsToCapabilityItems(capabilitiesSkills),
+          mcpServers: groupMcpServers(mcpToolsForCapabilities),
+          ...(factCount !== undefined ? { memory: { factCount } } : {}),
+          monitors: this.monitorStore
+            .list()
+            .map((m) => ({ id: m.monitorId, label: m.label, type: m.type })),
+          sessionCommands: NATIVE_COMMANDS.filter((c) => c.summary.trim() !== '').map((c) => ({
+            name: c.name,
+            about: c.summary,
+          })),
+        };
+      },
+    };
+    parentPorts = { ...parentPorts, capabilities: capabilitiesPort };
+
     // EST-0996 — TOOL-CALLING NATIVO: o controller é o dono do toolset FINAL, então
     // É AQUI que o catálogo de funções (`tools` da API) nasce — convertido de
     // `allTools` (nativas+web+memória+MCP+spawn). A capacidade decide "mandar `tools`
@@ -1599,6 +1679,10 @@ export class SessionController {
         ...(opts.availableAgents !== undefined ? { availableAgents: opts.availableAgents } : {}),
         // EST-1149 — comandos da SESSÃO no contexto: nota já formatada → canal `system`.
         ...(opts.sessionCommands !== undefined ? { sessionCommands: opts.sessionCommands } : {}),
+        // ADR-0145 (frente c) — thunk do TIER corrente (mesmo padrão do
+        // `weakYoloGuardrail.tier()` acima): gateia o bloco de FEW-SHOT do tier fraco
+        // no `system`. Só afeta o prompt — não toca a catraca/budget.
+        tierProvider: () => this.tierControl?.tier ?? this.state.meta.tier,
         // EST-0973 — AUTO-COMPACTAÇÃO da JANELA: quando o prompt cruza ~85% da janela,
         // o loop COMPACTA sozinho (via a porta abaixo, que reusa o Compactor/`/compact`)
         // e CONTINUA — sem pausar/pedir confirmação. Só repassa a config quando LIGADA

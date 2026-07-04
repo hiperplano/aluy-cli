@@ -312,6 +312,7 @@ const QUESTION_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
 export const QUESTION_TOOL: NativeTool<ToolPorts> = {
   name: QUESTION_TOOL_NAME,
   effect: 'read',
+  group: 'plano', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
   parameters: QUESTION_SCHEMA,
   description:
     'PERGUNTE ao usuário quando estiver em dúvida sobre como prosseguir e a resposta ' +

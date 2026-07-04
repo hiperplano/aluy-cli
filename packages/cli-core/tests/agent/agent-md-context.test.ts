@@ -68,7 +68,12 @@ describe('EST-0964 · AGENT.md no canal system (confiável)', () => {
     // ~1.3k chars ao system prompt; o ceiling sobe p/ acomodar.
     // EST-1110 — a tool `perguntar` (descrição + schema dos 3 formatos) acrescenta
     // ~0.5k chars; o ceiling sobe p/ acomodar (segue um teto SÃO, não ilimitado).
-    expect(sys.length).toBeLessThan(MAX_PROJECT_INSTRUCTIONS_CHARS + 10_000);
+    // ADR-0145 — o MAPA DE CAPACIDADES (frente a, ~9 linhas) + as descrições
+    // enriquecidas de read_file/run_command/grep/glob/change_dir ("Use QUANDO: …",
+    // frente b) + a nova tool `capabilities`/`list_tools` (frente d) acrescentam
+    // ~2.7k chars; o ceiling sobe de novo p/ acomodar (continua um teto SÃO, não
+    // ilimitado — só cresce quando o prompt cresce de propósito).
+    expect(sys.length).toBeLessThan(MAX_PROJECT_INSTRUCTIONS_CHARS + 13_000);
   });
 
   it('clampProjectInstructions: vazio/whitespace ⇒ undefined', () => {

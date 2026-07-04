@@ -39,6 +39,16 @@ export {
   MAX_GLOB_PATTERN_CHARS,
 } from './glob-match.js';
 export { ToolRegistry } from './registry.js';
+// ADR-0145 (frente d) — tool `capabilities` (+ sinônimo `list_tools`): menu vivo de
+// auto-descoberta (effect:'read' puro). A porta `CapabilitiesPort`/tipos do snapshot
+// já vêm de `./types.js` (export * acima); aqui só a tool + o formatador puro.
+export {
+  capabilitiesTool,
+  listToolsTool,
+  renderCapabilities,
+  CAPABILITIES_TOOL_NAME,
+  CAPABILITIES_TOOL_ALIAS,
+} from './capabilities.js';
 // EST-0996 — conversão do catálogo de tools p/ o schema de função NATIVO (provider).
 export { toToolFunctionSchema, toToolFunctionSchemas } from './native-schema.js';
 

@@ -224,6 +224,7 @@ const SPAWN_AGENT_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
 export const spawnAgentTool: NativeTool<ToolPorts> = {
   name: SPAWN_AGENT_TOOL_NAME,
   effect: 'exec',
+  group: 'delegacao', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
   parameters: SPAWN_AGENT_SCHEMA,
   description:
     'Delega subtarefas a sub-agentes LOCAIS rodando em PARALELO, cada um com objetivo próprio. ' +

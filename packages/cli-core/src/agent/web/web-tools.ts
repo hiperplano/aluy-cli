@@ -81,6 +81,7 @@ const WEB_FETCH_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
 export const webFetchTool: NativeTool<WebToolPorts> = {
   name: 'web_fetch',
   effect: 'network',
+  group: 'web', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
   parameters: WEB_FETCH_SCHEMA,
   description:
     'Busca o conteúdo (texto) de uma URL http(s). Input: { "url": string }. ' +
@@ -145,6 +146,7 @@ const WEB_SEARCH_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
 export const webSearchTool: NativeTool<WebToolPorts> = {
   name: 'web_search',
   effect: 'network',
+  group: 'web', // ADR-0145 (frente d) — agrupamento no menu do `capabilities`.
   parameters: WEB_SEARCH_SCHEMA,
   description:
     'Busca na web (DuckDuckGo, sem chave) e retorna títulos, URLs e trechos. ' +

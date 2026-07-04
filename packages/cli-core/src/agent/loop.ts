@@ -537,6 +537,15 @@ export interface AgentLoopOptions {
    */
   readonly sessionCommands?: string;
   /**
+   * ADR-0145 (frente c) — THUNK do TIER corrente da sessão (mesmo padrão de
+   * `weakYoloGuardrail.tier()`: função, pois o `/model` troca o tier MID-sessão e o
+   * loop é construído UMA vez). Lido a cada iteração p/ gatear o bloco de FEW-SHOT
+   * do tier fraco no `system` (`buildSystemPrompt`/`isWeakTier`, self-check.ts) — SÓ
+   * afeta o PROMPT (canal `system`, autorado por nós); não toca a catraca/budget.
+   * Ausente ⇒ sem few-shot (prompt idêntico ao baseline — não-regressão).
+   */
+  readonly tierProvider?: () => string | undefined;
+  /**
    * EST-0969 · ADR-0057 (E-A2) — CONTADOR INJETADO. Default: o loop cria um
    * `SessionBudget` PRÓPRIO por execução (mono-loop, idêntico ao baseline). Mas
    * um SUB-AGENTE recebe aqui o `SharedBudget` COMPARTILHADO do pai — assim a
@@ -680,6 +689,9 @@ export class AgentLoop {
   private readonly availableAgents?: string;
   // EST-1149 — COMANDOS DA SESSÃO (nota já formatada). undefined ⇒ nada a injetar.
   private readonly sessionCommands?: string;
+  // ADR-0145 (frente c) — thunk do tier corrente (gateia o few-shot no `system`).
+  // undefined ⇒ sem few-shot (baseline).
+  private readonly tierProvider?: () => string | undefined;
   // EST-0969 (E-A2) — budget COMPARTILHADO injetado (sub-agente). undefined ⇒
   // o loop cria um SessionBudget próprio por execução (mono-loop).
   private readonly sharedBudget?: BudgetGate;
@@ -733,6 +745,7 @@ export class AgentLoop {
     if (opts.projectInstructions !== undefined) this.projectInstructions = opts.projectInstructions;
     if (opts.availableAgents !== undefined) this.availableAgents = opts.availableAgents;
     if (opts.sessionCommands !== undefined) this.sessionCommands = opts.sessionCommands;
+    if (opts.tierProvider) this.tierProvider = opts.tierProvider;
     if (opts.budget) this.sharedBudget = opts.budget;
     if (opts.pollInjected) this.pollInjected = opts.pollInjected;
     if (opts.expedite) this.expedite = opts.expedite;
@@ -1182,6 +1195,9 @@ export class AgentLoop {
       // seguinte. Sem porta de cwd ⇒ prompt baseline (não-regressão). A lista é
       // INFORMATIVA — quem barra é o resolveInside/catraca, e só o USUÁRIO amplia.
       const roots = this.ports.cwd ? (this.ports.cwd.roots ?? [this.ports.cwd.root]) : undefined;
+      // ADR-0145 (frente c) — tier LIDO A CADA iteração (o `/model` pode trocar
+      // mid-sessão, igual ao YOLO do weakYoloGuardrail): o few-shot aparece/some
+      // conforme o tier corrente, sem exigir reconstruir o loop.
       const messages = buildMessages(
         toolList,
         history,
@@ -1189,6 +1205,7 @@ export class AgentLoop {
         roots,
         this.availableAgents,
         this.sessionCommands,
+        this.tierProvider?.(),
       );
       // F191 — EXPEDITE ("acelerar o encaixe"): subscreve um ouvinte SÓ pela duração
       // desta chamada de modelo. Ao disparar (o dono aperta ESC com um `user_inject`

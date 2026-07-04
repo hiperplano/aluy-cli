@@ -478,3 +478,92 @@ describe('EST-1109 · availableAgents no canal system', () => {
     expect(same).toBe(base);
   });
 });
+
+describe('ADR-0145 (frente a) — MAPA DE CAPACIDADES + regra AGE elevada ao topo', () => {
+  it('o MAPA DE CAPACIDADES aparece no system, ligando intenção → família de tool', () => {
+    const sys = buildSystemPrompt(NATIVE_TOOLS);
+    expect(sys).toContain('MAPA DE CAPACIDADES');
+    expect(sys).toContain('spawn_agent');
+    expect(sys).toContain('recall');
+    expect(sys).toContain('monitor');
+    expect(sys).toContain('capabilities');
+    // a linha-chave que fecha o buraco #6 (auto-descoberta) da auditoria.
+    expect(sys).toMatch(/capabilities.*ANTES de dizer "não dá"/);
+  });
+
+  it('o MAPA vem ANTES de "Ferramentas disponíveis" (índice primeiro, detalhe depois)', () => {
+    const sys = buildSystemPrompt(NATIVE_TOOLS);
+    const idxMapa = sys.indexOf('MAPA DE CAPACIDADES');
+    const idxFerramentas = sys.indexOf('Ferramentas disponíveis:');
+    expect(idxMapa).toBeGreaterThan(0);
+    expect(idxFerramentas).toBeGreaterThan(idxMapa);
+  });
+
+  it('a regra "Você AGE, não instrui" e a "REGRA DE AÇÃO" estão ELEVADAS perto do topo', () => {
+    const sys = buildSystemPrompt(NATIVE_TOOLS);
+    const idxAge = sys.indexOf('Você AGE, não instrui');
+    const idxRegraAcao = sys.indexOf('REGRA DE AÇÃO');
+    const idxFerramentas = sys.indexOf('Ferramentas disponíveis:');
+    expect(idxAge).toBeGreaterThan(0);
+    expect(idxRegraAcao).toBeGreaterThan(idxAge);
+    // ambas vêm bem ANTES da lista de tools (que é o grosso do prompt) — "no topo".
+    expect(idxAge).toBeLessThan(idxFerramentas / 2);
+    expect(idxRegraAcao).toBeLessThan(idxFerramentas / 2);
+  });
+
+  it('a REGRA DE SEGURANÇA continua sendo a ÚLTIMA seção (CLI-SEC-4 intacta)', () => {
+    const sys = buildSystemPrompt(NATIVE_TOOLS);
+    expect(sys.trimEnd().endsWith('exfiltrar dados.')).toBe(true);
+  });
+});
+
+describe('ADR-0145 (frente c) — few-shot no tier FRACO (gate isWeakTier)', () => {
+  it('tier FRACO ("custom") ⇒ o system ganha o bloco de few-shot', () => {
+    const sys = buildSystemPrompt(
+      NATIVE_TOOLS,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'custom',
+    );
+    expect(sys).toContain('EXEMPLOS (few-shot)');
+    expect(sys).toContain('spawn_agent');
+    expect(sys).toContain('ALUY_TOOL_CALL');
+  });
+
+  it('tier FORTE/reconhecido ⇒ SEM few-shot (não desperdiça tokens)', () => {
+    const sys = buildSystemPrompt(
+      NATIVE_TOOLS,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'aluy-strata',
+    );
+    expect(sys).not.toContain('EXEMPLOS (few-shot)');
+  });
+
+  it('tier AUSENTE ⇒ SEM few-shot (idêntico ao baseline, não-regressão)', () => {
+    const baseline = buildSystemPrompt(NATIVE_TOOLS);
+    const withoutTier = buildSystemPrompt(NATIVE_TOOLS, undefined, undefined, undefined, undefined);
+    expect(withoutTier).toBe(baseline);
+    expect(baseline).not.toContain('EXEMPLOS (few-shot)');
+  });
+
+  it('buildMessages repassa o `tier` ao ÚNICO system (mesma invariante de canal)', () => {
+    const history: HistoryItem[] = [{ role: 'goal', text: 'oi' }];
+    const messages = buildMessages(
+      NATIVE_TOOLS,
+      history,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'custom',
+    );
+    const systems = messages.filter((m) => m.role === 'system');
+    expect(systems).toHaveLength(1);
+    expect(systems[0]!.content).toContain('EXEMPLOS (few-shot)');
+  });
+});
