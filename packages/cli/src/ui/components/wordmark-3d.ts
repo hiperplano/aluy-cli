@@ -20,16 +20,20 @@
 // A marca é ÂMBAR (accent/accentMid/accentDim); o brilho "acende na cabeça e esmaece em
 // volta", varrendo o logo, por PAPEL do tema — NUNCA cor crua.
 //
-// F200b — SOMBRA SINCRONIZADA (pedido do dono): a SOMBRA 3D é VERDE/TEAL — contraste de
-// MATIZ com a marca âmbar — mas deixou de ser um tom teal FIXO (`depth` só). Agora a MESMA
-// luz que varre a marca atravessa a sombra na mesma passada: cada célula de sombra em (r,c)
-// é projetada pela célula da marca em (r−1,c−1) (↓→1) — então ela usa o `shimmerAt` daquela
-// COLUNA-FONTE (c−1) p/ escolher o SEU próprio degradê TEAL (não o âmbar da marca):
-//   · PICO  → papel `depthBright` (teal mais claro/vivo — a luz "acende" a sombra também)
-//   · HALO  → papel `depth`       (teal do meio — o tom "normal" já existente)
-//   · FORA  → papel `depthDim`    (teal escuro/calmo — sombra em repouso)
-// O resultado: onde a cabeça do brilho passa, MARCA e SOMBRA clareiam juntas (uma na escala
-// âmbar, outra na escala teal) — a luz atravessa as duas na mesma varredura, como pedido.
+// F200c — SOMBRA SINCRONIZADA, em ÂMBAR ESCURO (pedido do dono; F200b tinha sido TEAL, o
+// dono preferiu âmbar). A sombra 3D é da MESMA família ÂMBAR da marca, mas distintamente
+// MAIS ESCURA que ela (pra ainda ler como SOMBRA), e a MESMA luz que varre a marca atravessa
+// a sombra na mesma passada: cada célula de sombra em (r,c) é projetada pela célula da marca
+// em (r−1,c−1) (↓→1) — então ela usa o `shimmerAt` daquela COLUNA-FONTE (c−1) p/ escolher o
+// SEU próprio degradê ÂMBAR-ESCURO (abaixo do âmbar da marca):
+//   · PICO/HALO (nível 2/1) → papel `shadowAmber`    (âmbar-600 escuro — a sombra "acesa")
+//   · FORA      (nível 0)   → papel `shadowAmberDim` (âmbar mais escuro — sombra em repouso)
+// O tom LIT da sombra (`shadowAmber` = âmbar-600) é o tom MAIS ESCURO que a MARCA usa
+// (accentDim), então no MESMO ponto do brilho a sombra é sempre ≤ a marca ⇒ lê como sombra.
+// A banda "acesa" da sombra (pico+halo) casa com a região clara da marca (accent+accentMid),
+// então MARCA e SOMBRA clareiam JUNTAS onde a luz passa — a luz atravessa as duas na mesma
+// varredura, agora as duas em ÂMBAR (contraste por LUMINÂNCIA: marca clara, sombra escura —
+// não mais por matiz).
 //
 // ANTI-FLICKER (EST-0965 / EST-0956 / #95 / #118): a grade tem LARGURA e ALTURA CONSTANTES
 // entre frames — o `char` de cada célula (marca `█`, sombra `▒`, vazio ` `) NUNCA muda com o
@@ -37,11 +41,11 @@
 // nada cresce ou encolhe: o splash NÃO reflui.
 //
 // REDUCED-MOTION (`theme.animate===false`, a11y §6): SEM shimmer — a marca fica ESTÁTICA num
-// tom de realce fixo (`accent`, o logo "aceso") e a SOMBRA fica ESTÁTICA em `depth` (o tom
-// teal do meio, sem degradê), pois o movimento nunca carrega significado sozinho. O caller
-// (SplashScreen) já cai no <Wordmark> estático quando `!animate`; ainda assim
+// tom de realce fixo (`accent`, o logo "aceso") e a SOMBRA fica ESTÁTICA em `shadowAmber` (o
+// âmbar escuro médio, sem degradê), pois o movimento nunca carrega significado sozinho. O
+// caller (SplashScreen) já cai no <Wordmark> estático quando `!animate`; ainda assim
 // `composeShadowedWordmark(frame, animate)` honra o gate (marca toda `accent`, sombra toda
-// `depth`) p/ ser robusto e testável como função pura.
+// `shadowAmber`) p/ ser robusto e testável como função pura.
 //
 // PURO (ADR-0053 §8): só compõe uma grade de células {role,char}. Sem Ink/IO/tempo real (o
 // `frame` chega por prop, handoff §10.1). Fallback: sem Unicode (ascii) NÃO há 3D (o `█` é a
@@ -57,7 +61,7 @@ const GAP = ' ';
 /**
  * GLIFO fixo da drop-shadow (▒, meio-tom). ANTES a sombra CICLAVA ░▒▓▒ com o frame — era esse
  * o "pisca" que o dono pediu p/ tirar. O CHAR nunca muda (anti-flicker); é a COR (o papel)
- * que agora shimmeia em sincronia com a marca (F200b) — ver `shadowRole`/`composeShadowedWordmark`.
+ * que agora shimmeia em sincronia com a marca (F200c, âmbar escuro) — ver `shadowRole`/`composeShadowedWordmark`.
  * Mantido como constante nomeada p/ o teste e p/ uma eventual afinação.
  */
 export const SHADOW_SHADE = '▒';
@@ -74,7 +78,7 @@ export const SHIMMER_SPEED = 3;
 export const SHIMMER_PEAK = 1;
 
 /**
- * Meia-largura do HALO (`depth`) em volta do pico — o degradê suave. Escolhido MAIOR que
+ * Meia-largura do HALO (`accentMid`) em volta do pico — o degradê suave. Escolhido MAIOR que
  * `SHIMMER_SPEED` de propósito: como a cabeça salta `SHIMMER_SPEED` colunas por frame, um halo
  * mais largo faz os brilhos de frames consecutivos se SOBREPOREM ⇒ o olho lê um DESLIZE
  * contínuo, não uma luz "pulando" de coluna em coluna (suaviza os saltos do tick lento).
@@ -93,15 +97,15 @@ export const SHIMMER_TAIL = 8;
 export type ShimmerLevel = 0 | 1 | 2;
 
 /** Papéis (cores do tema) da grade: o degradê ÂMBAR da MARCA (accent/accentMid/accentDim,
- * mesma escala do <BusyPulse>) + o degradê TEAL da SOMBRA 3D (depthBright/depth/depthDim,
- * F200b — mesma forma, matiz teal). Por PAPEL — nunca cor crua. */
+ * mesma escala do <BusyPulse>) + o degradê ÂMBAR-ESCURO da SOMBRA 3D (shadowAmber/
+ * shadowAmberDim, F200c — mesma família, luminância abaixo da marca). Por PAPEL — nunca
+ * cor crua. */
 export type ShimmerRole =
   | 'accent'
   | 'accentMid'
   | 'accentDim'
-  | 'depth'
-  | 'depthBright'
-  | 'depthDim';
+  | 'shadowAmber'
+  | 'shadowAmberDim';
 
 /** Uma célula da grade composta: o papel do DS + o glifo. `null` = vazio (espaço). */
 export interface Cell {
@@ -146,15 +150,17 @@ export function shimmerRole(level: ShimmerLevel): ShimmerRole {
 }
 
 /**
- * F200b — mapeia a MESMA intensidade de brilho (`shimmerAt` da coluna-fonte da sombra) p/ o
- * degradê TEAL do tema (nunca cor crua). Espelha `shimmerRole` (mesma forma pico/halo/fora),
- * só que na escala teal da sombra 3D: a luz que acende a marca em âmbar acende a sombra em
- * teal, na mesma passada. PURO.
+ * F200c — mapeia a MESMA intensidade de brilho (`shimmerAt` da coluna-fonte da sombra) p/ o
+ * degradê ÂMBAR-ESCURO do tema (nunca cor crua). A luz que acende a marca em âmbar-claro
+ * acende a sombra em âmbar-escuro, na mesma passada. Degradê de 2 tons: a banda LIT (pico E
+ * halo) casa com a região clara da marca (accent+accentMid) ⇒ marca e sombra clareiam juntas
+ * na mesma faixa; fora dela a sombra repousa no tom mais escuro. PURO.
  */
 export function shadowRole(level: ShimmerLevel): ShimmerRole {
-  if (level === 2) return 'depthBright'; // pico — teal mais claro/vivo (a luz atravessa a sombra)
-  if (level === 1) return 'depth'; // halo — teal do meio (o tom "normal" já existente)
-  return 'depthDim'; // fora do brilho — teal escuro/calmo (sombra em repouso)
+  // pico E halo = a sombra "acesa" (âmbar-600, o tom mais escuro que a MARCA usa ⇒ a sombra
+  // é sempre ≤ a marca no mesmo ponto do brilho); a banda casa com accent+accentMid da marca.
+  if (level >= 1) return 'shadowAmber';
+  return 'shadowAmberDim'; // fora do brilho — âmbar mais escuro ainda (sombra em repouso)
 }
 
 /** As linhas combinadas (Λ + GAP + luy) da marca block-art, como strings. */
@@ -170,14 +176,14 @@ function combinedMarkRows(): string[] {
 /**
  * Compõe a grade do wordmark COM sombra 3D e o BRILHO horizontal para um dado `frame`. Cada
  * célula é a marca (`█`, cor pelo brilho da sua COLUNA via `shimmerAt` + `shimmerRole`), uma
- * sombra (`▒`, cor pelo MESMO brilho da coluna-FONTE via `shadowRole`, F200b) ou vazia. A
+ * sombra (`▒`, cor pelo MESMO brilho da coluna-FONTE via `shadowRole`, F200c) ou vazia. A
  * sombra de (r,c) acende quando a célula ACIMA-À-ESQUERDA (r-1,c-1) é preenchida e a própria
  * (r,c) NÃO é (a marca vence a sombra). Grade = (linhas+1) × (largura+1), ESTÁVEL entre frames
  * (anti-flicker: só o PAPEL/cor muda — de marca E, agora, de sombra).
  *
  * `animate` (default true): reduced-motion (`false`) ⇒ SEM shimmer — a marca inteira sai em
- * `accent` (realce estático) e a sombra inteira em `depth` (o teal do meio, sem degradê), o
- * movimento não carrega significado sozinho (a11y §6). PURO.
+ * `accent` (realce estático) e a sombra inteira em `shadowAmber` (o âmbar escuro médio, sem
+ * degradê), o movimento não carrega significado sozinho (a11y §6). PURO.
  */
 export function composeShadowedWordmark(frame: number, animate = true): Cell[][] {
   const mark = combinedMarkRows();
@@ -189,12 +195,13 @@ export function composeShadowedWordmark(frame: number, animate = true): Cell[][]
   // reduced-motion, `accent` fixo (logo âmbar aceso, ESTÁTICO, sem shimmer).
   const markRole = (c: number): ShimmerRole =>
     animate ? shimmerRole(shimmerAt(c, frame, width)) : 'accent';
-  // F200b — papel da célula de SOMBRA cuja fonte é a coluna `srcCol` (a coluna da MARCA que a
+  // F200c — papel da célula de SOMBRA cuja fonte é a coluna `srcCol` (a coluna da MARCA que a
   // projeta, r-1,c-1): com animação, o MESMO shimmerAt() da marca — mas mapeado no degradê
-  // TEAL (`shadowRole`), não no âmbar — sincronizando a luz que atravessa marca E sombra na
-  // mesma passada; em reduced-motion, `depth` fixo (o tom teal do meio, sombra ESTÁTICA).
+  // ÂMBAR-ESCURO (`shadowRole`), abaixo do âmbar da marca — sincronizando a luz que atravessa
+  // marca E sombra na mesma passada; em reduced-motion, `shadowAmber` fixo (âmbar escuro
+  // médio, sombra ESTÁTICA).
   const shadowRoleAt = (srcCol: number): ShimmerRole =>
-    animate ? shadowRole(shimmerAt(srcCol, frame, width)) : 'depth';
+    animate ? shadowRole(shimmerAt(srcCol, frame, width)) : 'shadowAmber';
 
   const grid: Cell[][] = [];
   for (let r = 0; r < height + 1; r += 1) {
@@ -204,11 +211,11 @@ export function composeShadowedWordmark(frame: number, animate = true): Cell[][]
         row.push({ role: markRole(c), char: FILL });
       } else if (filled(r - 1, c - 1)) {
         // sombra projetada ↓→ pela célula da marca acima-à-esquerda (coluna-fonte c-1): usa o
-        // shimmer DAQUELA coluna p/ escolher o tom TEAL (depthBright/depth/depthDim) — a
-        // sombra é o mesmo pixel da marca, deslocado, então shimmeia com a MESMA intensidade
-        // de quem a projeta. Contraste de MATIZ com a marca âmbar (accent/accentMid/accentDim):
-        // a luz é âmbar na marca, teal na sombra; o contraste com a marca vem da COR e do CHAR
-        // (`▒` sombra vs `█` marca) — nunca do CHAR mudando (anti-flicker).
+        // shimmer DAQUELA coluna p/ escolher o tom ÂMBAR-ESCURO (shadowAmber/shadowAmberDim) —
+        // a sombra é o mesmo pixel da marca, deslocado, então shimmeia com a MESMA intensidade
+        // de quem a projeta. MESMA família âmbar da marca (accent/accentMid/accentDim), porém
+        // MAIS ESCURA: o contraste com a marca vem da LUMINÂNCIA e do CHAR (`▒` sombra vs `█`
+        // marca) — nunca do CHAR mudando (anti-flicker).
         row.push({ role: shadowRoleAt(c - 1), char: SHADOW_SHADE });
       } else {
         row.push({ role: null, char: ' ' });
