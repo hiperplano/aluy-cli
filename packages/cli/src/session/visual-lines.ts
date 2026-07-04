@@ -17,6 +17,7 @@
  * COLUNAS. É uma aproximação deliberadamente conservadora p/ o orçamento de altura
  * (não um layout pixel-perfect):
  *
+ *   • sequências CSI (`\x1b[...`, cor/estilo ANSI) → 0 (ver FIX abaixo);
  *   • caracteres de controle (C0, exceto já tratados fora) → 0;
  *   • largura-DUPLA (CJK, Hangul, kana, ideogramas, e a maioria dos emoji no plano
  *     astral) → 2 colunas;
@@ -25,17 +26,41 @@
  *
  * Não cobre TODO o Unicode (não há tabela wcwidth embarcada), mas cobre as faixas
  * que mais aparecem e que, se contadas como 1, SUBESTIMARIAM a largura e furariam o
- * orçamento (CJK/emoji ocupam 2 células). Itera por CODE POINT (`for…of`), então um
- * emoji astral conta UMA vez (e como 2 colunas), não como 2 unidades UTF-16.
+ * orçamento (CJK/emoji ocupam 2 células). Itera por CODE POINT, então um emoji
+ * astral conta UMA vez (e como 2 colunas), não como 2 unidades UTF-16.
  *
- * Em caso de dúvida, ARREDONDA P/ CIMA (conta como mais largo) — o orçamento de
- * altura prefiro pessimista: superestimar a largura ⇒ superestimar as linhas
- * visuais ⇒ janela MENOR ⇒ região viva mais curta ⇒ MAIS folga contra o flicker.
+ * FIX (achado do dono — duplicação/fantasma no SCROLL de sessão grande) — ANTES esta
+ * função NÃO filtrava sequências CSI: só o byte `\x1b` tinha largura 0 (é C0), mas os
+ * bytes SEGUINTES da sequência (`[`, dígitos, `;`, a letra final `m`/…) são ASCII
+ * IMPRIMÍVEL "normal" p/ este scanner ⇒ cada um contava 1 coluna. Um `\x1b[31m`
+ * (cor vermelha, 5 bytes) inflava em +4 colunas de LIXO invisível — texto de tool/
+ * bang com saída COLORIDA (comum: `ls --color`, diffs, test runners) tinha a largura
+ * SUPERESTIMADA, e `visualLines`/`windowTailVisual` (que usam `displayWidth`) mediam
+ * MAIS linhas visuais do que o terminal realmente pinta. Isso diverge da medição
+ * "espelho" real (`wrappedLineCount`, que usa `wrap-ansi` — ciente de CSI) usada por
+ * `measureConversaBlock`/`markdownLines`: a MESMA sequência de escape, medida por
+ * `displayWidth` (superestima) vs. medida pelo render de fato (ignora), é a fonte
+ * concreta do drift medida≠render que só aparece em conteúdo ANTIGO/colorido — ou
+ * seja, ao ROLAR (pgup/pgdn) pro histórico de uma sessão grande. Agora pulamos a
+ * sequência CSI inteira (mesmo padrão de `frameEndCursor`/`chunkIsFrameContent` em
+ * `synchronized-output.ts`) ANTES de medir largura — ela nunca conta coluna.
  */
 export function displayWidth(text: string): number {
   let width = 0;
-  for (const ch of text) {
-    const cp = ch.codePointAt(0)!;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '\x1b' && text[i + 1] === '[') {
+      // CSI: `\x1b[` + parâmetros (`[0-9;?]*`) + bytes intermediários (` -/`) + 1
+      // byte final (`@-~`). LARGURA ZERO no terminal (não imprime; move cursor ou
+      // pinta cor) ⇒ pula a sequência inteira SEM contar coluna alguma.
+      let j = i + 2;
+      while (j < text.length && text[j]! >= '0' && text[j]! <= '?') j += 1;
+      while (j < text.length && text[j]! >= ' ' && text[j]! <= '/') j += 1;
+      i = j; // o `for` ainda soma +1 ⇒ próxima iteração começa APÓS o byte final.
+      continue;
+    }
+    const cp = text.codePointAt(i)!;
+    if (cp > 0xffff) i += 1; // par surrogate: pula a unidade baixa (já contabilizada).
     width += charWidth(cp);
   }
   return width;
