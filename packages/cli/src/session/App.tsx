@@ -1223,6 +1223,37 @@ export function App(props: AppProps): React.ReactElement {
   // inline: em fullscreen o effect de cockpit cuida (e clearScreen brigaria com o
   // alt-screen). Ref semeada com a dimensão do mount ⇒ não dispara um clear no 1º render.
   const inlineResizeDimRef = useRef<{ rows: number; columns: number }>({ rows, columns });
+  // BUG-GAP-CRESCENTE (resize inline) — o `clearScreen()` do resize REMONTA o `<Static>`
+  // (staticKey++), e o Ink trata TODOS os itens já commitados como NOVOS de novo:
+  // `stdout.write(staticOutput)` reescreve o HISTÓRICO INTEIRO a cada resize-settle (custo
+  // O(histórico)) e o `fullStaticOutput` do Ink (buffer que ele NUNCA reseta — ver F196
+  // acima) ACUMULA mais uma cópia completa a cada vez, mesmo no caminho "cabe" onde essa
+  // cópia não é usada AINDA — vira uma BOMBA LATENTE: se a sessão em algum momento LATER
+  // cruzar o caminho `outputHeight >= rows` (uma resposta longa, `--unsafe`, terminal
+  // estreito — mesmo que só TRANSITORIAMENTE), o Ink despeja o buffer INTEIRO de uma vez,
+  // com N cópias acumuladas de todo resize anterior — o "bloco/gap gigante" que cresce com
+  // o histórico e com a QUANTIDADE de resizes já sofridos pela sessão (PROVADO por teste de
+  // bytes real — ver `resize-inline-gap.test.tsx`: o header do `<Static>` aparece 1× a mais
+  // por resize-settle, sem limite). Testamos remover o remonte (manter só o clear cru) e
+  // PIOROU: sem o remonte, o `\x1b[H` cru move o cursor pro TOPO mas nada mais reescreve o
+  // histórico (o Ink só reemite itens "novos"), então o PRÓXIMO `eraseLines` do log-update
+  // (bookkeeping stale, alheio ao nosso write cru) escreve a região viva A PARTIR DO TOPO —
+  // o composer "pula" pro topo da tela com um vazio permanente abaixo (regressão PIOR,
+  // provada pelo mesmo harness de bytes). O remonte é o que REPREENCHE a tela após o
+  // `\x1b[H` — não dá pra tirar sem substituir por outra fonte de conteúdo (o `<Static>`
+  // do Ink não suporta "reemitir só a cauda"). Fix seguro (sem tocar a garantia de
+  // correção): reduzir a FREQUÊNCIA do remonte caro, sem eliminá-lo —
+  //   (1) um resize que muda só ROWS (não COLUMNS) nunca precisa de repaint: o reflow que
+  //       deixa órfãos (EST-1015) só existe pq o TEXTO rewrapeia numa LARGURA diferente —
+  //       altura sozinha não rewrapeia nada já pintado. Pula o clearScreen nesse caso.
+  //   (2) um COOLDOWN entre remontes forçados (ver `RESIZE_REPAINT_COOLDOWN_MS`) — limita
+  //       a TAXA de reprints completos mesmo se o terminal disparar `resize` em rajada
+  //       espaçada (> 90ms entre eventos, furando o debounce de coalescência do drag — o
+  //       padrão relatado em terminais que REFLOWAM, ex. conhost do Windows). Sem isto, uma
+  //       rajada de resizes espaçados vira uma rajada de reprints O(histórico) — CADA UM
+  //       alimentando a bomba do `fullStaticOutput` acima.
+  const lastForcedRepaintAtRef = useRef<number>(0);
+  const RESIZE_REPAINT_COOLDOWN_MS = 500;
   // F196 — sinal (atualizado no corpo do render) de que a região viva NÃO cabe em `rows`
   // ⇒ o Ink está no caminho `outputHeight >= rows` (repaint total por frame). Nesse regime
   // o `clearScreen()` do resize é redundante e DUPLICA o `fullStaticOutput` do Ink (branco
@@ -1254,6 +1285,17 @@ export function App(props: AppProps): React.ReactElement {
       );
       return;
     }
+    // BUG-GAP-CRESCENTE (1) — só ROWS mudou (largura igual): o reflow que deixa órfãos
+    // (EST-1015) precisa de uma LARGURA nova pra rewrapear texto já pintado — altura
+    // sozinha não rewrapeia nada. Sem risco de órfão ⇒ pula o clearScreen caro (o
+    // re-render normal, já disparado por `bumpResize`, ajusta o orçamento/altura sozinho).
+    if (prev.columns === columns) {
+      inlineResizeDimRef.current = { rows, columns };
+      debugRenderLog(
+        `resize ${prev.rows}x${prev.columns} → ${rows}x${columns} (só ROWS ⇒ PULA clearScreen; sem rewrap de largura)`,
+      );
+      return;
+    }
     // F-FLICKER (debug) — mudança de DIMENSÃO detectada. No Windows o conhost pode
     // reportar dims diferentes ao escrever output pesado (reflow) ⇒ dispara clearScreen
     // ESPÚRIO. Se isto loga sem o usuário redimensionar, é a causa do flicker "milenar".
@@ -1265,7 +1307,22 @@ export function App(props: AppProps): React.ReactElement {
     // o clear imediato-por-tick reintroduzia flicker de arraste). O conserto do "gap que CRESCE ao
     // digitar" é o `composerOverflow` no orçamento (acima): sem estourar `rows`, o Ink não cai no
     // `clearTerminal` que dessincroniza o `previousLineCount` — então este clear pós-assento basta.
-    const id = setTimeout(() => clearScreen(), 90);
+    const id = setTimeout(() => {
+      // BUG-GAP-CRESCENTE (2) — COOLDOWN entre remontes forçados: se o terminal disparar
+      // `resize` em rajada espaçada (> 90ms entre eventos — fura a coalescência do drag,
+      // padrão de terminal que REFLOWA), não deixamos CADA settle pagar o custo O(histórico)
+      // + alimentar a bomba do `fullStaticOutput` (ver doc acima). Fora do cooldown, segue
+      // valendo 1 clearScreen por settle (o comportamento já provado pelos testes existentes).
+      const now = Date.now();
+      if (now - lastForcedRepaintAtRef.current < RESIZE_REPAINT_COOLDOWN_MS) {
+        debugRenderLog(
+          `resize ${rows}x${columns} — clearScreen SUPRIMIDO (cooldown ${RESIZE_REPAINT_COOLDOWN_MS}ms; rajada de resize)`,
+        );
+        return;
+      }
+      lastForcedRepaintAtRef.current = now;
+      clearScreen();
+    }, 90);
     return () => clearTimeout(id); // novo resize antes de 90ms ⇒ recancela (trailing-edge)
   }, [rows, columns, fullscreen, clearScreen]);
 
