@@ -51,14 +51,27 @@ function plain(s: string): string {
 describe('Header — tier, nunca provider (HG-2)', () => {
   // EST-0988 — terminal BAIXO (rows<18) ⇒ header COMPACTO de 1 linha (Λ + info),
   // sem banner. É o caminho que preserva as garantias do EST-0986.
-  it('compacto: mostra `Aluy Cli` + tier + broker, nunca um provider', () => {
+  it('compacto: mostra `Aluy Cli` + tier, nunca um provider', () => {
     const { lastFrame } = wrap(<Header tier="turbo" columns={100} rows={15} />);
     const out = lastFrame() ?? '';
-    // EST-0989 — o compacto inclui o NOME de produto, o tier e o broker.
+    // EST-0989 — o compacto inclui o NOME de produto e o tier.
     expect(out).toContain('Aluy Cli');
     expect(out).toContain('turbo');
-    expect(out).toContain('broker');
     expect(out.toLowerCase()).not.toMatch(/openai|anthropic|gpt|gemini/);
+  });
+
+  // FIX (dono) — o indicador de backend (glifo `●` + "local"/"broker", ADR-0120) foi
+  // REMOVIDO do header: ele duplicava o indicador que já mora, vivo, no rodapé
+  // (<StatusBar>). O header não deve mostrar mais "broker"/"local" nem o glifo `●` em
+  // NENHUM modo (compacto ou banner) — essa informação é EXCLUSIVA do footer agora.
+  it('compacto: NÃO mostra mais o indicador de backend (● local/broker) — só o rodapé mostra', () => {
+    const { lastFrame } = wrap(<Header tier="local · deepseek-v4-pro" columns={100} rows={15} />);
+    const out = plain(lastFrame() ?? '');
+    // o tier (passado pela App já sem o prefixo "local" — ver App.tsx `headerTierDisplay`)
+    // segue aparecendo — só o BADGE de backend (`●`) some.
+    expect(out).toContain('deepseek-v4-pro');
+    expect(out).not.toContain('●');
+    expect(out).not.toContain('broker');
   });
 
   // EST-0989 — o compacto com versão: `Λ Aluy Cli v<versão> · <tier> · ◍ broker`.
@@ -117,19 +130,21 @@ describe('Header — tier, nunca provider (HG-2)', () => {
 
 describe('Header — BANNER persistente do wordmark (EST-0988)', () => {
   // BANNER aparece com espaço: confortável, largo (≥60 col) e terminal alto (≥18).
-  it('terminal alto+largo: WORDMARK grande █ + subtítulo `Aluy Cli · Terminal v<versão>` + broker ABAIXO — SEM tier (Variação B)', () => {
+  it('terminal alto+largo: WORDMARK grande █ + subtítulo `Aluy Cli · Terminal v<versão>` — SEM tier NEM backend (Variação B / FIX dono)', () => {
     const { lastFrame } = wrap(<Header tier="turbo" columns={100} rows={40} version="1.2.3" />);
     const out = plain(lastFrame() ?? '');
     // wordmark de meio-bloco (a MESMA marca da splash)
     expect(out).toContain('██');
-    // subtítulo abaixo: `Aluy Cli · Terminal v<versão>` + broker
+    // subtítulo abaixo: `Aluy Cli · Terminal v<versão>`
     expect(out).toContain('Aluy Cli');
     expect(out).toContain('Terminal');
     expect(out).toContain('v1.2.3');
-    expect(out).toContain('broker');
     // EST-0989 (Variação B) — o TIER NÃO fica no banner (o header é estático/pinado;
     // o tier vivo mora no rodapé). NÃO deve aparecer aqui.
     expect(out).not.toContain('turbo');
+    // FIX (dono) — o indicador de backend (`● local`/`● broker`, ADR-0120) foi REMOVIDO
+    // do banner: duplicava o que já mora, vivo, no rodapé (<StatusBar>).
+    expect(out).not.toContain('broker');
     // o wordmark JÁ é a marca ⇒ o Λ compacto NÃO se repete no banner
     expect(out).not.toContain('Λ');
     // subtítulo DEPOIS do wordmark (a marca grande abre; o subtítulo fecha)
@@ -155,10 +170,10 @@ describe('Header — BANNER persistente do wordmark (EST-0988)', () => {
     const out = plain(lastFrame() ?? '');
     expect(out).not.toContain('█'); // █ quebraria em TERM=linux
     expect(out).toContain('#'); // wordmark ASCII legível
-    // EST-0989 — o subtítulo do banner (sem tier): `Aluy Cli · Terminal` + broker.
+    // EST-0989 — o subtítulo do banner (sem tier): `Aluy Cli · Terminal`.
     expect(out).toContain('Aluy Cli');
-    expect(out).toContain('broker');
     expect(out).not.toContain('turbo'); // tier não fica no banner (Variação B)
+    expect(out).not.toContain('broker'); // FIX (dono) — backend não fica no banner
   });
 
   it('banner: erro mostra `⚠` na info abaixo do wordmark', () => {
