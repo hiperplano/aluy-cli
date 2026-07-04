@@ -16,6 +16,14 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 _(vazio)_
 
+## [1.0.0-rc.97] — 2026-07-04
+
+### Corrigido
+
+- 🔴 Modo inline: redimensionar o terminal aumentava a DISTÂNCIA (gap) entre a área de saída e o composer, crescendo a cada resize (bug antigo, visível com histórico grande / terminais que reflowam). Causa: cada resize remontava o `<Static>` inteiro (Ink reescrevia o histórico + acumulava cópias no `fullStaticOutput`). Fix: resize que muda só a altura pula o clear desnecessário + cooldown entre remontes forçados.
+
+_(vazio)_
+
 ## [1.0.0-rc.96] — 2026-07-04
 
 ### Alterado
