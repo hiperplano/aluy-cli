@@ -2760,6 +2760,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           resetDiffer: () => {
             sync?.resetDiffer();
           },
+          // EST-1015 (hardening — auto-correção) — repassa o `layout.rows` de CADA render da
+          // App ao envelope, p/ o `CockpitDiffer` comparar o corpo real contra o valor que a
+          // árvore de fato usou (ver `SyncStdout.setExpectedCockpitRows`).
+          setExpectedRows: (rows) => {
+            sync?.setExpectedCockpitRows(rows);
+          },
         }}
         onFullscreenChange={(on) => {
           // EST-1000 · ADR-0076 §1 — persiste a pref do cockpit p/ a próxima sessão

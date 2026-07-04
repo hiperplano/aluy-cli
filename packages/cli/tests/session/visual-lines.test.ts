@@ -91,6 +91,49 @@ describe('displayWidth — largura de exibição conservadora', () => {
     expect(visualLines('日'.repeat(40), 80)).toBe(1); // 40*2 = 80
     expect(visualLines('日'.repeat(41), 80)).toBe(2); // 82 > 80
   });
+
+  // FIX (achado do dono — duplicação/fantasma no SCROLL de sessão grande): ANTES, uma
+  // sequência CSI (`\x1b[...m`, cor/estilo ANSI) NÃO era filtrada — só o `\x1b` tinha
+  // largura 0; os bytes seguintes (`[`, dígitos, `;`, a letra final) contavam como texto
+  // normal (1 col cada). Isso SUPERESTIMAVA a largura de texto colorido (saída de tool/
+  // bang com `--color`, diffs, test runners) e divergia da medição "espelho" real
+  // (`wrappedLineCount`, via `wrap-ansi`, que IGNORA CSI) — a fonte concreta do drift
+  // medida≠render que só aparecia em conteúdo ANTIGO/colorido (ao rolar o histórico).
+  describe('CSI (ANSI) — sequência de escape tem largura ZERO (FIX HUNT-SCROLL)', () => {
+    it('cor SGR simples (`\\x1b[31mtexto\\x1b[0m`) mede só o texto visível', () => {
+      const RED = '\x1b[31m';
+      const RESET = '\x1b[0m';
+      expect(displayWidth(`${RED}erro${RESET}`)).toBe(4); // só "erro", zero da sequência.
+    });
+
+    it('SGR de 256 cores/parâmetros longos (`\\x1b[38;5;196m`) ainda mede ZERO', () => {
+      const FG256 = '\x1b[38;5;196m';
+      // ANTES do fix: cada dígito/`;`/`m` da sequência contava 1 col ⇒ +10 de lixo.
+      expect(displayWidth(`${FG256}x`)).toBe(1);
+    });
+
+    it('várias sequências intercaladas com texto: só os caracteres IMPRESSOS contam', () => {
+      const s = `\x1b[1m\x1b[31mERRO\x1b[0m: \x1b[32mok\x1b[0m`;
+      expect(displayWidth(s)).toBe(displayWidth('ERRO: ok'));
+    });
+
+    it('visualLines de uma linha colorida bate com a mesma linha SEM cor (mesma largura visível)', () => {
+      const plain = 'x'.repeat(90);
+      const colored = `\x1b[31m${plain}\x1b[0m`;
+      // 90 chars em col=80 ⇒ 2 linhas visuais — igual COM ou SEM a cor.
+      expect(visualLines(colored, 80)).toBe(visualLines(plain, 80));
+      expect(visualLines(colored, 80)).toBe(2);
+    });
+
+    it('CSI colado (sem texto) não soma nada: só zeros', () => {
+      expect(displayWidth('\x1b[31m\x1b[1m\x1b[0m')).toBe(0);
+    });
+
+    it('CSI truncada/incompleta no fim da string não trava nem conta lixo (degrada segura)', () => {
+      // `\x1b[31` sem o byte final — não deveria lançar nem contar cada dígito como coluna.
+      expect(() => displayWidth('a\x1b[31')).not.toThrow();
+    });
+  });
 });
 
 describe('windowTailVisual — janela de cauda por linhas VISUAIS (com WRAP)', () => {

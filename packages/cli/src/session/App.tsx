@@ -395,6 +395,17 @@ export interface AppProps {
      * segura; testes/legado). O `enter()` já reseta — este é só p/ o resize-em-tamanho.
      */
     readonly resetDiffer?: () => void;
+    /**
+     * EST-1015 (hardening — auto-correção do CockpitDiffer, achado do dono) — informa a
+     * altura ESPERADA (`layout.rows`) do frame que a App está PRESTES a fazer o Ink
+     * escrever. Chamado a CADA render (síncrono, sem I/O) — o differ compara o corpo real
+     * do próximo write contra este valor e força um FULL-REPAINT se divergir, em vez de
+     * acumular corrupção silenciosamente (a causa-raiz do fantasma/duplicação no SCROLL de
+     * sessão grande: a medição de altura à mão — measureConversaBlock/flatLineRows — pode
+     * divergir do render real). `undefined` fora do cockpit. Ausente ⇒ no-op (degradação
+     * segura; testes/legado que não injetam este método).
+     */
+    readonly setExpectedRows?: (rows: number | undefined) => void;
   };
   /**
    * EST-1000 · ADR-0076 §1 — persiste a preferência do cockpit ao alternar (`/fullscreen`/
@@ -802,6 +813,16 @@ export function App(props: AppProps): React.ReactElement {
   // renderiza o INLINE (degrada) e mostra o aviso. O alt-screen real (entrar/sair) é
   // disparado no TOGGLE (handler abaixo), espelhando este "ativo".
   const cockpitActive = fullscreen && cockpitLayout.kind === 'cockpit';
+
+  // EST-1015 (hardening — auto-correção do CockpitDiffer, achado do dono) — informa o
+  // `layout.rows` DESTE render ao envelope do stdout, ANTES de o Ink escrever o frame (o
+  // corpo da função ainda roda ANTES de a árvore retornada chegar ao commit/write do Ink,
+  // então este valor está pronto quando o `transform` do differ rodar). É a fonte de
+  // verdade que a ÁRVORE de fato usou (`resolveCockpitLayout`), mais confiável que a
+  // leitura crua de `stdout.rows` (pode divergir/atrasar em resize). Fora do cockpit (ou
+  // recusado) ⇒ `undefined` — o differ cai no `rowsOf`, sem a checagem (o cockpit nem
+  // está ativo no envelope). Ver `SyncStdout.setExpectedCockpitRows`.
+  props.cockpitScreen?.setExpectedRows?.(cockpitActive ? cockpitLayout.rows : undefined);
 
   // EST-0990 — RESOLUÇÃO do layout do split pela LARGURA corrente (puro). `single` (OFF
   // ou desabilitado por largura), `side` (≥100, lado-a-lado) ou `tabs` (60–99, alterna).
