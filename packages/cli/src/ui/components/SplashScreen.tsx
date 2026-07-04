@@ -22,7 +22,8 @@
 // (a marca já cai p/ `/\`+`#`; a caixa cai p/ box ASCII via Ink).
 //
 // As cores saem SEMPRE de papéis semânticos (nunca cor crua):
-//   - wordmark   → accent/depth/accentDim (o BRILHO horizontal F198 no splash; accent estático no header)
+//   - wordmark   → F199: base BRANCA (`fg`) + brilho ÂMBAR (accent/accentMid) varrendo por
+//     cima (splash, F198); `fg` estático no header/reduced-motion (ver wordmark-3d.ts)
 //   - "carregando" → fgDim (discreto)
 //   - moldura da caixa → accent (borderColor lido do papel — token, não cor crua)
 //   - título da caixa  → accent ; opções → fg ; dica → fgDim

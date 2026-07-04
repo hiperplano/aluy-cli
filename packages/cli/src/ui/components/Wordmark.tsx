@@ -4,16 +4,21 @@
 //
 // EST-0989 — a marca passou de "ALUY" (tudo MAIÚSCULO) p/ "Λluy": o glifo `aluy`
 // (Λ — o triângulo-sem-base, A MESMA marca do loader/header/thinking) como o "A",
-// em destaque (role `accent`), seguido de "luy" em letras MINÚSCULAS (block-art,
-// altura-x menor, na cor de marca `depth`). O Λ aqui é o glifo `aluy` escalado —
-// não diverge do <AluyLoader>/<Glyph name="aluy">.
+// seguido de "luy" em letras MINÚSCULAS (block-art, altura-x menor). Λ e "luy" já
+// foram EQUALIZADOS num único papel de marca (antes Λ era `accent`/"luy" `depth`).
+// O Λ aqui é o glifo `aluy` escalado — não diverge do <AluyLoader>/<Glyph name="aluy">.
+//
+// F199 — pedido do dono: a marca (splash E header) fica BRANCA (`fg`, o papel de
+// texto do tema) como cor de REPOUSO, coerente com o shimmer do splash (que agora
+// varre um brilho ÂMBAR por cima de uma base branca, ver <wordmark-3d>). Este
+// <Wordmark> ESTÁTICO usa a MESMA base branca, sem brilho.
 //
 // FALLBACK obrigatório (herdado do Boot):
 //   - sem Unicode (TERM=linux / locale não-UTF-8 / --ascii) ⇒ wordmark ASCII
 //     (`/\` p/ o Λ + `#` p/ "luy") — o `/\` é o MESMO fallback ASCII do glifo `aluy`;
 //   - largura < MIN_WORDMARK_COLS ⇒ degrada p/ o nome compacto `Λ luy` (`/\ luy`).
-// As cores saem SEMPRE de papel semântico (Λ `accent`, "luy" `depth` — a marca do
-// DS), nunca cor crua. É chrome ESTÁTICO: não anima, largura/altura estável
+// As cores saem SEMPRE de papel semântico (`fg`, o papel de texto/marca do DS),
+// nunca cor crua. É chrome ESTÁTICO: não anima, largura/altura estável
 // (anti-flicker EST-0965).
 
 import React from 'react';
@@ -24,8 +29,8 @@ import { ALUY_MARK_UNICODE, ALUY_MARK_ASCII } from '../theme/glyphs.js';
 /**
  * O Λ grande (block-art, escala 2×) — o glifo `aluy` (a MARCA) como capital. 6
  * linhas (a 6ª é a linha do DESCENDER, vazia p/ o Λ — alinha a grade com "luy",
- * cujo `y` tem perninha). Baseline na 5ª linha (índice 4). Renderizado em `accent`
- * (destaque), separado de "luy" p/ poder colorir a marca diferente do nome.
+ * cujo `y` tem perninha). Baseline na 5ª linha (índice 4). Renderizado em `fg`
+ * (branco, F199), separado de "luy" apenas por estrutura (mesmo papel de cor).
  *
  * FORMA (F195 — fidelidade ao logo do site): a marca oficial é uma LAMBDA de ÁPICE
  * AFIADO no topo que ABRE (splay) em duas pernas diagonais retas até uma BASE LARGA — a
@@ -52,7 +57,7 @@ export const WORDMARK_MARK_BLOCK: readonly string[] = [
  * DESCENDER do `y`, ABAIXO da baseline. O `y` tem o RABO CURVADO (F195): a haste direita
  * desce abaixo da baseline e JÁ GANCHA p/ a ESQUERDA numa única linha — o gancho
  * arredondado do "y" do logo, curto (perninha enxuta, pedido do dono), não uma haste
- * reta. `l`/`u` deixam a linha do descender vazia. Cor `depth`.
+ * reta. `l`/`u` deixam a linha do descender vazia. Cor `fg` (branco, F199).
  */
 export const WORDMARK_LUY_BLOCK: readonly string[] = [
   '██                ',
@@ -67,7 +72,7 @@ export const WORDMARK_LUY_BLOCK: readonly string[] = [
  * Fallback ASCII do Λ: `/\` escalado (o MESMO `/\` do glifo `aluy`). A grade 14× (PAR)
  * espelha a lambda do bloco Unicode — ápice `/\` centrado (linha 0) que ABRE em diagonais
  * retas até uma BASE LARGA (pés nos cantos) na linha 4 (baseline, alinhada com "luy"); a
- * 6ª linha é o descender (vazia p/ o Λ). `accent`.
+ * 6ª linha é o descender (vazia p/ o Λ). Cor `fg` (branco, F199).
  */
 export const WORDMARK_MARK_ASCII: readonly string[] = [
   '      /\\      ',
@@ -81,7 +86,7 @@ export const WORDMARK_MARK_ASCII: readonly string[] = [
 /**
  * Fallback ASCII de "luy" (`#`), minúsculo, baseline alinhada. O `y` tem o RABO CURVADO
  * (descender de 1 linha): a haste desce e GANCHA p/ a ESQUERDA (rabo curto) — espelha 1:1
- * o block-art unicode (mesmas colunas, `#` no lugar de `█`). `depth`.
+ * o block-art unicode (mesmas colunas, `#` no lugar de `█`). Cor `fg` (branco, F199).
  */
 export const WORDMARK_LUY_ASCII: readonly string[] = [
   '##                ',
@@ -109,8 +114,9 @@ export interface WordmarkProps {
 }
 
 /**
- * A MARCA grande "Λluy": Λ (glifo `aluy`, em `accent`) como o "A" + "luy"
- * minúsculo (em `depth`). Unicode `█` ⇒ ASCII `/\`+`#` ⇒ compacto `Λ luy`.
+ * A MARCA grande "Λluy": Λ (glifo `aluy`) como o "A" + "luy" minúsculo, ambos no
+ * MESMO papel `fg` (branco, F199 — a base de repouso da marca, igual ao shimmer do
+ * splash). Unicode `█` ⇒ ASCII `/\`+`#` ⇒ compacto `Λ luy`.
  * PURO/ESTÁTICO: mesma saída p/ a mesma largura+tema (não anima).
  */
 export function Wordmark(props: WordmarkProps): React.ReactElement {
@@ -120,11 +126,11 @@ export function Wordmark(props: WordmarkProps): React.ReactElement {
   const mark = theme.unicode ? ALUY_MARK_UNICODE : ALUY_MARK_ASCII;
 
   if (tooNarrow) {
-    // Degradação p/ telas estreitas: Λ (accent) + nome minúsculo (depth), 1 linha.
+    // Degradação p/ telas estreitas: Λ + nome minúsculo, 1 linha, papel `fg` (branco).
     return (
       <Box>
-        <Role name="accent">{mark}</Role>
-        <Role name="accent"> luy</Role>
+        <Role name="fg">{mark}</Role>
+        <Role name="fg"> luy</Role>
       </Box>
     );
   }
@@ -132,20 +138,21 @@ export function Wordmark(props: WordmarkProps): React.ReactElement {
   const markRows = theme.unicode ? WORDMARK_MARK_BLOCK : WORDMARK_MARK_ASCII;
   const luyRows = theme.unicode ? WORDMARK_LUY_BLOCK : WORDMARK_LUY_ASCII;
 
-  // Λ (accent) e "luy" (depth) lado a lado — duas colunas pra colorir a marca
-  // diferente do nome. Baseline já alinhada nas grades (última linha).
+  // Λ e "luy" lado a lado, no MESMO papel `fg` (branco) — duas colunas só por
+  // estrutura de layout, não pra colorir a marca diferente do nome. Baseline já
+  // alinhada nas grades (última linha).
   return (
     <Box flexDirection="row">
       <Box flexDirection="column">
         {markRows.map((line, i) => (
-          <Role key={i} name="accent">
+          <Role key={i} name="fg">
             {line}
           </Role>
         ))}
       </Box>
       <Box flexDirection="column">
         {luyRows.map((line, i) => (
-          <Role key={i} name="accent">
+          <Role key={i} name="fg">
             {MARK_GAP + line}
           </Role>
         ))}
