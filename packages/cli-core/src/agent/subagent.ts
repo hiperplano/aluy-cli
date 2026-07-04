@@ -478,6 +478,20 @@ export interface SubAgentSpawnerOptions {
     /** `subagents.idleTimeoutMs` — clampado em `[MIN_SUBAGENT_IDLE_TIMEOUT_MS, MAX_SUBAGENT_IDLE_TIMEOUT_MS]`. */
     readonly idleTimeoutMs?: number;
   };
+  /**
+   * CORREÇÃO DE FRONTEIRA (ADR-0053 §8) — env da SESSÃO, JÁ LIDA pelo `cli`
+   * (`session/wiring.ts`, MESMO padrão do `mcpEnv`/`parentEnv` do `mcp/setup.ts`:
+   * `opts.env ?? process.env`) e injetada aqui. O core NUNCA lê `process.env`/
+   * `globalThis.process` por conta própria — antes, este spawner o fazia direto
+   * (`readProcessEnv()`), furando a fronteira portável; agora só CONSOME o que o
+   * `cli` já leu. Chaves relevantes: `SUBAGENTS_MAX_PER_CALL_ENV`
+   * (`ALUY_SUBAGENT_MAX_PER_CALL`), `SUBAGENT_MAX_CONCURRENCY_ENV`
+   * (`ALUY_SUBAGENT_MAX_CONCURRENCY`) e `SUBAGENT_IDLE_TIMEOUT_ENV`
+   * (`ALUY_SUBAGENT_IDLE_TIMEOUT`). Ausente ⇒ nenhuma das três envs entra na
+   * precedência (cai em `configDefaults`/default — nunca no processo por baixo
+   * dos panos, nunca lança).
+   */
+  readonly env?: Record<string, string | undefined>;
   /** Observador da UI (opcional). */
   readonly observer?: SubAgentObserver;
   /**
@@ -699,13 +713,17 @@ class IdleTimer {
  * EST-0969 — resolve o timeout de INATIVIDADE com precedência flag > env > default
  * e CLAMP (positivo, finito, inteiro). A env `ALUY_SUBAGENT_IDLE_TIMEOUT` aceita
  * `"500ms"`/`"90s"`/número puro (interpretado como ms); valor inválido/≤0 ⇒ cai no
- * próximo da cadeia (nunca desarma o anti-deadlock). `env` injetável p/ teste.
+ * próximo da cadeia (nunca desarma o anti-deadlock).
+ *
+ * CORREÇÃO DE FRONTEIRA (ADR-0053 §8) — `env` é DADO injetado pelo `cli` (que já lê
+ * `process.env` no seu lado), NUNCA lido daqui. O default `{}` é PURO (objeto vazio,
+ * sem I/O) — antes lia `globalThis.process.env` diretamente, furando a fronteira
+ * portável do core; agora, sem `env` explícito, este nível simplesmente não
+ * contribui (cai no `config`/default, nunca no processo por baixo dos panos).
  */
 export function resolveIdleTimeoutMs(
   flagMs: number | undefined,
-  env: Record<string, string | undefined> = (
-    globalThis as { process?: { env?: Record<string, string | undefined> } }
-  ).process?.env ?? {},
+  env: Record<string, string | undefined> = {},
   config?: number | undefined, // ADR-0150 (balde b): config.subagents.idleTimeoutMs
 ): number {
   // 1) flag (opção do spawner) — só se for um positivo finito.
@@ -822,9 +840,12 @@ export class SubAgentSpawner {
     // ao teto-teto NOVO (`MAX_SUBAGENT_CONCURRENCY_CEILING`). Substitui o antigo
     // `clampPositive(opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY)` (sem env/config nem
     // teto-teto — só clampava ao PISO ≥1).
+    // CORREÇÃO DE FRONTEIRA (ADR-0053 §8) — o env vem de `opts.env` (já lido pelo
+    // `cli`, ver doc de `SubAgentSpawnerOptions.env`); este spawner NUNCA lê
+    // `process.env` diretamente (antes lia via `readProcessEnv()` — removido).
     this.maxConcurrency = resolveMaxConcurrency(
       opts.maxConcurrency,
-      readProcessEnv()[SUBAGENT_MAX_CONCURRENCY_ENV],
+      opts.env?.[SUBAGENT_MAX_CONCURRENCY_ENV],
       opts.configDefaults?.maxConcurrency,
     );
     // ADR-0150 (balde b) — teto de filhos por chamada: precedência env > config >
@@ -833,7 +854,7 @@ export class SubAgentSpawner {
     // módulo-constante `MAX_SUBAGENTS_PER_CALL`, que segue só como DEFAULT/guia estático
     // do schema do `spawn_agent`, EST-0970).
     this.maxSubagentsPerCall = resolveMaxSubagentsPerCall(
-      readProcessEnv()[SUBAGENTS_MAX_PER_CALL_ENV],
+      opts.env?.[SUBAGENTS_MAX_PER_CALL_ENV],
       opts.configDefaults?.maxPerCall,
     );
     // EST-0969 — precedência flag > env > default. `idleTimeoutMs` tem precedência
@@ -842,7 +863,7 @@ export class SubAgentSpawner {
     // default, clampado em `[MIN_SUBAGENT_IDLE_TIMEOUT_MS, MAX_SUBAGENT_IDLE_TIMEOUT_MS]`.
     this.idleTimeoutMs = resolveIdleTimeoutMs(
       opts.idleTimeoutMs ?? opts.timeoutMs,
-      undefined,
+      opts.env,
       opts.configDefaults?.idleTimeoutMs,
     );
     if (opts.observer) this.observer = opts.observer;
@@ -1173,13 +1194,6 @@ export class SubAgentSpawner {
       usage: result.usage,
     };
   }
-}
-
-/** ADR-0150 — leitura DEFENSIVA de `process.env` (ausente em runtimes sem Node global). */
-function readProcessEnv(): Record<string, string | undefined> {
-  return (
-    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {}
-  );
 }
 
 /**

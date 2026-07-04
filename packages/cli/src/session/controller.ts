@@ -1500,6 +1500,12 @@ export class SessionController {
         // ADR-0150 (balde b) — seção `subagents` do config.json (nível ENTRE a opção
         // acima e o DEFAULT do core). Repassado tal-qual; o spawner resolve/clampa.
         ...(opts.subAgents.configDefaults ? { configDefaults: opts.subAgents.configDefaults } : {}),
+        // CORREÇÃO DE FRONTEIRA (ADR-0053 §8) — env da SESSÃO (já resolvido pelo wiring,
+        // `opts.env ?? process.env`, MESMO padrão do `mcpEnv`/`parentEnv` do `mcp/setup.ts`),
+        // p/ o spawner ler `ALUY_SUBAGENT_MAX_PER_CALL`/`ALUY_SUBAGENT_MAX_CONCURRENCY`/
+        // `ALUY_SUBAGENT_IDLE_TIMEOUT` sem NUNCA tocar `process.env` por conta própria (o
+        // core não lê env/arquivo). Ausente ⇒ nenhuma das três envs entra na precedência.
+        ...(opts.subAgents.env !== undefined ? { env: opts.subAgents.env } : {}),
         observer: displayObserver,
         ...(opts.limits !== undefined ? { limits: opts.limits } : {}),
         // EST-0982 (semântica do esc) — o sinal de PARADA de cada filho é o do NÓ dele
