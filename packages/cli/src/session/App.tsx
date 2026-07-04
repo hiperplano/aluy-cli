@@ -3764,6 +3764,18 @@ export function App(props: AppProps): React.ReactElement {
         .join(' · ') || 'local'
     : `broker · ${tierDisplayName(state.meta.tier, modelPicker.tiers)}`;
 
+  // FIX (dono) — o HEADER (chrome mais estático — EST-0989) NÃO deve repetir o indicador
+  // de backend "local", que já mora, VIVO, no rodapé (`<StatusBar>`, via `tierDisplay`):
+  // o dono via `◍ local`/`◷ local · <provider> · <modelo>` 2x (header E footer, inline E
+  // fullscreen). Pro header, quando o backend é local, tiramos só a palavra "local" do
+  // texto — mantém provider/modelo (ainda orientam), sem repetir o rótulo do modo. Sem
+  // provider NEM modelo (raro, cedo no boot) cai de volta no `tierDisplay` cheio (degrada
+  // sem ficar em branco). Broker segue IGUAL a `tierDisplay` (sem queixa, sem mudança).
+  const headerTierDisplay = localByModel
+    ? [localProviderName, localModelName].filter((v) => v !== undefined && v !== '').join(' · ') ||
+      tierDisplay
+    : tierDisplay;
+
   // ── EST-1000 · ADR-0076 — OVERLAYS de `/` (SlashMenu + pickers + paleta) ─────────
   // EST-1000 (#157 fix) — o <SlashMenu>, os pickers abertos POR `/` (model/theme/lang/
   // history) e a <CommandPalette> (Ctrl+P) são overlays MODAIS: abrem SOBRE a superfície
@@ -3918,6 +3930,7 @@ export function App(props: AppProps): React.ReactElement {
         showCursor={composerShowCursor}
         hintState={hintState}
         tierDisplay={tierDisplay}
+        headerTierDisplay={headerTierDisplay}
         isDefaultTier={isDefaultTier}
         columns={columns}
         frame={frame}
@@ -4113,11 +4126,10 @@ export function App(props: AppProps): React.ReactElement {
                 {/* EST-0987 (1/3) — divisória ACIMA do header. */}
                 {showHeaderDivider && <Divider columns={columns} />}
                 <Header
-                  tier={tierDisplay}
+                  tier={headerTierDisplay}
                   columns={columns}
                   rows={rows}
                   {...(props.version !== undefined ? { version: props.version } : {})}
-                  {...(state.meta.backend !== undefined ? { backend: state.meta.backend } : {})}
                 />
                 {/* EST-0985 (1/3) — divisória SOB o header: separa o chrome
                     (marca/tier) do corpo da conversa. */}

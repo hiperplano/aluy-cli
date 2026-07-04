@@ -1,11 +1,16 @@
 // EST-1010 · /theme — SNAPSHOT do CHROME nos 3 temas do web (light/dark/slate).
 //
 // DoD: "snapshot dos 3 temas (chrome com a paleta de cada)". Renderiza o <Header>
-// (marca Λ + `Aluy Cli` + tier + ◍ broker — compacto, EST-0989) sob cada tema
+// (marca Λ + `Aluy Cli` + tier — compacto, EST-0989) sob cada tema
 // RESOLVIDO em truecolor e congela o frame
 // CRU (com os códigos SGR), provando que cada tema pinta a SUA paleta — o accent
-// âmbar de cada um, o `fg`/`fgDim`/`depth` distintos. Os snapshots inline também
+// âmbar de cada um, o `fg`/`fgDim` distintos. Os snapshots inline também
 // documentam, em um lugar só, as cores efetivas que cada tema emite no terminal.
+//
+// FIX (dono) — o badge de backend (`◍ broker`/`◍ local`, `depth`/ciano) foi REMOVIDO
+// do header: duplicava o indicador que já mora, vivo, no rodapé (<StatusBar>). O
+// header não emite mais a cor `depth` — os snapshots abaixo refletem isso (4 cores,
+// não mais 6).
 //
 // Por que truecolor: é o modo que separa os 3 temas (a paleta por tema). Em ansi16 os
 // escuros (dark/slate) colapsam na MESMA degradação — coberto à parte (esc-seq de cor
@@ -22,8 +27,9 @@ const TRUE_ENV = { COLORTERM: 'truecolor', LANG: 'en_US.UTF-8', TERM: 'xterm-256
 
 function renderHeader(themeName: string): string {
   const theme = resolveThemeByName(themeName, { env: TRUE_ENV });
-  // compacto (rows baixo) ⇒ header de 1 linha `Λ aluy <tier> · ◍ broker` — estável,
-  // sem o wordmark multilinha (cujo ASCII-art faria o snapshot frágil a colunas).
+  // compacto (rows baixo) ⇒ header de 1 linha `Λ aluy <tier>` — estável, sem o
+  // wordmark multilinha (cujo ASCII-art faria o snapshot frágil a colunas) e sem o
+  // badge de backend (FIX dono — ver topo do arquivo).
   const { lastFrame } = render(
     <ThemeProvider theme={theme}>
       <Header tier="aluy-deep" columns={80} rows={10} />
@@ -52,11 +58,13 @@ describe('chrome (<Header>) nos 3 temas do web — snapshot da paleta', () => {
     expect(THEMES.map((t) => t.name)).toEqual(['aluy-dark', 'aluy-light', 'aluy-slate']);
   });
 
-  it('dark — accent âmbar #DDA13F + fgDim neutro + depth ciano', () => {
+  it('dark — accent âmbar #DDA13F + fgDim neutro (sem depth — badge de backend removido)', () => {
     const hexes = truecolorHexes(renderHeader('aluy-dark'));
     expect(hexes).toContain('#DDA13F'); // accent (Λ)
     expect(hexes).toContain('#8A7F6D'); // fgDim (label `aluy`)
-    expect(hexes).toContain('#5BA8A2'); // depth (◍ broker)
+    // FIX (dono) — o badge `◍ broker` (depth/ciano) saiu do header; não deve mais
+    // emitir essa cor (duplicava o indicador que mora, vivo, no rodapé).
+    expect(hexes).not.toContain('#5BA8A2');
   });
 
   it('light — accent escurecido #82530F (AA no creme) + fg quase-preto', () => {
@@ -86,8 +94,6 @@ describe('chrome (<Header>) nos 3 temas do web — snapshot da paleta', () => {
             "#F2EEE8",
             "#8A7F6D",
             "#F2EEE8",
-            "#8A7F6D",
-            "#5BA8A2",
           ],
         },
         "aluy-light": {
@@ -97,8 +103,6 @@ describe('chrome (<Header>) nos 3 temas do web — snapshot da paleta', () => {
             "#1A1712",
             "#544B3C",
             "#1A1712",
-            "#544B3C",
-            "#2E6E69",
           ],
         },
         "aluy-slate": {
@@ -108,8 +112,6 @@ describe('chrome (<Header>) nos 3 temas do web — snapshot da paleta', () => {
             "#F2EEE8",
             "#B0A593",
             "#F2EEE8",
-            "#B0A593",
-            "#5BA8A2",
           ],
         },
       }

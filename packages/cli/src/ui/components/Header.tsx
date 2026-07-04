@@ -58,12 +58,6 @@ export interface HeaderProps {
    * o subtítulo cai p/ `Aluy CLI · Terminal` (sem a versão; degradação graciosa).
    */
   readonly version?: string;
-  /**
-   * ADR-0120 — backend EFETIVO (`local`|`broker`). O label do header reflete o modo real
-   * (`◍ local` no BYO) em vez de `broker` fixo — que fazia um setup local funcionando
-   * parecer broker. Ausente ⇒ `broker` (default histórico, não-regressão).
-   */
-  readonly backend?: 'broker' | 'local';
 }
 
 /**
@@ -78,16 +72,21 @@ export const HEADER_BANNER_MIN_ROWS = WORDMARK_ROWS + 13;
 const PRODUCT_NAME = 'Aluy Cli';
 
 /**
- * Subtítulo do BANNER (EST-0989) — `Aluy CLI · Terminal v<versão>` + `◍ broker`.
+ * Subtítulo do BANNER (EST-0989) — `Aluy CLI · Terminal v<versão>`.
  * SEM tier (Variação B): o tier vivo mora no rodapé. `Aluy CLI`=fg, ` · Terminal `
- * =fgDim, `v<versão>`=depth (mono), `◍ broker`=depth.
+ * =fgDim, `v<versão>`=depth (mono).
+ *
+ * FIX (dono) — o badge `◍ local`/`◍ broker` (ADR-0120) foi REMOVIDO daqui: ele
+ * duplicava o indicador de backend que já mora, VIVO, no rodapé (`<StatusBar>`, via
+ * `tier`/EST-0989) — em fullscreen o dono via `◍ local` no header E `◷ local · …` no
+ * rodapé. O header segue SEM indicar backend/local; essa informação é exclusiva do
+ * footer.
  */
 function BannerSubtitle(props: {
   readonly sub?: string;
   readonly version?: string;
   readonly narrow: boolean;
   readonly error: boolean | undefined;
-  readonly backend?: 'broker' | 'local';
 }): React.ReactElement {
   return (
     <Box>
@@ -106,13 +105,6 @@ function BannerSubtitle(props: {
           )}
         </>
       )}
-      {!props.narrow && (
-        <>
-          <Role name="fgDim"> · </Role>
-          <Glyph name="broker" role="depth" />
-          <Role name="depth"> {props.backend === 'local' ? 'local' : 'broker'}</Role>
-        </>
-      )}
       {props.error && (
         <>
           <Role name="fgDim"> · </Role>
@@ -129,6 +121,11 @@ function BannerSubtitle(props: {
  *   narrow (<60): `Λ Aluy CLI · <tier>`  (sem versão nem broker — cabe na largura)
  * O tier ENTRA aqui (≠ do banner): sem o wordmark, o compacto é a única pista de
  * modelo, e o compacto não fica no `<Static>` congelado.
+ *
+ * FIX (dono) — o badge `◍ local`/`◍ broker` (ADR-0120) foi REMOVIDO: além de repetir
+ * o indicador de backend que já mora no rodapé (`<StatusBar>`, vivo), no compacto ele
+ * ERA REDUNDANTE com o próprio `tier` (a App já prefixa `local · …`/`broker · …` no
+ * `tier` de exibição) — "local"/"broker" chegava a aparecer 2x só dentro do header.
  */
 function CompactLine(props: {
   readonly tier: string;
@@ -136,7 +133,6 @@ function CompactLine(props: {
   readonly version?: string;
   readonly narrow: boolean;
   readonly error: boolean | undefined;
-  readonly backend?: 'broker' | 'local';
 }): React.ReactElement {
   return (
     <Box>
@@ -159,13 +155,6 @@ function CompactLine(props: {
       )}
       <Role name="fgDim"> · </Role>
       <Role name="fg">{props.tier}</Role>
-      {!props.narrow && (
-        <>
-          <Role name="fgDim"> · </Role>
-          <Glyph name="broker" role="depth" />
-          <Role name="depth"> {props.backend === 'local' ? 'local' : 'broker'}</Role>
-        </>
-      )}
       {props.error && (
         <>
           <Role name="fgDim"> · </Role>
@@ -192,7 +181,6 @@ export function Header(props: HeaderProps): React.ReactElement {
         tier={props.tier}
         {...(props.sub !== undefined ? { sub: props.sub } : {})}
         {...(props.version !== undefined ? { version: props.version } : {})}
-        {...(props.backend !== undefined ? { backend: props.backend } : {})}
         narrow={narrow}
         error={props.error}
       />
@@ -206,7 +194,6 @@ export function Header(props: HeaderProps): React.ReactElement {
       <BannerSubtitle
         {...(props.sub !== undefined ? { sub: props.sub } : {})}
         {...(props.version !== undefined ? { version: props.version } : {})}
-        {...(props.backend !== undefined ? { backend: props.backend } : {})}
         narrow={narrow}
         error={props.error}
       />
