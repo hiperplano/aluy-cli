@@ -34,37 +34,65 @@ function errMsg(e: unknown): string {
  * @param config  config já parseada (do `mcp.json` confinado a `~/.aluy/`).
  * @param makeTransport  fábrica de transport concreto (stdio), injetada pelo locus.
  */
+/** Resultado interno de UM server — nunca lança (fail-soft já resolvido aqui). */
+interface OneServerOutcome {
+  readonly result: McpServerDiscovery;
+  readonly transport?: McpTransport;
+}
+
 export async function discoverMcpTools(
   config: McpConfig,
   makeTransport: McpTransportFactory,
 ): Promise<McpDiscoveryResult> {
+  // EST-0970/ADR-0058 (paralelização do boot) — cada server ATIVO conecta EM
+  // PARALELO: `Promise.all` sobre um array de promises que NUNCA rejeitam (o
+  // try/catch por-server abaixo resolve o fail-soft POR DENTRO de cada uma). Antes,
+  // o `for...of` com `await` dentro do loop fazia cada server esperar o anterior —
+  // o pior caso era a SOMA dos tempos de conexão. Agora o pior caso é o server MAIS
+  // LENTO (limitado pelo watchdog do transport), porque todos conectam ao mesmo
+  // tempo. `Promise.all` (não `allSettled`) é seguro aqui exatamente PORQUE nenhuma
+  // promise do array rejeita — o catch é interno.
+  const active = config.servers.filter((server) => server.disabled !== true);
+
+  const outcomes = await Promise.all(
+    active.map(async (server): Promise<OneServerOutcome> => {
+      // EST-0970 (ciclo MCP na sessão) — server DESATIVADO já foi filtrado acima:
+      // não lança processo, não conecta, nenhuma tool entra no toolset. Ele não
+      // aparece no resultado da descoberta — a LISTAGEM (listing.ts) resolve o
+      // estado "desativado" direto da config (a fonte da verdade do interruptor).
+      const transport = makeTransport(server);
+      try {
+        const descriptors = await transport.connect(server);
+        const tools: DiscoveredMcpTool[] = descriptors.map((descriptor) => ({
+          server: server.name,
+          descriptor,
+          transport,
+        }));
+        return { result: { server: server.name, ok: true, tools }, transport };
+      } catch (e) {
+        // fail-soft: o server não subiu / handshake falhou ⇒ some do toolset, com o
+        // erro registrado. Fecha o transport (best-effort) p/ não vazar processo.
+        // Isolado por server: a falha de UM `await connect()` não aborta os demais
+        // `Promise.all` porque é capturada AQUI, dentro da própria promise do map —
+        // nunca propaga pra fora e derruba as outras conexões em voo.
+        void closeQuietly(transport);
+        return { result: { server: server.name, ok: false, tools: [], error: errMsg(e) } };
+      }
+    }),
+  );
+
+  // ORDEM DETERMINÍSTICA: `outcomes` está na MESMA posição de `active` (o `.map`
+  // preserva índice mesmo com conexões concluindo fora de ordem, porque cada
+  // servidor conecta em paralelo mas cada promise devolve seu resultado na posição
+  // que entrou) — o `Promise.all` reordena os resultados pela ordem de ENTRADA, não
+  // pela ordem de CONCLUSÃO. O resultado final segue a ordem do `mcp.json`.
   const serverResults: McpServerDiscovery[] = [];
   const allTools: DiscoveredMcpTool[] = [];
   const transports: McpTransport[] = [];
-
-  for (const server of config.servers) {
-    // EST-0970 (ciclo MCP na sessão) — server DESATIVADO (`disabled: true`) é PULADO:
-    // não lança processo, não conecta, nenhuma tool entra no toolset. Ele não aparece
-    // no resultado da descoberta — a LISTAGEM (listing.ts) resolve o estado
-    // "desativado" direto da config (a fonte da verdade do interruptor).
-    if (server.disabled === true) continue;
-    const transport = makeTransport(server);
-    try {
-      const descriptors = await transport.connect(server);
-      const tools: DiscoveredMcpTool[] = descriptors.map((descriptor) => ({
-        server: server.name,
-        descriptor,
-        transport,
-      }));
-      transports.push(transport);
-      allTools.push(...tools);
-      serverResults.push({ server: server.name, ok: true, tools });
-    } catch (e) {
-      // fail-soft: o server não subiu / handshake falhou ⇒ some do toolset, com o
-      // erro registrado. Fecha o transport (best-effort) p/ não vazar processo.
-      void closeQuietly(transport);
-      serverResults.push({ server: server.name, ok: false, tools: [], error: errMsg(e) });
-    }
+  for (const outcome of outcomes) {
+    serverResults.push(outcome.result);
+    allTools.push(...outcome.result.tools);
+    if (outcome.transport) transports.push(outcome.transport);
   }
 
   return { servers: serverResults, tools: allTools, transports };
