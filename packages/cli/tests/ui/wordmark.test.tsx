@@ -1,12 +1,8 @@
 // EST-0989 — WORDMARK "Λluy": o glifo `aluy` (Λ — a marca, A MESMA do loader/header/
-// thinking) como o "A", seguido de "luy" em MINÚSCULAS (block-art). Fallback ASCII
-// (`/\` p/ o Λ + `#` p/ "luy") e degradação p/ terminal estreito (`Λ luy` / `/\ luy`).
-// FONTE ÚNICA: Boot e Header consomem este mesmo <Wordmark> — testado lá
-// (components.test.tsx) que não divergem.
-//
-// F199 — pedido do dono: a marca é BRANCA (papel `fg`), tanto o splash quanto o
-// header — Λ e "luy" equalizados no mesmo `fg`, coerente com o shimmer âmbar do
-// splash que varre por cima dessa base branca (ver wordmark-3d.test.ts).
+// thinking) como o "A" em DESTAQUE (accent), seguido de "luy" em MINÚSCULAS (block-art),
+// EQUALIZADO no mesmo papel de marca `accent` (âmbar). Fallback ASCII (`/\` p/ o Λ + `#`
+// p/ "luy") e degradação p/ terminal estreito (`Λ luy` / `/\ luy`). FONTE ÚNICA: Boot e
+// Header consomem este mesmo <Wordmark> — testado lá (components.test.tsx) que não divergem.
 
 import React from 'react';
 import { describe, expect, it } from 'vitest';
@@ -50,17 +46,16 @@ describe('Wordmark — "Λluy" (Λ accent + luy minúsculo) · EST-0989', () => 
     expect(out).not.toContain('Aluy');
   });
 
-  it('UNICODE: o Λ e "luy" EQUALIZADOS em `fg` — marca BRANCA (F199, pedido do dono)', () => {
+  it('UNICODE: o Λ e "luy" EQUALIZADOS em ACCENT (uma cor de marca — pedido do dono)', () => {
     const raw = wrap(<Wordmark columns={100} />).lastFrame() ?? '';
     const theme = resolveTheme({ env: { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' } });
-    // EQUALIZADO: Λ e "luy" no MESMO papel `fg` (branco) — a marca não tem mais 2 tons
-    // (antes Λ/luy eram accent/depth; F199 trocou a base p/ `fg`, branco, coerente com
-    // o shimmer do splash que varre âmbar por cima do branco). A saída renderiza
-    // COLORIDA no papel fg; não acoplamos ao ANSI exato (a equalização é estrutural).
-    const fg = theme.role('fg').color;
-    expect(fg).toBeTruthy();
+    // EQUALIZADO: Λ e "luy" no MESMO papel `accent` (a marca não tem mais 2 tons —
+    // antes o Λ era accent e "luy" depth). A saída renderiza COLORIDA no papel accent;
+    // não acoplamos ao ANSI exato (a equalização é estrutural no <Wordmark>).
+    const accent = theme.role('accent').color;
+    expect(accent).toBeTruthy();
     const sgr = raw.match(new RegExp(ESC + '\\[[0-9;]*m', 'g')) ?? [];
-    expect(sgr.length).toBeGreaterThan(0); // colorido (papel fg), não mono
+    expect(sgr.length).toBeGreaterThan(0); // colorido (papel accent), não mono
   });
 
   it('ASCII (TERM=linux): o Λ vira `/\\` e "luy" vira `#` (sem █)', () => {

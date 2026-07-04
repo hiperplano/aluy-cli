@@ -11,15 +11,15 @@
 // <BusyPulse>): a "cabeça" do brilho é uma COLUNA que anda com o `frame` do tick central
 //   head = (frame · SHIMMER_SPEED) mod (width + SHIMMER_TAIL)
 // varrendo da col 0 até a última coluna da marca e recomeçando. `SHIMMER_TAIL` é a margem
-// de respiro no fim (o logo repousa calmo em `fg` — a base BRANCA — por alguns frames antes
-// de o brilho reentrar pela esquerda — laço com pausa, não uma faixa colada). A intensidade
-// de cada coluna é o quão PERTO ela está da cabeça (degradê suave, não uma coluna só acesa):
+// ESCURA de respiro no fim (o logo repousa calmo em `accentDim` por alguns frames antes de
+// o brilho reentrar pela esquerda — laço com pausa, não uma faixa colada). A intensidade de
+// cada coluna é o quão PERTO ela está da cabeça (degradê suave, não uma coluna só acesa):
 //   · |col−head| ≤ SHIMMER_PEAK ⇒ PICO   → papel `accent`    (âmbar-400, o mais claro/vivo)
 //   · |col−head| ≤ SHIMMER_HALO ⇒ HALO    → papel `accentMid` (âmbar-500 — degradê em volta)
-//   · senão                     ⇒ FORA    → papel `fg`        (BRANCO — a base/repouso do logo)
-// A marca em REPOUSO é BRANCA (`fg`, o papel de texto do tema); o BRILHO ÂMBAR (accent/
-// accentMid) desliza por cima dela, por PAPEL do tema — NUNCA cor crua (pedido do dono: o
-// wordmark é branco, a luz que varre é que é âmbar).
+//   · senão                     ⇒ FORA    → papel `accentDim` (âmbar calmo — o logo em repouso)
+// A marca é ÂMBAR (accent/accentMid/accentDim); o brilho "acende na cabeça e esmaece em
+// volta", varrendo o logo, por PAPEL do tema — NUNCA cor crua. A SOMBRA 3D é VERDE/TEAL
+// (`depth`) — contraste de matiz: luz âmbar, sombra fria teal (pedido do dono).
 //
 // ANTI-FLICKER (EST-0965 / EST-0956 / #95 / #118): a grade tem LARGURA e ALTURA CONSTANTES
 // entre frames — o `char` de cada célula (marca `█`, sombra `▒`, vazio ` `) NUNCA muda com o
@@ -27,11 +27,11 @@
 // encolhe: o splash NÃO reflui. (Por isso a sombra deixou de respirar — o tom dela agora é
 // FIXO; o movimento vive só na COR da marca.)
 //
-// REDUCED-MOTION (`theme.animate===false`, a11y §6): SEM shimmer — a marca fica ESTÁTICA no
-// tom de BASE (`fg`, branco), coerente com o repouso: sem brilho, o logo é só a marca branca,
-// pois o movimento nunca carrega significado sozinho. O caller (SplashScreen) já cai no
-// <Wordmark> estático quando `!animate`; ainda assim `composeShadowedWordmark(frame, animate)`
-// honra o gate (marca toda `fg`) p/ ser robusto e testável como função pura.
+// REDUCED-MOTION (`theme.animate===false`, a11y §6): SEM shimmer — a marca fica ESTÁTICA num
+// tom de realce fixo (`accent`, o logo "aceso"), pois o movimento nunca carrega significado
+// sozinho. O caller (SplashScreen) já cai no <Wordmark> estático quando `!animate`; ainda
+// assim `composeShadowedWordmark(frame, animate)` honra o gate (marca toda `accent`) p/ ser
+// robusto e testável como função pura.
 //
 // PURO (ADR-0053 §8): só compõe uma grade de células {role,char}. Sem Ink/IO/tempo real (o
 // `frame` chega por prop, handoff §10.1). Fallback: sem Unicode (ascii) NÃO há 3D (o `█` é a
@@ -79,12 +79,12 @@ export const SHIMMER_HALO = 4;
  */
 export const SHIMMER_TAIL = 8;
 
-/** Intensidade do brilho numa coluna: 2=pico (`accent`) · 1=halo (`accentMid`) · 0=fora/repouso (`fg`). */
+/** Intensidade do brilho numa coluna: 2=pico (`accent`) · 1=halo (`accentMid`) · 0=fora (`accentDim`). */
 export type ShimmerLevel = 0 | 1 | 2;
 
-/** Papéis (cores do tema) da marca: `fg` é a base BRANCA de repouso; `accent`/`accentMid` são
- * o brilho ÂMBAR que varre por cima. */
-export type ShimmerRole = 'accent' | 'accentMid' | 'accentDim' | 'fg';
+/** Papéis (cores do tema) da grade: o degradê ÂMBAR do brilho (accent/accentMid/accentDim,
+ * mesma escala do <BusyPulse>) + a SOMBRA 3D em `depth` (teal). Por PAPEL — nunca cor crua. */
+export type ShimmerRole = 'accent' | 'accentMid' | 'accentDim' | 'depth';
 
 /** Uma célula da grade composta: o papel do DS + o glifo. `null` = vazio (espaço). */
 export interface Cell {
@@ -120,12 +120,12 @@ export function shimmerAt(col: number, frame: number, width: number): ShimmerLev
 }
 
 /** Mapeia a intensidade do brilho p/ o PAPEL do tema (nunca cor crua). PURO.
- * Nível 0 (fora do brilho) é a BASE de repouso do logo: `fg` (BRANCO) — o brilho ÂMBAR
- * (accent/accentMid) varre por cima dessa base (pedido do dono). */
+ * Nível 0 (fora do brilho) é a BASE de repouso do logo: `accentDim` (âmbar escuro) — o
+ * brilho ÂMBAR (accent/accentMid) varre por cima dessa base âmbar. */
 export function shimmerRole(level: ShimmerLevel): ShimmerRole {
   if (level === 2) return 'accent';
-  if (level === 1) return 'accentMid'; // halo = âmbar-500 (degradê ÂMBAR, sem teal — pedido do dono)
-  return 'fg'; // fora do brilho — base BRANCA do logo em repouso
+  if (level === 1) return 'accentMid'; // halo = âmbar-500 (degradê ÂMBAR, sem teal)
+  return 'accentDim'; // fora do brilho — âmbar calmo (logo em repouso)
 }
 
 /** As linhas combinadas (Λ + GAP + luy) da marca block-art, como strings. */
@@ -155,9 +155,9 @@ export function composeShadowedWordmark(frame: number, animate = true): Cell[][]
 
   const filled = (r: number, c: number): boolean => (mark[r]?.[c] ?? ' ') === FILL;
   // Papel da célula da marca na coluna `c`: com animação, deriva do brilho que varre; em
-  // reduced-motion, `fg` fixo (logo branco ESTÁTICO, coerente com a base de repouso).
+  // reduced-motion, `accent` fixo (logo âmbar aceso, ESTÁTICO, sem shimmer).
   const markRole = (c: number): ShimmerRole =>
-    animate ? shimmerRole(shimmerAt(c, frame, width)) : 'fg';
+    animate ? shimmerRole(shimmerAt(c, frame, width)) : 'accent';
 
   const grid: Cell[][] = [];
   for (let r = 0; r < height + 1; r += 1) {
@@ -167,11 +167,11 @@ export function composeShadowedWordmark(frame: number, animate = true): Cell[][]
         row.push({ role: markRole(c), char: FILL });
       } else if (filled(r - 1, c - 1)) {
         // sombra projetada ↓→ pela célula da marca acima-à-esquerda (tom FIXO — não respira).
-        // Sombra 3D em âmbar ESCURO (accentDim) — fica como está mesmo com a marca agora
-        // branca (`fg`) em repouso: a sombra NÃO acompanha a mudança de cor da base, só o
-        // brilho (accent/accentMid) varre por cima do branco. Contraste com a marca vem do
-        // CHAR (`▒` sombra vs `█` marca).
-        row.push({ role: 'accentDim', char: SHADOW_SHADE });
+        // Sombra 3D em VERDE/TEAL (`depth`, #5BA8A2 do tema) — contraste de MATIZ com a marca
+        // âmbar (accent/accentMid/accentDim): a luz é âmbar, a sombra fria é teal. Fixa (não
+        // é fonte de movimento — anti-flicker); o contraste com a marca vem da COR e do CHAR
+        // (`▒` sombra vs `█` marca).
+        row.push({ role: 'depth', char: SHADOW_SHADE });
       } else {
         row.push({ role: null, char: ' ' });
       }
