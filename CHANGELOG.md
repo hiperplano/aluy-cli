@@ -16,6 +16,24 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 _(vazio)_
 
+## [1.0.0-rc.98] — 2026-07-04
+
+### Adicionado
+
+- 🧠 Self-use (ADR-0145): o agente ganha um MAPA DE CAPACIDADES no prompt + gatilhos "use QUANDO" nas descrições + few-shot no tier fraco + a tool `capabilities` (lista o que ele pode disparar agora) + descoberta de skills. Alvo: com modelo médio (BYO), ele enxerga e DISPARA as próprias capacidades em vez de responder em texto.
+
+### Alterado
+
+- 🎨 Splash: a sombra 3D do wordmark agora SHIMMEIA em ÂMBAR escuro em sincronia com a luz da marca (era teal fixo) — a luz atravessa marca e sombra na mesma passada.
+- 📝 O indicador de backend "local" aparece só no rodapé (removido do header, onde duplicava).
+- ⚡ Boot ~2× mais rápido: a descoberta de MCP agora conecta os servers EM PARALELO (`Promise.all`) em vez de sequencial.
+
+### Corrigido
+
+- 🔴 Fullscreen: hardening do scroll — o differ do cockpit ficou auto-corretivo (força full-repaint em desalinhamento) e a medição de altura passou a filtrar ANSI, matando a duplicação de header/status-bar ao rolar em sessões grandes.
+
+_(vazio)_
+
 ## [1.0.0-rc.97] — 2026-07-04
 
 ### Corrigido
