@@ -922,6 +922,27 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     ...(savedConfig.limits ? { limits: savedConfig.limits } : {}),
     // ADR-0136 §5 — context do config (window/autocompactAt/autocompactMax); flag/env vencem.
     ...(savedConfig.context ? { context: savedConfig.context } : {}),
+    // ADR-0146 (D4) — dial GLOBAL `subAgent.model` (default dos FILHOS quando nem o
+    // spawn nem o `.md` setam `model`). MERGE explícito sobre `opts.subAgents` (já veio
+    // via `...optsForBuild` com `{ enabled }` de `aluy.ts`) — preserva os campos
+    // existentes e SOMA o `defaultModel`; `enabled` cai em `false` só no caso
+    // defensivo em que `opts.subAgents` não veio (sub-agentes OFF ⇒ o dial é inerte
+    // de qualquer jeito). Ausente no config ⇒ não sai (cai no default `same-as-parent`).
+    ...(savedConfig.subAgent?.model !== undefined
+      ? {
+          subAgents: {
+            enabled: opts.subAgents?.enabled ?? false,
+            ...(opts.subAgents?.maxConcurrency !== undefined
+              ? { maxConcurrency: opts.subAgents.maxConcurrency }
+              : {}),
+            ...(opts.subAgents?.timeoutMs !== undefined
+              ? { timeoutMs: opts.subAgents.timeoutMs }
+              : {}),
+            ...(opts.subAgents?.env !== undefined ? { env: opts.subAgents.env } : {}),
+            defaultModel: savedConfig.subAgent.model,
+          },
+        }
+      : {}),
     // EST-1112 · ADR-0119 — budget local resolvido (flag>env>config>default).
     localBudget,
     // EST-0972/0962 (BUG Custom) — slug Custom resolvido (só sob `tier:'custom'`): da

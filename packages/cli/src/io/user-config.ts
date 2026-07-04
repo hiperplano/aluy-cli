@@ -215,6 +215,22 @@ export interface UserConfig {
    * Os resolvers do core RE-VALIDAM/CLAMPAM (anti-overflow/anti-loop).
    */
   readonly context?: UserContextConfig;
+  /**
+   * ADR-0146 (D4) — dial GLOBAL de modelo/tier dos SUB-AGENTES (posição 3 da cadeia de
+   * precedência: parâmetro do `spawn_agent` > `model:` do `.md` > ESTE dial > herança
+   * do pai). MESMO vocabulário do `model:`/`spawn_agent.model`: um nome amigável
+   * (`sonnet`/…), uma chave `aluy-*`, `same-as-parent` (default — "sub-agentes seguem
+   * o pai", o comportamento de hoje) ou `custom`/`custom:<slug>` (BYO). Validação de
+   * FORMA idêntica ao `tier`/slug Custom (`isReasonableOpaque`) — este arquivo segue
+   * "só UI/tier", NUNCA credencial (CLI-SEC-7); o `resolveModelTier`/probe do core
+   * valida o VOCABULÁRIO de fato, no uso. Ausente ⇒ `same-as-parent` (zero regressão).
+   */
+  readonly subAgent?: UserSubAgentConfig;
+}
+
+/** ADR-0146 (D4) — dial de sub-agentes (só DADO/tier, nunca credencial — CLI-SEC-7). */
+export interface UserSubAgentConfig {
+  readonly model?: string;
 }
 
 /** Limites de orçamento de sessão (ADR-0136 §5). Inteiros positivos; o core clampa no uso. */
@@ -370,6 +386,18 @@ function sanitizeConnectors(raw: unknown): UserConnectorsConfig | undefined {
   return out.telegram !== undefined ? out : undefined;
 }
 
+/**
+ * ADR-0146 (D4) — sanitiza o dial `subAgent` (só `model`, string OPACA razoável —
+ * MESMA validação de forma do `tier`/slug Custom). Lixo/objeto inválido ⇒ `undefined`
+ * (a resolução cai no default `same-as-parent`, nunca trava/lança).
+ */
+function sanitizeSubAgent(raw: unknown): UserSubAgentConfig | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  if (isReasonableOpaque(o.model)) return { model: o.model.trim() };
+  return undefined;
+}
+
 /** Sanitiza a seção `services` (ADR-0136 §8). Só sub-endpoints válidos sobrevivem. */
 function sanitizeServices(raw: unknown): UserServicesConfig | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
@@ -479,6 +507,7 @@ function sanitize(raw: unknown): UserConfig {
     connectors?: UserConnectorsConfig;
     limits?: UserLimitsConfig;
     context?: UserContextConfig;
+    subAgent?: UserSubAgentConfig;
   } = {};
   // theme: precisa ser um nome conhecido do catálogo (senão ignora → default dark).
   if (typeof obj.theme === 'string') {
@@ -592,6 +621,10 @@ function sanitize(raw: unknown): UserConfig {
   // ADR-0136 §5 (balde a) — context promovido das env (window/autocompactAt/autocompactMax).
   const context = sanitizeContext(obj.context);
   if (context) out.context = context;
+
+  // ADR-0146 (D4) — dial global de modelo/tier dos sub-agentes.
+  const subAgent = sanitizeSubAgent(obj.subAgent);
+  if (subAgent) out.subAgent = subAgent;
 
   return out;
 }
@@ -738,6 +771,17 @@ export class UserConfigStore {
    */
   saveLocalBudget(localBudget: boolean): boolean {
     return this.save({ localBudget });
+  }
+
+  /**
+   * ADR-0146 (D4) — Açúcar: persiste (ou LIMPA, com `undefined`/vazio) o dial GLOBAL
+   * de modelo/tier dos SUB-AGENTES (`subAgent.model`), preservando as demais
+   * preferências. MESMO vocabulário do `model:` do `.md` (`same-as-parent`/tier/
+   * `custom`/`custom:<slug>`) — só DADO/tier, nunca credencial (CLI-SEC-7).
+   */
+  saveSubAgentModel(model: string | undefined): boolean {
+    const trimmed = model?.trim();
+    return this.save({ subAgent: trimmed !== undefined && trimmed !== '' ? { model: trimmed } : {} });
   }
 
   /**

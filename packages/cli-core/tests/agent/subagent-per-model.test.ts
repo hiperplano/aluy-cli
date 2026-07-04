@@ -97,6 +97,50 @@ describe('EST-SUBAGENT-MODEL · childCallerFor (PURO)', () => {
     const c = childCallerFor({ label: 'x', goal: 'g', model: 'opus' }, parent, undefined);
     expect(c).toBe(parent);
   });
+
+  // ── ADR-0146 (D3) — sentinelas de HERANÇA/BYO ──────────────────────────────
+  it('ADR-0146 · "same-as-parent"/"parent"/"inherit" ⇒ SEMPRE o caller do PAI', () => {
+    for (const m of ['same-as-parent', 'parent', 'inherit', 'Same-As-Parent']) {
+      const c = childCallerFor({ label: 'x', goal: 'g', model: m }, parent, factory);
+      expect(c).toBe(parent);
+    }
+  });
+
+  it('ADR-0146 · "custom" (sem slug) com customCallerFor ⇒ usa a fábrica CUSTOM, não a de tier', async () => {
+    const customCalls: { tag: string }[] = [];
+    const tierCalls: { tag: string }[] = [];
+    const tierFactory = (tier: string): ModelCaller => taggedCaller(`TIER:${tier}`, tierCalls);
+    const customFactory = (slug?: string): ModelCaller =>
+      taggedCaller(`CUSTOM:${slug ?? '(sem slug)'}`, customCalls);
+    const c = childCallerFor(
+      { label: 'x', goal: 'g', model: 'custom' },
+      parent,
+      tierFactory,
+      customFactory,
+    );
+    await c.call({ messages: [], idempotencyKey: 'k' });
+    expect(customCalls).toEqual([{ tag: 'CUSTOM:(sem slug)' }]);
+    expect(tierCalls).toHaveLength(0);
+  });
+
+  it('ADR-0146 · "custom:<slug>" ⇒ a fábrica CUSTOM recebe o SLUG indicado', async () => {
+    const customCalls: { tag: string }[] = [];
+    const customFactory = (slug?: string): ModelCaller =>
+      taggedCaller(`CUSTOM:${slug ?? '(sem slug)'}`, customCalls);
+    const c = childCallerFor(
+      { label: 'x', goal: 'g', model: 'custom:meu-slug' },
+      parent,
+      undefined,
+      customFactory,
+    );
+    await c.call({ messages: [], idempotencyKey: 'k' });
+    expect(customCalls).toEqual([{ tag: 'CUSTOM:meu-slug' }]);
+  });
+
+  it('ADR-0146 · "custom" SEM a fábrica customCallerFor injetada ⇒ cai no caller do PAI (fail-safe)', () => {
+    const c = childCallerFor({ label: 'x', goal: 'g', model: 'custom:algum-slug' }, parent);
+    expect(c).toBe(parent);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════

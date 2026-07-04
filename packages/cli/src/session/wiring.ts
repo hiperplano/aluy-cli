@@ -319,6 +319,13 @@ export interface BuildSessionOptions {
      * (Fatia 2). Default: o env da sessão (`opts.env`). Só p/ teste determinístico.
      */
     readonly env?: Record<string, string | undefined>;
+    /**
+     * ADR-0146 (D4) — DEFAULT dos FILHOS quando nem o parâmetro do `spawn_agent` nem
+     * o `model:` do `.md` setam `model` (posição 3 da cadeia de precedência). Vem do
+     * dial `subAgent.model` do `~/.aluy/config.json` (resolvido em run.tsx). MESMO
+     * vocabulário do `model:` do `.md`. Ausente ⇒ `same-as-parent` (zero regressão).
+     */
+    readonly defaultModel?: string;
   };
   /**
    * EST-0977/0978 · ADR-0061 — REGISTRO de agentes-`.md` nomeados (globais + projeto,
@@ -919,6 +926,65 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
       }
     : undefined;
 
+  // ADR-0146 (D3) — FÁBRICA de caller CUSTOM/BYO por-filho. Quando o `model` de um
+  // filho resolve em `kind:'custom'` (`custom`/`custom:<slug>`), o spawner pede AQUI
+  // o caller: fala pelo MESMO provider BYO do pai (`tier:'custom'` FIXO — o filho
+  // pediu explicitamente BYO), com o slug INDICADO ou, sem slug, o slug CORRENTE do
+  // pai (lido AO VIVO via getter — segue o `/model` do pai, igual ao `subAgentCaller`
+  // de hoje). O `provider` (NOME, ADR-0076) SEMPRE acompanha o corrente do pai — é a
+  // MESMA credencial/keychain (CLI-SEC-7); nunca base_url/api_key aqui (não existem
+  // no cliente). CACHE por slug (uma entrada por slug pedido; sem slug ⇒ 1 entrada
+  // "segue o pai"). Só existe com sub-agentes habilitados.
+  const customCallers = new Map<string, BrokerModelCaller>();
+  const CUSTOM_CALLER_FOLLOW_PARENT_KEY = ' __inherit__';
+  const customCallerFor = opts.subAgents?.enabled
+    ? (slug?: string): BrokerModelCaller => {
+        const key = slug ?? CUSTOM_CALLER_FOLLOW_PARENT_KEY;
+        const cached = customCallers.get(key);
+        if (cached) return cached;
+        const tierSource =
+          slug !== undefined
+            ? {
+                tier: 'custom' as const,
+                model: slug,
+                get provider(): string | undefined {
+                  return caller.provider;
+                },
+              }
+            : {
+                // sem slug indicado: segue o slug/provider CORRENTES do pai (deve estar
+                // em `tier:'custom'` — o `spawnNamed` do controller valida ANTES, D3/D2).
+                tier: 'custom' as const,
+                get model(): string | undefined {
+                  return caller.model;
+                },
+                get provider(): string | undefined {
+                  return caller.provider;
+                },
+              };
+        const c = new BrokerModelCaller({
+          client: brokerClient,
+          tier: 'custom',
+          tierSource,
+          ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
+        });
+        if (latestToolsCap) c.attachNativeTools(latestToolsCap);
+        customCallers.set(key, c);
+        return c;
+      }
+    : undefined;
+
+  // ADR-0146 (D2/L2) — PORTA do probe de nome de modelo: nomes do catálogo VIVO
+  // (as MESMAS chaves do seletor `/model`). Só existe com sub-agentes habilitados
+  // (o probe só roda no caminho de `spawnNamed`); falha de rede é tratada pelo
+  // controller (`fetchModelCatalogNamesSafe`, degrade honesto — L1-only).
+  const modelProbe = opts.subAgents?.enabled
+    ? {
+        availableNames: async (): Promise<readonly string[]> =>
+          (await catalogClient.list()).map((entry) => entry.key),
+      }
+    : undefined;
+
   // ── room store (EST-1119 · ADR-0121 §5) ────────────────────────────────────
   const roomBackendRes = resolveRoomBackend(env.ALUY_ROOM_BACKEND, opts.roomsBackend);
   if (roomBackendRes.warning && opts.onConfigWarn) {
@@ -1045,6 +1111,17 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // `model:` que resolve num tier fala AQUELE tier ao broker (o spawner roteia por
     // filho). Ausente ⇒ todos os filhos usam o `subAgentModel`/`model` do pai (back-compat).
     ...(callerForTier ? { callerForTier } : {}),
+    // ADR-0146 (D3) — fábrica de caller CUSTOM/BYO por-filho: cada filho cujo `model`
+    // resolve em `kind:'custom'` fala pelo provider BYO do pai (slug indicado ou
+    // corrente). Ausente ⇒ cai no caller do pai (fail-safe).
+    ...(customCallerFor ? { customCallerFor } : {}),
+    // ADR-0146 (D2/L2) — porta do probe de nome de modelo (catálogo vivo p/ sugestão).
+    ...(modelProbe ? { modelProbe } : {}),
+    // ADR-0146 (D4) — dial global: default dos FILHOS quando nem o spawn nem o `.md`
+    // setam `model` (posição 3 da cadeia de precedência). Ausente ⇒ `same-as-parent`.
+    ...(opts.subAgents?.defaultModel !== undefined
+      ? { defaultChildModel: opts.subAgents.defaultModel }
+      : {}),
     // EST-0996 — TOOL-CALLING NATIVO: o controller (dono do toolset FINAL) constrói o
     // catálogo de funções e nos entrega a capacidade AQUI; nós a ATTACHAMOS ao caller
     // de stream do pai E ao caller dedicado dos sub-agentes (MESMA capacidade ⇒ mesmo
@@ -1115,6 +1192,8 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
       // os criados DEPOIS (lazy, no 1º spawn daquele tier) também o recebam.
       latestToolsCap = cap;
       for (const c of tierCallers.values()) c.attachNativeTools(cap);
+      // ADR-0146 (D3) — idem p/ os callers CUSTOM/BYO por-filho já criados.
+      for (const c of customCallers.values()) c.attachNativeTools(cap);
     },
   });
   controllerRef = controller;
