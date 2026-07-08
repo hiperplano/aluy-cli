@@ -671,11 +671,13 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'rewind',
     section: 'workspace',
-    // ADR-0147 (Q-3) — REVERTE edições pós-ponto (perda de trabalho subsequente):
-    // classe conservadora `destructive` (a estória decide; o ADR deixou a questão
-    // aberta). Sem execução via agente wired nesta v1 (a confirmação é honesta, mas
-    // o `/rewind` via tool ainda recusa após aprovar — precisa do seletor de
-    // checkpoints, hoje só na TUI interativa).
+    // ADR-0147 (Q-3, ABERTA) — `destructive` PROVISORIAMENTE (condição 2 do parecer do
+    // `seguranca`): REVERTE edições pós-ponto (perda de trabalho subsequente), então a
+    // classe conservadora `destructive` (⇒ sempre-ask) é o default seguro ENQUANTO a Q-3
+    // do ADR ("/rewind é session-effect ou destructive?") não fechar e não existir o
+    // seletor de checkpoints acionável via agente. Sem execução via agente nesta v1 (a
+    // confirmação é honesta, mas a porta recusa após aprovar — hoje o /rewind só roda na
+    // TUI interativa). Reavaliar a classe quando a estória fechar a Q-3.
     agentEffect: 'destructive',
   },
   {

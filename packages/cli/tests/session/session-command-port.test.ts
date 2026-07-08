@@ -178,6 +178,46 @@ describe('ADR-0147 (3) — human-only nega SEM tocar a catraca/controller', () =
   });
 });
 
+describe('ADR-0147 · parecer do seguranca (cond. 1) — session-effect NÃO wireado devolve ok:false', () => {
+  it('/undo (session-effect não executado via agente) ⇒ ok:false (NÃO ok:true), pra o agente não afirmar "desfiz"', async () => {
+    const port = createSessionCommandPort(baseDeps());
+    const outcome = await port.run('undo', '');
+    expect(outcome.ok).toBe(false);
+    expect(outcome.text).toMatch(/NÃO foi executado|recomende/i);
+  });
+
+  it('/redo e /export e /mcp add|remove|disable|enable|reload|reconnect ⇒ todos ok:false (mutação não ocorreu)', async () => {
+    const port = createSessionCommandPort(baseDeps());
+    const cases: readonly [string, string][] = [
+      ['redo', ''],
+      ['export', ''],
+      ['mcp', 'add foo -- echo hi'],
+      ['mcp', 'remove foo'],
+      ['mcp', 'disable foo'],
+      ['mcp', 'enable foo'],
+      ['mcp', 'reload'],
+      ['mcp', 'reconnect'],
+    ];
+    for (const [name, args] of cases) {
+      const outcome = await port.run(name, args);
+      expect(outcome.ok, `esperava ok:false para /${name} ${args}`).toBe(false);
+    }
+  });
+
+  it('read-only no fallback (help/usage/permissions/tools/mcp list) segue ok:true — a nota É a resposta', async () => {
+    const port = createSessionCommandPort(baseDeps());
+    for (const [name, args] of [
+      ['help', ''],
+      ['permissions', ''],
+      ['tools', ''],
+      ['mcp', 'list'],
+    ] as const) {
+      const outcome = await port.run(name, args);
+      expect(outcome.ok, `esperava ok:true para /${name} ${args}`).toBe(true);
+    }
+  });
+});
+
 describe('ADR-0147 (4) — comando NÃO-classificado (não-nativo) nega, fail-closed', () => {
   it('nome inexistente no registro ⇒ deny honesto', async () => {
     const port = createSessionCommandPort(baseDeps());

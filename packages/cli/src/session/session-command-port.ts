@@ -43,6 +43,7 @@ import {
 import {
   NATIVE_COMMANDS,
   resolveAgentEffect,
+  type AgentCommandEffect,
   type SlashCommand,
 } from '../slash/commands.js';
 import type { WorkspacePort } from '../io/index.js';
@@ -84,7 +85,10 @@ function noteText(note: SlashNote): string {
 function unavailable(what: string): SessionCommandOutcome {
   return {
     ok: false,
-    text: `"/${what}" via agente indisponível nesta sessão (dependência não injetada) — recomende ao usuário rodar "/${what}" diretamente.`,
+    // HONESTO (parecer do `seguranca`, condição 1): NADA foi executado — seja por
+    // dependência ausente, seja por o comando ainda não ter execução real via agente.
+    // `ok:false` p/ o agente NUNCA informar "desfiz/adicionei" sobre algo que não ocorreu.
+    text: `"/${what}" NÃO foi executado via agente nesta sessão — recomende ao usuário rodar "/${what}" diretamente.`,
   };
 }
 
@@ -100,12 +104,32 @@ function slashCtx(deps: SessionCommandPortDeps): SlashContext {
   };
 }
 
-/** Fallback GENÉRICO: reusa o texto honesto que `buildSlashEffect` já escreve p/
- * comandos sem roteamento pleno (ex.: não-TTY) — aqui, "sem execução total via
- * agente ainda". NUNCA finge um efeito que não ocorreu. */
-function fromSlashEffectFallback(id: NonNullable<SlashCommand['id']>, deps: SessionCommandPortDeps): SessionCommandOutcome {
+/**
+ * Fallback GENÉRICO: reusa o texto honesto que `buildSlashEffect` já escreve p/
+ * comandos sem roteamento pleno (ex.: não-TTY). NUNCA finge um efeito que não ocorreu.
+ *
+ * CONDIÇÃO 1 do parecer do `seguranca` — `buildSlashEffect` NÃO executa o efeito real
+ * de nenhum comando: ele só devolve uma NOTA (explicação/leitura). Para comandos
+ * `read-only` (help/usage/permissions/tools/doctor/history/mcp list/telegram status) a
+ * nota É a resposta legítima ⇒ `ok:true`. Mas para comandos `session-effect` que ainda
+ * NÃO estão wireados de verdade via agente (`/undo`, `/redo`, `/export`, `/mcp
+ * add|remove|disable|enable|reload|reconnect`, `/telegram allow|deny`) a nota é só
+ * "indisponível/não aconteceu" — devolver `ok:true` faria o agente reportar ao usuário
+ * "desfiz sua edição"/"adicionei o server MCP" quando NADA mutou. Nesses ⇒ `ok:false`
+ * (via `unavailable()`), sem mudar a classe (`agentEffect`) nem a catraca.
+ */
+function fromSlashEffectFallback(
+  id: NonNullable<SlashCommand['id']>,
+  effectClass: AgentCommandEffect,
+  deps: SessionCommandPortDeps,
+): SessionCommandOutcome {
   const effect = buildSlashEffect(id, slashCtx(deps));
-  if (effect.kind === 'note') return { ok: true, text: noteText(effect.note) };
+  if (effect.kind === 'note') {
+    // `session-effect` que caiu AQUI = mutação esperada mas NÃO executada (buildSlashEffect
+    // só produziu a nota explicativa) ⇒ ok:false honesto. `read-only` = a nota é a resposta.
+    if (effectClass === 'session-effect') return unavailable(id);
+    return { ok: true, text: noteText(effect.note) };
+  }
   // Os outros `kind` (clear/quit/notify/theme/lang/provider/async) só aparecem p/ ids
   // que este arquivo trata ESPECIFICAMENTE acima (ou que são `human-only`, negados
   // antes de chegar aqui) — nunca deveriam cair neste `default`. Defensivo/fail-safe.
@@ -252,6 +276,12 @@ async function runDestructiveLogout(
   return { ok: true, text: noteText(note) };
 }
 
+// CONDIÇÃO 2 do parecer do `seguranca` — `/rewind` está classificado `destructive`
+// PROVISORIAMENTE: a Q-3 do ADR-0147 ("`/rewind` é `session-effect` ou `destructive`?")
+// segue ABERTA. Enquanto não houver o seletor de checkpoints acionável via agente, a
+// classe conservadora `destructive` (⇒ sempre-ask) é o default seguro; a execução real
+// via agente ainda NÃO existe (retorno `ok:false` honesto abaixo). Reavaliar a classe
+// quando a estória fechar a Q-3 e wirear o `/rewind` agente-dirigido.
 async function runDestructiveRewind(
   args: string,
   deps: SessionCommandPortDeps,
@@ -436,14 +466,17 @@ async function execTodo(args: string, deps: SessionCommandPortDeps): Promise<Ses
 
 async function execProvider(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
   const v = args.trim();
-  if (v === '') return fromSlashEffectFallback('provider', deps);
+  // Bare `/provider` LÊ (lista os providers) — a nota do fallback É a resposta legítima
+  // (read-only ⇒ ok:true); `/provider <n>` MUTA de verdade abaixo (setProvider).
+  if (v === '') return fromSlashEffectFallback('provider', 'read-only', deps);
   deps.controller.setProvider(v);
   return { ok: true, text: `provider setado: ${v}` };
 }
 
 async function execEffort(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
   const v = args.trim();
-  if (v === '') return fromSlashEffectFallback('effort', deps);
+  // Bare `/effort` LÊ o valor atual (read-only ⇒ ok:true); `/effort <v>` MUTA abaixo.
+  if (v === '') return fromSlashEffectFallback('effort', 'read-only', deps);
   if (v.length > 32) {
     return { ok: false, text: `erro: "effort" aceita no máximo 32 caracteres (recebeu ${v.length}).` };
   }
@@ -452,7 +485,9 @@ async function execEffort(args: string, deps: SessionCommandPortDeps): Promise<S
 }
 
 async function execModel(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
-  if (args.trim() === '') return fromSlashEffectFallback('model', deps);
+  // Bare `/model` LÊ o tier atual (read-only ⇒ ok:true); `/model <tier>` MUTA — mas a
+  // troca via agente ainda não está wireada ⇒ ok:false honesto abaixo (o tier NÃO mudou).
+  if (args.trim() === '') return fromSlashEffectFallback('model', 'read-only', deps);
   return {
     ok: false,
     text: '"/model <tier>" via agente ainda não tem execução implementada nesta versão (o tier NÃO foi trocado) — "/model" sem args (leitura) funciona.',
@@ -591,6 +626,7 @@ async function execAsk(args: string, deps: SessionCommandPortDeps): Promise<Sess
 async function execute(
   found: SlashCommand,
   args: string,
+  effectClass: AgentCommandEffect,
   deps: SessionCommandPortDeps,
   ctx: ToolRunContext | undefined,
 ): Promise<SessionCommandOutcome> {
@@ -633,9 +669,10 @@ async function execute(
       return execAsk(args, deps);
     default:
       // help/usage/permissions/tools/doctor/telegram/undo/redo/history/export/mcp —
-      // reusa o texto honesto do `buildSlashEffect` (comandos read-only puros ou cuja
-      // execução completa via agente ainda não está wired nesta versão).
-      return fromSlashEffectFallback(found.id!, deps);
+      // reusa o texto honesto do `buildSlashEffect`. `read-only` (help/usage/…/mcp list)
+      // ⇒ a nota É a resposta (ok:true); `session-effect` NÃO wireado (undo/redo/export/
+      // mcp add|remove|…) ⇒ ok:false (condição 1 do `seguranca` — não fingir mutação).
+      return fromSlashEffectFallback(found.id!, effectClass, deps);
   }
 }
 
@@ -662,7 +699,7 @@ export function createSessionCommandPort(deps: SessionCommandPortDeps): SessionC
         };
       }
       if (effect === 'destructive') return runDestructive(found, args, deps, ctx);
-      return execute(found, args, deps, ctx);
+      return execute(found, args, effect, deps, ctx);
     },
   };
 }
