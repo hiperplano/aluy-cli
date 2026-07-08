@@ -83,3 +83,17 @@ export {
   type QuestionPort,
   type QuestionParse,
 } from './question.js';
+
+// ADR-0147 — a tool `session_command` (o agente dispara comandos de SESSÃO, roteados
+// pela catraca por CLASSE de efeito). A porta `SessionCommandPort` é injetada pelo
+// `@hiperplano/aluy-cli` (que possui o registro/executor); a tool NÃO entra em
+// `NATIVE_TOOLS` (o locus concreto a adiciona só quando monta a porta — mesmo padrão
+// do `spawn_agent`).
+export {
+  sessionCommandTool,
+  SESSION_COMMAND_TOOL_NAME,
+  SESSION_COMMAND_DESTRUCTIVE_CALL_NAME,
+  type AgentCommandEffect,
+  type SessionCommandOutcome,
+  type SessionCommandPort,
+} from './session-command.js';

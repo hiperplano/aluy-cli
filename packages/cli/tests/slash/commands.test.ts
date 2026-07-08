@@ -19,6 +19,7 @@ import {
   windowSlashEntries,
   entrySection,
   NATIVE_COMMANDS,
+  resolveAgentEffect,
   type SlashCommand,
   type SlashMenuEntry,
 } from '../../src/slash/commands.js';
@@ -682,13 +683,18 @@ describe('isParallelWhileBusy (EST-0982 · ADR-0080)', () => {
   });
 });
 
-describe('EST-1149 · ADR-0127 — buildSessionCommandsNote (auto-conhecimento)', () => {
-  it('gera a nota do registro com o cabeçalho + a fronteira "recomende, não invoque"', () => {
+describe('EST-1149 · ADR-0127/ADR-0147 — buildSessionCommandsNote (auto-conhecimento)', () => {
+  it('gera a nota do registro com o cabeçalho + a fronteira por classe (session_command)', () => {
     const note = buildSessionCommandsNote();
     expect(note).toBeDefined();
     expect(note!).toContain(SESSION_COMMANDS_NOTE_HEADER);
     expect(note!).toMatch(/RECOMENDA|RECOMENDE/);
-    expect(note!).toContain('NÃO digita');
+    // ADR-0147 (emenda o ADR-0127) — o agente PODE disparar via `session_command`
+    // (read-only/session-effect direto; destructive sempre pede confirmação);
+    // `human-only` continua só-recomendável.
+    expect(note!).toContain('session_command');
+    expect(note!).toContain('[human-only]');
+    expect(note!).toContain('[destructive]');
   });
 
   it('inclui o /cycle (o fix do bug reportado: agendar loop ⇒ /cycle, não Task Scheduler)', () => {
@@ -708,5 +714,54 @@ describe('EST-1149 · ADR-0127 — buildSessionCommandsNote (auto-conhecimento)'
 
   it('registro vazio ⇒ undefined (não injeta nada — não-regressão)', () => {
     expect(buildSessionCommandsNote([])).toBeUndefined();
+  });
+});
+
+describe('ADR-0147 §2 — resolveAgentEffect (single-source de classificação p/ session_command)', () => {
+  it('comando SEM agentEffect declarado ⇒ default human-only (fail-closed, GS-SC5)', () => {
+    const unclassified: SlashCommand = { name: 'x', summary: '', source: 'native' };
+    expect(resolveAgentEffect(unclassified, '')).toBe('human-only');
+  });
+
+  it('/clear (bare) é session-effect; /clear full e /clear memory são destructive', () => {
+    const clear = NATIVE_COMMANDS.find((c) => c.name === 'clear')!;
+    expect(resolveAgentEffect(clear, '')).toBe('session-effect');
+    expect(resolveAgentEffect(clear, 'full')).toBe('destructive');
+    expect(resolveAgentEffect(clear, 'memory')).toBe('destructive');
+    // case-insensitive (o primeiro token de args é normalizado p/ lowercase).
+    expect(resolveAgentEffect(clear, 'FULL')).toBe('destructive');
+  });
+
+  it('/cron list é read-only; /cron rm é destructive; /cron add é session-effect (herda)', () => {
+    const cron = NATIVE_COMMANDS.find((c) => c.name === 'cron')!;
+    expect(resolveAgentEffect(cron, 'list')).toBe('read-only');
+    expect(resolveAgentEffect(cron, 'rm abc123')).toBe('destructive');
+    expect(resolveAgentEffect(cron, 'add "0 9 * * *" "bom dia"')).toBe('session-effect');
+  });
+
+  it('/memory forget <id> é destructive; /memory (list) é read-only', () => {
+    const memory = NATIVE_COMMANDS.find((c) => c.name === 'memory')!;
+    expect(resolveAgentEffect(memory, '')).toBe('read-only');
+    expect(resolveAgentEffect(memory, 'forget f1')).toBe('destructive');
+    expect(resolveAgentEffect(memory, 'edit f1 novo texto')).toBe('session-effect');
+  });
+
+  it('/logout, /cron rm, /clear full|memory, /rewind ⇒ todos destructive (a tabela do ADR-0147 §4)', () => {
+    const byName = (n: string): SlashCommand => NATIVE_COMMANDS.find((c) => c.name === n)!;
+    expect(resolveAgentEffect(byName('logout'), '')).toBe('destructive');
+    expect(resolveAgentEffect(byName('rewind'), '')).toBe('destructive');
+  });
+
+  it('/theme, /lang, /split, /fullscreen, /login, /quit, /back, /subagent, /add-dir ⇒ human-only', () => {
+    const byName = (n: string): SlashCommand => NATIVE_COMMANDS.find((c) => c.name === n)!;
+    for (const n of ['theme', 'lang', 'split', 'fullscreen', 'login', 'quit', 'back', 'subagent', 'add-dir']) {
+      expect(resolveAgentEffect(byName(n), ''), `/${n}`).toBe('human-only');
+    }
+  });
+
+  it('TODOS os 42 comandos nativos têm agentEffect declarado (nenhum cai no default por omissão)', () => {
+    for (const c of NATIVE_COMMANDS) {
+      expect(c.agentEffect, `/${c.name} sem agentEffect`).toBeDefined();
+    }
   });
 });

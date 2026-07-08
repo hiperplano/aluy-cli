@@ -198,6 +198,12 @@ type BangStatus = BangBlock['status'];
 import type { TuiAskResolver, PendingAskEntry } from '../ask/ask-resolver.js';
 import type { TuiQuestionResolver, PendingQuestionEntry } from '../ask/question-resolver.js';
 import type { AskResolver, QuestionAnswer, QuestionSpec } from '@hiperplano/aluy-cli-core';
+// ADR-0147 — tipos das dependências OPCIONAIS da `SessionCommandPort` (ver os campos
+// `agentMemory`/`commandWorkspace`/`login` em `SessionControllerOptions` acima).
+import type { AgentMemory, LoginService } from '@hiperplano/aluy-cli-core';
+import type { WorkspacePort } from '../io/index.js';
+import { createSessionCommandPort } from './session-command-port.js';
+import { sessionCommandTool } from '@hiperplano/aluy-cli-core';
 import { FlushThrottle, type FlushThrottleOptions } from './flush-throttle.js';
 import { backoffDelayMs, DEFAULT_BACKOFF, type BackoffPolicy } from './retry-backoff.js';
 import { isLiveBlock, sanitizeOrphans } from './render-split.js';
@@ -310,6 +316,20 @@ export interface SessionControllerOptions {
    * foi injetada nas ports) e o controller não liga a observação da UI de pergunta.
    */
   readonly questionResolver?: TuiQuestionResolver;
+  /**
+   * ADR-0147 — dependências OPCIONAIS que a `SessionCommandPort` (tool `session_command`)
+   * consome p/ EXECUTAR de verdade os comandos de sessão que o agente dispara — os
+   * MESMOS objetos que `session/wiring.ts` já monta p/ o caminho do humano
+   * (`slash/clear.ts`/`slash/memory.ts`/`slash/init.ts`/`slash/handlers.ts#runAsyncSlash`).
+   * Ausentes ⇒ os comandos que dependem delas (clear full/memory, memory, whoami,
+   * logout, init) degradam com uma observação honesta ("indisponível nesta sessão"),
+   * NUNCA fingem sucesso — fail-safe, como `subAgents`/`question`/`capabilities`.
+   * Nomeados `agentMemory`/`commandWorkspace` (não `memory`/`workspace`) p/ não colidir
+   * com o `memory` já existente (config do monitor de pressão de heap, EST-1012).
+   */
+  readonly agentMemory?: AgentMemory;
+  readonly commandWorkspace?: WorkspacePort;
+  readonly login?: LoginService;
   readonly meta: SessionMeta;
   /** Tamanho da janela de contexto p/ derivar `⛁ %` dos tokens. Default 200k. */
   readonly contextWindow?: number;
@@ -1440,6 +1460,10 @@ export class SessionController {
       ...(opts.mcpTools ?? []),
       // EST-1015 (POC headroom) — RETRIEVE entra só quando o wiring o montou (flag).
       ...(opts.headroomRetrieveTool ? [opts.headroomRetrieveTool] : []),
+      // ADR-0147 — `session_command`: SÓ no toolset do PAI (não entra em `baseTools`
+      // dos sub-agentes abaixo — mesma restrição de `spawn_agent`, escopo conservador
+      // não exigido pelo ADR mas alinhado ao padrão de "poder novo só no principal").
+      sessionCommandTool,
     ];
 
     // EST-0969 · ADR-0057 — SUB-AGENTES locais PARALELOS. Quando habilitado:
@@ -1617,6 +1641,27 @@ export class SessionController {
       },
     };
     parentPorts = { ...parentPorts, capabilities: capabilitiesPort };
+
+    // ADR-0147 — porta da tool `session_command`: reusa `this` (métodos do controller —
+    // compact/cycle*/clear/setEffort/setProvider/setLabel/roomX/askParallel/
+    // workflowRun/workflowsUse/pushNote/current) + `opts.permission`/`opts.askResolver`
+    // (a MESMA catraca/resolver da sessão — o RE-PASSE destrutivo usa exatamente estes)
+    // + as dependências OPCIONAIS (`opts.memory`/`opts.workspace`/`opts.login`) que
+    // `slash/clear.ts`/`slash/memory.ts`/`slash/init.ts`/`handlers.ts#runAsyncSlash` já
+    // consomem no caminho do humano. `this` é seguro AQUI: a porta só é CHAMADA muito
+    // depois (quando o agente de fato disparar `session_command`), nunca durante a
+    // construção — o mesmo raciocínio do `subAgents`/`capabilitiesPort` acima.
+    const sessionCommandPort = createSessionCommandPort({
+      controller: this,
+      engine: opts.permission,
+      askResolver: opts.askResolver,
+      ports: opts.ports,
+      ...(opts.agentMemory !== undefined ? { memory: opts.agentMemory } : {}),
+      ...(opts.commandWorkspace !== undefined ? { workspace: opts.commandWorkspace } : {}),
+      ...(opts.login !== undefined ? { login: opts.login } : {}),
+      ...(opts.agentRegistry !== undefined ? { agentRegistry: opts.agentRegistry } : {}),
+    });
+    parentPorts = { ...parentPorts, sessionCommand: sessionCommandPort };
 
     // EST-0996 — TOOL-CALLING NATIVO: o controller é o dono do toolset FINAL, então
     // É AQUI que o catálogo de funções (`tools` da API) nasce — convertido de

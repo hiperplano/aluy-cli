@@ -1076,6 +1076,12 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     roomStore,
     ports,
     askResolver,
+    // ADR-0147 — dependências da `SessionCommandPort` (tool `session_command`): os
+    // MESMOS objetos que este `buildSession` já monta p/ o caminho do humano
+    // (`clear.ts`/`memory.ts`/`init.ts`/`runAsyncSlash`/os loaders de skills/workflows).
+    agentMemory: memory,
+    commandWorkspace: workspace,
+    login,
     // EST-1110 · ADR-0114 — resolver de PERGUNTA (TUI): o controller observa o pendente
     // p/ publicar a fase `questioning` + o `pendingQuestion` e devolve a resposta.
     questionResolver,
