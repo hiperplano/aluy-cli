@@ -22,6 +22,7 @@ import {
   type McpConfig,
   type McpDiscoveryResult,
   type McpServerConfig,
+  type McpServerDiscovery,
   type McpSource,
   type McpTransport,
   type NativeTool,
@@ -97,6 +98,30 @@ export interface SetupMcpOptions {
    * `resolveMcpCallTimeoutMs`, intocado por este ADR).
    */
   readonly mcpConfig?: UserMcpConfig;
+  /**
+   * EST-BOOT-DECOUPLE — dispara ASSIM QUE a config (global+projeto+Codex) foi lida e
+   * MESCLADA — ANTES do handshake (lançar processo + `initialize` + `listTools`) dos
+   * servers, que é a parte LENTA. Dá ao caller (run.tsx) a CONTAGEM de servers ativos
+   * cedo o bastante p/ mostrar "conectando N servers…" sem esperar nenhum handshake.
+   * Ausente ⇒ sem efeito (comportamento idêntico).
+   */
+  readonly onConfigResolved?: (info: { readonly activeServerNames: readonly string[] }) => void;
+  /**
+   * EST-BOOT-DECOUPLE — dispara p/ CADA server assim que ELE conecta (ou falha),
+   * incrementalmente — não espera os outros servers mais lentos. As tools JÁ vêm
+   * adaptadas (mesma `adaptMcpTools`, mesmo teto por-server/HUNT-CAP). O caller usa
+   * isto p/ ANEXAR as tools daquele server ao toolset AO VIVO (ex.:
+   * `controller.refreshMcpTools(tools, server)`) sem esperar `setupMcp` inteiro
+   * terminar. Os avisos (HUNT-CAP) deste caminho NÃO entram no `McpSetup.warnings`
+   * final (evita aviso duplicado — o array final já recalcula tudo de uma vez).
+   * Ausente ⇒ sem efeito (comportamento idêntico ao boot síncrono de sempre).
+   */
+  readonly onServerReady?: (result: {
+    readonly server: string;
+    readonly ok: boolean;
+    readonly tools: readonly NativeTool<ToolPorts>[];
+    readonly error?: string;
+  }) => void;
 }
 
 /** Resultado do setup: tools adaptadas (p/ o registro) + transports (p/ fechar). */
@@ -162,6 +187,14 @@ export async function setupMcp(opts: SetupMcpOptions = {}): Promise<McpSetup> {
       .filter((e): e is string => typeof e === 'string')
       .join(' | ') || undefined;
 
+  // EST-BOOT-DECOUPLE — a config JÁ ESTÁ PRONTA aqui (só leitura de disco — rápida); o
+  // handshake (lento) começa DEPOIS. Dispara ANTES da parte lenta p/ o caller mostrar
+  // "conectando N servers…" sem esperar nenhum processo subir.
+  if (opts.onConfigResolved) {
+    const activeServerNames = config.servers.filter((s) => s.disabled !== true).map((s) => s.name);
+    opts.onConfigResolved({ activeServerNames });
+  }
+
   // ADR-0150 (balde b) — resolve os timeouts JÁ COM o config (env > config > default),
   // clampados ao MESMO teto-teto hardcoded (intocado). Env explícito continua vencendo.
   const mcpEnv = opts.parentEnv ?? process.env;
@@ -185,7 +218,26 @@ export async function setupMcp(opts: SetupMcpOptions = {}): Promise<McpSetup> {
           : {}),
       }));
 
-  const discovery = await discoverMcpTools(config, makeTransport);
+  const discovery = await discoverMcpTools(
+    config,
+    makeTransport,
+    opts.onServerReady
+      ? {
+          onServerResult: (result: McpServerDiscovery) => {
+            // Adapta SÓ as tools DESTE server (mesma função pura do array agregado
+            // abaixo) — os avisos deste caminho são DESCARTADOS (o array final
+            // recalcula tudo; evita o mesmo aviso HUNT-CAP entrar duas vezes no log).
+            const tools = adaptMcpTools(result.tools);
+            opts.onServerReady!({
+              server: result.server,
+              ok: result.ok,
+              tools,
+              ...(result.error !== undefined ? { error: result.error } : {}),
+            });
+          },
+        }
+      : undefined,
+  );
   // HUNT-CAP (classe "recurso sem teto", #266) — coleta os AVISOS honestos do teto de
   // tools por server (`MAX_MCP_TOOLS_PER_SERVER`). Os avisos NÃO vazam segredo (só nome
   // do server + contagens) e sobem no `McpSetup.warnings` p/ a UX exibir (stderr no boot,

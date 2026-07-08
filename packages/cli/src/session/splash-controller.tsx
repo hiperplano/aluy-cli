@@ -113,13 +113,28 @@ export function createBootSplash(opts: {
   readonly stdout: NodeJS.WriteStream;
 }): BootSplash {
   const store = createSplashStore();
+  // EST-BOOT-DECOUPLE — "pular o splash": QUALQUER tecla (fora de uma pergunta S/N
+  // pendente) resolve este promise. O ÚNICO lugar que hoje AGUARDA algo enquanto o
+  // splash só mostra a marca (sem trabalho real pendente) é o PISO de exibição
+  // (`resolveSplashMinMs`/`ALUY_SPLASH_MIN_MS` — o `await sleep(splashMinMs)` no
+  // `run.tsx`) — o resto do boot (config/resume/backend) segue seu próprio ritmo por
+  // baixo independente do splash estar montado. `run.tsx` faz
+  // `Promise.race([sleep(minMs), splash.whenSkip()])` nesse piso: uma tecla evita a
+  // espera artificial sem interferir em nenhum `await` de trabalho real (nem no
+  // prompt S/N — o `useInput` do <SplashApp> só chama `onSkip` quando NÃO há
+  // `resolve` pendente). Resolvido no máximo 1x (chamadas extras são no-op).
+  let resolveSkip: (() => void) | undefined;
+  const skipPromise = new Promise<void>((resolve) => {
+    resolveSkip = resolve;
+  });
+  const requestSkip = (): void => resolveSkip?.();
   const instance: Instance = render(
     <ThemeProvider theme={opts.theme}>
-      <SplashApp store={store} />
+      <SplashApp store={store} onSkip={requestSkip} />
     </ThemeProvider>,
     { stdout: opts.stdout, exitOnCtrlC: false },
   );
-  return new BootSplash(store, instance, opts.stdout);
+  return new BootSplash(store, instance, opts.stdout, skipPromise);
 }
 
 /** API imperativa do splash (o que o boot chama). */
@@ -128,7 +143,19 @@ export class BootSplash {
     private readonly store: SplashStore,
     private readonly instance: Instance,
     private readonly stdout: NodeJS.WriteStream,
+    private readonly skipPromise: Promise<void>,
   ) {}
+
+  /**
+   * EST-BOOT-DECOUPLE — resolve quando o usuário aperta QUALQUER tecla enquanto o
+   * splash mostra só a marca (sem pergunta pendente). `run.tsx` o corre em paralelo
+   * com o piso de exibição (`ALUY_SPLASH_MIN_MS`) — a espera artificial pula na
+   * hora. NUNCA rejeita; se ninguém apertar nada, fica pendente até o boot seguir
+   * (o `Promise.race` do caller resolve pelo timeout normalmente).
+   */
+  whenSkip(): Promise<void> {
+    return this.skipPromise;
+  }
 
   /** Atualiza o verbo de carga ("carregando" → "descobrindo MCP" → …). */
   setStatus(status: string): void {
@@ -210,7 +237,16 @@ export function createSplashStore(): SplashStore {
  * store vira `done` (o `finish()` já chamou unmount, mas isto cobre o caminho do
  * Ctrl-C interno). PURO em relação ao store — não tem estado próprio além do tick.
  */
-export function SplashApp(props: { readonly store: SplashStore }): React.ReactElement | null {
+export function SplashApp(props: {
+  readonly store: SplashStore;
+  /**
+   * EST-BOOT-DECOUPLE — QUALQUER tecla, FORA de uma pergunta S/N pendente, chama
+   * isto (pular o piso de exibição do splash). Ausente ⇒ sem esse atalho (o splash
+   * some da mesma forma, só sem a tecla de atalho — usado nos testes que não
+   * precisam dele).
+   */
+  readonly onSkip?: () => void;
+}): React.ReactElement | null {
   const state = useSyncExternalStore(props.store.subscribe, props.store.get, props.store.get);
   const { exit } = useApp();
 
@@ -230,7 +266,13 @@ export function SplashApp(props: { readonly store: SplashStore }): React.ReactEl
   // ⇒ retorna). Antes da 1ª pergunta / depois de resolver ⇒ no-op.
   useInput((input, key) => {
     const resolve = props.store.get().resolve;
-    if (!resolve) return;
+    if (!resolve) {
+      // EST-BOOT-DECOUPLE — SEM pergunta pendente: qualquer tecla pula o piso de
+      // exibição (ver `whenSkip`/`requestSkip` em `createBootSplash`). Não faz nada
+      // se já terminou (`done`) — não há mais nada a pular.
+      if (!state.done) props.onSkip?.();
+      return;
+    }
     if (key.return) return resolve(true); // Enter = sim (default da auto-oferta).
     const ch = input.toLowerCase();
     if (ch === 's' || ch === 'y') return resolve(true);

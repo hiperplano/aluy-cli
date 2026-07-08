@@ -6,9 +6,35 @@ import type { NativeTool, ToolPorts } from './types.js';
 
 export class ToolRegistry<Ports = ToolPorts> {
   private readonly tools = new Map<string, NativeTool<Ports>>();
+  /**
+   * EST-BOOT-DECOUPLE — servers MCP AINDA CONECTANDO (nome puro, sem prefixo). O
+   * boot desacoplado monta a sessão ANTES do handshake MCP terminar; enquanto um
+   * server está aqui, uma chamada a `mcp__<server>__*` cai em "tool desconhecida"
+   * (ele ainda não tem tools registradas) — `markMcpServerPending`/
+   * `clearMcpServerPending` deixam o LOOP (core) distinguir esse caso do de uma
+   * tool que nunca vai existir, p/ devolver uma observação HONESTA ("ainda
+   * conectando") em vez do "tool desconhecida" genérico. Vazio ⇒ comportamento
+   * intacto (nenhum server nesta lista, mensagem genérica de sempre).
+   */
+  private readonly pendingMcpServers = new Set<string>();
 
   constructor(tools: readonly NativeTool<Ports>[] = []) {
     for (const t of tools) this.register(t);
+  }
+
+  /** Marca um server MCP como AINDA CONECTANDO (boot desacoplado). Idempotente. */
+  markMcpServerPending(server: string): void {
+    this.pendingMcpServers.add(server);
+  }
+
+  /** Tira um server MCP da lista de pendentes (conectou ou desistiu). Idempotente. */
+  clearMcpServerPending(server: string): void {
+    this.pendingMcpServers.delete(server);
+  }
+
+  /** `true` enquanto o server MCP ainda não terminou de conectar (boot desacoplado). */
+  isMcpServerPending(server: string): boolean {
+    return this.pendingMcpServers.has(server);
   }
 
   register(tool: NativeTool<Ports>): void {
