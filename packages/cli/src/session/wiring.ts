@@ -23,6 +23,7 @@ import {
   resolveMaxIterations,
   resolveMaxOutputTokens,
   resolveMaxObservationChars,
+  resolveMaxMemoryWritesPerSession,
   resolveSelfCheck,
   LoginService,
   PolicyPermissionEngine,
@@ -89,7 +90,14 @@ import { makePreToolGate } from './pre-tool-gate.js';
 import { HookRunner, selectHooks, type HooksConfig } from '@hiperplano/aluy-cli-core';
 import { resolveContextWindow } from '../model/catalog.js';
 import { resolveMaestro, resolveContinuationCfg, resolveMemory } from '../maestro/wiring.js';
-import type { UserServicesConfig, UserLimitsConfig, UserContextConfig } from '../io/user-config.js';
+import type {
+  UserServicesConfig,
+  UserLimitsConfig,
+  UserContextConfig,
+  UserSubagentsConfig,
+  UserCycleConfig,
+  UserAdvancedConfig,
+} from '../io/user-config.js';
 import type { SessionMeta } from './model.js';
 
 /** Tier default da sessão (HG-2: só o tier sai do cliente; o broker resolve). */
@@ -101,7 +109,7 @@ export const DEFAULT_EXEC_TIMEOUT_MS = 120_000;
 export interface BuildSessionOptions {
   readonly env?: NodeJS.ProcessEnv;
   /**
-   * Seção `services` do config único (ADR-0136 §8/§9): porta/host dos sidecars.
+   * Seção `services` do config único (ADR-0150 §8/§9): porta/host dos sidecars.
    * Resolvido em run.tsx (savedConfig.services) e repassado ao Maestro/Memória, p/ o
    * judge/recall AO VIVO falarem ONDE o usuário configurou (não só o warmup/doctor).
    */
@@ -113,17 +121,37 @@ export interface BuildSessionOptions {
    */
   readonly headroomUrl?: string;
   /**
-   * ADR-0136 §5 (balde a) — limits do config (maxTokens/maxOutputTokens/maxIterations).
+   * ADR-0150 §5 (balde a) — limits do config (maxTokens/maxOutputTokens/maxIterations).
    * Resolvido em run.tsx (savedConfig.limits) e repassado; entra como nível ENTRE env e
    * default na precedência (flag > env > config > default). O core RE-VALIDA e CLAMPA.
    */
   readonly limits?: UserLimitsConfig;
   /**
-   * ADR-0136 §5 (balde a) — context do config (window/autocompactAt/autocompactMax).
+   * ADR-0150 §5 (balde a) — context do config (window/autocompactAt/autocompactMax).
    * Resolvido em run.tsx (savedConfig.context); entra ENTRE env e default na janela custom
    * e na auto-compactação (flag > env > config > default). O core re-valida/clampa.
    */
   readonly context?: UserContextConfig;
+  /**
+   * ADR-0150 (balde b) — seção `subagents` do config (`maxPerCall`/`maxConcurrency`/
+   * `idleTimeoutMs`). Resolvido em run.tsx (savedConfig.subagents); entra como o nível
+   * `configDefaults` do `SubAgentSpawner` (ENTRE env e default), clampado pelo core.
+   */
+  readonly subagentsConfig?: UserSubagentsConfig;
+  /**
+   * ADR-0150 (balde b) — seção `cycle` do config (`defaultDurationMs`/`defaultIterations`/
+   * `defaultIntervalMs`). Resolvido em run.tsx (savedConfig.cycle); repassado ao
+   * controller p/ `resolveCycleCeilings` usar como DEFAULT quando o `/cycle` omite a
+   * dimensão. Os teto-teto duros (CLI-SEC-14) não mudam.
+   */
+  readonly cycleConfig?: UserCycleConfig;
+  /**
+   * ADR-0150 (Tier 2) — seção `advanced` do config (self-check/mem-pressure/
+   * web-fetch). Resolvido em run.tsx (savedConfig.advanced); cada campo entra
+   * como o nível ENTRE env e default do resolver correspondente — env já existia
+   * e segue vencendo.
+   */
+  readonly advanced?: UserAdvancedConfig;
   /** Raiz do workspace (cwd preso). Default: process.cwd(). */
   readonly workspaceRoot?: string;
   /**
@@ -268,8 +296,11 @@ export interface BuildSessionOptions {
    */
   readonly todoBaseDir?: string;
   /**
-   * EST-0983 — teto de gravações de memória (`remember`) por sessão (GS-M2/RES-M-2).
-   * Default `DEFAULT_MAX_MEMORY_WRITES_PER_SESSION` (na engine). Injetável p/ teste.
+   * EST-0983 · ADR-0150 (balde b) — teto de gravações de memória (`remember`) por
+   * sessão (GS-M2/RES-M-2). Nível mais alto da precedência (equivalente a "flag";
+   * injetável p/ teste). Resolvido junto com `env.ALUY_MAX_MEMORY_WRITES_PER_SESSION`
+   * e `limits?.maxMemoryWritesPerSession` (config) por `resolveMaxMemoryWritesPerSession`,
+   * SEMPRE clampado a `MAX_MEMORY_WRITES_PER_SESSION_CEILING` (100) no core.
    */
   readonly maxMemoryWritesPerSession?: number;
   /**
@@ -322,6 +353,13 @@ export interface BuildSessionOptions {
      * (Fatia 2). Default: o env da sessão (`opts.env`). Só p/ teste determinístico.
      */
     readonly env?: Record<string, string | undefined>;
+    /**
+     * ADR-0146 (D4) — DEFAULT dos FILHOS quando nem o parâmetro do `spawn_agent` nem
+     * o `model:` do `.md` setam `model` (posição 3 da cadeia de precedência). Vem do
+     * dial `subAgent.model` do `~/.aluy/config.json` (resolvido em run.tsx). MESMO
+     * vocabulário do `model:` do `.md`. Ausente ⇒ `same-as-parent` (zero regressão).
+     */
+    readonly defaultModel?: string;
   };
   /**
    * EST-0977/0978 · ADR-0061 — REGISTRO de agentes-`.md` nomeados (globais + projeto,
@@ -573,7 +611,12 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // EST-0970 (fix OOM) — teto de CARACTERES da observação do web_fetch (o blob que
   // entra no contexto). flag/env (`ALUY_WEB_FETCH_MAX_CHARS`) > default, clampado em
   // [MIN, CEILING] (anti-OOM duro: config errada NÃO desliga o teto). SEMPRE na policy.
-  const maxObservationChars = resolveMaxObservationChars(env.ALUY_WEB_FETCH_MAX_CHARS);
+  // ADR-0150 (Tier 2) — config.advanced.webFetch.maxObservationChars (nível ENTRE
+  // env e default; env já existia e segue vencendo).
+  const maxObservationChars = resolveMaxObservationChars(
+    env.ALUY_WEB_FETCH_MAX_CHARS,
+    opts.advanced?.webFetch?.maxObservationChars,
+  );
   const web = createWebPort({
     egress,
     policy: { maxObservationChars, ...(yolo ? { allowInternalHosts: true } : {}) },
@@ -684,10 +727,14 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
       oldText !== undefined
         ? unifiedDiff(path, oldText, newText, true)
         : unifiedDiff(path, '', newText, false),
-    // EST-0983 · CLI-SEC-15 (GS-M2) — teto de gravações de memória por sessão.
-    ...(opts.maxMemoryWritesPerSession !== undefined
-      ? { maxMemoryWritesPerSession: opts.maxMemoryWritesPerSession }
-      : {}),
+    // EST-0983 · CLI-SEC-15 (GS-M2) · ADR-0150 (balde b) — teto de gravações de
+    // memória por sessão: precedência flag(opção) > env > config > default,
+    // SEMPRE clampada a `MAX_MEMORY_WRITES_PER_SESSION_CEILING` (100) no core.
+    maxMemoryWritesPerSession: resolveMaxMemoryWritesPerSession(
+      opts.maxMemoryWritesPerSession,
+      env.ALUY_MAX_MEMORY_WRITES_PER_SESSION,
+      opts.limits?.maxMemoryWritesPerSession,
+    ),
   });
 
   // ── ask resolver da TUI (0948 — fail-safe deny em timeout/abort) ────────────
@@ -795,6 +842,13 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     tier,
     everyKEnv: env.ALUY_SELF_CHECK_EVERY,
     maxVerificationsEnv: env.ALUY_SELF_CHECK_MAX,
+    // ADR-0150 (Tier 2) — config.advanced.selfCheck (nível ENTRE env e default).
+    ...(opts.advanced?.selfCheck?.everyK !== undefined
+      ? { everyKConfig: opts.advanced.selfCheck.everyK }
+      : {}),
+    ...(opts.advanced?.selfCheck?.maxVerifications !== undefined
+      ? { maxVerificationsConfig: opts.advanced.selfCheck.maxVerifications }
+      : {}),
   });
   const meta: SessionMeta = {
     // EST-0982 — arranca no `sessionCwd` (= raiz no boot). O controller o RE-ESPELHA
@@ -930,6 +984,65 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
       }
     : undefined;
 
+  // ADR-0146 (D3) — FÁBRICA de caller CUSTOM/BYO por-filho. Quando o `model` de um
+  // filho resolve em `kind:'custom'` (`custom`/`custom:<slug>`), o spawner pede AQUI
+  // o caller: fala pelo MESMO provider BYO do pai (`tier:'custom'` FIXO — o filho
+  // pediu explicitamente BYO), com o slug INDICADO ou, sem slug, o slug CORRENTE do
+  // pai (lido AO VIVO via getter — segue o `/model` do pai, igual ao `subAgentCaller`
+  // de hoje). O `provider` (NOME, ADR-0076) SEMPRE acompanha o corrente do pai — é a
+  // MESMA credencial/keychain (CLI-SEC-7); nunca base_url/api_key aqui (não existem
+  // no cliente). CACHE por slug (uma entrada por slug pedido; sem slug ⇒ 1 entrada
+  // "segue o pai"). Só existe com sub-agentes habilitados.
+  const customCallers = new Map<string, BrokerModelCaller>();
+  const CUSTOM_CALLER_FOLLOW_PARENT_KEY = ' __inherit__';
+  const customCallerFor = opts.subAgents?.enabled
+    ? (slug?: string): BrokerModelCaller => {
+        const key = slug ?? CUSTOM_CALLER_FOLLOW_PARENT_KEY;
+        const cached = customCallers.get(key);
+        if (cached) return cached;
+        const tierSource =
+          slug !== undefined
+            ? {
+                tier: 'custom' as const,
+                model: slug,
+                get provider(): string | undefined {
+                  return caller.provider;
+                },
+              }
+            : {
+                // sem slug indicado: segue o slug/provider CORRENTES do pai (deve estar
+                // em `tier:'custom'` — o `spawnNamed` do controller valida ANTES, D3/D2).
+                tier: 'custom' as const,
+                get model(): string | undefined {
+                  return caller.model;
+                },
+                get provider(): string | undefined {
+                  return caller.provider;
+                },
+              };
+        const c = new BrokerModelCaller({
+          client: brokerClient,
+          tier: 'custom',
+          tierSource,
+          ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
+        });
+        if (latestToolsCap) c.attachNativeTools(latestToolsCap);
+        customCallers.set(key, c);
+        return c;
+      }
+    : undefined;
+
+  // ADR-0146 (D2/L2) — PORTA do probe de nome de modelo: nomes do catálogo VIVO
+  // (as MESMAS chaves do seletor `/model`). Só existe com sub-agentes habilitados
+  // (o probe só roda no caminho de `spawnNamed`); falha de rede é tratada pelo
+  // controller (`fetchModelCatalogNamesSafe`, degrade honesto — L1-only).
+  const modelProbe = opts.subAgents?.enabled
+    ? {
+        availableNames: async (): Promise<readonly string[]> =>
+          (await catalogClient.list()).map((entry) => entry.key),
+      }
+    : undefined;
+
   // ── room store (EST-1119 · ADR-0121 §5) ────────────────────────────────────
   const roomBackendRes = resolveRoomBackend(env.ALUY_ROOM_BACKEND, opts.roomsBackend);
   if (roomBackendRes.warning && opts.onConfigWarn) {
@@ -991,8 +1104,13 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // (a flag vence o env). O controller resolve flag>env>default 0.85 com a janela do
     // modelo (`contextWindow`). Sem a flag, cai no env/default (ligada por padrão).
     ...(opts.autoCompactAt !== undefined ? { autoCompactAt: opts.autoCompactAt } : {}),
-    // ADR-0136 §5 — config.context (autocompactAt/Max/window): nível ENTRE env e default.
+    // ADR-0150 §5 — config.context (autocompactAt/Max/window): nível ENTRE env e default.
     ...(opts.context ? { contextConfig: opts.context } : {}),
+    // ADR-0150 (balde b) — config.cycle (defaultDurationMs/defaultIterations/
+    // defaultIntervalMs): DEFAULTS do `/cycle` quando o usuário omite a dimensão. Os
+    // teto-teto duros do `/cycle` (CLI-SEC-14) não mudam — só o controller repassa a
+    // `resolveCycleCeilings` no momento de iniciar um ciclo.
+    ...(opts.cycleConfig ? { cycleConfig: opts.cycleConfig } : {}),
     // EST-0973 (fix) — JANELA DE CONTEXTO do tier ativo (denominador da % janela +
     // auto-compactação). Resolvida do catálogo (ex.: 128k p/ Strata, 256k p/ Flui,
     // 200k p/ Cortex, 0 p/ Custom). SEMPRE passada (≠200k hardcoded). O controller
@@ -1029,6 +1147,24 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
             // `ALUY_FANOUT_DETACH_ON_INJECT` (Fatia 2). `opts.subAgents.env` (se vier)
             // tem precedência (teste); senão o env da sessão (produção). Default OFF.
             env: opts.subAgents.env ?? env,
+            // ADR-0150 (balde b) — seção `subagents` do config.json, nível ENTRE a
+            // opção acima (`maxConcurrency`/`timeoutMs`) e o DEFAULT do core. O core
+            // (`SubAgentSpawner`) resolve/clampa (env > config > default).
+            ...(opts.subagentsConfig
+              ? {
+                  configDefaults: {
+                    ...(opts.subagentsConfig.maxPerCall !== undefined
+                      ? { maxPerCall: opts.subagentsConfig.maxPerCall }
+                      : {}),
+                    ...(opts.subagentsConfig.maxConcurrency !== undefined
+                      ? { maxConcurrency: opts.subagentsConfig.maxConcurrency }
+                      : {}),
+                    ...(opts.subagentsConfig.idleTimeoutMs !== undefined
+                      ? { idleTimeoutMs: opts.subagentsConfig.idleTimeoutMs }
+                      : {}),
+                  },
+                }
+              : {}),
             ...(selectHooks(hooksConfig, 'subagent-stop').length > 0
               ? {
                   observer: {
@@ -1059,6 +1195,17 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // `model:` que resolve num tier fala AQUELE tier ao broker (o spawner roteia por
     // filho). Ausente ⇒ todos os filhos usam o `subAgentModel`/`model` do pai (back-compat).
     ...(callerForTier ? { callerForTier } : {}),
+    // ADR-0146 (D3) — fábrica de caller CUSTOM/BYO por-filho: cada filho cujo `model`
+    // resolve em `kind:'custom'` fala pelo provider BYO do pai (slug indicado ou
+    // corrente). Ausente ⇒ cai no caller do pai (fail-safe).
+    ...(customCallerFor ? { customCallerFor } : {}),
+    // ADR-0146 (D2/L2) — porta do probe de nome de modelo (catálogo vivo p/ sugestão).
+    ...(modelProbe ? { modelProbe } : {}),
+    // ADR-0146 (D4) — dial global: default dos FILHOS quando nem o spawn nem o `.md`
+    // setam `model` (posição 3 da cadeia de precedência). Ausente ⇒ `same-as-parent`.
+    ...(opts.subAgents?.defaultModel !== undefined
+      ? { defaultChildModel: opts.subAgents.defaultModel }
+      : {}),
     // EST-0996 — TOOL-CALLING NATIVO: o controller (dono do toolset FINAL) constrói o
     // catálogo de funções e nos entrega a capacidade AQUI; nós a ATTACHAMOS ao caller
     // de stream do pai E ao caller dedicado dos sub-agentes (MESMA capacidade ⇒ mesmo
@@ -1085,6 +1232,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
             env,
             ...(opts.memoryMonitor.sampleIntervalMs !== undefined
               ? { sampleIntervalMs: opts.memoryMonitor.sampleIntervalMs }
+              : {}),
+            // ADR-0150 (Tier 2) — config.advanced.memPressure.compactAt.
+            ...(opts.advanced?.memPressure?.compactAt !== undefined
+              ? { pressureAtConfig: opts.advanced.memPressure.compactAt }
               : {}),
           },
         }
@@ -1129,6 +1280,8 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
       // os criados DEPOIS (lazy, no 1º spawn daquele tier) também o recebam.
       latestToolsCap = cap;
       for (const c of tierCallers.values()) c.attachNativeTools(cap);
+      // ADR-0146 (D3) — idem p/ os callers CUSTOM/BYO por-filho já criados.
+      for (const c of customCallers.values()) c.attachNativeTools(cap);
     },
   });
   controllerRef = controller;

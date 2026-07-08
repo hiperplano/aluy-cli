@@ -106,11 +106,19 @@ function asProfiles(input: Readonly<Record<string, unknown>>): SubAgentProfile[]
           : `sub-${i + 1}`;
     // HUNT-SUBAGENT — garante UNICIDADE do rótulo no lote (anti-colisão de identidade).
     const label = uniqueLabel(rawLabel);
+    // ADR-0146 (D1) — `model`: uma preferência de MODELO/TIER que o USUÁRIO pediu NO
+    // PROMPT ("spawna um agente com o modelo X"), que o principal só RELAIA (não
+    // inventa por otimização de custo — §Segurança GS-SAM2). Input do modelo =
+    // NÃO-CONFIÁVEL: copiamos (trim) a string CRUA como DADO/pista de tier — ela passa
+    // pelo PROBE (D2) e pela catraca; nunca vira credencial/escopo novo (HG-2).
+    const modelPref =
+      typeof rec['model'] === 'string' && rec['model'].trim() !== '' ? rec['model'].trim() : '';
     const profile: SubAgentProfile = {
       label,
       goal,
       ...(agentName !== '' ? { agent: agentName } : {}),
       ...(typeof rec['context'] === 'string' ? { context: rec['context'] } : {}),
+      ...(modelPref !== '' ? { model: modelPref } : {}),
     };
     profiles.push(profile);
   }
@@ -199,6 +207,21 @@ const SPAWN_AGENT_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
           context: {
             type: 'string',
             description: 'Contexto adicional passado ao sub-agente (opcional).',
+          },
+          // ADR-0146 (D1) — o campo só existe p/ RELAIAR um pedido HUMANO explícito no
+          // prompt ("use o modelo X neste sub-agente"). NÃO é um botão de otimização de
+          // custo do modelo: você NÃO deve preencher isto por conta própria (ex.: p/
+          // economizar) — só quando o usuário pediu um modelo/tier específico. Nome
+          // desconhecido ⇒ ERRO (com sugestão) ANTES de rodar, esse filho não é spawnado.
+          model: {
+            type: 'string',
+            description:
+              'OPCIONAL — SÓ quando o USUÁRIO pediu um modelo/tier específico no prompt para ' +
+              'este sub-agente (você RELAIA a escolha dele; NÃO decida sozinho por custo). ' +
+              'Aceita um nome amigável ("sonnet"/"opus"/"haiku"/"flux"/"granito"/"strata"/"deep"), ' +
+              'uma chave de tier do Aluy ("aluy-strata", …), "same-as-parent" (segue o modelo/tier ' +
+              'CORRENTE da sessão) ou "custom"/"custom:<slug>" (usa o provider BYO/Custom da sessão, ' +
+              'com o slug indicado ou o corrente). Nome não reconhecido falha com sugestão, antes de rodar.',
           },
         },
         required: ['goal'],

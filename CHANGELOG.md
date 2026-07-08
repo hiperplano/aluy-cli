@@ -16,6 +16,15 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 _(vazio)_
 
+## [1.0.0-rc.99] — 2026-07-04
+
+### Adicionado
+
+- 🧩 Controle de modelo dos SUB-AGENTES (ADR-0146): agora dá pra escolher o modelo/tier de um sub-agente por 4 vias (todas humanas): parâmetro `model` no `spawn_agent` (você pede no prompt), `model:` no `.md`, dial global `subAgent.model` no config, ou herança do pai. Aceita `same-as-parent`/`custom` (usa o teu BYO), com probe que valida o nome e sugere correção. A UI mostra o modelo de cada sub-agente enquanto roda. Nunca vaza credencial.
+- 🎛️ Tunables de operação no config (ADR-0150): o teto de sub-agentes paralelos, a concorrência, os timeouts de MCP, os defaults de `/cycle`, gravações de memória/sessão e mais viraram configuráveis no `~/.aluy/config.json` (com `aluy config` listando), cada um com um teto-teto DURO de segurança que o config não pode furar.
+
+_(vazio)_
+
 ## [1.0.0-rc.98] — 2026-07-04
 
 ### Adicionado

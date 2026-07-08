@@ -46,6 +46,10 @@ import {
   spawnAgentTool,
   formatSubAgentResults,
   bindNamedAgent,
+  resolveModelTier,
+  formatUnknownModelError,
+  formatResolvedModelLabel,
+  isCostlierTier,
   childEngineOf,
   pathEffect,
   DEFAULT_LIMITS,
@@ -359,7 +363,7 @@ export interface SessionControllerOptions {
    */
   readonly autoCompactEnv?: Record<string, string | undefined>;
   /**
-   * ADR-0136 §5 (balde a) — `config.context` (autocompactAt/autocompactMax/window). Entra
+   * ADR-0150 §5 (balde a) — `config.context` (autocompactAt/autocompactMax/window). Entra
    * como nível ENTRE env e default na resolução da auto-compactação e da janela custom
    * (precedência flag > env > config > default). O core re-valida/clampa.
    */
@@ -367,6 +371,18 @@ export interface SessionControllerOptions {
     readonly window?: number;
     readonly autocompactAt?: number | string;
     readonly autocompactMax?: number;
+  };
+  /**
+   * ADR-0150 (balde b) — `config.cycle` (defaultDurationMs/defaultIterations/
+   * defaultIntervalMs). DEFAULTS do `/cycle` (CLI-SEC-14) quando o usuário OMITE a
+   * dimensão correspondente (`--por`/`--max-iter`/intervalo). Os teto-teto duros
+   * (`MAX_CYCLE_DURATION_MS`/`MAX_CYCLE_ITERATIONS`) permanecem hardcoded e intocados
+   * no core — este campo só é repassado a `resolveCycleCeilings` como `configDefaults`.
+   */
+  readonly cycleConfig?: {
+    readonly defaultDurationMs?: number;
+    readonly defaultIterations?: number;
+    readonly defaultIntervalMs?: number;
   };
   /**
    * Anti-flicker — opções do THROTTLE de flush do streaming. Os deltas de token
@@ -474,6 +490,16 @@ export interface SessionControllerOptions {
      * desta flag e é sempre ativa).
      */
     readonly env?: Record<string, string | undefined>;
+    /**
+     * ADR-0150 (balde b) — seção `subagents` do config.json, nível ENTRE esta opção
+     * (`maxConcurrency`/`timeoutMs`, equivalente a "flag") e o DEFAULT do core.
+     * Repassado tal-qual ao `SubAgentSpawner` (que resolve/clampa env > config > default).
+     */
+    readonly configDefaults?: {
+      readonly maxPerCall?: number;
+      readonly maxConcurrency?: number;
+      readonly idleTimeoutMs?: number;
+    };
   };
   /**
    * EST-0977/0978 · ADR-0061 — REGISTRO de agentes-`.md` nomeados (já carregado pelo
@@ -524,6 +550,32 @@ export interface SessionControllerOptions {
    * (back-compat). O tier é DADO de catálogo (o broker valida — 422); nunca credencial.
    */
   readonly callerForTier?: (tier: string) => ModelCaller;
+  /**
+   * ADR-0146 (D3) — FÁBRICA de caller CUSTOM/BYO por-filho. Quando o `model` de um
+   * filho resolve em `kind:'custom'` (`custom`/`custom:<slug>`), o controller a
+   * REPASSA ao spawner; quem a constrói (reusando o BrokerModelCaller dos filhos com
+   * `tierSource` fixado em `tier:'custom'` + o slug indicado/corrente) é o wiring
+   * (@hiperplano/aluy-cli — cli-core não conhece o broker concreto). Ausente ⇒ o
+   * filho `custom` cai no caller do PAI (fail-safe). Fecha o gap BYO do ADR-0146.
+   */
+  readonly customCallerFor?: (slug?: string) => ModelCaller;
+  /**
+   * ADR-0146 (D2/L2) — PORTA do PROBE de nome de modelo: nomes disponíveis no CATÁLOGO
+   * VIVO do broker (as MESMAS chaves do seletor `/model`), p/ o `spawnNamed` sugerir
+   * (distância de edição) quando um `model` (spawn/`.md`/dial) não bate com nada
+   * conhecido — ANTES do fan-out (D2, "erro legível + sugestão" em vez de 422 no
+   * meio). Ausente/falha de rede ⇒ degrade HONESTO (L1-only: só os nomes CONHECIDOS
+   * de cor, nunca trava o fluxo em silêncio). NÃO gasta modelo (mesma rota do `/model`).
+   */
+  readonly modelProbe?: { readonly availableNames: () => Promise<readonly string[]> };
+  /**
+   * ADR-0146 (D4) — DEFAULT dos FILHOS quando NEM o spawn NEM o `.md` setam `model`
+   * (posição 3 da cadeia de precedência: spawn > `.md` > este dial > herança). Vem do
+   * dial `subAgent.model` do `~/.aluy/config.json` (io/user-config.ts), MESMO
+   * vocabulário do `model:` do `.md` (`same-as-parent`/tier/`custom`/`custom:<slug>`).
+   * Ausente ⇒ `same-as-parent` (comportamento de hoje, zero regressão).
+   */
+  readonly defaultChildModel?: string;
   /**
    * EST-0948 (auto-retry · broker-error UX/resiliência) — política do AUTO-RETRY de
    * falhas RETRYABLE do broker. Injetável p/ tunar e p/ teste DETERMINÍSTICO (relógio
@@ -603,6 +655,11 @@ export interface SessionControllerOptions {
     readonly env?: Record<string, string | undefined>;
     /** Período de amostragem (ms). Default `DEFAULT_MEM_SAMPLE_MS`. Injetável p/ teste. */
     readonly sampleIntervalMs?: number;
+    /**
+     * ADR-0150 (Tier 2) — `config.advanced.memPressure.compactAt`. Nível ENTRE env
+     * (`ALUY_MEM_PRESSURE_AT`, que segue vencendo) e o default do core.
+     */
+    readonly pressureAtConfig?: string | number;
   };
   /**
    * EST-XXXX (CHECKPOINTS / REWIND) — gancho chamado no INÍCIO de cada PROMPT do
@@ -825,6 +882,10 @@ export class SessionController {
   private readonly subagentRegistry: AgentRegistry | undefined;
   /** GS-MD7 (fix registry-cwd) — relê agentes de projeto do cwd corrente (lazy no spawnNamed). */
   private readonly reloadProjectAgents: (() => readonly AgentProfile[]) | undefined;
+  /** ADR-0146 (D2/L2) — porta do catálogo vivo p/ o probe de nome de modelo (sugestão). */
+  private readonly modelProbe: { readonly availableNames: () => Promise<readonly string[]> } | undefined;
+  /** ADR-0146 (D4) — default dos FILHOS quando nem spawn nem `.md` setam `model` (dial). */
+  private readonly defaultChildModel: string | undefined;
   // EST-0948 — os tetos EFETIVOS da sessão (CLI-SEC-8), já resolvidos (flag>env>default,
   // clampados) pelo wiring. Fonte do TETO de tokens p/ os indicadores em % (StatusBar/
   // gate) e do `extend()` do `[c] continuar`.
@@ -877,12 +938,21 @@ export class SessionController {
   private readonly autoCompactAt: string | undefined;
   // EST-0973 — env da auto-compactação (p/ re-resolver na troca de tier).
   private readonly autoCompactEnv: Record<string, string | undefined>;
-  // ADR-0136 §5 — config.context (autocompactAt/Max/window) p/ re-resolver na troca de tier.
+  // ADR-0150 §5 — config.context (autocompactAt/Max/window) p/ re-resolver na troca de tier.
   private readonly contextConfig:
     | {
         readonly window?: number;
         readonly autocompactAt?: number | string;
         readonly autocompactMax?: number;
+      }
+    | undefined;
+  // ADR-0150 (balde b) — config.cycle (defaultDurationMs/defaultIterations/
+  // defaultIntervalMs), repassado a `resolveCycleCeilings` em `cycle()`.
+  private readonly cycleConfig:
+    | {
+        readonly defaultDurationMs?: number;
+        readonly defaultIterations?: number;
+        readonly defaultIntervalMs?: number;
       }
     | undefined;
   // EST-0973 — config RESOLVIDA da AUTO-COMPACTAÇÃO da janela (limiar + janela +
@@ -1145,6 +1215,8 @@ export class SessionController {
     this.permissionEngine = opts.permission; // ADR-0126(A·PR2)
     this.subagentRegistry = opts.agentRegistry; // ADR-0126(A·PR2)
     this.reloadProjectAgents = opts.reloadProjectAgents; // GS-MD7 fix: registry segue o cwd
+    this.modelProbe = opts.modelProbe; // ADR-0146 (D2/L2) — catálogo vivo p/ sugestão
+    this.defaultChildModel = opts.defaultChildModel; // ADR-0146 (D4) — dial global
     this.clock = opts.clock ?? Date.now;
     this.isRoot =
       opts.isRoot ?? (() => typeof process.geteuid === 'function' && process.geteuid() === 0);
@@ -1187,6 +1259,7 @@ export class SessionController {
     this.autoCompactEnv = opts.autoCompactEnv ?? process.env;
     this.autoCompactAt = opts.autoCompactAt;
     this.contextConfig = opts.contextConfig;
+    this.cycleConfig = opts.cycleConfig;
     this.contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
     // EST-0973 — AUTO-COMPACTAÇÃO da JANELA: resolve o limiar (flag `--autocompact-at`
     // > env `ALUY_AUTOCOMPACT_AT` > default 0.85) + a JANELA do modelo (`contextWindow`)
@@ -1215,6 +1288,11 @@ export class SessionController {
         this.memPressureCfg = resolveMemPressure({
           heapLimitMb: opts.memory.heapLimitMb,
           pressureAtEnv: memEnv.ALUY_MEM_PRESSURE_AT,
+          // ADR-0150 (Tier 2) — config.advanced.memPressure.compactAt (nível ENTRE
+          // env e default; env acima segue vencendo).
+          ...(opts.memory.pressureAtConfig !== undefined
+            ? { pressureAtConfig: opts.memory.pressureAtConfig }
+            : {}),
         });
         this.memSampleHeapUsed = opts.memory.sampleHeapUsed;
         this.memShutdown = opts.memory.shutdown ?? null;
@@ -1402,6 +1480,10 @@ export class SessionController {
         // declara `model:` que resolve num tier fala AQUELE tier ao broker (o spawner
         // roteia por-filho). Ausente ⇒ todos os filhos usam o caller do pai (back-compat).
         ...(opts.callerForTier ? { callerForTier: opts.callerForTier } : {}),
+        // ADR-0146 (D3) — fábrica de caller CUSTOM/BYO por-filho: cada filho cujo
+        // `model` resolve em `kind:'custom'` fala pelo provider BYO do pai (slug
+        // indicado ou corrente). Ausente ⇒ cai no caller do pai (fail-safe).
+        ...(opts.customCallerFor ? { customCallerFor: opts.customCallerFor } : {}),
         permission: opts.permission,
         ports: childPorts, // sem a porta `question` (ressalva seguranca EST-1110)
         baseTools, // o spawner REMOVE spawn_agent E perguntar p/ os filhos
@@ -1415,6 +1497,15 @@ export class SessionController {
         ...(opts.subAgents.timeoutMs !== undefined
           ? { idleTimeoutMs: opts.subAgents.timeoutMs }
           : {}),
+        // ADR-0150 (balde b) — seção `subagents` do config.json (nível ENTRE a opção
+        // acima e o DEFAULT do core). Repassado tal-qual; o spawner resolve/clampa.
+        ...(opts.subAgents.configDefaults ? { configDefaults: opts.subAgents.configDefaults } : {}),
+        // CORREÇÃO DE FRONTEIRA (ADR-0053 §8) — env da SESSÃO (já resolvido pelo wiring,
+        // `opts.env ?? process.env`, MESMO padrão do `mcpEnv`/`parentEnv` do `mcp/setup.ts`),
+        // p/ o spawner ler `ALUY_SUBAGENT_MAX_PER_CALL`/`ALUY_SUBAGENT_MAX_CONCURRENCY`/
+        // `ALUY_SUBAGENT_IDLE_TIMEOUT` sem NUNCA tocar `process.env` por conta própria (o
+        // core não lê env/arquivo). Ausente ⇒ nenhuma das três envs entra na precedência.
+        ...(opts.subAgents.env !== undefined ? { env: opts.subAgents.env } : {}),
         observer: displayObserver,
         ...(opts.limits !== undefined ? { limits: opts.limits } : {}),
         // EST-0982 (semântica do esc) — o sinal de PARADA de cada filho é o do NÓ dele
@@ -2327,7 +2418,10 @@ export class SessionController {
       // segue sendo a ÚNICA fonte do "sem teto ⇒ NÃO inicia" (a invariante NÃO muda).
       const request: CycleRequest = applyCycleOverrides(parsed.request, overrides);
       // GS-L2/RES-L-1 — porta "sem teto ⇒ NÃO inicia" (falha-fechada). Lança se não há teto.
-      ceilings = resolveCycleCeilings(request);
+      // ADR-0150 (balde b) — `this.cycleConfig` troca os DEFAULT_CYCLE_* hardcoded
+      // pelos valores de config.json QUANDO o usuário omitiu a dimensão; a regra
+      // "sem teto ⇒ não inicia" e os teto-teto duros (CLI-SEC-14) não mudam.
+      ceilings = resolveCycleCeilings(request, this.cycleConfig);
     } catch (err) {
       if (err instanceof CycleParseError || err instanceof NoCeilingError) {
         this.pushNote('/cycle', [err.message]);
@@ -5706,65 +5800,107 @@ export class SessionController {
     if (registry !== undefined && this.reloadProjectAgents !== undefined) {
       registry = new AgentRegistry(registry.listGlobal(), this.reloadProjectAgents());
     }
-    // Sem registro OU nenhum perfil pede agente nomeado ⇒ caminho direto (EST-0969).
-    if (!registry || !profiles.some((p) => p.agent !== undefined && p.agent.trim() !== '')) {
-      return this.spawnDetachable(spawner, profiles, signal, roomActive);
-    }
-    // Resolve cada perfil; separa os que falharam (nome desconhecido) dos que rodam.
-    // SEQUENCIAL (não `forEach`) porque o RES-MD-1 (conflito cross-camada) pode pedir
-    // CONFIRMAÇÃO via `askResolver` — I/O que precisa de `await` ANTES de decidir se
-    // este filho entra no fan-out (o spawn em si segue paralelo, depois).
+    // Resolve cada perfil; separa os que falharam (nome desconhecido/model inválido)
+    // dos que rodam. SEQUENCIAL (não `forEach`) porque a confirmação cross-camada
+    // (RES-MD-1) e o PROBE de modelo (ADR-0146 D2) podem pedir I/O (`askResolver`/
+    // catálogo) ANTES de decidir se este filho entra no fan-out (o spawn em si segue
+    // paralelo, depois). ADR-0146 — este loop AGORA roda p/ TODO perfil (agente
+    // nomeado OU genérico): o parâmetro `model` do `spawn_agent` (D1) vale mesmo SEM
+    // `agent:` nomeado, então a precedência/probe de modelo não pode ficar atrás do
+    // atalho "sem registro ⇒ caminho direto" que existia antes.
     const resolved: SubAgentProfile[] = [];
     const resolvedIndex: number[] = [];
     const outcomes: (SubAgentOutcome | undefined)[] = new Array(profiles.length);
+    // ADR-0146 (D2/L2) — catálogo vivo buscado NO MÁXIMO 1× por lote (lazy: só quando
+    // o 1º nome desconhecido aparece), nunca por filho.
+    let catalogNames: readonly string[] | undefined;
+    let catalogFetched = false;
+
     for (let i = 0; i < profiles.length; i++) {
-      const profile = profiles[i]!;
-      const binding = bindNamedAgent(registry, profile);
-      if (!binding.ok) {
-        // GS-MD7: nome desconhecido = ERRO visível p/ este filho — NÃO spawnado.
-        outcomes[i] = {
-          label: profile.label,
-          ok: false,
-          result: binding.error,
-          stop: 'error',
-          usage: { iterations: 0, toolCalls: 0, tokens: 0 },
-        };
-        continue;
-      }
-      // RES-MD-1 (ANTI-SPOOFING CROSS-CAMADA) — o LOCUS HONRA o flag que o registry
-      // PRODUZ. Um `.md` de PROJETO (origin='project', DADO de terceiro) homônimo de
-      // um agente GLOBAL confiável VENCE por precedência (§4), mas NUNCA sequestra a
-      // delegação explícita em SILÊNCIO: exige CONFIRMAÇÃO com a ORIGEM VISÍVEL. O
-      // fail-safe é da catraca (CLI-SEC-3/9): não-interativo/timeout/abort ⇒ deny.
-      if (binding.crossLayerConflict && binding.origin === 'project') {
-        const ok = await this.confirmCrossLayerProject(profile.agent!, signal);
-        if (!ok) {
-          // DENY fail-closed: o de PROJETO NÃO roda (e nunca caímos no global por trás).
-          outcomes[i] = {
-            label: profile.label,
-            ok: false,
-            result:
-              `delegação a "${profile.agent}" RECUSADA (proteção contra usurpação de nome): o ` +
-              `agente de PROJETO ([origem: projeto], .claude/agents/) é HOMÔNIMO de um ` +
-              `agente GLOBAL confiável e a sua escolha NÃO foi confirmada ` +
-              `(sessão não-interativa, expirou ou cancelada ⇒ deny fail-safe). Para ` +
-              `usar o de projeto, confirme explicitamente; o global homônimo nunca ` +
-              `roda em silêncio no lugar dele.`,
-            stop: 'error',
-            usage: { iterations: 0, toolCalls: 0, tokens: 0 },
-          };
+      let profile = profiles[i]!;
+      const hasNamedAgent =
+        registry !== undefined && profile.agent !== undefined && profile.agent.trim() !== '';
+      let mdModel: string | undefined;
+      if (hasNamedAgent) {
+        const binding = bindNamedAgent(registry!, profile);
+        if (!binding.ok) {
+          // GS-MD7: nome desconhecido = ERRO visível p/ este filho — NÃO spawnado.
+          outcomes[i] = errorOutcomeFor(profile.label, binding.error);
           continue;
         }
+        // RES-MD-1 (ANTI-SPOOFING CROSS-CAMADA) — o LOCUS HONRA o flag que o registry
+        // PRODUZ. Um `.md` de PROJETO (origin='project', DADO de terceiro) homônimo de
+        // um agente GLOBAL confiável VENCE por precedência (§4), mas NUNCA sequestra a
+        // delegação explícita em SILÊNCIO: exige CONFIRMAÇÃO com a ORIGEM VISÍVEL. O
+        // fail-safe é da catraca (CLI-SEC-3/9): não-interativo/timeout/abort ⇒ deny.
+        if (binding.crossLayerConflict && binding.origin === 'project') {
+          const ok = await this.confirmCrossLayerProject(profile.agent!, signal);
+          if (!ok) {
+            // DENY fail-closed: o de PROJETO NÃO roda (e nunca caímos no global por trás).
+            outcomes[i] = errorOutcomeFor(
+              profile.label,
+              `delegação a "${profile.agent}" RECUSADA (proteção contra usurpação de nome): o ` +
+                `agente de PROJETO ([origem: projeto], .claude/agents/) é HOMÔNIMO de um ` +
+                `agente GLOBAL confiável e a sua escolha NÃO foi confirmada ` +
+                `(sessão não-interativa, expirou ou cancelada ⇒ deny fail-safe). Para ` +
+                `usar o de projeto, confirme explicitamente; o global homônimo nunca ` +
+                `roda em silêncio no lugar dele.`,
+            );
+            continue;
+          }
+        }
+        profile = binding.profile;
+        mdModel = binding.model;
       }
-      // EST-SUBAGENT-MODEL — propaga o `model:` do `.md` (CRU) ao perfil que vai ao
-      // spawner: lá `childCallerFor` o traduz por `resolveModelTier` e roteia o filho
-      // ao caller do SEU tier (ou cai no do pai se não resolver). Sem `model` no `.md`
-      // ⇒ não setamos o campo (o filho usa o caller do pai — back-compat).
-      resolved.push(
-        binding.model !== undefined
-          ? { ...binding.profile, model: binding.model }
-          : binding.profile,
-      );
+
+      // ADR-0146 — PRECEDÊNCIA do modelo do FILHO (a fonte única/determinística do
+      // ADR): (1) o `model` do próprio `spawn_agent` (já em `profile.model` — o
+      // boundary `asProfiles` copiou do parâmetro que o USUÁRIO pediu no prompt)
+      // VENCE (2) o `model:` do `.md` (`mdModel`), que VENCE (3) o dial global
+      // (`this.defaultChildModel`, `subAgent.model` do config). Ausente em TODAS
+      // ⇒ `undefined` (herda o PAI — o comportamento de hoje, zero regressão).
+      const effectiveModel = profile.model ?? mdModel ?? this.defaultChildModel;
+
+      if (effectiveModel !== undefined) {
+        const resolution = resolveModelTier(effectiveModel);
+        // D2 — PROBE fail-closed ANTES do fan-out: nome sem cara de tier/sentinela
+        // conhecido ⇒ erro legível + sugestão (nunca herança silenciosa).
+        if (resolution.kind === 'unknown') {
+          if (!catalogFetched) {
+            catalogFetched = true;
+            catalogNames = await this.fetchModelCatalogNamesSafe();
+          }
+          outcomes[i] = errorOutcomeFor(
+            profile.label,
+            formatUnknownModelError(effectiveModel, catalogNames),
+          );
+          continue;
+        }
+        // D3 — `custom`/`custom:<slug>` só faz sentido com o PAI em `tier:'custom'`
+        // (é o provider BYO dele que o filho herda). Fora disso: erro legível
+        // ANTES de rodar (fail-closed), não um 422 do broker no meio.
+        if (resolution.kind === 'custom' && this.tier !== 'custom') {
+          outcomes[i] = errorOutcomeFor(
+            profile.label,
+            `modelo "${effectiveModel}": "custom"/"custom:<slug>" só vale numa sessão BYO/Custom ` +
+              `— a sessão atual está no tier "${this.tier}". Troque para Custom (/model) ou não ` +
+              `declare "model" (o filho herda o tier corrente do pai).`,
+          );
+          continue;
+        }
+        // Q-3 (decisão do dono) — AVISO NÃO-BLOQUEANTE: tier hospedado mais caro que
+        // o corrente da sessão. A escolha já é humana (prompt/.md/dial) — só uma nota;
+        // o filho roda de qualquer jeito.
+        if (resolution.kind === 'tier' && isCostlierTier(resolution.key, this.tier)) {
+          this.pushNote('spawn_agent', [
+            `sub-agente "${profile.label}" vai usar o tier "${resolution.key}", mais caro que o ` +
+              `corrente da sessão ("${this.tier}") — escolha do prompt/.md/config; o filho roda.`,
+          ]);
+        }
+        if (profile.model !== effectiveModel) profile = { ...profile, model: effectiveModel };
+      }
+
+      resolved.push(profile);
       resolvedIndex.push(i);
     }
     // Dispara só os resolvidos; reinsere os desfechos na ordem original dos perfis.
@@ -5776,6 +5912,21 @@ export class SessionController {
     }
     // Todos preenchidos por construção (resolvido OU erro). Coage o tipo.
     return outcomes.map((o, i) => o ?? errorOutcome(profiles[i]!.label));
+  }
+
+  /**
+   * ADR-0146 (D2/L2) — busca os nomes do CATÁLOGO VIVO (best-effort) p/ a sugestão do
+   * probe. Sem `modelProbe` injetado OU falha de rede ⇒ `undefined` (degrade HONESTO:
+   * o `formatUnknownModelError` cai só nos nomes CONHECIDOS de cor — L1). NUNCA trava
+   * o fan-out em silêncio; NUNCA gasta chamada de MODELO (só leitura de catálogo).
+   */
+  private async fetchModelCatalogNamesSafe(): Promise<readonly string[] | undefined> {
+    if (!this.modelProbe) return undefined;
+    try {
+      return await this.modelProbe.availableNames();
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -6160,9 +6311,22 @@ export class SessionController {
     return resolution.kind === 'approve-once' || resolution.kind === 'approve-session';
   }
 
+  /**
+   * ADR-0146 (D5) — formata o RÓTULO de tier/modelo RESOLVIDO deste filho p/ a UI, a
+   * partir da preferência CRUA do perfil (`model` — a MESMA string que `childCallerFor`
+   * roteia) + a pista CORRENTE do pai. NUNCA provider/base_url/credencial (HG-2) —
+   * só a chave de tier e/ou o slug de catálogo Custom (mesmo filtro da status bar).
+   */
+  private childModelLabel(model: string | undefined): string {
+    return formatResolvedModelLabel(resolveModelTier(model), {
+      tier: this.tier,
+      ...(this.model !== undefined ? { model: this.model } : {}),
+    });
+  }
+
   private subAgentDisplayObserver(extra?: SubAgentObserver): SubAgentObserver {
     return {
-      onChildStart: (label: string) => {
+      onChildStart: (label: string, model?: string) => {
         // EST-0982 — registra o filho na ÁRVORE DE FLUXOS (nó sob a raiz). O nó encadeia
         // o signal do pai (cancelar pai → filho) e tem o SEU AbortController (PARAR este
         // filho sem tocar irmãos — RES-C-3). nodeId estável por (sessão, label).
@@ -6170,11 +6334,13 @@ export class SessionController {
         this.upsertSubAgentChild(label, {
           label,
           status: 'running',
+          // ADR-0146 (D5) — tier/modelo RESOLVIDO deste filho, visível ENQUANTO roda.
+          model: this.childModelLabel(model),
           ...(node ? { nodeId: node.id } : {}),
         });
-        extra?.onChildStart?.(label);
+        extra?.onChildStart?.(label, model);
       },
-      onChildEnd: (label: string, outcome: SubAgentOutcome) => {
+      onChildEnd: (label: string, outcome: SubAgentOutcome, model?: string) => {
         // EST-0982 — fecha a contabilidade do filho na árvore: espelha o usage (tokens/
         // tools) e carimba a duração (relógio). Se o filho já foi PARADO (nó cancelado),
         // o status é `cancelled` (cessar≠falha) — a11y honesta.
@@ -6190,11 +6356,13 @@ export class SessionController {
           status: wasCancelled ? 'cancelled' : outcome.ok ? 'done' : 'fail',
           summary: subAgentSummary(outcome, acc?.durationMs),
           stop: wasCancelled ? 'cancelled' : outcome.stop,
+          // ADR-0146 (D5) — mantido no resumo final (mesmo rótulo do início).
+          model: this.childModelLabel(model),
           ...(node ? { nodeId: node.id } : {}),
         });
         // A contabilidade do PAI (rodapé) reflete a soma agregada — atualiza o rodapé.
         this.refreshTurnAccounting();
-        extra?.onChildEnd?.(label, outcome);
+        extra?.onChildEnd?.(label, outcome, model);
       },
     };
   }
@@ -6727,6 +6895,21 @@ function errorOutcome(label: string): SubAgentOutcome {
     label,
     ok: false,
     result: `sub-agente "${label}" não resolvido (erro interno)`,
+    stop: 'error',
+    usage: { iterations: 0, toolCalls: 0, tokens: 0 },
+  };
+}
+
+/**
+ * EST-0978 / ADR-0146 — desfecho de ERRO VISÍVEL p/ UM filho (nome de agente
+ * desconhecido, conflito cross-camada recusado, ou probe de modelo — D2/D3): o
+ * filho NÃO é spawnado; a mensagem legível volta ao PAI como DADO (não deriva ação).
+ */
+function errorOutcomeFor(label: string, message: string): SubAgentOutcome {
+  return {
+    label,
+    ok: false,
+    result: message,
     stop: 'error',
     usage: { iterations: 0, toolCalls: 0, tokens: 0 },
   };

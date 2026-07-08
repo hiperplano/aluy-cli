@@ -29,7 +29,7 @@ export async function warmupSidecars(opts?: {
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchFn?: typeof fetch;
   readonly timeoutMs?: number;
-  /** Seção `services` do config único (ADR-0136 §8/§9): porta/host dos sidecars. */
+  /** Seção `services` do config único (ADR-0150 §8/§9): porta/host dos sidecars. */
   readonly services?: UserServicesConfig;
 }): Promise<void> {
   const targets = opts?.targets ?? new Set<WarmTarget>(['mem0', 'ollama']);

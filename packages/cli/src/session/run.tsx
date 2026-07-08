@@ -101,6 +101,8 @@ import {
   loadProjectInstructions,
   UserConfigStore,
   SessionStore,
+  // ADR-0150 (balde b) — resolve `session.gcMaxAgeMs`/`gcMaxCount` do config único.
+  resolveSessionGcOptions,
   blocksToHistory,
   UserCommandsLoader,
   ProjectCommandsLoader,
@@ -135,6 +137,8 @@ import {
   decideBootResume,
   resolveResumedModel,
   resolvePreferredModel,
+  // ADR-0150 (balde b) — resolve `session.autoResumeWindowMs` do config único.
+  resolveAutoResumeWindowMs,
   type ResumeRequest,
   type ResumeResolution,
 } from './resume.js';
@@ -569,8 +573,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // sessão nova (resolução `none`), sem id forçado.
   const sessionStore = opts.sessionStore ?? new SessionStore();
   // best-effort: limpa sessões antigas/excedentes (unlink real). Não derruba nada.
+  // ADR-0150 (balde b) — `session.gcMaxAgeMs`/`gcMaxCount` do config único, com a
+  // sanidade MÍNIMA aplicada por `resolveSessionGcOptions` (idade ≥1 dia, contagem ≥1).
   try {
-    sessionStore.gc();
+    sessionStore.gc(resolveSessionGcOptions(savedConfig.session));
   } catch {
     /* GC é QoL — silêncio em falha */
   }
@@ -597,6 +603,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // EST-0989 — a auto-oferta de retomada agora aparece na CAIXA do splash (TTY),
     // não mais como `↻ … [S/n]` solto no meio da tela.
     promptYesNo: bootPrompt,
+    // ADR-0150 (balde b) — janela de "recente" p/ a auto-oferta, config-driven
+    // (clampada a 7 dias por `resolveAutoResumeWindowMs`; ausente ⇒ 24h de sempre).
+    windowMs: resolveAutoResumeWindowMs(savedConfig.session?.autoResumeWindowMs),
   });
   // F110 — `--resume <id>` pedido mas o id não existe: AVISA (não cai calado numa sessão
   // nova). Espelha o `/resume <id>` em-sessão (history.ts) e a filosofia do F109 (não
@@ -722,6 +731,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           workspaceRoot: cwdAbs,
           parentEnv: env,
           ...(mcpSandboxLauncher ? { sandboxLauncher: mcpSandboxLauncher } : {}),
+          // ADR-0150 (balde b) — seção `mcp` do config único (connectTimeoutMs/callTimeoutMs).
+          ...(savedConfig.mcp ? { mcpConfig: savedConfig.mcp } : {}),
           loadProjectConfig: async () => {
             const loaded = await projectMcpStore.load();
             projectMcpHadServers = loaded.config.servers.length > 0;
@@ -915,7 +926,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     tier: resolvedTier,
     // ADR-0120 — backend EFETIVO (flag>env>config>default) p/ a StatusBar indicar o modo.
     effectiveBackend: resolvedBackend,
-    // ADR-0136 §8/§9 — seção `services` (porta/host dos sidecars) p/ o judge/recall AO VIVO.
+    // ADR-0150 §8/§9 — seção `services` (porta/host dos sidecars) p/ o judge/recall AO VIVO.
     ...(savedConfig.services ? { services: savedConfig.services } : {}),
     // headroom CONFIG-DRIVEN (não env-only): liga por profile:turbo + sidecarToggles.headroom
     // (default on) OU services.headroom; env ALUY_HEADROOM_URL = override, ALUY_HEADROOM_OFF = kill.
@@ -930,10 +941,37 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       });
       return hru !== undefined ? { headroomUrl: hru } : {};
     })(),
-    // ADR-0136 §5 — limits do config (maxTokens/maxOutputTokens/maxIterations); flag/env vencem.
+    // ADR-0150 §5 — limits do config (maxTokens/maxOutputTokens/maxIterations); flag/env vencem.
     ...(savedConfig.limits ? { limits: savedConfig.limits } : {}),
-    // ADR-0136 §5 — context do config (window/autocompactAt/autocompactMax); flag/env vencem.
+    // ADR-0150 §5 — context do config (window/autocompactAt/autocompactMax); flag/env vencem.
     ...(savedConfig.context ? { context: savedConfig.context } : {}),
+    // ADR-0146 (D4) — dial GLOBAL `subAgent.model` (default dos FILHOS quando nem o
+    // spawn nem o `.md` setam `model`). MERGE explícito sobre `opts.subAgents` (já veio
+    // via `...optsForBuild` com `{ enabled }` de `aluy.ts`) — preserva os campos
+    // existentes e SOMA o `defaultModel`; `enabled` cai em `false` só no caso
+    // defensivo em que `opts.subAgents` não veio (sub-agentes OFF ⇒ o dial é inerte
+    // de qualquer jeito). Ausente no config ⇒ não sai (cai no default `same-as-parent`).
+    ...(savedConfig.subAgent?.model !== undefined
+      ? {
+          subAgents: {
+            enabled: opts.subAgents?.enabled ?? false,
+            ...(opts.subAgents?.maxConcurrency !== undefined
+              ? { maxConcurrency: opts.subAgents.maxConcurrency }
+              : {}),
+            ...(opts.subAgents?.timeoutMs !== undefined
+              ? { timeoutMs: opts.subAgents.timeoutMs }
+              : {}),
+            ...(opts.subAgents?.env !== undefined ? { env: opts.subAgents.env } : {}),
+            defaultModel: savedConfig.subAgent.model,
+          },
+        }
+      : {}),
+    // ADR-0150 (balde b) — subagents do config (maxPerCall/maxConcurrency/idleTimeoutMs).
+    ...(savedConfig.subagents ? { subagentsConfig: savedConfig.subagents } : {}),
+    // ADR-0150 (balde b) — cycle do config (defaultDurationMs/defaultIterations/defaultIntervalMs).
+    ...(savedConfig.cycle ? { cycleConfig: savedConfig.cycle } : {}),
+    // ADR-0150 (Tier 2) — advanced do config (self-check/mem-pressure/web-fetch).
+    ...(savedConfig.advanced ? { advanced: savedConfig.advanced } : {}),
     // EST-1112 · ADR-0119 — budget local resolvido (flag>env>config>default).
     localBudget,
     // EST-0972/0962 (BUG Custom) — slug Custom resolvido (só sob `tier:'custom'`): da
@@ -1731,6 +1769,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       parentEnv: env,
       // EST-1011 — o reconnect/reload mantém o MESMO confinamento de SO do boot (opt-in).
       ...(mcpSandboxLauncher ? { sandboxLauncher: mcpSandboxLauncher } : {}),
+      // ADR-0150 (balde b) — seção `mcp` do config único (connectTimeoutMs/callTimeoutMs).
+      ...(savedConfig.mcp ? { mcpConfig: savedConfig.mcp } : {}),
       loadProjectConfig: async () => {
         const loaded = await projectMcpStore.load();
         projectMcpHadServers = loaded.config.servers.length > 0;

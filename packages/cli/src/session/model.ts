@@ -130,6 +130,15 @@ export interface SubAgentChild {
   readonly summary?: string;
   /** Motivo da parada (`final`/`limit`/`timeout`/`error`/`cancelled`) — a11y/auditoria. */
   readonly stop?: 'final' | 'limit' | 'timeout' | 'error' | 'cancelled';
+  /**
+   * ADR-0146 (D5) — o NOME do tier/modelo RESOLVIDO deste filho (`aluy-strata`,
+   * `custom · <slug>`, `herdado (aluy-flux)`, `herdado (custom · <slug-do-pai>)`).
+   * Preenchido pelo controller (`upsertSubAgentChild`) a partir da precedência de
+   * resolução do modelo. NUNCA provider/base_url/credencial (HG-2/CLI-SEC-7) — só a
+   * chave de tier/slug de catálogo, mesma natureza do que a status bar do pai já
+   * mostra. Visível enquanto `status==='running'` e mantido no resumo final.
+   */
+  readonly model?: string;
 }
 
 /**

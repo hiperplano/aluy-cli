@@ -176,7 +176,7 @@ export function resolveContextWindow(
   tierKey: string,
   env: Record<string, string | undefined> = {},
   catalog?: readonly TierCatalogEntry[],
-  configWindow?: number | undefined, // ADR-0136 balde(a): config.context.window (custom only)
+  configWindow?: number | undefined, // ADR-0150 balde(a): config.context.window (custom only)
 ): number {
   const fromTier = contextWindowForTier(tierKey, catalog);
   if (fromTier > 0) return fromTier; // tier conhecido manda

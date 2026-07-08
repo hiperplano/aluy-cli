@@ -190,6 +190,12 @@ export interface MemPressureInputs {
   readonly heapLimitMb: number;
   /** `ALUY_MEM_PRESSURE_AT` (env) — override do limiar BASE (`compactAt`). */
   readonly pressureAtEnv?: string | undefined;
+  /**
+   * ADR-0150 (balde b, Tier 2) — `config.advanced.memPressure.compactAt`
+   * (~/.aluy/config.json). Nível ENTRE env e default (env > config > default);
+   * MESMA forma/parse de `pressureAtEnv` (razão `0..1` ou `%` `>1..100`).
+   */
+  readonly pressureAtConfig?: string | number | undefined;
 }
 
 /**
@@ -204,7 +210,12 @@ export function resolveMemPressure(inputs: MemPressureInputs): MemPressureConfig
   const heapLimitBytes = Math.max(0, Math.floor(inputs.heapLimitMb * BYTES_PER_MB));
   if (heapLimitBytes <= 0) return MEM_PRESSURE_OFF;
 
-  const base = parseMemPressureAt(inputs.pressureAtEnv) ?? DEFAULT_COMPACT_AT;
+  // ADR-0150 (balde b, Tier 2) — precedência env > config > default (config "termina
+  // o padrão"; o env já existia e segue vencendo).
+  const base =
+    parseMemPressureAt(inputs.pressureAtEnv) ??
+    parseMemPressureAt(inputs.pressureAtConfig) ??
+    DEFAULT_COMPACT_AT;
   // Mantém os DELTAS dos defaults (warn=+0.08, shutdown=+0.15) ao mover a base, p/ o
   // operador conseguir deslocar o conjunto inteiro com um knob só, preservando a folga.
   const warnDelta = DEFAULT_WARN_AT - DEFAULT_COMPACT_AT;

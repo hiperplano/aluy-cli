@@ -84,8 +84,93 @@ export const DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS = 120_000;
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS;
 /** Var de ambiente que sobrescreve o timeout de inatividade (s ou ms — ver clamp). */
 export const SUBAGENT_IDLE_TIMEOUT_ENV = 'ALUY_SUBAGENT_IDLE_TIMEOUT';
-/** Teto DURO de filhos por chamada de `spawn_agent` (anti exaustão de recursos). */
+/**
+ * DEFAULT de filhos por chamada de `spawn_agent` (anti exaustão de recursos). ADR-0150
+ * (balde b) — deixa de ser o teto-teto DURO (isso agora é `MAX_SUBAGENTS_PER_CALL_CEILING`)
+ * e vira o DEFAULT config-driven (`subagents.maxPerCall`, resolvido por
+ * `resolveMaxSubagentsPerCall`), CLAMPADO ao teto-teto novo. Mantido como export estável
+ * (usado hoje como fonte única do `maxItems`/texto do schema do `spawn_agent` — guia
+ * ESTÁTICO do modelo; a ENFORCEMENT real de runtime usa o valor RESOLVIDO/clampado, ver
+ * `SubAgentSpawner.spawn`).
+ */
 export const MAX_SUBAGENTS_PER_CALL = 8;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0150 (balde b) — `subagents.maxPerCall` e `subagents.maxConcurrency` viram
+// TUNABLES de config (~/.aluy/config.json), com a MESMA disciplina de
+// `resolveMaxTokens` (limits.ts): precedência ENV > CONFIG > DEFAULT, CLAMPADA
+// SEMPRE a um teto-teto NOVO e hardcoded. CLI-SEC-11 segue não-relaxável.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ADR-0150 — TETO-TETO DURO de filhos por chamada de `spawn_agent` (anti-runaway,
+ * exaustão de recursos). Aprovado pelo dono: 32 (4× o default de 8). O config/env
+ * NUNCA escapa deste limite.
+ */
+export const MAX_SUBAGENTS_PER_CALL_CEILING = 32;
+
+/** ADR-0150 — env que sobrepõe o default/config do teto de filhos por chamada. */
+export const SUBAGENTS_MAX_PER_CALL_ENV = 'ALUY_SUBAGENT_MAX_PER_CALL';
+
+/**
+ * ADR-0150 — resolve o TETO EFETIVO de filhos por chamada, precedência
+ * ENV > CONFIG > DEFAULT (`MAX_SUBAGENTS_PER_CALL`), sempre CLAMPADO em
+ * `[1, MAX_SUBAGENTS_PER_CALL_CEILING]`. Puro/determinístico (env/config são dados
+ * injetados pelo `cli`, sem I/O aqui).
+ */
+export function resolveMaxSubagentsPerCall(
+  env?: string | undefined,
+  config?: number | undefined,
+): number {
+  const fromEnv = parsePositiveIntSetting(env);
+  const fromConfig = parsePositiveIntSetting(config);
+  const chosen = fromEnv ?? fromConfig ?? MAX_SUBAGENTS_PER_CALL;
+  return Math.min(MAX_SUBAGENTS_PER_CALL_CEILING, Math.max(1, chosen));
+}
+
+/**
+ * ADR-0150 — TETO-TETO DURO de concorrência do fan-out (anti-runaway, exaustão de
+ * fds/processos/memória). Aprovado pelo dono: 16 (4× o default de 4). O config/env
+ * NUNCA escapa deste limite.
+ */
+export const MAX_SUBAGENT_CONCURRENCY_CEILING = 16;
+
+/** ADR-0150 — env que sobrepõe o default/config da concorrência do fan-out. */
+export const SUBAGENT_MAX_CONCURRENCY_ENV = 'ALUY_SUBAGENT_MAX_CONCURRENCY';
+
+/**
+ * ADR-0150 — resolve a CONCORRÊNCIA EFETIVA do fan-out, precedência
+ * FLAG (opção `maxConcurrency` do spawner) > ENV > CONFIG > DEFAULT
+ * (`DEFAULT_MAX_CONCURRENCY`), sempre CLAMPADA em `[1, MAX_SUBAGENT_CONCURRENCY_CEILING]`.
+ */
+export function resolveMaxConcurrency(
+  flag?: number | undefined,
+  env?: string | undefined,
+  config?: number | undefined,
+): number {
+  const fromFlag = parsePositiveIntSetting(flag);
+  const fromEnv = parsePositiveIntSetting(env);
+  const fromConfig = parsePositiveIntSetting(config);
+  const chosen = fromFlag ?? fromEnv ?? fromConfig ?? DEFAULT_MAX_CONCURRENCY;
+  return Math.min(MAX_SUBAGENT_CONCURRENCY_CEILING, Math.max(1, chosen));
+}
+
+/** Parseia um inteiro positivo (string ou número) — `undefined` se ausente/inválido. */
+function parsePositiveIntSetting(v: string | number | undefined): number | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = typeof v === 'number' ? v : Number(String(v).trim());
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) return undefined;
+  return n;
+}
+
+/**
+ * ADR-0150 — TETO-TETO DURO do timeout de INATIVIDADE por filho (floor/ceiling
+ * sensatos, aprovados pelo dono): entre 5s (nunca tão curto que mate um filho
+ * lento-mas-vivo por acidente) e 30min (nunca tão longo que um filho travado
+ * pendure a sessão quase indefinidamente).
+ */
+export const MIN_SUBAGENT_IDLE_TIMEOUT_MS = 5_000;
+export const MAX_SUBAGENT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * EST-1121 · ADR-0122 §F51 — PADRÕES de articulação de sala declarativos
@@ -288,8 +373,15 @@ export interface SubAgentOutcome {
 
 /** Observador OPCIONAL do ciclo de vida dos filhos (a UI do @hiperplano/aluy-cli pluga). */
 export interface SubAgentObserver {
-  onChildStart?(label: string): void;
-  onChildEnd?(label: string, outcome: SubAgentOutcome): void;
+  /**
+   * ADR-0146 (D5) — `model` é a preferência CRUA do PERFIL deste filho (`profile.model`,
+   * a MESMA string que `childCallerFor` traduz) — NUNCA provider/credencial (HG-2). O
+   * locus concreto a formata (via `resolveModelTier`/`formatResolvedModelLabel`) p/ o
+   * campo de tier exibido no indicador `<SubAgents>`. `undefined` ⇒ sem `model` no
+   * perfil (herda o pai — o formatador resolve o rótulo "herdado (...)").
+   */
+  onChildStart?(label: string, model?: string): void;
+  onChildEnd?(label: string, outcome: SubAgentOutcome, model?: string): void;
 }
 
 /**
@@ -329,6 +421,16 @@ export interface SubAgentSpawnerOptions {
    * DADO de catálogo (o broker valida — 422 se inservível); NUNCA credencial.
    */
   readonly callerForTier?: (tier: string) => ModelCaller;
+  /**
+   * ADR-0146 (D3) — FÁBRICA de caller CUSTOM/BYO por-filho. Quando o `model:` de um
+   * filho resolve em `kind:'custom'` (sentinela `custom`/`custom:<slug>`), o spawner
+   * usa `customCallerFor(slug)` PRA AQUELE FILHO: o locus concreto (@hiperplano/aluy-cli)
+   * constrói um caller que fala pelo MESMO provider BYO do pai (credencial/base_url
+   * NUNCA saem do cliente — CLI-SEC-7), com o slug indicado ou, sem slug, o corrente
+   * do pai. Ausente ⇒ o filho cai no caller do PAI (`parentCaller`/`childModel`) —
+   * fail-safe, nunca eleva. Fecha o gap BYO/Custom do ADR-0146 (D3).
+   */
+  readonly customCallerFor?: (slug?: string) => ModelCaller;
   /** A MESMA engine de permissão do pai (mesmo SessionMode, sempre-ask, hooks). */
   readonly permission: PermissionEngine;
   /** As MESMAS ports confinadas do pai (workspace/path-deny/egress). Escopo ⊆ pai. */
@@ -360,6 +462,36 @@ export interface SubAgentSpawnerOptions {
    * INATIVIDADE (heartbeat). `idleTimeoutMs` tem precedência se ambos vierem.
    */
   readonly timeoutMs?: number;
+  /**
+   * ADR-0150 (balde b) — seção `subagents` de `~/.aluy/config.json`, JÁ LIDA pelo
+   * `cli` (wiring/controller) e injetada aqui (o core NÃO lê arquivo/env — fronteira
+   * ADR-0053 §8). Nível ENTRE a opção acima (`maxConcurrency`/`idleTimeoutMs`,
+   * equivalente a "flag") e o DEFAULT — MESMA precedência de `resolveMaxTokens`
+   * (flag > env > config > default). Cada campo é resolvido/clampado por
+   * `resolveMaxSubagentsPerCall`/`resolveMaxConcurrency`/`resolveIdleTimeoutMs`.
+   */
+  readonly configDefaults?: {
+    /** `subagents.maxPerCall` — clampado em `[1, MAX_SUBAGENTS_PER_CALL_CEILING]`. */
+    readonly maxPerCall?: number;
+    /** `subagents.maxConcurrency` — clampado em `[1, MAX_SUBAGENT_CONCURRENCY_CEILING]`. */
+    readonly maxConcurrency?: number;
+    /** `subagents.idleTimeoutMs` — clampado em `[MIN_SUBAGENT_IDLE_TIMEOUT_MS, MAX_SUBAGENT_IDLE_TIMEOUT_MS]`. */
+    readonly idleTimeoutMs?: number;
+  };
+  /**
+   * CORREÇÃO DE FRONTEIRA (ADR-0053 §8) — env da SESSÃO, JÁ LIDA pelo `cli`
+   * (`session/wiring.ts`, MESMO padrão do `mcpEnv`/`parentEnv` do `mcp/setup.ts`:
+   * `opts.env ?? process.env`) e injetada aqui. O core NUNCA lê `process.env`/
+   * `globalThis.process` por conta própria — antes, este spawner o fazia direto
+   * (`readProcessEnv()`), furando a fronteira portável; agora só CONSOME o que o
+   * `cli` já leu. Chaves relevantes: `SUBAGENTS_MAX_PER_CALL_ENV`
+   * (`ALUY_SUBAGENT_MAX_PER_CALL`), `SUBAGENT_MAX_CONCURRENCY_ENV`
+   * (`ALUY_SUBAGENT_MAX_CONCURRENCY`) e `SUBAGENT_IDLE_TIMEOUT_ENV`
+   * (`ALUY_SUBAGENT_IDLE_TIMEOUT`). Ausente ⇒ nenhuma das três envs entra na
+   * precedência (cai em `configDefaults`/default — nunca no processo por baixo
+   * dos panos, nunca lança).
+   */
+  readonly env?: Record<string, string | undefined>;
   /** Observador da UI (opcional). */
   readonly observer?: SubAgentObserver;
   /**
@@ -581,13 +713,18 @@ class IdleTimer {
  * EST-0969 — resolve o timeout de INATIVIDADE com precedência flag > env > default
  * e CLAMP (positivo, finito, inteiro). A env `ALUY_SUBAGENT_IDLE_TIMEOUT` aceita
  * `"500ms"`/`"90s"`/número puro (interpretado como ms); valor inválido/≤0 ⇒ cai no
- * próximo da cadeia (nunca desarma o anti-deadlock). `env` injetável p/ teste.
+ * próximo da cadeia (nunca desarma o anti-deadlock).
+ *
+ * CORREÇÃO DE FRONTEIRA (ADR-0053 §8) — `env` é DADO injetado pelo `cli` (que já lê
+ * `process.env` no seu lado), NUNCA lido daqui. O default `{}` é PURO (objeto vazio,
+ * sem I/O) — antes lia `globalThis.process.env` diretamente, furando a fronteira
+ * portável do core; agora, sem `env` explícito, este nível simplesmente não
+ * contribui (cai no `config`/default, nunca no processo por baixo dos panos).
  */
 export function resolveIdleTimeoutMs(
   flagMs: number | undefined,
-  env: Record<string, string | undefined> = (
-    globalThis as { process?: { env?: Record<string, string | undefined> } }
-  ).process?.env ?? {},
+  env: Record<string, string | undefined> = {},
+  config?: number | undefined, // ADR-0150 (balde b): config.subagents.idleTimeoutMs
 ): number {
   // 1) flag (opção do spawner) — só se for um positivo finito.
   if (flagMs !== undefined && Number.isFinite(flagMs) && flagMs > 0) {
@@ -596,7 +733,18 @@ export function resolveIdleTimeoutMs(
   // 2) env (s/ms) — parse tolerante.
   const fromEnv = parseDurationMs(env[SUBAGENT_IDLE_TIMEOUT_ENV]);
   if (fromEnv !== undefined) return fromEnv;
-  // 3) default.
+  // 3) ADR-0150 — config (durável entre sessões). Só ESTE nível é CLAMPADO ao
+  // floor/ceiling sensato (`[MIN_SUBAGENT_IDLE_TIMEOUT_MS, MAX_SUBAGENT_IDLE_TIMEOUT_MS]`
+  // = 5s..30min): flag/env acima seguem SEM clamp (back-compat — testes injetam ms
+  // curtos p/ não esperar tempo real; a flag/env são escolha explícita e pontual da
+  // sessão, não um default persistido que precise de guarda-corpo).
+  if (config !== undefined && Number.isFinite(config) && config > 0) {
+    return Math.min(
+      MAX_SUBAGENT_IDLE_TIMEOUT_MS,
+      Math.max(MIN_SUBAGENT_IDLE_TIMEOUT_MS, Math.floor(config)),
+    );
+  }
+  // 4) default.
   return DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS;
 }
 
@@ -639,6 +787,10 @@ export class SubAgentSpawner {
    * Quando o `.md` do filho declara `model:` que resolve num tier, o spawner usa
    * `callerForTier(tier)` PRA AQUELE FILHO; ausente ⇒ todos os filhos usam o do pai. */
   private readonly callerForTier?: (tier: string) => ModelCaller;
+  /** ADR-0146 (D3) — fábrica de caller CUSTOM/BYO por-filho (porta injetada do
+   * @hiperplano/aluy-cli). Quando o `model` do filho resolve em `kind:'custom'`, o
+   * spawner usa `customCallerFor(slug)` PRA AQUELE FILHO; ausente ⇒ cai no caller do pai. */
+  private readonly customCallerFor?: (slug?: string) => ModelCaller;
   private readonly permission: PermissionEngine;
   private readonly ports: ToolPorts;
   private readonly childTools: readonly NativeTool<ToolPorts>[];
@@ -647,6 +799,8 @@ export class SubAgentSpawner {
   private readonly maxConcurrency: number;
   /** EST-0969 — timeout de INATIVIDADE por filho (não de relógio total). */
   private readonly idleTimeoutMs: number;
+  /** ADR-0150 (balde b) — teto EFETIVO/resolvido de filhos por chamada (`spawn()` o lê). */
+  private readonly maxSubagentsPerCall: number;
   private readonly observer?: SubAgentObserver;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** EST-0982 — sinal de parada POR FILHO (nó da FlowTree), resolvido pelo rótulo. */
@@ -670,6 +824,7 @@ export class SubAgentSpawner {
     // EST-SUBAGENT-MODEL — fábrica POR TIER (porta). Ausente ⇒ todos os filhos usam o
     // caller do pai (`this.model`) — comportamento de hoje (back-compat).
     if (opts.callerForTier) this.callerForTier = opts.callerForTier;
+    if (opts.customCallerFor) this.customCallerFor = opts.customCallerFor;
     this.permission = opts.permission;
     this.ports = opts.ports;
     // E-A1: o toolset do FILHO é o do pai SEM `spawn_agent` (filhos não delegam) e
@@ -681,10 +836,36 @@ export class SubAgentSpawner {
     );
     if (opts.askResolver) this.askResolver = opts.askResolver;
     this.budget = opts.sharedBudget ?? new SharedBudget(opts.limits ?? DEFAULT_LIMITS);
-    this.maxConcurrency = clampPositive(opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY);
+    // ADR-0150 (balde b) — precedência opção(flag) > env > config > default, clampada
+    // ao teto-teto NOVO (`MAX_SUBAGENT_CONCURRENCY_CEILING`). Substitui o antigo
+    // `clampPositive(opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY)` (sem env/config nem
+    // teto-teto — só clampava ao PISO ≥1).
+    // CORREÇÃO DE FRONTEIRA (ADR-0053 §8) — o env vem de `opts.env` (já lido pelo
+    // `cli`, ver doc de `SubAgentSpawnerOptions.env`); este spawner NUNCA lê
+    // `process.env` diretamente (antes lia via `readProcessEnv()` — removido).
+    this.maxConcurrency = resolveMaxConcurrency(
+      opts.maxConcurrency,
+      opts.env?.[SUBAGENT_MAX_CONCURRENCY_ENV],
+      opts.configDefaults?.maxConcurrency,
+    );
+    // ADR-0150 (balde b) — teto de filhos por chamada: precedência env > config >
+    // default (`MAX_SUBAGENTS_PER_CALL`), clampada ao teto-teto NOVO
+    // (`MAX_SUBAGENTS_PER_CALL_CEILING`). `spawn()` usa ESTE valor resolvido (não o
+    // módulo-constante `MAX_SUBAGENTS_PER_CALL`, que segue só como DEFAULT/guia estático
+    // do schema do `spawn_agent`, EST-0970).
+    this.maxSubagentsPerCall = resolveMaxSubagentsPerCall(
+      opts.env?.[SUBAGENTS_MAX_PER_CALL_ENV],
+      opts.configDefaults?.maxPerCall,
+    );
     // EST-0969 — precedência flag > env > default. `idleTimeoutMs` tem precedência
     // sobre o alias deprecado `timeoutMs` (ambos AGORA são INATIVIDADE, não total).
-    this.idleTimeoutMs = resolveIdleTimeoutMs(opts.idleTimeoutMs ?? opts.timeoutMs);
+    // ADR-0150 (balde b) — `configDefaults.idleTimeoutMs` entra como o nível ENTRE env e
+    // default, clampado em `[MIN_SUBAGENT_IDLE_TIMEOUT_MS, MAX_SUBAGENT_IDLE_TIMEOUT_MS]`.
+    this.idleTimeoutMs = resolveIdleTimeoutMs(
+      opts.idleTimeoutMs ?? opts.timeoutMs,
+      opts.env,
+      opts.configDefaults?.idleTimeoutMs,
+    );
     if (opts.observer) this.observer = opts.observer;
     this.sleep = opts.sleep ?? defaultSleep;
     if (opts.childSignalOf) this.childSignalOf = opts.childSignalOf;
@@ -703,8 +884,10 @@ export class SubAgentSpawner {
   /**
    * Dispara os sub-agentes em PARALELO (respeitando o teto de concorrência) e
    * devolve os desfechos na ORDEM dos perfis. `signal` propaga o cancelamento do
-   * pai (Ctrl-C) a todos os filhos. Filhos > `MAX_SUBAGENTS_PER_CALL` são
-   * recusados (anti-runaway) ANTES de qualquer execução.
+   * pai (Ctrl-C) a todos os filhos. Filhos > o teto RESOLVIDO (ADR-0150 —
+   * `resolveMaxSubagentsPerCall`, config-driven e clampado a
+   * `MAX_SUBAGENTS_PER_CALL_CEILING`) são recusados (anti-runaway) ANTES de
+   * qualquer execução.
    */
   async spawn(
     profiles: readonly SubAgentProfile[],
@@ -712,9 +895,9 @@ export class SubAgentSpawner {
     opts?: { room?: boolean; pattern?: string },
   ): Promise<readonly SubAgentOutcome[]> {
     if (profiles.length === 0) return [];
-    if (profiles.length > MAX_SUBAGENTS_PER_CALL) {
+    if (profiles.length > this.maxSubagentsPerCall) {
       throw new Error(
-        `spawn_agent: ${profiles.length} sub-agentes excede o teto de ${MAX_SUBAGENTS_PER_CALL} por chamada (anti-runaway)`,
+        `spawn_agent: ${profiles.length} sub-agentes excede o teto de ${this.maxSubagentsPerCall} por chamada (anti-runaway)`,
       );
     }
 
@@ -748,7 +931,7 @@ export class SubAgentSpawner {
         next += 1;
         if (i >= profiles.length) return;
         const profile = profiles[i]!;
-        this.observer?.onChildStart?.(profile.label);
+        this.observer?.onChildStart?.(profile.label, profile.model);
         const outcome = await this.runChild(
           profile,
           signal,
@@ -760,7 +943,7 @@ export class SubAgentSpawner {
           roomCode,
         );
         outcomes[i] = outcome;
-        this.observer?.onChildEnd?.(profile.label, outcome);
+        this.observer?.onChildEnd?.(profile.label, outcome, profile.model);
       }
     };
 
@@ -805,7 +988,12 @@ export class SubAgentSpawner {
     // verdade, ADR-0073). Sem model-no-`.md` (ou sem fábrica/sem cara de tier) ⇒ o filho
     // usa o caller do PAI (`this.model`) — back-compat. A SEGURANÇA não muda: mesma
     // rota de broker (CLI-SEC-7), só varia a pista de tier (HG-2).
-    const childCaller = childCallerFor(profile, this.model, this.callerForTier);
+    const childCaller = childCallerFor(
+      profile,
+      this.model,
+      this.callerForTier,
+      this.customCallerFor,
+    );
 
     // E-A3/CLI-SEC-9: o ask do filho carimba a ORIGEM. Filhos paralelos ⇒ rótulos
     // distintos ⇒ confirmações distintas.
@@ -1008,11 +1196,6 @@ export class SubAgentSpawner {
   }
 }
 
-function clampPositive(v: number | undefined, def: number): number {
-  if (v === undefined || !Number.isFinite(v) || v <= 0) return def;
-  return Math.floor(v);
-}
-
 /**
  * EST-0977/0978 — combina o SYSTEM PROMPT do agente nomeado (persona) com o CONTEXTO
  * recortado pelo pai num único bloco de instrução `system` do filho. Persona 1º
@@ -1032,27 +1215,49 @@ function personaAndContext(profile: SubAgentProfile): string | undefined {
 }
 
 /**
- * EST-SUBAGENT-MODEL · ADR-0073 · CLI-SEC-7 — ESCOLHE o `ModelCaller` de UM filho
- * (PURO/testável — o juízo "qual tier por filho" mora aqui, num ponto só):
+ * EST-SUBAGENT-MODEL · ADR-0073 · ADR-0146 (D3) · CLI-SEC-7 — ESCOLHE o `ModelCaller`
+ * de UM filho (PURO/testável — o juízo "qual caller por filho" mora aqui, num ponto
+ * só). `resolveModelTier(profile.model)` classifica a preferência CRUA numa
+ * `ModelTierResolution` tipada; o roteamento casa sobre o `kind`:
  *
- *  - se o `.md` do filho declara `model:` (`profile.model`) que `resolveModelTier`
- *    traduz numa CHAVE DE TIER **e** a fábrica `callerForTier` está disponível ⇒
- *    devolve `callerForTier(tier)` — o filho fala AQUELE tier ao broker (o broker
- *    resolve provider/credencial/quota; valida — 422 se inservível, degrade honesto);
- *  - caso contrário (sem `model`, model sem cara de tier = provider cru, OU sem a
- *    fábrica) ⇒ devolve `parentCaller` (o caller do PAI) — BACK-COMPAT: é o
- *    comportamento de hoje (todos os filhos no caller do pai).
+ *  - `kind:'tier'` (sinônimo/`aluy-*` conhecido ou não) **e** a fábrica
+ *    `callerForTier` disponível ⇒ `callerForTier(key)` — o filho fala AQUELE tier
+ *    hospedado ao broker (que resolve provider/credencial/quota e valida — 422 se
+ *    inservível, degrade honesto). Sem a fábrica ⇒ `parentCaller` (back-compat).
+ *  - `kind:'custom'` (`custom`/`custom:<slug>` — D3, fecha o gap BYO) **e** a fábrica
+ *    `customCallerFor` disponível ⇒ `customCallerFor(slug)` — o filho fala pelo
+ *    provider BYO do PAI (credencial/base_url NUNCA saem do cliente), com o slug
+ *    indicado ou, sem slug, o corrente do pai (a fábrica decide). Sem a fábrica ⇒
+ *    `parentCaller` (fail-safe — nunca crasha, nunca eleva).
+ *  - `kind:'inherit'` (ausência de `model`, OU o sentinela explícito
+ *    `same-as-parent`/`parent`/`inherit`) ⇒ `parentCaller` — é literalmente o
+ *    caminho A já existente (o `parentCaller` já segue o pai AO VIVO via
+ *    `tierSource`, incl. sob `tier:'custom'` — HG-2 intocado).
+ *  - `kind:'unknown'` (string sem cara de tier/sentinela — candidato a ERRO do probe
+ *    D2, que roda ANTES do fan-out) ⇒ `parentCaller` — REDE de segurança (defesa em
+ *    profundidade): o probe já devia ter barrado este filho ANTES de chegar aqui;
+ *    se por algum caminho chegou, o fallback é o MESMO de sempre (nunca um tier
+ *    elevado por engano — GS-SAM6).
  *
- * O tier vem do PERFIL EM DISCO (capacidade declarada, HG-2), não de input do modelo
- * não-confiável. NÃO toca catraca/escopo/budget — só roteia a PISTA de tier (CLI-SEC-7).
+ * O `model` vem do PERFIL EM DISCO/spawn (capacidade declarada, HG-2), não de input
+ * do modelo não-confiável interpretado aqui. NÃO toca catraca/escopo/budget — só
+ * roteia a PISTA de tier (CLI-SEC-7).
  */
 export function childCallerFor(
   profile: SubAgentProfile,
   parentCaller: ModelCaller,
   callerForTier?: (tier: string) => ModelCaller,
+  customCallerFor?: (slug?: string) => ModelCaller,
 ): ModelCaller {
-  if (callerForTier === undefined) return parentCaller;
-  const tier = resolveModelTier(profile.model);
-  if (tier === undefined) return parentCaller;
-  return callerForTier(tier);
+  const resolution = resolveModelTier(profile.model);
+  switch (resolution.kind) {
+    case 'tier':
+      return callerForTier ? callerForTier(resolution.key) : parentCaller;
+    case 'custom':
+      return customCallerFor ? customCallerFor(resolution.slug) : parentCaller;
+    case 'inherit':
+    case 'unknown':
+    default:
+      return parentCaller;
+  }
 }

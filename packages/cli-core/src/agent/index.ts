@@ -144,6 +144,7 @@ export {
   type ContinuationState,
   type ContinuationVerdict,
   type PlanBoxLike,
+  type ContinuationConfigDefaults,
 } from './continuation.js';
 
 export {
@@ -180,6 +181,7 @@ export {
   type DegenerationConfig,
   type DegenerationKind,
   type DegenerationSink,
+  type DegenerationConfigDefaults,
 } from './degeneration.js';
 // EST-1010 (BUG-0020) — TETO de BYTES por turno de stream (anti-OOM client-side).
 // COMPLEMENTA a guarda de degeneração: aquela pega o LOOP repetitivo; este pega o
@@ -235,6 +237,15 @@ export {
   DEFAULT_SUBAGENT_TIMEOUT_MS,
   SUBAGENT_IDLE_TIMEOUT_ENV,
   MAX_SUBAGENTS_PER_CALL,
+  // ADR-0150 (balde b) — tunables config-driven do fan-out de sub-agentes.
+  MAX_SUBAGENTS_PER_CALL_CEILING,
+  SUBAGENTS_MAX_PER_CALL_ENV,
+  resolveMaxSubagentsPerCall,
+  MAX_SUBAGENT_CONCURRENCY_CEILING,
+  SUBAGENT_MAX_CONCURRENCY_ENV,
+  resolveMaxConcurrency,
+  MIN_SUBAGENT_IDLE_TIMEOUT_MS,
+  MAX_SUBAGENT_IDLE_TIMEOUT_MS,
   ROOM_ART_PATTERN_DEFAULT,
   DEBATE_ROUND_CAP_ABSOLUTE,
   DEBATE_ROUND_CAP_DEFAULT,
@@ -324,7 +335,17 @@ export {
   type AgentsListNote,
   type AgentsListInput,
 } from './agents-list.js';
-export { resolveModelTier, ALUY_TIER_KEYS, type AluyTierKey } from './agent-model-tier.js';
+export {
+  resolveModelTier,
+  ALUY_TIER_KEYS,
+  knownModelNames,
+  suggestModelName,
+  formatUnknownModelError,
+  isCostlierTier,
+  formatResolvedModelLabel,
+  type AluyTierKey,
+  type ModelTierResolution,
+} from './agent-model-tier.js';
 // EST-1112 · ADR-0116 (proposto) — SKILLS definidas em `SKILL.md` (capacidade invocável
 // empacotada num diretório). Parser PURO do manifesto (frontmatter name/description +
 // corpo = instruções; FALHA FECHADA RES-MD-3) + o FORMATADOR PURO que lista as skills
@@ -458,6 +479,7 @@ export {
   type CycleCeilings,
   type CycleRequest,
   type CycleRhythm,
+  type CycleConfigDefaults,
   type ParsedCycleInput,
   type AbortableSleep,
   // ADR-0137 (Fatia 3) — política PURA de continuação de subciclo guiada pelo juiz.

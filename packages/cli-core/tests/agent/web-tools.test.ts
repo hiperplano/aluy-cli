@@ -376,4 +376,15 @@ describe('resolveMaxObservationChars (flag/env > default, CLAMPADO — anti-OOM 
   it('CLAMP: valor absurdo (typo) ⇒ TETO-TETO (nunca um blob ilimitado)', () => {
     expect(resolveMaxObservationChars('999999999')).toBe(MAX_OBSERVATION_CHARS_CEILING);
   });
+
+  // ADR-0150 (Tier 2) — config.advanced.webFetch.maxObservationChars (2º arg).
+  it('ADR-0150 — config (2º arg) vence o default, MAS o flag/env (1º arg) vence o config', () => {
+    expect(resolveMaxObservationChars(undefined, 30_000)).toBe(30_000);
+    expect(resolveMaxObservationChars('20000', 30_000)).toBe(20_000);
+  });
+
+  it('ADR-0150 — config CLAMPADO ao MESMO teto-teto (nenhum teto novo)', () => {
+    expect(resolveMaxObservationChars(undefined, 999_999_999)).toBe(MAX_OBSERVATION_CHARS_CEILING);
+    expect(resolveMaxObservationChars(undefined, -5)).toBe(DEFAULT_MAX_OBSERVATION_CHARS);
+  });
 });

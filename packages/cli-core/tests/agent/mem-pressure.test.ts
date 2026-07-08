@@ -118,6 +118,25 @@ describe('resolveMemPressure — limiares escalonados (compactar<avisar<encerrar
     expect(c.shutdownAt).toBeLessThanOrEqual(0.99);
   });
 
+  // ADR-0150 (Tier 2) — config.advanced.memPressure.compactAt (nível ENTRE env e default).
+  it('ADR-0150 — config vence o default', () => {
+    expect(resolveMemPressure({ heapLimitMb: 4096, pressureAtConfig: 0.7 }).compactAt).toBeCloseTo(
+      0.7,
+      5,
+    );
+    expect(resolveMemPressure({ heapLimitMb: 4096, pressureAtConfig: '75' }).compactAt).toBeCloseTo(
+      0.75,
+      5,
+    );
+  });
+
+  it('ADR-0150 — env AINDA vence o config', () => {
+    expect(
+      resolveMemPressure({ heapLimitMb: 4096, pressureAtEnv: '0.6', pressureAtConfig: 0.9 })
+        .compactAt,
+    ).toBeCloseTo(0.6, 5);
+  });
+
   it('env inválido ⇒ cai no default da base', () => {
     expect(resolveMemPressure({ heapLimitMb: 4096, pressureAtEnv: 'xyz' }).compactAt).toBeCloseTo(
       DEFAULT_COMPACT_AT,

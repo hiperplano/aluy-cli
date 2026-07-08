@@ -25,6 +25,7 @@ export {
   type CycleCeilings,
   type CycleRequest,
   type CycleRhythm,
+  type CycleConfigDefaults,
 } from './cycle-limits.js';
 export {
   CycleEngine,

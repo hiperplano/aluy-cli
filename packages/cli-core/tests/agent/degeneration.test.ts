@@ -166,6 +166,21 @@ describe('EST-0969 · configurável (ALUY_*) + toggle', () => {
     ).toBe(DEFAULT_MAX_CONSECUTIVE_LINE_REPEATS);
   });
 
+  // ADR-0150 (Tier 2) — configDefaults (3º arg), nível ENTRE env e default. Ainda
+  // NÃO wired a um call-site em produção (ver ADR-0150) — cobertura do resolver puro.
+  it('ADR-0150 — configDefaults vence o default; env AINDA vence o configDefaults', () => {
+    expect(
+      resolveDegenerationConfig({}, { maxConsecutiveLineRepeats: 12 }).maxConsecutiveLineRepeats,
+    ).toBe(12);
+    expect(
+      resolveDegenerationConfig(
+        { [DEGENERATION_MAX_LINE_REPEATS_ENV]: '10' },
+        { maxConsecutiveLineRepeats: 12 },
+      ).maxConsecutiveLineRepeats,
+    ).toBe(10);
+    expect(resolveDegenerationConfig({}, { minCycleSpanChars: 500 }).minCycleSpanChars).toBe(500);
+  });
+
   it('limiar configurado MENOR dispara mais cedo', () => {
     const d = new DegenerationDetector({
       ...DEFAULT_DEGENERATION_CONFIG,

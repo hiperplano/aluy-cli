@@ -123,6 +123,16 @@ export interface SelfCheckInputs {
   readonly everyKEnv?: string | undefined;
   /** `ALUY_SELF_CHECK_MAX` (env) — override do cap de verificações. */
   readonly maxVerificationsEnv?: string | undefined;
+  /**
+   * ADR-0150 (balde b, Tier 2) — `config.advanced.selfCheck.everyK` (~/.aluy/config.json).
+   * Nível ENTRE env e default (env > config > default); MESMO clamp de `everyKEnv`.
+   */
+  readonly everyKConfig?: number | undefined;
+  /**
+   * ADR-0150 (balde b, Tier 2) — `config.advanced.selfCheck.maxVerifications`. Nível
+   * ENTRE env e default (env > config > default); MESMO clamp de `maxVerificationsEnv`.
+   */
+  readonly maxVerificationsConfig?: number | undefined;
 }
 
 /**
@@ -147,11 +157,19 @@ export function resolveSelfCheck(inputs: SelfCheckInputs): SelfCheckConfig {
   if (!enabled) return SELF_CHECK_OFF;
   return {
     enabled: true,
+    // ADR-0150 (balde b, Tier 2) — precedência env > config > default (config é o
+    // nível NOVO, "termina o padrão"; o env já existia e segue vencendo).
     reanchorEveryK:
       parseIntClamped(inputs.everyKEnv, MIN_REANCHOR_EVERY_K, MAX_REANCHOR_EVERY_K) ??
+      parseIntClamped(inputs.everyKConfig, MIN_REANCHOR_EVERY_K, MAX_REANCHOR_EVERY_K) ??
       DEFAULT_REANCHOR_EVERY_K,
     maxVerifications:
       parseIntClamped(inputs.maxVerificationsEnv, MIN_MAX_VERIFICATIONS, MAX_MAX_VERIFICATIONS) ??
+      parseIntClamped(
+        inputs.maxVerificationsConfig,
+        MIN_MAX_VERIFICATIONS,
+        MAX_MAX_VERIFICATIONS,
+      ) ??
       DEFAULT_MAX_VERIFICATIONS,
   };
 }

@@ -32,7 +32,7 @@ describe('sidecar-urls — URLs env-configuráveis', () => {
   });
 });
 
-describe('sidecar-urls — config único services (ADR-0136 §8): precedência URL>HOST/PORT>services>default', () => {
+describe('sidecar-urls — config único services (ADR-0150 §8): precedência URL>HOST/PORT>services>default', () => {
   it('services.ollama.port/host monta a URL quando não há env', () => {
     expect(resolveOllamaUrl({}, { ollama: { port: 11500 } })).toBe('http://127.0.0.1:11500');
     expect(resolveOllamaUrl({}, { ollama: { host: 'localhost', port: 11500 } })).toBe(
@@ -82,7 +82,9 @@ describe('resolveHeadroomUrl — ativação CONFIG-DRIVEN (não mais env-only)',
   });
 
   it('turbo + toggle headroom=false ⇒ DESLIGADO (undefined)', () => {
-    expect(resolveHeadroomUrl({ env: {}, profile: 'turbo', headroomToggle: false })).toBeUndefined();
+    expect(
+      resolveHeadroomUrl({ env: {}, profile: 'turbo', headroomToggle: false }),
+    ).toBeUndefined();
   });
 
   it('perfil leve ⇒ desligado (a menos que services/env)', () => {

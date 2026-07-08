@@ -154,8 +154,53 @@ export interface SessionStoreOptions {
   readonly now?: () => number;
 }
 
-const DEFAULT_GC_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
-const DEFAULT_GC_MAX_COUNT = 50;
+/** ADR-0150 (balde b) — DEFAULT de idade de GC (30 dias), exportado p/ `aluy config`. */
+export const DEFAULT_GC_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
+/** ADR-0150 (balde b) — DEFAULT de contagem de GC (50), exportado p/ `aluy config`. */
+export const DEFAULT_GC_MAX_COUNT = 50;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0150 (balde b) — `session.gcMaxAgeMs`/`gcMaxCount` viram TUNABLES de config
+// (~/.aluy/config.json). Diferente dos anti-runaway (Tier 1 de custo/segurança),
+// isto é RETENÇÃO/privacidade — ainda ganha uma sanidade MÍNIMA (não é teto-teto
+// anti-runaway, mas evita um config absurdo: idade 0 apagaria tudo a cada boot,
+// contagem 0 idem).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** ADR-0150 — sanidade MÍNIMA: nunca aceita idade de GC abaixo de 1 dia. */
+export const MIN_GC_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1 dia
+
+/** ADR-0150 — sanidade MÍNIMA: nunca aceita manter menos de 1 sessão. */
+export const MIN_GC_MAX_COUNT = 1;
+
+/**
+ * ADR-0150 — resolve as `SessionGcOptions` a partir da seção `session` do config
+ * (`gcMaxAgeMs`/`gcMaxCount`), aplicando a sanidade MÍNIMA acima. Ausente/inválido ⇒
+ * `{}` (o `gc()` cai nos próprios defaults, `DEFAULT_GC_MAX_AGE_MS`/`DEFAULT_GC_MAX_COUNT`).
+ * PURO — sem I/O.
+ */
+export function resolveSessionGcOptions(config?: {
+  readonly gcMaxAgeMs?: number;
+  readonly gcMaxCount?: number;
+}): SessionGcOptions {
+  const out: { maxAgeMs?: number; maxCount?: number } = {};
+  if (
+    config?.gcMaxAgeMs !== undefined &&
+    Number.isFinite(config.gcMaxAgeMs) &&
+    config.gcMaxAgeMs > 0
+  ) {
+    out.maxAgeMs = Math.max(MIN_GC_MAX_AGE_MS, Math.floor(config.gcMaxAgeMs));
+  }
+  if (
+    config?.gcMaxCount !== undefined &&
+    Number.isFinite(config.gcMaxCount) &&
+    config.gcMaxCount > 0
+  ) {
+    out.maxCount = Math.max(MIN_GC_MAX_COUNT, Math.floor(config.gcMaxCount));
+  }
+  return out;
+}
+
 /**
  * Teto-ALVO do record (escrita cabe abaixo dele; leitura íntegra abaixo dele). Um
  * record ATÉ aqui é lido inteiro como antes. ACIMA dele (legado pré-EST-1011, arquivo

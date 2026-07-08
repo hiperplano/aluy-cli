@@ -118,12 +118,12 @@ export const DEFAULT_LIMITS: SessionLimits = {
 export function resolveMaxTokens(
   flag?: string | number | undefined,
   env?: string | undefined,
-  config?: string | number | undefined, // ADR-0136 balde(a): config.limits.maxTokens
+  config?: string | number | undefined, // ADR-0150 balde(a): config.limits.maxTokens
 ): number {
   const fromFlag = parseTokenSetting(flag);
   const fromEnv = parseTokenSetting(env);
   const fromConfig = parseTokenSetting(config);
-  // Precedência ADR-0136: flag > env > config > default. Clamp anti-runaway sempre.
+  // Precedência ADR-0150: flag > env > config > default. Clamp anti-runaway sempre.
   const chosen = fromFlag ?? fromEnv ?? fromConfig ?? DEFAULT_MAX_TOKENS;
   return Math.min(MAX_TOKENS_CEILING, Math.max(MIN_TOKENS_FLOOR, chosen));
 }
@@ -158,12 +158,12 @@ function parseTokenSetting(v: string | number | undefined): number | undefined {
 export function resolveMaxIterations(
   flag?: string | number | undefined,
   env?: string | undefined,
-  config?: string | number | undefined, // ADR-0136 balde(a): config.limits.maxIterations
+  config?: string | number | undefined, // ADR-0150 balde(a): config.limits.maxIterations
 ): number {
   const fromFlag = parseIterationSetting(flag);
   const fromEnv = parseIterationSetting(env);
   const fromConfig = parseIterationSetting(config);
-  // Precedência ADR-0136: flag > env > config > default. Clamp anti-runaway sempre.
+  // Precedência ADR-0150: flag > env > config > default. Clamp anti-runaway sempre.
   const chosen = fromFlag ?? fromEnv ?? fromConfig ?? DEFAULT_MAX_ITERATIONS;
   return Math.min(MAX_ITERATIONS_CEILING, Math.max(MIN_ITERATIONS_FLOOR, chosen));
 }
@@ -234,7 +234,7 @@ export const MIN_OUTPUT_TOKENS_FLOOR = 1;
 export function resolveMaxOutputTokens(
   flag?: string | number | undefined,
   env?: string | undefined,
-  config?: string | number | undefined, // ADR-0136 balde(a): config.limits.maxOutputTokens
+  config?: string | number | undefined, // ADR-0150 balde(a): config.limits.maxOutputTokens
   onWarn?: (msg: string) => void,
 ): number | undefined {
   // Mesma disciplina de `resolveMaxTokens`/`resolveMaxIterations`: flag inválida ⇒
@@ -304,6 +304,61 @@ export function budgetPct(tokens: number, maxTokens: number | undefined): number
  * é anti-runaway ⇒ NÃO-relaxável por `--unsafe`. Conservador por construção.
  */
 export const DEFAULT_MAX_MEMORY_WRITES_PER_SESSION = 20;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0150 (balde b) — `limits.maxMemoryWritesPerSession` vira TUNABLE de config
+// (~/.aluy/config.json), espelhando EXATAMENTE a disciplina de `resolveMaxTokens`/
+// `resolveMaxIterations` acima: precedência flag > env > config > default, CLAMPADA
+// SEMPRE a um teto-teto NOVO e hardcoded (`MAX_MEMORY_WRITES_PER_SESSION_CEILING`).
+// CLI-SEC-15 (GS-M2/RES-M-2) segue não-relaxável por `--unsafe`: subir o config só
+// move o DEFAULT dentro do teto, nunca o teto em si.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ADR-0150 — TETO-TETO DURO (clamp anti-runaway) do teto de gravações de memória
+ * por sessão. Aprovado pelo dono: 100 (5× o default de 20). Subir o config/env não
+ * escapa deste limite — a memória não pode crescer sem fim mesmo com config adulterado.
+ */
+export const MAX_MEMORY_WRITES_PER_SESSION_CEILING = 100;
+
+/** ADR-0150 — piso mínimo sensato (nunca desliga o teto: ao menos 1 gravação). */
+export const MIN_MEMORY_WRITES_PER_SESSION_FLOOR = 1;
+
+/** ADR-0150 — env que sobrepõe o default/config (nível ENTRE config e default). */
+export const MAX_MEMORY_WRITES_PER_SESSION_ENV = 'ALUY_MAX_MEMORY_WRITES_PER_SESSION';
+
+/**
+ * ADR-0150 — resolve o TETO EFETIVO de gravações de memória por sessão, com
+ * precedência FLAG > ENV > CONFIG > DEFAULT, sempre CLAMPADO em
+ * `[MIN_MEMORY_WRITES_PER_SESSION_FLOOR, MAX_MEMORY_WRITES_PER_SESSION_CEILING]`.
+ * Espelha `resolveMaxTokens`/`resolveMaxIterations`: determinístico, sem I/O (env/
+ * config são dados injetados pelo `cli`), entrada inválida ⇒ ignorada (cai no
+ * próximo nível da precedência).
+ */
+export function resolveMaxMemoryWritesPerSession(
+  flag?: string | number | undefined,
+  env?: string | undefined,
+  config?: string | number | undefined, // ADR-0150: config.limits.maxMemoryWritesPerSession
+): number {
+  const fromFlag = parseMemoryWritesSetting(flag);
+  const fromEnv = parseMemoryWritesSetting(env);
+  const fromConfig = parseMemoryWritesSetting(config);
+  const chosen = fromFlag ?? fromEnv ?? fromConfig ?? DEFAULT_MAX_MEMORY_WRITES_PER_SESSION;
+  return Math.min(
+    MAX_MEMORY_WRITES_PER_SESSION_CEILING,
+    Math.max(MIN_MEMORY_WRITES_PER_SESSION_FLOOR, chosen),
+  );
+}
+
+/** Parseia um valor de teto de gravações (string da flag/env/config ou número). */
+function parseMemoryWritesSetting(v: string | number | undefined): number | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = typeof v === 'number' ? v : Number(String(v).trim());
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < MIN_MEMORY_WRITES_PER_SESSION_FLOOR) {
+    return undefined;
+  }
+  return n;
+}
 
 /** Qual teto disparou (p/ a mensagem de parada e a auditoria). */
 export type LimitKind = 'iterations' | 'tool_calls' | 'tokens';

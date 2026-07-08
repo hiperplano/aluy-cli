@@ -158,7 +158,7 @@ describe('resolveContextWindow (F64 — janela via ALUY_CONTEXT_WINDOW p/ custom
     expect(resolveContextWindow('custom', { [CONTEXT_WINDOW_ENV]: '-5' })).toBe(0);
   });
 
-  it('ADR-0136: custom usa config.context.window quando não há env (env vence config)', () => {
+  it('ADR-0150: custom usa config.context.window quando não há env (env vence config)', () => {
     expect(resolveContextWindow('custom', {}, undefined, 256000)).toBe(256_000); // só config
     // env vence config
     expect(

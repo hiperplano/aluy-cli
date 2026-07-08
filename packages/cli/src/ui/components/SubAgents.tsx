@@ -22,6 +22,12 @@ export interface SubAgentChildView {
   readonly status: 'running' | 'done' | 'fail' | 'cancelled';
   readonly summary?: string;
   readonly stop?: 'final' | 'limit' | 'timeout' | 'error' | 'cancelled';
+  /**
+   * ADR-0146 (D5) — NOME do tier/modelo RESOLVIDO deste filho (`aluy-strata`,
+   * `custom · <slug>`, `herdado (...)`). NUNCA provider/base_url/credencial
+   * (HG-2/CLI-SEC-7) — mesmo filtro da status bar do pai.
+   */
+  readonly model?: string;
 }
 
 export interface SubAgentsProps {
@@ -72,6 +78,9 @@ function ChildLine(props: { readonly child: SubAgentChildView }): React.ReactEle
       {glyph}
       <Text> </Text>
       <Role name={wordRole}>{word}</Role>
+      {/* ADR-0146 (D5) — tier/modelo RESOLVIDO: visível enquanto roda E mantido no
+          resumo final (mesma linha, ao lado do status/summary). NUNCA credencial. */}
+      {c.model !== undefined && <Role name="fgDim"> · {c.model}</Role>}
       {c.summary !== undefined && c.status !== 'running' && (
         <Role name="fgDim"> · {c.summary}</Role>
       )}

@@ -73,3 +73,57 @@ describe('SubAgents — indicador compacto, status por filho (a11y)', () => {
     expect(plain(lastFrame() ?? '')).toMatch(/1 sub-agente:/);
   });
 });
+
+// ADR-0146 (D5) — o rótulo de tier/modelo RESOLVIDO aparece na linha do filho,
+// visível ENQUANTO `status==='running'` e MANTIDO no resumo final. NUNCA
+// provider/base_url/credencial — só a chave de tier/slug (mesmo filtro da status
+// bar do pai).
+describe('SubAgents — rótulo de tier/modelo resolvido (ADR-0146 D5)', () => {
+  it('running: mostra o tier ao lado do status (antes do resumo, que ainda não existe)', () => {
+    const running: readonly SubAgentChildView[] = [
+      { label: 'rust', status: 'running', model: 'aluy-strata' },
+    ];
+    const out = plain(wrap(<SubAgents childrenStatus={running} />, UTF8).lastFrame() ?? '');
+    expect(out).toContain('[rust]');
+    expect(out).toContain('rodando');
+    expect(out).toContain('aluy-strata');
+  });
+
+  it('done: o rótulo do tier fica MANTIDO junto do resumo final', () => {
+    const done: readonly SubAgentChildView[] = [
+      {
+        label: 'go',
+        status: 'done',
+        model: 'custom · meta-llama/llama-3.3-70b',
+        summary: '1.2k tokens · 3 tools',
+        stop: 'final',
+      },
+    ];
+    const out = plain(wrap(<SubAgents childrenStatus={done} />, UTF8).lastFrame() ?? '');
+    expect(out).toContain('custom · meta-llama/llama-3.3-70b');
+    expect(out).toContain('1.2k tokens · 3 tools');
+  });
+
+  it('herança: mostra "herdado (...)" quando o filho não declarou model próprio', () => {
+    const inherited: readonly SubAgentChildView[] = [
+      { label: 'zig', status: 'running', model: 'herdado (aluy-flux)' },
+    ];
+    const out = plain(wrap(<SubAgents childrenStatus={inherited} />, UTF8).lastFrame() ?? '');
+    expect(out).toContain('herdado (aluy-flux)');
+  });
+
+  it('GS-SAM4 — NUNCA renderiza provider/base_url/api_key/token/secret, mesmo se o rótulo os carregasse por engano', () => {
+    const suspicious: readonly SubAgentChildView[] = [
+      { label: 'x', status: 'running', model: 'aluy-strata' },
+    ];
+    const out = plain(wrap(<SubAgents childrenStatus={suspicious} />, UTF8).lastFrame() ?? '');
+    expect(out).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
+  });
+
+  it('AUSENTE (model undefined) ⇒ a linha renderiza normalmente, sem o sufixo de tier', () => {
+    const noModel: readonly SubAgentChildView[] = [{ label: 'rust', status: 'running' }];
+    const out = plain(wrap(<SubAgents childrenStatus={noModel} />, UTF8).lastFrame() ?? '');
+    expect(out).toContain('[rust]');
+    expect(out).toContain('rodando');
+  });
+});
