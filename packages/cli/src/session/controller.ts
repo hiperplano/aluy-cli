@@ -198,6 +198,12 @@ type BangStatus = BangBlock['status'];
 import type { TuiAskResolver, PendingAskEntry } from '../ask/ask-resolver.js';
 import type { TuiQuestionResolver, PendingQuestionEntry } from '../ask/question-resolver.js';
 import type { AskResolver, QuestionAnswer, QuestionSpec } from '@hiperplano/aluy-cli-core';
+// ADR-0147 — tipos das dependências OPCIONAIS da `SessionCommandPort` (ver os campos
+// `agentMemory`/`commandWorkspace`/`login` em `SessionControllerOptions` acima).
+import type { AgentMemory, LoginService } from '@hiperplano/aluy-cli-core';
+import type { WorkspacePort } from '../io/index.js';
+import { createSessionCommandPort } from './session-command-port.js';
+import { sessionCommandTool } from '@hiperplano/aluy-cli-core';
 import { FlushThrottle, type FlushThrottleOptions } from './flush-throttle.js';
 import { backoffDelayMs, DEFAULT_BACKOFF, type BackoffPolicy } from './retry-backoff.js';
 import { isLiveBlock, sanitizeOrphans } from './render-split.js';
@@ -310,6 +316,20 @@ export interface SessionControllerOptions {
    * foi injetada nas ports) e o controller não liga a observação da UI de pergunta.
    */
   readonly questionResolver?: TuiQuestionResolver;
+  /**
+   * ADR-0147 — dependências OPCIONAIS que a `SessionCommandPort` (tool `session_command`)
+   * consome p/ EXECUTAR de verdade os comandos de sessão que o agente dispara — os
+   * MESMOS objetos que `session/wiring.ts` já monta p/ o caminho do humano
+   * (`slash/clear.ts`/`slash/memory.ts`/`slash/init.ts`/`slash/handlers.ts#runAsyncSlash`).
+   * Ausentes ⇒ os comandos que dependem delas (clear full/memory, memory, whoami,
+   * logout, init) degradam com uma observação honesta ("indisponível nesta sessão"),
+   * NUNCA fingem sucesso — fail-safe, como `subAgents`/`question`/`capabilities`.
+   * Nomeados `agentMemory`/`commandWorkspace` (não `memory`/`workspace`) p/ não colidir
+   * com o `memory` já existente (config do monitor de pressão de heap, EST-1012).
+   */
+  readonly agentMemory?: AgentMemory;
+  readonly commandWorkspace?: WorkspacePort;
+  readonly login?: LoginService;
   readonly meta: SessionMeta;
   /** Tamanho da janela de contexto p/ derivar `⛁ %` dos tokens. Default 200k. */
   readonly contextWindow?: number;
@@ -446,6 +466,17 @@ export interface SessionControllerOptions {
    * engine. Ausente/vazio ⇒ sem MCP (o agente segue idêntico).
    */
   readonly mcpTools?: readonly NativeTool<ToolPorts>[];
+  /**
+   * EST-BOOT-DECOUPLE — nomes dos servers MCP CONFIGURADOS mas AINDA CONECTANDO em
+   * background (o boot desacoplado monta a sessão sem esperar o handshake MCP
+   * terminar). Cada nome entra em `ToolRegistry.markMcpServerPending` — enquanto lá,
+   * uma chamada a `mcp__<server>__*` (o server ainda não tem tools registradas) vira
+   * uma observação HONESTA ("ainda conectando") em vez de "tool desconhecida"
+   * genérico. O caller (run.tsx) limpa cada nome via `refreshMcpTools(tools, server)`
+   * assim que aquele server conecta. Ausente/vazio ⇒ comportamento intacto (sem
+   * pendentes — é o caso do boot síncrono de sempre e do headless).
+   */
+  readonly pendingMcpServers?: readonly string[];
   /**
    * EST-1015 (POC headroom) — tool `headroom_retrieve` (LADO RETRIEVE do CCR). Só é
    * montada pelo wiring quando `ALUY_HEADROOM_URL` está setado (proxy LOCAL do
@@ -1024,6 +1055,20 @@ export class SessionController {
   // reiniciar a sessão. Settado no construtor (mesma instância do `ToolRegistry`
   // que o loop usa) — NUNCA recriado.
   private readonly toolRegistry: ToolRegistry<ToolPorts>;
+  // EST-BOOT-DECOUPLE — o MESMO reporter que embrulhou as tools do boot (`withToolReport`),
+  // guardado p/ envolver IGUALMENTE as tools MCP anexadas DEPOIS (`refreshMcpTools`/
+  // attach incremental) — sem isto, uma tool MCP que chega em background nunca
+  // pintaria a linha `◌ running`→`⏺` (ficaria muda no display, só a observação
+  // voltaria ao modelo). Settado no construtor, junto do `toolRegistry`.
+  private readonly toolReporter: ToolReporter;
+  // EST-BOOT-DECOUPLE — catálogo NATIVO de tools (`onToolsReady`/`attachNativeTools`)
+  // guardado p/ RE-ANUNCIAR quando o registry muda DEPOIS do boot (MCP anexada em
+  // background, `/mcp reload`): sem isto, o tool-calling NATIVO (schema mandado ao
+  // provider) ficaria congelado no catálogo do boot — o loop resolveria a tool pelo
+  // protocolo de TEXTO, mas o modelo nunca "veria" a tool nova no array `tools` da
+  // API. Ausente ⇒ nativo desligado (comportamento intacto).
+  private readonly onToolsReadyCb: ((catalog: NativeToolsCapability) => void) | undefined;
+  private readonly nativeToolsDisabled: boolean;
   // EST-MON-5 · ADR-0079 — store dos monitores ativos (vigias file-watch/process-wait).
   // Cancelado por inteiro no encerramento (`cancelAllFlows`/dispose) — sem watcher/timer órfão.
   private readonly monitorStore: MonitorStore;
@@ -1322,6 +1367,7 @@ export class SessionController {
     // terminal `ok`/`err` com o resultado quantificado — em vez de empilhar uma
     // 2ª linha. Assim o in-flight (◌→⏺) é UMA linha que muda de estado.
     const reporter: ToolReporter = { report: (line) => this.resolveToolLine(line) };
+    this.toolReporter = reporter;
     // EST-0971 — as tools de WEB (web_fetch/web_search) entram no MESMO registro,
     // atrás da MESMA catraca (CLI-SEC-H1): o loop as trata como qualquer tool de
     // efeito. Sem `ports.web` injetado, elas devolvem erro claro (não há rede).
@@ -1440,6 +1486,10 @@ export class SessionController {
       ...(opts.mcpTools ?? []),
       // EST-1015 (POC headroom) — RETRIEVE entra só quando o wiring o montou (flag).
       ...(opts.headroomRetrieveTool ? [opts.headroomRetrieveTool] : []),
+      // ADR-0147 — `session_command`: SÓ no toolset do PAI (não entra em `baseTools`
+      // dos sub-agentes abaixo — mesma restrição de `spawn_agent`, escopo conservador
+      // não exigido pelo ADR mas alinhado ao padrão de "poder novo só no principal").
+      sessionCommandTool,
     ];
 
     // EST-0969 · ADR-0057 — SUB-AGENTES locais PARALELOS. Quando habilitado:
@@ -1563,6 +1613,12 @@ export class SessionController {
     this.toolRegistry = new ToolRegistry<ToolPorts>(
       allTools.map((t) => withToolReport(t, reporter)),
     );
+    // EST-BOOT-DECOUPLE — marca os servers MCP AINDA CONECTANDO (boot desacoplado, sem
+    // esperar o handshake). Cada nome sai da lista quando `refreshMcpTools(tools,
+    // server)` for chamado (run.tsx, ao servidor conectar). Vazio ⇒ no-op.
+    for (const server of opts.pendingMcpServers ?? []) {
+      this.toolRegistry.markMcpServerPending(server);
+    }
 
     // ADR-0145 (frente d) — CapabilitiesPort: o controller MONTA o snapshot a partir
     // do que JÁ TEM em mãos (mesmo padrão das portas `memory`/`subAgents`/`question` —
@@ -1584,7 +1640,6 @@ export class SessionController {
     // isso; ver o teste anti-vazamento em `tests/agent/capabilities.test.ts`.
     const capabilitiesAgents = opts.agentRegistry?.list() ?? [];
     const capabilitiesSkills = opts.skills ?? [];
-    const mcpToolsForCapabilities = opts.mcpTools ?? [];
     const capabilitiesPort: CapabilitiesPort = {
       snapshot: async (): Promise<CapabilitiesSnapshot> => {
         // Memória — SÓ a contagem (`total` do `searchFacts`, NUNCA o array de fatos em
@@ -1604,7 +1659,12 @@ export class SessionController {
           tools: mapToolsToCapabilityInfo(this.toolRegistry.list()),
           agents: mapAgentsToCapabilityItems(capabilitiesAgents),
           skills: mapSkillsToCapabilityItems(capabilitiesSkills),
-          mcpServers: groupMcpServers(mcpToolsForCapabilities),
+          // EST-BOOT-DECOUPLE — LIVE (não a `mcpToolsForCapabilities` congelada do boot):
+          // sem isto, uma tool MCP anexada em background (ou por `/mcp reload`) nunca
+          // apareceria aqui — o menu de capacidades ficaria mentindo "sem MCP" mesmo com
+          // servers conectados. `groupMcpServers` já filtra pelo prefixo `mcp__` (tools
+          // não-MCP passam batido), mesmo padrão do `tools:` na linha acima.
+          mcpServers: groupMcpServers(this.toolRegistry.list()),
           ...(factCount !== undefined ? { memory: { factCount } } : {}),
           monitors: this.monitorStore
             .list()
@@ -1618,6 +1678,27 @@ export class SessionController {
     };
     parentPorts = { ...parentPorts, capabilities: capabilitiesPort };
 
+    // ADR-0147 — porta da tool `session_command`: reusa `this` (métodos do controller —
+    // compact/cycle*/clear/setEffort/setProvider/setLabel/roomX/askParallel/
+    // workflowRun/workflowsUse/pushNote/current) + `opts.permission`/`opts.askResolver`
+    // (a MESMA catraca/resolver da sessão — o RE-PASSE destrutivo usa exatamente estes)
+    // + as dependências OPCIONAIS (`opts.memory`/`opts.workspace`/`opts.login`) que
+    // `slash/clear.ts`/`slash/memory.ts`/`slash/init.ts`/`handlers.ts#runAsyncSlash` já
+    // consomem no caminho do humano. `this` é seguro AQUI: a porta só é CHAMADA muito
+    // depois (quando o agente de fato disparar `session_command`), nunca durante a
+    // construção — o mesmo raciocínio do `subAgents`/`capabilitiesPort` acima.
+    const sessionCommandPort = createSessionCommandPort({
+      controller: this,
+      engine: opts.permission,
+      askResolver: opts.askResolver,
+      ports: opts.ports,
+      ...(opts.agentMemory !== undefined ? { memory: opts.agentMemory } : {}),
+      ...(opts.commandWorkspace !== undefined ? { workspace: opts.commandWorkspace } : {}),
+      ...(opts.login !== undefined ? { login: opts.login } : {}),
+      ...(opts.agentRegistry !== undefined ? { agentRegistry: opts.agentRegistry } : {}),
+    });
+    parentPorts = { ...parentPorts, sessionCommand: sessionCommandPort };
+
     // EST-0996 — TOOL-CALLING NATIVO: o controller é o dono do toolset FINAL, então
     // É AQUI que o catálogo de funções (`tools` da API) nasce — convertido de
     // `allTools` (nativas+web+memória+MCP+spawn). A capacidade decide "mandar `tools`
@@ -1626,8 +1707,12 @@ export class SessionController {
     // EXATAMENTE o que o agente pode chamar. Desligável (`disableNativeTools`): aí o
     // agente usa só o protocolo de texto (#99). NÃO toca a catraca: cada tool-call
     // (nativa OU texto) AINDA passa por `decide()` no loop (CLI-SEC-H1).
-    if (!opts.disableNativeTools && opts.onToolsReady) {
-      opts.onToolsReady(new NativeToolsCapability({ tools: toToolFunctionSchemas(allTools) }));
+    // EST-BOOT-DECOUPLE — guarda a callback + o flag p/ RE-ANUNCIAR o catálogo quando
+    // o registry mudar DEPOIS deste ponto (MCP anexada em background/`/mcp reload`).
+    this.onToolsReadyCb = opts.onToolsReady;
+    this.nativeToolsDisabled = opts.disableNativeTools === true;
+    if (!this.nativeToolsDisabled && this.onToolsReadyCb) {
+      this.onToolsReadyCb(new NativeToolsCapability({ tools: toToolFunctionSchemas(allTools) }));
     }
 
     // Observador do ciclo de vida (EST-0948 in-flight): início ⇒ linha `◌ running`
@@ -5025,14 +5110,39 @@ export class SessionController {
   }
 
   /**
-   * EST-0970 — troca as tools MCP no registro AO VIVO (p/ `/mcp reload` e
-   * `/mcp reconnect` sem reiniciar a sessão). Remove as tools MCP antigas do
-   * escopo e registra as novas. Se `serverScope` for dado, só troca as tools
-   * daquele server (prefixo `mcp__${serverScope}__`), sem derrubar os outros
-   * servers vivos. Sem `serverScope`, troca TODAS as tools MCP de uma vez.
+   * EST-0970/EST-BOOT-DECOUPLE — troca (ou ANEXA, no boot desacoplado) as tools MCP
+   * no registro AO VIVO: usado por `/mcp reload`/`/mcp reconnect` (sem reiniciar a
+   * sessão) E pelo boot desacoplado (cada server anexa suas tools assim que conecta,
+   * sem esperar os outros). Remove as tools MCP antigas do escopo e registra as
+   * novas. Se `serverScope` for dado, só troca as tools daquele server (prefixo
+   * `mcp__${serverScope}__`) — os outros servers vivos (ou ainda conectando) não são
+   * tocados — e o server sai da lista de PENDENTES (`isMcpServerPending`), então uma
+   * chamada a ele agora resolve normal em vez da observação "ainda conectando". Sem
+   * `serverScope`, troca TODAS as tools MCP de uma vez (o caso `/mcp reload all`).
+   *
+   * As tools novas são embrulhadas no MESMO `withToolReport` do boot (senão a linha
+   * `◌ running`→`⏺` ficaria muda p/ elas) e o catálogo NATIVO é RE-ANUNCIADO
+   * (`onToolsReady`/`attachNativeTools`) — sem isto, o tool-calling nativo ficaria
+   * congelado no schema do boot e o modelo nunca "veria" a tool anexada depois.
    */
   refreshMcpTools(newTools: readonly NativeTool<ToolPorts>[], serverScope?: string): void {
-    this.toolRegistry.replaceMcpTools(newTools, serverScope);
+    const wrapped = newTools.map((t) => withToolReport(t, this.toolReporter));
+    this.toolRegistry.replaceMcpTools(wrapped, serverScope);
+    if (serverScope !== undefined) this.toolRegistry.clearMcpServerPending(serverScope);
+    this.announceToolsChanged();
+  }
+
+  /**
+   * EST-BOOT-DECOUPLE — RE-ANUNCIA o catálogo NATIVO (`onToolsReady`) a partir do
+   * estado ATUAL do registry (`toolRegistry.list()`, não o `allTools` congelado do
+   * boot). Chamado sempre que o registry muda DEPOIS do anúncio inicial do
+   * construtor (hoje: só `refreshMcpTools`). No-op sem callback/nativo desligado.
+   */
+  private announceToolsChanged(): void {
+    if (this.nativeToolsDisabled || !this.onToolsReadyCb) return;
+    this.onToolsReadyCb(
+      new NativeToolsCapability({ tools: toToolFunctionSchemas(this.toolRegistry.list()) }),
+    );
   }
 
   /** Para o monitor (idempotente). Chamado em `dispose()` — sem timer órfão. */

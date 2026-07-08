@@ -9,6 +9,11 @@
 import { fuzzyScore } from '../attach/fuzzy.js';
 import { displayWidth } from '../session/visual-lines.js';
 import type { I18nKey, TFunction } from '../i18n/index.js';
+import type { AgentCommandEffect } from '@hiperplano/aluy-cli-core';
+
+// ADR-0147 — re-exportado p/ quem consome `SlashCommand.agentEffect` sem importar
+// diretamente do core (conveniência; o TIPO ÚNICO segue vivendo no core).
+export type { AgentCommandEffect } from '@hiperplano/aluy-cli-core';
 
 /** Identificador de um comando nativo. */
 export type NativeCommandId =
@@ -132,6 +137,30 @@ export interface SlashCommand {
   readonly parallelWhileBusyWith?: (args: string) => boolean;
   /** Forma de uso (ex.: `<intervalo> "<tarefa>"`) — p/ auto-conhecimento e documentação. */
   readonly usage?: string;
+  /**
+   * ADR-0147 §2 — a CLASSE DE EFEITO do comando p/ a tool `session_command` (o agente
+   * disparando o comando, não o humano digitando). FONTE ÚNICA: não crie um 2º mapa
+   * nome→classe em outro lugar — a `SessionCommandPort` (session/session-command-port.ts)
+   * LÊ este campo. Comando NATIVO sem este campo ⇒ **default `human-only`** (fail-closed,
+   * GS-SC5): nunca auto-executável por omissão. Comandos do USUÁRIO (`~/.aluy/commands/`)
+   * não declaram isto — são objetivos submetidos (EST-0974), fora desta tool.
+   *
+   *   - `read-only`      — só lê/lista/diagnostica, sem efeito colateral. Allow direto.
+   *   - `session-effect` — muta sessão/config; reversível ou não-destrutivo. Allow direto;
+   *                        o efeito PRÓPRIO do comando segue passando por `decide()`.
+   *   - `destructive`    — irreversível/apaga dado/revoga credencial. RE-PASSA `decide()`
+   *                        na categoria `always-ask:destructive` (nunca auto-aprovável,
+   *                        nem sob `--yolo` — ver `permission/engine.ts`).
+   *   - `human-only`     — só faz sentido no terminal do humano. Deny honesto.
+   */
+  readonly agentEffect?: AgentCommandEffect;
+  /**
+   * ADR-0147 §2 — refina `agentEffect` POR SUBCOMANDO (o primeiro token de `args`,
+   * lowercase — ex.: `full`/`memory` de `/clear`, `rm` de `/cron`). Ausente p/ um verbo
+   * presente ⇒ herda o `agentEffect` do comando-pai. Ex.: `/clear` = `session-effect`,
+   * mas `subcommandEffects: { full: 'destructive', memory: 'destructive' }`.
+   */
+  readonly subcommandEffects?: Readonly<Record<string, AgentCommandEffect>>;
 }
 
 /**
@@ -367,6 +396,21 @@ export function terminalSubmitLine(entry: Extract<SlashMenuEntry, { kind: 'subco
   return `/${entry.parent.name} ${entry.sub.name}`;
 }
 
+/**
+ * ADR-0147 §2 — resolve a CLASSE DE EFEITO efetiva de `command` p/ os `args` dados
+ * (o primeiro token, lowercase, contra `subcommandEffects`; sem match ⇒ herda o
+ * `agentEffect` do comando). PURA/determinística — a ÚNICA fonte de "efeito p/ o
+ * agente" (a `SessionCommandPort` a chama; nenhum 2º mapa nome→classe em outro lugar).
+ * Comando sem `agentEffect` declarado ⇒ `'human-only'` (fail-closed, GS-SC5): um
+ * comando NÃO-classificado nunca vira auto-executável por omissão.
+ */
+export function resolveAgentEffect(command: SlashCommand, args: string): AgentCommandEffect {
+  const base = command.agentEffect ?? 'human-only';
+  const verb = args.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  if (verb === '' || !command.subcommandEffects) return base;
+  return command.subcommandEffects[verb] ?? base;
+}
+
 /** Os comandos NATIVOS (spec §2.15). DADO listável, não hardcode espalhado. */
 export const NATIVE_COMMANDS: readonly SlashCommand[] = [
   // EST-0989 (i18n) — os NATIVOS ganham `summaryKey`: o `summary` segue pt-BR (back-compat
@@ -380,6 +424,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     section: 'sessão',
     // EST-0982 — read-only puro (nota): roda JÁ mid-turn em vez de enfileirar.
     parallelWhileBusy: true,
+    agentEffect: 'read-only', // ADR-0147
   },
   {
     name: 'login',
@@ -388,6 +433,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'login',
     section: 'conta',
+    // ADR-0147 — device-flow interativo no terminal do humano: sem sentido p/ o agente.
+    agentEffect: 'human-only',
   },
   {
     name: 'logout',
@@ -396,6 +443,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'logout',
     section: 'conta',
+    // ADR-0147 §4 — revoga+apaga a credencial: irreversível ⇒ destructive (always-ask).
+    agentEffect: 'destructive',
   },
   {
     name: 'whoami',
@@ -406,6 +455,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     section: 'conta',
     // EST-0982 — read-only puro (nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
+    agentEffect: 'read-only', // ADR-0147
   },
   {
     // ADR-0134/0135 — conector Telegram: setup DENTRO da sessão. `status` (read-only),
@@ -419,6 +469,11 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     section: 'conta',
     // status/allow/deny são leves (config/keychain local) — rodam JÁ mid-turn como nota.
     parallelWhileBusy: true,
+    // ADR-0147 — base session-effect (allow/deny mutam a allowlist); `status` é
+    // read-only; `logout` revoga o token (destructive); `login` pede token literal no
+    // terminal (human-only). Subcomandos refinam.
+    agentEffect: 'session-effect',
+    subcommandEffects: { status: 'read-only', logout: 'destructive', login: 'human-only' },
   },
   {
     // EST-0970 — health-check read-only: credencial/broker/catálogo/MCP/perfis/config/
@@ -432,6 +487,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // EST-0982 — health-check read-only (ticks numa nota própria, fire-and-forget): roda
     // JÁ mid-turn. NB: `/doctor --deep` gasta modelo, mas num caller PRÓPRIO (não o turno).
     parallelWhileBusy: true,
+    agentEffect: 'read-only', // ADR-0147
   },
   {
     name: 'model',
@@ -440,6 +496,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'model',
     section: 'sessão',
+    // ADR-0147 — sem arg LÊ o tier atual, com arg TROCA (dual-mode como /effort); ambos
+    // roteiam idêntico na catraca (allow direto), então uma classe só basta.
+    agentEffect: 'session-effect',
   },
   {
     // EST-0962 · /provider — seta o NOME do provider do modo CUSTOM (par do modelo).
@@ -452,6 +511,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'provider',
     section: 'sessão',
+    agentEffect: 'session-effect', // ADR-0147 — espelha /model (dual-mode).
   },
   {
     // EST-0962 · /effort — seta o `reasoning_effort` (PASSTHROUGH: qualquer string ≤32 chars;
@@ -466,6 +526,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // EST-0982 — DUAL-MODE: `/effort` (sem arg) só LÊ o valor ⇒ roda JÁ mid-turn; `/effort <v>`
     // MUTA o reasoning_effort do turno em curso ⇒ enfileira (não muta o turno vivo).
     parallelWhileBusyWith: effortIsReadOnly,
+    agentEffect: 'session-effect', // ADR-0147 — espelha /model (dual-mode, mesma classe).
   },
   {
     name: 'theme',
@@ -474,6 +535,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'theme',
     section: 'sessão',
+    // ADR-0147 — troca de tema é RENDER do terminal do humano: sem sentido p/ o agente.
+    agentEffect: 'human-only',
   },
   {
     // EST-0989 (i18n) — `/lang`: troca o idioma da TUI (pt-BR/en). MESMA mecânica/teclas
@@ -484,6 +547,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'lang',
     section: 'sessão',
+    agentEffect: 'human-only', // ADR-0147 — espelha /theme (render da TUI do humano).
   },
   {
     name: 'usage',
@@ -494,6 +558,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     section: 'sessão',
     // EST-0982 — read-only puro (lê tokens/janela numa nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
+    agentEffect: 'read-only', // ADR-0147
   },
   {
     name: 'rename',
@@ -502,6 +567,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'rename',
     section: 'sessão',
+    agentEffect: 'session-effect', // ADR-0147 — dado de UI local, reversível.
   },
   {
     name: 'history',
@@ -510,6 +576,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'history',
     section: 'sessão',
+    agentEffect: 'read-only', // ADR-0147 §4 — listagem; retomar sessão é fluxo interativo.
   },
   {
     name: 'ask',
@@ -519,6 +586,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     section: 'sessão',
     // EST-0982 · ADR-0080 — read-only + caller próprio ⇒ roda JÁ mid-turn (não enfileira).
     parallelWhileBusy: true,
+    agentEffect: 'read-only', // ADR-0147
   },
   {
     name: 'notify',
@@ -527,6 +595,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'notify',
     section: 'sessão',
+    agentEffect: 'session-effect', // ADR-0147
   },
   {
     // EST-0990 — MODO VIEW AVANÇADO (split CHAT | LOG). Toggle (alias do Ctrl+L). `/view`
@@ -536,6 +605,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'split',
     section: 'sessão',
+    // ADR-0147 — layout do terminal do humano: sem sentido p/ o agente.
+    agentEffect: 'human-only',
   },
   {
     // EST-1000 · ADR-0076 — MODO COCKPIT (tela cheia, alt-screen). Toggle in-session;
@@ -546,6 +617,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'fullscreen',
     section: 'sessão',
+    agentEffect: 'human-only', // ADR-0147 — espelha /split (render do terminal).
   },
   {
     // F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab). Toggle in-session: `/suggest`
@@ -557,6 +629,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'suggest',
     section: 'sessão',
+    // ADR-0147 — ghost-text é DICA VISUAL pro humano digitar: sem sentido p/ o agente.
+    agentEffect: 'human-only',
   },
   {
     // F179 — `/export`: grava o transcript REDIGIDO (CLI-SEC-6) em ~/.aluy/exports/.
@@ -568,6 +642,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'export',
     section: 'sessão',
+    // ADR-0147 — CRIA um arquivo novo (não apaga/sobrescreve nada existente).
+    agentEffect: 'session-effect',
   },
   {
     name: 'undo',
@@ -576,6 +652,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'undo',
     section: 'workspace',
+    // ADR-0147 §4 — undo/redo SÃO a própria rede de segurança (não-destrutivo).
+    agentEffect: 'session-effect',
   },
   {
     name: 'redo',
@@ -584,6 +662,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'redo',
     section: 'workspace',
+    agentEffect: 'session-effect', // ADR-0147 — espelha /undo.
   },
   {
     name: 'rewind',
@@ -592,6 +671,14 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'rewind',
     section: 'workspace',
+    // ADR-0147 (Q-3, ABERTA) — `destructive` PROVISORIAMENTE (condição 2 do parecer do
+    // `seguranca`): REVERTE edições pós-ponto (perda de trabalho subsequente), então a
+    // classe conservadora `destructive` (⇒ sempre-ask) é o default seguro ENQUANTO a Q-3
+    // do ADR ("/rewind é session-effect ou destructive?") não fechar e não existir o
+    // seletor de checkpoints acionável via agente. Sem execução via agente nesta v1 (a
+    // confirmação é honesta, mas a porta recusa após aprovar — hoje o /rewind só roda na
+    // TUI interativa). Reavaliar a classe quando a estória fechar a Q-3.
+    agentEffect: 'destructive',
   },
   {
     name: 'clear',
@@ -600,6 +687,10 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'clear',
     section: 'sessão',
+    // ADR-0147 §4 — `/clear` puro (só sessão) é session-effect; `full`/`memory` (apagam
+    // a memória IRREVERSIVELMENTE) são destructive — o CASO CRÍTICO do ADR.
+    agentEffect: 'session-effect',
+    subcommandEffects: { full: 'destructive', memory: 'destructive' },
     // EST-0983 — subcomandos DESTRUTIVOS do /clear (parseClearCommand): `full` = sessão +
     // memória; `memory` = só a memória. Ambos APAGAM os fatos (global+projeto) e PEDEM
     // confirmação (IRREVERSÍVEL). `/clear` puro (sem sub) segue só limpando a sessão.
@@ -625,6 +716,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'compact',
     section: 'sessão',
+    agentEffect: 'session-effect', // ADR-0147
   },
   {
     name: 'cycle',
@@ -634,6 +726,12 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     id: 'cycle',
     section: 'sessão',
     usage: '<intervalo> "<tarefa>"',
+    // ADR-0147 (Q-4, decisão do dono) — o agente PODE INICIAR `/cycle` sozinho, não só
+    // controlar um já-rodando: os tetos DUROS do CycleEngine (CLI-SEC-14) + a catraca
+    // (cada iteração re-passa `decide()`) são a rede anti-runaway. `status` é read-only;
+    // iniciar/pause/resume/edit/stop são session-effect (allow direto).
+    agentEffect: 'session-effect',
+    subcommandEffects: { status: 'read-only' },
     // EST-1158 — lifecycle do /cycle EM EXECUÇÃO, DESCOBRÍVEIS no menu (o dono pediu).
     // A forma de INICIAR é posicional (`/cycle 5m "tarefa"`); estes verbos só atuam num
     // ciclo JÁ rodando (run.tsx roteia). `/cycle ` abre o submenu; `/cycle 5m "..."`
@@ -674,6 +772,10 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     id: 'cron',
     section: 'sessão',
     usage: 'list · add <quando> "<tarefa>" · edit/enable/disable/rm <id>',
+    // ADR-0147 §4 — `list` é read-only; `rm` remove um job DE VEZ (destructive);
+    // add/edit/enable/disable mutam mas são reversíveis (session-effect).
+    agentEffect: 'session-effect',
+    subcommandEffects: { list: 'read-only', rm: 'destructive' },
     subcommands: [
       {
         name: 'list',
@@ -707,6 +809,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'permissions',
     section: 'workspace',
+    agentEffect: 'read-only', // ADR-0147 — painel, não muta nada.
   },
   {
     // F59 · /tools — inventário unificado das ferramentas do agente (8 nativas +
@@ -719,6 +822,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     section: 'workspace',
     // EST-0982 — read-only puro (nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
+    agentEffect: 'read-only', // ADR-0147
   },
   {
     // EST-0982 · /add-dir — ATO DO USUÁRIO que autoriza um diretório EXTRA além da
@@ -730,6 +834,12 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'add-dir',
     section: 'workspace',
+    // ADR-0147 — DIVERGE da tabela ilustrativa do ADR (que agrupava /add-dir como
+    // session-effect junto de /effort etc.): o comentário ACIMA já cravava a invariante
+    // "o agente não tem como invocar, sem auto-ampliação, NEM EM --unsafe" — ampliar o
+    // próprio confinamento é escalada de privilégio (espelha GS-MD1 ⊆ pai). human-only
+    // preserva essa invariante também pela via da tool (deny honesto).
+    agentEffect: 'human-only',
   },
   {
     name: 'init',
@@ -738,6 +848,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'init',
     section: 'workspace',
+    // ADR-0147 — a ESCRITA real (write_file) segue passando por `decide()` (CLI-SEC-9).
+    agentEffect: 'session-effect',
   },
   {
     name: 'memory',
@@ -746,6 +858,16 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'memory',
     section: 'workspace',
+    // ADR-0147 §4 — `/memory` puro e `list` LEEM; `forget <id>` APAGA um fato de vez
+    // (destructive, espelha /clear memory); edit/pin/unpin mutam mas são reversíveis.
+    agentEffect: 'read-only',
+    subcommandEffects: {
+      list: 'read-only',
+      forget: 'destructive',
+      edit: 'session-effect',
+      pin: 'session-effect',
+      unpin: 'session-effect',
+    },
     // EST-0974 — subcomandos de /memory (parseMemoryCommand). `/memory` puro LISTA;
     // os verbos mutam (negados em Plan, ADR-0055). Achatados no menu p/ descoberta.
     subcommands: [
@@ -765,6 +887,10 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'todo',
     section: 'workspace',
+    // ADR-0147 — listar é read-only; done/clear mutam mas são de baixo risco (itens
+    // concluídos, reversível editando/re-anotando).
+    agentEffect: 'read-only',
+    subcommandEffects: { list: 'read-only', done: 'session-effect', clear: 'session-effect' },
     subcommands: [
       { name: 'list', summary: 'lista o backlog (pendentes + feitos)', usage: 'list' },
       { name: 'done', summary: 'marca um item como concluído', usage: 'done <id>' },
@@ -781,6 +907,20 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // EST-0982 — DUAL-MODE: listagem/`list`/`search` só LEEM (nota) ⇒ rodam JÁ mid-turn;
     // add/remove/disable/enable (config) e reload/reconnect (troca tools do turno) ⇒ enfileiram.
     parallelWhileBusyWith: mcpIsReadOnly,
+    // ADR-0147 — espelha o dual-mode acima: list/search LEEM; add/remove/disable/enable/
+    // reload/reconnect mutam a config de servers MCP (reversível — não é "destructive"
+    // no sentido de dado do USUÁRIO apagado, é config local re-editável).
+    agentEffect: 'read-only',
+    subcommandEffects: {
+      search: 'read-only',
+      list: 'read-only',
+      add: 'session-effect',
+      remove: 'session-effect',
+      disable: 'session-effect',
+      enable: 'session-effect',
+      reconnect: 'session-effect',
+      reload: 'session-effect',
+    },
     // EST-0974/EST-0970 — subcomandos de /mcp, TODOS in-session (parseMcpAdminSlash +
     // parseMcpSlash): o ciclo completo sem ir ao shell. Achatados no menu p/ ficarem
     // descobríveis (digitar `/mcp s` filtra); selecionar completa `/mcp <sub> `.
@@ -821,6 +961,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     section: 'workspace',
     // EST-0982 — read-only puro (lista perfis numa nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
+    agentEffect: 'read-only', // ADR-0147
   },
   {
     // EST-1112 · ADR-0116 — `/skills`: lista as SKILLS (SKILL.md) que o aluy MAPEOU
@@ -832,6 +973,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     section: 'workspace',
     // EST-0982 — read-only puro (lista skills numa nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
+    agentEffect: 'read-only', // ADR-0147
   },
   {
     // LOTE-2 — `/inventory`: INVENTÁRIO do que a sessão carregou da `.aluy/` — ALUY.md,
@@ -844,6 +986,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     id: 'inventory',
     section: 'workspace',
     parallelWhileBusy: true,
+    agentEffect: 'read-only', // ADR-0147
   },
   {
     // EST-1105 · ADR-workflows — `/workflows`: lista os workflows .md que o aluy
@@ -854,6 +997,10 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'workflows',
     section: 'workspace',
+    // ADR-0147 — listar é read-only; `run`/`use` DIRIGEM o agente pelo fluxo (mutam a
+    // sessão, mas os tool-calls internos seguem passando por `decide()` normal).
+    agentEffect: 'read-only',
+    subcommandEffects: { run: 'session-effect', use: 'session-effect' },
     subcommands: [
       {
         name: 'run',
@@ -876,6 +1023,10 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'rooms',
     section: 'workspace',
+    // ADR-0147 — listar é read-only; new/read/watch mutam/observam a sessão (criam sala,
+    // fazem snapshot, entram em modo de observação) mas não são destrutivos.
+    agentEffect: 'session-effect',
+    subcommandEffects: { list: 'read-only' },
     subcommands: [
       { name: 'list', summary: 'lista as salas (código · msgs · atividade · quem)', usage: 'list' },
       { name: 'new', summary: 'cria uma sala e mostra o código', usage: 'new' },
@@ -894,6 +1045,10 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'subagent',
     section: 'workspace',
+    // ADR-0147 — redireciona o FOCO DO COMPOSER do humano (a que sub-sessão a digitação
+    // dele vai) — não é um efeito que o AGENTE dispara sobre si mesmo (já tem
+    // `spawn_agent` p/ delegar). Sem sentido pela via da tool ⇒ human-only.
+    agentEffect: 'human-only',
   },
   {
     // ADR-0126(A) — sai do foco 1:1 e volta ao agente principal.
@@ -902,6 +1057,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'back',
     section: 'workspace',
+    agentEffect: 'human-only', // ADR-0147 — espelha /subagent.
   },
   {
     name: 'quit',
@@ -910,6 +1066,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'quit',
     section: 'sessão',
+    // ADR-0147 §4 — encerra a TUI do humano: o agente não pode encerrar a sessão dele.
+    agentEffect: 'human-only',
   },
 ];
 
@@ -1160,23 +1318,32 @@ export function filterCommands(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EST-1149 · ADR-0127 — AUTO-CONHECIMENTO: nota dos COMANDOS DA SESSÃO p/ o system prompt
+// EST-1149 · ADR-0127 (emendado por ADR-0147) — AUTO-CONHECIMENTO: nota dos
+// COMANDOS DA SESSÃO p/ o system prompt
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Cabeçalho da seção de comandos da sessão no system prompt (estável p/ teste). */
+/**
+ * Cabeçalho da seção de comandos da sessão no system prompt (estável p/ teste).
+ * ADR-0147 EMENDA o ADR-0127: "nunca chame como tool — recomende" vira "PODE
+ * chamar via `session_command`, sob a catraca; a recomendação segue válida como
+ * alternativa de UX" (comandos `human-only` continuam só-recomendáveis).
+ */
 export const SESSION_COMMANDS_NOTE_HEADER =
-  'COMANDOS DA SESSÃO (o HUMANO os digita; você os RECOMENDA, não os invoca como ferramenta):';
+  'COMANDOS DA SESSÃO (o humano os digita OU você os dispara via a tool `session_command`):';
 
 /**
- * EST-1149 · ADR-0127 — monta a nota de AUTO-CONHECIMENTO dos `/comandos` da sessão, GERADA
- * do registro (`NATIVE_COMMANDS` por default) — single-source, nunca hardcoded: comando novo
- * no registro aparece sozinho no prompt. PURO. O caller (run.tsx) injeta no canal `system`.
+ * EST-1149 · ADR-0127/ADR-0147 — monta a nota de AUTO-CONHECIMENTO dos `/comandos` da
+ * sessão, GERADA do registro (`NATIVE_COMMANDS` por default) — single-source, nunca
+ * hardcoded: comando novo no registro aparece sozinho no prompt, JÁ com a classe
+ * (`agentEffect`) que rege se `session_command` o dispara. PURO. O caller (run.tsx)
+ * injeta no canal `system`.
  *
- * FRONTEIRA (a nota reforça): estes são comandos que o HUMANO digita na sessão — o agente os
- * RECOMENDA quando cabem (ex.: "agendar/repetir uma tarefa em loop" ⇒ `/cycle`), em vez de
- * dizer "não tenho como" ou sugerir ferramentas externas (cron do SO / Task Scheduler). O
- * agente NÃO os invoca como tool (não são suas tools). Sem o registro ⇒ `undefined` (não
- * injeta — não-regressão). O `summary` é o texto pt-BR do registro (consistente com o prompt).
+ * ADR-0147 — a tool `session_command({command, args})` dispara QUALQUER comando abaixo
+ * marcado `[read-only]`/`[session-effect]` DIRETO; `[destructive]` SEMPRE pede
+ * confirmação ao usuário antes (nunca auto-aprovável — isso é esperado, não erro);
+ * `[human-only]` é RECUSADO pela tool — para esses, RECOMENDE ao usuário digitar (ex.:
+ * trocar de TEMA, sair do aluy). Sem o registro ⇒ `undefined` (não injeta —
+ * não-regressão). O `summary` é o texto pt-BR do registro (consistente com o prompt).
  */
 export function buildSessionCommandsNote(
   commands: readonly SlashCommand[] = NATIVE_COMMANDS,
@@ -1184,18 +1351,23 @@ export function buildSessionCommandsNote(
   const lines = commands
     .filter((c) => c.summary.trim() !== '')
     .map((c) => {
-      const base = `  /${c.name} — ${c.summary}`;
+      const tag = `[${c.agentEffect ?? 'human-only'}]`;
+      const base = `  /${c.name} ${tag} — ${c.summary}`;
       return c.usage ? `${base}\n    uso: /${c.name} ${c.usage}` : base;
     });
   if (lines.length === 0) return undefined;
   return [
     SESSION_COMMANDS_NOTE_HEADER,
-    'Quando o usuário pede algo que um destes comandos resolve — ex.: AGENDAR/REPETIR uma',
-    'tarefa em loop recorrente ⇒ `/cycle`; checar a saúde da sessão ⇒ `/doctor`; liberar',
-    'contexto ⇒ `/compact` — RECOMENDE o comando ao usuário. NÃO diga "não tenho como" nem',
-    'sugira ferramentas externas (cron do SO, Windows Task Scheduler) quando existe um',
-    'comando nativo que resolve. Você NÃO digita estes comandos (não são suas ferramentas);',
-    'quem os digita é o usuário.',
+    'Você PODE disparar `[read-only]`/`[session-effect]` via a tool `session_command`',
+    '(ex.: { "command": "cycle", "args": \'5m "revisar os testes"\' }). `[destructive]`',
+    '(ex.: `/clear full`, `/logout`, `/cron rm`) SEMPRE pede confirmação do usuário —',
+    'dispare mesmo assim quando fizer sentido; a catraca cuida da segurança.',
+    '`[human-only]` (tema, idioma, split, fullscreen, login, quit, …) você NÃO dispara —',
+    'RECOMENDE ao usuário digitar. Quando o pedido do usuário resolve com um comando',
+    'abaixo — ex.: AGENDAR/REPETIR uma tarefa em loop ⇒ `/cycle`; checar a saúde da',
+    'sessão ⇒ `/doctor`; liberar contexto ⇒ `/compact` — use-o (ou recomende, p/ os',
+    '`[human-only]`). NÃO diga "não tenho como" nem sugira ferramentas externas (cron',
+    'do SO, Windows Task Scheduler) quando existe um comando nativo que resolve.',
     ...lines,
   ].join('\n');
 }

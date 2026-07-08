@@ -38,6 +38,7 @@ import {
 } from './limits.js';
 import { parseModelTurn } from './protocol.js';
 import { sanitizeUntrustedDoc } from './tools/tool-param-docs.js';
+import { parseMcpToolName } from '../mcp/tool-adapter.js';
 import { DegenerateLoopError, type DegenerationKind } from './degeneration.js';
 import {
   type SelfCheckConfig,
@@ -1658,6 +1659,19 @@ export class AgentLoop {
     watchdog?.noteToolCall(name, input);
     const tool = this.tools.get(name);
     if (!tool) {
+      // EST-BOOT-DECOUPLE — o boot desacoplado monta a sessão ANTES do handshake MCP
+      // terminar: uma tool `mcp__<server>__*` chamada ENQUANTO aquele server ainda
+      // conecta cai aqui (ela ainda não está registrada) — mas NÃO é "nome inventado"
+      // (o server existe, só não terminou). Distingue o caso HONESTO ("ainda
+      // conectando, tente de novo") do genérico ("tool desconhecida") — a lista de
+      // tools válidas do genérico ficaria enganosa (omitiria tools que vão existir em
+      // segundos). NÃO trava: devolve observação e segue (mesma disciplina fail-soft).
+      const mcpName = parseMcpToolName(name);
+      if (mcpName && this.tools.isMcpServerPending(mcpName.server)) {
+        const obs = `server MCP "${mcpName.server}" ainda conectando (boot em segundo plano) — tente de novo em alguns segundos.`;
+        watchdog?.noteToolResult(name, false, 'mcp-server-pending');
+        return { kind: 'observation', observation: obs };
+      }
       // EST-0969 (watchdog) — tool desconhecida REPETIDA é um erro em loop (o modelo
       // insiste num nome inexistente): assinatura estável (`unknown-tool`) p/ a série.
       const obs = `tool desconhecida: "${name}". Tools válidas: ${this.tools

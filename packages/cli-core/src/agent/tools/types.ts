@@ -511,6 +511,15 @@ export interface ToolPorts {
    * contrato ao módulo concreto da tool (evita ciclo; mesma técnica de plan/memory/web).
    */
   readonly capabilities?: CapabilitiesPort;
+  /**
+   * ADR-0147 — porta de COMANDOS DE SESSÃO (OPCIONAL). Quando presente, a tool
+   * `session_command` a usa p/ disparar um comando de sessão (`/doctor`, `/cycle`,
+   * `/clear`, …) roteado por CLASSE de efeito (a porta CONCRETA, no
+   * `@hiperplano/aluy-cli`, é quem classifica e re-passa `decide()` p/ os destrutivos —
+   * ver `agent/tools/session-command.ts`). Sem a porta, `session_command` é inerte
+   * (erro claro, fail-safe — nenhum efeito), no mesmo padrão de `subAgents`/`question`.
+   */
+  readonly sessionCommand?: import('./session-command.js').SessionCommandPort;
 }
 
 /**

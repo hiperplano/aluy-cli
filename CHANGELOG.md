@@ -16,6 +16,18 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 _(vazio)_
 
+## [1.0.0-rc.100] — 2026-07-08
+
+### Adicionado
+
+- ⚡ O AGENTE agora dispara COMANDOS DE SESSÃO (ADR-0147): nova tool `session_command` deixa o agente rodar `/cycle`, `/compact`, `/doctor` etc. quando pertinente (fecha o círculo do self-use). Cada comando é classificado por efeito: os SEGUROS disparam direto; os DESTRUTIVOS (ex.: `/clear full` que apaga memória) RE-PASSAM a catraca e pedem CONFIRMAÇÃO — nem `--yolo` relaxa isso; comandos não-classificados negam por padrão (fail-closed). O agente pode INICIAR `/cycle` sozinho, com os tetos duros do CycleEngine como rede anti-runaway.
+
+### Alterado
+
+- 🚀 Boot muito mais rápido (opção 2): o composer aparece em ~6s (era ~34s/~68s) — a descoberta de MCP foi DESACOPLADA do splash e roda em background; as tools MCP se anexam à sessão viva conforme cada server conecta (com nota "N/M conectados"). Também: tecla pra PULAR o splash, e o tool-calling nativo agora se re-anuncia no `/mcp reload`.
+
+_(vazio)_
+
 ## [1.0.0-rc.99] — 2026-07-04
 
 ### Adicionado

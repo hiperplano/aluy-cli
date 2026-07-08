@@ -336,6 +336,13 @@ export interface BuildSessionOptions {
    */
   readonly mcpTools?: readonly NativeTool<ToolPorts>[];
   /**
+   * EST-BOOT-DECOUPLE — nomes dos servers MCP configurados mas AINDA CONECTANDO em
+   * background (boot desacoplado do splash — run.tsx não espera o handshake MCP
+   * terminar p/ montar a sessão). Repassado 1:1 ao `SessionController` (marca os
+   * pendentes no `ToolRegistry`). Ausente/vazio ⇒ comportamento intacto.
+   */
+  readonly pendingMcpServers?: readonly string[];
+  /**
    * EST-0969 · ADR-0057 — habilita SUB-AGENTES locais PARALELOS (tool `spawn_agent`).
    * Default: DESLIGADO (mono-agente, não-regressão). Quando `enabled`, o controller
    * monta o spawner com a MESMA engine/ports/budget/ask do pai (não-bypass, escopo
@@ -1076,6 +1083,12 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     roomStore,
     ports,
     askResolver,
+    // ADR-0147 — dependências da `SessionCommandPort` (tool `session_command`): os
+    // MESMOS objetos que este `buildSession` já monta p/ o caminho do humano
+    // (`clear.ts`/`memory.ts`/`init.ts`/`runAsyncSlash`/os loaders de skills/workflows).
+    agentMemory: memory,
+    commandWorkspace: workspace,
+    login,
     // EST-1110 · ADR-0114 — resolver de PERGUNTA (TUI): o controller observa o pendente
     // p/ publicar a fase `questioning` + o `pendingQuestion` e devolve a resposta.
     questionResolver,
@@ -1127,6 +1140,9 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // EST-0970 — tools MCP já descobertas (handshake no startup) → registro atrás
     // da catraca. Efeito por padrão; classificadas por sinais do input (E-B2).
     ...(opts.mcpTools !== undefined ? { mcpTools: opts.mcpTools } : {}),
+    // EST-BOOT-DECOUPLE — servers MCP ainda conectando (boot desacoplado); vazio/ausente
+    // ⇒ sem pendentes (comportamento intacto).
+    ...(opts.pendingMcpServers !== undefined ? { pendingMcpServers: opts.pendingMcpServers } : {}),
     // EST-1015 (POC headroom) — RETRIEVE: só monta a tool quando `ALUY_HEADROOM_URL`
     // aponta p/ o proxy LOCAL do usuário. Ausente ⇒ a sessão segue idêntica (sem ela).
     // Efeito `network` ⇒ atrás da catraca (`always-ask:network`, Plan-deny) como web_fetch.

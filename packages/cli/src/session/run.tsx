@@ -90,6 +90,8 @@ import {
   buildWorkflowsNote,
   buildSkillsNote,
   buildAvailableAgentsNote,
+  type NativeTool,
+  type ToolPorts,
 } from '@hiperplano/aluy-cli-core';
 import { applyTierLiteral } from '../model/catalog.js';
 import { TerminalNotificationPort, loadNotifyConfig } from '../io/notify-port.js';
@@ -479,8 +481,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     splash = createBootSplash({ theme: splashTheme, stdout: splashOut });
     // Piso de exibição (feedback Tiago): segura o quip do splash por >= minMs antes
     // do prompt/cockpit (o Ink anima durante o await). Override ALUY_SPLASH_MIN_MS.
+    // EST-BOOT-DECOUPLE — "pular o splash": corre o piso em PARALELO com
+    // `splash.whenSkip()` (resolve na 1ª tecla, fora de um S/N pendente) — quem
+    // resolver primeiro libera o boot. Sem tecla, o piso normal segue valendo
+    // (comportamento idêntico a antes).
     const splashMinMs = resolveSplashMinMs(env);
-    if (splashMinMs > 0) await new Promise<void>((r) => setTimeout(r, splashMinMs));
+    if (splashMinMs > 0) {
+      await Promise.race([new Promise<void>((r) => setTimeout(r, splashMinMs)), splash.whenSkip()]);
+    }
   }
   // O prompt sim/não do boot: a CAIXA do splash (TTY) OU o `defaultBootPrompt`/injetado
   // (não-TTY/teste). MESMO contrato `(prompt) => Promise<boolean>` nos dois — entra
@@ -724,30 +732,112 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const mcpSandboxLauncher = env['ALUY_SANDBOX_MCP']
     ? createSandbox({ processEnv: env })
     : undefined;
-  let mcpSetup: Awaited<ReturnType<typeof setupMcp>> | undefined =
-    opts.mcpTools !== undefined
-      ? undefined
-      : await setupMcp({
-          workspaceRoot: cwdAbs,
-          parentEnv: env,
-          ...(mcpSandboxLauncher ? { sandboxLauncher: mcpSandboxLauncher } : {}),
-          // ADR-0150 (balde b) — seção `mcp` do config único (connectTimeoutMs/callTimeoutMs).
-          ...(savedConfig.mcp ? { mcpConfig: savedConfig.mcp } : {}),
-          loadProjectConfig: async () => {
-            const loaded = await projectMcpStore.load();
-            projectMcpHadServers = loaded.config.servers.length > 0;
-            return loaded;
-          },
-          loadCodexConfig: () => {
-            const loaded = codexMcpStore.load();
-            codexMcpHadServers = loaded.config.servers.length > 0;
-            return loaded;
-          },
-        });
+
+  // EST-BOOT-DECOUPLE (OPÇÃO 2) — no ramo TTY interativo, o HANDSHAKE MCP (lançar
+  // processo + `initialize` + `listTools` — a parte LENTA; `npx`/`uvx` frios levam
+  // segundos) NÃO segura mais o boot: o composer aparece assim que o resto do boot
+  // (config/resume/backend) termina, e cada server MCP ANEXA suas tools ao toolset
+  // AO VIVO (`controller.refreshMcpTools`) assim que CONECTA — sem esperar os mais
+  // lentos. A CONFIG (só leitura de disco — rápida) ainda é resolvida CEDO via
+  // `onConfigResolved`, a tempo de entrar em `buildSession` (nomes PENDENTES: uma
+  // chamada a uma tool MCP ainda conectando vira observação HONESTA "ainda
+  // conectando", não trava — ver `ToolRegistry.markMcpServerPending`/`loop.ts`).
+  //
+  // O não-TTY/headless mantém o boot SÍNCRONO de sempre (mesmo `await setupMcp`
+  // cheio, ANTES de qualquer trabalho): não há composer a "liberar mais cedo", e o
+  // `-p`/posicional já depende da MCP estar pronta antes do 1º turno (paridade com o
+  // objetivo do usuário rodando JÁ). `opts.mcpTools` injetado (teste) também segue
+  // 100% síncrono — sem chamar `setupMcp` de verdade, igual a antes.
+  const mcpDecoupled = isTty && opts.mcpTools === undefined;
+  const mcpSetupOpts = {
+    workspaceRoot: cwdAbs,
+    parentEnv: env,
+    ...(mcpSandboxLauncher ? { sandboxLauncher: mcpSandboxLauncher } : {}),
+    // ADR-0150 (balde b) — seção `mcp` do config único (connectTimeoutMs/callTimeoutMs).
+    ...(savedConfig.mcp ? { mcpConfig: savedConfig.mcp } : {}),
+    loadProjectConfig: async () => {
+      const loaded = await projectMcpStore.load();
+      projectMcpHadServers = loaded.config.servers.length > 0;
+      return loaded;
+    },
+    loadCodexConfig: () => {
+      const loaded = codexMcpStore.load();
+      codexMcpHadServers = loaded.config.servers.length > 0;
+      return loaded;
+    },
+  };
+  /** Resultado por-server já adaptado (ver `SetupMcpOptions.onServerReady`). */
+  type McpServerReady = {
+    readonly server: string;
+    readonly ok: boolean;
+    readonly tools: readonly NativeTool<ToolPorts>[];
+    readonly error?: string;
+  };
+  let mcpSetup: Awaited<ReturnType<typeof setupMcp>> | undefined;
+  // A promise da descoberta (fase LENTA) — só existe no ramo decoupled; o cleanup de
+  // saída a espera antes de fechar (nunca deixa processo-server órfão, mesmo se o
+  // usuário sair ANTES de qualquer server terminar de conectar).
+  let mcpConnectPromise: ReturnType<typeof setupMcp> | undefined;
+  // Nomes ativos (config já lida) — semeia `pendingMcpServers` do `buildSession` E a
+  // nota "conectando N…". Populado pelo `onConfigResolved` (rápido: só disco).
+  let pendingMcpServerNames: readonly string[] = [];
+  // Resultados por-server que chegam ANTES do controller existir (defensivo — a
+  // descoberta é sempre mais lenta que o resto do boot síncrono até `buildSession`,
+  // mas um server LOCAL raríssimo poderia, em teoria, vencer a corrida). Drenada
+  // assim que `built.controller` nasce, abaixo.
+  const mcpServerReadyQueue: McpServerReady[] = [];
+  let onMcpServerReady: (r: McpServerReady) => void = (r) => mcpServerReadyQueue.push(r);
+
+  if (opts.mcpTools !== undefined) {
+    // Teste/injeção: `mcpSetup` fica ausente, `mcpToolsBase` usa `opts.mcpTools`
+    // direto (comportamento IDÊNTICO a antes — nada muda neste ramo).
+  } else if (mcpDecoupled) {
+    // EST-BOOT-DECOUPLE — dispara o setup INTEIRO (config+handshake) mas só ESPERA a
+    // fase RÁPIDA (config): o `onConfigResolved` resolve este gate ANTES do handshake
+    // começar (setup.ts dispara o hook logo após ler+mesclar a config, ver
+    // `mcp/setup.ts`). O handshake (lento) segue rodando por trás — `mcpConnectPromise`
+    // não é esperado aqui.
+    let releaseConfigGate: (() => void) | undefined;
+    const configGate = new Promise<void>((resolve) => {
+      releaseConfigGate = resolve;
+    });
+    mcpConnectPromise = setupMcp({
+      ...mcpSetupOpts,
+      onConfigResolved: ({ activeServerNames }) => {
+        pendingMcpServerNames = activeServerNames;
+        releaseConfigGate?.();
+      },
+      onServerReady: (result) => onMcpServerReady(result),
+    }).then((result) => {
+      mcpSetup = result;
+      return result;
+    });
+    await configGate;
+  } else {
+    mcpSetup = await setupMcp(mcpSetupOpts);
+  }
   const mcpToolsBase = opts.mcpTools ?? mcpSetup?.tools ?? [];
   if (mcpSetup?.configError) {
     process.stderr.write(`aluy: MCP — ${mcpSetup.configError}\n`);
   }
+  /**
+   * EST-BOOT-DECOUPLE — fecha os processos-server MCP em QUALQUER saída, síncrona
+   * (`mcpSetup` já populado — o caso comum: headless, ou decoupled já terminou) OU
+   * ainda em voo (`mcpConnectPromise` — decoupled, handshake ainda rolando). Espera
+   * a conexão terminar ANTES de fechar (nunca deixa processo-server órfão mesmo se o
+   * usuário sair no primeiro segundo, antes de qualquer server conectar). Idempotente
+   * (chamada em múltiplos `finally`/cleanup — `close()` do McpSetup já é best-effort).
+   */
+  const closeMcpSetup = async (): Promise<void> => {
+    if (mcpSetup) {
+      await mcpSetup.close();
+      return;
+    }
+    if (mcpConnectPromise) {
+      const settled = await mcpConnectPromise.catch(() => undefined);
+      await settled?.close();
+    }
+  };
 
   // ADR-0134/0135 — ATIVAÇÃO da bridge Telegram (`--telegram`). Roda ANTES do `buildSession`
   // p/ a tool `telegram_send` entrar no toolset (`mcpTools`, síncrono no build). O SINK é
@@ -1020,7 +1110,15 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       return note !== undefined ? { sessionCommands: note } : {};
     })(),
     // EST-0970 — tools MCP já descobertas (handshake feito acima) → registro/catraca.
+    // No boot desacoplado (`mcpDecoupled`), `mcpTools` está VAZIO aqui de propósito —
+    // cada server ainda está conectando e ANEXA suas tools depois (ver
+    // `controller.refreshMcpTools` mais abaixo, pós-`splash.finish()`).
     ...(mcpTools.length > 0 ? { mcpTools } : {}),
+    // EST-BOOT-DECOUPLE — servers MCP configurados mas ainda conectando: marca os
+    // PENDENTES no toolRegistry (mensagem honesta "ainda conectando" em vez de "tool
+    // desconhecida" p/ uma chamada precoce). Vazio (sem MCP configurado, ou boot
+    // síncrono) ⇒ sem efeito.
+    ...(pendingMcpServerNames.length > 0 ? { pendingMcpServers: pendingMcpServerNames } : {}),
     // EST-1012 — ROBUSTEZ DE MEMÓRIA · MONITOR DE PRESSÃO de heap (backstop de OOM). O
     // `heapLimitMb` é o MESMO `--max-old-space-size` que o launcher aplicou (resolvido
     // de `ALUY_MAX_HEAP_MB`/default); o amostrador lê o heap usado. A config escalonada
@@ -1032,6 +1130,45 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       sampleHeapUsed: () => process.memoryUsage().heapUsed,
     },
   });
+
+  // EST-BOOT-DECOUPLE — `built.controller` já existe: a partir de agora, um server
+  // MCP que conecta ANEXA suas tools direto no toolset AO VIVO (não precisa mais da
+  // fila) E empurra uma NOTA de progresso ("M/N conectados" — reusa `pushNote`, o
+  // MESMO canal do `/mcp reload`; o pedido original era `splash.setStatus`, mas o
+  // splash já não segura mais o boot — pode ter terminado ANTES de qualquer server
+  // conectar, então a nota na sessão viva é o canal que sobrevive à transição
+  // splash→TUI). `mcpConnectPromise` só existe no ramo TTY decoupled (nunca no
+  // headless) — seguro empurrar nota aqui sem checar `isTty` de novo. Drena qualquer
+  // resultado que tenha chegado ANTES deste ponto (defensivo — ver comentário acima
+  // da fila) COM a mesma nota, p/ nenhum server escapar da contagem.
+  {
+    const mcpTotal = pendingMcpServerNames.length;
+    let mcpDone = 0;
+    onMcpServerReady = (r) => {
+      built.controller.refreshMcpTools(r.tools, r.server);
+      if (mcpConnectPromise && mcpTotal > 0) {
+        mcpDone += 1;
+        const mark = r.ok ? '✓' : '✗';
+        const detail = r.ok ? '' : ` (${r.error ?? 'falhou'})`;
+        built.controller.pushNote('mcp', [
+          `${mark} ${r.server}${detail} — ${mcpDone}/${mcpTotal} conectados.`,
+        ]);
+      }
+    };
+    if (mcpConnectPromise && mcpTotal > 0) {
+      built.controller.pushNote('mcp', [`conectando ${mcpTotal} server(es) em background…`]);
+      // HUNT-CAP (#266) — avisos honestos (teto de tools por server) só ficam
+      // conhecidos quando TODO o setup termina (o array agregado, não o por-server).
+      void mcpConnectPromise.then((setup) => {
+        for (const w of setup.warnings ?? []) {
+          process.stderr.write(`aluy: MCP — ${w}\n`);
+        }
+      });
+    }
+    for (const r of mcpServerReadyQueue.splice(0, mcpServerReadyQueue.length)) {
+      onMcpServerReady(r);
+    }
+  }
 
   // EST-0972 — ALVO efetivo do auto-save: o id+cwd da sessão CORRENTE. Começa no
   // retomado (boot) ou num id novo. É MUTÁVEL pois o `/history` (retomada AO VIVO,
@@ -1546,7 +1683,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       // EST-1007 (HANG) — fecha os processos-server MCP em TODA saída do não-TTY
       // (best-effort, idempotente com o cleanup do ramo TTY). É o que destrava o EXIT:
       // sem isto os child-servers stdio pinam o event-loop e o `-p`/posicional travam.
-      if (mcpSetup) await mcpSetup.close();
+      await closeMcpSetup();
     }
   }
 
@@ -1657,12 +1794,21 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       instructionSources,
       globalCommands: globalUserCommands.length,
       projectCommands: projectUserCommands.length,
-      mcpServers: mcpSetup?.discovery.servers.length ?? 0,
+      // EST-BOOT-DECOUPLE — no boot desacoplado `mcpSetup` ainda não existe aqui (o
+      // handshake segue em background); `pendingMcpServerNames` (config já lida) dá
+      // a contagem CORRETA de servers CONFIGURADOS mesmo antes de qualquer um
+      // conectar. `mcpSetup?.discovery` vence quando já disponível (boot síncrono,
+      // ou decoupled que por acaso já terminou).
+      mcpServers: mcpSetup?.discovery.servers.length ?? pendingMcpServerNames.length,
       projectMcp: projectMcpHadServers,
       codexMcp: codexMcpHadServers,
     });
     if (lines.length > 0) built.controller.pushNote('config', lines);
   }
+
+  // EST-BOOT-DECOUPLE — o progresso da conexão MCP ("conectando N…"/"M/N conectados")
+  // já foi fiado logo após `buildSession` (ver comentário lá) — reusa o MESMO
+  // `pushNote('mcp', …)`, então nada aqui; só um lembrete de onde procurar.
 
   // Update-notifier — nota discreta no boot se o cache já viu uma versão mais nova; em
   // paralelo refresca o cache (1x/dia, fail-soft) p/ o próximo boot. Off via
@@ -1758,30 +1904,18 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
    */
   const refreshMcp = async (scope: string): Promise<{ ok: string[]; failed: string[] }> => {
     // Fecha os transports ANTIGOS (CRÍTICO: não fechar orfana os servers — bug #158/#189).
-    if (mcpSetup) await mcpSetup.close();
+    // `closeMcpSetup` também cobre o caso RARO de `/mcp reload` disparado ENQUANTO o
+    // boot desacoplado ainda conecta (EST-BOOT-DECOUPLE): espera o handshake em voo
+    // terminar antes de fechar, em vez de arriscar fechar um transport que nem
+    // terminou de nascer.
+    await closeMcpSetup();
 
-    // Re-roda a descoberta com as MESMAS opções do boot (config de disco). Tanto
-    // `reconnect` quanto `reload` chamam `setupMcp` — a diferença na v1 é semântica
-    // (reload re-lê os arquivos, reconnect re-handshake a mesma config; `setupMcp`
-    // sempre re-lê os arquivos de config de qualquer jeito).
-    const next = await setupMcp({
-      workspaceRoot: cwdAbs,
-      parentEnv: env,
-      // EST-1011 — o reconnect/reload mantém o MESMO confinamento de SO do boot (opt-in).
-      ...(mcpSandboxLauncher ? { sandboxLauncher: mcpSandboxLauncher } : {}),
-      // ADR-0150 (balde b) — seção `mcp` do config único (connectTimeoutMs/callTimeoutMs).
-      ...(savedConfig.mcp ? { mcpConfig: savedConfig.mcp } : {}),
-      loadProjectConfig: async () => {
-        const loaded = await projectMcpStore.load();
-        projectMcpHadServers = loaded.config.servers.length > 0;
-        return loaded;
-      },
-      loadCodexConfig: () => {
-        const loaded = codexMcpStore.load();
-        codexMcpHadServers = loaded.config.servers.length > 0;
-        return loaded;
-      },
-    });
+    // Re-roda a descoberta com as MESMAS opções do boot (config de disco — reusa
+    // `mcpSetupOpts`, o MESMO objeto do boot). Tanto `reconnect` quanto `reload`
+    // chamam `setupMcp` — a diferença na v1 é semântica (reload re-lê os arquivos,
+    // reconnect re-handshake a mesma config; `setupMcp` sempre re-lê os arquivos de
+    // config de qualquer jeito).
+    const next = await setupMcp(mcpSetupOpts);
 
     // v1 — o LIFECYCLE é all-or-nothing: `mcpSetup.close()` fecha TODOS os transports e
     // `setupMcp` relança TODOS. Logo o SWAP também tem que ser de TODAS as tools — se
@@ -3028,8 +3162,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // deferida do sink (sem injetar em sessão já morta).
     telegramBridge?.stop();
     telegramController = undefined;
-    // EST-0970 — fecha os processos-server MCP ao sair (sem vazar processo). Best-effort.
-    if (mcpSetup) await mcpSetup.close();
+    // EST-0970/EST-BOOT-DECOUPLE — fecha os processos-server MCP ao sair (sem vazar
+    // processo). Best-effort; espera o handshake em voo terminar se o boot desacoplado
+    // ainda estava conectando quando o usuário saiu (nunca deixa órfão).
+    await closeMcpSetup();
     // EST-0963 — solta o observador do sino ao sair (sem timer/subscrição órfã).
     detachNotify();
     // EST-0974 — solta o observador de hooks ao sair (sem subscrição órfã).

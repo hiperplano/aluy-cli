@@ -97,6 +97,10 @@ import {
   CAPABILITIES_TOOL_NAME,
   CAPABILITIES_TOOL_ALIAS,
 } from '../agent/tools/capabilities.js';
+import {
+  SESSION_COMMAND_TOOL_NAME,
+  SESSION_COMMAND_DESTRUCTIVE_CALL_NAME,
+} from '../agent/tools/session-command.js';
 import { EMPTY_POLICY, evaluatePolicyRules, type PermissionPolicy } from './policy.js';
 import { runHooks, type PreToolUseHook } from './hooks.js';
 import { SessionGrants } from './ask.js';
@@ -473,6 +477,27 @@ export class PolicyPermissionEngine implements PermissionEngine {
       );
     }
 
+    // -0.9) ADR-0147 · CLI-SEC-3 — RE-PASSE do gate DESTRUTIVO de `session_command`. A
+    //     PORTA concreta (`@hiperplano/aluy-cli`, que possui o registro/classificação —
+    //     ver `agent/tools/session-command.ts`) chama `decide()` uma 2ª vez com este
+    //     ToolCall SINTÉTICO (nunca uma tool REGISTRADA) quando o comando de sessão
+    //     pedido é `destructive` (ex.: `/clear full`, `/logout`, `/cron rm`). Forçamos
+    //     SEMPRE `ask`/`always-ask:destructive` aqui — na MESMA família de precedência
+    //     do teto de profundidade (-2)/toolScope (-1.9)/teto de memória (-1.d)/Plan (-1):
+    //     ACIMA do YOLO (0), então `--yolo`/`--unsafe` NÃO relaxa (decisão do dono,
+    //     ADR-0147 — destrutivo de SESSÃO nunca auto-aprova, nem no bypass total; ao
+    //     contrário das categorias sempre-ask "normais", que o YOLO deliberadamente
+    //     derruba por ADR-0072). O `effect.exact` (via `describeEffect`) já carrega o
+    //     texto EXATO do escopo (ex.: "apaga N fatos — IRREVERSÍVEL") que a porta montou.
+    if (call.name === SESSION_COMMAND_DESTRUCTIVE_CALL_NAME) {
+      return ok(
+        'ask',
+        `comando de sessão destrutivo — confirmação obrigatória (CLI-SEC-3, nunca auto-aprovável, nem sob --yolo): ${effect.exact}`,
+        'always-ask:destructive',
+        effect,
+      );
+    }
+
     // 0) ⚠ YOLO (`mode==='unsafe'`, flag `--yolo`/`--unsafe`) — PERMISSÃO COMPLETA.
     //    Auto-aprova TUDO, ANTES de qualquer regra de permissão, INCLUSIVE as
     //    categorias sempre-ask (destrutivo/rede/sudo/exec-pacote/config/MCP) E os
@@ -558,6 +583,27 @@ export class PolicyPermissionEngine implements PermissionEngine {
         'allow',
         'comunicação entre agentes (membership = consentimento, §13.1; authz na mesh: writer∈writers)',
         'agent-comms',
+        effect,
+      );
+    }
+
+    // 0.7) ADR-0147 — `session_command` (a via única p/ o agente disparar comandos de
+    //     SESSÃO) SEMPRE passa direto NESTE ponto (allow). O roteamento REAL por CLASSE
+    //     de efeito (`read-only`/`session-effect` ⇒ executa; `destructive` ⇒ RE-PASSA
+    //     `decide()` com o ToolCall sintético acima, ANTES de qualquer efeito;
+    //     `human-only`/não-classificado ⇒ deny honesto) acontece DENTRO da porta
+    //     concreta (`@hiperplano/aluy-cli`), que possui o registro/classificação — não
+    //     aqui. Chegou aqui ⇒ já passou Plan (que já negaria `session_command` como
+    //     qualquer outro efeito fora da allow-list de leitura) e o teto de profundidade/
+    //     toolScope/memória acima. Nada de novo na catraca além do que CADA comando
+    //     roteado já faz (GS-SC1: a tool não contorna o ponto único — é mais um
+    //     tool-call atrás dele; o efeito PRÓPRIO de um comando session-effect, ex.: os
+    //     `run_command` de dentro de um `/cycle`, segue passando por `decide()` normal).
+    if (call.name === SESSION_COMMAND_TOOL_NAME) {
+      return ok(
+        'allow',
+        'session_command: roteamento por classe de efeito ocorre na porta (ADR-0147) — destrutivos re-passam decide() internamente',
+        'default',
         effect,
       );
     }
@@ -801,6 +847,23 @@ export class PolicyPermissionEngine implements PermissionEngine {
         tool: ROOM_POST_TOOL_NAME,
         exact: `[sala ${code}] ${kind || 'msg'} → ${to || '?'}`,
       };
+    }
+    // ADR-0147 — efeito de `session_command`: mostra `/comando args` (o comando de
+    // sessão pedido), como um `commandEffect` (o mesmo formato de `run_command`).
+    if (call.name === SESSION_COMMAND_TOOL_NAME) {
+      const command = strInput(call, 'command');
+      const args = strInput(call, 'args');
+      return commandEffect(SESSION_COMMAND_TOOL_NAME, `/${command}${args ? ` ${args}` : ''}`);
+    }
+    // ADR-0147 — efeito EXATO do RE-PASSE destrutivo: a porta concreta já preparou o
+    // texto do escopo (`exact`, ex.: "apaga N fatos — IRREVERSÍVEL") no input sintético;
+    // ausente ⇒ cai no `/comando args` cru (mesma forma do caso acima, fail-safe).
+    if (call.name === SESSION_COMMAND_DESTRUCTIVE_CALL_NAME) {
+      const command = strInput(call, 'command');
+      const args = strInput(call, 'args');
+      const exact = strInput(call, 'exact');
+      const base = `/${command}${args ? ` ${args}` : ''}`;
+      return commandEffect(SESSION_COMMAND_TOOL_NAME, exact ? `${base} — ${exact}` : base);
     }
     // tool desconhecida: descreve o que der (nome + input serializado curto).
     // FU (EST-0946/0948) — NÃO implementar em v1, só registrado: `describeEffect`
