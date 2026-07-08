@@ -40,9 +40,23 @@ interface OneServerOutcome {
   readonly transport?: McpTransport;
 }
 
+/**
+ * EST-BOOT-DECOUPLE — hooks OPCIONAIS de progresso incremental. `onServerResult`
+ * dispara p/ CADA server assim que ELE resolve (ok ou falho) — não espera os
+ * outros. Todos os servers já conectam em paralelo (`Promise.all` abaixo); este
+ * hook só expõe o resultado individual mais cedo, p/ o caller (locus) ANEXAR as
+ * tools daquele server ao toolset AO VIVO sem esperar o `Promise.all` inteiro
+ * (ex.: um server lento não atrasa os outros já conectados). PURO: não muda o
+ * resultado agregado devolvido no fim — só adianta o SINAL por-server.
+ */
+export interface McpDiscoveryHooks {
+  readonly onServerResult?: (result: McpServerDiscovery) => void;
+}
+
 export async function discoverMcpTools(
   config: McpConfig,
   makeTransport: McpTransportFactory,
+  hooks?: McpDiscoveryHooks,
 ): Promise<McpDiscoveryResult> {
   // EST-0970/ADR-0058 (paralelização do boot) — cada server ATIVO conecta EM
   // PARALELO: `Promise.all` sobre um array de promises que NUNCA rejeitam (o
@@ -68,7 +82,13 @@ export async function discoverMcpTools(
           descriptor,
           transport,
         }));
-        return { result: { server: server.name, ok: true, tools }, transport };
+        const result: McpServerDiscovery = { server: server.name, ok: true, tools };
+        // EST-BOOT-DECOUPLE — dispara ASSIM QUE ESTE server resolve (independente dos
+        // outros ainda em voo): cada `async` do `.map` fecha sua PRÓPRIA promise; o
+        // `hooks?.onServerResult` roda aqui, no ponto em que ESTE server terminou —
+        // não espera o `Promise.all` agregado abaixo.
+        hooks?.onServerResult?.(result);
+        return { result, transport };
       } catch (e) {
         // fail-soft: o server não subiu / handshake falhou ⇒ some do toolset, com o
         // erro registrado. Fecha o transport (best-effort) p/ não vazar processo.
@@ -76,7 +96,14 @@ export async function discoverMcpTools(
         // `Promise.all` porque é capturada AQUI, dentro da própria promise do map —
         // nunca propaga pra fora e derruba as outras conexões em voo.
         void closeQuietly(transport);
-        return { result: { server: server.name, ok: false, tools: [], error: errMsg(e) } };
+        const result: McpServerDiscovery = {
+          server: server.name,
+          ok: false,
+          tools: [],
+          error: errMsg(e),
+        };
+        hooks?.onServerResult?.(result);
+        return { result };
       }
     }),
   );

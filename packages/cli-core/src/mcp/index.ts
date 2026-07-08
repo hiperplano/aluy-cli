@@ -45,7 +45,7 @@ export {
   type McpTransportFactory,
 } from './client.js';
 
-export { closeMcpTransports, discoverMcpTools } from './discovery.js';
+export { closeMcpTransports, discoverMcpTools, type McpDiscoveryHooks } from './discovery.js';
 
 export {
   adaptMcpTool,
