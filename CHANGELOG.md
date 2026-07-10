@@ -14,6 +14,16 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.106] — 2026-07-10
+
+### Adicionado
+
+- 🌱 **`test-then-register` de modelo local desconhecido — catálogo BYO verificado que cresce sozinho** (ADR-0153, emenda ao ADR-0152 D6c; `seguranca` gate FORTE): no backend `local`, quando um sub-agente pede um modelo local (`model` explícito — spawn/`.md`/dial de config) cujo slug NÃO está no catálogo (declarado nem registrado-na-sessão), o CLI deixa de barrar fail-closed ou de fazer warn-but-allow cego (ADR-0152) e passa a TESTAR AO VIVO uma vez (`checkModelConnectivity`, ping `max_tokens:1`) contra o MESMO provider já autorizado pelo dono, com o fetch PINADO anti-SSRF (EST-1115) e a credencial do keychain/env do boot — nunca `globalThis.fetch`, nunca credencial derivada do spawn/`.md`/config. Se o modelo RESPONDE, o slug é REGISTRADO (append idempotente em `~/.aluy/config.json` `providers[<ativo>].models` + na sessão) e o filho ROTEIA, com uma nota visível; se não responde, o filho recebe um erro acionável (`HTTP 404 — modelo ou baseURL errado?`, com sugestão por distância de edição) ANTES de rodar, sem derrubar os irmãos. Resolve o caso de providers tipo router (ex. tokenrouter/OpenRouter) que servem dezenas de modelos mas cujo catálogo declarado à mão lista só um ou dois — agora qualquer slug real do provider funciona na primeira vez que é pedido, e fica confirmado para sempre. Memoizado por slug (N filhos no mesmo slug = 1 teste); teto de 64 verificações distintas por sessão; slug já conhecido nunca re-testa. O DWIM (`dwimAgentFieldAsLocalModel`, rc.105) é **intocado** — continua fail-closed via catálogo confirmado, nunca dispara o teste vivo (o campo `agent` é inferência de campo errado, não intenção explícita de nomear um modelo).
+
+### Segurança
+
+- 🔒 **Sanitização do erro de conectividade antes da TUI:** `checkModelConnectivity` podia ecoar até 160 caracteres do corpo cru da resposta do provider (potencialmente com sequências ANSI/BEL ou texto sensível) e, no branch de erro de rede/timeout/redirect-bloqueado, a `location`/`baseURL` via a mensagem da exceção. O caminho novo de test-then-register nunca repassa esse texto cru: extrai só o status HTTP (+ dica "chave inválida?"/"modelo ou baseURL errado?" para 401/403/404) quando há uma resposta, ou um texto fixo genérico ("rede/baseURL, ou egress bloqueado pelo anti-SSRF") quando não há — nunca interpola o corpo do provider nem a mensagem da exceção.
+
 ## [1.0.0-rc.105] — 2026-07-10
 
 ### Corrigido
