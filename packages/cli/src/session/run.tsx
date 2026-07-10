@@ -2878,6 +2878,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         syncActive={sync !== undefined}
         version={CLI_VERSION}
         onCommand={onCommand}
+        // BURACO-NO-MEIO-RESIZE — arma o hard-clear do `clearScreen()` da App p/ ser FUNDIDO
+        // com o PRÓXIMO write de frame do Ink (ver `SyncStdout.primeClearOnNextFrame`), em vez
+        // de um write cru separado seguido de um repaint assíncrono — a JANELA em branco entre
+        // os dois é o "buraco no meio" ao AUMENTAR a janela reportado pelo dono. Ausente ⇒ a
+        // App cai no write cru imediato de sempre (só quando `sync` é `undefined`: as duas
+        // camadas de acabamento desligadas via env, `ALUY_SYNC_OUTPUT=0` e
+        // `ALUY_OVERWRITE_RENDER=0` — sem envelope não há "próximo write" p/ fundir). Spread
+        // condicional (≠ `armAtomicClear={sync ? fn : undefined}`) p/ NUNCA passar `undefined`
+        // explícito a uma prop opcional (`exactOptionalPropertyTypes`) — e p/ a App de fato
+        // cair no fallback cru quando `sync` está ausente, em vez de ganhar um no-op silencioso.
+        {...(sync ? { armAtomicClear: () => sync.primeClearOnNextFrame() } : {})}
         registerClearScreen={(fn) => {
           // EST-0983 — a App entrega o seu `clearScreen` (clear de tela+scrollback + remonta
           // do <Static>); o wiring o dispara quando a sessão zera (`/clear`, `/clear full`
