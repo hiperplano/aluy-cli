@@ -14,6 +14,13 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.104] — 2026-07-10
+
+### Corrigido
+
+- 🔓 **Roteamento de sub-agente para modelos `vendor/model`/`nome:tag` no backend local** (ADR-0152, condição de segurança 3 REVISADA/re-aprovada pelo `seguranca`): a validação de forma do slug de modelo (`isReasonableModelSlug`) barrava `/` e `:` no corpo do slug — isso impedia rotear um filho a modelos reais de providers multi-vendor no formato `vendor/model` (ex. `deepseek/deepseek-v4-flash` no OpenRouter/tokenrouter) ou com tags no formato `nome:tag` (ex. `llama3:8b` no Ollama), mesmo com o `kind:'local'`/D6 introduzido em rc.103. Agora `/` e `:` são aceitos no corpo do slug — a validação segue barrando SOMENTE caracteres de controle (CR/LF/NUL/TAB/DEL), vazio e o teto de tamanho, já que o slug só alimenta o corpo JSON (`body.model`) da chamada ao provider, nunca um path/header/arquivo.
+- 📎 **Orientação do agente para rodar um sub-agente num modelo específico:** a descrição do parâmetro `model` do `spawn_agent` agora deixa explícito que o modelo por-filho vai NESTE campo (ex. `"model": "deepseek/deepseek-v4-flash"`) — e que o agente NÃO deve tentar trocar o provider/modelo da SESSÃO inteira (via shell ou `/provider`/`/model`) para atender um pedido de modelo pontual num sub-agente.
+
 ## [1.0.0-rc.103] — 2026-07-10
 
 ### Adicionado

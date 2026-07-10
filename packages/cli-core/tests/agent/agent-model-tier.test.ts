@@ -298,6 +298,23 @@ describe('ADR-0152 (D6a) — sob ctx.backend==="local": ergonomia BYO + alias "c
     });
   });
 
+  // Caso REAL do bug de origem (ADR-0152): usuário em tokenrouter, modelo do pai
+  // `deepseek/deepseek-v4-pro`, quer rotear um filho a `deepseek/deepseek-v4-flash`.
+  it('caso real: slug `vendor/model` (tokenrouter/OpenRouter) roteia sob backend local', () => {
+    expect(resolveModelTier('deepseek/deepseek-v4-flash', { backend: 'local' })).toEqual({
+      kind: 'local',
+      slug: 'deepseek/deepseek-v4-flash',
+    });
+    expect(resolveModelTier('local:deepseek/deepseek-v4-flash')).toEqual({
+      kind: 'local',
+      slug: 'deepseek/deepseek-v4-flash',
+    });
+    expect(resolveModelTier('llama3:8b', { backend: 'local' })).toEqual({
+      kind: 'local',
+      slug: 'llama3:8b',
+    });
+  });
+
   it('"custom"/"custom:<slug>" sob backend local ⇒ ALIAS de "local" (mesma semântica)', () => {
     expect(resolveModelTier('custom', { backend: 'local' })).toEqual({ kind: 'local' });
     expect(resolveModelTier('custom:meu-slug', { backend: 'local' })).toEqual({
@@ -323,17 +340,22 @@ describe('ADR-0152 (D6, condição de segurança 3 / T5) — isReasonableModelSl
   it('aceita um slug razoável de provider', () => {
     expect(isReasonableModelSlug('deepseek-v4-flash')).toBe(true);
     expect(isReasonableModelSlug('gpt-4o-mini')).toBe(true);
+    // ADR-0152 (condição de segurança 3, REVISADA) — `/` é formato de mercado
+    // `vendor/model` (OpenRouter/tokenrouter); o slug vai só ao corpo JSON.
+    expect(isReasonableModelSlug('meta-llama/Llama-3.3-70B')).toBe(true);
+    expect(isReasonableModelSlug('deepseek/deepseek-v4-flash')).toBe(true);
+    expect(isReasonableModelSlug('deepseek/deepseek-v4-pro')).toBe(true);
   });
 
-  it('REJEITA barra (/), CR, LF e outros caracteres de controle', () => {
-    expect(isReasonableModelSlug('meta-llama/Llama-3.3-70B')).toBe(false); // path-like
+  it('aceita `:` no corpo do slug (formato `nome:tag`, ex. Ollama)', () => {
+    expect(isReasonableModelSlug('llama3:8b')).toBe(true);
+    expect(isReasonableModelSlug('deepseek:v4')).toBe(true);
+  });
+
+  it('REJEITA CR, LF, NUL, TAB e outros control chars', () => {
     expect(isReasonableModelSlug('deepseek\r\nX-Evil-Header: 1')).toBe(false); // CRLF
     expect(isReasonableModelSlug('deepseek' + String.fromCharCode(0) + 'x')).toBe(false); // NUL
     expect(isReasonableModelSlug('deepseek\tx')).toBe(false); // tab (controle)
-  });
-
-  it('REJEITA `:` no corpo do slug (reservado ao prefixo do sentinela)', () => {
-    expect(isReasonableModelSlug('deepseek:v4')).toBe(false);
   });
 
   it('REJEITA vazio, só espaço, e string acima do teto', () => {
@@ -349,34 +371,37 @@ describe('ADR-0152 (D6, condição de segurança 3 / T5) — isReasonableModelSl
   });
 });
 
-describe('ADR-0152 (D6, T5) — resolveModelTier REJEITA forma inválida de slug ANTES de virar config.model', () => {
-  it('"local:<slug-com-barra>" ⇒ kind:"unknown" (NUNCA "local" com slug perigoso)', () => {
+describe('ADR-0152 (D6, T5) — resolveModelTier: slug `vendor/model` ROTEIA; CRLF/control seguem barrados', () => {
+  it('"local:<slug-com-barra>" ⇒ kind:"local" (formato vendor/model — condição de segurança 3 revisada)', () => {
     expect(resolveModelTier('local:meta-llama/Llama-3.3-70B')).toEqual({
-      kind: 'unknown',
-      raw: 'local:meta-llama/Llama-3.3-70B',
+      kind: 'local',
+      slug: 'meta-llama/Llama-3.3-70B',
     });
   });
 
-  it('"local:<slug-com-CRLF>" ⇒ kind:"unknown"', () => {
+  it('"local:<slug-com-CRLF>" ⇒ kind:"unknown" (control/CRLF seguem barrados — a PROVA de que a validação segue ativa)', () => {
     const raw = 'local:deepseek\r\nX-Evil: 1';
     expect(resolveModelTier(raw)).toEqual({ kind: 'unknown', raw });
   });
 
-  it('slug CRU inválido sob backend local (ergonomia) ⇒ kind:"unknown" (não promove a "local")', () => {
+  it('slug CRU `vendor/model` sob backend local (ergonomia) ⇒ kind:"local" (agora roteia)', () => {
     expect(resolveModelTier('deepseek/v4-flash', { backend: 'local' })).toEqual({
-      kind: 'unknown',
-      raw: 'deepseek/v4-flash',
+      kind: 'local',
+      slug: 'deepseek/v4-flash',
     });
+  });
+
+  it('slug CRU com CRLF sob backend local ⇒ kind:"unknown" (control/CRLF seguem barrados)', () => {
     expect(resolveModelTier('deepseek\r\nx', { backend: 'local' })).toEqual({
       kind: 'unknown',
       raw: 'deepseek\r\nx',
     });
   });
 
-  it('"custom:<slug-inválido>" sob backend local (alias) ⇒ kind:"unknown"', () => {
+  it('"custom:<slug-com-barra>" sob backend local (alias) ⇒ kind:"local" (já não é mais "inválido")', () => {
     expect(resolveModelTier('custom:bad/slug', { backend: 'local' })).toEqual({
-      kind: 'unknown',
-      raw: 'custom:bad/slug',
+      kind: 'local',
+      slug: 'bad/slug',
     });
   });
 });

@@ -110,21 +110,42 @@ const LOCAL_PREFIX = 'local:';
 const MAX_MODEL_SLUG_LEN = 128;
 
 /**
- * ADR-0152 (D6, condição de segurança 3) — `true` se `v` é uma string com FORMA
- * razoável p/ virar o `config.model` de um `LocalModelClient`: não-vazia, curta, SEM
- * barra (`/` — evita path-like/travessia), SEM `:` (reservado ao PREFIXO do sentinela,
- * nunca ao corpo do slug) e SEM nenhum caractere de controle (inclui CR/LF — corta
- * injeção de header/linha). Aplicada ANTES de qualquer slug (spawn/`.md`/config,
- * `local:<slug>`/`custom:<slug>` sob backend local) virar `config.model` — em
- * `resolveModelTier`, o ÚNICO funil por onde toda fonte passa. Forma inválida ⇒ o
- * chamador trata como `kind:'unknown'` (nunca vira credencial/endpoint; nunca lança).
- * PURA.
+ * ADR-0152 (D6, condição de segurança 3 — REVISADA pelo `seguranca`, re-review
+ * 2026-07-10) — `true` se `v` é uma string com FORMA razoável p/ virar o `config.model`
+ * de um `LocalModelClient`: não-vazia, curta, e SEM nenhum caractere de controle
+ * (inclui CR/LF/NUL/TAB/DEL — corta injeção de header/linha). PERMITE `/` e `:` no
+ * corpo do slug — formato padrão de mercado para modelos multi-vendor (`vendor/model`,
+ * ex. `deepseek/deepseek-v4-flash` no OpenRouter/tokenrouter) e para tags (`nome:tag`,
+ * ex. `llama3:8b` no Ollama). Barrar `/`/`:` impedia rotear a modelos REAIS desses
+ * providers (bug real: usuário em backend local/tokenrouter, modelo do pai
+ * `deepseek/deepseek-v4-pro`, não conseguia rotear um filho a
+ * `deepseek/deepseek-v4-flash`).
+ *
+ * Por que é seguro permitir `/`/`:` aqui: este slug só alimenta o corpo JSON
+ * (`body.model`) da chamada ao provider — NUNCA um path de URL, header, nome de
+ * arquivo ou chave de disco (`callerForLocalModel`/`buildLocalModelClient` usam o
+ * `baseUrl` já resolvido do PAI; o slug só entra no payload). `/`/`:` no corpo JSON
+ * não habilitam path-traversal nem injeção de header — só CR/LF (quebra de linha, já
+ * barrada abaixo) teriam esse poder.
+ *
+ * INVARIANTE — se um refactor FUTURO passar a rotear este slug a um path de URL, a um
+ * header, ou a um nome de arquivo/chave de disco, aquele SINK EXIGE re-validação/
+ * encoding própria (o relaxamento de `/`/`:` aqui vale SOMENTE enquanto o slug for
+ * body-only). Aplicada ANTES de qualquer slug (spawn/`.md`/config, `local:<slug>`/
+ * `custom:<slug>` sob backend local) virar `config.model` — em `resolveModelTier`, o
+ * ÚNICO funil por onde toda fonte passa. Forma inválida ⇒ o chamador trata como
+ * `kind:'unknown'` (nunca vira credencial/endpoint; nunca lança). PURA.
+ *
+ * Desambiguação com os prefixos `local:`/`custom:` — o prefixo (`LOCAL_PREFIX`/
+ * `CUSTOM_PREFIX`) é removido por `startsWith` ANTES desta validação rodar sobre o
+ * CORPO do slug; um `:` (ou `/`) que sobra no corpo (ex. `llama3:8b`,
+ * `deepseek/deepseek-v4-flash`) é só DADO do slug, nunca reinterpretado como um novo
+ * prefixo de sentinela — sem ambiguidade de reparsing.
  */
 export function isReasonableModelSlug(v: unknown): v is string {
   if (typeof v !== 'string') return false;
   const t = v.trim();
   if (t === '' || t.length > MAX_MODEL_SLUG_LEN) return false;
-  if (t.includes('/') || t.includes(':')) return false;
   // eslint-disable-next-line no-control-regex
   return !/[\u0000-\u001F\u007F]/.test(t);
 }
