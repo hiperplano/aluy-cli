@@ -13,6 +13,8 @@ import {
   knownModelNames,
   suggestModelName,
   formatUnknownModelError,
+  formatUnknownLocalModelError,
+  isReasonableModelSlug,
   isCostlierTier,
   formatResolvedModelLabel,
 } from '../../src/index.js';
@@ -246,6 +248,222 @@ describe('ADR-0152 (D5-bis) — formatResolvedModelLabel + parent.activeModel (p
   it('NUNCA inclui provider/base_url/api_key/token mesmo com activeModel', () => {
     const label = formatResolvedModelLabel(
       { kind: 'inherit' },
+      { tier: 'aluy-flux', activeModel: 'deepseek-v4-pro' },
+    );
+    expect(label).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// ADR-0152 (D6) — roteamento a MODELO LOCAL específico: `kind:'local'`, o hint
+// `ctx.backend`, `isReasonableModelSlug` (condição de segurança 3, T5) e
+// `formatUnknownLocalModelError`. `resolveModelTier` permanece PURA — `ctx` é DADO.
+// ════════════════════════════════════════════════════════════════════════════
+describe('ADR-0152 (D6a) — resolveModelTier: prefixo/sentinela `local` explícitos (qualquer backend)', () => {
+  it('"local:<slug>" ⇒ kind:"local" com o slug, EM QUALQUER backend (ou sem ctx)', () => {
+    expect(resolveModelTier('local:deepseek-v4-flash')).toEqual({
+      kind: 'local',
+      slug: 'deepseek-v4-flash',
+    });
+    expect(resolveModelTier('local:deepseek-v4-flash', { backend: 'broker' })).toEqual({
+      kind: 'local',
+      slug: 'deepseek-v4-flash',
+    });
+    expect(resolveModelTier('local:deepseek-v4-flash', { backend: 'local' })).toEqual({
+      kind: 'local',
+      slug: 'deepseek-v4-flash',
+    });
+  });
+
+  it('prefixo "local:" é case-insensitive; preserva o CASE do slug', () => {
+    expect(resolveModelTier('LOCAL:Deepseek-V4-Flash')).toEqual({
+      kind: 'local',
+      slug: 'Deepseek-V4-Flash',
+    });
+  });
+
+  it('"local" sentinela BARE (sem slug) ⇒ kind:"local" degenerado (sem slug)', () => {
+    expect(resolveModelTier('local')).toEqual({ kind: 'local' });
+    expect(resolveModelTier(' Local ')).toEqual({ kind: 'local' });
+    expect(resolveModelTier('local:')).toEqual({ kind: 'local' });
+    expect(resolveModelTier('local:   ')).toEqual({ kind: 'local' });
+  });
+});
+
+describe('ADR-0152 (D6a) — sob ctx.backend==="local": ergonomia BYO + alias "custom"', () => {
+  it('slug CRU não reconhecido (não é sinônimo/aluy-*/sentinela) ⇒ kind:"local" (em vez de "unknown")', () => {
+    expect(resolveModelTier('deepseek-v4-flash', { backend: 'local' })).toEqual({
+      kind: 'local',
+      slug: 'deepseek-v4-flash',
+    });
+  });
+
+  it('"custom"/"custom:<slug>" sob backend local ⇒ ALIAS de "local" (mesma semântica)', () => {
+    expect(resolveModelTier('custom', { backend: 'local' })).toEqual({ kind: 'local' });
+    expect(resolveModelTier('custom:meu-slug', { backend: 'local' })).toEqual({
+      kind: 'local',
+      slug: 'meu-slug',
+    });
+  });
+
+  it('sinônimo/tier/sentinela conhecidos NÃO são afetados pelo backend local (continuam "tier"/"inherit")', () => {
+    expect(resolveModelTier('sonnet', { backend: 'local' })).toEqual({
+      kind: 'tier',
+      key: 'aluy-strata',
+    });
+    expect(resolveModelTier('same-as-parent', { backend: 'local' })).toEqual({ kind: 'inherit' });
+    expect(resolveModelTier('aluy-granito', { backend: 'local' })).toEqual({
+      kind: 'tier',
+      key: 'aluy-granito',
+    });
+  });
+});
+
+describe('ADR-0152 (D6, condição de segurança 3 / T5) — isReasonableModelSlug (forma do slug)', () => {
+  it('aceita um slug razoável de provider', () => {
+    expect(isReasonableModelSlug('deepseek-v4-flash')).toBe(true);
+    expect(isReasonableModelSlug('gpt-4o-mini')).toBe(true);
+  });
+
+  it('REJEITA barra (/), CR, LF e outros caracteres de controle', () => {
+    expect(isReasonableModelSlug('meta-llama/Llama-3.3-70B')).toBe(false); // path-like
+    expect(isReasonableModelSlug('deepseek\r\nX-Evil-Header: 1')).toBe(false); // CRLF
+    expect(isReasonableModelSlug('deepseek' + String.fromCharCode(0) + 'x')).toBe(false); // NUL
+    expect(isReasonableModelSlug('deepseek\tx')).toBe(false); // tab (controle)
+  });
+
+  it('REJEITA `:` no corpo do slug (reservado ao prefixo do sentinela)', () => {
+    expect(isReasonableModelSlug('deepseek:v4')).toBe(false);
+  });
+
+  it('REJEITA vazio, só espaço, e string acima do teto', () => {
+    expect(isReasonableModelSlug('')).toBe(false);
+    expect(isReasonableModelSlug('   ')).toBe(false);
+    expect(isReasonableModelSlug('x'.repeat(200))).toBe(false);
+  });
+
+  it('REJEITA valores não-string', () => {
+    expect(isReasonableModelSlug(undefined)).toBe(false);
+    expect(isReasonableModelSlug(42)).toBe(false);
+    expect(isReasonableModelSlug(null)).toBe(false);
+  });
+});
+
+describe('ADR-0152 (D6, T5) — resolveModelTier REJEITA forma inválida de slug ANTES de virar config.model', () => {
+  it('"local:<slug-com-barra>" ⇒ kind:"unknown" (NUNCA "local" com slug perigoso)', () => {
+    expect(resolveModelTier('local:meta-llama/Llama-3.3-70B')).toEqual({
+      kind: 'unknown',
+      raw: 'local:meta-llama/Llama-3.3-70B',
+    });
+  });
+
+  it('"local:<slug-com-CRLF>" ⇒ kind:"unknown"', () => {
+    const raw = 'local:deepseek\r\nX-Evil: 1';
+    expect(resolveModelTier(raw)).toEqual({ kind: 'unknown', raw });
+  });
+
+  it('slug CRU inválido sob backend local (ergonomia) ⇒ kind:"unknown" (não promove a "local")', () => {
+    expect(resolveModelTier('deepseek/v4-flash', { backend: 'local' })).toEqual({
+      kind: 'unknown',
+      raw: 'deepseek/v4-flash',
+    });
+    expect(resolveModelTier('deepseek\r\nx', { backend: 'local' })).toEqual({
+      kind: 'unknown',
+      raw: 'deepseek\r\nx',
+    });
+  });
+
+  it('"custom:<slug-inválido>" sob backend local (alias) ⇒ kind:"unknown"', () => {
+    expect(resolveModelTier('custom:bad/slug', { backend: 'local' })).toEqual({
+      kind: 'unknown',
+      raw: 'custom:bad/slug',
+    });
+  });
+});
+
+describe('ADR-0152 (D6, T9) — ZERO REGRESSÃO sob broker/sem ctx (ADR-0146 intocado)', () => {
+  it('resolveModelTier("gpt-9-turbo", {backend:"broker"}) === kind:"unknown" (comportamento do 0146)', () => {
+    expect(resolveModelTier('gpt-9-turbo', { backend: 'broker' })).toEqual({
+      kind: 'unknown',
+      raw: 'gpt-9-turbo',
+    });
+  });
+
+  it('resolveModelTier("gpt-9-turbo") SEM ctx ⇒ idêntico (kind:"unknown")', () => {
+    expect(resolveModelTier('gpt-9-turbo')).toEqual({ kind: 'unknown', raw: 'gpt-9-turbo' });
+  });
+
+  it('"custom"/"custom:<slug>" sob broker ⇒ segue kind:"custom" (NUNCA "local")', () => {
+    expect(resolveModelTier('custom', { backend: 'broker' })).toEqual({ kind: 'custom' });
+    expect(resolveModelTier('custom:meu-slug', { backend: 'broker' })).toEqual({
+      kind: 'custom',
+      slug: 'meu-slug',
+    });
+  });
+
+  it('rótulo sob broker MANTÉM o tier (não usa activeModel) — mesmo com kind:"local" (defesa em profundidade)', () => {
+    // Um `kind:'local'` só nasce sob backend local OU prefixo explícito; mas o
+    // FORMATADOR também não deve usar `activeModel` fora do ramo inherit/unknown —
+    // aqui provamos que o ramo `local` sempre usa o SLUG da própria resolução (ou,
+    // no degenerado, o activeModel/model do parâmetro `parent` — nunca decide por
+    // `backend`, que o formatador nem recebe).
+    const label = formatResolvedModelLabel(
+      { kind: 'tier', key: 'aluy-strata' },
+      { tier: 'aluy-flux', activeModel: 'nao-deveria-aparecer' },
+    );
+    expect(label).toBe('aluy-strata');
+  });
+});
+
+describe('ADR-0152 (D6c) — formatUnknownLocalModelError (probe local, sem vazamento)', () => {
+  it('inclui sugestão + lista de disponíveis (slugs do provider)', () => {
+    const msg = formatUnknownLocalModelError('deepseek-v4-flsh', [
+      'deepseek-v4-pro',
+      'deepseek-v4-flash',
+    ]);
+    expect(msg).toMatch(/deepseek-v4-flsh/);
+    expect(msg).toMatch(/deepseek-v4-flash/); // sugestão
+    expect(msg).toMatch(/Disponíveis/);
+  });
+
+  it('NUNCA inclui provider/base_url/api_key/token/secret na mensagem', () => {
+    const msg = formatUnknownLocalModelError('deepseek-v4-flsh', [
+      'deepseek-v4-pro',
+      'deepseek-v4-flash',
+    ]);
+    expect(msg).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization|host)\b/i);
+  });
+
+  it('sem sugestão razoável ⇒ ainda lista os disponíveis (sem quebrar)', () => {
+    const msg = formatUnknownLocalModelError('xxxxxxxxxxxxxxxxxxxx', ['deepseek-v4-pro']);
+    expect(msg).toMatch(/não encontrado/);
+    expect(msg).toMatch(/deepseek-v4-pro/);
+  });
+});
+
+describe('ADR-0152 (D6) — formatResolvedModelLabel: ramo "local"', () => {
+  it('kind:"local" com slug ⇒ "local · <slug>" (o slug PEDIDO, não o do pai)', () => {
+    expect(
+      formatResolvedModelLabel(
+        { kind: 'local', slug: 'deepseek-v4-flash' },
+        { tier: 'aluy-flux', activeModel: 'deepseek-v4-pro' },
+      ),
+    ).toBe('local · deepseek-v4-flash');
+  });
+
+  it('kind:"local" SEM slug (degenerado) ⇒ usa activeModel do pai, senão parent.model', () => {
+    expect(
+      formatResolvedModelLabel({ kind: 'local' }, { tier: 'aluy-flux', activeModel: 'deepseek-v4-pro' }),
+    ).toBe('local · deepseek-v4-pro');
+    expect(formatResolvedModelLabel({ kind: 'local' }, { tier: 'custom', model: 'x' })).toBe(
+      'local · x',
+    );
+    expect(formatResolvedModelLabel({ kind: 'local' }, { tier: 'aluy-flux' })).toBe('local');
+  });
+
+  it('NUNCA inclui provider/base_url/api_key/token/secret no rótulo local', () => {
+    const label = formatResolvedModelLabel(
+      { kind: 'local', slug: 'deepseek-v4-flash' },
       { tier: 'aluy-flux', activeModel: 'deepseek-v4-pro' },
     );
     expect(label).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);

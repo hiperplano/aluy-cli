@@ -23,6 +23,7 @@ import {
   SharedBudget,
   SubAgentSpawner,
   childCallerFor,
+  childEngineOf,
   PolicyPermissionEngine,
   NATIVE_TOOLS,
   type ModelCaller,
@@ -282,5 +283,163 @@ describe('EST-SUBAGENT-MODEL · SubAgentSpawner roteia cada filho ao tier do seu
     expect(shared.usage.iterations).toBe(3);
     // e cada um falou pelo seu tier (a contabilidade compartilhada não embaralhou a pista).
     expect(tierLog.map((e) => e.tag).sort()).toEqual(['aluy-deep', 'aluy-granito', 'aluy-strata']);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// ADR-0152 (D6b) — roteamento a um MODELO LOCAL específico do MESMO provider do
+// pai. `childCallerFor` casa `kind:'local'`; `SubAgentSpawner` fecha o fio ponta-
+// a-ponta com a porta `callerForLocalModel` (análoga a `callerForTier`/
+// `customCallerFor`, injetada pelo @hiperplano/aluy-cli).
+// ════════════════════════════════════════════════════════════════════════════
+describe('ADR-0152 (D6b) · childCallerFor — kind:"local" (PURO)', () => {
+  const parent = taggedCaller('PARENT', []);
+
+  it('model "local:<slug>" com callerForLocalModel injetada ⇒ usa a fábrica LOCAL com o SLUG', async () => {
+    const localCalls: { tag: string }[] = [];
+    const localFactory = (slug: string): ModelCaller => taggedCaller(`LOCAL:${slug}`, localCalls);
+    const c = childCallerFor(
+      { label: 'x', goal: 'g', model: 'local:deepseek-v4-flash' },
+      parent,
+      undefined,
+      undefined,
+      localFactory,
+    );
+    await c.call({ messages: [], idempotencyKey: 'k' });
+    expect(localCalls).toEqual([{ tag: 'LOCAL:deepseek-v4-flash' }]);
+  });
+
+  it('"custom" sob backend local, JÁ NORMALIZADO p/ "local:<slug>" pelo controller ⇒ mesma rota', async () => {
+    // Espelha o que `spawnNamed` (controller.ts) grava em `profile.model` quando a
+    // resolução COM ctx deu `kind:'local'` — a forma canônica explícita resolve
+    // igual aqui (SEM ctx, fronteira do core), preservando o roteamento.
+    const localCalls: { tag: string }[] = [];
+    const localFactory = (slug: string): ModelCaller => taggedCaller(`LOCAL:${slug}`, localCalls);
+    const c = childCallerFor(
+      { label: 'x', goal: 'g', model: 'local:meu-slug' }, // canonicalizado de "custom:meu-slug"
+      parent,
+      undefined,
+      undefined,
+      localFactory,
+    );
+    await c.call({ messages: [], idempotencyKey: 'k' });
+    expect(localCalls).toEqual([{ tag: 'LOCAL:meu-slug' }]);
+  });
+
+  it('model "local" BARE (degenerado, sem slug) ⇒ SEMPRE o caller do PAI (não chama a fábrica)', () => {
+    const localCalls: { tag: string }[] = [];
+    const localFactory = (slug: string): ModelCaller => taggedCaller(`LOCAL:${slug}`, localCalls);
+    const c = childCallerFor(
+      { label: 'x', goal: 'g', model: 'local' },
+      parent,
+      undefined,
+      undefined,
+      localFactory,
+    );
+    expect(c).toBe(parent);
+    expect(localCalls).toHaveLength(0);
+  });
+
+  it('kind:"local" com slug MAS SEM callerForLocalModel injetado ⇒ LANÇA (fail-closed, NÃO eleva ao pai)', () => {
+    expect(() =>
+      childCallerFor({ label: 'x', goal: 'g', model: 'local:deepseek-v4-flash' }, parent),
+    ).toThrow(/backend local|não é possível rotear/i);
+  });
+
+  it('o erro do fail-closed NUNCA vaza provider/base_url/credencial (GS-SAM-L4)', () => {
+    let msg = '';
+    try {
+      childCallerFor({ label: 'x', goal: 'g', model: 'local:deepseek-v4-flash' }, parent);
+    } catch (err) {
+      msg = err instanceof Error ? err.message : String(err);
+    }
+    expect(msg).toMatch(/deepseek-v4-flash/); // o slug (dado público) pode aparecer
+    expect(msg).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
+  });
+});
+
+describe('ADR-0152 (D6b) · SubAgentSpawner roteia um filho a um MODELO LOCAL específico', () => {
+  it('filho "local:<slug>" ⇒ chama callerForLocalModel(slug); irmão SEM model usa o caller do PAI', async () => {
+    const localLog: { tag: string }[] = [];
+    const parentLog: { tag: string }[] = [];
+    const callerForLocalModel = (slug: string): ModelCaller =>
+      taggedCaller(`LOCAL:${slug}`, localLog);
+    const parent = taggedCaller('PARENT', parentLog);
+
+    const spawner = new SubAgentSpawner({
+      model: parent,
+      callerForLocalModel,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: ports(),
+      baseTools: base,
+    });
+
+    const out = await spawner.spawn([
+      { label: 'flash', goal: 'g1', model: 'local:deepseek-v4-flash' },
+      { label: 'herdado', goal: 'g2' },
+    ]);
+
+    expect(out.map((o) => o.stop)).toEqual(['final', 'final']);
+    expect(localLog.map((e) => e.tag)).toEqual(['LOCAL:deepseek-v4-flash']);
+    expect(parentLog.map((e) => e.tag)).toEqual(['PARENT']);
+  });
+
+  it('T6 — SEM callerForLocalModel injetado ⇒ o filho "local:<slug>" FALHA FECHADO (ok:false); o IRMÃO RODA', async () => {
+    const parentLog: { tag: string }[] = [];
+    const parent = taggedCaller('PARENT', parentLog);
+    const spawner = new SubAgentSpawner({
+      model: parent,
+      // SEM callerForLocalModel — simula o pai NÃO estar em backend local.
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: ports(),
+      baseTools: base,
+    });
+
+    const out = await spawner.spawn([
+      { label: 'ruim', goal: 'g1', model: 'local:deepseek-v4-flash' },
+      { label: 'bom', goal: 'g2' },
+    ]);
+
+    expect(out[0]!.label).toBe('ruim');
+    expect(out[0]!.ok).toBe(false);
+    expect(out[0]!.stop).toBe('error');
+    expect(out[0]!.result).toMatch(/backend local|não é possível rotear/i);
+    // o irmão SEM model NÃO foi derrubado — rodou normalmente.
+    expect(out[1]!.label).toBe('bom');
+    expect(out[1]!.ok).toBe(true);
+    expect(out[1]!.stop).toBe('final');
+    // o filho "ruim" NUNCA caiu silenciosamente no caller do pai (só o "bom" o usou).
+    expect(parentLog.map((e) => e.tag)).toEqual(['PARENT']);
+  });
+
+  it('T1 — filho roteado a modelo LOCAL segue com toolset ⊆ pai (toolScope restrito) e spawn_agent NEGADO', () => {
+    // O roteamento de MODELO (kind:'local') é ORTOGONAL à catraca/escopo: a engine
+    // do filho é derivada do MESMO jeito (childEngineOf) INDEPENDENTE do caller
+    // escolhido — provamos que compor os dois (perfil com `model:'local:x'` E
+    // `toolScope` restrito) preserva as DUAS garantias ao mesmo tempo.
+    const parentEngine = new PolicyPermissionEngine({ mode: 'unsafe' });
+    const childEngine = childEngineOf(parentEngine, new Set(['read_file']));
+    // spawn_agent SEMPRE negado, mesmo fora do toolScope declarado (E-A1).
+    expect(childEngine.decide({ name: 'spawn_agent', input: {} }).decision).toBe('deny');
+    // fora do toolScope declarado (bash não está em ['read_file']) ⇒ negado (GS-MD1).
+    expect(childEngine.decide({ name: 'bash', input: {} }).decision).toBe('deny');
+    // dentro do toolScope ⇒ segue a policy do pai (aqui: unsafe allow-all).
+    expect(childEngine.decide({ name: 'read_file', input: {} }).decision).toBe('allow');
+  });
+
+  it('T8 — filho roteado a modelo LOCAL herda o MODO do pai: Plan NEGA efeito (mesmo SEM toolScope)', () => {
+    // `SubAgentSpawner.runChild` deriva a engine do filho de `this.permission` (a do
+    // PAI) via `childEngineOf` — o MESMO mecanismo, independente de qual `ModelCaller`
+    // o filho fala (tier/custom/local). Um pai em modo Plan produz um filho cuja
+    // engine NEGA qualquer efeito (R1 allow-list fechada de leitura, ADR-0055) — a
+    // pista de MODELO (local · deepseek-v4-flash) não relaxa isto em nada.
+    const planParent = new PolicyPermissionEngine({ mode: 'plan' });
+    const childEngine = childEngineOf(planParent, undefined);
+    // efeito clássico (run_command) ⇒ NEGADO (fora da allow-list read-only de Plan).
+    expect(childEngine.decide({ name: 'run_command', input: {} }).decision).toBe('deny');
+    // leitura pura (read_file) segue PERMITIDA (Plan é read-only, não "nada").
+    expect(childEngine.decide({ name: 'read_file', input: {} }).decision).toBe('allow');
+    // spawn_agent (efeito) também negado — nem um "neto" nem qualquer efeito nasce.
+    expect(childEngine.decide({ name: 'spawn_agent', input: {} }).decision).toBe('deny');
   });
 });

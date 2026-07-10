@@ -12,6 +12,7 @@ import {
   validateProviderBaseUrl,
   defaultLocalCatalog,
   findProvider,
+  BrokerModelCaller,
   type ProviderAdapter,
   type LocalProviderKind,
   type LocalAuthKind,
@@ -19,6 +20,7 @@ import {
   type StreamFetch,
   type LocalProviderCatalog,
   type WireFormat,
+  type ModelCaller,
 } from '@hiperplano/aluy-cli-core';
 import { NodeHostResolver } from '../../io/web-port.js';
 import { createLocalCredentialProvider } from './credential-resolver.js';
@@ -154,4 +156,54 @@ export async function buildLocalModelClient(
     fetch: doFetch,
     ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
   });
+}
+
+/**
+ * ADR-0152 (D6b) — porta `callerForLocalModel(slug)`: fábrica que RECONSTRÓI o
+ * client local do FILHO com o MESMO provider/auth/base_url/env/credencial do PAI
+ * (`base`, todo o `BuildLocalClientOptions` MENOS `model`, já resolvidos no BOOT
+ * pelo `run.tsx`) — só o `model` muda p/ o `slug` pedido. Chamador de
+ * `buildLocalModelClient({ ...base, model: slug })`: por NÃO passar `fetch`/
+ * `getCredential` explícitos aqui, herda os MESMOS defaults do pai (o fetch PINADO
+ * `createPinnedStreamFetch`, EST-1115, e o `createLocalCredentialProvider`) — NUNCA
+ * `globalThis.fetch` cru, nunca uma credencial derivada de DADO (GS-SAM-L1/L2).
+ *
+ * PROIBIDO: `base` só pode conter o que o BOOT já resolveu (catálogo/provider/auth/
+ * baseUrl/env/oauthAccessToken) — jamais um `provider`/`base_url`/`api_key` vindo de
+ * spawn/`.md`/config (condição de segurança 1). O chamador (controller, via
+ * `childCallerFor`) só passa o `slug` — um DADO de catálogo (HG-2), nunca credencial.
+ *
+ * MEMOIZADA por slug (client + caller): a validação anti-SSRF do `base_url` (só
+ * roda quando há OVERRIDE, ver `buildLocalModelClient`) e a montagem do client
+ * rodam NO MÁXIMO 1× por slug distinto nesta sessão — não a cada spawn (ADR-0152
+ * D6b: "não re-valida DNS por spawn — mesmo endpoint do pai, já confiável").
+ * `callerForLocalModel(slug)` é SÍNCRONA (devolve o `ModelCaller` na hora); a
+ * montagem ASSÍNCRONA do client acontece de forma PREGUIÇOSA na 1ª `.call()`.
+ */
+export function createLocalChildCallerFactory(
+  base: Omit<BuildLocalClientOptions, 'model'>,
+): (slug: string) => ModelCaller {
+  const clients = new Map<string, Promise<LocalModelClient>>();
+  const callers = new Map<string, ModelCaller>();
+  return (slug: string): ModelCaller => {
+    const cached = callers.get(slug);
+    if (cached) return cached;
+    const caller: ModelCaller = {
+      call: async (args) => {
+        let pending = clients.get(slug);
+        if (!pending) {
+          pending = buildLocalModelClient({ ...base, model: slug });
+          clients.set(slug, pending);
+        }
+        const client = await pending;
+        // `tier` é IGNORADO pelo `LocalModelClient` fora do caminho `tier:'custom'`
+        // (o `model` concreto vem da config BYO deste client, já fixada no `slug`
+        // acima) — o valor aqui é só p/ satisfazer o shape de `BrokerModelCallerOptions`
+        // (o MESMO adaptador que `wiring.ts` usa p/ os callers por-tier/custom).
+        return new BrokerModelCaller({ client, tier: 'custom' }).call(args);
+      },
+    };
+    callers.set(slug, caller);
+    return caller;
+  };
 }

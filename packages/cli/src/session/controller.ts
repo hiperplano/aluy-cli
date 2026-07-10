@@ -48,6 +48,7 @@ import {
   bindNamedAgent,
   resolveModelTier,
   formatUnknownModelError,
+  formatUnknownLocalModelError,
   formatResolvedModelLabel,
   isCostlierTier,
   childEngineOf,
@@ -592,6 +593,29 @@ export interface SessionControllerOptions {
    */
   readonly customCallerFor?: (slug?: string) => ModelCaller;
   /**
+   * ADR-0152 (D6b) — FÁBRICA de caller p/ um MODELO LOCAL específico do MESMO
+   * provider do pai. Quando o `model` de um filho resolve em `kind:'local'` (com
+   * `slug`), o `spawnNamed` a repassa ao spawner (`SubAgentSpawner`), que a usa PRA
+   * AQUELE FILHO. Construída no `run.tsx` (locus que tem `localCatalog`/`localCfg`/
+   * `env`/oauth em escopo) e THREADADA por `wiring.ts` — fecha SÓ sobre o provider/
+   * auth/base_url/credencial/fetch-PINADO já resolvidos no BOOT do pai (GS-SAM-L1);
+   * troca APENAS o `model`. Ausente ⇒ `kind:'local'` com slug NÃO roteia (erro legível
+   * — ver `spawnNamed`); nunca cai silenciosamente no caller do pai.
+   */
+  readonly callerForLocalModel?: (slug: string) => ModelCaller;
+  /**
+   * ADR-0152 (D6c) — PORTA do PROBE LOCAL: lista os slugs de modelo DECLARADOS do
+   * provider local corrente (`~/.aluy/providers.json`/catálogo embutido — ADR-0118),
+   * p/ o `spawnNamed` confrontar um `kind:'local'` ANTES do fan-out (erro legível +
+   * sugestão quando não bate — D6c caso 1, "catálogo LISTÁVEL"). `listNames()`
+   * devolve `undefined` quando o provider NÃO declara modelos (caso 2, "NÃO
+   * listável") ⇒ degrade HONESTO: `spawnNamed` empurra um AVISO VISÍVEL (não
+   * silencioso) e deixa o provider validar na 1ª chamada (warn-but-allow, ADR-0066).
+   * SÍNCRONA (dado já resolvido no boot — sem I/O de rede). Ausente ⇒ mesmo degrade
+   * (trata como "não listável" p/ TODO slug local).
+   */
+  readonly localModelCatalog?: { readonly listNames: () => readonly string[] | undefined };
+  /**
    * ADR-0146 (D2/L2) — PORTA do PROBE de nome de modelo: nomes disponíveis no CATÁLOGO
    * VIVO do broker (as MESMAS chaves do seletor `/model`), p/ o `spawnNamed` sugerir
    * (distância de edição) quando um `model` (spawn/`.md`/dial) não bate com nada
@@ -926,6 +950,10 @@ export class SessionController {
   private readonly modelProbe: { readonly availableNames: () => Promise<readonly string[]> } | undefined;
   /** ADR-0146 (D4) — default dos FILHOS quando nem spawn nem `.md` setam `model` (dial). */
   private readonly defaultChildModel: string | undefined;
+  /** ADR-0152 (D6c) — porta do PROBE LOCAL (catálogo declarado do provider local). */
+  private readonly localModelCatalog:
+    | { readonly listNames: () => readonly string[] | undefined }
+    | undefined;
   // EST-0948 — os tetos EFETIVOS da sessão (CLI-SEC-8), já resolvidos (flag>env>default,
   // clampados) pelo wiring. Fonte do TETO de tokens p/ os indicadores em % (StatusBar/
   // gate) e do `extend()` do `[c] continuar`.
@@ -1276,6 +1304,7 @@ export class SessionController {
     this.reloadProjectAgents = opts.reloadProjectAgents; // GS-MD7 fix: registry segue o cwd
     this.modelProbe = opts.modelProbe; // ADR-0146 (D2/L2) — catálogo vivo p/ sugestão
     this.defaultChildModel = opts.defaultChildModel; // ADR-0146 (D4) — dial global
+    this.localModelCatalog = opts.localModelCatalog; // ADR-0152 (D6c) — probe local
     this.clock = opts.clock ?? Date.now;
     this.isRoot =
       opts.isRoot ?? (() => typeof process.geteuid === 'function' && process.geteuid() === 0);
@@ -1548,6 +1577,11 @@ export class SessionController {
         // `model` resolve em `kind:'custom'` fala pelo provider BYO do pai (slug
         // indicado ou corrente). Ausente ⇒ cai no caller do pai (fail-safe).
         ...(opts.customCallerFor ? { customCallerFor: opts.customCallerFor } : {}),
+        // ADR-0152 (D6b) — fábrica de caller p/ um MODELO LOCAL específico: cada filho
+        // cujo `model` resolve em `kind:'local'` (com slug) fala pelo MESMO provider
+        // local do pai, só o `model` muda. Ausente ⇒ `kind:'local'` FALHA FECHADO
+        // (`childCallerFor` lança; `runChild` converte em `ok:false` — não roteia).
+        ...(opts.callerForLocalModel ? { callerForLocalModel: opts.callerForLocalModel } : {}),
         permission: opts.permission,
         ports: childPorts, // sem a porta `question` (ressalva seguranca EST-1110)
         baseTools, // o spawner REMOVE spawn_agent E perguntar p/ os filhos
@@ -6034,7 +6068,16 @@ export class SessionController {
       const effectiveModel = profile.model ?? mdModel ?? this.defaultChildModel;
 
       if (effectiveModel !== undefined) {
-        const resolution = resolveModelTier(effectiveModel);
+        // ADR-0152 (D6) — `ctx.backend` é o HINT DE DADO que o controller (que JÁ
+        // conhece `meta.backend`) injeta em `resolveModelTier` — o core permanece
+        // PURO/sem I/O (ADR-0053 §8, condição de segurança 6). Sob `backend:'local'`,
+        // um slug CRU/`custom`* promove a `kind:'local'` (ergonomia BYO, D6a); sob
+        // `broker` (ou backend ausente) o comportamento do ADR-0146 é INTOCADO —
+        // zero regressão (condição de segurança 9).
+        const resolution = resolveModelTier(
+          effectiveModel,
+          this.state.meta.backend !== undefined ? { backend: this.state.meta.backend } : undefined,
+        );
         // D2 — PROBE fail-closed ANTES do fan-out: nome sem cara de tier/sentinela
         // conhecido ⇒ erro legível + sugestão (nunca herança silenciosa).
         if (resolution.kind === 'unknown') {
@@ -6058,6 +6101,58 @@ export class SessionController {
               `— a sessão atual está no tier "${this.tier}". Troque para Custom (/model) ou não ` +
               `declare "model" (o filho herda o tier corrente do pai).`,
           );
+          continue;
+        }
+        // ADR-0152 (D6) — `kind:'local'`: roteia o filho a um MODELO LOCAL específico
+        // do MESMO provider do pai. Só vale numa sessão de backend LOCAL (é o
+        // provider LOCAL do pai que o filho herda — GS-SAM-L1); fora disso, erro
+        // legível ANTES de rodar (fail-closed), espelhando a checagem D3 acima.
+        if (resolution.kind === 'local') {
+          if (this.state.meta.backend !== 'local') {
+            outcomes[i] = errorOutcomeFor(
+              profile.label,
+              `modelo "${effectiveModel}": "local"/"local:<slug>" só vale numa sessão de backend ` +
+                `LOCAL (BYO direto) — a sessão atual está no backend "` +
+                `${this.state.meta.backend ?? 'broker'}". Rode com --backend local (ou não declare ` +
+                `"model" — o filho herda o modelo/tier corrente do pai).`,
+            );
+            continue;
+          }
+          // D6c — PROBE LOCAL fail-closed ANTES do fan-out, só quando HÁ um slug
+          // concreto pedido (o degenerado "local" sem slug segue o pai ao vivo — sem
+          // nome nenhum p/ confrontar, ver `childCallerFor`).
+          const slug = resolution.slug;
+          if (slug !== undefined) {
+            const names = this.localModelCatalog?.listNames();
+            if (names !== undefined) {
+              // Caso 1 (D6c) — catálogo LOCAL LISTÁVEL: confronta ANTES de rodar.
+              // Erro FAIL-CLOSED por-filho (GS-SAM-L5) — não derruba os irmãos (T6).
+              const found = names.some((n) => n.toLowerCase() === slug.toLowerCase());
+              if (!found) {
+                outcomes[i] = errorOutcomeFor(
+                  profile.label,
+                  formatUnknownLocalModelError(slug, names),
+                );
+                continue;
+              }
+            } else {
+              // Caso 2 (D6c) — catálogo NÃO listável: WARN-BUT-ALLOW (ADR-0066) com
+              // AVISO VISÍVEL (T7 — não silencioso, GS-SAM-L5); o provider valida na
+              // 1ª chamada (422 honesto se o slug não existir).
+              this.pushNote('spawn_agent', [
+                `não deu para confirmar "${slug}" no catálogo do provider local ` +
+                  `(sub-agente "${profile.label}") — o provider valida na 1ª chamada.`,
+              ]);
+            }
+          }
+          // Canonicaliza p/ a forma EXPLÍCITA `local:<slug>`/`local`: o `childCallerFor`
+          // (subagent.ts, core) re-resolve `profile.model` SEM `ctx` (fronteira ADR-
+          // 0053 §8) — a forma explícita resolve em `kind:'local'` em QUALQUER
+          // backend/ctx (D6a), preservando o roteamento até o spawner/`childCallerFor`.
+          const canonical = slug !== undefined ? `local:${slug}` : 'local';
+          if (profile.model !== canonical) profile = { ...profile, model: canonical };
+          resolved.push(profile);
+          resolvedIndex.push(i);
           continue;
         }
         // Q-3 (decisão do dono) — AVISO NÃO-BLOQUEANTE: tier hospedado mais caro que

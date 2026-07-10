@@ -341,6 +341,8 @@ export {
   knownModelNames,
   suggestModelName,
   formatUnknownModelError,
+  formatUnknownLocalModelError,
+  isReasonableModelSlug,
   isCostlierTier,
   formatResolvedModelLabel,
   type AluyTierKey,
