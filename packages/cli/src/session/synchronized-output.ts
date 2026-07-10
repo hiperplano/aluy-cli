@@ -74,6 +74,21 @@ const CURSOR_HOME = `${ESC}H`;
 /** O `ansiEscapes.clearTerminal` do Ink, byte a byte: apaga tela + scrollback + home. */
 const CLEAR_TERMINAL = `${ERASE_SCREEN}${ERASE_SCROLLBACK}${CURSOR_HOME}`;
 
+// BURACO-NO-MEIO-RESIZE (dono: "espaço em branco no MEIO da tela ao redimensionar") —
+// o `clearScreen()` da App (`packages/cli/src/session/App.tsx`) precisa emitir o MESMO
+// hard-clear do `/clear` (F58: ordem H;2J;3J — de propósito DIFERENTE de `CLEAR_TERMINAL`
+// acima, p/ NÃO casar o transform anti-flicker e realmente apagar o scrollback), mas SEM
+// deixar uma JANELA visível entre "apagar" e "repintar": antes, a App fazia
+// `stdout.write('\x1b[H\x1b[2J\x1b[3J')` CRU e SÓ DEPOIS `setStaticKey(k+1)` (setState
+// ASSÍNCRONO) — dois writes SEPARADOS no tempo, e o terminal PODE pintar o estado
+// intermediário (tela apagada, nada ainda) entre eles. `primeClearOnNextFrame` (abaixo, em
+// `wrapStdoutWithSync`) arma este HARD_CLEAR p/ ser PREPENDED ao PRÓXIMO write de frame do
+// Ink — os dois viram UM write só (dentro do MESMO envelope `?2026` quando ligado) ⇒ o
+// terminal NUNCA vê um frame "só apagado". Mesma ordem/bytes do `/clear` de sempre (F58
+// intacto — o `\x1b[3J` real segue limpando o scrollback).
+/** `\x1b[H\x1b[2J\x1b[3J` — hard-clear (tela+scrollback) do `clearScreen()` da App. */
+const HARD_CLEAR = `${CURSOR_HOME}${ERASE_SCREEN}${ERASE_SCROLLBACK}`;
+
 /** `\x1b[<row>;1H` — CUP: posiciona o cursor na LINHA `row` (1-based), coluna 1. */
 function cursorTo(row: number): string {
   return `${ESC}${row};1H`;
@@ -682,6 +697,25 @@ export interface SyncStdout {
    * não lê este valor).
    */
   setExpectedCockpitRows(rows: number | undefined): void;
+  /**
+   * BURACO-NO-MEIO-RESIZE — arma o HARD_CLEAR (`\x1b[H\x1b[2J\x1b[3J`, o mesmo do `/clear`,
+   * F58) para ser PREPENDED ao PRÓXIMO `write()` de frame do Ink — em vez de escrevê-lo
+   * AGORA como um write separado. Existe uma janela entre "escrever o erase" e "o Ink
+   * re-renderizar" (o `setStaticKey` que segue é um setState ASSÍNCRONO); dois writes
+   * SEPARADOS (mesmo cada um atômico via `?2026`) deixam essa janela VISÍVEL como um vazio
+   * entre eles — o "buraco no meio" reportado pelo dono ao AUMENTAR a janela com histórico
+   * grande. Fundir erase+conteúdo num write só ELIMINA a janela: o terminal nunca vê um
+   * frame "só apagado".
+   *
+   * Fallback: se nenhum write chegar em `ARM_CLEAR_FALLBACK_MS`, o erase é descarregado
+   * SOZINHO (nunca fica pendurado indefinidamente — ex.: um remonte do `<Static>` que por
+   * algum motivo não gera write algum). Degrada pro comportamento antigo só nesse caso raro.
+   *
+   * Chamador: `App.clearScreen()` (usado tanto por `/clear` quanto pelo repaint de resize —
+   * um único mecanismo, sem caminho especial para nenhum dos dois; `/clear` só GANHA com
+   * isto, o hard-clear real do F58 é preservado byte a byte).
+   */
+  primeClearOnNextFrame(): void;
 }
 
 /** Opções do wrapper — ambos os toggles default ON. Injetáveis p/ teste. */
@@ -746,6 +780,24 @@ export function wrapStdoutWithSync(
     () => expectedCockpitRows,
   );
 
+  // BURACO-NO-MEIO-RESIZE — estado do `primeClearOnNextFrame`: quando `true`, o PRÓXIMO
+  // `write()` de frame ganha o `HARD_CLEAR` PREPENDED (mesmo write, mesmo envelope `?2026`)
+  // em vez de um write separado — funde erase+repaint p/ o terminal nunca ver o meio-termo
+  // apagado. `pendingClearFallback` é a rede de segurança: se NENHUM write chegar a tempo
+  // (ex.: o remonte do `<Static>` não gerou write algum, caso raro), descarrega o erase
+  // sozinho — nunca fica pendurado indefinidamente.
+  let pendingHardClear = false;
+  let pendingClearFallback: ReturnType<typeof setTimeout> | undefined;
+  // Folga acima do debounce de 90ms do resize-effect da App (EST-1015) — cobre o caso comum
+  // (settle → clearScreen → setStaticKey → próximo write, tudo em poucos ms) com margem.
+  const ARM_CLEAR_FALLBACK_MS = 150;
+
+  const clearPendingClearFallback = (): void => {
+    if (pendingClearFallback === undefined) return;
+    clearTimeout(pendingClearFallback);
+    pendingClearFallback = undefined;
+  };
+
   const wrappedWrite = ((
     chunk: string | Uint8Array,
     encodingOrCb?: BufferEncoding | ((err?: Error | null) => void),
@@ -790,7 +842,19 @@ export function wrapStdoutWithSync(
       : cockpitActive
         ? cockpitDiffer.transform(body)
         : overwriteInPlace(body);
-    const framed = useSync ? `${BEGIN_SYNC}${transformed}${END_SYNC}` : transformed;
+    // BURACO-NO-MEIO-RESIZE — se um `primeClearOnNextFrame()` está ARMADO, este É o
+    // "próximo write de frame": prepende o `HARD_CLEAR` CRU (não passa pelo `overwriteInPlace`
+    // — mesma lógica do F58, precisa casar os bytes exatos do `/clear` de sempre) ANTES do
+    // conteúdo já transformado, tudo dentro do MESMO `original.write` (e do MESMO envelope
+    // `?2026` abaixo) ⇒ erase+repaint viram UM frame atômico só. Desarma (e cancela o
+    // fallback) — o próximo write comum não deve repetir o clear.
+    let withClear = transformed;
+    if (pendingHardClear) {
+      pendingHardClear = false;
+      clearPendingClearFallback();
+      withClear = `${HARD_CLEAR}${transformed}`;
+    }
+    const framed = useSync ? `${BEGIN_SYNC}${withClear}${END_SYNC}` : withClear;
     // UM único write ao stream real: tudo concatenado e atômico.
     return original.write(framed, callback as () => void);
   }) as NodeJS.WriteStream['write'];
@@ -808,6 +872,7 @@ export function wrapStdoutWithSync(
   const cleanup = (): void => {
     if (cleanedUp) return;
     cleanedUp = true;
+    clearPendingClearFallback(); // não deixa o timer da fallback pendurado no exit.
     // ESU final CRU (não pelo proxy — senão re-transformaria). Best-effort.
     if (!useSync) return; // sem `?2026`, não há modo sync p/ desfazer.
     try {
@@ -815,6 +880,30 @@ export function wrapStdoutWithSync(
     } catch {
       // saída já fechada ⇒ nada a fazer; não derruba o exit.
     }
+  };
+
+  // BURACO-NO-MEIO-RESIZE — descarrega o `HARD_CLEAR` SOZINHO (write próprio, fora do
+  // `wrappedWrite`) quando o fallback dispara: nenhum write de frame chegou a tempo p/
+  // fundir o erase com ele. Degrada pro comportamento antigo (write separado) só nesse
+  // caso raro — nunca deixa o terminal com um clear pendente indefinidamente.
+  const flushPendingClearAlone = (): void => {
+    pendingClearFallback = undefined;
+    if (!pendingHardClear) return;
+    pendingHardClear = false;
+    const framed = useSync ? `${BEGIN_SYNC}${HARD_CLEAR}${END_SYNC}` : HARD_CLEAR;
+    original.write(framed);
+  };
+
+  // BURACO-NO-MEIO-RESIZE — arma o clear p/ o PRÓXIMO write (ver doc em `SyncStdout`).
+  // Idempotente: chamar de novo enquanto já armado só re-arma o fallback (1 clear, não N).
+  const primeClearOnNextFrame = (): void => {
+    pendingHardClear = true;
+    clearPendingClearFallback();
+    pendingClearFallback = setTimeout(flushPendingClearAlone, ARM_CLEAR_FALLBACK_MS);
+    // `unref()` — o timer NUNCA deve, sozinho, manter o processo vivo (ex.: exit logo
+    // após o resize, antes do fallback disparar). Ausente em alguns runtimes de teste
+    // (fake timers) — chamada opcional, tolerante.
+    pendingClearFallback.unref?.();
   };
 
   // EST-0965 · ADR-0076 §5 — liga/desliga o modo cockpit do envelope (troca o transform de
@@ -845,5 +934,12 @@ export function wrapStdoutWithSync(
     expectedCockpitRows = rows;
   };
 
-  return { stdout: proxy, cleanup, setCockpit, resetDiffer, setExpectedCockpitRows };
+  return {
+    stdout: proxy,
+    cleanup,
+    setCockpit,
+    resetDiffer,
+    setExpectedCockpitRows,
+    primeClearOnNextFrame,
+  };
 }
