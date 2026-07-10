@@ -14,6 +14,18 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.101] — 2026-07-10
+
+### Corrigido
+
+- 🪟 REDIMENSIONAR a janela não deixa mais aquele "buraco no meio da tela" (espaço vazio) no modo inline ao AUMENTAR o tamanho: o `clearScreen` do resize agora arma um limpa-tela ATÔMICO dentro do envelope de saída sincronizada (`?2026`) — o erase e o re-render viajam juntos, sem frame intermediário só-limpo. Coberto por teste byte-a-byte.
+- 🏷️ O MODELO do sub-agente volta a aparecer na UI em TODOS os renderizadores (ADR-0146): o rótulo (ex.: `· herdado (tier)` / `· custom · <slug>`) era CLIPADO porque 3 renderizadores irmãos (`live-budget`, `cockpit-conversa`, `linear`) e o `export-transcript` não estavam sincronizados com o campo `model` — o `live-budget` subestimava a altura visual e disparava o bug de linhas mescladas do Ink 5.2.1. Agora os 4 threadam o `model` e a altura é contada certa; PARAR um sub-agente também PRESERVA o rótulo (antes o `cancelFlow` o descartava).
+
+### Alterado
+
+- 📊 As notas de carregamento de MCP saíram da tela principal (não poluem mais o composer logo após o splash): viram uma BARRA DE PROGRESSO no status bar (`MCP ▰▰▱ n/total`) enquanto conecta e um ✓ rápido (`✓ MCP n/n`) por ~2s ao terminar, que se auto-limpa. Em terminais estreitos (<60 col) a barra cai fora, como o resto do conteúdo suplementar.
+- 🎨 O HEADER da UI principal agora mostra o MESMO logo 3D do splash (marca âmbar em relevo + sombra âmbar-escura), porém ESTÁTICO — com as cores e a fonte, sem o efeito de brilho (shimmer). Degrada para o wordmark 2D em terminais mais baixos e para o ASCII `/\` no fallback `TERM=linux`.
+
 _(vazio)_
 
 ## [1.0.0-rc.100] — 2026-07-08
