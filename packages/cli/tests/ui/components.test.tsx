@@ -183,7 +183,10 @@ describe('Header — BANNER persistente do wordmark (EST-0988)', () => {
         .join(''),
     );
     // as PRIMEIRAS linhas do banner são exatamente a grade da marca 3D (antes do subtítulo).
-    expect(lines.slice(0, expectedRows.length)).toEqual(expectedRows);
+    // Comparação apara o whitespace À DIREITA: a grade crua tem padding de trailing spaces,
+    // mas o render do Ink os remove — o conteúdo visível é idêntico (é a MESMA fonte/arte).
+    const trimEnd = (s: string): string => s.replace(/\s+$/, '');
+    expect(lines.slice(0, expectedRows.length).map(trimEnd)).toEqual(expectedRows.map(trimEnd));
   });
 
   it('banner: as cores da marca (accent) E da sombra (shadowAmber) aparecem no frame cru (truecolor)', () => {
