@@ -4589,6 +4589,7 @@ export function App(props: AppProps): React.ReactElement {
         {...(!cycleUiOff && state.cycleProgress !== undefined
           ? { cycleProgress: state.cycleProgress }
           : {})}
+        {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
         busy={busy}
         frame={frame}
       />

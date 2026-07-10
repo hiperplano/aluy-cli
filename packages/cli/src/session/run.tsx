@@ -1131,32 +1131,26 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     },
   });
 
-  // EST-BOOT-DECOUPLE — `built.controller` já existe: a partir de agora, um server
-  // MCP que conecta ANEXA suas tools direto no toolset AO VIVO (não precisa mais da
-  // fila) E empurra uma NOTA de progresso ("M/N conectados" — reusa `pushNote`, o
-  // MESMO canal do `/mcp reload`; o pedido original era `splash.setStatus`, mas o
-  // splash já não segura mais o boot — pode ter terminado ANTES de qualquer server
-  // conectar, então a nota na sessão viva é o canal que sobrevive à transição
-  // splash→TUI). `mcpConnectPromise` só existe no ramo TTY decoupled (nunca no
-  // headless) — seguro empurrar nota aqui sem checar `isTty` de novo. Drena qualquer
-  // resultado que tenha chegado ANTES deste ponto (defensivo — ver comentário acima
-  // da fila) COM a mesma nota, p/ nenhum server escapar da contagem.
+  // EST-BOOT-DECOUPLE/EST-MCP-STATUSBAR — `built.controller` já existe: a partir de
+  // agora, um server MCP que conecta ANEXA suas tools direto no toolset AO VIVO (não
+  // precisa mais da fila) E avança o progresso da StatusBar (`mcpProgress` —
+  // `startMcpProgress`/`reportMcpServerReady`). ANTES isto empurrava uma NOTA na
+  // conversa ("conectando N…" → "M/N conectados") — pedido do dono: tirar isso da
+  // tela principal, deixar só uma barrinha discreta no rodapé + um ✓ rápido que some
+  // sozinho. `mcpConnectPromise` só existe no ramo TTY decoupled (nunca no headless) —
+  // seguro chamar aqui sem checar `isTty` de novo. Drena qualquer resultado que tenha
+  // chegado ANTES deste ponto (defensivo — ver comentário acima da fila), p/ nenhum
+  // server escapar da contagem.
   {
     const mcpTotal = pendingMcpServerNames.length;
-    let mcpDone = 0;
     onMcpServerReady = (r) => {
       built.controller.refreshMcpTools(r.tools, r.server);
       if (mcpConnectPromise && mcpTotal > 0) {
-        mcpDone += 1;
-        const mark = r.ok ? '✓' : '✗';
-        const detail = r.ok ? '' : ` (${r.error ?? 'falhou'})`;
-        built.controller.pushNote('mcp', [
-          `${mark} ${r.server}${detail} — ${mcpDone}/${mcpTotal} conectados.`,
-        ]);
+        built.controller.reportMcpServerReady(r.ok);
       }
     };
     if (mcpConnectPromise && mcpTotal > 0) {
-      built.controller.pushNote('mcp', [`conectando ${mcpTotal} server(es) em background…`]);
+      built.controller.startMcpProgress(mcpTotal);
       // HUNT-CAP (#266) — avisos honestos (teto de tools por server) só ficam
       // conhecidos quando TODO o setup termina (o array agregado, não o por-server).
       void mcpConnectPromise.then((setup) => {
@@ -1806,9 +1800,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     if (lines.length > 0) built.controller.pushNote('config', lines);
   }
 
-  // EST-BOOT-DECOUPLE — o progresso da conexão MCP ("conectando N…"/"M/N conectados")
-  // já foi fiado logo após `buildSession` (ver comentário lá) — reusa o MESMO
-  // `pushNote('mcp', …)`, então nada aqui; só um lembrete de onde procurar.
+  // EST-BOOT-DECOUPLE/EST-MCP-STATUSBAR — o progresso da conexão MCP já foi fiado logo
+  // após `buildSession` (ver comentário lá): `startMcpProgress`/`reportMcpServerReady`
+  // alimentam `state.mcpProgress`, que a StatusBar exibe como barrinha + ✓ transiente —
+  // NADA disso vira nota na conversa. Nada aqui; só um lembrete de onde procurar.
 
   // Update-notifier — nota discreta no boot se o cache já viu uma versão mais nova; em
   // paralelo refresca o cache (1x/dia, fail-soft) p/ o próximo boot. Off via

@@ -69,6 +69,7 @@ export const ptBR: FullCatalog = {
   'statusbar.quota': 'quota',
   'statusbar.cycle': 'ciclo',
   'statusbar.subcycles': 'subciclos',
+  'statusbar.mcpFailed': 'falhou',
   // FATIA 2 (CICLOS/SUBCICLOS) — cabeçalho cíclico na árvore de fluxos (<FlowTreeView>).
   'flowtree.cycle': 'ciclo',
   'flowtree.subcycles': 'subciclos',

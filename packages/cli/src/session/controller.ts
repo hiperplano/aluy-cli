@@ -187,6 +187,7 @@ import {
   type SessionMeta,
   type SessionState,
   type GovernanceCounts,
+  type McpProgress,
   type SubAgentChild,
   type SubAgentsBlock,
   type TurnAccountingView,
@@ -854,6 +855,14 @@ const DEFAULT_CONTEXT_WINDOW = 200_000;
 const DEFAULT_MEM_SAMPLE_MS = 2000;
 
 /**
+ * EST-MCP-STATUSBAR (pedido do dono) — quanto tempo o ✓ (ou aviso) do `mcpProgress`
+ * fica visível na StatusBar ANTES do auto-clear, uma vez que TODOS os servers MCP
+ * resolveram (`done:true`). Curto de propósito — é só a confirmação rápida de "terminou
+ * de conectar"; a barra não deve virar chrome permanente.
+ */
+const MCP_PROGRESS_CLEAR_MS = 2000;
+
+/**
  * EST-0948 — teto NOMEADO de tentativas do auto-retry (1ª + re-tentativas). "Fácil de
  * tunar" (estória): trocar aqui muda o default global; `RetryOptions.maxAttempts`
  * sobrescreve por sessão. 3 ⇒ 1ª + 2 re-tentativas antes do broker-error manual.
@@ -1007,6 +1016,11 @@ export class SessionController {
   // Guarda contra reentrância: uma compactação por pressão é async (chama o broker);
   // não dispara outra enquanto a 1ª está em voo (evita N compactações concorrentes).
   private memActionInFlight = false;
+  // EST-MCP-STATUSBAR — handle do timer de AUTO-CLEAR do `mcpProgress` (o ✓ rápido
+  // que some sozinho ~2s após o último server resolver). `null` fora dessa janela.
+  // Parado em `dispose()` (sem timer órfão após o unmount) e re-armado se um NOVO
+  // `startMcpProgress` chega antes do anterior expirar (ex.: `/mcp reload`).
+  private mcpProgressClearTimer: ReturnType<typeof setTimeout> | null = null;
   // EST-0959 · ADR-0055 — controle do eixo de modo (a engine concreta o satisfaz).
   // `null` se a engine injetada não expuser `mode`/`setMode` (ex.: stub de teste).
   private readonly modeControl: ModeControl | null;
@@ -5132,6 +5146,54 @@ export class SessionController {
     this.announceToolsChanged();
   }
 
+  /** EST-MCP-STATUSBAR — progresso CORRENTE da conexão MCP (StatusBar/teste). `undefined` = sem MCP configurado neste boot ou já concluído + auto-clear. */
+  get mcpProgress(): McpProgress | undefined {
+    return this.state.mcpProgress;
+  }
+
+  /**
+   * EST-MCP-STATUSBAR (pedido do dono) — ARMA o progresso da conexão MCP em background
+   * na StatusBar (`mcpProgress`), em vez da NOTA que antes poluía a conversa
+   * ("conectando N server(es)…"). Chamado UMA vez, no boot desacoplado, com o total de
+   * servers ativos (config já lida). `total<=0` ⇒ no-op (sem MCP configurado — a barra
+   * nunca aparece). Cancela um auto-clear pendente de uma rodada anterior (ex.:
+   * `/mcp reload` enquanto o ✓ da rodada passada ainda não sumiu).
+   */
+  startMcpProgress(total: number): void {
+    if (total <= 0) return;
+    if (this.mcpProgressClearTimer !== null) {
+      clearTimeout(this.mcpProgressClearTimer);
+      this.mcpProgressClearTimer = null;
+    }
+    this.patch({ mcpProgress: { connected: 0, total, failed: 0, done: false } });
+  }
+
+  /**
+   * EST-MCP-STATUSBAR — reporta que MAIS UM server MCP resolveu (êxito ou falha) — o
+   * MESMO evento que antes empurrava a linha "✓/✗ <server> — M/N conectados" como nota
+   * na conversa. Agora só avança o contador de `mcpProgress` (a StatusBar redesenha a
+   * barra). Quando `connected+failed` fecha o `total`, marca `done:true` (a StatusBar
+   * troca a barra pelo ✓/aviso rápido) e AGENDA o auto-clear (`mcpProgress:undefined`)
+   * ~`MCP_PROGRESS_CLEAR_MS` depois — a UI não precisa de temporizador próprio. No-op
+   * se `startMcpProgress` nunca rodou neste boot (sem MCP configurado).
+   */
+  reportMcpServerReady(ok: boolean): void {
+    const prev = this.state.mcpProgress;
+    if (prev === undefined) return;
+    const connected = prev.connected + (ok ? 1 : 0);
+    const failed = prev.failed + (ok ? 0 : 1);
+    const done = connected + failed >= prev.total;
+    this.patch({ mcpProgress: { connected, total: prev.total, failed, done } });
+    if (!done) return;
+    if (this.mcpProgressClearTimer !== null) clearTimeout(this.mcpProgressClearTimer);
+    this.mcpProgressClearTimer = setTimeout(() => {
+      this.mcpProgressClearTimer = null;
+      this.patch({ mcpProgress: undefined });
+    }, MCP_PROGRESS_CLEAR_MS);
+    // Não segura o event-loop vivo só por causa do auto-clear (sem timer-zumbi no exit).
+    if (typeof this.mcpProgressClearTimer.unref === 'function') this.mcpProgressClearTimer.unref();
+  }
+
   /**
    * EST-BOOT-DECOUPLE — RE-ANUNCIA o catálogo NATIVO (`onToolsReady`) a partir do
    * estado ATUAL do registry (`toolRegistry.list()`, não o `allTools` congelado do
@@ -6601,6 +6663,12 @@ export class SessionController {
     this.flush.cancel();
     // EST-1012 — para o monitor de pressão de memória (sem timer órfão após o unmount).
     this.stopMemoryMonitor();
+    // EST-MCP-STATUSBAR — para o auto-clear pendente do `mcpProgress` (sem timer órfão
+    // após o unmount; o `unref()` já o isolava do exit, mas o dispose limpa de qualquer jeito).
+    if (this.mcpProgressClearTimer !== null) {
+      clearTimeout(this.mcpProgressClearTimer);
+      this.mcpProgressClearTimer = null;
+    }
     // EST-MON-5 · ADR-0079 — para TODOS os monitores ativos (file-watch/process-wait):
     // fecha watchers do fs + limpa timers de poll ⇒ nenhum vigia órfão segura o event-loop.
     this.monitorStore.cancelAll();

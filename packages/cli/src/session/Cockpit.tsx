@@ -410,6 +410,9 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
           props.state.cycleProgress !== undefined
             ? { cycleProgress: props.state.cycleProgress }
             : {})}
+          {...(props.state.mcpProgress !== undefined
+            ? { mcpProgress: props.state.mcpProgress }
+            : {})}
         />
       </Box>
 
