@@ -247,24 +247,31 @@ describe('App — resize INLINE não deixa BURACO em branco entre o erase e o re
       // só existe UM write com o prefixo por resize-settle (a fusão é 1x, não N).
       expect(body.startsWith(HARD_CLEAR)).toBe(true);
 
-      // O PROVA-CHAVE do "zero buraco": o Ink escreve o `log.clear()` interno (o 1º write
-      // após o `setStaticKey`, onde o HARD_CLEAR foi fundido) e o CONTEÚDO real (histórico
-      // remontado) em writes SEPARADOS — mas ambos fazem parte do MESMO commit síncrono do
-      // React/Ink (sem `await`/timer entre eles). Provamos isso por TEMPO, não só por bytes:
-      // o próximo write que carrega o HEADER chega em ~0ms (mesmo tick de JS) depois deste —
-      // bem diferente da lacuna ASSÍNCRONA do bug antigo (write cru imediato → setState →
-      // reconciliação → PRÓXIMO write, tipicamente vários ms depois, PIOR com histórico
-      // grande). Zero gap temporal mensurável ⇒ o terminal nunca tem chance de pintar o
-      // meio-termo "só apagado" entre o erase e o conteúdo.
-      const idx = resizeWrites.indexOf(w);
-      const nextContentIdx = resizeWrites.findIndex(
-        (cand, i) => i > idx && stripSync(cand).includes(HEADER),
-      );
-      expect(nextContentIdx).toBeGreaterThan(idx); // existe um write com conteúdo real depois.
-      const gapMs = fake.ts[before + nextContentIdx]! - fake.ts[before + idx]!;
-      // Folga generosa (50ms) — bem abaixo de qualquer debounce/timer da App (90ms/500ms);
-      // um gap desse tamanho só é possível se os writes forem SÍNCRONOS entre si.
-      expect(gapMs).toBeLessThan(50);
+      // O PROVA-CHAVE do "zero buraco": o CONTEÚDO real (histórico remontado, marcado pelo
+      // HEADER) chega no MESMO commit síncrono do React/Ink que o erase — sem `await`/timer
+      // mensurável entre eles. Isso pode se manifestar de DUAS formas, ambas válidas para o
+      // fix (a fusão total é o caso IDEAL, ainda mais atômica que a fusão em dois writes):
+      //   (a) o Ink funde o HEADER NO PRÓPRIO write do HARD_CLEAR (`body` já contém o
+      //       HEADER) — gap = 0, nem precisa de write posterior; OU
+      //   (b) o HEADER chega num write POSTERIOR, mas em ~0ms (mesmo tick de JS) — bem
+      //       diferente da lacuna ASSÍNCRONA do bug antigo (write cru imediato → setState →
+      //       reconciliação → PRÓXIMO write, tipicamente vários ms depois, PIOR com histórico
+      //       grande).
+      // Em ambos os casos, zero gap temporal mensurável ⇒ o terminal nunca tem chance de
+      // pintar o meio-termo "só apagado" entre o erase e o conteúdo.
+      if (!body.includes(HEADER)) {
+        const idx = resizeWrites.indexOf(w);
+        const nextContentIdx = resizeWrites.findIndex(
+          (cand, i) => i > idx && stripSync(cand).includes(HEADER),
+        );
+        expect(nextContentIdx).toBeGreaterThan(idx); // existe um write com conteúdo real depois.
+        const gapMs = fake.ts[before + nextContentIdx]! - fake.ts[before + idx]!;
+        // Folga generosa (50ms) — bem abaixo de qualquer debounce/timer da App (90ms/500ms);
+        // um gap desse tamanho só é possível se os writes forem SÍNCRONOS entre si.
+        expect(gapMs).toBeLessThan(50);
+      }
+      // Caso `body.includes(HEADER)` seja verdadeiro, a fusão total já prova gap = 0 — nada
+      // mais a checar para este write.
     }
 
     inst.unmount();
