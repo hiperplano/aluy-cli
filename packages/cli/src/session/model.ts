@@ -486,6 +486,31 @@ export interface CycleProgress {
   readonly subcyclesTotal: number;
 }
 
+/**
+ * EST-MCP-STATUSBAR (pedido do dono) — CACHE DE RENDER do progresso da CONEXÃO dos
+ * servers MCP em background (boot desacoplado, EST-BOOT-DECOUPLE). Antes, cada server
+ * que conectava empurrava uma NOTA na conversa ("conectando N…" → "M/N conectados") —
+ * poluía a tela principal. Agora o progresso vive SÓ na StatusBar: uma barrinha
+ * `connected+failed / total` enquanto conecta, e um ✓ rápido quando `done` (o
+ * controller AGENDA o auto-clear ~2s depois — a StatusBar não precisa de timer
+ * próprio). `undefined` ⇒ sem MCP configurado (ou já terminou + expirou) ⇒ SEM
+ * indicador (zero ruído). Leitura/display — não dispara efeito, não vaza segredo.
+ */
+export interface McpProgress {
+  /** Quantos servers já conectaram COM SUCESSO. */
+  readonly connected: number;
+  /** Total de servers MCP configurados (ativos) neste boot. */
+  readonly total: number;
+  /** Quantos servers FALHARAM ao conectar (contam p/ o `connected+failed===total`). */
+  readonly failed: number;
+  /**
+   * `true` quando TODOS os servers resolveram (êxito ou falha) — a StatusBar troca a
+   * barra por um ✓ (ou aviso, se `failed>0`) rápido. O controller limpa o campo
+   * inteiro (`undefined`) ~2s depois — a UI não precisa de temporizador próprio.
+   */
+  readonly done: boolean;
+}
+
 /** LOTE-2 — contagens da governança `.aluy/` carregada (StatusBar + `/stat`). */
 export interface GovernanceCounts {
   readonly agents: number;
@@ -605,6 +630,13 @@ export interface SessionState {
    * F8 é o único stop, então o dono PRECISA ver que há trabalho órfão vivo. 0/ausente = nada.
    */
   readonly detachedSubagents?: number | undefined;
+  /**
+   * EST-MCP-STATUSBAR (pedido do dono) — progresso da CONEXÃO dos servers MCP em
+   * background, exibido SÓ na StatusBar (`MCP ▰▰▱ 2/3` → `✓ MCP 3/3`, some sozinho).
+   * `undefined` ⇒ sem MCP configurado neste boot, ou já concluiu + o auto-clear (~2s)
+   * já rodou. Ver `McpProgress`.
+   */
+  readonly mcpProgress?: McpProgress | undefined;
   /**
    * LOTE-2 (governança .aluy/) — CONTAGENS do que foi CARREGADO da `.aluy/` (+ `~/.aluy/`
    * global) no boot: agentes, comandos, skills, workflows e itens de memória de projeto. A

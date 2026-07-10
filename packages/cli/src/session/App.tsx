@@ -210,6 +210,16 @@ export interface AppProps {
    * key do Static; o wiring tem a memória + o estado da confirmação. Chamado 1× no mount.
    */
   readonly registerClearScreen?: (clearScreen: () => void) => void;
+  /**
+   * BURACO-NO-MEIO-RESIZE (dono: "espaço em branco no MEIO da tela ao redimensionar") —
+   * arma o hard-clear (`\x1b[H\x1b[2J\x1b[3J`, mesmo do `/clear`) p/ ser FUNDIDO com o
+   * PRÓXIMO write de frame do Ink em vez de escrito AGORA como um write separado (ver
+   * `SyncStdout.primeClearOnNextFrame` em `synchronized-output.ts`). Sem isto, `clearScreen`
+   * cai no write CRU imediato (comportamento antigo) — usado quando o wiring NÃO envelopou o
+   * stdout (`ALUY_SYNC_OUTPUT=0` E `ALUY_OVERWRITE_RENDER=0`, ou testes que montam a App
+   * direto sobre um stdout não-envelopado): sem envelope não há PRÓXIMO write para fundir.
+   */
+  readonly armAtomicClear?: () => void;
   /** EST-0957 — índice de arquivos do workspace p/ o picker `@`. */
   readonly fileIndex?: FileIndexPort;
   /** EST-0957 — leitor confinado/path-deny dos anexos `@arquivo`. */
@@ -1197,11 +1207,29 @@ export function App(props: AppProps): React.ReactElement {
   // (synchronized-output.ts). Assim o clearScreen não é interceptado pelo transform
   // anti-flicker e o scrollback é REALMENTE limpo — sem acumular conteúdo fantasma a
   // cada restart de sessão.
+  const armAtomicClear = props.armAtomicClear;
   const clearScreen = useCallback((): void => {
     // F-FLICKER (debug) — este é o "carrega TUDO de novo": limpa a tela + remonta o
     // <Static> (re-emite o histórico inteiro). Se isto dispara ao abrir `/`, achamos o bug.
     debugRenderLog('clearScreen() → \\x1b[2J\\x1b[3J + staticKey++ (REEMITE histórico)');
-    stdout?.write('\x1b[H\x1b[2J\x1b[3J');
+    // BURACO-NO-MEIO-RESIZE (dono: "espaço em branco no MEIO da tela ao redimensionar") —
+    // ANTES: `stdout?.write('\x1b[H\x1b[2J\x1b[3J')` CRU aqui e SÓ DEPOIS `setStaticKey`
+    // (setState ASSÍNCRONO — o remonte real do `<Static>` só acontece no PRÓXIMO render do
+    // Ink). Dois writes SEPARADOS no tempo: o terminal PODE pintar o meio-termo "só apagado"
+    // entre eles — a JANELA cresce com o tamanho do histórico (mais tempo pra montar o
+    // repaint). Agora ARMAMOS o clear (`primeClearOnNextFrame`, synchronized-output.ts) pro
+    // wrapper de stdout FUNDIR o hard-clear com o PRÓXIMO write de frame do Ink — o mesmo
+    // `setStaticKey` abaixo dispara esse write — virando UM write atômico só. Zero write cru
+    // aqui ⇒ zero janela visível. Sem `armAtomicClear` (stdout não envelopado — ambas as
+    // camadas de acabamento desligadas, ou App montada direto s/ o wiring) não há "próximo
+    // write" p/ fundir: cai no write CRU imediato de sempre (mesma ordem H;2J;3J do F58 —
+    // NÃO casa o prefixo `CLEAR_TERMINAL` do overwriteInPlace, o scrollback é REALMENTE
+    // limpo mesmo nesse caminho).
+    if (armAtomicClear) {
+      armAtomicClear();
+    } else {
+      stdout?.write('\x1b[H\x1b[2J\x1b[3J');
+    }
     setStaticKey((k) => k + 1);
     // FIX (`/clear` no cockpit → TELA BRANCA, achado do dono) — no alt-screen o
     // `CockpitDiffer` mantém o FRAME ANTERIOR e só reescreve as linhas que MUDARAM. O
@@ -1213,7 +1241,7 @@ export function App(props: AppProps): React.ReactElement {
     // de novo sobre a tela limpa) ⇒ o cockpit vazio reaparece inteiro. No inline é no-op (o
     // differ do cockpit não está no caminho). Ver `createCockpitDiffer`/`resetDiffer`.
     if (fullscreen) props.cockpitScreen?.resetDiffer?.();
-  }, [stdout, fullscreen, props.cockpitScreen]);
+  }, [stdout, fullscreen, props.cockpitScreen, armAtomicClear]);
 
   // EST-0983 — entrega o `clearScreen` ao WIRING (que decide QUANDO a sessão zera —
   // `/clear` sempre; `/clear full` só na confirmação; `/clear memory` nunca). Registro
@@ -4589,6 +4617,7 @@ export function App(props: AppProps): React.ReactElement {
         {...(!cycleUiOff && state.cycleProgress !== undefined
           ? { cycleProgress: state.cycleProgress }
           : {})}
+        {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
         busy={busy}
         frame={frame}
       />

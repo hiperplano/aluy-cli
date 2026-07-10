@@ -908,8 +908,12 @@ export function linearize(block: SessionBlock): string {
                 : c.stop === 'limit'
                   ? 'teto'
                   : 'falhou';
+        // ADR-0146 (D5) — tier/modelo RESOLVIDO: mostrado também no não-TTY
+        // (piped/`--print`/CI), na mesma posição do `<ChildLine>` do TTY (antes do
+        // `summary`, independente do status).
+        const modelPart = c.model !== undefined ? ` · ${c.model}` : '';
         const tail = c.summary !== undefined && c.status !== 'running' ? ` · ${c.summary}` : '';
-        return `  [${c.label}] ${word}${tail}`;
+        return `  [${c.label}] ${word}${modelPart}${tail}`;
       });
       return [head, ...lines].join('\n');
     }

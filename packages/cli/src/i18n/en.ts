@@ -72,6 +72,7 @@ export const en: PartialCatalog = {
   'statusbar.quota': 'quota',
   'statusbar.cycle': 'cycle',
   'statusbar.subcycles': 'subcycles',
+  'statusbar.mcpFailed': 'failed',
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': 'broker',

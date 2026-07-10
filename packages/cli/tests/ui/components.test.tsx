@@ -9,7 +9,8 @@ import { render } from 'ink-testing-library';
 import type { AskRequest } from '@hiperplano/aluy-cli-core';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
-import { Header } from '../../src/ui/components/Header.js';
+import { Header, HEADER_BANNER_MIN_ROWS, HEADER_WORDMARK_3D_MIN_ROWS } from '../../src/ui/components/Header.js';
+import { composeShadowedWordmark, rowSegments, SHADOW_SHADE } from '../../src/ui/components/wordmark-3d.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { ToolLine } from '../../src/ui/components/ToolLine.js';
 import { AskDialog } from '../../src/ui/components/AskDialog.js';
@@ -152,15 +153,83 @@ describe('Header — BANNER persistente do wordmark (EST-0988)', () => {
     expect(out.toLowerCase()).not.toMatch(/openai|anthropic|gpt|gemini/);
   });
 
-  it('banner: FONTE ÚNICA — o wordmark do header é o MESMO do Boot (█ idêntico)', () => {
+  // FIX (dono) — o banner passou a usar a MESMA arte 3D do splash (<ShadowedWordmark>,
+  // marca âmbar + sombra âmbar), ESTÁTICA (sem shimmer). O <Boot> (splash secundário de
+  // "conectando") segue com o <Wordmark> 2D PLANO — as duas telas agora DIVERGEM de
+  // propósito (o 3D com sombra é exclusivo do splash principal + banner do header).
+  it('banner: usa a arte 3D COM SOMBRA (<ShadowedWordmark>), NÃO o wordmark 2D plano do Boot', () => {
     const header = plain(wrap(<Header tier="turbo" columns={100} rows={40} />).lastFrame() ?? '');
     const boot = plain(wrap(<Boot tier="turbo" columns={100} />).lastFrame() ?? '');
-    // EST-0989 — a marca "Λluy": a linha com o `█████` (do `u`/`y`) aparece idêntica
-    // nas duas telas (mesmo <Wordmark> compartilhado ⇒ não divergem).
+    // a marca de sombra (▒, SHADOW_SHADE) só existe na arte 3D — prova que o banner NÃO
+    // é mais o <Wordmark> 2D plano (que não tem sombra).
+    expect(header).toContain(SHADOW_SHADE);
+    expect(boot).not.toContain(SHADOW_SHADE);
+    // por causa da sombra, a linha com `█████` do header já NÃO é mais idêntica à do
+    // Boot (a sombra desloca/acrescenta caracteres ao lado) — as telas divergem agora.
     const headerLine = header.split('\n').find((l) => l.includes('█████'));
     const bootLine = boot.split('\n').find((l) => l.includes('█████'));
     expect(headerLine).toBeDefined();
-    expect(headerLine).toBe(bootLine);
+    expect(bootLine).toBeDefined();
+    expect(headerLine).not.toBe(bootLine);
+  });
+
+  it('banner: a grade do wordmark bate EXATAMENTE com composeShadowedWordmark(0, false) (mesma fonte do splash, estática)', () => {
+    const out = plain(wrap(<Header tier="turbo" columns={100} rows={40} />).lastFrame() ?? '');
+    const lines = out.split('\n');
+    // a grade estática esperada (mesma função pura que o splash usa, animate=false).
+    const expectedRows = composeShadowedWordmark(0, false).map((row) =>
+      rowSegments(row)
+        .map((seg) => seg.text)
+        .join(''),
+    );
+    // as PRIMEIRAS linhas do banner são exatamente a grade da marca 3D (antes do subtítulo).
+    // Comparação apara o whitespace À DIREITA: a grade crua tem padding de trailing spaces,
+    // mas o render do Ink os remove — o conteúdo visível é idêntico (é a MESMA fonte/arte).
+    const trimEnd = (s: string): string => s.replace(/\s+$/, '');
+    expect(lines.slice(0, expectedRows.length).map(trimEnd)).toEqual(expectedRows.map(trimEnd));
+    // e a arte tem a linha EXTRA da sombra (7 linhas: 6 da marca + 1 da sombra ↓→).
+    expect(expectedRows.length).toBe(7);
+  });
+
+  it('banner: as cores da marca (accent) E da sombra (shadowAmber) aparecem no frame cru (truecolor)', () => {
+    const TRUE_ENV = { COLORTERM: 'truecolor', LANG: 'en_US.UTF-8', TERM: 'xterm-256color' };
+    const theme = resolveTheme({ env: TRUE_ENV });
+    const raw = wrap(<Header tier="turbo" columns={100} rows={40} />, TRUE_ENV).lastFrame() ?? '';
+    const accentColor = theme.role('accent').color;
+    const shadowColor = theme.role('shadowAmber').color;
+    expect(accentColor).toBeTruthy();
+    expect(shadowColor).toBeTruthy();
+    expect(accentColor).not.toBe(shadowColor); // sombra distintamente mais escura que a marca
+    // as duas cores (marca E sombra) aparecem CRUAS no frame — prova de que as DUAS
+    // camadas (não só a marca) estão presentes, ao contrário do <Wordmark> 2D plano
+    // (que só emite `accent`, nunca `shadowAmber`).
+    const sgrHex = (hex: string): RegExp =>
+      new RegExp(
+        String.fromCharCode(27) +
+          `\\[[0-9;]*?38;2;${parseInt(hex.slice(1, 3), 16)};${parseInt(hex.slice(3, 5), 16)};${parseInt(hex.slice(5, 7), 16)}`,
+      );
+    expect(raw).toMatch(sgrHex(accentColor as string));
+    expect(raw).toMatch(sgrHex(shadowColor as string));
+  });
+
+  // FIX (dono) — a arte 3D é 1 linha MAIOR que a 2D (a sombra projeta ↓→); no piso
+  // exato do banner (HEADER_BANNER_MIN_ROWS) ainda NÃO sobra essa linha extra ⇒ o
+  // banner aparece (não cai pro compacto) mas com o wordmark 2D PLANO, sem sombra.
+  it('banner com rows NO PISO exato (sem a linha extra do 3D): ainda banner, mas SEM sombra', () => {
+    expect(HEADER_WORDMARK_3D_MIN_ROWS).toBe(HEADER_BANNER_MIN_ROWS + 1);
+    const out = plain(
+      wrap(<Header tier="turbo" columns={100} rows={HEADER_BANNER_MIN_ROWS} />).lastFrame() ?? '',
+    );
+    expect(out).toContain('██'); // segue banner (não caiu pro compacto Λ)
+    expect(out).not.toContain(SHADOW_SHADE); // mas sem a linha/sombra extra do 3D
+  });
+
+  it('banner com 1 linha A MAIS que o piso: já cabe o 3D com sombra', () => {
+    const out = plain(
+      wrap(<Header tier="turbo" columns={100} rows={HEADER_WORDMARK_3D_MIN_ROWS} />).lastFrame() ??
+        '',
+    );
+    expect(out).toContain(SHADOW_SHADE);
   });
 
   it('banner: fallback ASCII — wordmark vira `#` (sem █) quando TERM=linux', () => {
@@ -170,6 +239,9 @@ describe('Header — BANNER persistente do wordmark (EST-0988)', () => {
     const out = plain(lastFrame() ?? '');
     expect(out).not.toContain('█'); // █ quebraria em TERM=linux
     expect(out).toContain('#'); // wordmark ASCII legível
+    // FIX (dono) — a arte 3D (<ShadowedWordmark>) é Unicode-only (sem fallback ASCII
+    // próprio); em TERM=linux o banner cai no <Wordmark> 2D, nunca no 3D com sombra.
+    expect(out).not.toContain(SHADOW_SHADE);
     // EST-0989 — o subtítulo do banner (sem tier): `Aluy Cli · Terminal`.
     expect(out).toContain('Aluy Cli');
     expect(out).not.toContain('turbo'); // tier não fica no banner (Variação B)

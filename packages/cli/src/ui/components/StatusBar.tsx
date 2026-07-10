@@ -24,9 +24,15 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { BUDGET_WARN_PCT } from '@hiperplano/aluy-cli-core';
-import { Glyph, Role } from '../theme/index.js';
+import { Glyph, Role, useTheme } from '../theme/index.js';
 import { BusyPulse } from './BusyPulse.js';
-import { abbreviateCount, type GovernanceCounts, type CycleProgress } from '../../session/model.js';
+import { progressRatio, renderBar } from './ProgressBar.js';
+import {
+  abbreviateCount,
+  type GovernanceCounts,
+  type CycleProgress,
+  type McpProgress,
+} from '../../session/model.js';
 import { useI18n } from '../../i18n/index.js';
 
 /** Nível de consumo de quota (#125) — espelha os limiares do core (70/90%). */
@@ -109,6 +115,18 @@ export interface StatusBarProps {
    * StatusBar já re-renderiza a cada frame (EST-0989), então o pulso avança junto.
    */
   readonly frame?: number;
+  /**
+   * EST-MCP-STATUSBAR (pedido do dono) — progresso da CONEXÃO dos servers MCP em
+   * background (boot desacoplado). Quando presente e AINDA conectando (`done:false`),
+   * a barra ganha um indicador discreto `MCP ▰▰▱ 2/3`; quando `done:true`, um ✓ rápido
+   * (`✓ MCP 3/3`, ou "· N falhou" se algum server falhou) — some sozinho ~2s depois (o
+   * controller limpa o campo). `undefined` ⇒ sem MCP configurado neste boot, ou já
+   * concluiu + expirou ⇒ SEM indicador (zero ruído). NUNCA vira nota na conversa —
+   * antes disto o boot desacoplado empurrava "conectando N…"/"M/N conectados" como
+   * nota; o dono pediu p/ tirar isso da tela principal. Supplementar: cai no narrow
+   * (mesmo critério do `busy`/<BusyPulse> — não é estado de roteamento crítico).
+   */
+  readonly mcpProgress?: McpProgress;
 }
 
 /** Papel de cor do `⛁ janela %` por nível (§4). */
@@ -133,6 +151,13 @@ function windowRole(pct: number): 'fgDim' | 'accent' | 'danger' {
 const MODEL_MIN_COLS = 90;
 
 /**
+ * EST-MCP-STATUSBAR — largura (em células) da barrinha `MCP ▰▰▱` enquanto os servers
+ * conectam. Curta de propósito — é um indicador DISCRETO, não uma <ProgressBar> cheia
+ * (essa é `DEFAULT_BAR_WIDTH=12`, pensada p/ ocupar sozinha uma linha da região viva).
+ */
+const MCP_BAR_WIDTH = 6;
+
+/**
  * EST-0948 — papel de cor do `◔ sessão %` por nível: dim normal; AVISO (accent) ao
  * cruzar BUDGET_WARN_PCT (~70%); danger nos ≥100% (no teto/estourado). É o sinal
  * ANTECIPADO antes da pausa do gate.
@@ -152,6 +177,7 @@ function quotaRole(level: QuotaWarnLevel): 'fgDim' | 'accent' | 'danger' {
 
 export function StatusBar(props: StatusBarProps): React.ReactElement {
   const { t } = useI18n();
+  const theme = useTheme();
   const wRole = windowRole(props.windowPct);
   // EST-0948 — quando há teto de tokens, o `◔ sessão` é o % do budget (+ aviso aos
   // 70%); o número cru fica como detalhe `(8.2k)`. Sem teto, mostra só o cru.
@@ -181,6 +207,23 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   // EST-0989 (#125) — o `◔ quota` só entra quando o broker reportou consumo de janela.
   const hasQuota = props.quotaPct !== undefined;
   const qRole = quotaRole(props.quotaLevel ?? 'ok');
+
+  // EST-MCP-STATUSBAR — a barrinha `MCP ▰▰▱ 2/3` só existe enquanto AINDA conecta
+  // (`done:false`); ao terminar a barra vira o ✓/aviso (renderizado direto no JSX
+  // abaixo, sem célula-por-célula). `mcpFailed` alimenta os DOIS ramos (cor do ✓ e o
+  // "· N falhou" discreto).
+  const mcpProgress = props.mcpProgress;
+  const mcpFailed = mcpProgress?.failed ?? 0;
+  const mcpBar =
+    mcpProgress !== undefined && !mcpProgress.done
+      ? renderBar(
+          progressRatio(mcpProgress.connected + mcpProgress.failed, mcpProgress.total),
+          theme.glyph('barFull'),
+          theme.glyph('barEmpty'),
+          MCP_BAR_WIDTH,
+          theme.unicode,
+        )
+      : undefined;
 
   return (
     <Box>
@@ -291,6 +334,38 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
         <>
           <Text> </Text>
           <BusyPulse {...(props.frame !== undefined ? { frame: props.frame } : {})} />
+        </>
+      )}
+
+      {/* EST-MCP-STATUSBAR (pedido do dono) — progresso da CONEXÃO dos servers MCP em
+          background (boot desacoplado): SÓ aqui, nunca como nota na conversa. Enquanto
+          conecta (`!done`): barrinha discreta `MCP ▰▰▱ 2/3`. Ao terminar (`done`): um ✓
+          rápido (`success` sem falha) ou um aviso discreto (`accent` + "· N falhou"),
+          que SOME sozinho ~2s depois — o controller limpa `mcpProgress` (a StatusBar não
+          tem timer próprio). Supplementar: cai no narrow (mesmo critério do <BusyPulse>). */}
+      {mcpProgress !== undefined && !narrow && (
+        <>
+          <Text> </Text>
+          {mcpProgress.done ? (
+            <>
+              <Glyph name="ok" role={mcpFailed > 0 ? 'accent' : 'success'} />
+              <Role name={mcpFailed > 0 ? 'accent' : 'success'}>
+                {' '}
+                MCP {mcpProgress.connected}/{mcpProgress.total}
+                {mcpFailed > 0 ? ` · ${mcpFailed} ${t('statusbar.mcpFailed')}` : ''}
+              </Role>
+            </>
+          ) : (
+            <>
+              <Role name="fgDim">MCP </Role>
+              <Role name="accent">{mcpBar!.filled}</Role>
+              <Role name="fgDim">{mcpBar!.rest}</Role>
+              <Role name="fgDim">
+                {' '}
+                {mcpProgress.connected + mcpProgress.failed}/{mcpProgress.total}
+              </Role>
+            </>
+          )}
         </>
       )}
     </Box>

@@ -110,6 +110,8 @@ export interface Catalog {
   'statusbar.cycle': string;
   /** FATIA 1 — rótulo dos SUBCICLOS (caixas do plano) (`· subciclos K/T`). */
   'statusbar.subcycles': string;
+  /** EST-MCP-STATUSBAR — palavra do aviso discreto quando algum server MCP falhou ao conectar (`· N <mcpFailed>`). */
+  'statusbar.mcpFailed': string;
   /** FATIA 2 — rótulo do CICLO no cabeçalho da árvore de fluxos (`↻ ciclo N/M`). */
   'flowtree.cycle': string;
   /** FATIA 2 — rótulo dos SUBCICLOS no cabeçalho da árvore (`subciclos K/T`). */
