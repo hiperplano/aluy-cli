@@ -14,7 +14,15 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
-## [1.0.0-rc.102] — 2026-07-10
+## [1.0.0-rc.103] — 2026-07-10
+
+### Adicionado
+
+- 🎛️ **Rotear um sub-agente para um modelo LOCAL específico** (ADR-0152 D6, backend local/BYO): agora você pode pedir "spawna esse filho no `deepseek-v4-flash`" e o filho roda naquele modelo do seu provider local, **diferente** do pai — reusando o MESMO provider/auth/base_url/fetch-pinado (só o `model` muda; zero credencial ou escopo novo). Novo `kind:'local'` no resolvedor: no backend local um slug cru (ou `local:<slug>`, e `custom:<slug>` como alias) roteia; slug desconhecido com catálogo listável **falha antes com sugestão**, sem catálogo emite **aviso visível** e deixa o provider validar (nunca fallback silencioso). O rótulo mostra `local · <slug>` enquanto roda. Revisado pelo `seguranca` (APROVADO-COM-CONDIÇÕES; 9 condições + bateria T1–T9 no verde). No backend broker/hospedado nada muda. _Limitação conhecida:_ um filho roteado a modelo local usa o protocolo de tool-calling por TEXTO (não o nativo) — aceitável no baseline, a refinar depois.
+
+### Corrigido
+
+- 🔒 Validação de forma do slug de modelo em TODAS as fontes (prompt/`.md`/config): rejeita `/`, CR, LF e chars de controle antes de virar alvo de request (anti-injeção de header/path).
 
 ### Corrigido
 
