@@ -32,7 +32,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Role, useTheme } from '../theme/index.js';
 import { Wordmark, MIN_WORDMARK_COLS } from './Wordmark.js';
-import { composeShadowedWordmark, rowSegments } from './wordmark-3d.js';
+import { ShadowedWordmark } from './ShadowedWordmark.js';
 import { splashQuip } from './splash-quips.js';
 
 /** Quantidade de estados da cauda de pontinhos do "carregando" (`` → `.` → `..` → `...`). */
@@ -197,36 +197,6 @@ function VersionLine(props: { readonly version: string }): React.ReactElement {
     <Box>
       <Role name="fgDim">Aluy CLI · </Role>
       <Role name="depth">v{props.version}</Role>
-    </Box>
-  );
-}
-
-/**
- * F198 — o wordmark `Λluy` COM sombra 3D + o BRILHO horizontal que varre a marca da
- * esquerda p/ a direita (splash-only). Compõe a grade {marca com shimmer · sombra `depth`
- * FIXA} pelo `frame` (PURO, em `wordmark-3d.ts`) e emite um <Text> por papel em cada linha.
- * Passa `theme.animate` p/ o gate reduced-motion (sem brilho ⇒ marca `accent` estática) —
- * ainda que este componente só seja montado quando `animate` (via `wants3d` no SplashScreen),
- * repassar mantém a função pura honesta. NÃO usado no header (lá a marca é estática).
- */
-function ShadowedWordmark(props: { readonly frame: number }): React.ReactElement {
-  const theme = useTheme();
-  const grid = composeShadowedWordmark(props.frame, theme.animate);
-  return (
-    <Box flexDirection="column">
-      {grid.map((row, r) => (
-        <Box key={r}>
-          {rowSegments(row).map((seg, i) =>
-            seg.role === null ? (
-              <Text key={i}>{seg.text}</Text>
-            ) : (
-              <Role key={i} name={seg.role}>
-                {seg.text}
-              </Role>
-            ),
-          )}
-        </Box>
-      ))}
     </Box>
   );
 }

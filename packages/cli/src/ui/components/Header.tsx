@@ -7,9 +7,20 @@
 //
 // EST-0988 — BANNER persistente: quando há espaço (densidade `comfortable`, largura
 // não-`narrow`, terminal alto o bastante), o header exibe o WORDMARK GRANDE "Aluy"
-// (o MESMO da splash, via <Wordmark> compartilhado) com a linha de info ABAIXO.
-// Aqui a marca já é o wordmark — então o `Λ` compacto NÃO se repete no banner (sem
-// marca duplicada); ele continua abrindo apenas o fallback de 1 linha.
+// com a linha de info ABAIXO. Aqui a marca já é o wordmark — então o `Λ` compacto
+// NÃO se repete no banner (sem marca duplicada); ele continua abrindo apenas o
+// fallback de 1 linha.
+//
+// FIX (dono) — o wordmark do BANNER passou a ser a MESMA arte 3D do splash
+// (<ShadowedWordmark>, wordmark-3d.ts): a marca âmbar em RELEVO + a sombra âmbar
+// escura (F198/F200c), porém ESTÁTICA (`animate={false}` — sem o shimmer que desliza
+// no splash; num header FIXO animar não faz sentido). Antes o banner usava o
+// <Wordmark> 2D plano (sem sombra); agora "boot" e "header" têm a MESMA arte de
+// marca, coerência visual de ponta a ponta. A arte 3D é 1 linha e 1 coluna MAIOR que
+// a 2D (a sombra projeta ↓→) — por isso só entra quando `theme.unicode` (a sombra
+// exige block-art, sem fallback ASCII próprio) E sobra 1 linha A MAIS que o piso do
+// banner (`HEADER_WORDMARK_3D_MIN_ROWS`). Fora disso (ASCII, terminal baixo/estreito
+// dentro do próprio banner), cai no <Wordmark> 2D — nunca força o 3D onde não cabe.
 //
 // EST-0989 — SUBTÍTULO DE PRODUTO (Variação B, aprovada): abaixo do wordmark a linha
 // de info virou `Aluy CLI · Terminal v<versão>` + `◍ broker`, SEM o tier. O tier saiu
@@ -38,6 +49,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { Wordmark, WORDMARK_ROWS } from './Wordmark.js';
+import { ShadowedWordmark } from './ShadowedWordmark.js';
 
 export interface HeaderProps {
   readonly tier: string;
@@ -67,6 +79,15 @@ export interface HeaderProps {
  * folgada p/ sobrar tela viva: wordmark + info + dividers + composer + status.
  */
 export const HEADER_BANNER_MIN_ROWS = WORDMARK_ROWS + 13;
+
+/**
+ * FIX (dono) — piso de linhas p/ o wordmark 3D COM SOMBRA (<ShadowedWordmark>) dentro
+ * do banner: a arte 3D é 1 linha MAIOR que a 2D plana (a sombra projeta ↓→ abaixo da
+ * última linha da marca). Abaixo deste piso (mas ainda em banner, ≥`HEADER_BANNER_MIN_ROWS`)
+ * o 3D não cabe folgado ⇒ o banner cai no <Wordmark> 2D (ainda banner, só sem a sombra) —
+ * nunca comprime a arte nem invade a linha de info abaixo dela.
+ */
+export const HEADER_WORDMARK_3D_MIN_ROWS = HEADER_BANNER_MIN_ROWS + 1;
 
 /** Nome de PRODUTO no header (mesma string no banner e no compacto). */
 const PRODUCT_NAME = 'Aluy Cli';
@@ -187,10 +208,17 @@ export function Header(props: HeaderProps): React.ReactElement {
     );
   }
 
-  // Banner: WORDMARK grande (marca, via <Wordmark> compartilhado) + subtítulo ABAIXO.
+  // FIX (dono) — Banner: a MESMA arte 3D do splash (marca âmbar + sombra âmbar),
+  // ESTÁTICA (`animate={false}` — sem o shimmer, que só faz sentido no splash
+  // animado). Unicode-only (a sombra `▒`/marca `█` não têm fallback ASCII próprio) e
+  // só quando sobra a linha EXTRA que a sombra precisa (`HEADER_WORDMARK_3D_MIN_ROWS`)
+  // — senão cai no <Wordmark> 2D plano (ainda banner, sem forçar o 3D onde não cabe).
+  const wants3d = theme.unicode && rows >= HEADER_WORDMARK_3D_MIN_ROWS;
+
+  // Banner: WORDMARK grande (marca) + subtítulo ABAIXO.
   return (
     <Box flexDirection="column">
-      <Wordmark columns={columns} />
+      {wants3d ? <ShadowedWordmark frame={0} animate={false} /> : <Wordmark columns={columns} />}
       <BannerSubtitle
         {...(props.sub !== undefined ? { sub: props.sub } : {})}
         {...(props.version !== undefined ? { version: props.version } : {})}
