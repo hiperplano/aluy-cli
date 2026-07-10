@@ -384,6 +384,73 @@ describe('EST-0982 · GS-C1/C2 + RES-C-3 — PARAR um/todos (abort), sem deadloc
     expect(block.children.find((c) => c.label === 'slow')!.status).toBe('cancelled');
   });
 
+  it('ADR-0146 (D5) — PARAR um sub-agente PRESERVA o rótulo de tier/modelo daquela linha (não some no cancel)', async () => {
+    // Bug: `cancelFlow` monta o filho de reposição SEM `model` (só label/status/stop/
+    // summary) e `upsertSubAgentChild` SUBSTITUÍA o registro inteiro por label — o
+    // rótulo `herdado (aluy-strata)` visível enquanto `slow` rodava SUMIA da linha
+    // assim que o usuário parava aquele filho. Fix: `upsertSubAgentChild` faz MERGE
+    // do `model` (preserva o anterior quando o novo registro não traz um).
+    const { ports } = fakePorts();
+    let releaseSlow!: () => void;
+    const slowGate = new Promise<void>((r) => (releaseSlow = r));
+    let parent: string | null = null;
+    const turnSeen = new Map<string, number>();
+
+    const model: ModelCaller = {
+      async call(args): Promise<ModelCallResult> {
+        const key = args.idempotencyKey;
+        const sessionId = key.slice(0, key.lastIndexOf(':'));
+        if (parent === null) parent = sessionId;
+        const isParent = sessionId === parent;
+        const usage = { request_id: 'r', tier: 'aluy-flux', tokens_in: 1, tokens_out: 1 };
+        if (isParent) {
+          const n = turnSeen.get(sessionId) ?? 0;
+          turnSeen.set(sessionId, n + 1);
+          const content =
+            n === 0
+              ? toolCall(SPAWN_AGENT_TOOL_NAME, { agents: [{ label: 'slow', goal: 'g-slow' }] })
+              : 'consolidado.';
+          return { request_id: 'r', content, finish_reason: 'stop', usage };
+        }
+        await Promise.race([
+          slowGate,
+          new Promise<void>((res) => {
+            if (args.signal?.aborted) return res();
+            args.signal?.addEventListener('abort', () => res(), { once: true });
+          }),
+        ]);
+        return { request_id: 'r', content: 'relatório do filho.', finish_reason: 'stop', usage };
+      },
+    };
+
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports,
+      askResolver: approveAll,
+      meta,
+      subAgents: { enabled: true, maxConcurrency: 1, timeoutMs: 5_000 },
+    });
+
+    const done = controller.submit('delegue um');
+    await waitFor(() => controller.flowOverview().some((n) => n.label === 'slow'));
+
+    // ENQUANTO roda, o `model` já aparece (D5) — captura o valor PRÉ-cancel.
+    const beforeCancel = subAgentsBlock(controller)!.children.find((c) => c.label === 'slow');
+    expect(beforeCancel?.model).toBe('herdado (aluy-strata)');
+
+    const slow = controller.flowOverview().find((n) => n.label === 'slow')!;
+    expect(controller.cancelFlow(slow.id)).toBe(true);
+
+    // Logo APÓS o cancel, o registro é `cancelled` — o `model` tem que SEGUIR lá.
+    const afterCancel = subAgentsBlock(controller)!.children.find((c) => c.label === 'slow');
+    expect(afterCancel?.status).toBe('cancelled');
+    expect(afterCancel?.model).toBe('herdado (aluy-strata)');
+
+    releaseSlow();
+    await done;
+  });
+
   it('PARAR TODOS (interrupt) aborta a raiz e a subárvore; o pai recebe estado coerente', async () => {
     const { ports } = fakePorts();
     let releaseAll!: () => void;

@@ -91,9 +91,16 @@ function blockToLines(block: SessionBlock): string[] {
     case 'deny':
       return [`- (negado) \`${redact(block.verb)} ${redact(block.exact)}\``, ''];
     case 'subagents':
+      // ADR-0146 (D5) — o tier/modelo RESOLVIDO do filho também vai pro export markdown
+      // (mesmo filtro HG-2/CLI-SEC-7 do resto do transcript: nunca provider/base_url/
+      // credencial, só a chave de tier/slug de catálogo). Redigido por defesa-em-
+      // profundidade, igual ao `label`.
       return [
         `- sub-agentes: ${block.children
-          .map((c) => `${redact(c.label)} (${c.status})`)
+          .map(
+            (c) =>
+              `${redact(c.label)} (${c.status}${c.model !== undefined ? ` · ${redact(c.model)}` : ''})`,
+          )
           .join(', ')}`,
         '',
       ];

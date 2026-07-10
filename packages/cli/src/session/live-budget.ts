@@ -387,13 +387,23 @@ function liveShellOutputLines(
 
 /**
  * F87 / EST-0965 (wrap) — linhas VISUAIS de UMA linha de filho de sub-agente, como o
- * `<SubAgents>` a renderiza: `  [label] G word[ · summary]` (paddingLeft 2; `G` = glifo
- * de status, 1 coluna; `word` curta; `summary` `74.4k tokens · 13 tools · 2.1s` só
- * quando concluído). Reconstrói a largura VISÍVEL e conta o wrap em `columns` (mesmo
- * espírito de `liveShellOutputLines`). `columns ≤ 0` ⇒ 1 (linha-fonte, degradação).
+ * `<SubAgents>` a renderiza: `  [label] G word[ · model][ · summary]` (paddingLeft 2;
+ * `G` = glifo de status, 1 coluna; `word` curta; ADR-0146 (D5) `model` — tier/modelo
+ * RESOLVIDO, visível independente do status — ENTRA ANTES do `summary`; `summary`
+ * `74.4k tokens · 13 tools · 2.1s` só quando concluído). Reconstrói a largura VISÍVEL
+ * e conta o wrap em `columns` (mesmo espírito de `liveShellOutputLines`). Precisa
+ * incluir o `model` aqui — senão esta conta SUBESTIMA a altura de um filho com
+ * model+summary (o render real é mais longo) e a região viva estoura `columns` ⇒
+ * dispara o bug de linhas mescladas do Ink (F87/EST-0965) que ENGOLE/CLIPA o texto do
+ * modelo. `columns ≤ 0` ⇒ 1 (linha-fonte, degradação).
  */
 function subAgentChildVisualLines(
-  child: { readonly label: string; readonly status: string; readonly summary?: string },
+  child: {
+    readonly label: string;
+    readonly status: string;
+    readonly summary?: string;
+    readonly model?: string;
+  },
   columns: number,
 ): number {
   // `columns` ausente/0/negativo ⇒ 1 linha-fonte por filho (degradação graciosa,
@@ -409,10 +419,13 @@ function subAgentChildVisualLines(
         : child.status === 'cancelled'
           ? 'parado'
           : 'timeout';
+  // ADR-0146 (D5) — mesma posição/condição do `<ChildLine>` real: o `model` entra
+  // ANTES do `summary`, independente do status (não só quando concluído).
+  const modelPart = child.model !== undefined ? ` · ${child.model}` : '';
   const summaryPart =
     child.summary !== undefined && child.status !== 'running' ? ` · ${child.summary}` : '';
   // `  [label] G word…` — `G` (glifo) ocupa 1 coluna; representado por 1 char.
-  const line = `  [${child.label}] x ${word}${summaryPart}`;
+  const line = `  [${child.label}] x ${word}${modelPart}${summaryPart}`;
   return Math.max(1, visualLines(line, columns));
 }
 
