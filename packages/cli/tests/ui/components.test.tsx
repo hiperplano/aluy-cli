@@ -187,6 +187,8 @@ describe('Header — BANNER persistente do wordmark (EST-0988)', () => {
     // mas o render do Ink os remove — o conteúdo visível é idêntico (é a MESMA fonte/arte).
     const trimEnd = (s: string): string => s.replace(/\s+$/, '');
     expect(lines.slice(0, expectedRows.length).map(trimEnd)).toEqual(expectedRows.map(trimEnd));
+    // e a arte tem a linha EXTRA da sombra (7 linhas: 6 da marca + 1 da sombra ↓→).
+    expect(expectedRows.length).toBe(7);
   });
 
   it('banner: as cores da marca (accent) E da sombra (shadowAmber) aparecem no frame cru (truecolor)', () => {
