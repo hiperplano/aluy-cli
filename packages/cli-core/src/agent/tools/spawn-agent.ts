@@ -218,10 +218,15 @@ const SPAWN_AGENT_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
             description:
               'OPCIONAL — SÓ quando o USUÁRIO pediu um modelo/tier específico no prompt para ' +
               'este sub-agente (você RELAIA a escolha dele; NÃO decida sozinho por custo). ' +
-              'Aceita um nome amigável ("sonnet"/"opus"/"haiku"/"flux"/"granito"/"strata"/"deep"), ' +
-              'uma chave de tier do Aluy ("aluy-strata", …), "same-as-parent" (segue o modelo/tier ' +
-              'CORRENTE da sessão) ou "custom"/"custom:<slug>" (usa o provider BYO/Custom da sessão, ' +
-              'com o slug indicado ou o corrente). Nome não reconhecido falha com sugestão, antes de rodar.',
+              'PARA RODAR NUM MODELO ESPECÍFICO: ponha o NOME do modelo AQUI, por-agente ' +
+              '(ex.: "model": "deepseek/deepseek-v4-flash"). NÃO tente trocar o provider/modelo ' +
+              'da SESSÃO inteira (não rode comando de shell nem "/provider"/"/model") — só preencha ' +
+              'este campo. Aceita um nome amigável ("sonnet"/"opus"/"haiku"/"flux"/"granito"/"strata"/' +
+              '"deep"), uma chave de tier do Aluy ("aluy-strata", …), "same-as-parent" (segue o ' +
+              'modelo/tier CORRENTE da sessão), "custom"/"custom:<slug>" (usa o provider BYO/Custom ' +
+              'da sessão, com o slug indicado ou o corrente) ou, no backend LOCAL, o nome do modelo ' +
+              'do teu provider como está (aceita o formato "vendor/model", ex. do OpenRouter/' +
+              'tokenrouter). Nome não reconhecido falha com sugestão, antes de rodar.',
           },
         },
         required: ['goal'],

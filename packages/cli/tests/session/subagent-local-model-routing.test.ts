@@ -375,10 +375,46 @@ describe('T3 — snapshot de sessão local com filho roteado', () => {
   });
 });
 
-describe('T5 — forma do slug: `/`, CRLF e caractere de controle são REJEITADOS antes de virar config.model', () => {
-  it('em CADA fonte (spawn/`.md`/config) — callerForLocalModel NUNCA é chamada com um slug malformado', async () => {
+describe('T5 — forma do slug (condição de segurança 3, REVISADA): `vendor/model` ROTEIA; CRLF/NUL/control SEGUEM rejeitados em TODA fonte', () => {
+  it('slug com barra (`vendor/model`) em CADA fonte (spawn/`.md`) ⇒ ROTEIA via callerForLocalModel (body-only, sem risco de path/header)', async () => {
     const registry = new AgentRegistry(
-      [globalProfile('helper', 'local:bad/slug')], // `.md` malformado
+      [globalProfile('helper', 'local:vendor/model-c')], // `.md` com barra — agora forma VÁLIDA
+      [],
+    );
+    const localLog: string[] = [];
+    const localCalls: string[] = [];
+    const model = parentDelegates({
+      agents: [
+        { label: 'a', goal: 'g', model: 'local:vendor/model-a' }, // spawn com barra
+        { label: 'c', goal: 'g', agent: 'helper' }, // .md com barra
+      ],
+    });
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: fakePorts().ports,
+      askResolver: askAutoApprove,
+      meta: LOCAL_META,
+      subAgents: { enabled: true, maxConcurrency: 2 },
+      agentRegistry: registry,
+      callerForLocalModel: (slug) => {
+        localCalls.push(slug);
+        return taggedCaller(`LOCAL:${slug}`, localLog);
+      },
+    });
+    await controller.submit('lote com slugs vendor/model em 2 fontes');
+
+    // AMBOS chegaram a chamar `callerForLocalModel` — `/` não é mais barrado (a
+    // validação de forma só barra control chars/CR/LF/NUL/TAB/DEL/vazio/teto).
+    expect(localCalls.sort()).toEqual(['vendor/model-a', 'vendor/model-c']);
+    const block = subAgentsBlock(controller.current.blocks);
+    expect(block?.children.find((c) => c.label === 'a')?.status).toBe('done');
+    expect(block?.children.find((c) => c.label === 'c')?.status).toBe('done');
+  });
+
+  it('CRLF/NUL em CADA fonte (spawn/`.md`) ⇒ callerForLocalModel NUNCA é chamada com o slug malformado', async () => {
+    const registry = new AgentRegistry(
+      [globalProfile('helper', 'local:evil\r\nX-Injected: 1')], // `.md` malformado (CRLF)
       [],
     );
     const localLog: string[] = [];
@@ -387,9 +423,9 @@ describe('T5 — forma do slug: `/`, CRLF e caractere de controle são REJEITADO
     const model = parentDelegates(
       {
         agents: [
-          { label: 'a', goal: 'g', model: 'local:evil/../../etc' }, // spawn malformado (barra)
-          { label: 'b', goal: 'g', model: `local:evil\r\nX-Injected: 1` }, // spawn malformado (CRLF)
-          { label: 'c', goal: 'g', agent: 'helper' }, // .md malformado
+          { label: 'a', goal: 'g', model: `local:evil\r\nX-Injected: 1` }, // spawn malformado (CRLF)
+          { label: 'b', goal: 'g', model: 'local:evil' + String.fromCharCode(0) + 'x' }, // spawn malformado (NUL)
+          { label: 'c', goal: 'g', agent: 'helper' }, // .md malformado (CRLF)
         ],
       },
       captured,
@@ -408,10 +444,11 @@ describe('T5 — forma do slug: `/`, CRLF e caractere de controle são REJEITADO
         return taggedCaller(`LOCAL:${slug}`, localLog);
       },
     });
-    await controller.submit('lote com slugs malformados nas 3 fontes');
+    await controller.submit('lote com slugs malformados (CRLF/NUL) nas 3 fontes');
 
     // NENHUM filho chegou a chamar `callerForLocalModel` com um slug malformado —
     // e de fato NENHUM chegou a rodar (cada um virou erro "unknown", D2 padrão).
+    // Isto é a PROVA de que control/CRLF/NUL seguem barrados após o relaxamento de `/`/`:`.
     expect(localCalls).toHaveLength(0);
     expect(localLog).toHaveLength(0);
     const block = subAgentsBlock(controller.current.blocks);
@@ -420,7 +457,7 @@ describe('T5 — forma do slug: `/`, CRLF e caractere de controle são REJEITADO
     expect(msg).toMatch(/não encontrado/);
   });
 
-  it('dial de config (3ª fonte) com slug malformado ⇒ idem: NUNCA vira config.model', async () => {
+  it('dial de config (3ª fonte) com slug CRLF ⇒ idem: NUNCA vira config.model (control/CRLF seguem barrados)', async () => {
     const localCalls: string[] = [];
     const captured: { messages?: string } = {};
     const model = parentDelegates({ agents: [{ label: 'x', goal: 'g' }] }, captured); // SEM model
@@ -431,13 +468,13 @@ describe('T5 — forma do slug: `/`, CRLF e caractere de controle são REJEITADO
       askResolver: askAutoApprove,
       meta: LOCAL_META,
       subAgents: { enabled: true },
-      defaultChildModel: 'bad/slug-from-config',
+      defaultChildModel: 'bad\r\nslug-from-config',
       callerForLocalModel: (slug) => {
         localCalls.push(slug);
         return taggedCaller(`LOCAL:${slug}`, []);
       },
     });
-    await controller.submit('spawn — dial de config malformado');
+    await controller.submit('spawn — dial de config malformado (CRLF)');
     expect(localCalls).toHaveLength(0);
     const block = subAgentsBlock(controller.current.blocks);
     expect(block?.children ?? []).toHaveLength(0);
