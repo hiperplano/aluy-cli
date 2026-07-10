@@ -1,6 +1,6 @@
 {
   "name": "@hiperplano/aluy-cli-core",
-  "version": "1.0.0-rc.101",
+  "version": "1.0.0-rc.102",
   "description": "Engine modular do agente Aluy (loop/tools/permissão). PORTÁVEL: sem TUI, sem I/O de terminal — habilita o split futuro de locus (client-side hoje, server-side amanhã; ADR-0053 §8-bis). Aqui nasce o ponto de interceptação único de tool-calls (CLI-SEC-H1). NÃO publicado standalone: entra BUNDLADO em @hiperplano/aluy-cli (entrega monolítica, ADR-0053 §8 — ver docs/release.md). `private:true` previne publish acidental do pacote interno.",
   "keywords": [
     "aluy",

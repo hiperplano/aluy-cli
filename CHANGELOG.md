@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.102] — 2026-07-10
+
+### Corrigido
+
+- 🏷️ **Sub-agente que HERDA o pai mostra o modelo LOCAL concreto** (ADR-0152 D5-bis): no backend **local** (broker local/BYO), o rótulo do filho exibia o tier abstrato (`herdado (aluy-flux)`) em vez do modelo que o pai de fato usa. Agora mostra o concreto — `herdado (deepseek-v4-pro)` — lendo o `activeModel` que o broker reporta. No backend hospedado (broker) nada muda (preserva a abstração de tier). _(Próximo passo, E2/ADR-0152 D6: poder ROTEAR um filho para um modelo local diferente do pai — ex.: "spawna no deepseek-v4-flash" — em release seguinte, com revisão de segurança.)_
+
 ## [1.0.0-rc.101] — 2026-07-10
 
 ### Corrigido
