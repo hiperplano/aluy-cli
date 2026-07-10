@@ -96,6 +96,40 @@ const CUSTOM_SENTINEL = 'custom';
 const CUSTOM_PREFIX = 'custom:';
 
 /**
+ * ADR-0152 (D6a) — sentinela de roteamento a um MODELO LOCAL específico (sem slug —
+ * degenerado, usa o modelo corrente do pai) do MESMO provider local do pai.
+ */
+const LOCAL_SENTINEL = 'local';
+/** Prefixo do sentinela `local:<slug>` (D6a) — explícito, vale em QUALQUER backend. */
+const LOCAL_PREFIX = 'local:';
+
+/**
+ * ADR-0152 (D6, condição de segurança 3) — teto defensivo p/ um SLUG de modelo LOCAL
+ * (mesma natureza/teto do `MAX_OPAQUE_LEN` do `user-config.ts` — chave de catálogo).
+ */
+const MAX_MODEL_SLUG_LEN = 128;
+
+/**
+ * ADR-0152 (D6, condição de segurança 3) — `true` se `v` é uma string com FORMA
+ * razoável p/ virar o `config.model` de um `LocalModelClient`: não-vazia, curta, SEM
+ * barra (`/` — evita path-like/travessia), SEM `:` (reservado ao PREFIXO do sentinela,
+ * nunca ao corpo do slug) e SEM nenhum caractere de controle (inclui CR/LF — corta
+ * injeção de header/linha). Aplicada ANTES de qualquer slug (spawn/`.md`/config,
+ * `local:<slug>`/`custom:<slug>` sob backend local) virar `config.model` — em
+ * `resolveModelTier`, o ÚNICO funil por onde toda fonte passa. Forma inválida ⇒ o
+ * chamador trata como `kind:'unknown'` (nunca vira credencial/endpoint; nunca lança).
+ * PURA.
+ */
+export function isReasonableModelSlug(v: unknown): v is string {
+  if (typeof v !== 'string') return false;
+  const t = v.trim();
+  if (t === '' || t.length > MAX_MODEL_SLUG_LEN) return false;
+  if (t.includes('/') || t.includes(':')) return false;
+  // eslint-disable-next-line no-control-regex
+  return !/[\u0000-\u001F\u007F]/.test(t);
+}
+
+/**
  * ADR-0146 — resultado TIPADO de `resolveModelTier` (substitui o antigo
  * `string | undefined`): distingue a NATUREZA da preferência, não só a chave.
  *
@@ -107,6 +141,10 @@ const CUSTOM_PREFIX = 'custom:';
  *  - `custom`  — via BYO/Custom do pai, com o `slug` indicado (`custom:<slug>`) ou,
  *                sem slug, o slug CORRENTE do pai. Só faz sentido com o pai em
  *                `tier:'custom'` (o locus concreto valida — probe D2).
+ *  - `local`   — ADR-0152 (D6) — roteia a um MODELO LOCAL específico do MESMO
+ *                provider do pai (`local:<slug>`, sempre; OU, sob `ctx.backend
+ *                === 'local'`, um slug CRU não reconhecido, OU `custom`/`custom:<slug>`
+ *                como ALIAS). `slug` ausente ⇒ degenerado — usa o modelo corrente do pai.
  *  - `unknown` — string com CARA de nome de modelo cru que não bate com nada acima
  *                (ex.: typo de tier, `gpt-9-turbo`) — candidato a ERRO+sugestão
  *                (probe D2), NUNCA mais uma herança silenciosa.
@@ -115,6 +153,7 @@ export type ModelTierResolution =
   | { readonly kind: 'tier'; readonly key: string }
   | { readonly kind: 'inherit' }
   | { readonly kind: 'custom'; readonly slug?: string }
+  | { readonly kind: 'local'; readonly slug?: string }
   | { readonly kind: 'unknown'; readonly raw: string };
 
 /**
@@ -128,31 +167,66 @@ export type ModelTierResolution =
  * EST-0962 — o broker é a FONTE: além dos SINÔNIMOS conhecidos, qualquer chave
  * `aluy-*` bem-formada PASSA ADIANTE como tier (o broker valida), mesmo que o CLI
  * não a conheça.
+ *
+ * ADR-0152 (D6) — `ctx?.backend` é um HINT de DADO (não I/O — o chamador, que já
+ * conhece `meta.backend`, o injeta). Sob `ctx.backend === 'local'`: (a) `custom`/
+ * `custom:<slug>` vira ALIAS de `local` (mesma semântica — o "provider custom" no
+ * local É o provider local do pai); (b) um slug CRU sem cara de tier/sentinela vira
+ * `kind:'local'` (ergonomia BYO) em vez de `unknown`. `local:<slug>`/`local` (prefixo/
+ * sentinela explícitos) resolvem em `kind:'local'` em QUALQUER backend/ctx — forma
+ * portátil. `ctx` ausente ou `backend:'broker'` ⇒ comportamento do ADR-0146 INTOCADO
+ * (zero regressão): slug cru = `unknown`, `custom`* = `kind:'custom'`. O FORMATO do
+ * slug (condição de segurança 3) é validado AQUI — `isReasonableModelSlug` — antes de
+ * qualquer promoção a `kind:'local'`; forma inválida cai em `unknown` (fail-closed).
  */
-export function resolveModelTier(model: string | undefined): ModelTierResolution {
+export function resolveModelTier(
+  model: string | undefined,
+  ctx?: { readonly backend?: 'local' | 'broker' },
+): ModelTierResolution {
   if (model === undefined) return { kind: 'inherit' };
   const raw = model.trim();
   if (raw === '') return { kind: 'inherit' };
   const key = raw.toLowerCase();
+  const isLocalBackend = ctx?.backend === 'local';
   // 1) Sentinelas de HERANÇA explícita (D3) — o dono pediu "siga o pai" por nome.
   if (INHERIT_SENTINELS.has(key)) return { kind: 'inherit' };
-  // 2) Sentinela BYO/Custom (D3) — `custom` (usa o slug corrente do pai) ou
+  // 2) ADR-0152 (D6a) — `local`/`local:<slug>`, prefixo/sentinela EXPLÍCITOS, valem em
+  //    QUALQUER backend (forma portátil de um `.md`/dial). Preserva o CASE do slug.
+  if (key === LOCAL_SENTINEL) return { kind: 'local' };
+  if (key.startsWith(LOCAL_PREFIX)) {
+    const slug = raw.slice(LOCAL_PREFIX.length).trim();
+    if (slug === '') return { kind: 'local' };
+    return isReasonableModelSlug(slug) ? { kind: 'local', slug } : { kind: 'unknown', raw };
+  }
+  // 3) Sentinela BYO/Custom (D3) — `custom` (usa o slug corrente do pai) ou
   //    `custom:<slug>` (usa o slug indicado). Preserva o CASE do slug (chave de
   //    catálogo Custom — pode ser sensível a maiúsc./minúsc. no provider externo).
-  if (key === CUSTOM_SENTINEL) return { kind: 'custom' };
+  //    ADR-0152 (D6a) — sob backend LOCAL, é ALIAS de `local` (mesma semântica).
+  if (key === CUSTOM_SENTINEL) return isLocalBackend ? { kind: 'local' } : { kind: 'custom' };
   if (key.startsWith(CUSTOM_PREFIX)) {
     const slug = raw.slice(CUSTOM_PREFIX.length).trim();
-    return slug !== '' ? { kind: 'custom', slug } : { kind: 'custom' };
+    if (slug === '') return isLocalBackend ? { kind: 'local' } : { kind: 'custom' };
+    if (isLocalBackend) {
+      return isReasonableModelSlug(slug) ? { kind: 'local', slug } : { kind: 'unknown', raw };
+    }
+    return { kind: 'custom', slug };
   }
-  // 3) Sinônimo amigável conhecido (haiku/sonnet/strata/granito/…): mapeia.
+  // 4) Sinônimo amigável conhecido (haiku/sonnet/strata/granito/…): mapeia.
   const synonym = MODEL_SYNONYM_TO_TIER[key];
   if (synonym !== undefined) return { kind: 'tier', key: synonym };
-  // 4) Chave de tier `aluy-*` bem-formada mas DESCONHECIDA (tier novo do broker,
+  // 5) Chave de tier `aluy-*` bem-formada mas DESCONHECIDA (tier novo do broker,
   //    ex.: `aluy-granito` antes de virar sinônimo, ou um futuro `aluy-quartzo`):
   //    PASSA ADIANTE — o broker é a fonte da verdade e valida (EST-0962). NUNCA
   //    a barramos só por não estar na tabela de sinônimos.
   if (looksLikeAluyTierKey(key)) return { kind: 'tier', key };
-  // 5) Nada com cara de tier/sentinela conhecido ⇒ candidato a ERRO (probe D2/L2).
+  // 6) ADR-0152 (D6a) — sob backend LOCAL, um slug CRU sem cara de tier/sentinela
+  //    conhecido vira `kind:'local'` (ergonomia BYO: "deepseek-v4-flash" funciona sem
+  //    prefixo) — SÓ se tiver forma razoável de slug (condição de segurança 3);
+  //    senão cai em `unknown` (fail-closed, nunca vira `config.model`).
+  if (isLocalBackend) {
+    return isReasonableModelSlug(raw) ? { kind: 'local', slug: raw } : { kind: 'unknown', raw };
+  }
+  // 7) Nada com cara de tier/sentinela conhecido ⇒ candidato a ERRO (probe D2/L2).
   return { kind: 'unknown', raw };
 }
 
@@ -167,6 +241,7 @@ export function knownModelNames(): readonly string[] {
       ...Object.keys(MODEL_SYNONYM_TO_TIER),
       ...INHERIT_SENTINELS,
       CUSTOM_SENTINEL,
+      LOCAL_SENTINEL,
     ]),
   ];
 }
@@ -254,6 +329,31 @@ export function formatUnknownModelError(
 }
 
 /**
+ * ADR-0152 (D6c) — formata o ERRO LEGÍVEL do probe LOCAL p/ um SLUG de modelo local
+ * não encontrado no catálogo LISTÁVEL do provider (o `.md`/spawn/config pediu um
+ * `local:<slug>` que não bate com nada declarado). Espelha `formatUnknownModelError`,
+ * mas o vocabulário é o do PROVIDER LOCAL (slugs de modelo, não tiers/sinônimos do
+ * Aluy) — `availableNames` são SÓ os slugs de modelo (DADO público, mesma natureza do
+ * que a status bar do pai já mostra em `local · <slug>`); NUNCA provider/base_url/
+ * api_key/host (HG-2/CLI-SEC-7, GS-SAM-L4). PURA (recebe os nomes já buscados — quem
+ * lista o catálogo local é o locus concreto, porta injetada).
+ */
+export function formatUnknownLocalModelError(
+  raw: string,
+  availableNames: readonly string[],
+): string {
+  const suggestion = suggestModelName(raw, availableNames);
+  const MAX_LISTED = 8;
+  const listed = availableNames.slice(0, MAX_LISTED).join(', ');
+  const tail = availableNames.length > MAX_LISTED ? ', …' : '';
+  const head =
+    suggestion !== undefined
+      ? `modelo local "${raw}" não encontrado — você quis dizer "${suggestion}"?`
+      : `modelo local "${raw}" não encontrado.`;
+  return `${head} Disponíveis: ${listed}${tail}.`;
+}
+
+/**
  * ADR-0146 (Q-3) — RANKING de custo RELATIVO dos tiers hospedados que o CLI conhece
  * de cor (espelha `MODEL_SYNONYM_TO_TIER`: flux < granito < strata < deep). Só serve
  * ao AVISO não-bloqueante de "tier mais caro" — NUNCA bloqueia nem restringe (tiers
@@ -294,6 +394,11 @@ export function isCostlierTier(candidate: string, current: string): boolean {
  * `parent.tier === 'custom' && parent.model` ⇒ `herdado (custom · ${model})`
  * (comportamento do ADR-0146, inalterado); (c) senão ⇒ `herdado (${parent.tier})`
  * (comportamento do ADR-0146, inalterado).
+ *
+ * ADR-0152 (D6) — ramo `local`: `local · ${slug}` — o SLUG pedido para ESTE filho
+ * (`resolution.slug`), ou, no caso degenerado (sem slug — "usa o modelo corrente do
+ * pai"), o `parent.activeModel`/`parent.model` (mesma pista que a status bar do pai
+ * já exibe). NUNCA provider/base_url/credencial.
  */
 export function formatResolvedModelLabel(
   resolution: ModelTierResolution,
@@ -305,6 +410,10 @@ export function formatResolvedModelLabel(
     case 'custom': {
       const slug = resolution.slug ?? parent.model;
       return slug !== undefined ? `custom · ${slug}` : 'custom';
+    }
+    case 'local': {
+      const slug = resolution.slug ?? parent.activeModel ?? parent.model;
+      return slug !== undefined ? `local · ${slug}` : 'local';
     }
     case 'inherit':
     case 'unknown':

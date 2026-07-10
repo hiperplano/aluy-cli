@@ -37,7 +37,7 @@ import { buildSession, type BuildSessionOptions } from './wiring.js';
 // ADR-0120 / EST-1113 — backend LOCAL (BYO): resolve a config e monta o LocalModelClient
 // (atrás do MESMO contrato `ModelClient`) p/ injetar no wiring quando `backend:'local'`.
 import { resolveModelBackend, resolveLocalProviderConfig } from '../model/local/config.js';
-import { buildLocalModelClient } from '../model/local/factory.js';
+import { buildLocalModelClient, createLocalChildCallerFactory } from '../model/local/factory.js';
 import { loadLocalProviderCatalog } from '../io/providers-config.js';
 import { createOAuthAccessTokenProvider } from '../model/local/oauth-store.js';
 import { setupMcp, ProjectMcpConfigStore, CodexMcpConfigStore } from '../mcp/index.js';
@@ -90,8 +90,10 @@ import {
   buildWorkflowsNote,
   buildSkillsNote,
   buildAvailableAgentsNote,
+  findProvider,
   type NativeTool,
   type ToolPorts,
+  type ModelCaller,
 } from '@hiperplano/aluy-cli-core';
 import { applyTierLiteral } from '../model/catalog.js';
 import { TerminalNotificationPort, loadNotifyConfig } from '../io/notify-port.js';
@@ -940,6 +942,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // mostrar `◷ local · tokenrouter · <modelo>` e não o provider do tier (ex.: `openai`).
   let localProviderForMeta: string | undefined;
   let localModelClient: import('@hiperplano/aluy-cli-core').ModelClient | undefined;
+  // ADR-0152 (D6b/D6c) — porta de ROTEAMENTO de sub-agente a um MODELO LOCAL
+  // específico + porta do PROBE LOCAL (catálogo declarado). Só existem sob backend
+  // LOCAL de verdade (não sob `opts.brokerClient` injetado de teste); ausentes ⇒ o
+  // controller trata `kind:'local'` como "não roteia" (erro legível) — fail-safe.
+  let callerForLocalModel: ((slug: string) => ModelCaller) | undefined;
+  let localModelCatalogPort: { readonly listNames: () => readonly string[] | undefined } | undefined;
   if (resolvedBackend === 'local' && opts.brokerClient === undefined) {
     // ADR-0118 — o catálogo EFETIVO (built-ins + `~/.aluy/providers.json`). SEM isto, a
     // resolução cairia no `defaultLocalCatalog()` (só built-ins) e um provider CUSTOM
@@ -971,6 +979,34 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         ? { oauthAccessToken: createOAuthAccessTokenProvider(localCfg.provider) }
         : {}),
     });
+
+    // ADR-0152 (D6b) — `callerForLocalModel(slug)`: MESMOS parâmetros do client do
+    // pai acima (catálogo/provider/auth/baseUrl/env/oauth já resolvidos no BOOT) —
+    // só o `model` varia por slug (GS-SAM-L1). NÃO passa `fetch`/`getCredential`
+    // aqui: herda os defaults de `buildLocalModelClient` (fetch PINADO EST-1115 +
+    // `createLocalCredentialProvider`) — NUNCA `globalThis.fetch`, nunca credencial
+    // derivada de DADO (spawn/`.md`/config só fornecem o `slug`, condição 1/2).
+    callerForLocalModel = createLocalChildCallerFactory({
+      catalog: localCatalog,
+      provider: localCfg.provider,
+      auth: localCfg.auth,
+      ...(localCfg.baseUrl !== undefined ? { baseUrl: localCfg.baseUrl } : {}),
+      env,
+      ...(localCfg.auth === 'oauth'
+        ? { oauthAccessToken: createOAuthAccessTokenProvider(localCfg.provider) }
+        : {}),
+    });
+
+    // ADR-0152 (D6c) — porta do PROBE LOCAL: os slugs de modelo DECLARADOS do
+    // provider corrente no catálogo (`~/.aluy/providers.json`/embutido, ADR-0118).
+    // Vazio/ausente ⇒ "não listável" (`undefined`) — degrade honesto (warn-but-allow
+    // no controller); NUNCA um probe vivo/rede aqui (síncrono, dado já em memória).
+    localModelCatalogPort = {
+      listNames: (): readonly string[] | undefined => {
+        const declared = findProvider(localCatalog, localCfg.provider)?.models;
+        return declared !== undefined && declared.length > 0 ? declared : undefined;
+      },
+    };
   }
 
   // EST-0962 (`--provider`) — TIRA `provider` do spread cru de `opts`: ele só entra ABAIXO,
@@ -1000,6 +1036,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // BrokerModelClient de sempre (não-regressão). Um teste que já injetou
     // `opts.brokerClient` o preserva (localModelClient fica undefined acima).
     ...(localModelClient !== undefined ? { brokerClient: localModelClient } : {}),
+    // ADR-0152 (D6b/D6c) — porta de roteamento a modelo LOCAL específico + porta do
+    // probe local (catálogo declarado). Ausentes sob backend broker (não-regressão).
+    ...(callerForLocalModel !== undefined ? { callerForLocalModel } : {}),
+    ...(localModelCatalogPort !== undefined ? { localModelCatalog: localModelCatalogPort } : {}),
     // EST-0991 · ADR-0072 — modo EFETIVO: cai p/ `normal` se a confirmação de YOLO
     // foi recusada no boot. Vence o `opts.mode` cru (e a cerca/anti-SSRF do wiring
     // derivam DESTE modo — então recusar o YOLO também restaura a cerca/SSRF).

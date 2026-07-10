@@ -40,6 +40,7 @@ import {
   resolveRoomBackend,
   ContextGraph,
   type ModelClient,
+  type ModelCaller,
   type TierCatalogClient,
   type CustomModelClient,
   type ProvidersClient,
@@ -185,6 +186,24 @@ export interface BuildSessionOptions {
    * backend (`opts.backend`/env/config) — o teste injeta o que quiser.
    */
   readonly brokerClient?: ModelClient;
+  /**
+   * ADR-0152 (D6b) — porta `callerForLocalModel(slug)`: fábrica que roteia um
+   * SUB-AGENTE a um MODELO LOCAL específico do MESMO provider do pai. Construída
+   * pelo `run.tsx` (locus que tem `localCatalog`/`localCfg`/`env`/oauth em escopo —
+   * fecha SÓ sobre o que o BOOT já resolveu, GS-SAM-L1) e THREADADA aqui até o
+   * `SessionController` sem lógica própria (pass-through). Ausente (backend ≠
+   * `local`, ou sub-agentes fora deste caminho) ⇒ `kind:'local'` com slug NÃO roteia
+   * (o controller devolve erro legível — não cai silenciosamente no caller do pai).
+   */
+  readonly callerForLocalModel?: (slug: string) => ModelCaller;
+  /**
+   * ADR-0152 (D6c) — porta do PROBE LOCAL: lista os slugs de modelo DECLARADOS do
+   * provider local corrente (catálogo ADR-0118), p/ o `spawnNamed` confrontar um
+   * `kind:'local'` ANTES do fan-out. `undefined`/ausente ⇒ catálogo NÃO listável
+   * (degrade honesto: aviso visível + o provider valida na 1ª chamada). Construída
+   * pelo `run.tsx`; pass-through aqui.
+   */
+  readonly localModelCatalog?: { readonly listNames: () => readonly string[] | undefined };
   /** EST-0962 — override do cliente de catálogo de tiers (testes — broker mockado). */
   readonly catalogClient?: TierCatalogClient;
   /** EST-0962 — override do cliente de modelos custom (testes — broker mockado). */
@@ -1215,6 +1234,12 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // resolve em `kind:'custom'` fala pelo provider BYO do pai (slug indicado ou
     // corrente). Ausente ⇒ cai no caller do pai (fail-safe).
     ...(customCallerFor ? { customCallerFor } : {}),
+    // ADR-0152 (D6b) — fábrica de caller p/ um MODELO LOCAL específico (construída
+    // pelo `run.tsx`, pass-through aqui — sem lógica própria no wiring). Ausente ⇒
+    // `kind:'local'` com slug NÃO roteia (o controller devolve erro legível).
+    ...(opts.callerForLocalModel ? { callerForLocalModel: opts.callerForLocalModel } : {}),
+    // ADR-0152 (D6c) — porta do probe LOCAL (catálogo declarado do provider local).
+    ...(opts.localModelCatalog ? { localModelCatalog: opts.localModelCatalog } : {}),
     // ADR-0146 (D2/L2) — porta do probe de nome de modelo (catálogo vivo p/ sugestão).
     ...(modelProbe ? { modelProbe } : {}),
     // ADR-0146 (D4) — dial global: default dos FILHOS quando nem o spawn nem o `.md`

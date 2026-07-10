@@ -431,6 +431,18 @@ export interface SubAgentSpawnerOptions {
    * fail-safe, nunca eleva. Fecha o gap BYO/Custom do ADR-0146 (D3).
    */
   readonly customCallerFor?: (slug?: string) => ModelCaller;
+  /**
+   * ADR-0152 (D6b) — FÁBRICA de caller p/ um MODELO LOCAL específico do MESMO
+   * provider do pai. Quando o `model` de um filho resolve em `kind:'local'` (com
+   * `slug` definido), o spawner usa `callerForLocalModel(slug)` PRA AQUELE FILHO: o
+   * locus concreto (@hiperplano/aluy-cli, `run.tsx`) reconstrói o `LocalModelClient`
+   * fechando SÓ sobre o provider/auth/base_url/credencial/fetch-PINADO já resolvidos
+   * no BOOT do pai — troca APENAS o `model` (GS-SAM-L1). Ausente ⇒ o filho NÃO
+   * roteia (o pai não está em backend local) — `childCallerFor` FALHA FECHADO (erro
+   * legível, `runChild` o converte num `SubAgentOutcome{ok:false}` — nunca eleva
+   * silenciosamente pro caller do pai, que seria outro provider/modelo).
+   */
+  readonly callerForLocalModel?: (slug: string) => ModelCaller;
   /** A MESMA engine de permissão do pai (mesmo SessionMode, sempre-ask, hooks). */
   readonly permission: PermissionEngine;
   /** As MESMAS ports confinadas do pai (workspace/path-deny/egress). Escopo ⊆ pai. */
@@ -791,6 +803,9 @@ export class SubAgentSpawner {
    * @hiperplano/aluy-cli). Quando o `model` do filho resolve em `kind:'custom'`, o
    * spawner usa `customCallerFor(slug)` PRA AQUELE FILHO; ausente ⇒ cai no caller do pai. */
   private readonly customCallerFor?: (slug?: string) => ModelCaller;
+  /** ADR-0152 (D6b) — fábrica de caller p/ um MODELO LOCAL específico (porta injetada
+   * do @hiperplano/aluy-cli). Ausente ⇒ `kind:'local'` FALHA FECHADO (não roteia). */
+  private readonly callerForLocalModel?: (slug: string) => ModelCaller;
   private readonly permission: PermissionEngine;
   private readonly ports: ToolPorts;
   private readonly childTools: readonly NativeTool<ToolPorts>[];
@@ -825,6 +840,7 @@ export class SubAgentSpawner {
     // caller do pai (`this.model`) — comportamento de hoje (back-compat).
     if (opts.callerForTier) this.callerForTier = opts.callerForTier;
     if (opts.customCallerFor) this.customCallerFor = opts.customCallerFor;
+    if (opts.callerForLocalModel) this.callerForLocalModel = opts.callerForLocalModel;
     this.permission = opts.permission;
     this.ports = opts.ports;
     // E-A1: o toolset do FILHO é o do pai SEM `spawn_agent` (filhos não delegam) e
@@ -988,12 +1004,32 @@ export class SubAgentSpawner {
     // verdade, ADR-0073). Sem model-no-`.md` (ou sem fábrica/sem cara de tier) ⇒ o filho
     // usa o caller do PAI (`this.model`) — back-compat. A SEGURANÇA não muda: mesma
     // rota de broker (CLI-SEC-7), só varia a pista de tier (HG-2).
-    const childCaller = childCallerFor(
-      profile,
-      this.model,
-      this.callerForTier,
-      this.customCallerFor,
-    );
+    // ADR-0152 (D6b) — `kind:'local'` sem `callerForLocalModel` injetado (pai NÃO está
+    // em backend local) FALHA FECHADO (`childCallerFor` lança); capturado AQUI e
+    // convertido num desfecho `ok:false` deste filho — NÃO derruba os irmãos (cada
+    // `runChild` é isolado) nem eleva silenciosamente pro caller do pai.
+    let childCaller: ModelCaller;
+    try {
+      childCaller = childCallerFor(
+        profile,
+        this.model,
+        this.callerForTier,
+        this.customCallerFor,
+        this.callerForLocalModel,
+      );
+    } catch (err) {
+      return {
+        label: profile.label,
+        ok: false,
+        result: `sub-agente "${profile.label}" não pôde resolver o modelo: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        stop: 'error',
+        // Falhou ANTES do loop nascer (nenhum débito ainda) — uso zerado (mesmo shape
+        // do `ownUsage` declarado abaixo, que ainda não existe neste ponto do código).
+        usage: { iterations: 0, toolCalls: 0, tokens: 0 },
+      };
+    }
 
     // E-A3/CLI-SEC-9: o ask do filho carimba a ORIGEM. Filhos paralelos ⇒ rótulos
     // distintos ⇒ confirmações distintas.
@@ -1233,6 +1269,16 @@ function personaAndContext(profile: SubAgentProfile): string | undefined {
  *    `same-as-parent`/`parent`/`inherit`) ⇒ `parentCaller` — é literalmente o
  *    caminho A já existente (o `parentCaller` já segue o pai AO VIVO via
  *    `tierSource`, incl. sob `tier:'custom'` — HG-2 intocado).
+ *  - `kind:'local'` (ADR-0152 D6 — `local:<slug>`, OU, no perfil já NORMALIZADO pelo
+ *    `spawnNamed` do controller, o alias `custom`/slug-cru promovidos sob backend
+ *    local) **com** `slug` definido: **e** a fábrica `callerForLocalModel` disponível
+ *    ⇒ `callerForLocalModel(slug)` — o filho fala pelo MESMO provider local do PAI
+ *    (provider/auth/base_url/fetch-pinado do BOOT, GS-SAM-L1), só o `model` muda.
+ *    Sem a fábrica (o pai NÃO está em backend local) ⇒ FALHA FECHADA — LANÇA (não
+ *    eleva pro `parentCaller`, que seria outro provider/modelo; `runChild` captura e
+ *    converte num `SubAgentOutcome{ok:false}` — não deriva os irmãos). `slug`
+ *    AUSENTE (degenerado — "usa o modelo corrente do pai") ⇒ `parentCaller`
+ *    diretamente (idêntico a `inherit`; não precisa da fábrica).
  *  - `kind:'unknown'` (string sem cara de tier/sentinela — candidato a ERRO do probe
  *    D2, que roda ANTES do fan-out) ⇒ `parentCaller` — REDE de segurança (defesa em
  *    profundidade): o probe já devia ter barrado este filho ANTES de chegar aqui;
@@ -1240,14 +1286,20 @@ function personaAndContext(profile: SubAgentProfile): string | undefined {
  *    elevado por engano — GS-SAM6).
  *
  * O `model` vem do PERFIL EM DISCO/spawn (capacidade declarada, HG-2), não de input
- * do modelo não-confiável interpretado aqui. NÃO toca catraca/escopo/budget — só
- * roteia a PISTA de tier (CLI-SEC-7).
+ * do modelo não-confiável interpretado aqui. `resolveModelTier(profile.model)` é
+ * chamado SEM `ctx` (este módulo não conhece `backend` — fronteira ADR-0053 §8): o
+ * `controller.spawnNamed` (que TEM o `ctx`) já NORMALIZA `profile.model` p/ a forma
+ * CANÔNICA `local:<slug>`/`local` quando a resolução COM ctx deu `kind:'local'` —
+ * a forma canônica resolve em `kind:'local'` em QUALQUER backend/ctx (ADR-0152 D6a),
+ * então a re-resolução AQUI (sem ctx) casa igual. NÃO toca catraca/escopo/budget —
+ * só roteia a PISTA de tier/modelo (CLI-SEC-7).
  */
 export function childCallerFor(
   profile: SubAgentProfile,
   parentCaller: ModelCaller,
   callerForTier?: (tier: string) => ModelCaller,
   customCallerFor?: (slug?: string) => ModelCaller,
+  callerForLocalModel?: (slug: string) => ModelCaller,
 ): ModelCaller {
   const resolution = resolveModelTier(profile.model);
   switch (resolution.kind) {
@@ -1255,6 +1307,17 @@ export function childCallerFor(
       return callerForTier ? callerForTier(resolution.key) : parentCaller;
     case 'custom':
       return customCallerFor ? customCallerFor(resolution.slug) : parentCaller;
+    case 'local': {
+      if (resolution.slug === undefined) return parentCaller;
+      if (!callerForLocalModel) {
+        throw new Error(
+          `modelo local "${resolution.slug}" pedido, mas esta sessão não está em ` +
+            `backend local — não é possível rotear (a porta callerForLocalModel não ` +
+            `está disponível).`,
+        );
+      }
+      return callerForLocalModel(resolution.slug);
+    }
     case 'inherit':
     case 'unknown':
     default:
