@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.105] — 2026-07-10
+
+### Corrigido
+
+- 🩹 **`spawn_agent` auto-corrige quando o modelo põe o slug do modelo no campo `agent` por engano** (backend `local`, `seguranca` APROVOU-COM-CONDIÇÕES): pedidos como "spawna sub-agentes no modelo `deepseek/deepseek-v4-flash`" faziam o modelo-pai (mais fraco) colocar o slug no parâmetro `agent` — pensado para o NOME de um perfil `.md` — em vez do parâmetro `model`, e a delegação era recusada com "agente desconhecido" (GS-MD7), levando o modelo a desistir. Agora, quando o `agent` NÃO resolve a nenhum `.md` do registro, o backend `local` reinterpreta o valor como `model` e roteia pelo MESMO caminho D6 (ADR-0152) — SEMPRE com uma nota visível explicando a reinterpretação. Fail-closed: só dispara sob backend local, sem `model` explícito já declarado (o `model` explícito nunca é sobrescrito), com o mesmo juízo `kind:'local'`+slug concreto do D6, e com o catálogo local CONFIRMANDO o slug (catálogo não-listável ou slug ausente dele ⇒ mantém o erro original de "agente desconhecido", nunca o erro de "modelo local desconhecido" — não vaza o palpite). Zero regressão: broker/hospedado, `model` explícito e agentes `.md` reais continuam inalterados.
+
 ## [1.0.0-rc.104] — 2026-07-10
 
 ### Corrigido
