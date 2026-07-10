@@ -249,9 +249,16 @@ export function measureConversaBlock(b: SessionBlock, ctx: ConversaCtx): number 
               : ch.status === 'cancelled'
                 ? 'parado'
                 : 'falhou';
+        // ADR-0146 (D5) — o `model` entra ANTES do `summary`, independente do status
+        // (espelha o `<ChildLine>` real) — senão esta medição SUBESTIMA a altura de um
+        // filho com model+summary e o clip do Ink acontece no cockpit também.
+        const modelPart = ch.model !== undefined ? ` · ${ch.model}` : '';
         const summary =
           ch.summary !== undefined && ch.status !== 'running' ? ` · ${ch.summary}` : '';
-        rows += wrappedLineCount(`[${ch.label}] x ${word}${summary}`, c - SPEECH_INDENT);
+        rows += wrappedLineCount(
+          `[${ch.label}] x ${word}${modelPart}${summary}`,
+          c - SPEECH_INDENT,
+        );
       }
       return 1 + rows + 1;
     }

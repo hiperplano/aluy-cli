@@ -6482,6 +6482,12 @@ export class SessionController {
    * (no rabo da lista) na 1ª vez. Atualização IMEDIATA (patch) — é uma transição
    * discreta (início/fim de filho), não um stream token-a-token: o bloco é estável
    * (sem jitter), não passa pelo throttle de flush.
+   *
+   * ADR-0146 (D5) — MERGE do `model`, não substituição: quando o registro que
+   * atualiza NÃO traz `model` (ex.: `cancelFlow` monta o filho de reposição sem essa
+   * pista), preserva o `model` do registro anterior daquele label. Sem isto, PARAR um
+   * sub-agente apagava o rótulo do modelo daquela linha (o `child` de reposição
+   * SUBSTITUÍA o array inteiro, dropando o campo).
    */
   private upsertSubAgentChild(label: string, child: SubAgentChild): void {
     const blocks = [...this.state.blocks];
@@ -6491,8 +6497,13 @@ export class SessionController {
       if (block.kind === 'subagents') {
         const children = [...block.children];
         const ci = children.findIndex((c) => c.label === label);
-        if (ci >= 0) children[ci] = child;
-        else children.push(child);
+        if (ci >= 0) {
+          const prev = children[ci]!;
+          const model = child.model ?? prev.model;
+          // `exactOptionalPropertyTypes` — não atribuir `model: undefined` explícito;
+          // omite a chave quando nem o novo nem o anterior têm modelo.
+          children[ci] = model !== undefined ? { ...child, model } : child;
+        } else children.push(child);
         blocks[idx] = { kind: 'subagents', children };
         this.patch({ blocks });
         return;
