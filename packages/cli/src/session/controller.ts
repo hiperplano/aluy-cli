@@ -5984,6 +5984,65 @@ export class SessionController {
     }
   }
 
+  /**
+   * DWIM AUTO-RECOVER — GS-MD7 fallback (`seguranca` APROVOU-COM-CONDIÇÕES): quando o
+   * modelo-pai (fraco) põe o SLUG de um modelo local no campo `agent` do
+   * `spawn_agent` (achando que é o `model`), e esse nome NÃO resolve a nenhum perfil
+   * `.md` do registro, reinterpreta o valor como `model` e roteia pelo MESMO caminho
+   * D6 (ADR-0152, bloco `kind:'local'` logo abaixo em `spawnNamed`) — em vez de
+   * desistir com "agente desconhecido". Retorna o perfil REESCRITO (pronto p/ cair no
+   * D6 pela via normal) ou `undefined` se QUALQUER condição falhar (fail-closed — o
+   * chamador então emite o erro GS-MD7 original, intocado):
+   *
+   *   1. (cond 2) backend LOCAL — `this.state.meta.backend === 'local'`. Zero
+   *      regressão broker/hosted.
+   *   2. (cond 3) precedência — `profile.model` ausente/vazio. Um `model` EXPLÍCITO
+   *      do `spawn_agent` NUNCA é sobrescrito pelo `agent` (ADR-0146 intacto).
+   *   3. (cond 1) mesmo juízo do D6 — `resolveModelTier(agent, {backend:'local'})` é
+   *      `kind:'local'` COM `slug` CONCRETO (não-vazio). Exclui o degenerado
+   *      "local"/"custom" sem slug e qualquer outro `kind` (`tier`/`custom`/
+   *      `inherit`/`unknown`).
+   *   4. (cond 4) confirmação de CATÁLOGO OBRIGATÓRIA — `localModelCatalog.listNames()`
+   *      precisa ser LISTÁVEL (não `undefined`) E conter o slug (case-insensitive).
+   *      Catálogo não-listável OU slug ausente dele ⇒ NÃO roteia (aqui NÃO vale o
+   *      warn-but-allow do D6c — esse é só p/ `model` EXPLÍCITO, nunca p/ inferência
+   *      de um campo errado).
+   *
+   * Ao rotear, `agent` é LIMPO (`undefined` — cond. 5, CLI-SEC-9: o filho nunca se
+   * apresenta como agente nomeado) e uma NOTA visível explica a reinterpretação
+   * (cond. 6, nunca silencioso). PURO quanto a I/O: só LÊ `localModelCatalog`, a
+   * MESMA porta síncrona que o D6c já consulta — nenhuma chamada nova.
+   */
+  private dwimAgentFieldAsLocalModel(profile: SubAgentProfile): SubAgentProfile | undefined {
+    const agentValue = profile.agent;
+    if (agentValue === undefined || agentValue.trim() === '') return undefined;
+    // cond 2 — backend LOCAL (fora disso, zero regressão broker/hosted).
+    if (this.state.meta.backend !== 'local') return undefined;
+    // cond 3 — precedência: `model` explícito do spawn NUNCA é sobrescrito pelo `agent`.
+    if (profile.model !== undefined && profile.model.trim() !== '') return undefined;
+    // cond 1 — mesmo juízo do D6: precisa resolver a `kind:'local'` COM slug concreto.
+    const resolution = resolveModelTier(agentValue, { backend: 'local' });
+    if (resolution.kind !== 'local' || resolution.slug === undefined) return undefined;
+    const slug = resolution.slug;
+    // cond 4 — confirmação de catálogo OBRIGATÓRIA (fail-closed; sem warn-but-allow
+    // aqui — essa complacência é só p/ `model` EXPLÍCITO, D6c abaixo).
+    const names = this.localModelCatalog?.listNames();
+    if (names === undefined) return undefined;
+    const found = names.some((n) => n.toLowerCase() === slug.toLowerCase());
+    if (!found) return undefined;
+    // cond 6 — nota SEMPRE visível (nunca silenciosa).
+    this.pushNote('spawn_agent', [
+      `interpretei "${agentValue}" no campo agent como um MODELO local — não há perfil ` +
+        `.md com esse nome; rodando o sub-agente "${profile.label}" nesse modelo.`,
+    ]);
+    // cond 5 — reescrita limpa: `agent` some (nunca `undefined` explícito — o tipo é
+    // `exactOptionalPropertyTypes`), `model` assume o valor pedido; o MESMO bloco D6
+    // (abaixo, em `spawnNamed`) refaz o probe/canonicalização a partir daqui.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- só descarta `agent`.
+    const { agent: _droppedAgent, ...rest } = profile;
+    return { ...rest, model: agentValue };
+  }
+
   private async spawnNamed(
     spawner: SubAgentSpawner,
     registry: AgentRegistry | undefined,
@@ -6030,33 +6089,45 @@ export class SessionController {
       if (hasNamedAgent) {
         const binding = bindNamedAgent(registry!, profile);
         if (!binding.ok) {
-          // GS-MD7: nome desconhecido = ERRO visível p/ este filho — NÃO spawnado.
-          outcomes[i] = errorOutcomeFor(profile.label, binding.error);
-          continue;
-        }
-        // RES-MD-1 (ANTI-SPOOFING CROSS-CAMADA) — o LOCUS HONRA o flag que o registry
-        // PRODUZ. Um `.md` de PROJETO (origin='project', DADO de terceiro) homônimo de
-        // um agente GLOBAL confiável VENCE por precedência (§4), mas NUNCA sequestra a
-        // delegação explícita em SILÊNCIO: exige CONFIRMAÇÃO com a ORIGEM VISÍVEL. O
-        // fail-safe é da catraca (CLI-SEC-3/9): não-interativo/timeout/abort ⇒ deny.
-        if (binding.crossLayerConflict && binding.origin === 'project') {
-          const ok = await this.confirmCrossLayerProject(profile.agent!, signal);
-          if (!ok) {
-            // DENY fail-closed: o de PROJETO NÃO roda (e nunca caímos no global por trás).
-            outcomes[i] = errorOutcomeFor(
-              profile.label,
-              `delegação a "${profile.agent}" RECUSADA (proteção contra usurpação de nome): o ` +
-                `agente de PROJETO ([origem: projeto], .claude/agents/) é HOMÔNIMO de um ` +
-                `agente GLOBAL confiável e a sua escolha NÃO foi confirmada ` +
-                `(sessão não-interativa, expirou ou cancelada ⇒ deny fail-safe). Para ` +
-                `usar o de projeto, confirme explicitamente; o global homônimo nunca ` +
-                `roda em silêncio no lugar dele.`,
-            );
+          // DWIM AUTO-RECOVER (`seguranca` APROVOU-COM-CONDIÇÕES) — antes de desistir
+          // com "agente desconhecido" (GS-MD7), tenta reinterpretar o `agent` como um
+          // MODELO local (o modelo-pai, fraco, às vezes põe o slug de modelo no campo
+          // errado). SÓ dispara sob TODAS as condições de segurança — ver
+          // `dwimAgentFieldAsLocalModel`; qualquer uma falhando ⇒ `undefined` ⇒ GS-MD7
+          // original, sem alterar `profile`.
+          const dwim = this.dwimAgentFieldAsLocalModel(profile);
+          if (dwim !== undefined) {
+            profile = dwim;
+          } else {
+            // GS-MD7: nome desconhecido = ERRO visível p/ este filho — NÃO spawnado.
+            outcomes[i] = errorOutcomeFor(profile.label, binding.error);
             continue;
           }
+        } else {
+          // RES-MD-1 (ANTI-SPOOFING CROSS-CAMADA) — o LOCUS HONRA o flag que o registry
+          // PRODUZ. Um `.md` de PROJETO (origin='project', DADO de terceiro) homônimo de
+          // um agente GLOBAL confiável VENCE por precedência (§4), mas NUNCA sequestra a
+          // delegação explícita em SILÊNCIO: exige CONFIRMAÇÃO com a ORIGEM VISÍVEL. O
+          // fail-safe é da catraca (CLI-SEC-3/9): não-interativo/timeout/abort ⇒ deny.
+          if (binding.crossLayerConflict && binding.origin === 'project') {
+            const ok = await this.confirmCrossLayerProject(profile.agent!, signal);
+            if (!ok) {
+              // DENY fail-closed: o de PROJETO NÃO roda (e nunca caímos no global por trás).
+              outcomes[i] = errorOutcomeFor(
+                profile.label,
+                `delegação a "${profile.agent}" RECUSADA (proteção contra usurpação de nome): o ` +
+                  `agente de PROJETO ([origem: projeto], .claude/agents/) é HOMÔNIMO de um ` +
+                  `agente GLOBAL confiável e a sua escolha NÃO foi confirmada ` +
+                  `(sessão não-interativa, expirou ou cancelada ⇒ deny fail-safe). Para ` +
+                  `usar o de projeto, confirme explicitamente; o global homônimo nunca ` +
+                  `roda em silêncio no lugar dele.`,
+              );
+              continue;
+            }
+          }
+          profile = binding.profile;
+          mdModel = binding.model;
         }
-        profile = binding.profile;
-        mdModel = binding.model;
       }
 
       // ADR-0146 — PRECEDÊNCIA do modelo do FILHO (a fonte única/determinística do
