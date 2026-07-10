@@ -13,13 +13,39 @@ export interface ModelCheckResult {
   readonly detail: string;
 }
 
+/**
+ * ADR-0153 (COND-S1/Q-4) — subset MÍNIMO de `fetch` que este módulo de fato usa
+ * (`.ok`/`.status`/`.text()` da resposta). Existe p/ que o caminho de
+ * TEST-THEN-REGISTER (`run.tsx`) possa injetar o FETCH PINADO anti-SSRF
+ * (`createPinnedStreamFetch`, EST-1115 — `StreamFetch`/`StreamResponse` do
+ * `cli-core`) SEM um adaptador `StreamResponse→Response` completo: `StreamResponse`
+ * já expõe exatamente esse subset, então é estruturalmente atribuível aqui. O
+ * `fetch` GLOBAL (default, usado por `aluy onboard`/`aluy login`) também satisfaz
+ * este tipo — nenhuma mudança de comportamento p/ os chamadores existentes. Este
+ * módulo NÃO seta `init.redirect`: o fetch PINADO cai no default `'error'`
+ * (fail-closed, EST-1115) — um `302 → http://169.254.169.254/` nunca é seguido.
+ */
+export type ConnectivityFetch = (
+  input: string,
+  init: {
+    readonly method: string;
+    readonly headers: Record<string, string>;
+    readonly body?: string;
+    readonly signal?: AbortSignal;
+  },
+) => Promise<{ readonly ok: boolean; readonly status: number; text(): Promise<string> }>;
+
 export async function checkModelConnectivity(args: {
   readonly wireFormat: string;
   readonly baseUrl: string;
   readonly model: string;
   readonly key: string;
-  /** `fetch` injetável (testes). Default: global fetch. */
-  readonly fetchImpl?: typeof fetch;
+  /**
+   * `fetch` injetável (testes) — ou o FETCH PINADO anti-SSRF no caminho
+   * TEST-THEN-REGISTER (ADR-0153, COND-S1: NUNCA o default global neste caminho).
+   * Default: `fetch` global (mantém `aluy onboard`/`aluy login` intocados).
+   */
+  readonly fetchImpl?: ConnectivityFetch;
   /** Timeout em ms (default 15000). */
   readonly timeoutMs?: number;
 }): Promise<ModelCheckResult> {
@@ -74,4 +100,40 @@ export async function checkModelConnectivity(args: {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * ADR-0153 (COND-S5) — SANITIZA o `detail` de um `ModelCheckResult{ok:false}` ANTES
+ * de alcançar a TUI (nota/erro por-filho), p/ o caminho de TEST-THEN-REGISTER
+ * (`verifyAndRegisterLocalModel`, `run.tsx`). `detail` hoje pode ecoar até 160
+ * chars do CORPO CRU do provider (ANSI/BEL/pseudo-segredo, ACHADO-A do parecer de
+ * segurança) e, no branch de rede/timeout/redirect-bloqueado, a `location`/
+ * `baseURL` via `e.message` (SSRF). Esta função DESCARTA os dois:
+ *
+ *   - `detail` bate `/^HTTP (\d{3})\b/` (branch HTTP do `checkModelConnectivity`,
+ *     linha `return { ok:false, detail: \`HTTP ${status}${hint} ${body}\` }`) ⇒
+ *     devolve SÓ `modelo local "<slug>" não respondeu: HTTP <ddd><hint>` — o
+ *     `<hint>` é RECALCULADO aqui (401/403 ⇒ " — chave inválida?", 404 ⇒
+ *     " — modelo ou baseURL errado?", senão vazio); o corpo de 160 chars É
+ *     DESCARTADO por completo (nunca chega à TUI).
+ *   - Qualquer outro formato (branch `catch` — rede/timeout/redirect BLOQUEADO
+ *     pelo anti-SSRF, EST-1115) ⇒ texto FIXO, sem interpolar `detail`/`e.message`
+ *     (nunca vaza `location`/`baseUrl`/host interno).
+ *
+ * PURA — recebe o `detail` já produzido, nunca refaz a chamada. Exportada p/ o
+ * `controller.ts` (que monta o erro por-filho) e testável isoladamente.
+ */
+export function formatConnectivityFailureDetail(slug: string, detail: string): string {
+  const m = /^HTTP (\d{3})\b/.exec(detail);
+  if (m !== null) {
+    const status = Number(m[1]);
+    const hint =
+      status === 401 || status === 403
+        ? ' — chave inválida?'
+        : status === 404
+          ? ' — modelo ou baseURL errado?'
+          : '';
+    return `modelo local "${slug}" não respondeu: HTTP ${m[1]}${hint}`;
+  }
+  return `modelo local "${slug}" não respondeu (rede/baseURL, ou egress bloqueado pelo anti-SSRF).`;
 }

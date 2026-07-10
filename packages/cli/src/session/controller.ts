@@ -49,6 +49,7 @@ import {
   resolveModelTier,
   formatUnknownModelError,
   formatUnknownLocalModelError,
+  suggestModelName,
   formatResolvedModelLabel,
   isCostlierTier,
   childEngineOf,
@@ -616,6 +617,27 @@ export interface SessionControllerOptions {
    */
   readonly localModelCatalog?: { readonly listNames: () => readonly string[] | undefined };
   /**
+   * ADR-0153 — PORTA de TEST-THEN-REGISTER: quando um `kind:'local'` pede um slug
+   * DESCONHECIDO (nem declarado nem registrado-na-sessão, `localModelCatalog`
+   * acima), o `spawnNamed` chama ISTO em vez de barrar/warn-but-allow cego (D6c do
+   * 0152). Faz UM teste ao vivo (`checkModelConnectivity`, ping `max_tokens:1`)
+   * contra o provider ATIVO do boot, com o FETCH PINADO (EST-1115, COND-S1 — NUNCA
+   * `globalThis.fetch`) e a credencial do credential provider do boot (COND-S2 —
+   * NUNCA de DADO de spawn/`.md`/config). `ok` ⇒ REGISTRA o slug (config +
+   * sessão) e o filho ROTEIA; `!ok` ⇒ erro por-filho ANTES do fan-out (fail-closed
+   * honesto, COND-S7 — não derruba os irmãos). Construída em `run.tsx`, MEMOIZADA
+   * por slug (D3 — N filhos no mesmo slug resolvem 1 teste) e sujeita ao teto de
+   * sessão (COND-S3, `MAX_LOCAL_MODEL_TESTS_PER_SESSION`). Ausente ⇒ o `spawnNamed`
+   * preserva EXATAMENTE o fallback rc.105 (Caso 1 fail-closed / Caso 2
+   * warn-but-allow) — zero regressão quando a porta não está montada (ex.:
+   * `opts.brokerClient` injetado de teste).
+   */
+  readonly verifyAndRegisterLocalModel?: (slug: string) => Promise<{
+    readonly ok: boolean;
+    readonly detail: string;
+    readonly registered: boolean;
+  }>;
+  /**
    * ADR-0146 (D2/L2) — PORTA do PROBE de nome de modelo: nomes disponíveis no CATÁLOGO
    * VIVO do broker (as MESMAS chaves do seletor `/model`), p/ o `spawnNamed` sugerir
    * (distância de edição) quando um `model` (spawn/`.md`/dial) não bate com nada
@@ -953,6 +975,10 @@ export class SessionController {
   /** ADR-0152 (D6c) — porta do PROBE LOCAL (catálogo declarado do provider local). */
   private readonly localModelCatalog:
     | { readonly listNames: () => readonly string[] | undefined }
+    | undefined;
+  /** ADR-0153 — porta de TEST-THEN-REGISTER (slug local desconhecido: testa + registra). */
+  private readonly verifyAndRegisterLocalModel:
+    | ((slug: string) => Promise<{ readonly ok: boolean; readonly detail: string; readonly registered: boolean }>)
     | undefined;
   // EST-0948 — os tetos EFETIVOS da sessão (CLI-SEC-8), já resolvidos (flag>env>default,
   // clampados) pelo wiring. Fonte do TETO de tokens p/ os indicadores em % (StatusBar/
@@ -1305,6 +1331,7 @@ export class SessionController {
     this.modelProbe = opts.modelProbe; // ADR-0146 (D2/L2) — catálogo vivo p/ sugestão
     this.defaultChildModel = opts.defaultChildModel; // ADR-0146 (D4) — dial global
     this.localModelCatalog = opts.localModelCatalog; // ADR-0152 (D6c) — probe local
+    this.verifyAndRegisterLocalModel = opts.verifyAndRegisterLocalModel; // ADR-0153 — TTR
     this.clock = opts.clock ?? Date.now;
     this.isRoot =
       opts.isRoot ?? (() => typeof process.geteuid === 'function' && process.geteuid() === 0);
@@ -6043,6 +6070,24 @@ export class SessionController {
     return { ...rest, model: agentValue };
   }
 
+  /**
+   * ADR-0153 (COND-S5) — sufixo de SUGESTÃO por distância de edição sobre `names`
+   * (a MESMA técnica de `formatUnknownLocalModelError`, via o `suggestModelName`
+   * exportado do core — sem duplicar/tocar o `cli-core`, ADR-0053 §8). Usado
+   * DEPOIS do texto sanitizado do `detail` do teste vivo (que já não tem "não
+   * encontrado" — o slug FOI testado, só não respondeu). `names` vazio ⇒ sem
+   * sugestão (string vazia — nenhuma lista pra oferecer). PURO.
+   */
+  private suggestLocalModelTail(slug: string, names: readonly string[]): string {
+    if (names.length === 0) return '';
+    const suggestion = suggestModelName(slug, names);
+    const MAX_LISTED = 8;
+    const listed = names.slice(0, MAX_LISTED).join(', ');
+    const tail = names.length > MAX_LISTED ? ', …' : '';
+    const q = suggestion !== undefined ? ` Você quis dizer "${suggestion}"?` : '';
+    return `${q} Disponíveis: ${listed}${tail}.`;
+  }
+
   private async spawnNamed(
     spawner: SubAgentSpawner,
     registry: AgentRegistry | undefined,
@@ -6189,31 +6234,56 @@ export class SessionController {
             );
             continue;
           }
-          // D6c — PROBE LOCAL fail-closed ANTES do fan-out, só quando HÁ um slug
-          // concreto pedido (o degenerado "local" sem slug segue o pai ao vivo — sem
-          // nome nenhum p/ confrontar, ver `childCallerFor`).
+          // ADR-0153 (D1/D2) — TEST-THEN-REGISTER, só quando HÁ um slug concreto
+          // pedido (o degenerado "local" sem slug segue o pai ao vivo — sem nome
+          // nenhum p/ confrontar, ver `childCallerFor`). `names` já é a UNIÃO
+          // declarado∪registrado-na-sessão (a porta `localModelCatalog`, construída
+          // em `run.tsx`, faz essa união — D2). Um slug JÁ CONHECIDO roteia direto,
+          // SEM teste (zero custo/latência); só o DESCONHECIDO dispara a porta nova.
           const slug = resolution.slug;
           if (slug !== undefined) {
             const names = this.localModelCatalog?.listNames();
-            if (names !== undefined) {
-              // Caso 1 (D6c) — catálogo LOCAL LISTÁVEL: confronta ANTES de rodar.
-              // Erro FAIL-CLOSED por-filho (GS-SAM-L5) — não derruba os irmãos (T6).
-              const found = names.some((n) => n.toLowerCase() === slug.toLowerCase());
-              if (!found) {
-                outcomes[i] = errorOutcomeFor(
-                  profile.label,
-                  formatUnknownLocalModelError(slug, names),
-                );
-                continue;
+            const known = names?.some((n) => n.toLowerCase() === slug.toLowerCase()) ?? false;
+            if (!known) {
+              if (this.verifyAndRegisterLocalModel === undefined) {
+                // Porta AUSENTE (ex.: teste com `opts.brokerClient` injetado, wiring
+                // degenerado) ⇒ preserva EXATAMENTE o comportamento rc.105 — zero
+                // regressão quando a porta de test-then-register não está montada.
+                if (names !== undefined) {
+                  // Caso 1 (0152 D6c) — catálogo LOCAL LISTÁVEL: confronta ANTES de
+                  // rodar. Erro FAIL-CLOSED por-filho (GS-SAM-L5) — não derruba os
+                  // irmãos (T6).
+                  outcomes[i] = errorOutcomeFor(
+                    profile.label,
+                    formatUnknownLocalModelError(slug, names),
+                  );
+                  continue;
+                }
+                // Caso 2 (0152 D6c) — catálogo NÃO listável: WARN-BUT-ALLOW
+                // (ADR-0066) com AVISO VISÍVEL (T7 — não silencioso, GS-SAM-L5); o
+                // provider valida na 1ª chamada (422 honesto se o slug não existir).
+                this.pushNote('spawn_agent', [
+                  `não deu para confirmar "${slug}" no catálogo do provider local ` +
+                    `(sub-agente "${profile.label}") — o provider valida na 1ª chamada.`,
+                ]);
+              } else {
+                // ADR-0153 — slug DESCONHECIDO: testa AO VIVO 1× (porta memoizada
+                // por slug, D3) contra o MESMO provider/credencial do boot
+                // (COND-S1/S2/S9 — nunca `globalThis.fetch`, nunca credencial de
+                // DADO). `ok` ⇒ REGISTRA (D2) e roteia; `!ok` ⇒ erro por-filho
+                // ANTES do fan-out (fail-closed honesto, COND-S7) — não derruba os
+                // irmãos (`continue`, não uma exception).
+                this.pushNote('spawn_agent', [`testando modelo "${slug}" no provider local…`]);
+                const result = await this.verifyAndRegisterLocalModel(slug);
+                if (!result.ok) {
+                  outcomes[i] = errorOutcomeFor(
+                    profile.label,
+                    `${result.detail}${this.suggestLocalModelTail(slug, names ?? [])}`,
+                  );
+                  continue;
+                }
+                this.pushNote('spawn_agent', [result.detail]);
               }
-            } else {
-              // Caso 2 (D6c) — catálogo NÃO listável: WARN-BUT-ALLOW (ADR-0066) com
-              // AVISO VISÍVEL (T7 — não silencioso, GS-SAM-L5); o provider valida na
-              // 1ª chamada (422 honesto se o slug não existir).
-              this.pushNote('spawn_agent', [
-                `não deu para confirmar "${slug}" no catálogo do provider local ` +
-                  `(sub-agente "${profile.label}") — o provider valida na 1ª chamada.`,
-              ]);
             }
           }
           // Canonicaliza p/ a forma EXPLÍCITA `local:<slug>`/`local`: o `childCallerFor`
