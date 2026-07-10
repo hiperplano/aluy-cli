@@ -6484,15 +6484,28 @@ export class SessionController {
   }
 
   /**
-   * ADR-0146 (D5) — formata o RÓTULO de tier/modelo RESOLVIDO deste filho p/ a UI, a
-   * partir da preferência CRUA do perfil (`model` — a MESMA string que `childCallerFor`
-   * roteia) + a pista CORRENTE do pai. NUNCA provider/base_url/credencial (HG-2) —
-   * só a chave de tier e/ou o slug de catálogo Custom (mesmo filtro da status bar).
+   * ADR-0146 (D5) / ADR-0152 (D5-bis) — formata o RÓTULO de tier/modelo RESOLVIDO
+   * deste filho p/ a UI, a partir da preferência CRUA do perfil (`model` — a MESMA
+   * string que `childCallerFor` roteia) + a pista CORRENTE do pai. NUNCA provider/
+   * base_url/credencial (HG-2) — só a chave de tier e/ou o slug de catálogo Custom
+   * (mesmo filtro da status bar).
+   *
+   * ADR-0152 (D5-bis) — sob backend `local`, o caso `inherit` passa a mostrar o
+   * modelo CONCRETO que o pai de fato usa (`meta.activeModel`, ex.:
+   * `herdado (deepseek-v4-pro)`) em vez do tier abstrato — o CLI já conhece o
+   * client local que montou, não há abstração de tier a proteger. Sob backend
+   * `broker` (hospedado), `activeModel` NUNCA é passado ⇒ o rótulo mantém o tier
+   * (`herdado (aluy-strata)`), preservando CLI-SEC-7. A política de "o que é
+   * seguro exibir" mora AQUI (locus que conhece `meta.backend`); `formatResolvedModelLabel`
+   * segue PURA, só formata o que recebe.
    */
   private childModelLabel(model: string | undefined): string {
+    const meta = this.state.meta;
+    const activeModel = meta.backend === 'local' ? meta.activeModel : undefined;
     return formatResolvedModelLabel(resolveModelTier(model), {
       tier: this.tier,
       ...(this.model !== undefined ? { model: this.model } : {}),
+      ...(activeModel !== undefined ? { activeModel } : {}),
     });
   }
 

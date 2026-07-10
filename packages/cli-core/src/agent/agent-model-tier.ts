@@ -280,15 +280,24 @@ export function isCostlierTier(candidate: string, current: string): boolean {
 }
 
 /**
- * ADR-0146 (D5) — formata o RÓTULO de exibição do tier/modelo RESOLVIDO de um filho
- * p/ a UI (`<SubAgents>`), a partir da `ModelTierResolution` + a pista CORRENTE do
- * pai (`parentTier`/`parentModel` — mesma natureza do que a status bar do pai já
- * mostra). NUNCA inclui provider/base_url/credencial (HG-2/CLI-SEC-7) — só a chave
- * de tier e/ou o slug de catálogo Custom (chave OPACA de UI). PURO.
+ * ADR-0146 (D5) / ADR-0152 (D5-bis) — formata o RÓTULO de exibição do tier/modelo
+ * RESOLVIDO de um filho p/ a UI (`<SubAgents>`), a partir da `ModelTierResolution` +
+ * a pista CORRENTE do pai (`parent.tier`/`parent.model`/`parent.activeModel` — mesma
+ * natureza do que a status bar do pai já mostra). NUNCA inclui provider/base_url/
+ * credencial (HG-2/CLI-SEC-7) — só a chave de tier e/ou o slug de catálogo
+ * Custom/local (chave OPACA de UI). PURA — não sabe de `backend`; quem decide SE
+ * `parent.activeModel` é seguro exibir (só sob `backend==='local'`) é o locus
+ * concreto (o controller), que só preenche o campo nesse caso (ADR-0152 D5-bis).
+ *
+ * Precedência no ramo `inherit`/`unknown`: (a) `parent.activeModel` presente ⇒
+ * `herdado (${activeModel})` — o modelo CONCRETO que o pai de fato usa; (b) senão,
+ * `parent.tier === 'custom' && parent.model` ⇒ `herdado (custom · ${model})`
+ * (comportamento do ADR-0146, inalterado); (c) senão ⇒ `herdado (${parent.tier})`
+ * (comportamento do ADR-0146, inalterado).
  */
 export function formatResolvedModelLabel(
   resolution: ModelTierResolution,
-  parent: { readonly tier: string; readonly model?: string },
+  parent: { readonly tier: string; readonly model?: string; readonly activeModel?: string },
 ): string {
   switch (resolution.kind) {
     case 'tier':
@@ -300,6 +309,7 @@ export function formatResolvedModelLabel(
     case 'inherit':
     case 'unknown':
     default:
+      if (parent.activeModel !== undefined) return `herdado (${parent.activeModel})`;
       return parent.tier === 'custom' && parent.model !== undefined
         ? `herdado (custom · ${parent.model})`
         : `herdado (${parent.tier})`;
