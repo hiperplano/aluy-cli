@@ -204,6 +204,19 @@ export interface BuildSessionOptions {
    * pelo `run.tsx`; pass-through aqui.
    */
   readonly localModelCatalog?: { readonly listNames: () => readonly string[] | undefined };
+  /**
+   * ADR-0153 — porta de TEST-THEN-REGISTER: quando um `kind:'local'` pede um slug
+   * DESCONHECIDO, o `spawnNamed` a chama em vez de barrar/warn-but-allow cego
+   * (D6c do 0152). Construída pelo `run.tsx` (fetch PINADO EST-1115 + credencial
+   * do boot + memo por slug); THREADADA aqui até o `SessionController` sem lógica
+   * própria (pass-through). Ausente ⇒ o controller preserva EXATAMENTE o
+   * comportamento rc.105 (fallback fail-closed/warn-but-allow) — zero regressão.
+   */
+  readonly verifyAndRegisterLocalModel?: (slug: string) => Promise<{
+    readonly ok: boolean;
+    readonly detail: string;
+    readonly registered: boolean;
+  }>;
   /** EST-0962 — override do cliente de catálogo de tiers (testes — broker mockado). */
   readonly catalogClient?: TierCatalogClient;
   /** EST-0962 — override do cliente de modelos custom (testes — broker mockado). */
@@ -1240,6 +1253,11 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     ...(opts.callerForLocalModel ? { callerForLocalModel: opts.callerForLocalModel } : {}),
     // ADR-0152 (D6c) — porta do probe LOCAL (catálogo declarado do provider local).
     ...(opts.localModelCatalog ? { localModelCatalog: opts.localModelCatalog } : {}),
+    // ADR-0153 — porta de test-then-register (construída pelo `run.tsx`, pass-through
+    // aqui). Ausente ⇒ o controller cai no fallback rc.105 (zero regressão).
+    ...(opts.verifyAndRegisterLocalModel
+      ? { verifyAndRegisterLocalModel: opts.verifyAndRegisterLocalModel }
+      : {}),
     // ADR-0146 (D2/L2) — porta do probe de nome de modelo (catálogo vivo p/ sugestão).
     ...(modelProbe ? { modelProbe } : {}),
     // ADR-0146 (D4) — dial global: default dos FILHOS quando nem o spawn nem o `.md`

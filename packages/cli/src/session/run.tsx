@@ -40,6 +40,11 @@ import { resolveModelBackend, resolveLocalProviderConfig } from '../model/local/
 import { buildLocalModelClient, createLocalChildCallerFactory } from '../model/local/factory.js';
 import { loadLocalProviderCatalog } from '../io/providers-config.js';
 import { createOAuthAccessTokenProvider } from '../model/local/oauth-store.js';
+// ADR-0153 — TEST-THEN-REGISTER: a fábrica da porta (fetch PINADO, COND-S1 + memo/
+// teto/sanitização/fail-closed) vive em `test-then-register.ts`, testável isolada.
+import { createVerifyAndRegisterLocalModelPort } from '../model/local/test-then-register.js';
+import { createPinnedStreamFetch } from '../model/local/pinned-stream-fetch.js';
+import { createLocalCredentialProvider } from '../model/local/credential-resolver.js';
 import { setupMcp, ProjectMcpConfigStore, CodexMcpConfigStore } from '../mcp/index.js';
 import { createSandbox } from '../sandbox/index.js';
 import {
@@ -948,6 +953,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // controller trata `kind:'local'` como "não roteia" (erro legível) — fail-safe.
   let callerForLocalModel: ((slug: string) => ModelCaller) | undefined;
   let localModelCatalogPort: { readonly listNames: () => readonly string[] | undefined } | undefined;
+  // ADR-0153 — porta de TEST-THEN-REGISTER (D1/D2/D3). Mesma guarda do bloco acima
+  // (só existe sob backend LOCAL de verdade); ausente ⇒ o controller preserva o
+  // fallback rc.105 (Caso 1 fail-closed / Caso 2 warn-but-allow) — zero regressão.
+  let verifyAndRegisterLocalModel:
+    | ((
+        slug: string,
+      ) => Promise<{ readonly ok: boolean; readonly detail: string; readonly registered: boolean }>)
+    | undefined;
   if (resolvedBackend === 'local' && opts.brokerClient === undefined) {
     // ADR-0118 — o catálogo EFETIVO (built-ins + `~/.aluy/providers.json`). SEM isto, a
     // resolução cairia no `defaultLocalCatalog()` (só built-ins) e um provider CUSTOM
@@ -997,16 +1010,76 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         : {}),
     });
 
+    // ADR-0153 (D2) — o conjunto de slugs REGISTRADOS NESTA SESSÃO (test-then-
+    // register, `ok:true`). `localModelCatalogPort.listNames()` abaixo passa a
+    // devolver declarado ∪ ESTE set — o PRÓXIMO filho do MESMO lote (ou de um
+    // lote seguinte, mesma sessão) já vê o slug como CONHECIDO e não re-testa
+    // (D2 §"Persistência DUPLA" — sessão em memória, além do append no config).
+    const sessionRegisteredLocalModels = new Set<string>();
+
     // ADR-0152 (D6c) — porta do PROBE LOCAL: os slugs de modelo DECLARADOS do
-    // provider corrente no catálogo (`~/.aluy/providers.json`/embutido, ADR-0118).
-    // Vazio/ausente ⇒ "não listável" (`undefined`) — degrade honesto (warn-but-allow
-    // no controller); NUNCA um probe vivo/rede aqui (síncrono, dado já em memória).
+    // provider corrente no catálogo (`~/.aluy/providers.json`/embutido, ADR-0118)
+    // UNIDOS (ADR-0153 D2) aos registrados-na-sessão acima. Vazio/ausente ⇒ "não
+    // listável" (`undefined`) — degrade honesto (warn-but-allow no controller
+    // quando a porta de test-then-register também estiver ausente); NUNCA um
+    // probe vivo/rede aqui (síncrono, dado já em memória).
     localModelCatalogPort = {
       listNames: (): readonly string[] | undefined => {
-        const declared = findProvider(localCatalog, localCfg.provider)?.models;
-        return declared !== undefined && declared.length > 0 ? declared : undefined;
+        const declared = findProvider(localCatalog, localCfg.provider)?.models ?? [];
+        const union = [...declared, ...sessionRegisteredLocalModels];
+        return union.length > 0 ? union : undefined;
       },
     };
+
+    // COND-S2 — MESMO `createLocalCredentialProvider` que `localModelClient`/
+    // `callerForLocalModel` do pai usam (construído uma vez; resolve a CADA
+    // chamada — keychain/OAuth podem rotacionar sem reiniciar a sessão).
+    const getCredentialForTest = createLocalCredentialProvider({
+      provider: localCfg.provider,
+      auth: localCfg.auth,
+      env,
+      ...(localCfg.auth === 'oauth'
+        ? { oauthAccessToken: createOAuthAccessTokenProvider(localCfg.provider) }
+        : {}),
+    });
+
+    // ADR-0153 (D1-D4, COND-S1..S9) — porta `verifyAndRegisterLocalModel(slug)`:
+    // TEST-THEN-REGISTER de um slug local DESCONHECIDO. Fecha SÓ sobre o que o
+    // BOOT já resolveu (catálogo/provider/auth/env/oauth — MESMO escopo do
+    // `callerForLocalModel` acima, GS-SAM-L1); nenhum dado de spawn/`.md`/config
+    // entra aqui além do `slug` (um DADO de catálogo, HG-2). A fábrica em si
+    // (memo/teto/sanitização/fail-closed) vive em `test-then-register.ts` —
+    // testável ISOLADA, sem precisar bootar a TUI (mesmo padrão de
+    // `createLocalChildCallerFactory`, factory.ts).
+    verifyAndRegisterLocalModel = createVerifyAndRegisterLocalModelPort({
+      // COND-S9 (wireFormat/baseUrl só do boot) — MESMA derivação de `wireFormat`
+      // que `createLocalChildCallerFactory`/`adapterFor` usam (findProvider do
+      // catálogo já resolvido no boot); `baseUrl` = override do boot OU o default
+      // PÚBLICO do MESMO catálogo (mesma resolução de `buildLocalModelClient`) —
+      // nenhum dos dois vem de DADO de spawn/`.md`/config.
+      wireFormat: findProvider(localCatalog, localCfg.provider)?.wireFormat ?? 'openai-compat',
+      baseUrl: localCfg.baseUrl ?? findProvider(localCatalog, localCfg.provider)?.baseUrl ?? '',
+      // COND-S1 (fetch PINADO) — o MESMO `createPinnedStreamFetch` (EST-1115) que
+      // `buildLocalModelClient`/`callerForLocalModel` usam por default; NUNCA
+      // `globalThis.fetch`. `checkModelConnectivity` não seta `init.redirect` ⇒ o
+      // pinado cai no default `'error'` (fail-closed) — um `302 → 169.254.169.254`
+      // nunca é seguido.
+      fetchImpl: createPinnedStreamFetch({}),
+      // COND-S2 (credencial do boot) — MESMO `createLocalCredentialProvider` que o
+      // `localModelClient`/`callerForLocalModel` do pai usam (construído UMA vez,
+      // resolve a CADA chamada — mesma disciplina do resolvedor); `auth:'none'`
+      // (Ollama) devolve `secret:''` (aceito).
+      getKey: async () => {
+        const cred = await getCredentialForTest();
+        return cred.secret;
+      },
+      // D2/COND-S4 — append idempotente no config (só quando o provider ATIVO já
+      // tem entrada em `providers[]`); `false` ⇒ built-in sem entrada, sessão-only.
+      registerLocalModel: (slug) => configStore.registerLocalModel(localCfg.provider, slug),
+      // D2 — o que faz o PRÓXIMO filho do MESMO lote (via `localModelCatalogPort`
+      // acima) ver o slug como "conhecido" e não re-testar.
+      markSessionRegistered: (slug) => sessionRegisteredLocalModels.add(slug),
+    });
   }
 
   // EST-0962 (`--provider`) — TIRA `provider` do spread cru de `opts`: ele só entra ABAIXO,
@@ -1040,6 +1113,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // probe local (catálogo declarado). Ausentes sob backend broker (não-regressão).
     ...(callerForLocalModel !== undefined ? { callerForLocalModel } : {}),
     ...(localModelCatalogPort !== undefined ? { localModelCatalog: localModelCatalogPort } : {}),
+    // ADR-0153 — porta de test-then-register (ausente sob backend broker/teste com
+    // `opts.brokerClient` — não-regressão).
+    ...(verifyAndRegisterLocalModel !== undefined ? { verifyAndRegisterLocalModel } : {}),
     // EST-0991 · ADR-0072 — modo EFETIVO: cai p/ `normal` se a confirmação de YOLO
     // foi recusada no boot. Vence o `opts.mode` cru (e a cerca/anti-SSRF do wiring
     // derivam DESTE modo — então recusar o YOLO também restaura a cerca/SSRF).

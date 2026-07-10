@@ -730,6 +730,15 @@ export interface UserConfigStoreOptions {
  */
 const MAX_OPAQUE_LEN = 128;
 
+/**
+ * ADR-0153 (D2/COND-S4) — teto defensivo de slugs REGISTRADOS por provider em
+ * `providers[<id>].models` (test-then-register, `registerLocalModel`). Evita
+ * crescimento sem fim (config adulterado ou um loop de slugs distintos); um
+ * provider real (mesmo um router tipo tokenrouter) não tem centenas de slugs
+ * ÚNICOS testados numa sessão de trabalho — bem acima do uso normal.
+ */
+const MAX_LOCAL_MODELS_PER_PROVIDER = 256;
+
 /** `true` se a string opaca (tier ou slug) é razoável: não-vazia, curta, sem controle. */
 function isReasonableOpaque(v: unknown): v is string {
   if (typeof v !== 'string') return false;
@@ -1075,6 +1084,42 @@ export class UserConfigStore {
   saveSubAgentModel(model: string | undefined): boolean {
     const trimmed = model?.trim();
     return this.save({ subAgent: trimmed !== undefined && trimmed !== '' ? { model: trimmed } : {} });
+  }
+
+  /**
+   * ADR-0153 (D2/COND-S4) — TEST-THEN-REGISTER: registra um SLUG de modelo LOCAL
+   * que RESPONDEU ao teste ao vivo (`checkModelConnectivity`, via
+   * `verifyAndRegisterLocalModel`) no catálogo do provider `providerId`, append
+   * IDEMPOTENTE case-insensitive em `providers[<id>].models` — preserva TODO o
+   * resto do config (outras entradas, `baseUrl`/`auth`/demais campos DAQUELA
+   * entrada INTOCADOS; NUNCA grava credencial/baseUrl novos, COND-S4). Só o slug
+   * (DADO PÚBLICO) muda; passa pelo `sanitizeProviderEntries` de sempre (via
+   * `save`/`sanitize`, mesmo gatekeeper de qualquer escrita em `providers[]`).
+   *
+   * Devolve `false` (SEM gravar) em dois casos, ambos fail-safe/session-only —
+   * quem chama trata como "não persistiu, só a sessão sabe":
+   *   - `providerId` NÃO tem entrada em `providers[]` (provider BUILT-IN sem
+   *     override do usuário — sintetizar uma `UserProviderEntry` exigiria gravar
+   *     `baseUrl`/`wireFormat`, fora do MVP, ADR-0153 D2 borda/Q-3);
+   *   - a entrada já tem `MAX_LOCAL_MODELS_PER_PROVIDER` slugs (teto defensivo,
+   *     COND-S4 — nunca cresce sem fim).
+   * Devolve `true` se já estava lá (idempotente) OU se acabou de gravar.
+   */
+  registerLocalModel(providerId: string, slug: string): boolean {
+    const id = providerId.trim();
+    const s = slug.trim();
+    if (id === '' || s === '') return false;
+    const providers = this.load().providers ?? [];
+    const idx = providers.findIndex((p) => p.id === id);
+    if (idx === -1) return false; // built-in sem entrada — o caller registra só-sessão.
+    const entry = providers[idx]!;
+    const models = entry.models ?? [];
+    if (models.some((m) => m.toLowerCase() === s.toLowerCase())) return true; // já registrado.
+    if (models.length >= MAX_LOCAL_MODELS_PER_PROVIDER) return false; // teto (COND-S4).
+    const nextProviders = providers.map((p, i) =>
+      i === idx ? { ...entry, models: [...models, s] } : p,
+    );
+    return this.save({ providers: nextProviders });
   }
 
   /**
