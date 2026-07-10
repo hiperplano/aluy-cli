@@ -196,3 +196,58 @@ describe('ADR-0146 (D5) — formatResolvedModelLabel (rótulo de UI, sem credenc
     expect(label).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
   });
 });
+
+describe('ADR-0152 (D5-bis) — formatResolvedModelLabel + parent.activeModel (precedência)', () => {
+  it('kind:"inherit" + activeModel presente ⇒ "herdado (<activeModel>)" (modelo LOCAL concreto)', () => {
+    expect(
+      formatResolvedModelLabel(
+        { kind: 'inherit' },
+        { tier: 'aluy-flux', activeModel: 'deepseek-v4-pro' },
+      ),
+    ).toBe('herdado (deepseek-v4-pro)');
+  });
+
+  it('kind:"unknown" + activeModel presente ⇒ mesma precedência (também cai em "inherit")', () => {
+    expect(
+      formatResolvedModelLabel(
+        { kind: 'unknown', raw: 'deepseek-v4-flash' },
+        { tier: 'aluy-flux', activeModel: 'deepseek-v4-pro' },
+      ),
+    ).toBe('herdado (deepseek-v4-pro)');
+  });
+
+  it('activeModel AUSENTE + parent.tier="custom" ⇒ "herdado (custom · <slug>)" — INALTERADO', () => {
+    expect(
+      formatResolvedModelLabel({ kind: 'inherit' }, { tier: 'custom', model: 'x' }),
+    ).toBe('herdado (custom · x)');
+  });
+
+  it('activeModel AUSENTE + só tier ⇒ "herdado (<tier>)" — INALTERADO', () => {
+    expect(
+      formatResolvedModelLabel({ kind: 'inherit' }, { tier: 'aluy-strata' }),
+    ).toBe('herdado (aluy-strata)');
+  });
+
+  it('activeModel presente NÃO afeta kind:"tier"/"custom" (só o ramo inherit/unknown)', () => {
+    expect(
+      formatResolvedModelLabel(
+        { kind: 'tier', key: 'aluy-deep' },
+        { tier: 'aluy-flux', activeModel: 'deepseek-v4-pro' },
+      ),
+    ).toBe('aluy-deep');
+    expect(
+      formatResolvedModelLabel(
+        { kind: 'custom', slug: 'meu-slug' },
+        { tier: 'custom', model: 'slug-do-pai', activeModel: 'deepseek-v4-pro' },
+      ),
+    ).toBe('custom · meu-slug');
+  });
+
+  it('NUNCA inclui provider/base_url/api_key/token mesmo com activeModel', () => {
+    const label = formatResolvedModelLabel(
+      { kind: 'inherit' },
+      { tier: 'aluy-flux', activeModel: 'deepseek-v4-pro' },
+    );
+    expect(label).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
+  });
+});

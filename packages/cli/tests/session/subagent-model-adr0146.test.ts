@@ -382,6 +382,95 @@ describe('ADR-0146 (D5) — o rótulo do tier resolvido aparece no bloco `subage
   });
 });
 
+describe('ADR-0152 (D5-bis) — backend local: filho herdado mostra o modelo CONCRETO', () => {
+  it('backend "local" + meta.activeModel ⇒ o child-view mostra "herdado (<activeModel>)"', async () => {
+    const model = parentDelegates({ agents: [{ label: 'x', goal: 'g' }] }); // SEM model ⇒ inherit
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: fakePorts(),
+      askResolver: askAutoApprove,
+      meta: {
+        cwd: '/proj',
+        tier: 'aluy-flux',
+        backend: 'local',
+        activeModel: 'deepseek-v4-pro',
+        tokens: 0,
+        windowPct: 0,
+      },
+      subAgents: { enabled: true },
+    });
+    await controller.submit('spawn herdado sob backend local');
+    const block = subAgentsBlock(controller.current.blocks);
+    expect(block?.children.find((c) => c.label === 'x')?.model).toBe('herdado (deepseek-v4-pro)');
+  });
+
+  it('backend "broker" (hospedado) + meta.activeModel ⇒ MANTÉM o tier — ignora activeModel', async () => {
+    const model = parentDelegates({ agents: [{ label: 'x', goal: 'g' }] }); // SEM model ⇒ inherit
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: fakePorts(),
+      askResolver: askAutoApprove,
+      meta: {
+        cwd: '/proj',
+        tier: 'aluy-strata',
+        backend: 'broker',
+        activeModel: 'algum-modelo-interno-do-broker',
+        tokens: 0,
+        windowPct: 0,
+      },
+      subAgents: { enabled: true },
+    });
+    await controller.submit('spawn herdado sob backend broker');
+    const block = subAgentsBlock(controller.current.blocks);
+    expect(block?.children.find((c) => c.label === 'x')?.model).toBe('herdado (aluy-strata)');
+  });
+
+  it('SEM backend (default hospedado) + meta.activeModel ⇒ MANTÉM o tier (zero regressão)', async () => {
+    const model = parentDelegates({ agents: [{ label: 'x', goal: 'g' }] });
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: fakePorts(),
+      askResolver: askAutoApprove,
+      meta: {
+        cwd: '/proj',
+        tier: 'aluy-strata',
+        activeModel: 'algum-modelo-interno-do-broker',
+        tokens: 0,
+        windowPct: 0,
+      },
+      subAgents: { enabled: true },
+    });
+    await controller.submit('spawn herdado sem backend explícito');
+    const block = subAgentsBlock(controller.current.blocks);
+    expect(block?.children.find((c) => c.label === 'x')?.model).toBe('herdado (aluy-strata)');
+  });
+
+  it('GS-SAM4 — backend local, rótulo herdado NUNCA carrega provider/base_url/api_key/token/secret', async () => {
+    const model = parentDelegates({ agents: [{ label: 'x', goal: 'g' }] });
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: fakePorts(),
+      askResolver: askAutoApprove,
+      meta: {
+        cwd: '/proj',
+        tier: 'aluy-flux',
+        backend: 'local',
+        activeModel: 'deepseek-v4-pro',
+        tokens: 0,
+        windowPct: 0,
+      },
+      subAgents: { enabled: true },
+    });
+    await controller.submit('spawn herdado sob backend local');
+    const serialized = JSON.stringify(controller.current);
+    expect(serialized).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
+  });
+});
+
 describe('GS-SAM1/GS-SAM4 — anti-vazamento de credencial no estado inteiro da sessão', () => {
   it('serializa TODO o `controller.current` e falha se aparecer provider/base_url/api_key/token/secret', async () => {
     const model = parentDelegates({
