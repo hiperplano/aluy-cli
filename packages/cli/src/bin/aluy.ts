@@ -370,6 +370,13 @@ async function main(): Promise<void> {
       // F-ONB (fix) — CUMPRE o `enter p/ entrar no aluy` que a tela final promete. Antes o
       // onboard terminava e o processo morria: o usuário configurava tudo e caía no shell.
       if (!outcome.launch) return; // Esc / ctrl-c ⇒ o usuário RECUSOU abrir. Nada a fazer.
+      // O INSTALADOR (`install.sh`) já conduz a cadeia `onboard → bootstrap → aluy` por
+      // conta própria, cada etapa reanexada ao `/dev/tty` (o stdin do processo é o pipe do
+      // `curl`). Se abríssemos aqui TAMBÉM, o bootstrap rodaria 2× e a sessão abriria 2× em
+      // sequência. Ele sinaliza com `ALUY_ONBOARD_NO_LAUNCH=1`; a config já está salva, que
+      // é o que o onboard tem de garantir. Fora do instalador a variável não existe e o
+      // Enter abre normalmente.
+      if (process.env.ALUY_ONBOARD_NO_LAUNCH === '1') return;
       if (outcome.bootstrap) {
         // Perfil TURBO: optar pelo turbo é o consentimento da instalação (`docs/turbo.md`),
         // então a cadeia `onboard → bootstrap → aluy` roda inteira sem pedir o comando de
