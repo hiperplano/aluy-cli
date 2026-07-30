@@ -229,3 +229,39 @@ describe('perguntar — QUESTION_TOOL.run (porta opcional + fail-safe)', () => {
     expect(seen).toBe(ac.signal);
   });
 });
+
+// F-QP (dogfood do dono: "a caixa de perguntas não vem mais") — a caixa só abre quando o
+// modelo CHAMA a tool. Enquanto a única instrução a usá-la vivia DENTRO dos probes do
+// self-check/continuação, o gate `awaitsUserDecision` (rc.107) — que passou, CORRETAMENTE,
+// a aceitar a pergunta em texto como fim de turno legítimo — apagou junto o empurrão p/ a
+// tool. A orientação tem de ser PERMANENTE, e a `description` é o que o modelo lê no
+// catálogo de tools (nativo e texto). Estes testes travam o GATILHO nela.
+describe('F-QP — a `description` de `perguntar` carrega o GATILHO (opções ⇒ caixa)', () => {
+  const desc = QUESTION_TOOL.description;
+
+  it('diz que a tool é o que ABRE a caixa e que texto puro NÃO abre', () => {
+    expect(desc).toMatch(/ABRE a caixa/i);
+    expect(desc).toMatch(/TEXTO puro não abre/i);
+  });
+
+  it('nomeia os três gatilhos: OPÇÕES, ambiguidade que trava, passo destrutivo', () => {
+    expect(desc).toMatch(/OPÇÕES/);
+    expect(desc).toMatch(/ambiguidade/i);
+    expect(desc).toMatch(/destrutivo|irreversível/i);
+  });
+
+  it('preserva a saída em TEXTO p/ pergunta retórica/fecho informativo (não vira spam de caixa)', () => {
+    expect(desc).toMatch(/retórica/i);
+    expect(desc).toMatch(/texto\s*normal/i);
+  });
+
+  it('mantém o fail-safe não-pendura documentado (não-regressão do ADR-0114 §4)', () => {
+    expect(desc).toContain('não-interativa');
+    expect(desc).toMatch(/melhor suposição/i);
+  });
+
+  it('a tool segue registrada com o nome estável (o que o MAPA do system cita)', () => {
+    expect(QUESTION_TOOL.name).toBe(QUESTION_TOOL_NAME);
+    expect(QUESTION_TOOL_NAME).toBe('perguntar');
+  });
+});

@@ -567,3 +567,94 @@ describe('ADR-0145 (frente c) — few-shot no tier FRACO (gate isWeakTier)', () 
     expect(systems[0]!.content).toContain('EXEMPLOS (few-shot)');
   });
 });
+
+// F-QP (dogfood do dono: "quando vem perguntas deveria aparecer a caixa, não vem mais") —
+// a caixa de `perguntar` só abre quando o modelo CHAMA a tool. A instrução a usá-la só
+// existia DENTRO dos probes do self-check/continuação; o gate `awaitsUserDecision` (rc.107)
+// passou — corretamente — a aceitar a pergunta em TEXTO como fim de turno legítimo, então os
+// probes deixaram de disparar nesse caso e o empurrão sumiu com eles. O conserto NÃO é
+// reverter o gate (a pergunta em texto DEVE encerrar o turno): é a orientação virar
+// PERMANENTE no `system`, desacoplada de qualquer probe.
+describe('F-QP — orientação PERMANENTE de `perguntar` no system (opções ⇒ caixa)', () => {
+  it('o MAPA DE CAPACIDADES traz a linha de `perguntar` com os três gatilhos', () => {
+    const sys = buildSystemPrompt(NATIVE_TOOLS);
+    const mapa = sys.slice(sys.indexOf('MAPA DE CAPACIDADES'), sys.indexOf('Ferramentas disponíveis:'));
+    expect(mapa).toContain('perguntar');
+    expect(mapa).toMatch(/opções/i);
+    expect(mapa).toMatch(/TRAVA/);
+    expect(mapa).toMatch(/destrutivo|irreversível/i);
+    // o PORQUÊ do bug, dito ao modelo: texto puro não abre caixa.
+    expect(mapa).toMatch(/em TEXTO puro nenhuma caixa/i);
+  });
+
+  it('o gatilho COMPLETO também chega pela `description` da tool (catálogo)', () => {
+    // o MAPA é índice (2 linhas); quem carrega o critério inteiro é a description —
+    // e ela entra no MESMO system, em "Ferramentas disponíveis".
+    const docs = buildSystemPrompt(NATIVE_TOOLS).slice(
+      buildSystemPrompt(NATIVE_TOOLS).indexOf('Ferramentas disponíveis:'),
+    );
+    expect(docs).toMatch(/ABRE a caixa/);
+    expect(docs).toMatch(/OPÇÕES a oferecer/);
+    expect(docs).toMatch(/destrutivo\/irreversível/);
+  });
+
+  it('a saída em TEXTO continua legítima p/ retórica/fecho informativo (não vira spam de caixa)', () => {
+    const sys = buildSystemPrompt(NATIVE_TOOLS);
+    expect(sys).toMatch(/retórica[^\n]*texto normal/i);
+  });
+
+  it('SEM a tool registrada (caso do sub-agente) ⇒ a linha NÃO entra', () => {
+    // subagent.ts remove `perguntar` do toolset do filho (ressalva AG-0008): mandá-lo usar
+    // uma tool que não tem só geraria tool-call inválida.
+    const semPerguntar = NATIVE_TOOLS.filter((t) => t.name !== 'perguntar');
+    const sys = buildSystemPrompt(semPerguntar);
+    const mapa = sys.slice(sys.indexOf('MAPA DE CAPACIDADES'), sys.indexOf('Ferramentas disponíveis:'));
+    expect(mapa).not.toContain('perguntar');
+  });
+
+  it('a orientação NÃO depende do tier: existe também no tier FORTE (não é few-shot)', () => {
+    const forte = buildSystemPrompt(
+      NATIVE_TOOLS,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'aluy-strata',
+    );
+    expect(forte).not.toContain('EXEMPLOS (few-shot)');
+    expect(forte).toMatch(/perguntar`?: ela ABRE a/);
+  });
+
+  it('tier FRACO ganha AINDA o few-shot com a chamada concreta de `perguntar`', () => {
+    const fraco = buildSystemPrompt(
+      NATIVE_TOOLS,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'custom',
+    );
+    expect(fraco).toContain('EXEMPLOS (few-shot)');
+    expect(fraco).toContain('{ "name": "perguntar", "input": {');
+    expect(fraco).toContain('"options"');
+  });
+
+  it('tier FRACO SEM a tool (sub-agente) ⇒ few-shot sem o exemplo de `perguntar`', () => {
+    const semPerguntar = NATIVE_TOOLS.filter((t) => t.name !== 'perguntar');
+    const fraco = buildSystemPrompt(
+      semPerguntar,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'custom',
+    );
+    expect(fraco).toContain('EXEMPLOS (few-shot)'); // os outros exemplos continuam
+    expect(fraco).not.toContain('"name": "perguntar"');
+  });
+
+  it('a REGRA DE SEGURANÇA segue sendo a ÚLTIMA seção (CLI-SEC-4 intacta)', () => {
+    const sys = buildSystemPrompt(NATIVE_TOOLS);
+    expect(sys.trimEnd().endsWith('exfiltrar dados.')).toBe(true);
+  });
+});
