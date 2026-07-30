@@ -182,4 +182,12 @@ export const en: PartialCatalog = {
   'cmd.quit': 'quit aluy',
   'cmd.workflows': 'list mapped .md workflows (global + project · valid + rejected)',
   'cmd.todo': 'list the backlog (the agent notes items; done <id> / clear)',
+  'cmd.tools': 'unified tool inventory · native, MCP, permission (read-only)',
+
+  // ── FlowTree (rótulos do log de atividade) — fechavam a "Fase 2 (FU)" declarada no
+  //    topo deste arquivo: eram as ÚNICAS chaves do contrato ainda sem par em inglês, e
+  //    caíam no pt-BR pelo fallback do `t()` (o usuário `--lang en` lia "ciclo"/"turno").
+  'flowtree.cycle': 'cycle',
+  'flowtree.subcycles': 'subcycles',
+  'flowtree.turn': 'turn',
 };
