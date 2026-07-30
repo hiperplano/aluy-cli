@@ -5,6 +5,9 @@
 // opt-in (`./local/`), satisfazendo o MESMO contrato `ModelClient`.
 export * from './types.js';
 export * from './errors.js';
+// F-RETRY — política PURA de retentativa (transitório vs definitivo, espera, tetos).
+// O laço concreto (dormir + re-chamar + contador na TUI) vive no @hiperplano/aluy-cli.
+export * from './retry.js';
 // ADR-0120 / EST-1113 — backend LOCAL (smallbroker BYO). Default segue `broker`.
 export * from './local/index.js';
 // EST-0948 · ADR-0069 (footer/quota) — parse tolerante das FONTES REAIS (`GET /v1/quota`
