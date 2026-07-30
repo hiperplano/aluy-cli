@@ -37,11 +37,16 @@ jobs:
         run: npm ci
 
       - name: validar (lint + build [type-check via tsc -b] + testes)
+        # SEM excludes: os testes de binário (headless-exit/headless-yolo-bin) estavam
+        # EXCLUÍDOS SÓ AQUI, enquanto o `ci.yml` já os havia REINCORPORADO (o motivo real
+        # era um 'stub-token' que reprovava no `isPat`, corrigido em F166). Mantê-los fora
+        # deixava o gate de RELEASE mais FRACO que o de CI — exatamente o "known-red
+        # mascarado" que o comentário do ci.yml condena. A suíte passa inteira.
         run: |
           set -euo pipefail
           npm run lint
           npm run build
-          npm test -- --exclude '**/headless-exit.test.ts' --exclude '**/headless-yolo-bin.test.ts' --maxWorkers=2
+          npm test -- --maxWorkers=2
 
       - name: versão + dist-tag
         id: ver

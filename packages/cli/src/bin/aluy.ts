@@ -365,7 +365,39 @@ async function main(): Promise<void> {
       // no caminho headless (--version/--help). É a TUI do instalador (idioma/backend/
       // provider/chave/modelo/sidecars); o bootstrap mínimo o invoca reanexado ao TTY.
       const { runOnboard } = await import('../session/onboard.js');
-      process.exitCode = await runOnboard();
+      const outcome = await runOnboard();
+      process.exitCode = outcome.code;
+      // F-ONB (fix) — CUMPRE o `enter p/ entrar no aluy` que a tela final promete. Antes o
+      // onboard terminava e o processo morria: o usuário configurava tudo e caía no shell.
+      if (!outcome.launch) return; // Esc / ctrl-c ⇒ o usuário RECUSOU abrir. Nada a fazer.
+      if (outcome.bootstrap) {
+        // Perfil TURBO: optar pelo turbo é o consentimento da instalação (`docs/turbo.md`),
+        // então a cadeia `onboard → bootstrap → aluy` roda inteira sem pedir o comando de
+        // novo. O `runInit` decide o que falta (perfil leve e "nada a instalar" já são
+        // no-op lá) — não duplicamos a lógica aqui.
+        //
+        // FILHO, não in-process: o provisionamento deixa HANDLES VIVOS (`ollama serve`
+        // detached, watchers do agente) — é o motivo pelo qual o `case 'bootstrap'` abaixo
+        // força `process.exit()`. Se rodássemos aqui dentro, esses handles ficariam com
+        // ESTE processo e a sessão nunca abriria (exatamente o travamento que aquele
+        // comentário descreve). No filho, os detached passam a ser dele e sobrevivem à
+        // saída dele; o event loop DESTE processo segue limpo p/ renderizar a TUI.
+        const { spawnSync } = await import('node:child_process');
+        const r = spawnSync(process.execPath, [process.argv[1] ?? '', 'bootstrap'], {
+          stdio: 'inherit', // o usuário VÊ a instalação (é longa e pode pedir sudo)
+        });
+        // Bootstrap falhou ⇒ AVISA e ainda assim abre: os complementos são enriquecimentos
+        // (o CLI funciona sem eles), e prender o usuário fora da sessão por causa de um
+        // sidecar seria pior. O `/doctor fix` dentro da sessão é o caminho de reparo.
+        if (r.status !== 0) {
+          process.stderr.write(
+            'aluy: os complementos do turbo não ficaram prontos — abrindo a sessão de todo jeito.\n' +
+              '      rode `/doctor` (ou `aluy bootstrap`) depois para concluir.\n',
+          );
+        }
+      }
+      const { runSession } = await import('../session/run.js');
+      await runSession({});
       return;
     }
     case 'models': {

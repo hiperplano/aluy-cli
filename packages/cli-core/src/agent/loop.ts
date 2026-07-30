@@ -46,11 +46,13 @@ import {
   buildReanchor,
   buildSelfCheckProbe,
   buildVerificationCapNote,
+  awaitsUserDecision,
 } from './self-check.js';
 import {
   detectWeakYoloUntrusted,
   buildWeakYoloWarning,
   buildWeakYoloReanchor,
+  hasWeakYoloReanchor,
 } from './weak-yolo-guardrail.js';
 import { newStuckWatchdog, type StuckResolver, type StuckWatchdog } from './stuck-watchdog.js';
 import {
@@ -76,7 +78,6 @@ import {
   decideContinuation,
   buildContinuationNudge,
   isAnnounceNoTool,
-  endsWithUserQuestion,
   hasPendingPlanWork,
   buildPlanPendingNudge,
   type ContinuationConfig,
@@ -975,11 +976,19 @@ export class AgentLoop {
     const goalText = originalGoal(history);
     let verifications = 0;
     // EST-SEC-HARDEN (F21) — estado ONE-SHOT do guardrail do combo perigoso (yolo +
-    // tier-fraco + untrusted). `true` depois que JÁ avisamos+reforçamos nesta execução:
-    // o WARN no stderr é uma vez por sessão (não polui a cada iteração) e o REFORÇO do
-    // envelope (um `reanchor`) também é one-shot (não infla o contexto). Inerte quando
+    // tier-fraco + untrusted). `true` depois que JÁ avisamos+reforçamos: o WARN no stderr
+    // é uma vez por sessão (não polui a cada iteração) e o REFORÇO do envelope (um
+    // `reanchor`) também é one-shot (não infla o contexto). Inerte quando
     // `weakYoloGuardrail` ausente (baseline).
-    let weakYoloGuardrailFired = false;
+    //
+    // SEMEADO DO HISTÓRICO (não `false` cego): a TUI faz UM `run`/`resume` POR TURNO, e
+    // o `resume` re-semeia o histórico do turno anterior — que JÁ carrega o `reanchor`
+    // que empurramos lá. Iniciar em `false` re-injetava o reforço A CADA TURNO e as
+    // cópias ACUMULAVAM (turno N com N reforços): exatamente a inflação de contexto que
+    // este CAP existe p/ evitar, além de fazer o modelo gastar turno REAGINDO ao
+    // lembrete. Derivar do histórico mantém o `AgentLoop` STATELESS entre execuções (ver
+    // `controller.clear()`) e o `/clear` RE-ARMA de graça (contexto novo, aviso novo).
+    let weakYoloGuardrailFired = hasWeakYoloReanchor(history);
     // EST-0944 (refino #121) — quantas tool-calls RODARAM com SUCESSO nesta execução.
     // É o gate "houve AÇÃO REAL a conferir": a re-âncora e a auto-verificação SÓ valem
     // com `successfulToolCalls > 0`. Um turno CONVERSACIONAL puro (saudação, pergunta
@@ -1406,7 +1415,19 @@ export class AgentLoop {
         // que o probe pressupõe não existe; verificar seria desperdício (+1 chamada à
         // toa) E besta ("evidência que você viu… saudar o usuário, está cumprido"). Sem
         // tool ⇒ aceita o `final` direto, idêntico ao baseline.
-        const verifiable = this.selfCheck.enabled && successfulToolCalls > 0;
+        // F-SC (fix) — 3º GATE: a resposta final ESTÁ ESPERANDO O USUÁRIO (pergunta,
+        // pedido de confirmação, oferta de opções) ⇒ NÃO sonda. A premissa do probe
+        // ("você indicou que terminou") é falsa aqui, e a única lacuna é a resposta que
+        // só o dono pode dar — sondar fazia o modelo "achar o gap" e EXECUTAR a decisão
+        // que acabara de oferecer (dogfood: "Quer que eu reconfigure assim?" → o probe
+        // entrou → o agente editou o script e matou os daemons). Sob `--yolo` a catraca
+        // auto-aprova, então o defeito de AGÊNCIA vira efeito destrutivo.
+        //
+        // Mesma família do gate `successfulToolCalls > 0` logo abaixo: lá não se sonda
+        // por não haver evidência a conferir; aqui não se sonda porque o que falta NÃO É
+        // TRABALHO NOSSO. Aceitar o final é o baseline (idêntico a self-check off).
+        const awaitingUser = awaitsUserDecision(turn.text);
+        const verifiable = this.selfCheck.enabled && successfulToolCalls > 0 && !awaitingUser;
         if (verifiable && verifications < this.selfCheck.maxVerifications) {
           verifications += 1;
           // Segura o CANDIDATO REAL a entregar ao usuário no fim. ATUALIZA-o SÓ quando
@@ -1474,7 +1495,15 @@ export class AgentLoop {
           // #4 — o modelo PERGUNTOU em texto livre (sem a tool `perguntar`, que já pausa):
           // se o turno final termina numa pergunta ao usuário, NÃO nudgar — `decideContinuation`
           // devolve `stop` e o loop aguarda a resposta em vez de o agente decidir sozinho.
-          const askedUser = endsWithUserQuestion(turn.text);
+          //
+          // F-SC (fix) — passou de `endsWithUserQuestion` p/ `awaitsUserDecision`: a intenção
+          // deste gate SEMPRE foi a certa (o comentário acima é da estória original), mas o
+          // detector só via `?` no fim. Pedido de decisão SEM interrogação — "Me diga qual
+          // prefere.", "Aguardo sua confirmação.", "Please confirm." — PASSAVA, e este seam é
+          // o que manda EXECUTAR o próximo passo (`buildPlanPendingNudge`/`buildContinuationNudge`).
+          // Era o detector mais FRACO guardando a porta mais PERIGOSA. Agora os dois seams
+          // (probe do self-check e nudge de continuação) usam o MESMO juízo.
+          const askedUser = awaitsUserDecision(turn.text);
           if (announcedNoTool || pendingPlan) {
             const verdict = decideContinuation(
               { continuationsThisTurn, signalAborted, askedUser },

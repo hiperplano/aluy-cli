@@ -72,7 +72,31 @@ interface Opt {
   readonly hint?: string;
 }
 
-function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElement {
+/**
+ * F-ONB (fix) — o que o onboard PEDE ao encerrar. A tela final promete `enter p/ entrar
+ * no aluy`, mas o handler só fechava o Ink e o processo morria: o `aluy` nunca abria.
+ * Agora o Enter EXPRESSA a intenção e o `bin/aluy.ts` a cumpre (mesmo caminho do
+ * `case 'launch'`), fechando a cadeia `aluy onboard → aluy bootstrap → aluy` que o
+ * comentário do `case 'bootstrap'` já descrevia.
+ *
+ * `bootstrap` é `true` quando o usuário escolheu o perfil **turbo** no passo `sidecars`:
+ * optar pelo turbo É o consentimento da instalação (`docs/turbo.md`), então a cadeia
+ * completa roda sem pedir o comando de novo. O `runInit` decide sozinho o que falta
+ * (perfil leve e "nada a instalar" já são no-op lá) — não duplicamos essa lógica aqui.
+ */
+export interface OnboardOutcome {
+  readonly code: number;
+  /** Enter na tela final ⇒ abre a sessão. Esc ⇒ só sai. */
+  readonly launch: boolean;
+  /** Perfil turbo ⇒ roda o bootstrap ANTES de abrir. */
+  readonly bootstrap: boolean;
+}
+
+function OnboardApp(props: {
+  readonly store: UserConfigStore;
+  /** Chamado UMA vez, no encerramento, com a intenção do usuário. */
+  readonly onOutcome?: (o: { launch: boolean; bootstrap: boolean }) => void;
+}): React.ReactElement {
   const app = useApp();
   const cfg = props.store.load();
   const providers = useMemo(() => loadLocalProviderCatalog().entries, []);
@@ -253,7 +277,20 @@ function OnboardApp(props: { readonly store: UserConfigStore }): React.ReactElem
 
   useInput((input, key) => {
     if (step === 'done') {
-      if (key.return || key.escape || input) app.exit();
+      // F-ONB (fix) — ANTES: `key.return || key.escape || input` ⇒ Enter, Esc e QUALQUER
+      // tecla faziam a MESMA coisa (só `app.exit()`), então (a) o `enter p/ entrar no aluy`
+      // que a tela promete nunca acontecia e (b) não havia como RECUSAR (nem toque
+      // acidental era inofensivo). Agora as três intenções são distintas:
+      //   Enter ⇒ abre a sessão (e, no perfil turbo, roda o bootstrap antes);
+      //   Esc   ⇒ sai pro shell sem abrir nada;
+      //   outra ⇒ IGNORA (não encerra por tecla solta).
+      if (key.return) {
+        props.onOutcome?.({ launch: true, bootstrap: profile === 'turbo' });
+        app.exit();
+      } else if (key.escape) {
+        props.onOutcome?.({ launch: false, bootstrap: false });
+        app.exit();
+      }
       return;
     }
     if (step === 'validating') return; // sem input durante o check (async)
@@ -594,20 +631,29 @@ function TextRow(props: { readonly label: string; readonly value: string; readon
 }
 
 /** Lança o onboard (Ink) e resolve quando o usuário sai. Retorna o exit code. */
-export async function runOnboard(): Promise<number> {
+export async function runOnboard(): Promise<OnboardOutcome> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     process.stdout.write(
       'aluy onboard precisa de um terminal interativo.\n' + 'Abra um terminal e rode:  aluy onboard\n',
     );
-    return 0;
+    return { code: 0, launch: false, bootstrap: false };
   }
   const store = new UserConfigStore();
   const theme = resolveTheme({});
+  // Default RECUSA: se o Ink sair por qualquer via que não seja o Enter da tela final
+  // (ctrl-c, erro de render, `unmount` externo), NÃO abrimos nada — abrir sessão é ato
+  // pedido, nunca consequência de um encerramento qualquer.
+  let outcome = { launch: false, bootstrap: false };
   const instance = render(
     <ThemeProvider theme={theme}>
-      <OnboardApp store={store} />
+      <OnboardApp
+        store={store}
+        onOutcome={(o) => {
+          outcome = o;
+        }}
+      />
     </ThemeProvider>,
   );
   await instance.waitUntilExit();
-  return 0;
+  return { code: 0, ...outcome };
 }

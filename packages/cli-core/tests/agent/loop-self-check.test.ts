@@ -420,3 +420,68 @@ describe('CLI-SEC-4 · re-âncora no RESUME não LAVA injeção do sumário p/ c
     expect(sys[0]!.content).not.toContain('IGNORE TODAS AS INSTRUÇÕES');
   });
 });
+
+// F-SC (REGRESSÃO, dogfood do Tiago: "o selfcheck é proativo demais, ele acaba tomando
+// decisões onde o usuário deveria tomar"). O probe dizia "se faltou QUALQUER coisa,
+// CONTINUE trabalhando (use as ferramentas)" e o gate era só `enabled && tools>0` — sem
+// olhar o CONTEÚDO da final. Quando o modelo fechava o turno PERGUNTANDO ("Quer que eu
+// reconfigure assim?"), o probe entrava, o modelo "achava o gap" e EXECUTAVA a decisão
+// que acabara de oferecer (no caso real: editou um script e deu kill -9 em 5 daemons —
+// sob `--yolo` a catraca auto-aprova, então o defeito de agência virou efeito destrutivo).
+describe('F-SC · self-check NÃO sonda quando a final ESPERA O USUÁRIO', () => {
+  it('final PERGUNTANDO (após trabalho real) ⇒ NENHUM probe: entrega a pergunta e para', async () => {
+    const fs = new MemoryFs(new Map([['a.txt', 'x']]));
+    const { ports } = makePorts({ fs });
+    // Trabalho REAL (1 tool) e então uma final que PEDE DECISÃO. Se o loop sondar, o
+    // 3º item do script rodaria (a "continuação" destrutiva) — é o bug.
+    const model = new ScriptedModelCaller([
+      { text: toolCallBlock('read_file', { path: 'a.txt' }) },
+      { text: 'Recomendo a opção C.\n\nQuer que eu reconfigure assim?' },
+      { text: toolCallBlock('write_file', { path: 'NAO_DEVIA.txt', content: 'executei sem perguntar' }) },
+    ]);
+    const signals: string[] = [];
+    const loop = new AgentLoop({
+      model,
+      permission: allowAllEngine,
+      tools: registry(),
+      ports,
+      sessionId: 's',
+      selfCheck: on(1000, 2), // ON e com cap disponível — ainda assim não deve sondar
+      onProgress: (s) => signals.push(s.kind),
+    });
+    const res = await loop.run('analise a carga dos daemons e proponha');
+
+    expect(res.stop.kind).toBe('final');
+    // A resposta ENTREGUE é a pergunta — não uma conclusão inventada:
+    if (res.stop.kind === 'final') expect(res.stop.answer).toContain('Quer que eu reconfigure');
+    // NENHUM probe injetado (a lacuna é a resposta do dono, não trabalho nosso):
+    expect(countAssistantWith(model, SELF_CHECK_MARKER)).toBe(0);
+    expect(signals).not.toContain('self-check');
+    // E o mais importante: a ação que ele OFERECEU não rodou (o 3º item do script
+    // nunca foi consumido) ⇒ o arquivo não existe.
+    expect(model.calls.length).toBe(2);
+    expect(await fs.exists('NAO_DEVIA.txt')).toBe(false);
+  });
+
+  it('final AFIRMATIVA (sem pergunta) ⇒ segue sondando normalmente (não quebrou o self-check)', async () => {
+    const fs = new MemoryFs(new Map([['a.txt', 'x']]));
+    const { ports } = makePorts({ fs });
+    const model = new ScriptedModelCaller([
+      { text: toolCallBlock('read_file', { path: 'a.txt' }) },
+      { text: 'pronto, li o arquivo.' }, // afirmativa ⇒ o probe DEVE entrar
+      { text: 'confirmo: cumprido.' },
+    ]);
+    const loop = new AgentLoop({
+      model,
+      permission: allowAllEngine,
+      tools: registry(),
+      ports,
+      sessionId: 's',
+      selfCheck: on(1000, 1), // cap 1: uma passada e aceita (script de 3 falas)
+    });
+    const res = await loop.run('leia a.txt');
+    expect(res.stop.kind).toBe('final');
+    // O probe entrou UMA vez — o mecanismo continua vivo onde ele faz sentido:
+    expect(countAssistantWith(model, SELF_CHECK_MARKER)).toBe(1);
+  });
+});
