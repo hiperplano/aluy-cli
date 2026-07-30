@@ -11,6 +11,9 @@
 //   3. one-shot: mesmo com várias leituras (várias iterações com untrusted), o WARN
 //      sai UMA vez e há SÓ UM reforço no histórico.
 //   4. ausente (sem `weakYoloGuardrail`) ⇒ baseline (nada).
+//   5. one-shot ENTRE TURNOS (`run` + `resume`, a cadência real da TUI): o WARN é uma vez
+//      por SESSÃO e o reforço NÃO acumula no histórico re-semeado; um contexto LIMPO
+//      (semântica do `/clear`) RE-ARMA o guardrail.
 //
 // NÃO regride: a catraca/budget/self-check seguem; o loop encerra normal.
 
@@ -187,5 +190,81 @@ describe('F21 · guardrail do combo no loop', () => {
     await loop.run('leia a.txt várias vezes');
     expect(warnings).toHaveLength(1);
     expect(countReanchor(model)).toBe(1);
+  });
+
+  // REGRESSÃO (dogfood do Tiago: "toda hora aparece FRONTEIRA DE DADOS"). O one-shot era
+  // uma variável LOCAL do `runLoop` ⇒ one-shot POR EXECUÇÃO. A TUI faz UM `run`/`resume`
+  // POR TURNO do usuário, então a flag renascia `false` a cada turno: o WARN repetia e os
+  // reforços ACUMULAVAM no histórico re-semeado (turno N com N cópias) — a inflação de
+  // contexto que o CAP existe p/ evitar. Agora o estado é SEMEADO DO HISTÓRICO.
+  it('ONE-SHOT ENTRE TURNOS: run + 2 resume (cadência da TUI) ⇒ ainda 1 WARN e 1 reforço', async () => {
+    const fs = new MemoryFs(new Map([['a.txt', 'x']]));
+    const { ports } = makePorts({ fs });
+    // 3 turnos, cada um: 1 leitura (gera untrusted) + 1 final.
+    const script: ConstructorParameters<typeof ScriptedModelCaller>[0] = [
+      { text: toolCallBlock('read_file', { path: 'a.txt' }) },
+      { text: 'turno 1 pronto.' },
+      { text: toolCallBlock('read_file', { path: 'a.txt' }) },
+      { text: 'turno 2 pronto.' },
+      { text: toolCallBlock('read_file', { path: 'a.txt' }) },
+      { text: 'turno 3 pronto.' },
+    ];
+    const model = new ScriptedModelCaller(script);
+    const warnings: string[] = [];
+    const loop = new AgentLoop({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      tools: registry(),
+      ports,
+      sessionId: 's',
+      weakYoloGuardrail: { tier: () => 'custom', onWarn: (w) => warnings.push(w) },
+    });
+
+    // Turno 1: `run` (objetivo novo) — aqui o guardrail LEGITIMAMENTE dispara.
+    const t1 = await loop.run('leia a.txt');
+    expect(t1.stop.kind).toBe('final');
+    expect(warnings).toHaveLength(1);
+
+    // Turnos 2 e 3: `resume` re-semeando o histórico do turno anterior — é EXATAMENTE o
+    // que o controller faz (`resume(this.lastRunHistory)`).
+    const t2 = await loop.resume(t1.history);
+    expect(t2.stop.kind).toBe('final');
+    const t3 = await loop.resume(t2.history);
+    expect(t3.stop.kind).toBe('final');
+
+    // O WARN é UMA vez por SESSÃO (não por turno) e o reforço NÃO acumula:
+    expect(warnings).toHaveLength(1);
+    expect(countReanchor(model)).toBe(1);
+    expect(reanchorNeverSystemOrUser(model)).toBe(true);
+  });
+
+  // O reset do `/clear` sai de graça: ele zera as sementes de contexto do controller, e um
+  // `run` com histórico LIMPO volta a disparar (contexto novo ⇒ aviso novo). Prova de que
+  // semear-do-histórico NÃO deixa o guardrail permanentemente desarmado.
+  it('RE-ARMA em contexto limpo (semântica do /clear): novo `run` sem histórico ⇒ dispara de novo', async () => {
+    const fs = new MemoryFs(new Map([['a.txt', 'x']]));
+    const { ports } = makePorts({ fs });
+    const script: ConstructorParameters<typeof ScriptedModelCaller>[0] = [
+      { text: toolCallBlock('read_file', { path: 'a.txt' }) },
+      { text: 'turno 1 pronto.' },
+      { text: toolCallBlock('read_file', { path: 'a.txt' }) },
+      { text: 'turno pós-clear pronto.' },
+    ];
+    const model = new ScriptedModelCaller(script);
+    const warnings: string[] = [];
+    const loop = new AgentLoop({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      tools: registry(),
+      ports,
+      sessionId: 's',
+      weakYoloGuardrail: { tier: () => 'custom', onWarn: (w) => warnings.push(w) },
+    });
+    await loop.run('leia a.txt');
+    expect(warnings).toHaveLength(1);
+    // `/clear` ⇒ o controller ESQUECE o histórico; o próximo turno é um `run` do zero.
+    await loop.run('leia a.txt de novo');
+    expect(warnings).toHaveLength(2);
+    expect(countReanchor(model)).toBe(1); // 1 no contexto NOVO (não 2 acumulados)
   });
 });

@@ -57,6 +57,33 @@ export function hasUntrustedInContext(history: readonly HistoryItem[]): boolean 
   return false;
 }
 
+/**
+ * `true` se o REFORÇO do envelope JÁ está no histórico — de uma iteração anterior OU
+ * de um TURNO anterior (o `resume` re-semeia o histórico do turno passado, que carrega
+ * o `reanchor` que empurramos lá).
+ *
+ * POR QUE isto existe: o one-shot do guardrail era uma variável LOCAL do `runLoop`, ou
+ * seja, one-shot POR EXECUÇÃO. Como a TUI faz UM `run`/`resume` POR TURNO do usuário, a
+ * flag renascia `false` a cada turno e o reforço era re-injetado TODA VEZ — contra o que
+ * este módulo promete ("one-shot, não a cada volta, p/ não inflar o contexto") e contra
+ * o "uma vez por sessão" do WARN. Pior: os reforços ACUMULAVAM (turno N carregava N
+ * cópias), justamente a inflação de contexto que o CAP deveria evitar, e o modelo gastava
+ * turno REAGINDO ao lembrete em vez de trabalhar.
+ *
+ * Derivar do HISTÓRICO (em vez de guardar estado no `AgentLoop`) preserva o invariante
+ * "o `AgentLoop` é STATELESS entre execuções" (ver `controller.clear()`) e dá o reset
+ * certo DE GRAÇA: o `/clear` zera as sementes de contexto ⇒ histórico sem `reanchor` ⇒
+ * o guardrail RE-ARMA na conversa nova (que é o comportamento desejado — contexto novo,
+ * aviso novo). Mesmo espírito do fallback-pelo-literal de `hasUntrustedInContext`. PURO.
+ */
+export function hasWeakYoloReanchor(history: readonly HistoryItem[]): boolean {
+  for (const item of history) {
+    if (item.role !== 'reanchor') continue;
+    if (item.text.includes(WEAK_YOLO_REANCHOR_MARKER)) return true;
+  }
+  return false;
+}
+
 /** Entradas (puras) p/ decidir o combo perigoso. */
 export interface WeakYoloDetectInputs {
   /** YOLO ativo NESTA iteração? (`permission.isUnsafe` — dinâmico: pega o Tab). */
