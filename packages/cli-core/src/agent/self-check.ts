@@ -226,8 +226,71 @@ export function buildSelfCheckProbe(goal: string, attempt: number, max: number):
     `Você REALMENTE o cumpriu? Verifique pela EVIDÊNCIA REAL (arquivos criados/editados, ` +
     `saídas de comando que você de fato viu) — NÃO pela sua memória nem por suposição. ` +
     `Se faltou QUALQUER coisa, liste o que falta e CONTINUE trabalhando (use as ferramentas). ` +
+    // F-SC (fix) — SAÍDA EXPLÍCITA p/ "o que falta é DECISÃO DO USUÁRIO". Sem esta
+    // cláusula o probe só oferecia duas saídas — "confirmo que cumpri" (mentira) ou
+    // "continuo trabalhando" — então um modelo que havia PERGUNTADO ao usuário
+    // ("Quer que eu reconfigure assim?") escolhia CONTINUAR e EXECUTAVA a decisão que
+    // acabara de oferecer. O probe existe p/ pegar "claimed done" alucinado, NÃO p/
+    // atropelar o dono. Decisão pendente é conclusão LEGÍTIMA de turno.
+    `Se o que falta depende de uma DECISÃO ou AUTORIZAÇÃO do usuário (você fez uma pergunta, ` +
+    `ofereceu opções, ou o próximo passo é destrutivo/irreversível), NÃO continue e NÃO execute: ` +
+    `entregue a pergunta e pare — esperar a resposta é o certo. Se precisa da resposta p/ seguir, ` +
+    `use a tool \`perguntar\`. ` +
     `Se estiver mesmo tudo cumprido e comprovado, responda confirmando — em texto, SEM tool-call.`
   );
+}
+
+/**
+ * F-SC (fix) — `true` se a resposta FINAL do modelo está ESPERANDO O USUÁRIO: uma
+ * pergunta, um pedido de confirmação, ou uma oferta de opções. Nesse caso o loop NÃO
+ * deve sondar (`buildSelfCheckProbe`): a premissa do probe ("você indicou que terminou")
+ * é FALSA, e a única "lacuna" é a resposta que só o dono pode dar.
+ *
+ * POR QUE ISTO É NECESSÁRIO além da cláusula no texto do probe: o self-check liga por
+ * DEFAULT justamente nos tiers FRACOS (`WEAK_TIERS`), que são os que MENOS honram
+ * instrução condicional. A defesa não pode depender do modelo ler o parágrafo certo —
+ * o gate tem de ser nosso. Espelha o gate `successfulToolCalls > 0` (que já evita sondar
+ * turno conversacional "por não haver evidência"): aqui não sondamos porque o que falta
+ * NÃO É TRABALHO NOSSO.
+ *
+ * DIREÇÃO DO ERRO É SEGURA: um falso POSITIVO só faz o loop aceitar a resposta como
+ * final — exatamente o baseline com self-check desligado (nenhum efeito extra, nenhuma
+ * perda de segurança). Um falso NEGATIVO devolve o comportamento antigo (sonda), que a
+ * cláusula do probe ainda cobre. Por isso a heurística pode ser generosa.
+ *
+ * Olha só o FIM do texto (últimas linhas): é onde vive o fechamento "quer que eu…?".
+ * Uma `?` no meio de um relatório (ex.: "por quê? porque X") não conta. PURO.
+ */
+export function awaitsUserDecision(finalText: string): boolean {
+  const text = (finalText ?? '').trim();
+  if (text === '') return false;
+  // CAUDA: as últimas linhas não-vazias — o fechamento do turno.
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '');
+  const tail = lines.slice(-3).join(' ').toLowerCase();
+  if (tail === '') return false;
+  // (1) fechamento interrogativo — DELEGADO ao `endsWithUserQuestion` do seam de
+  // continuação (FONTE ÚNICA): ele já lida com a decoração do fim (emoji/pictográficos,
+  // ZWJ, `*_~\`` de markdown, aspas e parênteses de fechamento) antes de olhar o `?`, o
+  // que um `/\?\s*$/` ingênuo perderia em `**Posso aplicar?**` ou `… assim? 🤔`.
+  // Reusar em vez de reimplementar evita o que esta função nasceu para corrigir: DOIS
+  // heurísticos divergentes para o MESMO conceito no mesmo diretório.
+  if (endsWithUserQuestion(text)) return true;
+  // (2) fórmulas de pedido de decisão/autorização (PT-BR + EN), na CAUDA. Cobrem o
+  //     caso em que o modelo fecha sem `?` ("me diga qual opção prefere.").
+  const ASKS: readonly RegExp[] = [
+    /\bquer que eu\b/,
+    /\bposso (seguir|prosseguir|continuar|aplicar|rodar|executar|fazer|apagar|remover)\b/,
+    /\bdevo (seguir|prosseguir|continuar|aplicar|rodar|executar|fazer)\b/,
+    /\b(confirma|confirme|autoriza|autorize)\b/,
+    /\b(me diga|me avise|me confirme|diga qual|escolha (uma|qual))\b/,
+    /\bqual (opção|delas|caminho|prefere)\b/,
+    /\baguardo (sua |seu )?(resposta|ok|confirmação|decisão)\b/,
+    /\b(shall i|should i|do you want|would you like|let me know|which option|please confirm)\b/,
+  ];
+  return ASKS.some((re) => re.test(tail));
 }
 
 /**
@@ -242,6 +305,10 @@ export function buildVerificationCapNote(max: number): string {
     `o usuário pode pedir a continuação.`
   );
 }
+
+// F-SC — fonte ÚNICA do "fechou perguntando" (o `?` semântico, já sem decoração).
+// `continuation.ts` não importa nada, então não há ciclo.
+import { endsWithUserQuestion } from './continuation.js';
 
 // EST-1124 — barramento do Maestro (opcional). Emissão ADITIVA.
 import type { SignalCollector } from './maestro/bus.js';

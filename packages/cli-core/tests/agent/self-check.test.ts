@@ -21,7 +21,9 @@ import {
   SELF_CHECK_MARKER,
   DEFAULT_REANCHOR_EVERY_K,
   DEFAULT_MAX_VERIFICATIONS,
+  awaitsUserDecision,
 } from '../../src/agent/self-check.js';
+import { endsWithUserQuestion } from '../../src/agent/continuation.js';
 
 describe('EST-0944 · self-check — gating (flag > env > tier fraco), OFF por default', () => {
   it('SEM flag, SEM env, tier FORTE/DEFAULT ⇒ OFF (não onera quem não quer)', () => {
@@ -159,5 +161,66 @@ describe('EST-0944 · self-check — redatores (re-âncora / probe / nota de cap
     expect(txt).toContain(SELF_CHECK_MARKER);
     expect(txt).toContain('2');
     expect(txt.toLowerCase()).toContain('anti-loop');
+  });
+});
+
+// F-SC — detector PURO de "a final está esperando o usuário". O gate do loop depende
+// dele, então importa tanto o que ele PEGA quanto o que ele NÃO pega: um falso positivo
+// só desliga o probe (= baseline, inofensivo), mas se ele pegasse qualquer `?` do meio de
+// um relatório, o self-check ficaria inútil na prática.
+describe('F-SC · awaitsUserDecision', () => {
+  it('PEGA fechamento interrogativo (o caso real do dogfood)', () => {
+    expect(awaitsUserDecision('Recomendo a opção C.\n\nQuer que eu reconfigure assim?')).toBe(true);
+    expect(awaitsUserDecision('Posso aplicar essa mudança?')).toBe(true);
+    expect(awaitsUserDecision('Qual opção você prefere?')).toBe(true);
+  });
+
+  it('PEGA pedido de decisão SEM interrogação', () => {
+    expect(awaitsUserDecision('Listei as três opções acima. Me diga qual prefere.')).toBe(true);
+    expect(awaitsUserDecision('Aguardo sua confirmação para prosseguir.')).toBe(true);
+    expect(awaitsUserDecision('Deixei tudo pronto. Confirme para eu aplicar.')).toBe(true);
+  });
+
+  it('PEGA em inglês', () => {
+    expect(awaitsUserDecision('I found 3 issues. Shall I fix them?')).toBe(true);
+    expect(awaitsUserDecision('Ready to deploy. Please confirm.')).toBe(true);
+    expect(awaitsUserDecision('Do you want me to continue?')).toBe(true);
+  });
+
+  it('NÃO pega `?` no MEIO de um relatório (o self-check segue útil)', () => {
+    // a pergunta é retórica e o turno FECHA afirmando — é exatamente o "claimed done"
+    // que o probe existe p/ conferir.
+    expect(
+      awaitsUserDecision('Por que estava lento? Porque o MCP roda na thread da UI.\nCorrigi e validei: 42 req/min → 12.'),
+    ).toBe(false);
+  });
+
+  it('NÃO pega conclusão afirmativa comum', () => {
+    expect(awaitsUserDecision('pronto, li o arquivo.')).toBe(false);
+    expect(awaitsUserDecision('Terminei: 3 arquivos editados, testes verdes.')).toBe(false);
+    expect(awaitsUserDecision('Done. All 8007 tests pass.')).toBe(false);
+  });
+
+  it('vazio/só-espaço ⇒ false (não inventa espera)', () => {
+    expect(awaitsUserDecision('')).toBe(false);
+    expect(awaitsUserDecision('   \n  ')).toBe(false);
+  });
+});
+
+// F-SC — o detector é FONTE ÚNICA compartilhada com o seam de CONTINUAÇÃO (loop.ts), que
+// é o que manda EXECUTAR o próximo passo. Antes ele usava `endsWithUserQuestion` (só `?`
+// no fim), então pedido de decisão SEM interrogação passava e o agente agia. Estes casos
+// travam a unificação.
+describe('F-SC · awaitsUserDecision reusa o `?` semântico de endsWithUserQuestion', () => {
+  it('pega `?` sob decoração de markdown/emoji (o que um /\\?\\s*$/ perderia)', () => {
+    expect(awaitsUserDecision('**Posso aplicar essa mudança?**')).toBe(true);
+    expect(awaitsUserDecision('Quer que eu reconfigure assim? 🤔')).toBe(true);
+    expect(awaitsUserDecision('Sigo por esse caminho?"')).toBe(true);
+  });
+
+  it('é ESTRITAMENTE mais forte que endsWithUserQuestion (pega o que ele não pega)', () => {
+    const semInterrogacao = 'Deixei as três opções acima. Aguardo sua confirmação.';
+    expect(endsWithUserQuestion(semInterrogacao)).toBe(false); // o detector antigo falhava
+    expect(awaitsUserDecision(semInterrogacao)).toBe(true); // o unificado pega
   });
 });
