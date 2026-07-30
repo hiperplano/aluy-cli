@@ -89,7 +89,11 @@ import { HooksConfigStore } from '../io/index.js';
 import { FileRoomStore } from './rooms/file-room-store.js';
 import { makePreToolGate } from './pre-tool-gate.js';
 import { HookRunner, selectHooks, type HooksConfig } from '@hiperplano/aluy-cli-core';
-import { resolveContextWindow } from '../model/catalog.js';
+import {
+  resolveContextWindow,
+  modelWindowFromConfig,
+  type ProviderWindowSource,
+} from '../model/catalog.js';
 import { resolveMaestro, resolveContinuationCfg, resolveMemory } from '../maestro/wiring.js';
 import type {
   UserServicesConfig,
@@ -133,6 +137,34 @@ export interface BuildSessionOptions {
    * e na auto-compactação (flag > env > config > default). O core re-valida/clampa.
    */
   readonly context?: UserContextConfig;
+  /**
+   * F-WIN — CATÁLOGO de janelas por modelo do config (`providers[].contextByModel`,
+   * subset `{id,label,contextByModel}` do `UserProviderEntry`). Resolvido em run.tsx
+   * (savedConfig.providers) e usado em DOIS momentos:
+   *   1. AQUI no boot, p/ resolver a `contextWindow` INICIAL (era o buraco: em BYO o tier
+   *      é o literal `custom` ⇒ `contextWindowForTier` = 0 ⇒ `⛁ % janela` CONGELADO em 0%
+   *      e auto-compactação INERTE, mesmo com o dono tendo declarado a janela do modelo).
+   *   2. Repassado ao controller, que o RE-CONSULTA no `setTier` (troca de modelo pelo
+   *      `/model <slug>` re-resolve a janela do slug NOVO sem reiniciar a sessão).
+   * Ausente ⇒ nada muda (a resolução cai nos degraus de sempre e, sem nada declarado,
+   * volta a 0/inerte — o fail-safe do F134).
+   */
+  readonly providerWindows?: readonly ProviderWindowSource[];
+  /**
+   * F-WIN — id/label do provider ATIVO (backend local: `config.localProvider` já resolvido
+   * pela precedência flag>env>config>default; broker: o `--provider` do par Custom). É o
+   * que desambigua `providerWindows` quando o dono declarou o MESMO slug em mais de um
+   * provider. Ausente ⇒ o `modelWindowFromConfig` casa qualquer provider (degrade honesto).
+   */
+  readonly activeProviderId?: string;
+  /**
+   * F-WIN — SLUG do modelo ATIVO no boot p/ a resolução da janela. Sob backend LOCAL vem do
+   * `resolveLocalProviderConfig` (`--local-model` > env > `config.localModel` > default do
+   * catálogo); sob broker, o slug Custom (`opts.model`) já cobre o caso e este fica ausente.
+   * ⚠ SEPARADO do `model` acima de propósito: aquele viaja no CORPO do request (só sob
+   * `tier:'custom'`, HG-2); ESTE é só a chave de consulta da janela — nunca sai da máquina.
+   */
+  readonly activeModelSlug?: string;
   /**
    * ADR-0150 (balde b) — seção `subagents` do config (`maxPerCall`/`maxConcurrency`/
    * `idleTimeoutMs`). Resolvido em run.tsx (savedConfig.subagents); entra como o nível
@@ -806,7 +838,6 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // `--backend local`), `resolveContextWindow` cai no override `ALUY_CONTEXT_WINDOW`
   // (opt-in): habilita a auto-compactação no modo local. Sem o env, segue 0 (inerte).
   // Passada ao controller e RE-RESOLVIDA na troca de tier (`/model`).
-  const contextWindow = resolveContextWindow(tier, env, undefined, opts.context?.window);
   // EST-0972 (BUG Custom) — slug Custom do BOOT: só vale sob `tier:'custom'`. Vem de
   // uma sessão retomada (run.tsx); fora de Custom é ignorado (não vaza Custom em tier
   // canônico). String opaca / chave de catálogo (HG-2), nunca credencial.
@@ -815,6 +846,25 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // (sob `tier:'custom'` E com `bootModel`). Fora disso é ignorado (não atribui provider
   // a um tier canônico nem a um Custom sem slug). É só o NOME (DADO, não credencial — HG-2).
   const bootProvider = bootModel !== undefined ? opts.provider : undefined;
+  // F-WIN — SLUG usado SÓ p/ consultar a janela declarada. Sob backend LOCAL o slug ativo
+  // é o `activeModelSlug` (resolvido em run.tsx pelo `resolveLocalProviderConfig`); sob
+  // broker, o slug Custom do boot. ⚠ NÃO reusa `bootModel` sozinho: em BYO o dono roda
+  // `--backend local` e o slug NÃO viaja como `model` do corpo (HG-2) — era exatamente
+  // por isso que a janela declarada ficava órfã e o `⛁ %` congelava em 0%.
+  const windowSlug = opts.activeModelSlug ?? bootModel;
+  // F-WIN — a resolução DE FATO: tier > env > config.context.window > JANELA DO MODELO
+  // declarada em `providers[].contextByModel` > 0. O último degrau é o que estava INERTE:
+  // as peças existiam (config sanitizado + `modelWindowFromConfig` + `setTier` do
+  // controller) mas NINGUÉM as alimentava no boot, então o controller nascia com a janela
+  // do tier (0 em `custom`) e só um `/model` posterior a corrigiria. Sem nada declarado o
+  // resultado segue 0 — o fail-safe que o F134 exige (size-aware do Compactor OFF).
+  const contextWindow = resolveContextWindow(
+    tier,
+    env,
+    undefined,
+    opts.context?.window,
+    modelWindowFromConfig(opts.providerWindows, opts.activeProviderId, windowSlug),
+  );
   // EST-0962 (--effort) — reasoning_effort PASSTHROUGH (qualquer string ≤32 chars).
   // SEM tier-gate: vale em qualquer tier. undefined ⇒ não enviado.
   const effort = opts.effort;
@@ -1161,6 +1211,14 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // 200k p/ Cortex, 0 p/ Custom). SEMPRE passada (≠200k hardcoded). O controller
     // a re-resolve na troca de tier (`setTier`).
     contextWindow,
+    // F-WIN — o MESMO catálogo de janelas por modelo que resolveu a `contextWindow` acima,
+    // agora na mão do controller: o `setTier` o re-consulta a cada troca de modelo
+    // (`/model <slug>` em BYO) p/ a janela acompanhar o slug NOVO. Sem isto, trocar de
+    // modelo numa sessão viva voltaria a 0/inerte mesmo com a janela declarada no config.
+    ...(opts.providerWindows !== undefined ? { providerWindows: opts.providerWindows } : {}),
+    // F-WIN — provider ATIVO p/ desambiguar o slug entre providers do config. Ausente ⇒
+    // o casamento é só por slug (degrade honesto, nunca inventa janela).
+    ...(opts.activeProviderId !== undefined ? { activeProviderId: opts.activeProviderId } : {}),
     // EST-0964 — AGENT.md confiável (já lido/clampado no startup) → canal `system`.
     ...(opts.projectInstructions !== undefined
       ? { projectInstructions: opts.projectInstructions }

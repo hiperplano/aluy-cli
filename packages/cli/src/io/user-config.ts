@@ -413,6 +413,20 @@ export interface UserProviderEntry {
   readonly auth?: readonly string[];
   readonly defaultModel: string;
   readonly models?: readonly string[];
+  /**
+   * F-WIN — JANELA DE CONTEXTO por SLUG (tokens). O buraco que isto fecha: a janela era
+   * procurada por TIER (`contextWindowForTier`), mas em BYO o tier é o literal `custom`,
+   * que devolve 0 por design ("janela imprevisível"). Só que em BYO a janela NÃO é
+   * imprevisível — o dono declarou um modelo CONCRETO; o que faltava era ONDE guardar o
+   * número. Com janela 0, o `⛁ %` congela E a auto-compactação fica INERTE
+   * (`decideAutoCompact` sai em `contextWindow <= 0`) — sessão longa sem rede de segurança.
+   *
+   * Mapa PARALELO ao `models` (em vez de trocar `models` de `string[]` p/ união de
+   * objeto): não quebra o append idempotente do test-then-register (ADR-0153) nem os
+   * consumidores existentes. Chave = slug exato; valor = inteiro positivo de tokens.
+   * Ausente p/ um slug ⇒ cai na precedência normal (config global > tier > 0).
+   */
+  readonly contextByModel?: Readonly<Record<string, number>>;
 }
 
 /** Formatos de fio aceitos (espelha `WireFormat` do core; gatekeeper de `sanitize`). */
@@ -701,6 +715,20 @@ function sanitizeProviderEntries(raw: unknown): readonly UserProviderEntry[] | u
     // parseAuth do core). Normaliza p/ array de strings; vazio ⇒ campo omitido.
     const auth = normStrList(o.auth);
     const models = normStrList(o.models);
+    // F-WIN — janela por slug: só pares (string não-vazia → inteiro > 0). Qualquer
+    // entrada malformada é DESCARTADA em silêncio (config é DADO do usuário; um valor
+    // ruim não pode derrubar o boot nem virar denominador inválido).
+    const contextByModel = ((): Readonly<Record<string, number>> | undefined => {
+      const src = o.contextByModel;
+      if (typeof src !== 'object' || src === null) return undefined;
+      const acc: Record<string, number> = {};
+      for (const [slug, v] of Object.entries(src as Record<string, unknown>)) {
+        const key = slug.trim();
+        const n = typeof v === 'number' ? v : Number.NaN;
+        if (key !== '' && Number.isInteger(n) && n > 0) acc[key] = n;
+      }
+      return Object.keys(acc).length > 0 ? acc : undefined;
+    })();
     const entry: UserProviderEntry = {
       id,
       wireFormat: wf as UserProviderEntry['wireFormat'],
@@ -709,6 +737,7 @@ function sanitizeProviderEntries(raw: unknown): readonly UserProviderEntry[] | u
       ...(typeof o.label === 'string' && o.label.trim() ? { label: o.label.trim() } : {}),
       ...(auth ? { auth } : {}),
       ...(models ? { models } : {}),
+      ...(contextByModel ? { contextByModel } : {}),
     };
     out.push(entry);
   }
@@ -1118,6 +1147,53 @@ export class UserConfigStore {
     if (models.length >= MAX_LOCAL_MODELS_PER_PROVIDER) return false; // teto (COND-S4).
     const nextProviders = providers.map((p, i) =>
       i === idx ? { ...entry, models: [...models, s] } : p,
+    );
+    return this.save({ providers: nextProviders });
+  }
+
+  /**
+   * F-WIN (descoberta) — grava a JANELA DE CONTEXTO DESCOBERTA de um slug em
+   * `providers[<id>].contextByModel` (o número que o dono, até aqui, tinha de caçar na
+   * doc do provider e digitar à mão no `~/.aluy/config.json`). A origem é o próprio
+   * provider (`GET {baseUrl}/models` → `context_length`, ver
+   * `model/local/context-window-discovery.ts`); aqui é só a ESCRITA.
+   *
+   * MESMA disciplina do `registerLocalModel` acima (ADR-0153 D2/COND-S4): append
+   * IDEMPOTENTE, preservando TODO o resto do config (outras entradas e os demais
+   * campos DAQUELA entrada — `baseUrl`/`auth`/`models` INTOCADOS; NUNCA grava
+   * credencial). Só o par `slug → tokens` (DADO público) muda, e ele passa pelo
+   * `sanitizeProviderEntries` de sempre (via `save`/`sanitize`).
+   *
+   * Devolve `false` (SEM gravar) — todos fail-safe, o caller trata como "vale só p/
+   * esta sessão":
+   *   - `providerId` sem entrada em `providers[]` (built-in sem override do usuário —
+   *     sintetizar uma entrada exigiria gravar `baseUrl`/`wireFormat`, fora do escopo);
+   *   - `tokens` não-inteiro/≤0 (o chamador já valida a plausibilidade; esta é a
+   *     segunda trava — um denominador inválido persistido envenenaria TODA sessão
+   *     futura, e o config é lido antes de qualquer chance de re-descoberta);
+   *   - a entrada já tem `MAX_LOCAL_MODELS_PER_PROVIDER` janelas (teto defensivo).
+   * Devolve `true` se JÁ havia janela p/ o slug (idempotente — "descobre uma vez,
+   * nunca mais": não sobrescrevemos, inclusive p/ preservar um número que o dono
+   * tenha ajustado à mão) OU se acabou de gravar.
+   */
+  registerModelContextWindow(providerId: string, slug: string, tokens: number): boolean {
+    const id = providerId.trim();
+    const s = slug.trim();
+    if (id === '' || s === '') return false;
+    if (!Number.isInteger(tokens) || tokens <= 0) return false;
+    const providers = this.load().providers ?? [];
+    const idx = providers.findIndex((p) => p.id === id);
+    if (idx === -1) return false; // built-in sem entrada — a descoberta fica só-sessão.
+    const entry = providers[idx]!;
+    const current = entry.contextByModel ?? {};
+    // Casamento case-insensitive p/ espelhar o `modelWindowFromConfig` (que lê assim):
+    // se ele JÁ acha uma janela p/ este slug, escrever outra chave criaria duas
+    // entradas ambíguas p/ o MESMO modelo — e a leitura pegaria a primeira, não a nova.
+    const already = Object.keys(current).some((k) => k.trim().toLowerCase() === s.toLowerCase());
+    if (already) return true;
+    if (Object.keys(current).length >= MAX_LOCAL_MODELS_PER_PROVIDER) return false;
+    const nextProviders = providers.map((p, i) =>
+      i === idx ? { ...entry, contextByModel: { ...current, [s]: tokens } } : p,
     );
     return this.save({ providers: nextProviders });
   }
