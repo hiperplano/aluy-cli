@@ -1,4 +1,4 @@
-// ADR-0134/0135 — `--telegram` ATIVA a bridge no boot. Prova o parsing (não a ativação,
+// ADR-0154 — `--telegram` ATIVA a bridge no boot. Prova o parsing (não a ativação,
 // que é testada em telegram-activation.test.ts). Default OFF (não-regressão: inerte como hoje).
 
 import { describe, expect, it } from 'vitest';

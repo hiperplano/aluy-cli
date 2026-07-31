@@ -1,14 +1,14 @@
-// Conector Telegram (ADR-0134) — ADAPTADOR de ingresso: mapeia um update do Telegram p/
+// Conector Telegram (ADR-0154) — ADAPTADOR de ingresso: mapeia um update do Telegram p/
 // a `IncomingMessage` portável e DELEGA a classificação à MALHA genérica (mesh.ts). A
 // lógica de segurança (allowlist, dono=instrução, forward=dado, default fechado) vive
-// UMA vez na malha (ADR-0135: "herdada, não reimplementada"). Aqui mora só o ESPECÍFICO
+// UMA vez na malha (ADR-0154: "herdada, não reimplementada"). Aqui mora só o ESPECÍFICO
 // do Telegram: o formato do chat-id/from-id e a leitura do forward/quote.
 //
 // PURO (sem rede/I/O): recebe um update já parseado + a allowlist e devolve a decisão. O
 // long-poll, o keychain e o egresso vivem no @hiperplano/aluy-cli.
 //
 // ⚠️ INERTE: ainda NÃO ligado a `--telegram`/boot — espera o resto da bridge + a revisão
-//    de segurança que o ADR-0134 exige.
+//    de segurança que o ADR-0154 exige.
 
 import { classifyConnectorIngress, type ConnectorIngress } from './mesh.js';
 import type { IncomingMessage, Provenance, ConnectorMeta, ConversationRef } from './types.js';
@@ -78,8 +78,8 @@ export function telegramConversationRef(chatId: number): ConversationRef {
 }
 
 /**
- * Classifica um update do Telegram contra a allowlist do dono (ADR-0134 §1/§2 via malha
- * ADR-0135). PURO. Default FECHADO. Mapeia o update p/ `IncomingMessage` e delega.
+ * Classifica um update do Telegram contra a allowlist do dono (ADR-0154 §1/§2 via malha
+ * ADR-0154). PURO. Default FECHADO. Mapeia o update p/ `IncomingMessage` e delega.
  */
 export function classifyTelegramIngress(
   update: TelegramUpdate,

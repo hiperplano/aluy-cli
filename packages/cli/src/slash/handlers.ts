@@ -1177,7 +1177,7 @@ export async function runAsyncSlash(
 }
 
 /**
- * ADR-0134/0135 — runner do `/telegram` (setup do conector DENTRO da sessão). PURO de Ink:
+ * ADR-0154 — runner do `/telegram` (setup do conector DENTRO da sessão). PURO de Ink:
  * recebe os `args` + as deps (config + secret-store) e devolve a nota a empurrar.
  *   /telegram | status        → token (redigido) + allowlist + estado (bridge inerte)
  *   /telegram allow <chat-id> → autoriza um chat-id (allowlist no config único)

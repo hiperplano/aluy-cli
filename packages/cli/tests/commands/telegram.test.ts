@@ -40,7 +40,7 @@ function fakeSecret(initial: string | null = null): ConnectorSecretStore & { val
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-describe('runTelegram (ADR-0134/0135 — gestão do conector)', () => {
+describe('runTelegram (ADR-0154 — gestão do conector)', () => {
   let base: string;
   let configStore: UserConfigStore;
   beforeEach(() => {
@@ -123,7 +123,7 @@ describe('runTelegram (ADR-0134/0135 — gestão do conector)', () => {
     expect(text).toContain('presente');
     expect(text).toContain('555');
     expect(text).not.toContain('AAHk'); // não vaza o token
-    // ADR-0134/0135 — com token+allowlist a bridge está PRONTA: o `aluy --telegram` a ativa.
+    // ADR-0154 — com token+allowlist a bridge está PRONTA: o `aluy --telegram` a ativa.
     expect(text).toMatch(/pronta/i);
     expect(text).toContain('--telegram');
   });

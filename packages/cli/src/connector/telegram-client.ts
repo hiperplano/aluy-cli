@@ -1,4 +1,4 @@
-// Conector Telegram (ADR-0134 §4) — LONG-POLL concreto sobre `getUpdates`. A máquina é
+// Conector Telegram (ADR-0154 §4) — LONG-POLL concreto sobre `getUpdates`. A máquina é
 // CLIENTE puro (egress de saída a api.telegram.org), SEM porta/webhook exposto. Usa o
 // parser PURO do cli-core; aqui só o I/O HTTP (fetch injetável p/ teste — a suíte NUNCA
 // toca a rede real).
@@ -7,7 +7,7 @@
 // O `await` de cada poll é cancelável por AbortSignal (encerra junto com a sessão).
 //
 // ⚠️ INERTE: nada aqui é chamado pelo boot ainda. A ativação (`--telegram`) + o roteamento
-//    do ingresso à sessão + o `telegram_send` esperam a revisão `seguranca` (ADR-0134).
+//    do ingresso à sessão + o `telegram_send` esperam a revisão `seguranca` (ADR-0154).
 
 import {
   parseGetUpdates,

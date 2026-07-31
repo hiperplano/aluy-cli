@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { EgressRateLimiter } from '../../src/connector/egress-limit.js';
 
-describe('EgressRateLimiter (ADR-0135 TC-6 / CLI-SEC-8 — anti-spam, puro)', () => {
+describe('EgressRateLimiter (ADR-0154 TC-6 / CLI-SEC-8 — anti-spam, puro)', () => {
   it('permite até N na janela, NEGA o N+1', () => {
     const lim = new EgressRateLimiter(3, 1000);
     expect(lim.tryConsume(0)).toBe(true);

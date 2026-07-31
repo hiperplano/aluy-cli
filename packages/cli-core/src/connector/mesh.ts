@@ -1,4 +1,4 @@
-// Malha de conectores (ADR-0135 §2) — a FRONTEIRA DE CONFIANÇA genérica, herdada por TODO
+// Malha de conectores (ADR-0154 §2) — a FRONTEIRA DE CONFIANÇA genérica, herdada por TODO
 // conector (TC-1/TC-2). É o SINGLE-SOURCE da decisão instrução×dado×descarte: o conector
 // só descreve proveniência/identidade; AQUI se decide. PURO (sem I/O).
 //
@@ -34,7 +34,7 @@ export type ConnectorIngress =
 
 /**
  * Classifica uma `IncomingMessage` contra a allowlist do dono + a proveniência + a
- * forjabilidade do transporte (ADR-0135 §2, TC-1/TC-2). PURO. Default FECHADO.
+ * forjabilidade do transporte (ADR-0154 §2, TC-1/TC-2). PURO. Default FECHADO.
  *
  * A allowlist é "por id-do-canal": casa pelo `conversation` (em DM 1:1 == sender). Ids
  * opacos (string) — o conector define o formato (chat-id, user-id, e-mail…).

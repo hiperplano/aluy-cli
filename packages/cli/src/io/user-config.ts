@@ -195,7 +195,7 @@ export interface UserConfig {
    */
   readonly services?: UserServicesConfig;
   /**
-   * ADR-0134/0135 (conectores) — config dos bridges externos. DADO de config: só a
+   * ADR-0154 (conectores) — config dos bridges externos. DADO de config: só a
    * allowlist de ids-do-canal e preferências (CLI-SEC-7). O TOKEN do bot NUNCA mora aqui
    * — vai no keychain do SO (CLI-SEC-2 / TC-3). Allowlist VAZIA/ausente ⇒ bridge fechada
    * (default fechado, TC-2): nada entra até o dono autorizar um id.
@@ -380,12 +380,12 @@ export interface UserContextConfig {
   readonly autocompactMax?: number;
 }
 
-/** Config dos conectores (ADR-0135). Só DADO (allowlist/prefs); token só no keychain. */
+/** Config dos conectores (ADR-0154). Só DADO (allowlist/prefs); token só no keychain. */
 export interface UserConnectorsConfig {
   readonly telegram?: UserTelegramConfig;
 }
 
-/** Config do conector Telegram (ADR-0134). Allowlist de chat-ids do dono. */
+/** Config do conector Telegram (ADR-0154). Allowlist de chat-ids do dono. */
 export interface UserTelegramConfig {
   /** chat-ids autorizados (a allowlist do dono). Vazia ⇒ nada entra (default fechado). */
   readonly allowlist?: readonly number[];
@@ -636,7 +636,7 @@ function sanitizeContext(raw: unknown): UserContextConfig | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-/** Sanitiza a config de conectores (ADR-0134/0135). Só a allowlist (DADO); token no keychain. */
+/** Sanitiza a config de conectores (ADR-0154). Só a allowlist (DADO); token no keychain. */
 function sanitizeConnectors(raw: unknown): UserConnectorsConfig | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const o = raw as Record<string, unknown>;
@@ -919,7 +919,7 @@ function sanitize(raw: unknown): UserConfig {
   const services = sanitizeServices(obj.services);
   if (services) out.services = services;
 
-  // ADR-0134/0135 — conectores (allowlist do Telegram; token só no keychain).
+  // ADR-0154 — conectores (allowlist do Telegram; token só no keychain).
   const connectors = sanitizeConnectors(obj.connectors);
   if (connectors) out.connectors = connectors;
 

@@ -12,7 +12,7 @@ const msg = (over: Partial<TelegramUpdate> = {}): TelegramUpdate => ({
   ...over,
 });
 
-describe('classifyTelegramIngress (ADR-0134 — filtro de autenticação)', () => {
+describe('classifyTelegramIngress (ADR-0154 — filtro de autenticação)', () => {
   it('DEFAULT FECHADO: allowlist vazia ⇒ descarta tudo (nem dado)', () => {
     const d = classifyTelegramIngress(msg(), new Set());
     expect(d.kind).toBe('discard');

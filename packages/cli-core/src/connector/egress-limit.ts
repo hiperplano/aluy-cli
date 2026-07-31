@@ -1,4 +1,4 @@
-// Conectores (ADR-0135 TC-6 / CLI-SEC-8) — TETO ANTI-SPAM de egresso. Impede o agente (ou
+// Conectores (ADR-0154 TC-6 / CLI-SEC-8) — TETO ANTI-SPAM de egresso. Impede o agente (ou
 // um loop) de FLOODAR o canal: no máximo N envios por janela deslizante. PURO — o tempo
 // entra por parâmetro (`nowMs`), então é 100% testável sem relógio real.
 //

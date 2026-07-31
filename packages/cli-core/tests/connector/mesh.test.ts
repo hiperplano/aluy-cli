@@ -13,7 +13,7 @@ const msg = (over: Partial<IncomingMessage> = {}): IncomingMessage => ({
   ...over,
 });
 
-describe('classifyConnectorIngress (ADR-0135 — fronteira de confiança genérica)', () => {
+describe('classifyConnectorIngress (ADR-0154 — fronteira de confiança genérica)', () => {
   it('TC-2: allowlist vazia ⇒ descarta tudo (default fechado)', () => {
     expect(classifyConnectorIngress(msg(), new Set(), NON_FORGEABLE).kind).toBe('discard');
   });

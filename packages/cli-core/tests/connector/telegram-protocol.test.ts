@@ -10,7 +10,7 @@ const dm = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-describe('parseGetUpdates (ADR-0134 §4 — parser puro, fail-safe)', () => {
+describe('parseGetUpdates (ADR-0154 §4 — parser puro, fail-safe)', () => {
   it('mensagem DM simples ⇒ TelegramUpdate + nextOffset = update_id+1', () => {
     const p = parseGetUpdates(resp([{ update_id: 42, message: dm() }]), 0);
     expect(p.updates).toEqual([{ chatId: 100, fromId: 100, text: 'oi' }]);

@@ -1,4 +1,4 @@
-// ConnectorSecretStore concreto = KEYCHAIN do SO (CLI-SEC-2 / ADR-0135 TC-3). Guarda o
+// ConnectorSecretStore concreto = KEYCHAIN do SO (CLI-SEC-2 / ADR-0154 TC-3). Guarda o
 // TOKEN do bot de um conector (Telegram etc.) como 1 string por conta de keychain
 // (`connector-<id>-token`), serviço `aluy-cli`. Espelha o `KeychainCredentialStore`
 // (mesma dep `@napi-rs/keyring`, mesmo NoKeychainError, mesma disciplina CA-4):

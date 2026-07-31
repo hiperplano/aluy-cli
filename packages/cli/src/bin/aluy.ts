@@ -280,7 +280,7 @@ async function main(): Promise<void> {
       return;
     }
     case 'telegram': {
-      // ADR-0134/0135 — gestão do conector Telegram (login=keychain; allow/deny=allowlist
+      // ADR-0154 — gestão do conector Telegram (login=keychain; allow/deny=allowlist
       // no config; status). Sem rede nesta fatia (a bridge segue inerte até `--telegram`).
       const { runTelegram } = await import('../commands/telegram.js');
       process.exitCode = await runTelegram({
@@ -567,7 +567,7 @@ async function main(): Promise<void> {
         // EST-0969 · ADR-0057 — sub-agentes locais paralelos (default ligado; opt-out
         // por `--no-subagents`). Repassado a buildSession via run.tsx (forma objeto).
         subAgents: { enabled: action.subAgents },
-        // ADR-0134/0135 — `--telegram` ATIVA a bridge no boot (dormente sem token). Só
+        // ADR-0154 — `--telegram` ATIVA a bridge no boot (dormente sem token). Só
         // na sessão INTERATIVA (não no headless `-p` one-shot: um long-poll não faz sentido
         // num turno único que sai logo). run.tsx faz a ativação real (keychain → connector).
         ...(action.telegram && !action.print ? { telegram: true } : {}),

@@ -19,7 +19,7 @@ function fakeFetch(responses: unknown[]) {
   return { fn, urls };
 }
 
-describe('TelegramClient — long-poll concreto (ADR-0134 §4)', () => {
+describe('TelegramClient — long-poll concreto (ADR-0154 §4)', () => {
   it('poll: parseia e AVANÇA o offset (offset vai na próxima URL)', async () => {
     const { fn, urls } = fakeFetch([
       { ok: true, result: [{ update_id: 5, message: { chat: { id: 1, type: 'private' }, text: 'a' } }] },

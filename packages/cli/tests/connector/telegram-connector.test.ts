@@ -19,7 +19,7 @@ function clientWith(responses: unknown[], sendSink?: { url: string; body: unknow
   return new TelegramClient({ token: TOKEN, fetchFn: fn });
 }
 
-describe('TelegramConnector — impl da porta Connector (ADR-0135 §1)', () => {
+describe('TelegramConnector — impl da porta Connector (ADR-0154 §1)', () => {
   it('meta é o do Telegram (authIsForgeable=false)', () => {
     const c = new TelegramConnector(clientWith([{ ok: true, result: [] }]));
     expect(c.meta).toEqual(TELEGRAM_META);

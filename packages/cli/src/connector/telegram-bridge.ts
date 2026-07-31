@@ -1,4 +1,4 @@
-// Bridge Telegram (ADR-0134 / ADR-0135) — a ATIVAÇÃO da bridge: liga o `TelegramConnector`
+// Bridge Telegram (ADR-0154 / ADR-0154) — a ATIVAÇÃO da bridge: liga o `TelegramConnector`
 // (INERTE) à sessão viva. Esta é a peça que o `seguranca` deu OK CONDICIONAL (C1–C6):
 //
 //  C1 — todo log/erro do loop e do send passa por `client.safeForLog(...)` (token NUNCA vaza).
