@@ -962,6 +962,20 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     ...(bootModel !== undefined ? { model: bootModel } : {}),
     // ADR-0120 — backend EFETIVO espelhado p/ a StatusBar indicar o modo (broker/local).
     ...(opts.effectiveBackend !== undefined ? { backend: opts.effectiveBackend } : {}),
+    // BUGFIX (dogfooding — footer `local · <modelo> · <modelo>` em vez de `local ·
+    // tokenrouter · <modelo>`) — semeia `meta.provider` DIRETO de `opts.provider`, NÃO do
+    // `bootProvider` acima. `bootProvider` existe p/ o CALLER (par --provider/--model do
+    // Custom no CORPO da chamada ao broker, HG-2: só faz sentido colado a um slug Custom)
+    // e por isso é gateado por `bootModel !== undefined` — mas essa trava NÃO se aplica ao
+    // DISPLAY: no backend LOCAL, `run.tsx` manda `opts.provider = localProviderForMeta`
+    // (o provider BYO resolvido, ex. `tokenrouter`) INDEPENDENTE do tier estar em `custom`
+    // (o BYO comum roda no tier default). Reusar `bootProvider` aqui (como antes) DESCARTAVA
+    // esse valor sempre que o tier não era `custom` — `meta.provider` nascia `undefined` e
+    // a StatusBar (App.tsx `localProviderName`) caía no fallback, mostrando SÓ o modelo
+    // (via `activeModel`, pós-1º turno) onde devia mostrar `tokenrouter`. `opts.provider`
+    // já chega PRÉ-ESCOPADO pelo run.tsx (só não-vazio nos casos legítimos: backend local
+    // SEMPRE, ou o par `--provider`+`--model` do Custom) — sem precisar de gate aqui.
+    ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
     tokens: 0,
     windowPct: 0,
   };
@@ -1115,7 +1129,16 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // no cliente). CACHE por slug (uma entrada por slug pedido; sem slug ⇒ 1 entrada
   // "segue o pai"). Só existe com sub-agentes habilitados.
   const customCallers = new Map<string, BrokerModelCaller>();
-  const CUSTOM_CALLER_FOLLOW_PARENT_KEY = ' __inherit__';
+  // Sentinela de chave do Map `customCallers` p/ "sem slug ⇒ segue o pai" (ver
+  // comentário acima). ERA um NUL-byte literal (`'\x00__inherit__'`) — funcionava
+  // (chave de Map interna, nunca serializada/comparada fora daqui), mas fazia
+  // ferramentas de texto (grep sem `-a`, alguns editores) classificarem ESTE
+  // ARQUIVO INTEIRO como binário e pularem buscas nele silenciosamente (já
+  // causou diagnóstico errado: um agente concluiu que uma função não tinha
+  // chamador só porque o grep não enxergava o arquivo). Trocado por uma string
+  // ASCII com prefixo/sufixo que nenhum slug de modelo real usaria — mesma
+  // semântica (só precisa ser um valor que `slug` nunca assume).
+  const CUSTOM_CALLER_FOLLOW_PARENT_KEY = '__ALUY_INHERIT_PARENT__';
   const customCallerFor = opts.subAgents?.enabled
     ? (slug?: string): BrokerModelCaller => {
         const key = slug ?? CUSTOM_CALLER_FOLLOW_PARENT_KEY;
