@@ -258,7 +258,9 @@ describe('BUG A (fan-out) — texto puro durante sub-agentes vivos NÃO some da 
     await waitFor(() => {
       const f = plain(s.lastFrame());
       return (
-        f.includes('encaixando') || f.includes('na fila') || s.controller.current.pendingInjects.length > 0
+        f.includes('encaixando') ||
+        f.includes('na fila') ||
+        s.controller.current.pendingInjects.length > 0
       );
     });
 

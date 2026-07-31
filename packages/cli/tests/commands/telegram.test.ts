@@ -20,7 +20,9 @@ function fakeIO(promptAnswer = '') {
 }
 
 /** Secret store fake em memória. */
-function fakeSecret(initial: string | null = null): ConnectorSecretStore & { value: string | null } {
+function fakeSecret(
+  initial: string | null = null,
+): ConnectorSecretStore & { value: string | null } {
   let value = initial;
   return {
     get value() {
@@ -53,7 +55,10 @@ describe('runTelegram (ADR-0154 — gestão do conector)', () => {
   it('login --token válido ⇒ grava no keychain (redigido, sem vazar o auth)', async () => {
     const { io, out, err } = fakeIO();
     const secret = fakeSecret();
-    const code = await runTelegram({ sub: 'login', token: TOKEN }, { io, secretStore: secret, configStore });
+    const code = await runTelegram(
+      { sub: 'login', token: TOKEN },
+      { io, secretStore: secret, configStore },
+    );
     expect(code).toBe(0);
     expect(secret.value).toBe(TOKEN);
     expect(err).toHaveLength(0);
@@ -64,7 +69,10 @@ describe('runTelegram (ADR-0154 — gestão do conector)', () => {
   it('login com token de forma inválida ⇒ NÃO grava, erro, exit 1', async () => {
     const { io, err } = fakeIO();
     const secret = fakeSecret();
-    const code = await runTelegram({ sub: 'login', token: 'lixo' }, { io, secretStore: secret, configStore });
+    const code = await runTelegram(
+      { sub: 'login', token: 'lixo' },
+      { io, secretStore: secret, configStore },
+    );
     expect(code).toBe(1);
     expect(secret.value).toBeNull();
     expect(err.join('\n')).toMatch(/inválida/i);
@@ -73,7 +81,10 @@ describe('runTelegram (ADR-0154 — gestão do conector)', () => {
   it('login sem --token ⇒ lê do prompt (secret)', async () => {
     const { io } = fakeIO(TOKEN);
     const secret = fakeSecret();
-    const code = await runTelegram({ sub: 'login' }, { io, secretStore: secret, configStore, env: {} });
+    const code = await runTelegram(
+      { sub: 'login' },
+      { io, secretStore: secret, configStore, env: {} },
+    );
     expect(code).toBe(0);
     expect(secret.value).toBe(TOKEN);
   });

@@ -47,7 +47,13 @@ const MSGS: ChatMessage[] = [
 ];
 
 function jsonResponse(body: unknown, ok = true): Response {
-  return { ok, status: ok ? 200 : 500, async json() { return body; } } as unknown as Response;
+  return {
+    ok,
+    status: ok ? 200 : 500,
+    async json() {
+      return body;
+    },
+  } as unknown as Response;
 }
 
 /** Resposta de compress BEM-FORMADA (mesma contagem, só encurta o content). */
@@ -127,7 +133,9 @@ describe('F-SIDECAR-USO · headroom (compressão de contexto)', () => {
     const m = new SidecarUsageMeter();
     await compressViaHeadroom(MSGS, {
       baseUrl: 'http://127.0.0.1:8787',
-      fetchFn: vi.fn(async () => jsonResponse({ messages: [{ content: 'só uma' }] })) as unknown as typeof fetch,
+      fetchFn: vi.fn(async () =>
+        jsonResponse({ messages: [{ content: 'só uma' }] }),
+      ) as unknown as typeof fetch,
       onUsed: (ok) => m.record('headroom', ok),
     });
     expect(m.snapshot().headroom).toEqual({ ok: 0, fail: 1 });
@@ -166,10 +174,13 @@ describe('F-SIDECAR-USO · headroom (tool headroom_retrieve)', () => {
       baseUrl: 'http://127.0.0.1:8787',
       fetchFn: vi.fn(
         async () =>
-          new Response(JSON.stringify({ original_content: 'o log inteiro', original_tokens: 900 }), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          }),
+          new Response(
+            JSON.stringify({ original_content: 'o log inteiro', original_tokens: 900 }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          ),
       ) as unknown as typeof fetch,
       onUsed: (ok) => m.record('headroom', ok),
     });
@@ -219,7 +230,11 @@ function ollamaSaying(content: string): typeof fetch {
   return vi.fn(
     async () =>
       new Response(
-        JSON.stringify({ model: DEFAULT_OLLAMA_MODEL, message: { role: 'assistant', content }, done: true }),
+        JSON.stringify({
+          model: DEFAULT_OLLAMA_MODEL,
+          message: { role: 'assistant', content },
+          done: true,
+        }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
   ) as unknown as typeof fetch;
@@ -357,7 +372,11 @@ describe('F-SIDECAR-USO · mem0 (escrita e recall)', () => {
     'RECALL com hits ⇒ conta USO',
     withTmp(async (dir) => {
       const m = new SidecarUsageMeter();
-      const eng = engineWith(pinnedOk({ results: [{ id: '1', memory: 'lembrança', score: 0.9 }] }), m, dir);
+      const eng = engineWith(
+        pinnedOk({ results: [{ id: '1', memory: 'lembrança', score: 0.9 }] }),
+        m,
+        dir,
+      );
       const r = await eng.search({ scopes: ['proj'], query: 'q' });
       expect(r.hits).toHaveLength(1);
       expect(m.snapshot().mem0).toEqual({ ok: 1, fail: 0 });

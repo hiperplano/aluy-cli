@@ -20,7 +20,7 @@ catraca antes de acontecer.
 
 Você usa o **seu próprio modelo** (BYO): qualquer provider compatível com a API da
 OpenAI, com a sua própria credencial — direto, sem intermediário e sem metering.
-*(Por enquanto o aluy roda só local, com a sua chave.)*
+_(Por enquanto o aluy roda só local, com a sua chave.)_
 
 ## Instalação
 
@@ -47,14 +47,14 @@ aluy --continue               # retoma a sessão mais recente deste diretório
 
 Dentro da sessão, **slash-commands** controlam tudo sem sair do fluxo:
 
-| Comando | O que faz |
-|---|---|
-| `/model` · `/provider` · `/effort` | troca modelo / provider / esforço de raciocínio |
-| `/init` | cria o `ALUY.md` + a estrutura `.aluy/` do projeto |
-| `/mcp` · `/agents` · `/skills` · `/workflows` | gerencia MCP, sub-agentes, skills e workflows |
-| `/rooms` | salas de conversa entre agentes (multi-agente) |
-| `/rename` · `/theme` · `/lang` | nome+cor da sessão, tema, idioma |
-| `/memory` · `/compact` · `/history` | memória, compactação de contexto, histórico |
+| Comando                                       | O que faz                                          |
+| --------------------------------------------- | -------------------------------------------------- |
+| `/model` · `/provider` · `/effort`            | troca modelo / provider / esforço de raciocínio    |
+| `/init`                                       | cria o `ALUY.md` + a estrutura `.aluy/` do projeto |
+| `/mcp` · `/agents` · `/skills` · `/workflows` | gerencia MCP, sub-agentes, skills e workflows      |
+| `/rooms`                                      | salas de conversa entre agentes (multi-agente)     |
+| `/rename` · `/theme` · `/lang`                | nome+cor da sessão, tema, idioma                   |
+| `/memory` · `/compact` · `/history`           | memória, compactação de contexto, histórico        |
 
 ## Como funciona
 
@@ -75,11 +75,11 @@ Dentro da sessão, **slash-commands** controlam tudo sem sair do fluxo:
 
 Tudo vive em `~/.aluy/`:
 
-| Arquivo | Conteúdo |
-|---|---|
-| `config.json` | preferências (idioma, tema, provider/modelo, perfil, limites…) |
-| `providers.json` | seus providers BYO (OpenAI-compatíveis) |
-| `mcp.json` | servers MCP globais |
+| Arquivo          | Conteúdo                                                       |
+| ---------------- | -------------------------------------------------------------- |
+| `config.json`    | preferências (idioma, tema, provider/modelo, perfil, limites…) |
+| `providers.json` | seus providers BYO (OpenAI-compatíveis)                        |
+| `mcp.json`       | servers MCP globais                                            |
 
 Variáveis `ALUY_*` e flags de CLI sobrescrevem (precedência **flag > env > config > default**).
 No **projeto**, o `ALUY.md` dá as instruções ao agente e `.aluy/` guarda agents, workflows,
@@ -87,10 +87,10 @@ commands e skills.
 
 ## Monorepo
 
-| Pacote | Papel |
-|---|---|
+| Pacote                          | Papel                                                                                                                                         |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | **`@hiperplano/aluy-cli-core`** | Engine **portável** do agente (loop · tools · permissão). Sem Ink, sem I/O de terminal. Hospeda o ponto único de interceptação de tool-calls. |
-| **`@hiperplano/aluy-cli`** | TUI (**Ink**) + binário **`aluy`** + wiring. Consome `@hiperplano/aluy-cli-core`. |
+| **`@hiperplano/aluy-cli`**      | TUI (**Ink**) + binário **`aluy`** + wiring. Consome `@hiperplano/aluy-cli-core`.                                                             |
 
 Lema: **core modular, entrega monolítica**. A fronteira `core × TUI` é explícita e
 testada (o core não importa Ink).

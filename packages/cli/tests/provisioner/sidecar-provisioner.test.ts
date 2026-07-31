@@ -44,7 +44,9 @@ vi.mock('node:os', async () => {
 
 // Mock do verifySha256 do cli-core — por padrão delega ao real.
 vi.mock('@hiperplano/aluy-cli-core', async () => {
-  const actual = await vi.importActual<typeof import('@hiperplano/aluy-cli-core')>('@hiperplano/aluy-cli-core');
+  const actual = await vi.importActual<typeof import('@hiperplano/aluy-cli-core')>(
+    '@hiperplano/aluy-cli-core',
+  );
   // Por padrão, usa a implementação real.
   const mockVerify = vi.fn((a: string, b: string) => actual.verifySha256(a, b));
   return { ...actual, verifySha256: mockVerify };
@@ -214,7 +216,12 @@ describe('NodeSidecarProvisioner.provision — agentInstaller é PREFERIDO (qual
   });
 
   it('provisionAll passa o CTX de SEQUÊNCIA (i/N + fila) ao agente — cabeçalho sobrevive ao clear', async () => {
-    const seen: { target: SidecarTarget; index?: number; total?: number; plan?: readonly SidecarTarget[] }[] = [];
+    const seen: {
+      target: SidecarTarget;
+      index?: number;
+      total?: number;
+      plan?: readonly SidecarTarget[];
+    }[] = [];
     const provisioner = new NodeSidecarProvisioner({
       platform: 'linux',
       agentInstaller: async (t, ctx) => {
@@ -527,13 +534,20 @@ describe('runProvisioner', () => {
       arrayBuffer: async () => new ArrayBuffer(0),
     });
 
-    const result = await runProvisioner(undefined, undefined, { platform: 'linux', useAgent: false });
+    const result = await runProvisioner(undefined, undefined, {
+      platform: 'linux',
+      useAgent: false,
+    });
     expect(result.profile).toBe('turbo');
     expect(result.targets.length).toBeGreaterThanOrEqual(1);
   });
 
   it('perfil LEVE explícito ⇒ não provisiona nada', async () => {
-    const result = await runProvisioner('leve', { ollama: true }, { platform: 'linux', useAgent: false });
+    const result = await runProvisioner(
+      'leve',
+      { ollama: true },
+      { platform: 'linux', useAgent: false },
+    );
     expect(result.profile).toBe('leve');
     expect(result.targets).toHaveLength(0);
     expect(result.anySuccess).toBe(false);

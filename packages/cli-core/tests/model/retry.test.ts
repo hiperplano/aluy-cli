@@ -135,7 +135,9 @@ describe('F-RETRY · resolveRetry — precedência env > config > default (ADR-0
 
   it('CLAMPA nos tetos duros (anti-runaway) e ignora lixo', () => {
     expect(resolveRetry({ attemptsEnv: '9999' }).attempts).toBe(MAX_RETRY_ATTEMPTS);
-    expect(resolveRetry({ attemptsEnv: '3', waitMsEnv: '99999999' }).waitMs).toBe(MAX_RETRY_WAIT_MS);
+    expect(resolveRetry({ attemptsEnv: '3', waitMsEnv: '99999999' }).waitMs).toBe(
+      MAX_RETRY_WAIT_MS,
+    );
     expect(resolveRetry({ attemptsEnv: 'abc' })).toEqual(RETRY_OFF); // lixo ⇒ default (off)
   });
 });

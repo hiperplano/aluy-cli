@@ -315,7 +315,9 @@ describe('FATIA 1 (CICLOS/SUBCICLOS) — cycleProgress publicado DURANTE o ciclo
     const seen: Array<{ iteration: number; max: number } | undefined> = [];
     controller.subscribe((s) => {
       seen.push(
-        s.cycleProgress ? { iteration: s.cycleProgress.iteration, max: s.cycleProgress.max } : undefined,
+        s.cycleProgress
+          ? { iteration: s.cycleProgress.iteration, max: s.cycleProgress.max }
+          : undefined,
       );
     });
     await controller.cycle('--max-iter 2 "trabalho curto"');

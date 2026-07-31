@@ -48,7 +48,13 @@ function state(): SessionState {
   } as unknown as SessionState;
 }
 
-function renderCockpit(input: string, cursorPos: number, rows = 24, cols = 100, showCursor = false) {
+function renderCockpit(
+  input: string,
+  cursorPos: number,
+  rows = 24,
+  cols = 100,
+  showCursor = false,
+) {
   // o caller (App) deriva composerLines do input; aqui replicamos p/ o layout. Como o App
   // (task #14), usamos linhas VISUAIS (com soft-wrap) — p/ short lines é == lógicas.
   const composerLines = input.length === 0 ? 1 : visualLines(input, cols > 2 ? cols - 2 : cols);
@@ -140,7 +146,8 @@ describe('cockpit composer multi-linha (BUG P2-C)', () => {
     const rows = 40;
     // ~200 chars, sem `\n` — 1 linha lógica que embrulha em 2 visuais a 140 col.
     const groups = ['AAAAAAAAAA', 'bbbbbbbbbb', 'CCCCCCCCCC', 'dddddddddd', 'EEEEEEEEEE'];
-    const input = Array.from({ length: 24 }, (_, i) => groups[i % groups.length]).join(' ') + ' FIM';
+    const input =
+      Array.from({ length: 24 }, (_, i) => groups[i % groups.length]).join(' ') + ' FIM';
     const { r } = renderCockpit(input, input.length, rows, cols, /* showCursor */ true);
     await flush();
     const frame = plain(r.lastFrame() ?? '');

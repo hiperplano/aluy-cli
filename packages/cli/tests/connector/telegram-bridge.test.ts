@@ -2,10 +2,7 @@
 // (C1–C6) no wiring concreto. Tudo com fakes (sem rede real). Cada teste cita a condição.
 
 import { describe, it, expect } from 'vitest';
-import {
-  TelegramBridge,
-  type IngressSink,
-} from '../../src/connector/telegram-bridge.js';
+import { TelegramBridge, type IngressSink } from '../../src/connector/telegram-bridge.js';
 import { TelegramConnector } from '../../src/connector/telegram-connector.js';
 import { TelegramClient } from '../../src/connector/telegram-client.js';
 import {
@@ -30,10 +27,7 @@ function spySink(): IngressSink & { instr: string[]; data: { label: string; text
 }
 
 /** Connector fake: emite as mensagens dadas e registra os sends. */
-function fakeConnector(
-  msgs: IncomingMessage[],
-  sends: OutgoingMessage[],
-): Connector {
+function fakeConnector(msgs: IncomingMessage[], sends: OutgoingMessage[]): Connector {
   return {
     meta: { id: 'telegram', displayName: 'Telegram', authIsForgeable: false },
     async *incoming() {
@@ -46,7 +40,12 @@ function fakeConnector(
 }
 
 function ownerMsg(text: string, chatId = 100): IncomingMessage {
-  return { content: text, sender: String(chatId), conversation: String(chatId), provenance: { kind: 'author-direct' } };
+  return {
+    content: text,
+    sender: String(chatId),
+    conversation: String(chatId),
+    provenance: { kind: 'author-direct' },
+  };
 }
 
 // Redator fake (em prod é o TelegramClient.safeForLog).
@@ -165,7 +164,7 @@ describe('TelegramBridge — C3 (egress travado na conversa corrente, NUNCA arg 
       redactor: noopRedactor,
     });
     const tool = bridge.sendTool();
-    const props = (tool.parameters as { properties: Record<string, unknown>; required: string[] });
+    const props = tool.parameters as { properties: Record<string, unknown>; required: string[] };
     expect(Object.keys(props.properties)).toEqual(['text']); // SÓ text
     expect(props.required).toEqual(['text']);
     // nenhuma chave de destino (chat_id/to/conversation) no schema

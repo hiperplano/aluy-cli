@@ -13,7 +13,13 @@ import * as fsPromises from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { FileRoomStore } from '../../src/session/rooms/file-room-store.js';
-import { createRoom, isExpired, revokeRoom, buildRoomTools, type Room } from '@hiperplano/aluy-cli-core';
+import {
+  createRoom,
+  isExpired,
+  revokeRoom,
+  buildRoomTools,
+  type Room,
+} from '@hiperplano/aluy-cli-core';
 import { classifyAttachPath } from '../../src/attach/path-deny.js';
 import { classifyAlwaysAsk } from '@hiperplano/aluy-cli-core';
 

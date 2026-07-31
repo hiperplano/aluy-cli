@@ -40,7 +40,9 @@ describe('ADR-0137 · C2/C3 — <CycleCeilingGate>: reason rotulado + 1 linha + 
 
     // ROTULADO como DADO não-confiável (local · não verificado) — nunca "texto de sistema".
     // O rótulo está na PRÓPRIA linha (não quebra) ⇒ casa contíguo mesmo sob wrap.
-    const labelLine = lines.find((l) => norm(l).includes('motivo do juiz (local · não verificado):'));
+    const labelLine = lines.find((l) =>
+      norm(l).includes('motivo do juiz (local · não verificado):'),
+    );
     expect(labelLine).toBeDefined();
     // O prompt de saída SEGURA está SEMPRE visível, mesmo com o reason hostil multilinha gigante.
     expect(out).toContain('[c] continua');

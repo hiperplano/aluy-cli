@@ -67,7 +67,11 @@ describe('OpenAiCompatAdapter — request building', () => {
     const credNone = async (): Promise<ResolvedCredential> => ({ kind: 'none', secret: '' });
     const sse = openAiSse([
       { id: 'c', choices: [{ delta: { content: 'oi' } }] },
-      { id: 'c', choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      {
+        id: 'c',
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      },
     ]);
     const { fetch, calls } = makeBrokerFetch({ status: 200, sse });
     const client = new LocalModelClient({
@@ -270,7 +274,9 @@ describe('OpenAiCompatAdapter — BUG-TRAILER (usage no chunk trailer, pós fini
     // Sem o `data: [DONE]\n\n` final — simula um proxy/timeout que corta o corpo
     // logo após o trailer de usage.
     const sse =
-      'data: ' + JSON.stringify({ id: 'c1', choices: [{ delta: { content: 'oi' } }] }) + '\n\n' +
+      'data: ' +
+      JSON.stringify({ id: 'c1', choices: [{ delta: { content: 'oi' } }] }) +
+      '\n\n' +
       'data: ' +
       JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'length' }] }) +
       '\n\n' +
@@ -304,7 +310,8 @@ describe('OpenAiCompatAdapter — BUG-TRAILER (usage no chunk trailer, pós fini
   it('(b.2) fim de stream sem finish_reason nenhum ⇒ finalize fecha como "stop" (default histórico)', async () => {
     // Corpo termina no meio (nem finish_reason, nem [DONE]) — o teto de idempotência
     // não deve inventar um finish_reason específico; cai no default 'stop'.
-    const sse = 'data: ' + JSON.stringify({ id: 'c1', choices: [{ delta: { content: 'x' } }] }) + '\n\n';
+    const sse =
+      'data: ' + JSON.stringify({ id: 'c1', choices: [{ delta: { content: 'x' } }] }) + '\n\n';
     const { fetch } = makeBrokerFetch({ status: 200, sse });
     const client = new LocalModelClient({
       adapter: adapter(),
@@ -326,7 +333,11 @@ describe('OpenAiCompatAdapter — BUG-TRAILER (usage no chunk trailer, pós fini
     const a = adapter();
     const acc = newSseAccumulator();
     // finish_reason + [DONE], como um turno normal.
-    a.mapSse('', JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'stop' }] }), acc);
+    a.mapSse(
+      '',
+      JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'stop' }] }),
+      acc,
+    );
     const doneEvents = a.mapSse('', '[DONE]', acc);
     expect(doneEvents).toEqual([{ type: 'done', finish_reason: 'stop' }]);
     expect(acc.emittedDone).toBe(true);
@@ -338,7 +349,11 @@ describe('OpenAiCompatAdapter — BUG-TRAILER (usage no chunk trailer, pós fini
   it('(c.2) idempotência — dois `[DONE]` seguidos no MESMO corpo não duplicam o done', () => {
     const a = adapter();
     const acc = newSseAccumulator();
-    a.mapSse('', JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'stop' }] }), acc);
+    a.mapSse(
+      '',
+      JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'stop' }] }),
+      acc,
+    );
     expect(a.mapSse('', '[DONE]', acc)).toEqual([{ type: 'done', finish_reason: 'stop' }]);
     // um `[DONE]` redundante (provider mal-comportado) ⇒ [] (não repete o evento).
     expect(a.mapSse('', '[DONE]', acc)).toEqual([]);
@@ -404,7 +419,11 @@ describe('OpenAiCompatAdapter — BUG-TRAILER (usage no chunk trailer, pós fini
       {
         id: 'c1',
         choices: [
-          { delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'f', arguments: '{}' } }] } },
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: 'call_1', function: { name: 'f', arguments: '{}' } }],
+            },
+          },
         ],
       },
       { id: 'c1', choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
@@ -426,11 +445,17 @@ describe('OpenAiCompatAdapter — BUG-TRAILER (usage no chunk trailer, pós fini
       JSON.stringify({
         id: 'c1',
         choices: [
-          { delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'f', arguments: '{}' } }] } },
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: 'call_1', function: { name: 'f', arguments: '{}' } }],
+            },
+          },
         ],
       }) +
       '\n\n' +
-      'data: ' + JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'tool_calls' }] }) + '\n\n';
+      'data: ' +
+      JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'tool_calls' }] }) +
+      '\n\n';
     const { fetch: fetchNoDone } = makeBrokerFetch({ status: 200, sse: sseNoDone });
     const clientNoDone = new LocalModelClient({
       adapter: adapter(),

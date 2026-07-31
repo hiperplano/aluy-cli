@@ -65,9 +65,7 @@ export function mapToolsToCapabilityInfo(
  * ⇒ `summary` SANITIZADA (dado de terceiro — CLI-SEC-4); nunca marca `invocable`
  * (delegação de agente já é via a tool própria `spawn_agent`, não um flag de invocação).
  */
-export function mapAgentsToCapabilityItems(
-  agents: readonly AgentProfile[],
-): CapabilityNamedItem[] {
+export function mapAgentsToCapabilityItems(agents: readonly AgentProfile[]): CapabilityNamedItem[] {
   return agents.map((a) => {
     const raw = a.description ?? clampAgentSummary(a.systemPrompt);
     return {
@@ -100,9 +98,7 @@ export function mapSkillsToCapabilityItems(skills: readonly Skill[]): Capability
  * contador e o prefixo (NUNCA a description da tool de terceiro, que nem é lida:
  * só `t.name` é inspecionado aqui).
  */
-export function groupMcpServers(
-  mcpTools: readonly NativeTool<ToolPorts>[],
-): CapabilityMcpServer[] {
+export function groupMcpServers(mcpTools: readonly NativeTool<ToolPorts>[]): CapabilityMcpServer[] {
   const byServer = new Map<string, number>();
   for (const t of mcpTools) {
     const parsed = parseMcpToolName(t.name);

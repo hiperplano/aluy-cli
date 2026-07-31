@@ -298,9 +298,7 @@ export class CycleEngine {
     }
     if (patch.maxIterations !== undefined) {
       if (!Number.isInteger(patch.maxIterations) || patch.maxIterations < 1) {
-        throw new Error(
-          'reconfigure: max-iter deve ser inteiro ≥ 1 (o teto não pode sumir).',
-        );
+        throw new Error('reconfigure: max-iter deve ser inteiro ≥ 1 (o teto não pode sumir).');
       }
       this.ceilings = { ...this.ceilings, maxIterations: patch.maxIterations };
     }

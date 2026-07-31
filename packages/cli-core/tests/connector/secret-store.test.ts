@@ -14,7 +14,9 @@ describe('connector secret-store — naming + validadores PUROS (TC-3 / CLI-SEC-
 
   it('isPlausibleTelegramToken: forma <bot_id>:<auth> aceita; lixo rejeitado', () => {
     expect(isPlausibleTelegramToken('123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345')).toBe(true);
-    expect(isPlausibleTelegramToken('  123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345  ')).toBe(true);
+    expect(isPlausibleTelegramToken('  123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345  ')).toBe(
+      true,
+    );
     expect(isPlausibleTelegramToken('not-a-token')).toBe(false);
     expect(isPlausibleTelegramToken('123:short')).toBe(false); // auth curto
     expect(isPlausibleTelegramToken('abc:AAHkabcdefghijklmnopqrstuvwxyz012345')).toBe(false); // id não-numérico

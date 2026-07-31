@@ -19,9 +19,25 @@ const TOOL_CLOSE = 'ALUY_TOOL_CALL>>>';
 const toolCall = (name, input) => `${TOOL_OPEN}\n${JSON.stringify({ name, input })}\n${TOOL_CLOSE}`;
 
 const ports = {
-  fs: { async readFile() { return ''; }, async writeFile() {}, async exists() { return false; } },
-  shell: { async exec() { return { stdout: 'ok', stderr: '', exitCode: 0 }; } },
-  search: { async search() { return []; } },
+  fs: {
+    async readFile() {
+      return '';
+    },
+    async writeFile() {},
+    async exists() {
+      return false;
+    },
+  },
+  shell: {
+    async exec() {
+      return { stdout: 'ok', stderr: '', exitCode: 0 };
+    },
+  },
+  search: {
+    async search() {
+      return [];
+    },
+  },
 };
 
 let controllerRef = null;
@@ -33,11 +49,19 @@ const model = {
     if (t === 0) {
       // janela LONGA p/ o operador enfileirar o bang antes da iter 1 abrir o ask.
       await new Promise((r) => setTimeout(r, 12000));
-      return { request_id: 'r', content: toolCall('read_file', { path: 'x' }), finish_reason: 'stop' };
+      return {
+        request_id: 'r',
+        content: toolCall('read_file', { path: 'x' }),
+        finish_reason: 'stop',
+      };
     }
     if (t === 1) {
       // run_command destrutivo ⇒ ask abre e BLOQUEIA o turno vivo (a fila segue cheia).
-      return { request_id: 'r', content: toolCall('run_command', { command: 'rm -rf build' }), finish_reason: 'stop' };
+      return {
+        request_id: 'r',
+        content: toolCall('run_command', { command: 'rm -rf build' }),
+        finish_reason: 'stop',
+      };
     }
     // iter 2: encerra RÁPIDO p/ o turno repousar e a fila (bang) drenar VISIVELMENTE.
     await new Promise((r) => setTimeout(r, 1500));
@@ -58,8 +82,14 @@ controller.dismissBoot();
 
 const theme = resolveTheme({ env: process.env });
 render(
-  React.createElement(ThemeProvider, { theme }, React.createElement(App, { controller, animate: false, bootMs: 0 })),
+  React.createElement(
+    ThemeProvider,
+    { theme },
+    React.createElement(App, { controller, animate: false, bootMs: 0 }),
+  ),
 );
 
 // Dispara o turno automaticamente (o operador só digita o bang + ESC).
-setTimeout(() => { void controller.submit('objetivo inicial'); }, 300);
+setTimeout(() => {
+  void controller.submit('objetivo inicial');
+}, 300);

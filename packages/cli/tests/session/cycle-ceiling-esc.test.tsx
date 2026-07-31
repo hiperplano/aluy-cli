@@ -64,9 +64,11 @@ const judge: JudgeEngine = {
     };
   },
 };
-const approveAll: AskResolver = { async resolve() {
-  return { kind: 'approve' };
-} };
+const approveAll: AskResolver = {
+  async resolve() {
+    return { kind: 'approve' };
+  },
+};
 
 async function waitFor(cond: () => boolean, timeoutMs = 4000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

@@ -300,10 +300,7 @@ function levenshtein(a: string, b: string): number {
  * dentro de um limiar RAZOÁVEL (evita "quis dizer X?" bizarro p/ uma string
  * totalmente diferente) — limiar proporcional ao tamanho do termo buscado. PURO.
  */
-export function suggestModelName(
-  raw: string,
-  candidates: readonly string[],
-): string | undefined {
+export function suggestModelName(raw: string, candidates: readonly string[]): string | undefined {
   const target = raw.trim().toLowerCase();
   if (target === '' || candidates.length === 0) return undefined;
   let best: string | undefined;
@@ -328,10 +325,7 @@ export function suggestModelName(
  * caindo só nos nomes CONHECIDOS de cor (L1). PURO (recebe os dados já buscados —
  * quem busca o catálogo é o locus concreto).
  */
-export function formatUnknownModelError(
-  raw: string,
-  catalogNames?: readonly string[],
-): string {
+export function formatUnknownModelError(raw: string, catalogNames?: readonly string[]): string {
   const known = knownModelNames();
   const candidates = [...new Set([...known, ...(catalogNames ?? [])])];
   const suggestion = suggestModelName(raw, candidates);

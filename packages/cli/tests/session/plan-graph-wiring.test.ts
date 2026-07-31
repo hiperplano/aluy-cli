@@ -12,7 +12,12 @@
 //      flat clássico: sem indentação, sem marcador de horizonte.
 
 import { describe, expect, it } from 'vitest';
-import { NATIVE_TOOLS, ContextGraph, type NativeTool, type ToolPorts } from '@hiperplano/aluy-cli-core';
+import {
+  NATIVE_TOOLS,
+  ContextGraph,
+  type NativeTool,
+  type ToolPorts,
+} from '@hiperplano/aluy-cli-core';
 import { buildSession } from '../../src/session/wiring.js';
 
 /** Acha a tool `update_plan` no conjunto nativo (a MESMA que o loop usa). */

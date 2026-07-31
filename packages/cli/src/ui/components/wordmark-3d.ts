@@ -100,12 +100,7 @@ export type ShimmerLevel = 0 | 1 | 2;
  * mesma escala do <BusyPulse>) + o degradê ÂMBAR-ESCURO da SOMBRA 3D (shadowAmber/
  * shadowAmberDim, F200c — mesma família, luminância abaixo da marca). Por PAPEL — nunca
  * cor crua. */
-export type ShimmerRole =
-  | 'accent'
-  | 'accentMid'
-  | 'accentDim'
-  | 'shadowAmber'
-  | 'shadowAmberDim';
+export type ShimmerRole = 'accent' | 'accentMid' | 'accentDim' | 'shadowAmber' | 'shadowAmberDim';
 
 /** Uma célula da grade composta: o papel do DS + o glifo. `null` = vazio (espaço). */
 export interface Cell {

@@ -6,7 +6,11 @@
 //   - get sem login ⇒ null (ausência não é erro).
 
 import { Entry } from '@napi-rs/keyring';
-import { KEYCHAIN_SERVICE, connectorKeychainAccount, type ConnectorSecretStore } from '@hiperplano/aluy-cli-core';
+import {
+  KEYCHAIN_SERVICE,
+  connectorKeychainAccount,
+  type ConnectorSecretStore,
+} from '@hiperplano/aluy-cli-core';
 import { NoKeychainError, type KeychainEntry } from './keychain-store.js';
 
 function isNotFound(err: unknown): boolean {

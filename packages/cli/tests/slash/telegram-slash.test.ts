@@ -11,7 +11,9 @@ import type { ConnectorSecretStore } from '@hiperplano/aluy-cli-core';
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeSecret(initial: string | null = null): ConnectorSecretStore & { value: string | null } {
+function fakeSecret(
+  initial: string | null = null,
+): ConnectorSecretStore & { value: string | null } {
   let value = initial;
   return {
     get value() {

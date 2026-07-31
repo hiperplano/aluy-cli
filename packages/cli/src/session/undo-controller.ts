@@ -19,7 +19,11 @@
 //          mas o journal só guarda o `antes`. v1: /redo restaura via re-captura —
 //          ver `redo()` (reaplica o snapshot inverso guardado no passo do /undo).
 
-import { redactCommandSecrets, type JournalEntry, type RestoreOutcome } from '@hiperplano/aluy-cli-core';
+import {
+  redactCommandSecrets,
+  type JournalEntry,
+  type RestoreOutcome,
+} from '@hiperplano/aluy-cli-core';
 import type { SnapshotJournal } from '@hiperplano/aluy-cli-core';
 
 /** Uma nota a empurrar na conversa (mesma forma do SlashNote dos handlers). */

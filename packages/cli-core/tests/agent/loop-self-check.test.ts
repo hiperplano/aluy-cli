@@ -437,7 +437,12 @@ describe('F-SC · self-check NÃO sonda quando a final ESPERA O USUÁRIO', () =>
     const model = new ScriptedModelCaller([
       { text: toolCallBlock('read_file', { path: 'a.txt' }) },
       { text: 'Recomendo a opção C.\n\nQuer que eu reconfigure assim?' },
-      { text: toolCallBlock('write_file', { path: 'NAO_DEVIA.txt', content: 'executei sem perguntar' }) },
+      {
+        text: toolCallBlock('write_file', {
+          path: 'NAO_DEVIA.txt',
+          content: 'executei sem perguntar',
+        }),
+      },
     ]);
     const signals: string[] = [];
     const loop = new AgentLoop({

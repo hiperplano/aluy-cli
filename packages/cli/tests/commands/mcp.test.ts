@@ -6,7 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseMcpCommand, runMcp, type McpCommandDeps } from '../../src/commands/mcp.js';
 import type { TerminalIO } from '../../src/auth/io.js';
-import { addCommandFor, parseMcpConfig, type RegistrySearchResult } from '@hiperplano/aluy-cli-core';
+import {
+  addCommandFor,
+  parseMcpConfig,
+  type RegistrySearchResult,
+} from '@hiperplano/aluy-cli-core';
 
 // IO fake: coleta as linhas escritas em out/err.
 function io(): { io: TerminalIO; out: string[]; err: string[] } {

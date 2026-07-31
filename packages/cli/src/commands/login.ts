@@ -7,7 +7,12 @@
 // A credencial vai SEMPRE ao keychain do SO (CLI-SEC-2). Sem keychain ⇒ avisa e
 // NÃO grava em claro (CA-4).
 
-import { LoginService, isPat, type FetchLike, type RedactedCredential } from '@hiperplano/aluy-cli-core';
+import {
+  LoginService,
+  isPat,
+  type FetchLike,
+  type RedactedCredential,
+} from '@hiperplano/aluy-cli-core';
 import { loadAuthConfig } from '../auth/config.js';
 import { loadBrokerConfig } from '../model/config.js';
 import { NoKeychainError, KeychainCredentialStore } from '../auth/keychain-store.js';

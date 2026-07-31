@@ -34,12 +34,9 @@ function tsVersion(rel: string, constName: string): string {
 }
 
 describe('version sync (guard de release)', () => {
-  it.each(PACKAGES)(
-    'o $ts commitado casa com a versão do $pkg',
-    ({ pkg, ts, constName }) => {
-      expect(tsVersion(ts, constName)).toBe(pkgVersion(pkg));
-    },
-  );
+  it.each(PACKAGES)('o $ts commitado casa com a versão do $pkg', ({ pkg, ts, constName }) => {
+    expect(tsVersion(ts, constName)).toBe(pkgVersion(pkg));
+  });
 
   it('cli e cli-core estão na MESMA versão (são versionados juntos)', () => {
     expect(pkgVersion('packages/cli/package.json')).toBe(

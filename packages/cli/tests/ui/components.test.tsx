@@ -9,8 +9,16 @@ import { render } from 'ink-testing-library';
 import type { AskRequest } from '@hiperplano/aluy-cli-core';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
-import { Header, HEADER_BANNER_MIN_ROWS, HEADER_WORDMARK_3D_MIN_ROWS } from '../../src/ui/components/Header.js';
-import { composeShadowedWordmark, rowSegments, SHADOW_SHADE } from '../../src/ui/components/wordmark-3d.js';
+import {
+  Header,
+  HEADER_BANNER_MIN_ROWS,
+  HEADER_WORDMARK_3D_MIN_ROWS,
+} from '../../src/ui/components/Header.js';
+import {
+  composeShadowedWordmark,
+  rowSegments,
+  SHADOW_SHADE,
+} from '../../src/ui/components/wordmark-3d.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { ToolLine } from '../../src/ui/components/ToolLine.js';
 import { AskDialog } from '../../src/ui/components/AskDialog.js';
@@ -506,8 +514,15 @@ function diffAsk(): AskRequest {
 
 function bashNetworkAsk(): AskRequest {
   return {
-    call: { name: 'run_command', input: { command: 'npm install @hiperplano/aluy-cli-core@latest' } },
-    effect: { kind: 'command', tool: 'run_command', exact: '$ npm install @hiperplano/aluy-cli-core@latest' },
+    call: {
+      name: 'run_command',
+      input: { command: 'npm install @hiperplano/aluy-cli-core@latest' },
+    },
+    effect: {
+      kind: 'command',
+      tool: 'run_command',
+      exact: '$ npm install @hiperplano/aluy-cli-core@latest',
+    },
     category: 'always-ask:package-exec',
     reason: 'exec de pacote',
     alwaysAsk: true,

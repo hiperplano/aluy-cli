@@ -34,11 +34,16 @@ describe('onboard — catálogo de MCPs', () => {
       const writer = new McpConfigWriter({ file });
       for (const m of mcpCatalog()) {
         expect(() =>
-          writer.add({ name: m.id, command: m.command, args: [...m.args], env: {} }, { force: true }),
+          writer.add(
+            { name: m.id, command: m.command, args: [...m.args], env: {} },
+            { force: true },
+          ),
         ).not.toThrow();
       }
       expect(existsSync(file)).toBe(true);
-      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { mcpServers?: Record<string, unknown> };
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as {
+        mcpServers?: Record<string, unknown>;
+      };
       const names = Object.keys(parsed.mcpServers ?? {});
       // todos os do catálogo entraram.
       for (const m of mcpCatalog()) expect(names).toContain(m.id);

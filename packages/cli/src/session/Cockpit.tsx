@@ -343,7 +343,12 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
     // (ADR-0076 §5) dessincronizava do terminal e deixava a linha ANTIGA do composer como
     // FANTASMA (composer duplicado no rodapé) até um full-paint. Cravar a altura mantém o
     // invariante sum==rows SEMPRE verdadeiro na tela, não só no cálculo do layout.
-    <Box flexDirection="column" width={props.columns} height={clampH(layout.rows)} overflow="hidden">
+    <Box
+      flexDirection="column"
+      width={props.columns}
+      height={clampH(layout.rows)}
+      overflow="hidden"
+    >
       {/* ── 1) HEADER (fixo) ─────────────────────────────────────────────────── */}
       <Box height={clampH(layout.headerRows)}>
         <Header

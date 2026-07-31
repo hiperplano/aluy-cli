@@ -18,9 +18,7 @@ export interface ParsedVersion {
 export function parseVersion(v: string): ParsedVersion | null {
   const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/.exec(v.trim());
   if (!m) return null;
-  const pre = m[4]
-    ? m[4].split('.').map((id) => (/^\d+$/.test(id) ? Number(id) : id))
-    : [];
+  const pre = m[4] ? m[4].split('.').map((id) => (/^\d+$/.test(id) ? Number(id) : id)) : [];
   return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre };
 }
 

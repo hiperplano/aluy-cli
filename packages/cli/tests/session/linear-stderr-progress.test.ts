@@ -233,7 +233,13 @@ describe('runHeadlessPrint — progresso human-readable no stderr', () => {
         [{ kind: 'you', text: 'instale' }],
         [
           { kind: 'you', text: 'instale' },
-          { kind: 'tool', verb: 'bash', target: 'sudo apt install -y python3-venv', result: '', status: 'running' },
+          {
+            kind: 'tool',
+            verb: 'bash',
+            target: 'sudo apt install -y python3-venv',
+            result: '',
+            status: 'running',
+          },
         ],
         [
           { kind: 'you', text: 'instale' },
@@ -271,11 +277,23 @@ describe('runHeadlessPrint — progresso human-readable no stderr', () => {
         [{ kind: 'you', text: 'x' }],
         [
           { kind: 'you', text: 'x' },
-          { kind: 'tool', verb: 'bash', target: 'sudo apt install xyz', result: '', status: 'running' },
+          {
+            kind: 'tool',
+            verb: 'bash',
+            target: 'sudo apt install xyz',
+            result: '',
+            status: 'running',
+          },
         ],
         [
           { kind: 'you', text: 'x' },
-          { kind: 'tool', verb: 'bash', target: 'sudo apt install xyz', result: 'ok', status: 'ok' },
+          {
+            kind: 'tool',
+            verb: 'bash',
+            target: 'sudo apt install xyz',
+            result: 'ok',
+            status: 'ok',
+          },
           { kind: 'aluy', text: 'pronto.', streaming: false },
         ],
       ]);

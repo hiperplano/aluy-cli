@@ -78,11 +78,7 @@ export const SIDECAR_CODE: Readonly<Record<SidecarKind, string>> = Object.freeze
  * `SidecarUsage` é cache de render (vai parar no `SessionState`), e a TUI compara por
  * identidade p/ decidir re-render.
  */
-export function recordSidecarUse(
-  prev: SidecarUsage,
-  kind: SidecarKind,
-  ok: boolean,
-): SidecarUsage {
+export function recordSidecarUse(prev: SidecarUsage, kind: SidecarKind, ok: boolean): SidecarUsage {
   const cur = prev[kind];
   return {
     ...prev,
@@ -190,7 +186,9 @@ export function sidecarUsageSummary(view: SidecarUsageView): readonly string[] {
     const c = view.usage[kind];
     if (!view.enabled[kind]) return `${kind}: desligado`;
     const uso = `${c.ok} uso${c.ok === 1 ? '' : '(s)'}`;
-    return c.fail > 0 ? `${kind}: ${uso} · ${c.fail} falha${c.fail === 1 ? '' : '(s)'}` : `${kind}: ${uso}`;
+    return c.fail > 0
+      ? `${kind}: ${uso} · ${c.fail} falha${c.fail === 1 ? '' : '(s)'}`
+      : `${kind}: ${uso}`;
   });
 }
 

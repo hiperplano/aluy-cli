@@ -195,9 +195,7 @@ async function buildBigHistorySession(wireArmAtomicClear: boolean): Promise<{
         controller={controller}
         animate={false}
         bootMs={0}
-        {...(wireArmAtomicClear
-          ? { armAtomicClear: () => sync.primeClearOnNextFrame() }
-          : {})}
+        {...(wireArmAtomicClear ? { armAtomicClear: () => sync.primeClearOnNextFrame() } : {})}
       />
     </ThemeProvider>,
     { stdout: sync.stdout, stdin, patchConsole: false },

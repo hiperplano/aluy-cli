@@ -55,13 +55,7 @@ describe('EST-0970 — spawn_agent declara `parameters` (espelha asProfiles)', (
 
     const itemProps = items.properties as Record<string, unknown>;
     // os campos REAIS lidos por asProfiles: goal/label/agent/context/model (ADR-0146 D1).
-    expect(Object.keys(itemProps).sort()).toEqual([
-      'agent',
-      'context',
-      'goal',
-      'label',
-      'model',
-    ]);
+    expect(Object.keys(itemProps).sort()).toEqual(['agent', 'context', 'goal', 'label', 'model']);
   });
 
   it('native-schema gera o schema ESTRUTURADO (NÃO o permissivo objeto-livre)', () => {

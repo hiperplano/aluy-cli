@@ -345,7 +345,13 @@ describe('CA-G2-2 — spawn sem shell, argv array', () => {
         closed = true;
       },
     };
-    const sup = new NodeBootSupervisor({ spawn: spawnFn, fetchFn, uid: 1000, fs, timer: fakeTimer() });
+    const sup = new NodeBootSupervisor({
+      spawn: spawnFn,
+      fetchFn,
+      uid: 1000,
+      fs,
+      timer: fakeTimer(),
+    });
     await sup.boot(TURBO, ALL_TOGGLES, defaultPaths.headroom.binary);
 
     // abriu o log do headroom e passou o fd no stdio (não 'ignore')
@@ -359,7 +365,13 @@ describe('CA-G2-2 — spawn sem shell, argv array', () => {
     const fetchFn = vi.fn<FetchFn>(async () => ({ ok: false }));
     const spawnFn = vi.fn<SpawnFn>(() => fakeChildProcess(1000));
     const fs = fakeFs(new Set([defaultPaths.headroom.binary])); // fakeFs NÃO tem openSync
-    const sup = new NodeBootSupervisor({ spawn: spawnFn, fetchFn, uid: 1000, fs, timer: fakeTimer() });
+    const sup = new NodeBootSupervisor({
+      spawn: spawnFn,
+      fetchFn,
+      uid: 1000,
+      fs,
+      timer: fakeTimer(),
+    });
     await sup.boot(TURBO, ALL_TOGGLES, defaultPaths.headroom.binary);
     const opts = spawnFn.mock.calls[0]![2] as { stdio?: unknown };
     expect(opts.stdio).toBe('ignore');

@@ -130,7 +130,9 @@ async function statusCmd(
   const token = await store.get();
   const allow = telegramAllowlist(configStore.load());
   io.out('Telegram (conector):');
-  io.out(`  token:     ${token ? `presente (${redactTelegramToken(token)})` : 'ausente — rode `aluy telegram login`'}`);
+  io.out(
+    `  token:     ${token ? `presente (${redactTelegramToken(token)})` : 'ausente — rode `aluy telegram login`'}`,
+  );
   io.out(
     `  allowlist: ${allow.length > 0 ? `[${allow.join(', ')}]` : 'VAZIA (bridge fechada — autorize com `aluy telegram allow <chat-id>`)'}`,
   );

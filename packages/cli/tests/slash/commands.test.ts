@@ -754,7 +754,17 @@ describe('ADR-0147 §2 — resolveAgentEffect (single-source de classificação 
 
   it('/theme, /lang, /split, /fullscreen, /login, /quit, /back, /subagent, /add-dir ⇒ human-only', () => {
     const byName = (n: string): SlashCommand => NATIVE_COMMANDS.find((c) => c.name === n)!;
-    for (const n of ['theme', 'lang', 'split', 'fullscreen', 'login', 'quit', 'back', 'subagent', 'add-dir']) {
+    for (const n of [
+      'theme',
+      'lang',
+      'split',
+      'fullscreen',
+      'login',
+      'quit',
+      'back',
+      'subagent',
+      'add-dir',
+    ]) {
       expect(resolveAgentEffect(byName(n), ''), `/${n}`).toBe('human-only');
     }
   });
