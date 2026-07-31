@@ -14,6 +14,17 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.111] — 2026-07-31
+
+### Corrigido
+
+- 🩹 **sentinela binário em `wiring.ts` silenciava grep no arquivo inteiro:** um NUL byte literal (`'\x00__inherit__'`) usado como sentinela do `Map` de callers CUSTOM/BYO (ADR-0146 D3) fazia `file`/`grep` sem `-a` classificarem o ARQUIVO INTEIRO como binário. Já causou diagnóstico errado nesta sessão de trabalho (uma busca concluiu que uma função "não tinha chamador" só porque o grep não via o arquivo). Trocado por `'__ALUY_INHERIT_PARENT__'` (ASCII, mesma semântica).
+- 🩹 **rodapé mostrava o modelo duas vezes em vez de `provider · modelo`:** no backend local/BYO, após um turno, `local · deepseek/deepseek-v4-pro · deepseek/deepseek-v4-pro` em vez de `local · tokenrouter · deepseek/deepseek-v4-pro`. O literal `meta` do boot nunca copiava `opts.provider` — só a variável interna `bootProvider` (travada em `tier==='custom'`) alimentava o CALLER; essa trava nunca deveria valer para o DISPLAY. `state.meta.provider` nascia `undefined`, a StatusBar caía no fallback, e após o 1º turno o campo do modelo preenchia o vazio — dando a impressão de duplicação.
+
+### Interno
+
+- 🧹 `prettier --write .` em 94 arquivos (só formatação — reflow de assinaturas longas, colapso de chamadas que cabem numa linha; zero mudança de comportamento, confirmado por spot-check).
+
 ## [1.0.0-rc.110] — 2026-07-31
 
 ### Corrigido
