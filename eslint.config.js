@@ -13,7 +13,8 @@ import tseslint from 'typescript-eslint';
 const TERMINAL_AND_TUI = [
   {
     name: 'ink',
-    message: 'cli-core é portável: sem Ink/TUI no engine (ADR-0053 §8). TUI mora em @hiperplano/aluy-cli.',
+    message:
+      'cli-core é portável: sem Ink/TUI no engine (ADR-0053 §8). TUI mora em @hiperplano/aluy-cli.',
   },
   { name: 'react', message: 'cli-core é portável: sem React/Ink no engine (ADR-0053 §8).' },
   {

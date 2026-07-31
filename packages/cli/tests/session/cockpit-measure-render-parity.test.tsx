@@ -254,10 +254,7 @@ describe('paridade medida×render — bateria ADVERSARIAL (ANSI, CJK, tabela lar
     // 1 linha-fonte de 5000 chars, sem quebra — força o `clampLineToVisualTail` (corte na
     // cauda) tanto na medição (`aluySpeech`/`windowTailVisual`) quanto no render real.
     const giant = 'x'.repeat(5000);
-    expectParity(
-      { kind: 'aluy', text: giant, streaming: true },
-      { ...CTX, streamMaxLines },
-    );
+    expectParity({ kind: 'aluy', text: giant, streaming: true }, { ...CTX, streamMaxLines });
   });
 
   it('linha ÚNICA gigante + ANSI: streaming com uma linha colorida gigante sem `\\n`', () => {
@@ -266,10 +263,7 @@ describe('paridade medida×render — bateria ADVERSARIAL (ANSI, CJK, tabela lar
     const giant = Array.from({ length: 200 }, (_, i) => `\x1b[3${i % 8}m palavra${i}\x1b[0m`).join(
       ' ',
     );
-    expectParity(
-      { kind: 'aluy', text: giant, streaming: true },
-      { ...CTX, streamMaxLines },
-    );
+    expectParity({ kind: 'aluy', text: giant, streaming: true }, { ...CTX, streamMaxLines });
   });
 
   it('linha ÚNICA gigante: saída de tool `err` sem `\\n` (log de uma linha só, ex.: JSON minificado)', () => {
@@ -291,7 +285,8 @@ describe('paridade medida×render — bateria ADVERSARIAL (ANSI, CJK, tabela lar
 describe('paridade medida×render — <ActivityLog> (flatLineRows), incl. ANSI/CJK', () => {
   function expectLogParity(sections: readonly LogSection[], cols: number): void {
     const flat = flatten(sections);
-    const expected = 1 /* rótulo `LOG · …` */ + flat.reduce((sum, ln) => sum + flatLineRows(ln, cols), 0);
+    const expected =
+      1 /* rótulo `LOG · …` */ + flat.reduce((sum, ln) => sum + flatLineRows(ln, cols), 0);
     const height = renderedHeight(
       <ActivityLog
         sections={sections}
@@ -328,10 +323,7 @@ describe('paridade medida×render — <ActivityLog> (flatLineRows), incl. ANSI/C
   it('evento simples', () => expectLogParity([section([baseEvent({})])], 60));
 
   it('evento running com tail ao vivo (2 linhas)', () =>
-    expectLogParity(
-      [section([baseEvent({ status: 'running', tail: 'saída parcial…' })])],
-      60,
-    ));
+    expectLogParity([section([baseEvent({ status: 'running', tail: 'saída parcial…' })])], 60));
 
   it('evento com dado rico (summary/diffstat/duração/tokens) que QUEBRA em coluna estreita', () =>
     expectLogParity(

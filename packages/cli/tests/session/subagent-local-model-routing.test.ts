@@ -263,10 +263,7 @@ describe('ADR-0152 (D6) — precedência e fontes: spawn / `.md` / dial de confi
 
 describe('T1 — nenhuma fonte injeta provider/base_url/api_key nem amplia o toolset do filho', () => {
   it('spawn/`.md`/config com slug local ⇒ toolset do filho ⊆ pai; spawn_agent NEGADO no filho', async () => {
-    const registry = new AgentRegistry(
-      [globalProfile('helper', 'local:deepseek-v4-flash')],
-      [],
-    );
+    const registry = new AgentRegistry([globalProfile('helper', 'local:deepseek-v4-flash')], []);
     const { ports, ran } = fakePorts();
     const localLog: string[] = [];
     // 3 filhos: um via param do spawn, um via `.md`, um via dial de config — os TRÊS
@@ -309,7 +306,9 @@ describe('T1 — nenhuma fonte injeta provider/base_url/api_key nem amplia o too
     // "provider" pode aparecer em PROSA de UI legítima — ver T7 — mas não aqui, já
     // que o catálogo listável evita a nota; então checar a palavra tb é seguro.)
     const serialized = JSON.stringify(controller.current);
-    expect(serialized).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
+    expect(serialized).not.toMatch(
+      /\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i,
+    );
   });
 });
 
@@ -343,7 +342,9 @@ describe('T2 — probe LOCAL listável: erro do slug typo contém SÓ nomes + su
     expect(msg).toMatch(/deepseek-v4-flash/); // sugestão por distância de edição
     expect(msg).toMatch(/não encontrado/);
     // regex de NEGAÇÃO sobre o config real — nunca provider/host/base_url/api_key/token.
-    expect(msg).not.toMatch(/\b(provider|base_?url|host|api[_-]?key|token|secret|authorization)\b/i);
+    expect(msg).not.toMatch(
+      /\b(provider|base_?url|host|api[_-]?key|token|secret|authorization)\b/i,
+    );
   });
 });
 
@@ -371,7 +372,9 @@ describe('T3 — snapshot de sessão local com filho roteado', () => {
     expect(block?.children.find((c) => c.label === 'x')?.model).toBe('local · deepseek-v4-flash');
 
     const serialized = JSON.stringify(controller.current);
-    expect(serialized).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
+    expect(serialized).not.toMatch(
+      /\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i,
+    );
   });
 });
 

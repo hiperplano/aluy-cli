@@ -1,13 +1,13 @@
 # Modo TURBO — complementos, instalação e solução de problemas
 
-O **modo turbo** liga três *complementos* (sidecars) opcionais que rodam **localmente** na sua
+O **modo turbo** liga três _complementos_ (sidecars) opcionais que rodam **localmente** na sua
 máquina, em loopback (`127.0.0.1`), sem nuvem:
 
-| Complemento | O que faz | Porta | Onde mora |
-|---|---|---|---|
-| **ollama** | modelos locais — um *judge* (`qwen2.5:0.5b`) e um *embedder* (`nomic-embed-text`) | `11434` | `~/.aluy/ollama` (ou instalação de sistema) |
-| **mem0** | memória persistente (fatos entre sessões) | `11435` | venv `~/.aluy/mem-venv` + store `~/.aluy/memory` |
-| **headroom** | proxy de compressão de contexto | `8787` | venv `~/.aluy/hr-venv` |
+| Complemento  | O que faz                                                                         | Porta   | Onde mora                                        |
+| ------------ | --------------------------------------------------------------------------------- | ------- | ------------------------------------------------ |
+| **ollama**   | modelos locais — um _judge_ (`qwen2.5:0.5b`) e um _embedder_ (`nomic-embed-text`) | `11434` | `~/.aluy/ollama` (ou instalação de sistema)      |
+| **mem0**     | memória persistente (fatos entre sessões)                                         | `11435` | venv `~/.aluy/mem-venv` + store `~/.aluy/memory` |
+| **headroom** | proxy de compressão de contexto                                                   | `8787`  | venv `~/.aluy/hr-venv`                           |
 
 O Aluy CLI **funciona sem eles** — são enriquecimentos. O perfil oposto, **leve**, não instala
 nem sobe nenhum. Você escolhe o perfil no `aluy onboard` ou em `~/.aluy/config.json`
@@ -30,15 +30,15 @@ aluy bootstrap                     # instala os 3 complementos (perfil turbo)
 
 O `aluy bootstrap` tem dois modos:
 
-- **`aluy bootstrap`** (padrão, *via agente*): o próprio aluy detecta o SO/distro, instala os
+- **`aluy bootstrap`** (padrão, _via agente_): o próprio aluy detecta o SO/distro, instala os
   pré-requisitos que faltam (Python, pip, venv, `zstd`/`tar`, com `sudo` quando preciso) e os
   complementos, **acompanhando e tratando problemas**. ⚠ Roda em `--yolo` (acesso total à
   máquina) — optar pelo turbo é o consentimento.
-- **`aluy bootstrap --no-agent`** (*direto*): provisiona pelo caminho determinístico (artefato
+- **`aluy bootstrap --no-agent`** (_direto_): provisiona pelo caminho determinístico (artefato
   pinado do Ollama + criação dos venvs), **sem usar modelo**. Requer Python já pronto.
 
 **Quando usar `--no-agent`:** numa **máquina do zero sem modelo configurado/acessível**. O modo
-*via agente* precisa de um modelo funcionando para "pensar" — e se o modelo é o próprio Ollama
+_via agente_ precisa de um modelo funcionando para "pensar" — e se o modelo é o próprio Ollama
 que você ainda vai instalar, há um problema circular. A partir da **rc.35** o `aluy bootstrap`
 **detecta** que o modelo não responde e **cai sozinho** no caminho direto; em versões anteriores,
 use `--no-agent` explicitamente.
@@ -66,15 +66,15 @@ até os três ficarem ✓ — adaptando-se ao que a sua máquina precisar.
 
 ## Problemas comuns e como resolver
 
-| Sintoma (no `doctor`) | Causa | Conserto |
-|---|---|---|
-| `mem0 ✗ (fora)` + log `can't open file '…/aluy-mem0-server.py'` | o script do servidor não está no venv | `aluy bootstrap` (copia o script). Em rc ≥ 33 o boot também o copia sozinho ao abrir o aluy. |
-| `mem0 ✗` + log `KeyError: '_type'` ou `no such column: prev_value` | store de versão anterior, incompatível | `mv ~/.aluy/memory{,.bak}; mv ~/.mem0/history.db{,.bak}` e reabra. Em rc ≥ 29 o servidor faz isso sozinho (self-heal). |
-| `ollama ✓` mas `ollama list` → *command not found* | serviço sobe em `:11434`, mas o binário ficou fora do `PATH` | rc ≥ 30 cria um symlink em `~/.local/bin`. Ou abra um shell novo / `source ~/.bashrc`. |
-| `bootstrap` trava em *"verificando ollama"* + `erro de broker: provider local` | instalação *via agente* sem um modelo acessível | use `aluy bootstrap --no-agent` (rc ≥ 35 cai nisso sozinho). |
-| `headroom ✗` + log `No module named 'fastapi'` / `Proxy dependencies not installed` | o venv instalou `headroom-ai` sem o extra `[proxy]` | `~/.aluy/hr-venv/bin/pip install 'headroom-ai[proxy]==0.25.0'` e reabra. Corrigido na fonte em rc ≥ 36. |
-| `headroom ✗ (fora)` (outros) | venv sem deps, ou core sem wheel pro SO/arch | `aluy bootstrap --no-agent`; veja `~/.aluy/logs/headroom.log`. No Windows, suba com `HEADROOM_REQUIRE_RUST_CORE=false`. |
-| os três `✗` numa máquina nova | nada provisionado ainda | `aluy bootstrap --no-agent`. |
+| Sintoma (no `doctor`)                                                               | Causa                                                        | Conserto                                                                                                                |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `mem0 ✗ (fora)` + log `can't open file '…/aluy-mem0-server.py'`                     | o script do servidor não está no venv                        | `aluy bootstrap` (copia o script). Em rc ≥ 33 o boot também o copia sozinho ao abrir o aluy.                            |
+| `mem0 ✗` + log `KeyError: '_type'` ou `no such column: prev_value`                  | store de versão anterior, incompatível                       | `mv ~/.aluy/memory{,.bak}; mv ~/.mem0/history.db{,.bak}` e reabra. Em rc ≥ 29 o servidor faz isso sozinho (self-heal).  |
+| `ollama ✓` mas `ollama list` → _command not found_                                  | serviço sobe em `:11434`, mas o binário ficou fora do `PATH` | rc ≥ 30 cria um symlink em `~/.local/bin`. Ou abra um shell novo / `source ~/.bashrc`.                                  |
+| `bootstrap` trava em _"verificando ollama"_ + `erro de broker: provider local`      | instalação _via agente_ sem um modelo acessível              | use `aluy bootstrap --no-agent` (rc ≥ 35 cai nisso sozinho).                                                            |
+| `headroom ✗` + log `No module named 'fastapi'` / `Proxy dependencies not installed` | o venv instalou `headroom-ai` sem o extra `[proxy]`          | `~/.aluy/hr-venv/bin/pip install 'headroom-ai[proxy]==0.25.0'` e reabra. Corrigido na fonte em rc ≥ 36.                 |
+| `headroom ✗ (fora)` (outros)                                                        | venv sem deps, ou core sem wheel pro SO/arch                 | `aluy bootstrap --no-agent`; veja `~/.aluy/logs/headroom.log`. No Windows, suba com `HEADROOM_REQUIRE_RUST_CORE=false`. |
+| os três `✗` numa máquina nova                                                       | nada provisionado ainda                                      | `aluy bootstrap --no-agent`.                                                                                            |
 
 > **Não rode `aluy` com `sudo`.** Os sidecars **recusam** rodar como root (segurança), e o `sudo`
 > ainda manda o aluy procurar a config em `/root/.aluy` — outro lugar. Instale como seu usuário;

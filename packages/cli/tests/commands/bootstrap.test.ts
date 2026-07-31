@@ -491,7 +491,11 @@ describe('runInit — integração wizard + provisionamento', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'aluy-bootstrap-fb-'));
     tmpDirs.push(tmp);
     const configStore = new UserConfigStore({ baseDir: tmp });
-    configStore.save({ localProvider: 'anthropic', localModel: 'claude-sonnet-4-8', profile: 'turbo' });
+    configStore.save({
+      localProvider: 'anthropic',
+      localModel: 'claude-sonnet-4-8',
+      profile: 'turbo',
+    });
 
     const out: string[] = [];
     const code = await runInit({

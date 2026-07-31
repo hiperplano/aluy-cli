@@ -576,7 +576,11 @@ export interface CapabilitiesSnapshot {
   readonly skills: readonly CapabilityNamedItem[];
   readonly mcpServers: readonly CapabilityMcpServer[];
   readonly memory?: { readonly factCount: number };
-  readonly monitors?: readonly { readonly id: string; readonly label: string; readonly type: string }[];
+  readonly monitors?: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly type: string;
+  }[];
   /** Comandos `/…` que o HUMANO digita (nunca invocados pelo agente) — auto-conhecimento do produto. */
   readonly sessionCommands: readonly { readonly name: string; readonly about: string }[];
 }

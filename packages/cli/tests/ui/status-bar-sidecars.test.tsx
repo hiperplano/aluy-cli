@@ -46,9 +46,7 @@ describe('StatusBar — chip de USO dos sidecars (F-SIDECAR-USO)', () => {
   });
 
   it('perfil LEVE ⇒ chip SUPRIMIDO (não polui quem escolheu rodar magro)', () => {
-    const out = plain(
-      wrap(bar({ sidecarUsage: usoView({ profile: 'leve' }) })).lastFrame() ?? '',
-    );
+    const out = plain(wrap(bar({ sidecarUsage: usoView({ profile: 'leve' }) })).lastFrame() ?? '');
     expect(out).not.toContain('sidecars');
     expect(out).not.toContain('hdr');
     expect(out).not.toContain('oll');
@@ -137,10 +135,10 @@ describe('StatusBar — chip de USO dos sidecars (F-SIDECAR-USO)', () => {
 
   it('ASCII (TERM=linux) — glifo vira rótulo `sc:` e o `✗` vira `x`', () => {
     const out = plain(
-      wrap(
-        bar({ sidecarUsage: usoView({ enabled: { ...TODOS_LIGADOS, mem0: false } }) }),
-        { TERM: 'linux', LANG: 'C' },
-      ).lastFrame() ?? '',
+      wrap(bar({ sidecarUsage: usoView({ enabled: { ...TODOS_LIGADOS, mem0: false } }) }), {
+        TERM: 'linux',
+        LANG: 'C',
+      }).lastFrame() ?? '',
     );
     expect(out).toContain('sc:');
     expect(out).toContain('memx');

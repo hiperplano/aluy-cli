@@ -16,7 +16,10 @@ import {
   type AskResolver,
   type ToolPorts,
 } from '@hiperplano/aluy-cli-core';
-import { createSessionCommandPort, type SessionCommandPortDeps } from '../../src/session/session-command-port.js';
+import {
+  createSessionCommandPort,
+  type SessionCommandPortDeps,
+} from '../../src/session/session-command-port.js';
 import type { SessionController } from '../../src/session/controller.js';
 
 /** AskResolver fake: grava os pedidos e responde conforme a fila (default: aprova). */
@@ -102,7 +105,10 @@ describe('ADR-0147 (2) — /clear full é DESTRUTIVO: re-passa decide(), pede co
   it('memória com fatos + usuário APROVA ⇒ executa (clearAll + clear da sessão)', async () => {
     const { resolver, requests } = fakeAskResolver(['approve-once']);
     const clearAll = vi.fn(async () => 3);
-    const memory = { list: vi.fn(async () => [{ id: '1' }, { id: '2' }, { id: '3' }]), clearAll } as unknown;
+    const memory = {
+      list: vi.fn(async () => [{ id: '1' }, { id: '2' }, { id: '3' }]),
+      clearAll,
+    } as unknown;
     const controller = fakeController();
     const port = createSessionCommandPort(
       baseDeps({ askResolver: resolver, memory: memory as never, controller }),
@@ -112,7 +118,9 @@ describe('ADR-0147 (2) — /clear full é DESTRUTIVO: re-passa decide(), pede co
     expect(requests[0]!.category).toBe('always-ask:destructive');
     expect(requests[0]!.alwaysAsk).toBe(true);
     expect(clearAll).toHaveBeenCalledTimes(1);
-    expect((controller as unknown as { clear: ReturnType<typeof vi.fn> }).clear).toHaveBeenCalledTimes(1);
+    expect(
+      (controller as unknown as { clear: ReturnType<typeof vi.fn> }).clear,
+    ).toHaveBeenCalledTimes(1);
     expect(outcome.ok).toBe(true);
     expect(outcome.text).toMatch(/3 fato/);
   });
@@ -128,14 +136,19 @@ describe('ADR-0147 (2) — /clear full é DESTRUTIVO: re-passa decide(), pede co
     const outcome = await port.run('clear', 'full');
     expect(requests).toHaveLength(1);
     expect(clearAll).not.toHaveBeenCalled();
-    expect((controller as unknown as { clear: ReturnType<typeof vi.fn> }).clear).not.toHaveBeenCalled();
+    expect(
+      (controller as unknown as { clear: ReturnType<typeof vi.fn> }).clear,
+    ).not.toHaveBeenCalled();
     expect(outcome.ok).toBe(false);
     expect(outcome.text).toMatch(/NEGADO|sem confirmação/i);
   });
 
   it('--yolo/--unsafe NÃO relaxa a confirmação destrutiva (decisão do dono, ADR-0147)', async () => {
     const { resolver, requests } = fakeAskResolver(['deny']);
-    const memory = { list: vi.fn(async () => [{ id: '1' }]), clearAll: vi.fn(async () => 1) } as unknown;
+    const memory = {
+      list: vi.fn(async () => [{ id: '1' }]),
+      clearAll: vi.fn(async () => 1),
+    } as unknown;
     const unsafeEngine = new PolicyPermissionEngine({ unsafe: true });
     const port = createSessionCommandPort(
       baseDeps({ askResolver: resolver, memory: memory as never, engine: unsafeEngine }),
@@ -150,7 +163,9 @@ describe('ADR-0147 (2) — /clear full é DESTRUTIVO: re-passa decide(), pede co
   it('memória VAZIA ⇒ não pede confirmação (nada a apagar)', async () => {
     const { resolver, requests } = fakeAskResolver();
     const memory = { list: vi.fn(async () => []), clearAll: vi.fn(async () => 0) } as unknown;
-    const port = createSessionCommandPort(baseDeps({ askResolver: resolver, memory: memory as never }));
+    const port = createSessionCommandPort(
+      baseDeps({ askResolver: resolver, memory: memory as never }),
+    );
     const outcome = await port.run('clear', 'full');
     expect(requests).toHaveLength(0);
     expect(outcome.ok).toBe(true);
@@ -166,7 +181,9 @@ describe('ADR-0147 (3) — human-only nega SEM tocar a catraca/controller', () =
     expect(outcome.ok).toBe(false);
     expect(outcome.text).toMatch(/terminal do humano|recomende/i);
     expect(requests).toHaveLength(0);
-    expect((controller as unknown as { pushNote: ReturnType<typeof vi.fn> }).pushNote).not.toHaveBeenCalled();
+    expect(
+      (controller as unknown as { pushNote: ReturnType<typeof vi.fn> }).pushNote,
+    ).not.toHaveBeenCalled();
   });
 
   it('/quit e /logout(login humano)/split/fullscreen também negam', async () => {
@@ -253,7 +270,8 @@ describe('ADR-0147 (5) — /cycle via a porta INICIA o ciclo (Q-4)', () => {
     const port = createSessionCommandPort(baseDeps({ controller }));
     await port.run('cycle', 'status');
     const cycleFn = (controller as unknown as { cycle: ReturnType<typeof vi.fn> }).cycle;
-    const statusFn = (controller as unknown as { cycleStatus: ReturnType<typeof vi.fn> }).cycleStatus;
+    const statusFn = (controller as unknown as { cycleStatus: ReturnType<typeof vi.fn> })
+      .cycleStatus;
     expect(cycleFn).not.toHaveBeenCalled();
     expect(statusFn).toHaveBeenCalledTimes(1);
   });

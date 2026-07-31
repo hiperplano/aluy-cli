@@ -55,11 +55,46 @@ export interface McpEntry {
 }
 export function mcpCatalog(): McpEntry[] {
   return [
-    { id: 'playwright', label: 'Playwright', hintPt: 'automação de navegador (oficial)', hintEn: 'browser automation (official)', command: 'npx', args: ['-y', '@playwright/mcp@latest'] },
-    { id: 'sequential-thinking', label: 'Sequential Thinking', hintPt: 'raciocínio passo-a-passo', hintEn: 'step-by-step reasoning', command: 'npx', args: ['-y', '@modelcontextprotocol/server-sequential-thinking'] },
-    { id: 'memory', label: 'Memory', hintPt: 'grafo de conhecimento persistente', hintEn: 'persistent knowledge graph', command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] },
-    { id: 'filesystem', label: 'Filesystem', hintPt: 'arquivos (escopo: sua home)', hintEn: 'files (scope: your home)', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', homedir()] },
-    { id: 'rpa', label: 'RPA (Aluy)', hintPt: 'automação visual de desktop — OCR/clica/digita · via uvx', hintEn: 'visual desktop automation — OCR/click/type · via uvx', command: 'uvx', args: ['aluy-mcp-rpa'] },
+    {
+      id: 'playwright',
+      label: 'Playwright',
+      hintPt: 'automação de navegador (oficial)',
+      hintEn: 'browser automation (official)',
+      command: 'npx',
+      args: ['-y', '@playwright/mcp@latest'],
+    },
+    {
+      id: 'sequential-thinking',
+      label: 'Sequential Thinking',
+      hintPt: 'raciocínio passo-a-passo',
+      hintEn: 'step-by-step reasoning',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+    },
+    {
+      id: 'memory',
+      label: 'Memory',
+      hintPt: 'grafo de conhecimento persistente',
+      hintEn: 'persistent knowledge graph',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-memory'],
+    },
+    {
+      id: 'filesystem',
+      label: 'Filesystem',
+      hintPt: 'arquivos (escopo: sua home)',
+      hintEn: 'files (scope: your home)',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', homedir()],
+    },
+    {
+      id: 'rpa',
+      label: 'RPA (Aluy)',
+      hintPt: 'automação visual de desktop — OCR/clica/digita · via uvx',
+      hintEn: 'visual desktop automation — OCR/click/type · via uvx',
+      command: 'uvx',
+      args: ['aluy-mcp-rpa'],
+    },
   ];
 }
 
@@ -105,7 +140,11 @@ function OnboardApp(props: {
   const [lang, setLang] = useState<Lang>(cfg.lang ?? 'pt-BR');
   const [backend, setBackend] = useState<Backend>('local');
   const [providerId, setProviderId] = useState<string>('anthropic');
-  const [custom, setCustom] = useState<{ id: string; url: string; model: string }>({ id: '', url: '', model: '' });
+  const [custom, setCustom] = useState<{ id: string; url: string; model: string }>({
+    id: '',
+    url: '',
+    model: '',
+  });
   const [apiKey, setApiKey] = useState<string>('');
   const [model, setModel] = useState<string>('');
   const [profile, setProfile] = useState<Profile>('leve'); // default LEVE (decisão do dono)
@@ -116,7 +155,12 @@ function OnboardApp(props: {
   const [mcpSel, setMcpSel] = useState<ReadonlySet<number>>(new Set()); // MCPs marcados (multi-select, opcional)
   const [mcpCursor, setMcpCursor] = useState<number>(0);
 
-  const [cursor, setCursor] = useState<number>(Math.max(0, LANGS.findIndex((l) => l.code === lang)));
+  const [cursor, setCursor] = useState<number>(
+    Math.max(
+      0,
+      LANGS.findIndex((l) => l.code === lang),
+    ),
+  );
   const [buf, setBuf] = useState<string>('');
   const [savedMsg, setSavedMsg] = useState<string[]>([]);
 
@@ -124,16 +168,39 @@ function OnboardApp(props: {
   const T = (p: string, e: string): string => (pt ? p : e);
 
   const backendOpts: Opt[] = [
-    { value: 'local', label: T('Local (sua chave / BYO)', 'Local (your key / BYO)'), hint: T('direto no provider', 'direct to provider') },
-    { value: 'broker', label: T('Broker (conta Aluy)', 'Broker (Aluy account)'), hint: T('autentica depois com aluy login', 'authenticate later with aluy login') },
+    {
+      value: 'local',
+      label: T('Local (sua chave / BYO)', 'Local (your key / BYO)'),
+      hint: T('direto no provider', 'direct to provider'),
+    },
+    {
+      value: 'broker',
+      label: T('Broker (conta Aluy)', 'Broker (Aluy account)'),
+      hint: T('autentica depois com aluy login', 'authenticate later with aluy login'),
+    },
   ];
   const providerOpts: Opt[] = [
     ...providers.map((e) => ({ value: e.id, label: e.label, hint: e.defaultModel })),
-    { value: '__custom__', label: T('+ custom (OpenAI-compatível)', '+ custom (OpenAI-compatible)'), hint: T('ex.: TokenRouter, vLLM…', 'e.g. TokenRouter, vLLM…') },
+    {
+      value: '__custom__',
+      label: T('+ custom (OpenAI-compatível)', '+ custom (OpenAI-compatible)'),
+      hint: T('ex.: TokenRouter, vLLM…', 'e.g. TokenRouter, vLLM…'),
+    },
   ];
   const sidecarOpts: Opt[] = [
-    { value: 'turbo', label: T('Turbo — instala tudo', 'Turbo — install all'), hint: T('ollama + mem0 + headroom · pede máquina razoável', 'ollama + mem0 + headroom · needs a decent machine') },
-    { value: 'leve', label: T('Leve — nada agora', 'Lite — nothing now'), hint: T('liga depois com aluy bootstrap', 'enable later with aluy bootstrap') },
+    {
+      value: 'turbo',
+      label: T('Turbo — instala tudo', 'Turbo — install all'),
+      hint: T(
+        'ollama + mem0 + headroom · pede máquina razoável',
+        'ollama + mem0 + headroom · needs a decent machine',
+      ),
+    },
+    {
+      value: 'leve',
+      label: T('Leve — nada agora', 'Lite — nothing now'),
+      hint: T('liga depois com aluy bootstrap', 'enable later with aluy bootstrap'),
+    },
   ];
 
   // Embedder do mem0 (turbo): catálogo do core, hints i18n. O 1º é o default (bge-m3, forte).
@@ -144,7 +211,17 @@ function OnboardApp(props: {
   }));
 
   const pickerLen = (s: Step): number =>
-    s === 'lang' ? LANGS.length : s === 'backend' ? backendOpts.length : s === 'provider' ? providerOpts.length : s === 'sidecars' ? sidecarOpts.length : s === 'embedder' ? embedderOpts.length : 0;
+    s === 'lang'
+      ? LANGS.length
+      : s === 'backend'
+        ? backendOpts.length
+        : s === 'provider'
+          ? providerOpts.length
+          : s === 'sidecars'
+            ? sidecarOpts.length
+            : s === 'embedder'
+              ? embedderOpts.length
+              : 0;
 
   function gotoText(next: Step, prefill = ''): void {
     setBuf(prefill);
@@ -154,7 +231,12 @@ function OnboardApp(props: {
   // Abre o passo de sidecars com LEVE pré-selecionado (decisão do dono): o cursor
   // ancora no índice de 'leve', não no topo. Usado em TODAS as entradas em 'sidecars'.
   function enterSidecars(): void {
-    setCursor(Math.max(0, sidecarOpts.findIndex((o) => o.value === 'leve')));
+    setCursor(
+      Math.max(
+        0,
+        sidecarOpts.findIndex((o) => o.value === 'leve'),
+      ),
+    );
     setStep('sidecars');
   }
 
@@ -222,7 +304,12 @@ function OnboardApp(props: {
     props.store.save(patch as never);
     msg.push(`✓ ${T('config', 'config')}: backend ${backend}`);
 
-    if (backend === 'local' && providerId === '__custom__' && custom.id.trim() !== '' && custom.url.trim() !== '') {
+    if (
+      backend === 'local' &&
+      providerId === '__custom__' &&
+      custom.id.trim() !== '' &&
+      custom.url.trim() !== ''
+    ) {
       try {
         addLocalProviderOverride({
           id: custom.id.trim(),
@@ -230,7 +317,12 @@ function OnboardApp(props: {
           baseUrl: custom.url.trim(),
           defaultModel: custom.model.trim() || custom.id.trim(),
         });
-        msg.push(T(`✓ provider custom "${custom.id.trim()}" registrado`, `✓ custom provider "${custom.id.trim()}" registered`));
+        msg.push(
+          T(
+            `✓ provider custom "${custom.id.trim()}" registrado`,
+            `✓ custom provider "${custom.id.trim()}" registered`,
+          ),
+        );
       } catch (e) {
         msg.push(`⚠ providers.json: ${String(e)}`);
       }
@@ -241,7 +333,12 @@ function OnboardApp(props: {
         storeApiKey(pid, apiKey.trim());
         msg.push(T(`✓ chave de "${pid}" no keychain`, `✓ "${pid}" key in keychain`));
       } catch {
-        msg.push(T(`⚠ keychain indisponível — rode: aluy login --provider ${pid}`, `⚠ keychain unavailable — run: aluy login --provider ${pid}`));
+        msg.push(
+          T(
+            `⚠ keychain indisponível — rode: aluy login --provider ${pid}`,
+            `⚠ keychain unavailable — run: aluy login --provider ${pid}`,
+          ),
+        );
       }
     }
     // MCPs escolhidos (opcional) → registra no ~/.aluy/mcp.json. "Instalar" é registrar:
@@ -252,7 +349,10 @@ function OnboardApp(props: {
       try {
         const writer = new McpConfigWriter({ file: join(homedir(), '.aluy', 'mcp.json') });
         for (const m of chosenMcps) {
-          writer.add({ name: m.id, command: m.command, args: [...m.args], env: {} }, { force: true });
+          writer.add(
+            { name: m.id, command: m.command, args: [...m.args], env: {} },
+            { force: true },
+          );
         }
         msg.push(
           T(
@@ -268,9 +368,16 @@ function OnboardApp(props: {
     if (prof === 'turbo' && embedderChoice !== undefined && embedderChoice !== '') {
       msg.push(`  → embedder: ${embedderChoice}`);
     }
-    if (prof === 'turbo') msg.push(T('  → instale agora: aluy bootstrap', '  → install now: aluy bootstrap'));
-    if (vError !== '') msg.push(T('⚠ modelo NÃO validado — pode não funcionar', '⚠ model NOT validated — may not work'));
-    if (backend === 'broker') msg.push(T('→ broker: autentique com `aluy login`', '→ broker: authenticate with `aluy login`'));
+    if (prof === 'turbo')
+      msg.push(T('  → instale agora: aluy bootstrap', '  → install now: aluy bootstrap'));
+    if (vError !== '')
+      msg.push(
+        T('⚠ modelo NÃO validado — pode não funcionar', '⚠ model NOT validated — may not work'),
+      );
+    if (backend === 'broker')
+      msg.push(
+        T('→ broker: autentique com `aluy login`', '→ broker: authenticate with `aluy login`'),
+      );
     setSavedMsg(msg);
     setStep('done');
   }
@@ -301,9 +408,12 @@ function OnboardApp(props: {
         return;
       }
       const ch = (input || '').toLowerCase();
-      if (key.return || ch === 'r') setStep('validating'); // tenta de novo
-      else if (ch === 'k') gotoText('key', ''); // troca a chave
-      else if (ch === 'u' && providerId === '__custom__') gotoText('custom-url', custom.url); // troca a baseURL
+      if (key.return || ch === 'r')
+        setStep('validating'); // tenta de novo
+      else if (ch === 'k')
+        gotoText('key', ''); // troca a chave
+      else if (ch === 'u' && providerId === '__custom__')
+        gotoText('custom-url', custom.url); // troca a baseURL
       else if (ch === 'c') enterMcp(); // segue mesmo assim
       return;
     }
@@ -328,7 +438,12 @@ function OnboardApp(props: {
       return;
     }
 
-    const isPicker = step === 'lang' || step === 'backend' || step === 'provider' || step === 'sidecars' || step === 'embedder';
+    const isPicker =
+      step === 'lang' ||
+      step === 'backend' ||
+      step === 'provider' ||
+      step === 'sidecars' ||
+      step === 'embedder';
     if (isPicker) {
       const len = pickerLen(step);
       if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
@@ -346,7 +461,15 @@ function OnboardApp(props: {
       setBuf((b) => b.slice(0, -1));
       return;
     }
-    if (input && !key.ctrl && !key.meta && !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow) {
+    if (
+      input &&
+      !key.ctrl &&
+      !key.meta &&
+      !key.upArrow &&
+      !key.downArrow &&
+      !key.leftArrow &&
+      !key.rightArrow
+    ) {
       setBuf((b) => b + input);
     }
   });
@@ -428,8 +551,18 @@ function OnboardApp(props: {
 
   const stepNo = (): string => {
     const map: Record<string, string> = {
-      lang: '1/8', backend: '2/8', provider: '3/8', 'custom-id': '3/8', 'custom-url': '3/8', 'custom-model': '3/8',
-      key: '4/8', model: '5/8', validating: '6/8', 'validate-failed': '6/8', mcp: '7/8', sidecars: '8/8',
+      lang: '1/8',
+      backend: '2/8',
+      provider: '3/8',
+      'custom-id': '3/8',
+      'custom-url': '3/8',
+      'custom-model': '3/8',
+      key: '4/8',
+      model: '5/8',
+      validating: '6/8',
+      'validate-failed': '6/8',
+      mcp: '7/8',
+      sidecars: '8/8',
     };
     return map[step] ?? '';
   };
@@ -440,12 +573,35 @@ function OnboardApp(props: {
       <Box paddingTop={1}>
         {/* Mostra a VERSÃO que está sendo instalada/configurada na tela do logo (pedido do
             dono): tira a dúvida de "qual versão estou rodando" logo no 1º passo. */}
-        <Role name="fgDim">aluy v{CLI_VERSION}  ·  {T('configuração inicial', 'first-run setup')}{step !== 'done' ? `  ·  ${stepNo()}` : ''}</Role>
+        <Role name="fgDim">
+          aluy v{CLI_VERSION} · {T('configuração inicial', 'first-run setup')}
+          {step !== 'done' ? `  ·  ${stepNo()}` : ''}
+        </Role>
       </Box>
       <Box paddingTop={1} flexDirection="column">
-        {step === 'lang' && <Picker title={T('Idioma', 'Language')} opts={LANGS.map((l) => ({ value: l.code, label: l.label }))} cursor={cursor} active={lang} />}
-        {step === 'backend' && <Picker title={T('Backend do modelo', 'Model backend')} opts={backendOpts} cursor={cursor} />}
-        {step === 'provider' && <Picker title={T('Provider', 'Provider')} opts={providerOpts} cursor={cursor} active={providerId} />}
+        {step === 'lang' && (
+          <Picker
+            title={T('Idioma', 'Language')}
+            opts={LANGS.map((l) => ({ value: l.code, label: l.label }))}
+            cursor={cursor}
+            active={lang}
+          />
+        )}
+        {step === 'backend' && (
+          <Picker
+            title={T('Backend do modelo', 'Model backend')}
+            opts={backendOpts}
+            cursor={cursor}
+          />
+        )}
+        {step === 'provider' && (
+          <Picker
+            title={T('Provider', 'Provider')}
+            opts={providerOpts}
+            cursor={cursor}
+            active={providerId}
+          />
+        )}
         {step === 'mcp' && (
           <McpPicker
             title={T('MCPs (opcional) — quais instalar?', 'MCPs (optional) — which to install?')}
@@ -457,7 +613,12 @@ function OnboardApp(props: {
         )}
         {step === 'sidecars' && (
           <Box flexDirection="column">
-            <Picker title={T('Complementos (modo turbo)', 'Complements (turbo mode)')} opts={sidecarOpts} cursor={cursor} active={profile} />
+            <Picker
+              title={T('Complementos (modo turbo)', 'Complements (turbo mode)')}
+              opts={sidecarOpts}
+              cursor={cursor}
+              active={profile}
+            />
             <Box paddingTop={1} flexDirection="column">
               <Role name="fgDim">
                 {T(
@@ -482,7 +643,12 @@ function OnboardApp(props: {
         )}
         {step === 'embedder' && (
           <Box flexDirection="column">
-            <Picker title={T('Modelo de embedding (memória)', 'Embedding model (memory)')} opts={embedderOpts} cursor={cursor} active={embedder} />
+            <Picker
+              title={T('Modelo de embedding (memória)', 'Embedding model (memory)')}
+              opts={embedderOpts}
+              cursor={cursor}
+              active={embedder}
+            />
             <Box paddingTop={1} flexDirection="column">
               <Role name="fgDim">
                 {T(
@@ -500,10 +666,28 @@ function OnboardApp(props: {
           </Box>
         )}
 
-        {step === 'custom-id' && <TextRow label={T('id do provider (ex.: tokenrouter)', 'provider id (e.g. tokenrouter)')} value={buf} />}
-        {step === 'custom-url' && <TextRow label={T('base URL (https, .../v1)', 'base URL (https, .../v1)')} value={buf} />}
-        {step === 'custom-model' && <TextRow label={T('modelo default', 'default model')} value={buf} />}
-        {step === 'key' && <TextRow label={T(`API key de ${providerId === '__custom__' ? custom.id : providerId} (oculta)`, `${providerId === '__custom__' ? custom.id : providerId} API key (hidden)`)} value={buf} mask />}
+        {step === 'custom-id' && (
+          <TextRow
+            label={T('id do provider (ex.: tokenrouter)', 'provider id (e.g. tokenrouter)')}
+            value={buf}
+          />
+        )}
+        {step === 'custom-url' && (
+          <TextRow label={T('base URL (https, .../v1)', 'base URL (https, .../v1)')} value={buf} />
+        )}
+        {step === 'custom-model' && (
+          <TextRow label={T('modelo default', 'default model')} value={buf} />
+        )}
+        {step === 'key' && (
+          <TextRow
+            label={T(
+              `API key de ${providerId === '__custom__' ? custom.id : providerId} (oculta)`,
+              `${providerId === '__custom__' ? custom.id : providerId} API key (hidden)`,
+            )}
+            value={buf}
+            mask
+          />
+        )}
         {step === 'model' && (
           <Box flexDirection="column">
             <TextRow label={T('modelo (enter = default)', 'model (enter = default)')} value={buf} />
@@ -522,7 +706,12 @@ function OnboardApp(props: {
           <Box flexDirection="column">
             <Role name="fg">{T('Testando o modelo…', 'Testing the model…')}</Role>
             <Box paddingTop={1}>
-              <Role name="fgDim">{T('chamada real ao provider (não prossigo se falhar)', 'real call to the provider (won\'t proceed if it fails)')}</Role>
+              <Role name="fgDim">
+                {T(
+                  'chamada real ao provider (não prossigo se falhar)',
+                  "real call to the provider (won't proceed if it fails)",
+                )}
+              </Role>
             </Box>
           </Box>
         )}
@@ -530,7 +719,9 @@ function OnboardApp(props: {
         {step === 'validate-failed' && (
           <Box flexDirection="column">
             <Role name="fg">{T('✗ o modelo NÃO respondeu', '✗ the model did NOT respond')}</Role>
-            <Box paddingTop={1}><Role name="fgDim">{vError}</Role></Box>
+            <Box paddingTop={1}>
+              <Role name="fgDim">{vError}</Role>
+            </Box>
             <Box paddingTop={1}>
               <Role name="fgDim">
                 {T('enter/r tentar de novo · k trocar chave', 'enter/r retry · k change key')}
@@ -544,7 +735,9 @@ function OnboardApp(props: {
         {step === 'done' && (
           <Box flexDirection="column">
             {savedMsg.map((m, i) => (
-              <Role key={i} name={m.startsWith('⚠') ? 'fg' : 'accent'}>{m}</Role>
+              <Role key={i} name={m.startsWith('⚠') ? 'fg' : 'accent'}>
+                {m}
+              </Role>
             ))}
             <Box paddingTop={1}>
               <Role name="fgDim">{T('enter p/ entrar no aluy', 'enter to launch aluy')}</Role>
@@ -555,7 +748,11 @@ function OnboardApp(props: {
       {step !== 'done' && step !== 'validating' && step !== 'validate-failed' && (
         <Box paddingTop={1}>
           <Role name="fgDim">
-            {step === 'lang' || step === 'backend' || step === 'provider' || step === 'sidecars' || step === 'embedder'
+            {step === 'lang' ||
+            step === 'backend' ||
+            step === 'provider' ||
+            step === 'sidecars' ||
+            step === 'embedder'
               ? `↑↓ ${T('navegar', 'move')} · enter ${T('escolher', 'select')} · esc ${T('sair', 'quit')}`
               : `${T('digite', 'type')} · enter ${T('confirmar', 'confirm')} · esc ${T('sair', 'quit')}`}
           </Role>
@@ -565,17 +762,26 @@ function OnboardApp(props: {
   );
 }
 
-function Picker(props: { readonly title: string; readonly opts: readonly Opt[]; readonly cursor: number; readonly active?: string }): React.ReactElement {
+function Picker(props: {
+  readonly title: string;
+  readonly opts: readonly Opt[];
+  readonly cursor: number;
+  readonly active?: string;
+}): React.ReactElement {
   return (
     <Box flexDirection="column">
       <Role name="fg">{props.title}</Role>
       <Box flexDirection="column" paddingTop={1}>
         {props.opts.map((o, i) => (
           <Box key={o.value}>
-            <Role name={i === props.cursor ? 'accent' : 'fgDim'}>{i === props.cursor ? '❯ ' : '  '}</Role>
+            <Role name={i === props.cursor ? 'accent' : 'fgDim'}>
+              {i === props.cursor ? '❯ ' : '  '}
+            </Role>
             <Role name={i === props.cursor ? 'accent' : 'fg'}>{o.label}</Role>
             {o.hint ? <Role name="fgDim"> · {o.hint}</Role> : null}
-            {props.active !== undefined && o.value === props.active ? <Role name="fgDim"> ●</Role> : null}
+            {props.active !== undefined && o.value === props.active ? (
+              <Role name="fgDim"> ●</Role>
+            ) : null}
           </Box>
         ))}
       </Box>
@@ -619,7 +825,11 @@ function McpPicker(props: {
   );
 }
 
-function TextRow(props: { readonly label: string; readonly value: string; readonly mask?: boolean }): React.ReactElement {
+function TextRow(props: {
+  readonly label: string;
+  readonly value: string;
+  readonly mask?: boolean;
+}): React.ReactElement {
   const shown = props.mask ? '•'.repeat(props.value.length) : props.value;
   return (
     <Box>
@@ -634,7 +844,8 @@ function TextRow(props: { readonly label: string; readonly value: string; readon
 export async function runOnboard(): Promise<OnboardOutcome> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     process.stdout.write(
-      'aluy onboard precisa de um terminal interativo.\n' + 'Abra um terminal e rode:  aluy onboard\n',
+      'aluy onboard precisa de um terminal interativo.\n' +
+        'Abra um terminal e rode:  aluy onboard\n',
     );
     return { code: 0, launch: false, bootstrap: false };
   }

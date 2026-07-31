@@ -23,10 +23,7 @@ import type { ToolCall } from './gate.js';
 import { RECALL_TOOL_NAME } from '../agent/memory/contract.js';
 import { PLAN_TOOL_NAME } from '../agent/tools/plan.js';
 import { QUESTION_TOOL_NAME } from '../agent/tools/question.js';
-import {
-  CAPABILITIES_TOOL_NAME,
-  CAPABILITIES_TOOL_ALIAS,
-} from '../agent/tools/capabilities.js';
+import { CAPABILITIES_TOOL_NAME, CAPABILITIES_TOOL_ALIAS } from '../agent/tools/capabilities.js';
 
 /**
  * R1 — a ALLOW-LIST FECHADA de tools NATIVAS de LEITURA LOCAL permitidas em Plan.

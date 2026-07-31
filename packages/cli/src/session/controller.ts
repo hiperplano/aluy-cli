@@ -981,7 +981,9 @@ export class SessionController {
   /** GS-MD7 (fix registry-cwd) — relê agentes de projeto do cwd corrente (lazy no spawnNamed). */
   private readonly reloadProjectAgents: (() => readonly AgentProfile[]) | undefined;
   /** ADR-0146 (D2/L2) — porta do catálogo vivo p/ o probe de nome de modelo (sugestão). */
-  private readonly modelProbe: { readonly availableNames: () => Promise<readonly string[]> } | undefined;
+  private readonly modelProbe:
+    | { readonly availableNames: () => Promise<readonly string[]> }
+    | undefined;
   /** ADR-0146 (D4) — default dos FILHOS quando nem spawn nem `.md` setam `model` (dial). */
   private readonly defaultChildModel: string | undefined;
   /** ADR-0152 (D6c) — porta do PROBE LOCAL (catálogo declarado do provider local). */
@@ -990,7 +992,9 @@ export class SessionController {
     | undefined;
   /** ADR-0153 — porta de TEST-THEN-REGISTER (slug local desconhecido: testa + registra). */
   private readonly verifyAndRegisterLocalModel:
-    | ((slug: string) => Promise<{ readonly ok: boolean; readonly detail: string; readonly registered: boolean }>)
+    | ((
+        slug: string,
+      ) => Promise<{ readonly ok: boolean; readonly detail: string; readonly registered: boolean }>)
     | undefined;
   // EST-0948 — os tetos EFETIVOS da sessão (CLI-SEC-8), já resolvidos (flag>env>default,
   // clampados) pelo wiring. Fonte do TETO de tokens p/ os indicadores em % (StatusBar/
@@ -4568,7 +4572,10 @@ export class SessionController {
    */
   armSidecarUsage(
     presence: Omit<SidecarUsageView, 'usage'>,
-    meter: { snapshot(): SidecarUsageView['usage']; subscribe(fn: (u: SidecarUsageView['usage']) => void): () => void },
+    meter: {
+      snapshot(): SidecarUsageView['usage'];
+      subscribe(fn: (u: SidecarUsageView['usage']) => void): () => void;
+    },
   ): void {
     this.patch({ sidecarUsage: { ...presence, usage: meter.snapshot() } });
     meter.subscribe((usage) => {

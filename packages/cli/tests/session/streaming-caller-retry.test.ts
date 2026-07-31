@@ -64,11 +64,7 @@ describe('F-RETRY · laço de retentativa no StreamingModelCaller', () => {
   });
 
   it('a Idempotency-Key é a MESMA em todas as tentativas (dedup de billing)', async () => {
-    const { c, cli } = caller([
-      new BrokerTransportError('x'),
-      new BrokerTransportError('y'),
-      'ok',
-    ]);
+    const { c, cli } = caller([new BrokerTransportError('x'), new BrokerTransportError('y'), 'ok']);
     await c.call({ messages: [], idempotencyKey: 'MESMA-KEY' });
     expect(cli.calls).toEqual(['MESMA-KEY', 'MESMA-KEY', 'MESMA-KEY']);
   });

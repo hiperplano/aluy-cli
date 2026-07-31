@@ -19,7 +19,8 @@ function countingFetch(opts: {
   const calls: string[] = [];
   const okSlugs = new Set(opts.okSlugs ?? []);
   const fetchImpl: ConnectivityFetch = async (_input, init) => {
-    const body = init.body !== undefined ? (JSON.parse(init.body) as { model: string }) : { model: '' };
+    const body =
+      init.body !== undefined ? (JSON.parse(init.body) as { model: string }) : { model: '' };
     calls.push(body.model);
     const ok = okSlugs.has(body.model);
     return {
@@ -41,7 +42,8 @@ function basePort(overrides: {
   return createVerifyAndRegisterLocalModelPort({
     wireFormat: 'openai-compat',
     baseUrl: 'https://gateway.test',
-    fetchImpl: overrides.fetchImpl ?? (async () => ({ ok: true, status: 200, text: async () => '' })),
+    fetchImpl:
+      overrides.fetchImpl ?? (async () => ({ ok: true, status: 200, text: async () => '' })),
     getKey: overrides.getKey ?? (async () => 'sk-test'),
     registerLocalModel: overrides.registerLocalModel ?? (() => true),
     markSessionRegistered: overrides.markSessionRegistered ?? (() => {}),
@@ -193,7 +195,9 @@ describe('TESTE DE SEGURANÇA 9 — fail-closed: throw (rede/credencial) NUNCA e
   it('getKey lança (ex.: MissingLocalCredentialError) ⇒ {ok:false}, mensagem SEM interpolar a exceção', async () => {
     const port = basePort({
       getKey: async () => {
-        throw new Error('backend local: sem credencial apikey p/ "openai". configure ANTHROPIC_API_KEY=...');
+        throw new Error(
+          'backend local: sem credencial apikey p/ "openai". configure ANTHROPIC_API_KEY=...',
+        );
       },
     });
     const r = await port('m');
@@ -210,7 +214,9 @@ describe('TESTE DE SEGURANÇA 9 — fail-closed: throw (rede/credencial) NUNCA e
   it('fetchImpl lança (timeout/anti-SSRF) ⇒ {ok:false}, mensagem FIXA sem e.message', async () => {
     const port = basePort({
       fetchImpl: async () => {
-        throw new Error('backend local: redirect (302 → http://169.254.169.254/) BLOQUEADO (PROV-SEC-1)');
+        throw new Error(
+          'backend local: redirect (302 → http://169.254.169.254/) BLOQUEADO (PROV-SEC-1)',
+        );
       },
     });
     const r = await port('m');

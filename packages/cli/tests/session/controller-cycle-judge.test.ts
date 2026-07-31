@@ -106,7 +106,12 @@ function fakeJudge(
   const judge: JudgeEngine = {
     async judge(input: JudgeInput): Promise<JudgeResult> {
       inputs.push(input);
-      return { chosen, confidence: 0.9, reasons: [{ optionId: chosen, rationale: reason }], mode: 'llm' };
+      return {
+        chosen,
+        confidence: 0.9,
+        reasons: [{ optionId: chosen, rationale: reason }],
+        mode: 'llm',
+      };
     },
   };
   return { judge, inputs, calls: () => inputs.length };

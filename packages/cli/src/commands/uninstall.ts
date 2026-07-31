@@ -12,11 +12,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import {
-  OLLAMA_INSTALL_DIR,
-  MEM0_VENV_DIR,
-  HEADROOM_VENV_DIR,
-} from '@hiperplano/aluy-cli-core';
+import { OLLAMA_INSTALL_DIR, MEM0_VENV_DIR, HEADROOM_VENV_DIR } from '@hiperplano/aluy-cli-core';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
 
 export interface UninstallOptions {
@@ -100,10 +96,14 @@ function uninstallSystemViaAgent(io: TerminalIO): number {
   }
   io.out('  ── Removendo o Ollama de sistema com o próprio aluy ── (acompanhe abaixo)');
   io.out('');
-  spawnSync(process.execPath, [aluyScript, '-p', systemUninstallGoal(), '--yolo', '--no-self-check'], {
-    stdio: 'inherit',
-    timeout: 600_000,
-    env: { ...process.env, ALUY_NO_WEAK_YOLO_WARN: '1', ALUY_PRINT_VERBOSE: '1' },
-  });
+  spawnSync(
+    process.execPath,
+    [aluyScript, '-p', systemUninstallGoal(), '--yolo', '--no-self-check'],
+    {
+      stdio: 'inherit',
+      timeout: 600_000,
+      env: { ...process.env, ALUY_NO_WEAK_YOLO_WARN: '1', ALUY_PRINT_VERBOSE: '1' },
+    },
+  );
   return 0;
 }

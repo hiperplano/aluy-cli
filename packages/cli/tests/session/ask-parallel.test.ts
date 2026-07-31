@@ -102,7 +102,11 @@ describe('EST-ASK · SessionController.askParallel — /ask paralela read-only (
     const gate = new Promise<ModelCallResult>((r) => {
       release = r;
     });
-    const caller: ModelCaller = { async call() { return gate; } };
+    const caller: ModelCaller = {
+      async call() {
+        return gate;
+      },
+    };
     const c = makeController(caller);
     const p = c.askParallel('como está?');
     // EM VOO: a /ask está na área de pendentes (separada), AINDA sem nota de resposta.

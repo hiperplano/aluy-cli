@@ -18,7 +18,11 @@ import {
   CAPABILITIES_TOOL_NAME,
   CAPABILITIES_TOOL_ALIAS,
 } from '../../src/agent/tools/capabilities.js';
-import type { CapabilitiesPort, CapabilitiesSnapshot, ToolPorts } from '../../src/agent/tools/types.js';
+import type {
+  CapabilitiesPort,
+  CapabilitiesSnapshot,
+  ToolPorts,
+} from '../../src/agent/tools/types.js';
 import { makePorts } from './helpers.js';
 import { PolicyPermissionEngine } from '../../src/permission/engine.js';
 import { PLAN_READ_ALLOWLIST, isPlanReadAllowed } from '../../src/permission/plan.js';
@@ -47,8 +51,18 @@ function fullSnapshot(): CapabilitiesSnapshot {
       { name: 'revisor-proj', summary: 'Revisa PRs do projeto.', origin: 'project' },
     ],
     skills: [
-      { name: 'deep-research', summary: 'Pesquisa profunda multi-fonte.', origin: 'global', invocable: true },
-      { name: 'skill-do-repo', summary: 'Skill de projeto (descoberta-apenas).', origin: 'project', invocable: false },
+      {
+        name: 'deep-research',
+        summary: 'Pesquisa profunda multi-fonte.',
+        origin: 'global',
+        invocable: true,
+      },
+      {
+        name: 'skill-do-repo',
+        summary: 'Skill de projeto (descoberta-apenas).',
+        origin: 'project',
+        invocable: false,
+      },
     ],
     mcpServers: [{ server: 'playwright', toolCount: 12, prefix: 'mcp__playwright__' }],
     memory: { factCount: 7 },
@@ -132,7 +146,15 @@ describe('ADR-0145 (frente d) — tool `capabilities`', () => {
   it('ANTI-VAZAMENTO — mesmo com filtros/variações, nenhuma saída vaza os termos proibidos', () => {
     const FORBIDDEN = /provider|base_?url|api[_-]?key|token|secret|authorization|model|tier/i;
     const snap = fullSnapshot();
-    for (const filter of [undefined, 'mcp', 'skills', 'delegacao', 'memoria', 'assincrono', 'busca']) {
+    for (const filter of [
+      undefined,
+      'mcp',
+      'skills',
+      'delegacao',
+      'memoria',
+      'assincrono',
+      'busca',
+    ]) {
       expect(renderCapabilities(snap, filter)).not.toMatch(FORBIDDEN);
     }
   });

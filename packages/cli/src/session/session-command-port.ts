@@ -47,14 +47,24 @@ import {
   type SlashCommand,
 } from '../slash/commands.js';
 import type { WorkspacePort } from '../io/index.js';
-import { buildSlashEffect, runAsyncSlash, type SlashContext, type SlashNote } from '../slash/handlers.js';
+import {
+  buildSlashEffect,
+  runAsyncSlash,
+  type SlashContext,
+  type SlashNote,
+} from '../slash/handlers.js';
 import { parseClearCommand, runClearCommand } from '../slash/clear.js';
 import { parseMemoryCommand, runMemoryCommand } from '../slash/memory.js';
 import { parseTodoCommand, runTodoCommand } from '../slash/todo.js';
 import { runInit } from '../slash/init.js';
 import { routeRename } from './rename.js';
 import { runCron } from '../commands/cron.js';
-import { UserSkillsLoader, ProjectSkillsLoader, UserWorkflowsLoader, ProjectWorkflowsLoader } from '../io/index.js';
+import {
+  UserSkillsLoader,
+  ProjectSkillsLoader,
+  UserWorkflowsLoader,
+  ProjectWorkflowsLoader,
+} from '../io/index.js';
 import type { SessionController } from './controller.js';
 
 /**
@@ -149,7 +159,8 @@ async function captureBlocks(
   if (added.length === 0) return '(sem saída nova — ver o estado da sessão)';
   return added
     .map((b) => {
-      if (b.kind === 'note') return b.lines.length > 0 ? `${b.title}:\n${b.lines.join('\n')}` : b.title;
+      if (b.kind === 'note')
+        return b.lines.length > 0 ? `${b.title}:\n${b.lines.join('\n')}` : b.title;
       if (b.kind === 'doctor') {
         return `doctor: ${b.summary ?? b.checks.map((c) => `${c.label}=${c.status}`).join(', ')}`;
       }
@@ -254,7 +265,10 @@ async function runDestructiveCronRm(
   const approved = await confirmDestructive('cron', args, exact, deps, ctx);
   if (!approved) return destructiveDenied();
   const collected: string[] = [];
-  const io = { out: (l: string): number => collected.push(l), err: (l: string): number => collected.push(l) };
+  const io = {
+    out: (l: string): number => collected.push(l),
+    err: (l: string): number => collected.push(l),
+  };
   await runCron(['rm', id], { io });
   return { ok: true, text: collected.length > 0 ? collected.join('\n') : '(sem saída)' };
 }
@@ -337,7 +351,10 @@ async function runDestructive(
 
 // ── comandos read-only / session-effect (execução real) ────────────────────────
 
-async function execClear(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execClear(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   const parsed = parseClearCommand(args);
   // Só `session`/`cancel`/`help` chegam aqui — `full`/`memory` são `destructive`
   // (roteados em `runDestructive` ANTES de chamar `execute`).
@@ -346,7 +363,13 @@ async function execClear(args: string, deps: SessionCommandPortDeps): Promise<Se
     { clearSession: () => deps.controller.clear(), memory: deps.memory as AgentMemory },
     false,
   );
-  return { ok: true, text: parsed.kind === 'session' ? 'sessão limpa (contexto zerado; memória intacta).' : noteText(outcome.note) };
+  return {
+    ok: true,
+    text:
+      parsed.kind === 'session'
+        ? 'sessão limpa (contexto zerado; memória intacta).'
+        : noteText(outcome.note),
+  };
 }
 
 async function execCompact(
@@ -358,7 +381,11 @@ async function execCompact(
 }
 
 /** Espelha o parse de `/cycle edit …` do `session/run.tsx` (mesma gramática). */
-function parseCycleEditPatch(rest: string): { task?: string; intervalMs?: number; maxIterations?: number } {
+function parseCycleEditPatch(rest: string): {
+  task?: string;
+  intervalMs?: number;
+  maxIterations?: number;
+} {
   const tokens = rest.match(/"[^"]*"|\S+/g) ?? [];
   const patch: { task?: string; intervalMs?: number; maxIterations?: number } = {};
   const taskParts: string[] = [];
@@ -389,24 +416,42 @@ function parseCycleEditPatch(rest: string): { task?: string; intervalMs?: number
   return patch;
 }
 
-async function execCycle(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execCycle(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   const sub = args.trim().split(/\s+/)[0]?.toLowerCase();
   if (sub === 'pause') {
-    return { ok: true, text: await captureBlocks(deps.controller, () => deps.controller.cyclePause()) };
+    return {
+      ok: true,
+      text: await captureBlocks(deps.controller, () => deps.controller.cyclePause()),
+    };
   }
   if (sub === 'resume') {
-    return { ok: true, text: await captureBlocks(deps.controller, () => deps.controller.cycleResume()) };
+    return {
+      ok: true,
+      text: await captureBlocks(deps.controller, () => deps.controller.cycleResume()),
+    };
   }
   if (sub === 'stop') {
-    return { ok: true, text: await captureBlocks(deps.controller, () => deps.controller.cycleStop()) };
+    return {
+      ok: true,
+      text: await captureBlocks(deps.controller, () => deps.controller.cycleStop()),
+    };
   }
   if (sub === 'status') {
-    return { ok: true, text: await captureBlocks(deps.controller, () => deps.controller.cycleStatus()) };
+    return {
+      ok: true,
+      text: await captureBlocks(deps.controller, () => deps.controller.cycleStatus()),
+    };
   }
   if (sub === 'edit') {
     const rest = (args.trim().match(/^edit\b\s*(.*)$/i)?.[1] ?? '').trim();
     const patch = parseCycleEditPatch(rest);
-    return { ok: true, text: await captureBlocks(deps.controller, () => deps.controller.cycleEdit(patch)) };
+    return {
+      ok: true,
+      text: await captureBlocks(deps.controller, () => deps.controller.cycleEdit(patch)),
+    };
   }
   if (args.trim() === '') {
     return {
@@ -438,17 +483,26 @@ function tokenizeQuoted(args: string): string[] {
   return (args.match(/"[^"]*"|\S+/g) ?? []).map((t) => t.replace(/^"|"$/g, ''));
 }
 
-async function execCron(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execCron(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   const tokens = tokenizeQuoted(args);
   const argv = tokens.length === 0 ? ['list'] : tokens;
   const collected: string[] = [];
-  const io = { out: (l: string): number => collected.push(l), err: (l: string): number => collected.push(l) };
+  const io = {
+    out: (l: string): number => collected.push(l),
+    err: (l: string): number => collected.push(l),
+  };
   await runCron(argv, { io });
   void deps; // silencia o lint em builds sem uso adicional de deps neste ramo.
   return { ok: true, text: collected.length > 0 ? collected.join('\n') : '(sem saída)' };
 }
 
-async function execMemory(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execMemory(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   if (!deps.memory) return unavailable('memory');
   const parsed = parseMemoryCommand(args);
   // `forget` é destructive (roteado ANTES de chegar aqui); os demais (list/edit/pin/
@@ -457,14 +511,20 @@ async function execMemory(args: string, deps: SessionCommandPortDeps): Promise<S
   return { ok: true, text: noteText(note) };
 }
 
-async function execTodo(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execTodo(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   if (!deps.ports.todo) return unavailable('todo');
   const parsed = parseTodoCommand(args);
   const note = await runTodoCommand(parsed, deps.ports.todo, false);
   return { ok: true, text: noteText(note) };
 }
 
-async function execProvider(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execProvider(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   const v = args.trim();
   // Bare `/provider` LÊ (lista os providers) — a nota do fallback É a resposta legítima
   // (read-only ⇒ ok:true); `/provider <n>` MUTA de verdade abaixo (setProvider).
@@ -473,18 +533,27 @@ async function execProvider(args: string, deps: SessionCommandPortDeps): Promise
   return { ok: true, text: `provider setado: ${v}` };
 }
 
-async function execEffort(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execEffort(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   const v = args.trim();
   // Bare `/effort` LÊ o valor atual (read-only ⇒ ok:true); `/effort <v>` MUTA abaixo.
   if (v === '') return fromSlashEffectFallback('effort', 'read-only', deps);
   if (v.length > 32) {
-    return { ok: false, text: `erro: "effort" aceita no máximo 32 caracteres (recebeu ${v.length}).` };
+    return {
+      ok: false,
+      text: `erro: "effort" aceita no máximo 32 caracteres (recebeu ${v.length}).`,
+    };
   }
   deps.controller.setEffort(v);
   return { ok: true, text: `effort definido para: ${v}` };
 }
 
-async function execModel(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execModel(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   // Bare `/model` LÊ o tier atual (read-only ⇒ ok:true); `/model <tier>` MUTA — mas a
   // troca via agente ainda não está wireada ⇒ ok:false honesto abaixo (o tier NÃO mudou).
   if (args.trim() === '') return fromSlashEffectFallback('model', 'read-only', deps);
@@ -494,7 +563,10 @@ async function execModel(args: string, deps: SessionCommandPortDeps): Promise<Se
   };
 }
 
-async function execRename(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execRename(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   const result = routeRename(args);
   switch (result.kind) {
     case 'set':
@@ -563,7 +635,10 @@ async function execSkills(deps: SessionCommandPortDeps): Promise<SessionCommandO
   return { ok: true, text: noteText(note) };
 }
 
-async function execWorkflows(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execWorkflows(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   const runMatch = /^\s*run\s+(\S+)/.exec(args);
   if (runMatch) {
     const name = runMatch[1]!;
@@ -595,25 +670,43 @@ async function execInventory(deps: SessionCommandPortDeps): Promise<SessionComma
   };
 }
 
-async function execRooms(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
+async function execRooms(
+  args: string,
+  deps: SessionCommandPortDeps,
+): Promise<SessionCommandOutcome> {
   const [sub, ...rest] = args.trim().split(/\s+/);
   if (sub === '' || sub === undefined || sub === 'list') {
-    return { ok: true, text: await captureBlocks(deps.controller, () => deps.controller.roomList()) };
+    return {
+      ok: true,
+      text: await captureBlocks(deps.controller, () => deps.controller.roomList()),
+    };
   }
   if (sub === 'new') {
-    return { ok: true, text: await captureBlocks(deps.controller, () => deps.controller.roomNew()) };
+    return {
+      ok: true,
+      text: await captureBlocks(deps.controller, () => deps.controller.roomNew()),
+    };
   }
   if (sub === 'read') {
     const code = rest.join(' ').trim();
     if (code === '') return { ok: false, text: 'uso: rooms read <código> — código ausente.' };
-    return { ok: true, text: await captureBlocks(deps.controller, () => deps.controller.roomRead(code)) };
+    return {
+      ok: true,
+      text: await captureBlocks(deps.controller, () => deps.controller.roomRead(code)),
+    };
   }
   if (sub === 'watch') {
     const code = rest.join(' ').trim();
     if (code === '') return { ok: false, text: 'uso: rooms watch <código> — código ausente.' };
-    return { ok: true, text: await captureBlocks(deps.controller, () => deps.controller.roomWatch(code)) };
+    return {
+      ok: true,
+      text: await captureBlocks(deps.controller, () => deps.controller.roomWatch(code)),
+    };
   }
-  return { ok: false, text: `subcomando desconhecido: "${sub}" — use list | new | read <código> | watch <código>.` };
+  return {
+    ok: false,
+    text: `subcomando desconhecido: "${sub}" — use list | new | read <código> | watch <código>.`,
+  };
 }
 
 async function execAsk(args: string, deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {

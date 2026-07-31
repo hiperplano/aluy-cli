@@ -25,7 +25,10 @@ describe('ADR-0137 · C1 (parte pura) — buildRedactedSubcycleContext REDIGE an
       {
         objective: 'deploy com AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE no comando',
         boxes: [
-          { label: 'rodar curl -H "Authorization: Bearer sk-secret1234567890abcdef"', closed: false },
+          {
+            label: 'rodar curl -H "Authorization: Bearer sk-secret1234567890abcdef"',
+            closed: false,
+          },
           { label: 'caixa limpa', closed: true },
         ],
         lastOutcome: 'falhou: token github_pat_11ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 inválido',

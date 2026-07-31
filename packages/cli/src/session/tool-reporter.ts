@@ -8,7 +8,13 @@
 // PORTÁVEL? Este wrapper é do @hiperplano/aluy-cli (liga ao render), mas só usa o contrato
 // do core (`NativeTool`/`ToolResult`) — não toca I/O.
 
-import { QUESTION_TOOL_NAME, type NativeTool, type ToolPorts, type ToolResult, type ToolRunContext } from '@hiperplano/aluy-cli-core';
+import {
+  QUESTION_TOOL_NAME,
+  type NativeTool,
+  type ToolPorts,
+  type ToolResult,
+  type ToolRunContext,
+} from '@hiperplano/aluy-cli-core';
 import { clampTarget, type ToolLineBlock } from './model.js';
 
 /** Para onde as linhas de tool são emitidas (a UI). */

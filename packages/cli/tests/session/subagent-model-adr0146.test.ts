@@ -112,7 +112,11 @@ function subAgentsBlock(blocks: readonly SessionBlock[]): SubAgentsBlock | undef
   return blocks.find((b): b is SubAgentsBlock => b.kind === 'subagents');
 }
 
-const askAutoApprove = { async resolve() { return { kind: 'approve-once' as const }; } };
+const askAutoApprove = {
+  async resolve() {
+    return { kind: 'approve-once' as const };
+  },
+};
 
 describe('ADR-0146 (D1/D3) — precedência: param do spawn VENCE o model: do `.md`', () => {
   it('agent nomeado com model:"granito" no `.md`, mas o spawn pede model:"opus" ⇒ roteia p/ aluy-deep', async () => {
@@ -206,7 +210,10 @@ describe('ADR-0146 (D2) — probe fail-closed: nome de modelo desconhecido', () 
 describe('ADR-0146 (D3) — "custom"/"custom:<slug>" só roda com o pai em tier:custom', () => {
   it('pai FORA de tier:custom + model:"custom" ⇒ erro legível ANTES de rodar', async () => {
     const captured: { messages?: string } = {};
-    const model = parentDelegates({ agents: [{ label: 'x', goal: 'g', model: 'custom' }] }, captured);
+    const model = parentDelegates(
+      { agents: [{ label: 'x', goal: 'g', model: 'custom' }] },
+      captured,
+    );
     const customLog: string[] = [];
     const controller = new SessionController({
       model,
@@ -378,7 +385,9 @@ describe('ADR-0146 (D5) — o rótulo do tier resolvido aparece no bloco `subage
     const block = subAgentsBlock(controller.current.blocks);
     const label = block?.children.find((c) => c.label === 'x')?.model;
     expect(label).toBe('custom · meta-llama/llama-3.3-70b');
-    expect(label ?? '').not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
+    expect(label ?? '').not.toMatch(
+      /\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i,
+    );
   });
 });
 
@@ -467,7 +476,9 @@ describe('ADR-0152 (D5-bis) — backend local: filho herdado mostra o modelo CON
     });
     await controller.submit('spawn herdado sob backend local');
     const serialized = JSON.stringify(controller.current);
-    expect(serialized).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
+    expect(serialized).not.toMatch(
+      /\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i,
+    );
   });
 });
 
@@ -496,6 +507,8 @@ describe('GS-SAM1/GS-SAM4 — anti-vazamento de credencial no estado inteiro da 
     await controller.submit('lote misto p/ o anti-leak sweep');
 
     const serialized = JSON.stringify(controller.current);
-    expect(serialized).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i);
+    expect(serialized).not.toMatch(
+      /\b(provider|base_?url|api[_-]?key|token|secret|authorization)\b/i,
+    );
   });
 });

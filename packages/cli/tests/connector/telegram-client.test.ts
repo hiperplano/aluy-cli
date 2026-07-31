@@ -22,7 +22,10 @@ function fakeFetch(responses: unknown[]) {
 describe('TelegramClient — long-poll concreto (ADR-0154 §4)', () => {
   it('poll: parseia e AVANÇA o offset (offset vai na próxima URL)', async () => {
     const { fn, urls } = fakeFetch([
-      { ok: true, result: [{ update_id: 5, message: { chat: { id: 1, type: 'private' }, text: 'a' } }] },
+      {
+        ok: true,
+        result: [{ update_id: 5, message: { chat: { id: 1, type: 'private' }, text: 'a' } }],
+      },
       { ok: true, result: [] },
     ]);
     const c = new TelegramClient({ token: TOKEN, fetchFn: fn });
@@ -41,7 +44,10 @@ describe('TelegramClient — long-poll concreto (ADR-0154 §4)', () => {
   });
 
   it('R6: safeForLog remove o token de uma mensagem (ex.: erro que ecoa a URL)', () => {
-    const c = new TelegramClient({ token: TOKEN, fetchFn: (async () => ({}) as Response) as unknown as typeof fetch });
+    const c = new TelegramClient({
+      token: TOKEN,
+      fetchFn: (async () => ({}) as Response) as unknown as typeof fetch,
+    });
     const msg = `fetch failed: https://api.telegram.org/bot${TOKEN}/getUpdates`;
     expect(c.safeForLog(msg)).not.toContain(TOKEN);
     expect(c.safeForLog(msg)).not.toContain('AAHk');
@@ -68,7 +74,8 @@ describe('TelegramClient — long-poll concreto (ADR-0154 §4)', () => {
   });
 
   it('HTTP não-2xx ⇒ [] e NÃO avança offset (tenta de novo)', async () => {
-    const fn = (async () => ({ ok: false, json: async () => ({}) }) as Response) as unknown as typeof fetch;
+    const fn = (async () =>
+      ({ ok: false, json: async () => ({}) }) as Response) as unknown as typeof fetch;
     const c = new TelegramClient({ token: TOKEN, fetchFn: fn });
     expect(await c.poll()).toEqual([]);
   });
@@ -83,8 +90,14 @@ describe('TelegramClient — long-poll concreto (ADR-0154 §4)', () => {
 
   it('stream: produz updates e PARA quando o signal aborta', async () => {
     const { fn } = fakeFetch([
-      { ok: true, result: [{ update_id: 1, message: { chat: { id: 1, type: 'private' }, text: 'um' } }] },
-      { ok: true, result: [{ update_id: 2, message: { chat: { id: 1, type: 'private' }, text: 'dois' } }] },
+      {
+        ok: true,
+        result: [{ update_id: 1, message: { chat: { id: 1, type: 'private' }, text: 'um' } }],
+      },
+      {
+        ok: true,
+        result: [{ update_id: 2, message: { chat: { id: 1, type: 'private' }, text: 'dois' } }],
+      },
     ]);
     const ac = new AbortController();
     const c = new TelegramClient({ token: TOKEN, fetchFn: fn });
@@ -114,12 +127,14 @@ describe('TelegramClient — long-poll concreto (ADR-0154 §4)', () => {
   it('send: HTTP não-2xx ou ok:false ⇒ false (fail-safe)', async () => {
     const c1 = new TelegramClient({
       token: TOKEN,
-      fetchFn: (async () => ({ ok: false, json: async () => ({}) }) as Response) as unknown as typeof fetch,
+      fetchFn: (async () =>
+        ({ ok: false, json: async () => ({}) }) as Response) as unknown as typeof fetch,
     });
     expect(await c1.send(1, 'x')).toBe(false);
     const c2 = new TelegramClient({
       token: TOKEN,
-      fetchFn: (async () => ({ ok: true, json: async () => ({ ok: false }) }) as Response) as unknown as typeof fetch,
+      fetchFn: (async () =>
+        ({ ok: true, json: async () => ({ ok: false }) }) as Response) as unknown as typeof fetch,
     });
     expect(await c2.send(1, 'x')).toBe(false);
   });

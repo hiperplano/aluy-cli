@@ -13,11 +13,7 @@
 
 import { TelegramClient } from './telegram-client.js';
 import { TelegramConnector } from './telegram-connector.js';
-import {
-  TelegramBridge,
-  type IngressSink,
-  type TelegramBridgeOptions,
-} from './telegram-bridge.js';
+import { TelegramBridge, type IngressSink, type TelegramBridgeOptions } from './telegram-bridge.js';
 import {
   parseAllowlist,
   type ConnectorSecretStore,

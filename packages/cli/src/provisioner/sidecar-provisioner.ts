@@ -193,7 +193,9 @@ async function readBodyWithProgress(resp: Response, label: string): Promise<Buff
       if (pct !== lastPct) {
         lastPct = pct;
         const tot = (total / 1e6).toFixed(1);
-        process.stderr.write(`${tty ? '\r' : ''}  baixando ${label}... ${pct}% (${mb}/${tot} MB)${tty ? '' : '\n'}`);
+        process.stderr.write(
+          `${tty ? '\r' : ''}  baixando ${label}... ${pct}% (${mb}/${tot} MB)${tty ? '' : '\n'}`,
+        );
       }
     } else {
       process.stderr.write(`${tty ? '\r' : ''}  baixando ${label}... ${mb} MB${tty ? '' : '\n'}`);
@@ -922,7 +924,10 @@ export class NodeSidecarProvisioner implements SidecarProvisioner {
    * Provisiona UM alvo específico. `ctx` (posição na fila) é repassado ao instalador-agente
    * p/ o cabeçalho mostrar "Complemento i/N" + a fila (sobrevive ao clear de tela).
    */
-  async provision(target: SidecarTarget, ctx?: AgentInstallContext): Promise<ProvisionTargetResult> {
+  async provision(
+    target: SidecarTarget,
+    ctx?: AgentInstallContext,
+  ): Promise<ProvisionTargetResult> {
     // G2-C1 / CLI-SEC-H2: recusa root.
     const uid = userInfo().uid;
     if (isRoot(uid)) {
@@ -1212,31 +1217,31 @@ async function defaultAgentInstaller(
   // O usuário PRECISA ver a EVOLUÇÃO + ONDE está na fila (após o clear, este cabeçalho é a
   // única coisa que sobrevive — por isso a SEQUÊNCIA + a FILA vão AQUI, não num plano pré-loop
   // que o `2J` apagaria). Assim o dono vê "2/3: mem0" e que o headroom ainda vem.
-  const seq = ctx ? `Complemento ${ctx.index}/${ctx.total}: "${target}"` : `Complemento "${target}"`;
+  const seq = ctx
+    ? `Complemento ${ctx.index}/${ctx.total}: "${target}"`
+    : `Complemento "${target}"`;
   const queue = ctx ? `  (fila: ${ctx.plan.join(' · ')})` : '';
-  process.stdout.write(`  ── Instalando o ${seq} ──${queue}\n  (acompanhe abaixo; pode levar alguns minutos)\n\n`);
-  const run = spawnSync(
-    process.execPath,
-    [aluyScript, '-p', goal, '--yolo', '--no-self-check'],
-    {
-      stdio: 'inherit',
-      timeout: 900_000,
-      // Ambiente de saída LIMPA para o agente interno:
-      //  • ALUY_OVERWRITE_RENDER=0 / ALUY_SYNC_OUTPUT=0 — desligam o redesenho
-      //    "overwrite-in-place"; sem isso o agente reescreve por cima das linhas do
-      //    bootstrap e tudo embaralha ("coisas em cima de coisas"). Append-only é legível.
-      //  • ALUY_NO_WEAK_YOLO_WARN=1 — silencia o aviso de modo-autônomo NESTE agente
-      //    interno (a tarefa é nossa e confiável; o aviso é só ruído durante o install).
-      env: {
-        ...process.env,
-        ALUY_OVERWRITE_RENDER: '0',
-        ALUY_SYNC_OUTPUT: '0',
-        ALUY_NO_WEAK_YOLO_WARN: '1',
-        // O dono quer ACOMPANHAR: progresso VERBOSO (comando + saída de cada tool) no stderr.
-        ALUY_PRINT_VERBOSE: '1',
-      },
-    },
+  process.stdout.write(
+    `  ── Instalando o ${seq} ──${queue}\n  (acompanhe abaixo; pode levar alguns minutos)\n\n`,
   );
+  const run = spawnSync(process.execPath, [aluyScript, '-p', goal, '--yolo', '--no-self-check'], {
+    stdio: 'inherit',
+    timeout: 900_000,
+    // Ambiente de saída LIMPA para o agente interno:
+    //  • ALUY_OVERWRITE_RENDER=0 / ALUY_SYNC_OUTPUT=0 — desligam o redesenho
+    //    "overwrite-in-place"; sem isso o agente reescreve por cima das linhas do
+    //    bootstrap e tudo embaralha ("coisas em cima de coisas"). Append-only é legível.
+    //  • ALUY_NO_WEAK_YOLO_WARN=1 — silencia o aviso de modo-autônomo NESTE agente
+    //    interno (a tarefa é nossa e confiável; o aviso é só ruído durante o install).
+    env: {
+      ...process.env,
+      ALUY_OVERWRITE_RENDER: '0',
+      ALUY_SYNC_OUTPUT: '0',
+      ALUY_NO_WEAK_YOLO_WARN: '1',
+      // O dono quer ACOMPANHAR: progresso VERBOSO (comando + saída de cada tool) no stderr.
+      ALUY_PRINT_VERBOSE: '1',
+    },
+  });
   // mem0: o caminho via agente NÃO copia o script do servidor (só o nativo copia).
   // Garantimos aqui. SOBRESCREVE SEMPRE (não só quando ausente): o script é nosso asset e
   // tem que bater com a versão do CLI — ACHADO DO DONO: ao atualizar o aluy com o venv já
@@ -1265,7 +1270,9 @@ async function defaultAgentInstaller(
   // ACHADO DO DONO: este poll era SILENCIOSO e longo (parecia "travado no mem0" — na verdade
   // re-rodava o `import mem0,chromadb` pesado por até 12min). Agora AVISA que está verificando
   // e o teto caiu p/ ~2min (o agente já confirmou internamente; aqui é só rede-safety).
-  process.stderr.write(`\n  verificando "${target}"… (alguns segundos; a próxima etapa vem em seguida)\n`);
+  process.stderr.write(
+    `\n  verificando "${target}"… (alguns segundos; a próxima etapa vem em seguida)\n`,
+  );
   // LIGHT: o agente já confirmou imports/serviço no seu goal — aqui só existência (rápido),
   // p/ não pendurar a fila re-importando chromadb (achado do dono: "travava no mem0").
   let healthy = await verifyTargetHealthy(target, process.platform, true);
@@ -1329,7 +1336,10 @@ function ensureOllamaOnPath(): void {
   if (process.platform === 'win32') return;
   try {
     // 1) Já alcançável? `command -v ollama` num shell de login (lê ~/.profile/.bashrc).
-    const probe = spawnSync('sh', ['-lc', 'command -v ollama'], { encoding: 'utf8', timeout: 10_000 });
+    const probe = spawnSync('sh', ['-lc', 'command -v ollama'], {
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
     if (probe.status === 0 && (probe.stdout ?? '').trim() !== '') return; // já no PATH
 
     // 2) Descobre o binário nos locais conhecidos (instalador oficial, brew, user-local).
@@ -1420,7 +1430,9 @@ function preflightPrereqs(toggles: ReadonlySet<SidecarTarget>): string[] {
   if (toggles.has('mem0') || toggles.has('headroom')) {
     const py = checkPython();
     if (!py.ok) {
-      missing.push(`python3 >= ${MEM0_MIN_PYTHON} para mem0/headroom (encontrado: ${py.version || 'nenhum'})`);
+      missing.push(
+        `python3 >= ${MEM0_MIN_PYTHON} para mem0/headroom (encontrado: ${py.version || 'nenhum'})`,
+      );
       apt.push('python3', 'python3-venv', 'python3-pip');
     } else {
       if (!checkVenvModule()) {

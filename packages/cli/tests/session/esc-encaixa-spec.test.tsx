@@ -144,8 +144,7 @@ describe('ESPEC FINAL — ESC só PARA com tudo vazio; senão ACELERA o encaixe'
     await pressUntil(
       () => s.stdin.write(CR),
       () =>
-        s.controller.current.pendingInjects.length > 0 ||
-        plain(s.lastFrame()).includes('na fila'),
+        s.controller.current.pendingInjects.length > 0 || plain(s.lastFrame()).includes('na fila'),
     );
     expect(s.controller.current.pendingInjects.length).toBeGreaterThan(0);
 

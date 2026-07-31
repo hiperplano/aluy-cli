@@ -48,7 +48,10 @@ export function CycleCeilingGate(props: CycleCeilingGateProps): React.ReactEleme
       <Box>
         <Role name="accent">{theme.box.topLeft} </Role>
         <Glyph name="clock" role="accent" />
-        <Role name="accent"> {props.ceilingLabel} atingido {theme.box.horizontal.repeat(4)} pausado</Role>
+        <Role name="accent">
+          {' '}
+          {props.ceilingLabel} atingido {theme.box.horizontal.repeat(4)} pausado
+        </Role>
       </Box>
       <Box>
         <Role name="accent">{theme.box.vertical} </Role>
@@ -64,7 +67,7 @@ export function CycleCeilingGate(props: CycleCeilingGateProps): React.ReactEleme
         <Role name="fgDim">motivo do juiz (local · não verificado):</Role>
       </Box>
       <Box>
-        <Role name="accent">{theme.box.vertical}   </Role>
+        <Role name="accent">{theme.box.vertical} </Role>
         <Text wrap="truncate-end">
           <Role name="fg">{reason}</Role>
         </Text>

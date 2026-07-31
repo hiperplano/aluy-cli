@@ -130,10 +130,7 @@ function mcpTool(name: string): NativeTool<ToolPorts> {
 
 describe('ADR-0145 (frente d) — CapabilitiesPort integrado ao SessionController', () => {
   it('a tool `capabilities` devolve o menu VIVO como OBSERVAÇÃO envelopada (nunca system)', async () => {
-    const { model, callsMessages } = recordingModel([
-      toolCall('capabilities', {}),
-      'entendido.',
-    ]);
+    const { model, callsMessages } = recordingModel([toolCall('capabilities', {}), 'entendido.']);
     const agentRegistry = new AgentRegistry([globalAgent], [projectAgent]);
     const controller = new SessionController({
       model,
@@ -147,7 +144,10 @@ describe('ADR-0145 (frente d) — CapabilitiesPort integrado ao SessionControlle
       meta: { cwd: '/proj', tier: 'custom', tokens: 0, windowPct: 0 },
       agentRegistry,
       skills: [globalSkill, projectSkill],
-      mcpTools: [mcpTool('mcp__playwright__browser_click'), mcpTool('mcp__playwright__browser_type')],
+      mcpTools: [
+        mcpTool('mcp__playwright__browser_click'),
+        mcpTool('mcp__playwright__browser_type'),
+      ],
     });
 
     await controller.submit('o que você consegue fazer?');
@@ -161,7 +161,9 @@ describe('ADR-0145 (frente d) — CapabilitiesPort integrado ao SessionControlle
 
     // a observação está num canal não-system (user OU tool, conforme o caminho de
     // tool-calling), ENVELOPADA como dado, e contém o menu.
-    const obsMsg = secondTurnMessages.find((m) => m.content.includes('CAPACIDADES DISPONÍVEIS AGORA'));
+    const obsMsg = secondTurnMessages.find((m) =>
+      m.content.includes('CAPACIDADES DISPONÍVEIS AGORA'),
+    );
     expect(obsMsg).toBeDefined();
     expect(obsMsg!.role).not.toBe('system');
 
@@ -210,7 +212,9 @@ describe('ADR-0145 (frente d) — CapabilitiesPort integrado ao SessionControlle
 
     expect(asked).toBe(false); // read puro: Plan permite sem perguntar.
     const secondTurnMessages = callsMessages[1]!;
-    const obsMsg = secondTurnMessages.find((m) => m.content.includes('CAPACIDADES DISPONÍVEIS AGORA'));
+    const obsMsg = secondTurnMessages.find((m) =>
+      m.content.includes('CAPACIDADES DISPONÍVEIS AGORA'),
+    );
     expect(obsMsg).toBeDefined();
   });
 });

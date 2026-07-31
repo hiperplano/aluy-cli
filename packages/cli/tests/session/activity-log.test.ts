@@ -151,7 +151,12 @@ describe('buildActivityLog — V2 agrupado por agente', () => {
 // FlowActivity, sem depender da FlowTree real — para isolar os ramos do
 // mapeador interno activityToEvent e do anel bounded.
 
-import type { FlowSummary, FlowDrillIn, FlowActivity, FlowAccounting } from '@hiperplano/aluy-cli-core';
+import type {
+  FlowSummary,
+  FlowDrillIn,
+  FlowActivity,
+  FlowAccounting,
+} from '@hiperplano/aluy-cli-core';
 
 /** Contabilidade padrão para fixtures de overview. */
 const BASE_ACCT: FlowAccounting = {

@@ -138,9 +138,7 @@ function subAgentsBlock(blocks: readonly SessionBlock[]): SubAgentsBlock | undef
 }
 
 function dwimNote(blocks: readonly SessionBlock[]): NoteBlock | undefined {
-  return blocks.find(
-    (b): b is NoteBlock => b.kind === 'note' && b.title === 'spawn_agent',
-  );
+  return blocks.find((b): b is NoteBlock => b.kind === 'note' && b.title === 'spawn_agent');
 }
 
 const askAutoApprove = {
@@ -233,10 +231,7 @@ describe('T-DWIM2 — local, agent NÃO é kind:local (sentinela/sinônimo de ti
   it('agent="opus" (sinônimo de TIER, não slug local) ⇒ não roteia, erro de agente desconhecido', async () => {
     const captured: { messages?: string } = {};
     const localCalls: string[] = [];
-    const model = parentDelegates(
-      { agents: [{ label: 'x', goal: 'g', agent: 'opus' }] },
-      captured,
-    );
+    const model = parentDelegates({ agents: [{ label: 'x', goal: 'g', agent: 'opus' }] }, captured);
     const controller = new SessionController({
       model,
       permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
@@ -425,9 +420,7 @@ describe('T-DWIM7 — local, agent=slug inexistente E model=explícito diferente
     const localCalls: string[] = [];
     const model = parentDelegates(
       {
-        agents: [
-          { label: 'x', goal: 'g', agent: 'bogus-agent-name', model: 'deepseek-v4-pro' },
-        ],
+        agents: [{ label: 'x', goal: 'g', agent: 'bogus-agent-name', model: 'deepseek-v4-pro' }],
       },
       captured,
     );

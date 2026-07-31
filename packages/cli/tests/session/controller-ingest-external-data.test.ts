@@ -1,4 +1,4 @@
-// ADR-0134/0135 — `SessionController.ingestExternalData` é o canal de DADO da bridge de
+// ADR-0154 — `SessionController.ingestExternalData` é o canal de DADO da bridge de
 // conectores (ex.: Telegram). Prova: o conteúdo entra como `observation` (DADO_NAO_CONFIAVEL),
 // NUNCA como instrução do usuário (`user_inject`) — a fronteira de proveniência (CLI-SEC-4).
 // FRUGAL: ModelCaller MOCK (sem rede); inspeciona o que o modelo VÊ.
@@ -38,9 +38,11 @@ function fakePorts(): ToolPorts {
   return { fs, shell, search };
 }
 
-const approveAll = { async resolve() {
-  return { kind: 'approve-once' as const };
-} };
+const approveAll = {
+  async resolve() {
+    return { kind: 'approve-once' as const };
+  },
+};
 const meta = { cwd: '/proj', tier: 'aluy-strata', tokens: 0, windowPct: 0 };
 
 async function waitFor(cond: () => boolean, timeoutMs = 4000): Promise<void> {

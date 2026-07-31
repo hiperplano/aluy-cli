@@ -1112,7 +1112,9 @@ export class UserConfigStore {
    */
   saveSubAgentModel(model: string | undefined): boolean {
     const trimmed = model?.trim();
-    return this.save({ subAgent: trimmed !== undefined && trimmed !== '' ? { model: trimmed } : {} });
+    return this.save({
+      subAgent: trimmed !== undefined && trimmed !== '' ? { model: trimmed } : {},
+    });
   }
 
   /**

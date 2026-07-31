@@ -104,9 +104,7 @@ describe('resolveModelTier (GS-MD4 · ADR-0146)', () => {
     for (const m of ['haiku', 'sonnet', 'opus', 'fast', 'premium', 'granito']) {
       const t = resolveModelTier(m);
       expect(t.kind).toBe('tier');
-      expect(t.kind === 'tier' && (ALUY_TIER_KEYS as readonly string[]).includes(t.key)).toBe(
-        true,
-      );
+      expect(t.kind === 'tier' && (ALUY_TIER_KEYS as readonly string[]).includes(t.key)).toBe(true);
     }
   });
 });
@@ -185,9 +183,9 @@ describe('ADR-0146 (D5) — formatResolvedModelLabel (rótulo de UI, sem credenc
     expect(formatResolvedModelLabel({ kind: 'inherit' }, { tier: 'aluy-flux' })).toBe(
       'herdado (aluy-flux)',
     );
-    expect(
-      formatResolvedModelLabel({ kind: 'inherit' }, { tier: 'custom', model: 'x/y' }),
-    ).toBe('herdado (custom · x/y)');
+    expect(formatResolvedModelLabel({ kind: 'inherit' }, { tier: 'custom', model: 'x/y' })).toBe(
+      'herdado (custom · x/y)',
+    );
   });
 
   it('NUNCA inclui provider/base_url/api_key/token no rótulo', () => {
@@ -219,15 +217,15 @@ describe('ADR-0152 (D5-bis) — formatResolvedModelLabel + parent.activeModel (p
   });
 
   it('activeModel AUSENTE + parent.tier="custom" ⇒ "herdado (custom · <slug>)" — INALTERADO', () => {
-    expect(
-      formatResolvedModelLabel({ kind: 'inherit' }, { tier: 'custom', model: 'x' }),
-    ).toBe('herdado (custom · x)');
+    expect(formatResolvedModelLabel({ kind: 'inherit' }, { tier: 'custom', model: 'x' })).toBe(
+      'herdado (custom · x)',
+    );
   });
 
   it('activeModel AUSENTE + só tier ⇒ "herdado (<tier>)" — INALTERADO', () => {
-    expect(
-      formatResolvedModelLabel({ kind: 'inherit' }, { tier: 'aluy-strata' }),
-    ).toBe('herdado (aluy-strata)');
+    expect(formatResolvedModelLabel({ kind: 'inherit' }, { tier: 'aluy-strata' })).toBe(
+      'herdado (aluy-strata)',
+    );
   });
 
   it('activeModel presente NÃO afeta kind:"tier"/"custom" (só o ramo inherit/unknown)', () => {
@@ -456,7 +454,9 @@ describe('ADR-0152 (D6c) — formatUnknownLocalModelError (probe local, sem vaza
       'deepseek-v4-pro',
       'deepseek-v4-flash',
     ]);
-    expect(msg).not.toMatch(/\b(provider|base_?url|api[_-]?key|token|secret|authorization|host)\b/i);
+    expect(msg).not.toMatch(
+      /\b(provider|base_?url|api[_-]?key|token|secret|authorization|host)\b/i,
+    );
   });
 
   it('sem sugestão razoável ⇒ ainda lista os disponíveis (sem quebrar)', () => {
@@ -478,7 +478,10 @@ describe('ADR-0152 (D6) — formatResolvedModelLabel: ramo "local"', () => {
 
   it('kind:"local" SEM slug (degenerado) ⇒ usa activeModel do pai, senão parent.model', () => {
     expect(
-      formatResolvedModelLabel({ kind: 'local' }, { tier: 'aluy-flux', activeModel: 'deepseek-v4-pro' }),
+      formatResolvedModelLabel(
+        { kind: 'local' },
+        { tier: 'aluy-flux', activeModel: 'deepseek-v4-pro' },
+      ),
     ).toBe('local · deepseek-v4-pro');
     expect(formatResolvedModelLabel({ kind: 'local' }, { tier: 'custom', model: 'x' })).toBe(
       'local · x',

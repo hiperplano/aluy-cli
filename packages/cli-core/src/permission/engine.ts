@@ -93,10 +93,7 @@ import { REMEMBER_TOOL_NAME, RECALL_TOOL_NAME } from '../agent/memory/contract.j
 import { ROOM_POST_TOOL_NAME } from '../agent/rooms/room-tools.js';
 import { PLAN_TOOL_NAME } from '../agent/tools/plan.js';
 import { QUESTION_TOOL_NAME } from '../agent/tools/question.js';
-import {
-  CAPABILITIES_TOOL_NAME,
-  CAPABILITIES_TOOL_ALIAS,
-} from '../agent/tools/capabilities.js';
+import { CAPABILITIES_TOOL_NAME, CAPABILITIES_TOOL_ALIAS } from '../agent/tools/capabilities.js';
 import {
   SESSION_COMMAND_TOOL_NAME,
   SESSION_COMMAND_DESTRUCTIVE_CALL_NAME,

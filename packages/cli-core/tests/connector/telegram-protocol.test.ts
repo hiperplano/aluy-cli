@@ -19,7 +19,17 @@ describe('parseGetUpdates (ADR-0154 §4 — parser puro, fail-safe)', () => {
 
   it('FORWARD ⇒ forwarded:true (vira DADO na malha)', () => {
     const p = parseGetUpdates(
-      resp([{ update_id: 1, message: dm({ chat: { id: 5, type: 'private' }, from: { id: 5 }, text: 'x', forward_origin: {} }) }]),
+      resp([
+        {
+          update_id: 1,
+          message: dm({
+            chat: { id: 5, type: 'private' },
+            from: { id: 5 },
+            text: 'x',
+            forward_origin: {},
+          }),
+        },
+      ]),
       0,
     );
     expect(p.updates[0]).toMatchObject({ chatId: 5, text: 'x', forwarded: true });
@@ -45,8 +55,14 @@ describe('parseGetUpdates (ADR-0154 §4 — parser puro, fail-safe)', () => {
   it('R4: chat NÃO-privado (grupo/canal) ⇒ IGNORADO (não autoriza terceiro do grupo)', () => {
     const p = parseGetUpdates(
       resp([
-        { update_id: 1, message: { chat: { id: -500, type: 'group' }, from: { id: 999 }, text: 'oi grupo' } },
-        { update_id: 2, message: { chat: { id: -1, type: 'supergroup' }, from: { id: 9 }, text: 'x' } },
+        {
+          update_id: 1,
+          message: { chat: { id: -500, type: 'group' }, from: { id: 999 }, text: 'oi grupo' },
+        },
+        {
+          update_id: 2,
+          message: { chat: { id: -1, type: 'supergroup' }, from: { id: 9 }, text: 'x' },
+        },
         { update_id: 3, message: dm({ text: 'dm vale' }) },
       ]),
       0,
@@ -57,12 +73,18 @@ describe('parseGetUpdates (ADR-0154 §4 — parser puro, fail-safe)', () => {
   });
 
   it('R4: chat sem `type` ⇒ tratado como NÃO-privado (ignorado, fail-closed)', () => {
-    const p = parseGetUpdates(resp([{ update_id: 1, message: { chat: { id: 1 }, from: { id: 1 }, text: 'x' } }]), 0);
+    const p = parseGetUpdates(
+      resp([{ update_id: 1, message: { chat: { id: 1 }, from: { id: 1 }, text: 'x' } }]),
+      0,
+    );
     expect(p.updates).toHaveLength(0);
   });
 
   it('fromId default = chatId quando from ausente', () => {
-    const p = parseGetUpdates(resp([{ update_id: 1, message: { chat: { id: 7, type: 'private' }, text: 'a' } }]), 0);
+    const p = parseGetUpdates(
+      resp([{ update_id: 1, message: { chat: { id: 7, type: 'private' }, text: 'a' } }]),
+      0,
+    );
     expect(p.updates[0]).toMatchObject({ chatId: 7, fromId: 7 });
   });
 
@@ -87,7 +109,10 @@ describe('parseGetUpdates (ADR-0154 §4 — parser puro, fail-safe)', () => {
   });
 
   it('texto ausente ⇒ string vazia (a malha descarta no classify)', () => {
-    const p = parseGetUpdates(resp([{ update_id: 1, message: { chat: { id: 1, type: 'private' } } }]), 0);
+    const p = parseGetUpdates(
+      resp([{ update_id: 1, message: { chat: { id: 1, type: 'private' } } }]),
+      0,
+    );
     expect(p.updates[0]?.text).toBe('');
   });
 });

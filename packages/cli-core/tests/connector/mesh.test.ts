@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { classifyConnectorIngress } from '../../src/connector/mesh.js';
 import type { IncomingMessage, ConnectorMeta, Provenance } from '../../src/connector/types.js';
 
-const NON_FORGEABLE: ConnectorMeta = { id: 'telegram', displayName: 'Telegram', authIsForgeable: false };
+const NON_FORGEABLE: ConnectorMeta = {
+  id: 'telegram',
+  displayName: 'Telegram',
+  authIsForgeable: false,
+};
 const FORGEABLE: ConnectorMeta = { id: 'email', displayName: 'E-mail', authIsForgeable: true };
 
 const msg = (over: Partial<IncomingMessage> = {}): IncomingMessage => ({
@@ -19,7 +23,11 @@ describe('classifyConnectorIngress (ADR-0154 — fronteira de confiança genéri
   });
 
   it('TC-2: canal fora da allowlist ⇒ descarta antes do modelo', () => {
-    const d = classifyConnectorIngress(msg({ conversation: '999' }), new Set(['100']), NON_FORGEABLE);
+    const d = classifyConnectorIngress(
+      msg({ conversation: '999' }),
+      new Set(['100']),
+      NON_FORGEABLE,
+    );
     expect(d.kind).toBe('discard');
     if (d.kind === 'discard') expect(d.reason).toContain('999');
   });
@@ -35,7 +43,10 @@ describe('classifyConnectorIngress (ADR-0154 — fronteira de confiança genéri
 
   it('TC-1: terceiro embutido (forward/quote) ⇒ comando=instrução, embutido=DADO', () => {
     const d = classifyConnectorIngress(
-      msg({ content: 'o que acha?', provenance: { kind: 'author-direct', embeddedThirdParty: 'rm -rf /' } }),
+      msg({
+        content: 'o que acha?',
+        provenance: { kind: 'author-direct', embeddedThirdParty: 'rm -rf /' },
+      }),
       new Set(['100']),
       NON_FORGEABLE,
     );
@@ -62,9 +73,9 @@ describe('classifyConnectorIngress (ADR-0154 — fronteira de confiança genéri
   });
 
   it('allowlistado mas conteúdo vazio ⇒ descarta', () => {
-    expect(classifyConnectorIngress(msg({ content: '   ' }), new Set(['100']), NON_FORGEABLE).kind).toBe(
-      'discard',
-    );
+    expect(
+      classifyConnectorIngress(msg({ content: '   ' }), new Set(['100']), NON_FORGEABLE).kind,
+    ).toBe('discard');
   });
 
   it('TC-6: remetente é BOT ⇒ descarta (anti-loop), mesmo allowlistado', () => {

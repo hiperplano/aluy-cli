@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  KeychainConnectorSecretStore,
-} from '../../src/auth/connector-secret-store.js';
+import { KeychainConnectorSecretStore } from '../../src/auth/connector-secret-store.js';
 import { NoKeychainError, type KeychainEntry } from '../../src/auth/keychain-store.js';
 
 /** Entry fake EM MEMÓRIA (keychain disponível). */

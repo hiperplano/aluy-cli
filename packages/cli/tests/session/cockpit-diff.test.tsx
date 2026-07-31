@@ -477,9 +477,10 @@ describe('createCockpitDiffer — auto-correção (expectedRowsOf): mismatch for
     d.transform(cockpitFrame('a\nX\nc')); // 2º: DIVERGE (3≠4) ⇒ full-repaint forçado (provado acima).
     const out = d.transform(cockpitFrame('a\nX\nc\nY')); // 3º: já SAUDÁVEL de novo (4==4).
     // volta ao diff PARCIAL normal (CUP na linha que mudou) — NÃO outro full-repaint.
-    expect(out.startsWith(CURSOR_HOME), 'não deveria repetir o full-repaint num frame saudável').toBe(
-      false,
-    );
+    expect(
+      out.startsWith(CURSOR_HOME),
+      'não deveria repetir o full-repaint num frame saudável',
+    ).toBe(false);
     expect(countCursorTo(out)).toBeGreaterThanOrEqual(1);
   });
 
@@ -503,14 +504,16 @@ describe('createCockpitDiffer — auto-correção (expectedRowsOf): mismatch for
     // `undefined` (default) e valores inválidos (0/NaN/negativo) desligam a auto-correção —
     // testes/legado que não injetam o 2º parâmetro seguem se comportando como antes.
     for (const bad of [undefined, () => NaN, () => 0, () => -1] as const) {
-      const d = typeof bad === 'function' ? createCockpitDiffer(undefined, bad) : createCockpitDiffer();
+      const d =
+        typeof bad === 'function' ? createCockpitDiffer(undefined, bad) : createCockpitDiffer();
       d.transform(cockpitFrame('a\nb\nc'));
       // corpo MUDA de tamanho (2 linhas) sem nenhum "esperado" válido ⇒ segue o caminho comum
       // (reescreve as mudadas + varre as órfãs), NUNCA um full-repaint espúrio por mismatch.
       const out = d.transform(cockpitFrame('a\nb'));
-      expect(out.startsWith(CURSOR_HOME), 'sem expectedRowsOf válido não deve forçar full-repaint').toBe(
-        false,
-      );
+      expect(
+        out.startsWith(CURSOR_HOME),
+        'sem expectedRowsOf válido não deve forçar full-repaint',
+      ).toBe(false);
     }
   });
 });

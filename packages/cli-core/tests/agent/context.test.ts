@@ -578,7 +578,10 @@ describe('ADR-0145 (frente c) — few-shot no tier FRACO (gate isWeakTier)', () 
 describe('F-QP — orientação PERMANENTE de `perguntar` no system (opções ⇒ caixa)', () => {
   it('o MAPA DE CAPACIDADES traz a linha de `perguntar` com os três gatilhos', () => {
     const sys = buildSystemPrompt(NATIVE_TOOLS);
-    const mapa = sys.slice(sys.indexOf('MAPA DE CAPACIDADES'), sys.indexOf('Ferramentas disponíveis:'));
+    const mapa = sys.slice(
+      sys.indexOf('MAPA DE CAPACIDADES'),
+      sys.indexOf('Ferramentas disponíveis:'),
+    );
     expect(mapa).toContain('perguntar');
     expect(mapa).toMatch(/opções/i);
     expect(mapa).toMatch(/TRAVA/);
@@ -608,7 +611,10 @@ describe('F-QP — orientação PERMANENTE de `perguntar` no system (opções �
     // uma tool que não tem só geraria tool-call inválida.
     const semPerguntar = NATIVE_TOOLS.filter((t) => t.name !== 'perguntar');
     const sys = buildSystemPrompt(semPerguntar);
-    const mapa = sys.slice(sys.indexOf('MAPA DE CAPACIDADES'), sys.indexOf('Ferramentas disponíveis:'));
+    const mapa = sys.slice(
+      sys.indexOf('MAPA DE CAPACIDADES'),
+      sys.indexOf('Ferramentas disponíveis:'),
+    );
     expect(mapa).not.toContain('perguntar');
   });
 

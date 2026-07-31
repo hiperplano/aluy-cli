@@ -134,7 +134,11 @@ function fakeTtrPort(opts: {
         registered: true,
       };
     }
-    return { ok: false, detail: `modelo local "${slug}" não respondeu: HTTP 404 — modelo ou baseURL errado?`, registered: false };
+    return {
+      ok: false,
+      detail: `modelo local "${slug}" não respondeu: HTTP 404 — modelo ou baseURL errado?`,
+      registered: false,
+    };
   };
 }
 
@@ -223,13 +227,15 @@ describe('ADR-0153 — slug DESCONHECIDO: test-then-register (ok ⇒ registra+ro
         // em isolamento em `test-then-register.test.ts`, teste "fail-closed").
         return {
           ok: false,
-          detail: 'modelo local "vendor/sem-credencial" não respondeu (rede/baseURL, ou egress bloqueado pelo anti-SSRF).',
+          detail:
+            'modelo local "vendor/sem-credencial" não respondeu (rede/baseURL, ou egress bloqueado pelo anti-SSRF).',
           registered: false,
         };
       }
       return {
         ok: false,
-        detail: 'modelo local "deepseek/deepseek-v4-nope" não respondeu: HTTP 404 — modelo ou baseURL errado?',
+        detail:
+          'modelo local "deepseek/deepseek-v4-nope" não respondeu: HTTP 404 — modelo ou baseURL errado?',
         registered: false,
       };
     };
@@ -245,7 +251,9 @@ describe('ADR-0153 — slug DESCONHECIDO: test-then-register (ok ⇒ registra+ro
       verifyAndRegisterLocalModel,
     });
     // NENHUMA exception escapa do submit — o lote conclui normalmente.
-    await expect(controller.submit('lote misto: bom (conhecido) + 2 ruins (TTR)')).resolves.not.toThrow();
+    await expect(
+      controller.submit('lote misto: bom (conhecido) + 2 ruins (TTR)'),
+    ).resolves.not.toThrow();
 
     expect(ttrCalls.sort()).toEqual(['deepseek/deepseek-v4-nope', 'vendor/sem-credencial']);
     expect(localLog).toEqual(['LOCAL:deepseek/deepseek-v4-pro']); // só o bom rodou
@@ -301,7 +309,10 @@ describe('TESTE DE SEGURANÇA 6 (nível-controller) — slug JÁ CONHECIDO não 
       subAgents: { enabled: true },
       callerForLocalModel: (slug) => taggedCaller(`LOCAL:${slug}`, localLog),
       localModelCatalog: { listNames: () => ['deepseek/deepseek-v4-pro'] },
-      verifyAndRegisterLocalModel: fakeTtrPort({ okSlugs: ['deepseek/deepseek-v4-pro'], calls: ttrCalls }),
+      verifyAndRegisterLocalModel: fakeTtrPort({
+        okSlugs: ['deepseek/deepseek-v4-pro'],
+        calls: ttrCalls,
+      }),
     });
     await controller.submit('spawn com slug JÁ conhecido — não deve testar');
 
@@ -331,7 +342,9 @@ describe('TESTE DE SEGURANÇA 6 (nível-controller) — slug JÁ CONHECIDO não 
       subAgents: { enabled: true, maxConcurrency: 3 },
       callerForLocalModel: (slug) => taggedCaller(`LOCAL:${slug}`, localLog),
       // UNIÃO declarado(vazio) ∪ sessionRegistered — como `run.tsx` monta de fato (D2).
-      localModelCatalog: { listNames: () => (sessionRegistered.size > 0 ? [...sessionRegistered] : undefined) },
+      localModelCatalog: {
+        listNames: () => (sessionRegistered.size > 0 ? [...sessionRegistered] : undefined),
+      },
       verifyAndRegisterLocalModel: fakeTtrPort({
         okSlugs: ['vendor/model-novo'],
         calls: ttrCalls,
@@ -427,7 +440,10 @@ describe('TESTE DE SEGURANÇA 8 (nível-controller) — a catraca: sessão em Pl
       subAgents: { enabled: true },
       callerForLocalModel: (slug) => taggedCaller(`LOCAL:${slug}`, []),
       localModelCatalog: { listNames: () => ['deepseek/deepseek-v4-pro'] },
-      verifyAndRegisterLocalModel: fakeTtrPort({ okSlugs: ['deepseek/deepseek-v4-flash'], calls: ttrCalls }),
+      verifyAndRegisterLocalModel: fakeTtrPort({
+        okSlugs: ['deepseek/deepseek-v4-flash'],
+        calls: ttrCalls,
+      }),
     });
     await controller.submit('spawn sob Plan — negado antes de qualquer filho nascer');
 
@@ -538,7 +554,9 @@ describe('TESTE DE SEGURANÇA 11 (nível-controller) — DWIM não cresce: nunca
   it('DWIM COM slug JÁ no catálogo (confirmado) ⇒ roteia normalmente, SEM tocar a porta TTR (catálogo já resolve)', async () => {
     const ttrCalls: string[] = [];
     const localLog: string[] = [];
-    const model = parentDelegates({ agents: [{ label: 'x', goal: 'g', agent: 'deepseek/deepseek-v4-pro' }] });
+    const model = parentDelegates({
+      agents: [{ label: 'x', goal: 'g', agent: 'deepseek/deepseek-v4-pro' }],
+    });
     const registry = new AgentRegistry([], []);
     const controller = new SessionController({
       model,
@@ -550,7 +568,10 @@ describe('TESTE DE SEGURANÇA 11 (nível-controller) — DWIM não cresce: nunca
       agentRegistry: registry,
       callerForLocalModel: (slug) => taggedCaller(`LOCAL:${slug}`, localLog),
       localModelCatalog: { listNames: () => ['deepseek/deepseek-v4-pro'] }, // slug JÁ confirmado
-      verifyAndRegisterLocalModel: fakeTtrPort({ okSlugs: ['deepseek/deepseek-v4-pro'], calls: ttrCalls }),
+      verifyAndRegisterLocalModel: fakeTtrPort({
+        okSlugs: ['deepseek/deepseek-v4-pro'],
+        calls: ttrCalls,
+      }),
     });
     await controller.submit('agent com slug JÁ catalogado — DWIM roteia, sem porta TTR');
 

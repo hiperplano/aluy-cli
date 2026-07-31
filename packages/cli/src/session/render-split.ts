@@ -74,7 +74,11 @@ export function sanitizeOrphans(blocks: readonly SessionBlock[]): SessionBlock[]
         // vira o `output` final p/ não sumir; omitido (não `undefined`) p/ exactOptional.
         if (b.status === 'running') {
           const { liveOutput, ...rest } = b;
-          return { ...rest, status: 'err' as const, output: b.output ?? liveOutput ?? 'interrompido' };
+          return {
+            ...rest,
+            status: 'err' as const,
+            output: b.output ?? liveOutput ?? 'interrompido',
+          };
         }
         return b;
       case 'aluy':

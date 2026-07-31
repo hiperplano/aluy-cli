@@ -191,7 +191,9 @@ describe('F-SC · awaitsUserDecision', () => {
     // a pergunta é retórica e o turno FECHA afirmando — é exatamente o "claimed done"
     // que o probe existe p/ conferir.
     expect(
-      awaitsUserDecision('Por que estava lento? Porque o MCP roda na thread da UI.\nCorrigi e validei: 42 req/min → 12.'),
+      awaitsUserDecision(
+        'Por que estava lento? Porque o MCP roda na thread da UI.\nCorrigi e validei: 42 req/min → 12.',
+      ),
     ).toBe(false);
   });
 

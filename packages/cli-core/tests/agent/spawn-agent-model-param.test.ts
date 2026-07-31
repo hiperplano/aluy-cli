@@ -6,15 +6,27 @@
 // o probe do controller) — aqui só provamos que o boundary TRANSPORTA o campo.
 
 import { describe, expect, it } from 'vitest';
-import { spawnAgentTool, type SubAgentPort, type ToolPorts } from '../../src/agent/tools/spawn-agent.js';
+import {
+  spawnAgentTool,
+  type SubAgentPort,
+  type ToolPorts,
+} from '../../src/agent/tools/spawn-agent.js';
 import type { SubAgentProfile } from '../../src/agent/subagent.js';
 import { MemoryFs, RecordingShell, MemorySearch } from './helpers.js';
 
 function makePorts(spawner: SubAgentPort): ToolPorts {
-  return { fs: new MemoryFs(), shell: new RecordingShell(), search: new MemorySearch(), subAgents: spawner };
+  return {
+    fs: new MemoryFs(),
+    shell: new RecordingShell(),
+    search: new MemorySearch(),
+    subAgents: spawner,
+  };
 }
 
-function capturingSpawner(): { port: SubAgentPort; captured: { profiles: readonly SubAgentProfile[] } } {
+function capturingSpawner(): {
+  port: SubAgentPort;
+  captured: { profiles: readonly SubAgentProfile[] };
+} {
   const captured: { profiles: readonly SubAgentProfile[] } = { profiles: [] };
   const port: SubAgentPort = {
     async spawn(profiles) {

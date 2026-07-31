@@ -381,7 +381,12 @@ describe('EST-0978 · RES-MD-1 · controller HONRA o conflito cross-camada na de
       agentRegistry: new AgentRegistry([], []),
       // Relê do cwd corrente: o `.claude/agents/revisor.md` do projeto onde estou agora.
       reloadProjectAgents: () => [
-        profile({ name: 'revisor', systemPrompt: 'projeto', tools: ['run_command'], origin: 'project' }),
+        profile({
+          name: 'revisor',
+          systemPrompt: 'projeto',
+          tools: ['run_command'],
+          origin: 'project',
+        }),
       ],
     });
 
