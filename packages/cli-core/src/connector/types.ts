@@ -6,7 +6,9 @@
 // Um conector (Telegram, Slack, e-mail…) só fornece TRANSPORTE + IDENTIDADE; a "malha"
 // (mesh.ts) é dona da FRONTEIRA DE CONFIANÇA, da allowlist, da injeção na sessão, do
 // registro da tool `<connector>_send`, do roteamento da confirmação `ask` ao canal e da
-// catraca. As invariantes de segurança (TC-1..TC-8) são HERDADAS por todo conector.
+// catraca. As invariantes de segurança (TC-1/TC-2/TC-3/TC-5/TC-6) são HERDADAS por todo
+// conector — numeração FECHADA nesse conjunto (ADR-0154/APR-0144, Tiago, 2026-07-31);
+// TC-4/TC-7/TC-8 NÃO são definidas, não é um espaço reservado em aberto.
 //
 // ⚠️ INERTE: a porta e os tipos são introduzidos aqui; o wiring a `--connector`/`--telegram`
 //    e o I/O concreto esperam o resto da bridge + a revisão de segurança que o ADR exige.

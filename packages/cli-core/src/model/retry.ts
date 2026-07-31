@@ -23,6 +23,12 @@
 // PURO (ADR-0053 §8): só decide `{retry, waitMs}` a partir do erro e do número da
 // tentativa. Não dorme, não faz I/O, não chama modelo. Quem dorme e re-chama é o
 // `StreamingModelCaller` (@hiperplano/aluy-cli), que também emite o contador p/ a TUI.
+//
+// DEFAULT: LIGADO (ADR-0156/APR-0146, Tiago, 2026-07-31). Nasceu desligado — ligar por
+// default mudava o comportamento de TODA sessão e colidia com o invariante CA-5 testado
+// ("erro estruturado sobe sem virar retry"), então a regra de ouro do specs pedia ADR
+// antes de trocar. O ADR foi escrito, a pergunta foi decidida: liga. `ALUY_RETRY=off`
+// preserva o comportamento antigo pra quem quiser voltar a ele.
 
 import { BrokerError, BrokerTransportError, ModelCallAbortedError } from './errors.js';
 
@@ -116,7 +122,14 @@ function clampInt(v: unknown, min: number, max: number): number | undefined {
 /**
  * Resolve a config a partir de env > config > default — a MESMA precedência dos outros
  * tunables (ADR-0150). `ALUY_RETRY=0`/`off` desliga; `ALUY_RETRY_WAIT_MS` ajusta a espera.
- * LIGADO por default: a alternativa (morrer no 1º blip) já se provou pior no uso real.
+ *
+ * DEFAULT = **LIGADO** (ADR-0156/APR-0146, Tiago, 2026-07-31). Nasceu desligado (a
+ * pergunta aberta do ADR-0156 original) porque ligar por default muda o comportamento
+ * de TODA sessão e colidia com o invariante CA-5 testado ("erro estruturado sobe sem
+ * virar retry") — pela regra de ouro do specs, isso exigia ADR, não um default trocado
+ * de lado. O ADR foi escrito, a pergunta foi decidida pelo dono: liga. O CA-5 deixa de
+ * ser o comportamento PADRÃO e passa a valer só sob `ALUY_RETRY=off` explícito — ver o
+ * teste emendado em `streaming-caller.test.ts` (mesma ADR).
  */
 export function resolveRetry(inputs: {
   readonly attemptsEnv?: string | undefined;
@@ -127,6 +140,8 @@ export function resolveRetry(inputs: {
   const rawEnv = (inputs.attemptsEnv ?? '').trim().toLowerCase();
   if (rawEnv === 'off' || rawEnv === 'false' || rawEnv === '0') return RETRY_OFF;
   // `on`/`true`/`1` ⇒ liga no default recomendado (sem precisar escolher um número).
+  // MESMO caminho que a AUSÊNCIA de env agora segue (ver fallback abaixo) — mantido
+  // como ramo explícito só pela clareza do `rawEnv` já ter sido parseado aqui.
   if (rawEnv === 'on' || rawEnv === 'true' || rawEnv === '1') {
     return {
       attempts: DEFAULT_RETRY_ATTEMPTS,
@@ -136,16 +151,14 @@ export function resolveRetry(inputs: {
         DEFAULT_RETRY_WAIT_MS,
     };
   }
-  // DEFAULT = **DESLIGADO**, deliberadamente. O invariante CA-5 do `streaming-caller`
-  // ("erro estruturado SOBE, sem virar uma 2ª rota/retry") é documentado e TESTADO; e
-  // ligar retry por default muda o comportamento de TODA sessão — decisão de produto,
-  // que pela regra de ouro do specs quer ADR, não um default trocado de lado. A
-  // capacidade fica pronta e a 1 env de distância (`ALUY_RETRY=on`), e o ADR decide se
-  // o default vira ON.
+  // Sem env reconhecido (ausente, ou um número em `ALUY_RETRY=<N>`): `attemptsConfig`
+  // pode ligar explicitamente; na ausência de QUALQUER config, cai no default LIGADO
+  // (`DEFAULT_RETRY_ATTEMPTS`) — não mais em `0`. Um `ALUY_RETRY=<N>` numérico ainda
+  // respeita o N pedido (inclusive `0`, que desliga na prática via `attempts<=0` abaixo).
   const attempts =
     clampInt(inputs.attemptsEnv, 0, MAX_RETRY_ATTEMPTS) ??
     clampInt(inputs.attemptsConfig, 0, MAX_RETRY_ATTEMPTS) ??
-    0;
+    DEFAULT_RETRY_ATTEMPTS;
   const waitMs =
     clampInt(inputs.waitMsEnv, 100, MAX_RETRY_WAIT_MS) ??
     clampInt(inputs.waitMsConfig, 100, MAX_RETRY_WAIT_MS) ??

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   BrokerError,
   DegenerateLoopError,
+  RETRY_OFF,
   type BrokerModelClient,
   type ModelStreamEvent,
   type ModelUsage,
@@ -357,8 +358,14 @@ describe('StreamingModelCaller — provider Custom (--provider//provider)', () =
   });
 });
 
-describe('StreamingModelCaller — propaga erro estruturado (CA-5)', () => {
-  it('um stream que LANÇA BrokerError sobe sem virar uma 2ª rota/retry', async () => {
+// ADR-0156/APR-0146 (Tiago, 2026-07-31) — o retry passou a nascer LIGADO por default.
+// O invariante original de CA-5 ("erro estruturado sobe sem virar retry") DEIXOU de
+// ser o comportamento PADRÃO — passa a valer só com `retry:RETRY_OFF` explícito. Este
+// bloco foi EMENDADO (não descartado): o 1º teste agora passa `retry:RETRY_OFF` de
+// propósito, provando que o invariante segue disponível pra quem desliga; o 2º teste
+// é NOVO e cobre o baseline atual (transitório retenta por default, sem config nenhuma).
+describe('StreamingModelCaller — propaga erro estruturado quando retry está OFF (CA-5, emendado)', () => {
+  it('com retry:RETRY_OFF, um stream que LANÇA BrokerError sobe sem virar uma 2ª rota/retry', async () => {
     const boom = new BrokerError({ status: 502, code: 'PROVIDER_ERROR', title: 'broker fora' });
     const client = {
       // eslint-disable-next-line require-yield
@@ -367,11 +374,44 @@ describe('StreamingModelCaller — propaga erro estruturado (CA-5)', () => {
       },
     } as unknown as BrokerModelClient;
     const s = spySink();
-    const caller = new StreamingModelCaller({ client, tier: 'aluy-flux', sink: s.sink });
+    const caller = new StreamingModelCaller({
+      client,
+      tier: 'aluy-flux',
+      sink: s.sink,
+      retry: RETRY_OFF,
+    });
 
     await expect(caller.call({ messages: [], idempotencyKey: 'k' })).rejects.toBe(boom);
     // o turno começou na UI (onStart) antes do erro subir — o controller mapeia o erro.
     expect(s.events).toEqual(['start']);
+  });
+
+  it('SEM config de retry (o default novo), a MESMA falha transitória É retentada e se recupera', async () => {
+    const boom = new BrokerError({ status: 502, code: 'PROVIDER_ERROR', title: 'broker fora' });
+    let calls = 0;
+    const client = {
+      async *stream(): AsyncGenerator<ModelStreamEvent> {
+        calls += 1;
+        if (calls === 1) throw boom;
+        yield { type: 'start', request_id: 'r', session_id: 's' };
+        yield { type: 'delta', content: 'recuperou' };
+        yield { type: 'done', finish_reason: 'stop' };
+      },
+    } as unknown as BrokerModelClient;
+    const s = spySink();
+    // Nenhum `retry:` passado — prova o DEFAULT em si. `ALUY_RETRY_WAIT_MS` curto só p/
+    // o teste não esperar os 5s reais; `ALUY_RETRY` (o liga/desliga) fica INTOCADO.
+    const prevWait = process.env.ALUY_RETRY_WAIT_MS;
+    process.env.ALUY_RETRY_WAIT_MS = '5';
+    try {
+      const caller = new StreamingModelCaller({ client, tier: 'aluy-flux', sink: s.sink });
+      const res = await caller.call({ messages: [], idempotencyKey: 'k' });
+      expect(res.content).toContain('recuperou');
+      expect(calls).toBe(2); // 1ª falhou, 2ª (retentada por default) recuperou
+    } finally {
+      if (prevWait === undefined) delete process.env.ALUY_RETRY_WAIT_MS;
+      else process.env.ALUY_RETRY_WAIT_MS = prevWait;
+    }
   });
 });
 

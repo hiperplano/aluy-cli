@@ -103,12 +103,16 @@ describe('F-RETRY · decideRetry — veredito e espera', () => {
 });
 
 describe('F-RETRY · resolveRetry — precedência env > config > default (ADR-0150)', () => {
-  // DESLIGADO por default de propósito: o invariante CA-5 do `streaming-caller`
-  // ("erro estruturado SOBE, sem virar uma 2ª rota/retry") é documentado E testado.
-  // Ligar por default muda o comportamento de toda sessão ⇒ é decisão de ADR, não um
-  // default trocado de lado. A capacidade fica a 1 env de distância.
-  it('sem nada ⇒ DESLIGADO (preserva o invariante CA-5 até um ADR decidir)', () => {
-    expect(resolveRetry({})).toEqual(RETRY_OFF);
+  // LIGADO por default (ADR-0156/APR-0146, Tiago, 2026-07-31). Nasceu desligado
+  // justamente porque colidia com o invariante CA-5 testado do `streaming-caller`
+  // ("erro estruturado SOBE, sem virar retry") — a regra de ouro do specs pedia ADR
+  // antes de trocar o default. O ADR foi escrito, a pergunta foi decidida: liga.
+  // `ALUY_RETRY=off` continua disponível pra quem quiser o comportamento antigo.
+  it('sem nada ⇒ LIGADO no default recomendado (ADR-0156, decidido)', () => {
+    const c = resolveRetry({});
+    expect(c.attempts).toBe(DEFAULT_RETRY_ATTEMPTS);
+    expect(c.waitMs).toBe(DEFAULT_RETRY_WAIT_MS);
+    expect(c).not.toEqual(RETRY_OFF);
   });
 
   it('`on`/`true`/`1` liga no default recomendado (sem escolher número)', () => {
@@ -126,7 +130,6 @@ describe('F-RETRY · resolveRetry — precedência env > config > default (ADR-0
   it('env vence config, config vence default', () => {
     expect(resolveRetry({ attemptsEnv: '7', attemptsConfig: 9 }).attempts).toBe(7);
     expect(resolveRetry({ attemptsConfig: 9 }).attempts).toBe(9);
-    // `waitMs` só é observável com o retry LIGADO (desligado ⇒ RETRY_OFF canônico).
     expect(resolveRetry({ attemptsEnv: '3', waitMsEnv: '2000', waitMsConfig: 8000 }).waitMs).toBe(
       2_000,
     );
@@ -138,6 +141,12 @@ describe('F-RETRY · resolveRetry — precedência env > config > default (ADR-0
     expect(resolveRetry({ attemptsEnv: '3', waitMsEnv: '99999999' }).waitMs).toBe(
       MAX_RETRY_WAIT_MS,
     );
-    expect(resolveRetry({ attemptsEnv: 'abc' })).toEqual(RETRY_OFF); // lixo ⇒ default (off)
+    // lixo no env ⇒ cai no default LIGADO (não em RETRY_OFF — só `off`/`0`/`false` desligam).
+    const c = resolveRetry({ attemptsEnv: 'abc' });
+    expect(c.attempts).toBe(DEFAULT_RETRY_ATTEMPTS);
+  });
+
+  it('`ALUY_RETRY=0` (numérico) desliga na prática, igual a `off`', () => {
+    expect(resolveRetry({ attemptsEnv: '0' })).toEqual(RETRY_OFF);
   });
 });
