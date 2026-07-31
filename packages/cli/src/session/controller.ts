@@ -4339,6 +4339,20 @@ export class SessionController {
   }
 
   /**
+   * F-WIN (descoberta) — a janela EFETIVA da sessão, em tokens. `0` ⇒ DESCONHECIDA:
+   * `⛁ %` congelado (a guarda `contextWindow > 0` do `onUsage` não passa) e
+   * auto-compactação INERTE (`decideAutoCompact` sai em `contextWindow <= 0`).
+   *
+   * Existe p/ o boot poder PERGUNTAR "a sessão ficou sem rede de segurança?" depois que
+   * a descoberta em background terminou — a única forma honesta de decidir se vale
+   * avisar o dono (ver o aviso no `run.tsx`). Somente LEITURA: quem MUDA a janela é o
+   * `applyContextWindow` (tier/env/config/descoberta), nunca um consumidor externo.
+   */
+  get modelContextWindow(): number {
+    return this.contextWindow;
+  }
+
+  /**
    * EST-0962 — TROCA o tier de modelo da sessão (seletor `/model`). Troca no CALLER
    * (fonte da verdade da próxima chamada de modelo) e ESPELHA em `meta.tier`/`meta.model`
    * p/ a StatusBar/Header re-renderizarem na hora. HG-2: só o `tier` (+ o slug Custom,

@@ -1349,7 +1349,34 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     if (declaredWindow === undefined) {
       void discoverContextWindow(slugForWindow)
         .then((r) => {
-          if (r.window > 0) built.controller.adoptDiscoveredModelWindow(slugForWindow, r.window);
+          if (r.window > 0) {
+            built.controller.adoptDiscoveredModelWindow(slugForWindow, r.window);
+            return;
+          }
+          // F-WIN (descoberta) — NÃO DESCOBRIMOS. Até aqui isto era um no-op MUDO, e é
+          // esse silêncio o defeito real que o dono reportou como "a descoberta não
+          // acontece": no ambiente dele o provider (tokenrouter) responde `/models` com
+          // 200 mas SEM nenhum campo de janela (`context_length`/`context_window`/…),
+          // então a descoberta faz tudo certo e devolve "nada" — e a sessão segue com
+          // `⛁ 0%` e auto-compactação INERTE, sem UMA linha explicando o porquê nem o
+          // que fazer. A spec da OpenAI não obriga o campo, logo isto NÃO é um bug a
+          // consertar no provider: é uma condição PERMANENTE daquele BYO, e o único
+          // conserto honesto é dizer ao dono que ele precisa declarar o número (chutar
+          // uma janela seria pior — ver `MIN/MAX_PLAUSIBLE_CONTEXT_TOKENS`: um
+          // denominador errado ou vira loop de compactação, ou a desliga em silêncio).
+          //
+          // Gate DUPLO p/ não virar ruído: só avisa se, DEPOIS da descoberta, a janela
+          // efetiva ainda for DESCONHECIDA (0) — quem declarou `contextByModel`, setou
+          // `ALUY_CONTEXT_WINDOW`/`context.window` ou roda um tier com janela real nunca
+          // vê esta nota. Declarado o número, o aviso some sozinho na sessão seguinte.
+          if (built.controller.modelContextWindow > 0) return;
+          built.controller.pushNote('janela', [
+            `o provider não informa a janela de contexto de "${slugForWindow}" em /models —` +
+              ' a auto-compactação fica INERTE e o `⛁ %` não sai de 0.',
+            `declare o número em \`providers[].contextByModel["${slugForWindow}"]\` no` +
+              ' `~/.aluy/config.json` (ou `context.window` / `ALUY_CONTEXT_WINDOW`) —' +
+              ' feito isso, este aviso não aparece mais.',
+          ]);
         })
         .catch(() => {
           /* best-effort: descoberta é enfeite — nunca derruba a sessão. */

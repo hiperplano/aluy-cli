@@ -8,10 +8,19 @@
 // ESCREVIA — o dono tinha que descobrir o número na doc do provider e editar o
 // `~/.aluy/config.json` na mão. Sem isso a janela fica 0 ⇒ `⛁ %` congelado e
 // auto-compactação INERTE (`decideAutoCompact` sai em `contextWindow <= 0`) — sessão
-// longa sem rede de segurança, exatamente a dor do dogfood. Só que o provider quase
-// sempre JÁ SABE o número: a lista `/models` de quase todo agregador OpenAI-compat
-// (OpenRouter, TokenRouter, Together, vLLM, LM Studio, Ollama-compat…) carrega o
-// `context_length` de cada modelo. Este módulo é o tradutor daquele corpo.
+// longa sem rede de segurança, exatamente a dor do dogfood. Muitos agregadores
+// OpenAI-compat (OpenRouter, Together, vLLM, LM Studio…) JÁ carregam o `context_length`
+// de cada modelo na lista `/models`. Este módulo é o tradutor daquele corpo.
+//
+// ⚠ MAS NEM TODOS — e isto NÃO é uma falha a consertar aqui. Verificado em campo
+// (rc.108): o `GET https://api.tokenrouter.com/v1/models` responde 200 com 19 modelos
+// e NENHUM campo de janela (só `id`/`object`/`created`/`owned_by`/`supported_endpoint_
+// types`/`tags`) — nem no `/api/pricing`, nem em header de resposta. É o formato MÍNIMO
+// que a spec da OpenAI permite. Para um provider assim a descoberta é estruturalmente
+// impossível e sai `[]` por projeto (fail-open); quem AVISA o dono de que ele precisa
+// declarar o número à mão é o `run.tsx` (nota `janela`), não este parse — aqui não há
+// palpite a dar. Não adianta somar campos novos ao `CONTEXT_FIELDS` abaixo: o provider
+// não manda campo NENHUM.
 //
 // PORTÁVEL/PURO (fronteira ADR-0053 §8): SÓ tipos + parse de um `unknown` já lido.
 // Nenhum `fetch`/`node:*`/keychain aqui — o I/O CONCRETO (fetch PINADO anti-SSRF
