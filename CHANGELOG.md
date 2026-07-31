@@ -14,6 +14,16 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.112] — 2026-07-31
+
+### Alterado
+
+- 🔴 **retentativa em falha transitória passa a nascer LIGADA por padrão** (ADR-0156/APR-0146, decisão do Tiago): antes exigia `ALUY_RETRY=on` explícito, porque colidia com o invariante testado CA-5 ("erro estruturado sobe sem virar retry"). O ADR foi escrito, a pergunta foi decidida: liga. `ALUY_RETRY=off` continua disponível pra quem quiser o comportamento antigo. O teste CA-5 foi EMENDADO (não descartado) — passa `retry:RETRY_OFF` explícito para provar que o invariante segue disponível sob opt-out — e um teste novo cobre o baseline atual (falha transitória é retentada por default e o turno se recupera). Classificação de erro, tetos anti-runaway (20 tentativas, 60s de espera máxima) e o não-retry de cancelamento/erro desconhecido continuam os mesmos.
+
+### Interno
+
+- 📚 **4 ADRs aprovados** (APR-0144 a APR-0147, Tiago): conectores/Telegram (número livre `ADR-0154`, corrige colisão com `ADR-0134`/`ADR-0135`), janela de contexto por modelo (`ADR-0155`), retry-default (`ADR-0156`, implementado nesta release) e o gate `awaitsUserDecision` (`ADR-0157`, ratificado sem mudança de código). Numeração `TC-1..TC-8` dos conectores fecha em `TC-1/2/3/5/6` — `TC-4`/`TC-7`/`TC-8` não são definidas.
+
 ## [1.0.0-rc.111] — 2026-07-31
 
 ### Corrigido
