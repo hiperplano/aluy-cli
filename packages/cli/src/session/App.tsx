@@ -3778,8 +3778,25 @@ export function App(props: AppProps): React.ReactElement {
     state.meta.model ??
     state.meta.activeModel ??
     (process.env.ALUY_LOCAL_MODEL?.trim() || undefined);
+  // F-SIDECAR-USO (fix de largura) — no BYO o modelo VIAJA PELO CAMPO `model` da
+  // StatusBar (droppable), não mais colado dentro do `tier` (que NUNCA cai).
+  //
+  // O texto renderizado é IDÊNTICO quando cabe (`◷ local · <provider> · <modelo>`,
+  // porque a StatusBar imprime `tier` e depois ` · model`), mas a diferença importa
+  // quando NÃO cabe: enquanto o modelo estava dentro do `tier`, ele era INDROPÁVEL por
+  // construção — e desde que a rc.108 pendurou o chip `◈ sidecars` na mesma linha
+  // (+~23 col), a soma passava de `columns` em ~90–115 col e o Ink ESPREMIA os nós
+  // (`◷` some, `sidecars`→`sidecar`, `0%`→`0`), que é como o dono viu o chip "sumir".
+  // O `showModel` (EST-1015/#24) já existia exatamente p/ isso e estava INERTE no BYO,
+  // porque o `displayModel` era fixado em `undefined` aqui.
+  //
+  // O opt-in `ALUY_SHOW_MODEL` (gate AG-0008) segue valendo SÓ p/ o broker: no BYO o
+  // usuário escolheu provider+modelo, não há mapa tier→provider a esconder (HG-2), então
+  // o modelo continua aparecendo SEMPRE que couber — só deixa de embaralhar a barra
+  // quando não cabe (a barra legível vale mais que um detalhe de observabilidade, é a
+  // MESMA troca que o #24 já fez p/ o broker).
   const displayModel = localByModel
-    ? undefined
+    ? localModelName
     : (state.meta.model ?? (showRoutedModel ? state.meta.activeModel : undefined));
 
   // EST-0962 — NOME DE EXIBIÇÃO do tier (`Granito`), nunca a KEY crua (`aluy-granito`).
@@ -3787,10 +3804,12 @@ export function App(props: AppProps): React.ReactElement {
   // VENCE; antes disso (ou 401/ausente) cai no mapa local FALLBACK_TIERS; tier sem
   // mapa nem catálogo ⇒ a própria key (último recurso). A via Custom mantém a key
   // `custom` (sem mapa) ⇒ exibe `custom`, com o slug indo separado em `state.meta.model`.
+  // O `tier` do BYO fica só com `local · <provider>` — o `<modelo>` saiu p/ o campo
+  // `model` (ver `displayModel` acima). Concatenados, dão o MESMO texto de antes; o que
+  // muda é que agora só o modelo cai quando a linha não cabe, e o `◷ local · <provider>`
+  // (o estado que IMPORTA — qual backend/provider está no ar) nunca cai.
   const tierDisplay = localByModel
-    ? ['local', localProviderName, localModelName]
-        .filter((v) => v !== undefined && v !== '')
-        .join(' · ') || 'local'
+    ? ['local', localProviderName].filter((v) => v !== undefined && v !== '').join(' · ') || 'local'
     : `broker · ${tierDisplayName(state.meta.tier, modelPicker.tiers)}`;
 
   // FIX (dono) — o HEADER (chrome mais estático — EST-0989) NÃO deve repetir o indicador

@@ -29,6 +29,7 @@ import {
   sidecarChipCell,
   type SidecarUsageView,
   type SidecarUseState,
+  type SidecarChipEntry,
 } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { BusyPulse } from './BusyPulse.js';
@@ -174,6 +175,36 @@ function windowRole(pct: number): 'fgDim' | 'accent' | 'danger' {
 const MODEL_MIN_COLS = 90;
 
 /**
+ * F-SIDECAR-USO (fix de largura) — CUSTO EM COLUNAS do chip `◈ sidecars hdr oll mem`,
+ * medido do que será DE FATO impresso (não estimado).
+ *
+ * O PORQUÊ: o `MODEL_MIN_COLS` acima foi calibrado (EST-1015/#24) para a barra SEM o
+ * chip — tier+modelo+cwd+medidores ≈ 90 col. A rc.108 pendurou o chip na MESMA linha
+ * (+~23 col no caso ocioso, +~30 com contadores de 2 dígitos) e NÃO recalibrou o
+ * limiar. Resultado observado no binário real, em ~90–115 col: a soma dos nós passa de
+ * `columns`, o Ink quebra NOS LIMITES dos nós e a barra vira DUAS linhas embaralhadas —
+ * e o que visivelmente "some" é justamente o chip (é o último campo antes dos
+ * medidores, e o rótulo `sidecars` é o pedaço mais longo a ser empurrado p/ a 2ª
+ * linha). Ou seja: o chip não estava faltando, estava sendo PICADO pela largura —
+ * exatamente o garble que o #24 já tinha consertado uma vez p/ o modelo.
+ *
+ * MEDIR (em vez de somar uma constante) importa porque o chip CRESCE com o uso:
+ * `hdr oll mem` (ocioso) → `hdr·12 oll·3 mem·7` (em regime). Um limiar fixo acertaria
+ * o boot e erraria a sessão longa — que é exatamente quando o dono olha a barra.
+ *
+ * Conta: 1 espaço + glifo (`◈`=1, `sc:`=3) + 1 espaço + rótulo + Σ(1 espaço + célula).
+ */
+function sidecarChipCols(
+  chip: readonly SidecarChipEntry[],
+  label: string,
+  glyph: string,
+  ascii: boolean,
+): number {
+  const cells = chip.reduce((acc, e) => acc + 1 + sidecarChipCell(e, ascii).length, 0);
+  return 1 + glyph.length + 1 + label.length + cells;
+}
+
+/**
  * EST-MCP-STATUSBAR — largura (em células) da barrinha `MCP ▰▰▱` enquanto os servers
  * conectam. Curta de propósito — é um indicador DISCRETO, não uma <ProgressBar> cheia
  * (essa é `DEFAULT_BAR_WIDTH=12`, pensada p/ ocupar sozinha uma linha da região viva).
@@ -239,7 +270,26 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   // emaranhado (visto em ~60 col após o #378 somar `· <modelo>`). Então o modelo só
   // entra quando há largura folgada p/ tier+modelo+cwd+medidores SEM estourar; abaixo
   // disso, dropa (o `◷ <tier>` — que importa — NUNCA cai). Sem `columns` ⇒ assume largo.
-  const showModel = (props.columns ?? MODEL_MIN_COLS) >= MODEL_MIN_COLS;
+  // F-SIDECAR-USO — a DECISÃO (quais aparecem, em que estado) é PURA e mora no core
+  // (`buildSidecarChip`, ADR-0053 §8: o cli-core não conhece Ink). Aqui a TUI só pinta.
+  // `undefined` ⇒ perfil leve ou sem medidor ⇒ nenhum nó no JSX (zero ruído, zero custo
+  // de largura p/ quem não roda turbo).
+  // CALCULADO ANTES do `showModel` de propósito: o chip é um campo NOVO na MESMA linha,
+  // então ele entra na conta de quem cabe — ver `sidecarChipCols`.
+  const sidecarChip =
+    props.sidecarUsage !== undefined ? buildSidecarChip(props.sidecarUsage) : undefined;
+  const sidecarLabel = showLabels ? t('statusbar.sidecars') : t('statusbar.sidecars.narrow');
+  // Custo REAL do chip em colunas (0 quando ele não é renderizado). É o que faz o
+  // limiar do modelo acompanhar o crescimento do chip ao longo da sessão.
+  const sidecarCols =
+    sidecarChip !== undefined
+      ? sidecarChipCols(sidecarChip, sidecarLabel, theme.glyph('sidecar'), !theme.unicode)
+      : 0;
+  // O modelo só entra quando cabe DEPOIS de reservar o chip. Sem o `+ sidecarCols` a
+  // barra estourava em ~90–115 col (ver `sidecarChipCols`): o Ink quebrava a linha e o
+  // chip aparecia picado/ausente. Dropar o modelo (observabilidade) é o preço certo —
+  // é a MESMA escolha que o #24 já fez, só que agora com o campo novo na conta.
+  const showModel = (props.columns ?? MODEL_MIN_COLS + sidecarCols) >= MODEL_MIN_COLS + sidecarCols;
 
   // EST-0989 (#125) — o `◔ quota` só entra quando o broker reportou consumo de janela.
   const hasQuota = props.quotaPct !== undefined;
@@ -249,13 +299,6 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   // (`done:false`); ao terminar a barra vira o ✓/aviso (renderizado direto no JSX
   // abaixo, sem célula-por-célula). `mcpFailed` alimenta os DOIS ramos (cor do ✓ e o
   // "· N falhou" discreto).
-  // F-SIDECAR-USO — a DECISÃO (quais aparecem, em que estado) é PURA e mora no core
-  // (`buildSidecarChip`, ADR-0053 §8: o cli-core não conhece Ink). Aqui a TUI só pinta.
-  // `undefined` ⇒ perfil leve ou sem medidor ⇒ nenhum nó no JSX (zero ruído, zero custo
-  // de largura p/ quem não roda turbo).
-  const sidecarChip =
-    props.sidecarUsage !== undefined ? buildSidecarChip(props.sidecarUsage) : undefined;
-
   const mcpProgress = props.mcpProgress;
   const mcpFailed = mcpProgress?.failed ?? 0;
   const mcpBar =
@@ -344,10 +387,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
         <>
           <Text> </Text>
           <Glyph name="sidecar" role="fgDim" />
-          <Role name="fgDim">
-            {' '}
-            {showLabels ? t('statusbar.sidecars') : t('statusbar.sidecars.narrow')}
-          </Role>
+          <Role name="fgDim"> {sidecarLabel}</Role>
           {sidecarChip.map((entry) => (
             <Role key={entry.kind} name={sidecarRole(entry.state)}>
               {' '}
