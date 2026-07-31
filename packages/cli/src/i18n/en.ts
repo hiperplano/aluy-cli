@@ -73,6 +73,10 @@ export const en: PartialCatalog = {
   'statusbar.cycle': 'cycle',
   'statusbar.subcycles': 'subcycles',
   'statusbar.mcpFailed': 'failed',
+  // F-SIDECAR-USO — "sidecars" é termo de PRODUTO (igual nos dois idiomas); só a forma
+  // narrow existe p/ caber na barra estreita. Mantém a paridade 1:1 com o pt-BR.
+  'statusbar.sidecars': 'sidecars',
+  'statusbar.sidecars.narrow': 'sc',
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': 'broker',

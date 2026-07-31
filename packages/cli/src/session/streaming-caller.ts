@@ -27,6 +27,33 @@ import {
   type Quota,
 } from '@hiperplano/aluy-cli-core';
 import { compressViaHeadroom } from '../model/headroom.js';
+import {
+  decideRetry,
+  resolveRetry,
+  RETRY_OFF,
+  ModelCallAbortedError,
+  type RetryConfig,
+} from '@hiperplano/aluy-cli-core';
+
+/**
+ * F-RETRY — espera ABORTÁVEL entre tentativas. Um `sleep` cru prenderia o usuário até o
+ * fim do timer mesmo após o Ctrl-C; aqui o abort resolve na hora, lançando o MESMO erro
+ * de cancelamento que o resto do caminho já entende (e que `decideRetry` nunca retenta).
+ */
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new ModelCallAbortedError());
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    function onAbort(): void {
+      clearTimeout(t);
+      reject(new ModelCallAbortedError());
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 /** Eventos de stream que a UI observa (token-a-token + usage). */
 export interface StreamSink {
@@ -46,9 +73,28 @@ export interface StreamSink {
   onDone?(): void;
 }
 
+/** F-RETRY — o que a UI recebe a cada retentativa (o contador `n/N` na tela). */
+export interface RetryNotice {
+  /** Tentativa que ACABOU de falhar (1-based). */
+  readonly attempt: number;
+  /** Teto de tentativas extras configurado. */
+  readonly max: number;
+  /** Espera até a próxima (ms) — honra `Retry-After` quando o provider manda. */
+  readonly waitMs: number;
+  /** Motivo curto (`HTTP 503`, `falha de rede`…) p/ o usuário entender o porquê. */
+  readonly reason: string;
+}
+
 export interface StreamingModelCallerOptions {
   // ADR-0120 — broker OU local: o caller de stream da TUI não distingue.
   readonly client: ModelClient;
+  /**
+   * F-RETRY — config de retentativa. Ausente ⇒ resolve de env/config (ligado por
+   * default). `RETRY_OFF` ⇒ baseline exato de antes (erro sobe na 1ª falha).
+   */
+  readonly retry?: RetryConfig;
+  /** F-RETRY — chamado ANTES de cada espera, p/ a UI mostrar o contador. */
+  readonly onRetry?: (n: RetryNotice) => void;
   readonly tier: LlmTier;
   /** EST-0962 (Custom) — slug inicial da via Custom (só sob `tier:'custom'`). */
   readonly model?: string;
@@ -76,6 +122,14 @@ export interface StreamingModelCallerOptions {
    * caller lia `ALUY_HEADROOM_URL` do env direto (env-only) — agora é injetada (config-driven).
    */
   readonly headroomUrl?: string;
+  /**
+   * F-SIDECAR-USO — CONTABILIZA cada compressão de contexto. O caller é o ÚNICO lugar
+   * do caminho quente que consulta o headroom (`compressViaHeadroom`, antes de CADA
+   * chamada ao modelo), então é daqui que sai o número que a StatusBar mostra. `ok`
+   * distingue compressão APLICADA de fail-open (que segue com as mensagens originais).
+   * Ausente ⇒ nada é contado (baseline).
+   */
+  readonly onHeadroomUsed?: (ok: boolean) => void;
   /** Para onde os tokens são emitidos ao vivo (a UI). */
   readonly sink: StreamSink;
   /**
@@ -118,9 +172,20 @@ export class StreamingModelCaller implements ModelCaller {
   // EST-1075 · HR-SEC-2 — avisa UMA vez quando o destino headroom é recusado (não-loopback).
   private headroomRefusedWarned = false;
 
+  /** F-RETRY — config resolvida uma vez no boot (env > config > default). */
+  private readonly retryCfg: RetryConfig;
+
   constructor(opts: StreamingModelCallerOptions) {
     this.client = opts.client;
     this.opts = opts;
+    // Injetada (testes/wiring) OU resolvida do ambiente. `ALUY_RETRY=off` desliga.
+    this.retryCfg =
+      opts.retry ??
+      resolveRetry({
+        attemptsEnv: process.env.ALUY_RETRY,
+        waitMsEnv: process.env.ALUY_RETRY_WAIT_MS,
+      });
+    void RETRY_OFF; // re-exportado p/ os testes/wiring desligarem explicitamente.
     this.brokerSessionId = opts.sessionId;
     this.currentTier = opts.tier;
     this.customModel = opts.model;
@@ -222,6 +287,10 @@ export class StreamingModelCaller implements ModelCaller {
                   );
                 }
               },
+              // F-SIDECAR-USO — marca USO (compressão APLICADA) vs FALHA (fail-open:
+              // recusa/timeout/HTTP ruim/proxy adulterado ⇒ mensagens ORIGINAIS). É o
+              // sinal que faz o chip `hdr` acender em vez de só dizer "está de pé".
+              ...(this.opts.onHeadroomUsed ? { onUsed: this.opts.onHeadroomUsed } : {}),
               onRefused: (reason) => {
                 if (!this.headroomRefusedWarned) {
                   this.headroomRefusedWarned = true;
@@ -233,11 +302,50 @@ export class StreamingModelCaller implements ModelCaller {
               },
             }),
           };
-    // EST-0996 — laço externo do DEGRADE: 1ª passada COM tools (se suportado); se o
-    // broker responder `422 TOOLS_UNSUPPORTED`, a capacidade se desliga e repetimos
-    // UMA vez SEM tools (fallback p/ o protocolo de texto, #99). Sem capacidade ⇒
-    // uma única passada de texto puro (baseline). NÃO faz retry de transporte aqui
-    // (igual ao baseline — erro estruturado sobe; o loop/tetos decidem).
+    // F-RETRY — laço EXTERNO de RETENTATIVA, por cima do degrade de tools. Só re-tenta
+    // o que é TRANSITÓRIO (rede/timeout/429/5xx — `decideRetry`): "o provider negou"
+    // (401/404/400/422/recusa) NÃO se retenta, porque é determinístico e, no backend
+    // LOCAL/BYO, cada tentativa que chega ao provider CUSTA DINHEIRO. Cancelamento
+    // (`ModelCallAbortedError`) nunca se retenta — é ordem do dono.
+    //
+    // A `idempotencyKey` é a MESMA em todas as tentativas (ela vem pronta do loop, e
+    // este é exatamente o caso p/ o qual ela nasceu): o broker DEDUPLICA o billing de
+    // um retry de transporte, então re-tentar não cobra duas vezes pela mesma chamada
+    // lógica.
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await this.callOnceWithToolDegrade(args);
+      } catch (e) {
+        attempt += 1;
+        const verdict = decideRetry(e, attempt, this.retryCfg);
+        if (!verdict.retry) throw e;
+        // Avisa a UI ANTES de dormir (o contador `n/N` fica visível durante a espera).
+        this.opts.onRetry?.({
+          attempt,
+          max: this.retryCfg.attempts,
+          waitMs: verdict.waitMs,
+          reason: verdict.reason,
+        });
+        // A espera é ABORTÁVEL: Ctrl-C durante o backoff encerra na hora, em vez de
+        // prender o usuário até o fim do timer.
+        await sleepAbortable(verdict.waitMs, args.signal);
+      }
+    }
+  }
+
+  /**
+   * EST-0996 — laço do DEGRADE: 1ª passada COM tools (se suportado); se o broker
+   * responder `422 TOOLS_UNSUPPORTED`, a capacidade se desliga e repetimos UMA vez SEM
+   * tools (fallback p/ o protocolo de texto, #99). Sem capacidade ⇒ uma única passada de
+   * texto puro (baseline). Extraído de `call()` p/ que o laço de RETENTATIVA (F-RETRY)
+   * envolva o degrade inteiro — um blip de rede na passada sem-tools também re-tenta.
+   */
+  private async callOnceWithToolDegrade(args: {
+    readonly messages: readonly ChatMessage[];
+    readonly idempotencyKey: string;
+    readonly signal?: AbortSignal;
+  }): Promise<ModelCallResult> {
     for (let nativeAttempt = 0; nativeAttempt < 2; nativeAttempt++) {
       const withTools = this.nativeTools?.shouldSendTools() ?? false;
       try {

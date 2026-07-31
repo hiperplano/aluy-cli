@@ -89,8 +89,18 @@ import { HooksConfigStore } from '../io/index.js';
 import { FileRoomStore } from './rooms/file-room-store.js';
 import { makePreToolGate } from './pre-tool-gate.js';
 import { HookRunner, selectHooks, type HooksConfig } from '@hiperplano/aluy-cli-core';
-import { resolveContextWindow } from '../model/catalog.js';
+import {
+  resolveContextWindow,
+  modelWindowFromConfig,
+  type ProviderWindowSource,
+} from '../model/catalog.js';
 import { resolveMaestro, resolveContinuationCfg, resolveMemory } from '../maestro/wiring.js';
+// F-SIDECAR-USO — o medidor de USO dos sidecars + a resolução de toggles. O medidor é
+// criado UMA vez por sessão aqui (é o único lugar que enxerga os TRÊS pontos de
+// consulta: o caller/headroom, o judge/ollama e a memória/mem0) e o controller o
+// espelha no estado p/ a StatusBar. `resolveSidecarToggles` é a MESMA função que o
+// `resolveMaestro` usa — os "ligados" do indicador não podem divergir do que subiu.
+import { SidecarUsageMeter, resolveSidecarToggles } from '@hiperplano/aluy-cli-core';
 import type {
   UserServicesConfig,
   UserLimitsConfig,
@@ -122,6 +132,13 @@ export interface BuildSessionOptions {
    */
   readonly headroomUrl?: string;
   /**
+   * F-SIDECAR-USO — PERFIL ativo (`~/.aluy/config.json`), resolvido em run.tsx. Só o
+   * TURBO sobe os sidecars, então só ele ganha o chip de uso na StatusBar; em LEVE o
+   * indicador seria três `✗` eternos na barra de quem escolheu rodar magro. Ausente ⇒
+   * assume `turbo` (o default REAL do sistema — mesmo que o boot-trigger usa).
+   */
+  readonly profile?: 'turbo' | 'leve';
+  /**
    * ADR-0150 §5 (balde a) — limits do config (maxTokens/maxOutputTokens/maxIterations).
    * Resolvido em run.tsx (savedConfig.limits) e repassado; entra como nível ENTRE env e
    * default na precedência (flag > env > config > default). O core RE-VALIDA e CLAMPA.
@@ -133,6 +150,34 @@ export interface BuildSessionOptions {
    * e na auto-compactação (flag > env > config > default). O core re-valida/clampa.
    */
   readonly context?: UserContextConfig;
+  /**
+   * F-WIN — CATÁLOGO de janelas por modelo do config (`providers[].contextByModel`,
+   * subset `{id,label,contextByModel}` do `UserProviderEntry`). Resolvido em run.tsx
+   * (savedConfig.providers) e usado em DOIS momentos:
+   *   1. AQUI no boot, p/ resolver a `contextWindow` INICIAL (era o buraco: em BYO o tier
+   *      é o literal `custom` ⇒ `contextWindowForTier` = 0 ⇒ `⛁ % janela` CONGELADO em 0%
+   *      e auto-compactação INERTE, mesmo com o dono tendo declarado a janela do modelo).
+   *   2. Repassado ao controller, que o RE-CONSULTA no `setTier` (troca de modelo pelo
+   *      `/model <slug>` re-resolve a janela do slug NOVO sem reiniciar a sessão).
+   * Ausente ⇒ nada muda (a resolução cai nos degraus de sempre e, sem nada declarado,
+   * volta a 0/inerte — o fail-safe do F134).
+   */
+  readonly providerWindows?: readonly ProviderWindowSource[];
+  /**
+   * F-WIN — id/label do provider ATIVO (backend local: `config.localProvider` já resolvido
+   * pela precedência flag>env>config>default; broker: o `--provider` do par Custom). É o
+   * que desambigua `providerWindows` quando o dono declarou o MESMO slug em mais de um
+   * provider. Ausente ⇒ o `modelWindowFromConfig` casa qualquer provider (degrade honesto).
+   */
+  readonly activeProviderId?: string;
+  /**
+   * F-WIN — SLUG do modelo ATIVO no boot p/ a resolução da janela. Sob backend LOCAL vem do
+   * `resolveLocalProviderConfig` (`--local-model` > env > `config.localModel` > default do
+   * catálogo); sob broker, o slug Custom (`opts.model`) já cobre o caso e este fica ausente.
+   * ⚠ SEPARADO do `model` acima de propósito: aquele viaja no CORPO do request (só sob
+   * `tier:'custom'`, HG-2); ESTE é só a chave de consulta da janela — nunca sai da máquina.
+   */
+  readonly activeModelSlug?: string;
   /**
    * ADR-0150 (balde b) — seção `subagents` do config (`maxPerCall`/`maxConcurrency`/
    * `idleTimeoutMs`). Resolvido em run.tsx (savedConfig.subagents); entra como o nível
@@ -806,7 +851,6 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // `--backend local`), `resolveContextWindow` cai no override `ALUY_CONTEXT_WINDOW`
   // (opt-in): habilita a auto-compactação no modo local. Sem o env, segue 0 (inerte).
   // Passada ao controller e RE-RESOLVIDA na troca de tier (`/model`).
-  const contextWindow = resolveContextWindow(tier, env, undefined, opts.context?.window);
   // EST-0972 (BUG Custom) — slug Custom do BOOT: só vale sob `tier:'custom'`. Vem de
   // uma sessão retomada (run.tsx); fora de Custom é ignorado (não vaza Custom em tier
   // canônico). String opaca / chave de catálogo (HG-2), nunca credencial.
@@ -815,6 +859,25 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // (sob `tier:'custom'` E com `bootModel`). Fora disso é ignorado (não atribui provider
   // a um tier canônico nem a um Custom sem slug). É só o NOME (DADO, não credencial — HG-2).
   const bootProvider = bootModel !== undefined ? opts.provider : undefined;
+  // F-WIN — SLUG usado SÓ p/ consultar a janela declarada. Sob backend LOCAL o slug ativo
+  // é o `activeModelSlug` (resolvido em run.tsx pelo `resolveLocalProviderConfig`); sob
+  // broker, o slug Custom do boot. ⚠ NÃO reusa `bootModel` sozinho: em BYO o dono roda
+  // `--backend local` e o slug NÃO viaja como `model` do corpo (HG-2) — era exatamente
+  // por isso que a janela declarada ficava órfã e o `⛁ %` congelava em 0%.
+  const windowSlug = opts.activeModelSlug ?? bootModel;
+  // F-WIN — a resolução DE FATO: tier > env > config.context.window > JANELA DO MODELO
+  // declarada em `providers[].contextByModel` > 0. O último degrau é o que estava INERTE:
+  // as peças existiam (config sanitizado + `modelWindowFromConfig` + `setTier` do
+  // controller) mas NINGUÉM as alimentava no boot, então o controller nascia com a janela
+  // do tier (0 em `custom`) e só um `/model` posterior a corrigiria. Sem nada declarado o
+  // resultado segue 0 — o fail-safe que o F134 exige (size-aware do Compactor OFF).
+  const contextWindow = resolveContextWindow(
+    tier,
+    env,
+    undefined,
+    opts.context?.window,
+    modelWindowFromConfig(opts.providerWindows, opts.activeProviderId, windowSlug),
+  );
   // EST-0962 (--effort) — reasoning_effort PASSTHROUGH (qualquer string ≤32 chars).
   // SEM tier-gate: vale em qualquer tier. undefined ⇒ não enviado.
   const effort = opts.effort;
@@ -906,11 +969,30 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // O sink precisa do controller; resolvemos a referência circular criando o
   // caller com um sink-proxy que delega ao controller após construído.
   let controllerRef: SessionController | null = null;
+  // F-SIDECAR-USO (pedido do dono) — MEDIDOR ÚNICO de uso dos sidecars nesta sessão.
+  // Nasce zerado e acumula SÓ chamadas que saíram e voltaram aproveitáveis; o
+  // controller o assina no fim deste `buildSession` e a StatusBar pinta os 3 estados.
+  const sidecarUsage = new SidecarUsageMeter();
+  // Toggles do MESMO jeito que o `resolveMaestro` os resolve (default-ON): o chip tem
+  // de dizer "ligado/desligado" pelo critério REAL do wiring, não por um palpite.
+  const sidecarToggles = resolveSidecarToggles({
+    ollama: env['ALUY_MAESTRO_OLLAMA'] !== '0',
+    mem0: env['ALUY_MAESTRO_MEM0'] !== '0',
+  });
+  // Preenchidos DENTRO da construção do controller (é lá que `resolveMaestro`/
+  // `resolveMemory` rodam e decidem, de fato, se o fio existe). Lidos logo depois,
+  // p/ montar a parte ESTÁTICA da visão do chip.
+  let ollamaLigado = false;
+  let mem0Ligado = false;
   const caller = new StreamingModelCaller({
     client: brokerClient,
     tier,
     // headroom config-driven: URL resolvida no run.tsx (turbo+toggle/services/env). undefined ⇒ off.
     ...(opts.headroomUrl !== undefined ? { headroomUrl: opts.headroomUrl } : {}),
+    // F-SIDECAR-USO — compressão APLICADA (ok) vs fail-open (falha). Só o caller do
+    // HUMANO conta: os callers de sub-agente/compactação são o mesmo sidecar e inflar
+    // o número com eles tornaria o indicador ruído em vez de sinal.
+    onHeadroomUsed: (ok: boolean) => sidecarUsage.record('headroom', ok),
     // EST-0972 (BUG Custom) — slug Custom retomado: só sob `tier:'custom'` (bootModel).
     // Sem isto, a 1ª chamada após retomar uma sessão Custom ia SEM model ⇒ 422.
     ...(bootModel !== undefined ? { model: bootModel } : {}),
@@ -1161,6 +1243,14 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // 200k p/ Cortex, 0 p/ Custom). SEMPRE passada (≠200k hardcoded). O controller
     // a re-resolve na troca de tier (`setTier`).
     contextWindow,
+    // F-WIN — o MESMO catálogo de janelas por modelo que resolveu a `contextWindow` acima,
+    // agora na mão do controller: o `setTier` o re-consulta a cada troca de modelo
+    // (`/model <slug>` em BYO) p/ a janela acompanhar o slug NOVO. Sem isto, trocar de
+    // modelo numa sessão viva voltaria a 0/inerte mesmo com a janela declarada no config.
+    ...(opts.providerWindows !== undefined ? { providerWindows: opts.providerWindows } : {}),
+    // F-WIN — provider ATIVO p/ desambiguar o slug entre providers do config. Ausente ⇒
+    // o casamento é só por slug (degrade honesto, nunca inventa janela).
+    ...(opts.activeProviderId !== undefined ? { activeProviderId: opts.activeProviderId } : {}),
     // EST-0964 — AGENT.md confiável (já lido/clampado no startup) → canal `system`.
     ...(opts.projectInstructions !== undefined
       ? { projectInstructions: opts.projectInstructions }
@@ -1179,7 +1269,15 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // aponta p/ o proxy LOCAL do usuário. Ausente ⇒ a sessão segue idêntica (sem ela).
     // Efeito `network` ⇒ atrás da catraca (`always-ask:network`, Plan-deny) como web_fetch.
     ...(opts.headroomUrl !== undefined
-      ? { headroomRetrieveTool: makeHeadroomRetrieveTool({ baseUrl: opts.headroomUrl }) }
+      ? {
+          headroomRetrieveTool: makeHeadroomRetrieveTool({
+            baseUrl: opts.headroomUrl,
+            // F-SIDECAR-USO — o retrieve é o 2º ponto de uso REAL do headroom (quem
+            // consulta aqui é o MODELO, recuperando conteúdo dedupado). Cai no MESMO
+            // contador do compress: p/ o dono, "o headroom foi usado" é um fato só.
+            onUsed: (ok: boolean) => sidecarUsage.record('headroom', ok),
+          }),
+        }
       : {}),
     // EST-0969 · ADR-0057 — sub-agentes locais paralelos (tool `spawn_agent`). Só
     // entra quando habilitado; o controller monta o spawner com a MESMA engine/
@@ -1311,8 +1409,13 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     ...(() => {
       const maestro = resolveMaestro({
         env,
+        usage: sidecarUsage,
         ...(opts.services ? { services: opts.services } : {}),
       });
+      // F-SIDECAR-USO — o judge só é consultado com o Maestro LIGADO **e** o toggle
+      // `ollama` ON (ver a camada (b) do `rege`). Registrar isto aqui é o que permite
+      // ao chip distinguir "desligado" de "ligado e ocioso" — sem probe de rede.
+      ollamaLigado = maestro !== undefined && sidecarToggles.has('ollama');
       if (!maestro) return {};
       // F54 — também liga a política de CONTINUAÇÃO (fim-de-turno). Sem este fio,
       // o seam fica inerte e o agente "para e pede totó" (default-ON c/ Maestro).
@@ -1322,7 +1425,14 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // F-MEM — liga a MEMÓRIA (Mem0): recall+store no loop, escopo por projeto.
     // Independente do Maestro (kill-switch próprio ALUY_MEM_OFF). Default ON.
     ...(() => {
-      const mem = resolveMemory({ env, ...(opts.services ? { services: opts.services } : {}) });
+      const mem = resolveMemory({
+        env,
+        usage: sidecarUsage,
+        ...(opts.services ? { services: opts.services } : {}),
+      });
+      // F-SIDECAR-USO — `resolveMemory` já aplica os dois desligamentos (`ALUY_MEM_OFF`
+      // e o toggle `ALUY_MAESTRO_MEM0=0`); `undefined` ⇒ mem0 não está no fio.
+      mem0Ligado = mem !== undefined;
       return mem
         ? {
             memoryEngine: mem.memory,
@@ -1344,6 +1454,26 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     },
   });
   controllerRef = controller;
+
+  // F-SIDECAR-USO (pedido do dono: "ver se os sidecars estão sendo USADOS de fato") —
+  // ARMA o indicador. A parte ESTÁTICA (perfil + quem está no fio) é conhecida agora,
+  // depois que `resolveMaestro`/`resolveMemory` rodaram; a VIVA vem do medidor, que o
+  // controller assina. Perfil ausente ⇒ `turbo` (default REAL do sistema); em `leve` o
+  // `buildSidecarChip` devolve `undefined` e a barra não ganha campo nenhum.
+  controller.armSidecarUsage(
+    {
+      profile: opts.profile ?? 'turbo',
+      enabled: {
+        // O headroom não tem toggle próprio no fio da sessão: ele está ligado se, e
+        // somente se, o `resolveHeadroomUrl` (turbo+toggle/services/env) resolveu uma
+        // URL — a MESMA condição que arma o compress e a tool de retrieve.
+        headroom: opts.headroomUrl !== undefined,
+        ollama: ollamaLigado,
+        mem0: mem0Ligado,
+      },
+    },
+    sidecarUsage,
+  );
 
   return {
     controller,

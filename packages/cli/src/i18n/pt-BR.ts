@@ -70,6 +70,10 @@ export const ptBR: FullCatalog = {
   'statusbar.cycle': 'ciclo',
   'statusbar.subcycles': 'subciclos',
   'statusbar.mcpFailed': 'falhou',
+  // F-SIDECAR-USO — rótulo do chip de uso dos sidecars (turbo). A forma narrow encurta
+  // p/ caber em <60 col sem embaralhar a barra, como o `banner.yolo.narrow` faz.
+  'statusbar.sidecars': 'sidecars',
+  'statusbar.sidecars.narrow': 'sc',
   // FATIA 2 (CICLOS/SUBCICLOS) — cabeçalho cíclico na árvore de fluxos (<FlowTreeView>).
   'flowtree.cycle': 'ciclo',
   'flowtree.subcycles': 'subciclos',

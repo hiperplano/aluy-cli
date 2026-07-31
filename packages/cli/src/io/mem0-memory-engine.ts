@@ -134,6 +134,24 @@ export interface Mem0MemoryEngineOptions {
    * degradação CA-MA8 depende de "nada na porta".
    */
   readonly deleteFetch?: typeof fetch;
+
+  /**
+   * F-SIDECAR-USO — CONTABILIZA a consulta ao sidecar mem0. Cobre os DOIS caminhos
+   * quentes que o dono quer enxergar: ESCRITA (`add`) e RECALL (`search`). `ok:true`
+   * quando a chamada saiu e voltou (o Mem0 respondeu 2xx e o corpo foi parseado);
+   * `ok:false` na degradação CA-MA8 (sidecar fora, timeout, HTTP ruim, egress
+   * recusado) — nesses casos o loop segue com recall VAZIO, então NÃO houve uso.
+   *
+   * IMPORTANTE — um `search` multi-escopo (F80/F83: escopo novo + legado, em
+   * paralelo) reporta UMA vez por RECALL, não por escopo: o que o humano conta na
+   * tela é "o mem0 foi consultado", e N escopos é detalhe interno de migração que
+   * inflaria o número sem significar mais uso. Vale `ok:true` se PELO MENOS UM
+   * escopo respondeu (a fatia que respondeu foi de fato aproveitada).
+   *
+   * `scope` (list/info/delete) NÃO conta: é manutenção via `/memory`, não o uso
+   * automático da memória no loop. NUNCA carrega texto de memória (HG-2/CLI-SEC-6).
+   */
+  readonly onUsed?: (ok: boolean) => void;
 }
 
 // ── Implementação ─────────────────────────────────────────────────────────
@@ -145,6 +163,8 @@ export class Mem0MemoryEngine implements MemoryEngine {
   private readonly resolver: HostResolver;
   private readonly fetcher: PinnedFetcher;
   private readonly deleteFetch: typeof fetch;
+  /** F-SIDECAR-USO — observador de uso (ver `Mem0MemoryEngineOptions.onUsed`). */
+  private readonly onUsed: ((ok: boolean) => void) | undefined;
 
   /**
    * Cache da classificação anti-SSRF (lazy — 1ª chamada de rede dispara DNS;
@@ -167,6 +187,7 @@ export class Mem0MemoryEngine implements MemoryEngine {
     this.resolver = opts.resolver ?? new NodeHostResolver();
     this.fetcher = opts.fetcher ?? new NodePinnedFetcher();
     this.deleteFetch = opts.deleteFetch ?? ((input, init) => fetch(input, init));
+    this.onUsed = opts.onUsed;
     this.base = opts.baseDir ?? join(homedir(), '.aluy');
     this.memoryDir = join(this.base, MEMORY_DIRNAME);
 
@@ -175,6 +196,19 @@ export class Mem0MemoryEngine implements MemoryEngine {
   }
 
   // ── Porta MemoryEngine ──────────────────────────────────────────────────
+
+  /**
+   * F-SIDECAR-USO — reporta uso/falha ao medidor, engolindo exceção do observador. A
+   * degradação CA-MA8 é o contrato desta classe (Mem0 fora ⇒ recall vazio, loop
+   * segue); um INDICADOR de uso não pode ser a única coisa capaz de quebrá-la.
+   */
+  private report(ok: boolean): void {
+    try {
+      this.onUsed?.(ok);
+    } catch {
+      /* observador defeituoso nunca quebra a memória */
+    }
+  }
 
   /** @inheritdoc */
   async add(input: MemoryAddInput): Promise<MemoryAddResult> {
@@ -204,9 +238,11 @@ export class Mem0MemoryEngine implements MemoryEngine {
       const ids = content.map((_, i) =>
         resp.id ? `${resp.id}-${i}` : `${scope}-${Date.now()}-${i}`,
       );
+      this.report(true); // ESCRITA gravada no mem0 ⇒ uso real do sidecar
       return { ids };
     } catch {
       // CA-MA8: degrada — add falhou, mas não quebra o loop.
+      this.report(false);
       return { ids: [] };
     }
   }
@@ -222,8 +258,12 @@ export class Mem0MemoryEngine implements MemoryEngine {
     // mesmo com o mem0 no ar. Paralelo, a latência é ~max(chamadas), não a soma.
     // Cada scope degrada SOZINHO (CA-MA8): a falha de um não derruba os outros.
     const scopeList = scopes.length > 0 ? scopes : ['default'];
+    // F-SIDECAR-USO — o resultado por escopo carrega `ok` SEPARADO dos itens: um
+    // recall legítimo pode voltar VAZIO (escopo novo ainda sem memórias — caso comum
+    // pós-F80), e um `[]` de degradação também. Só o `ok` distingue "o mem0 respondeu"
+    // de "o mem0 está fora" — sem ele, um projeto novo marcaria o sidecar como caído.
     const perScope = await Promise.all(
-      scopeList.map(async (scope): Promise<Mem0MemoryItem[]> => {
+      scopeList.map(async (scope): Promise<{ ok: boolean; items: Mem0MemoryItem[] }> => {
         try {
           // F99 — pede `limit` INTEIRO de CADA scope (não `limit/N`). O Mem0 ordena por
           // relevância POR scope; o corte final (`sort+slice(limit)`) escolhe o top-N
@@ -240,13 +280,17 @@ export class Mem0MemoryEngine implements MemoryEngine {
             `/v1/memories/?${params.toString()}`,
             { method: 'GET' },
           );
-          return resp.results ?? [];
+          return { ok: true, items: resp.results ?? [] };
         } catch {
-          return []; // CA-MA8: degrada por scope — os outros seguem.
+          return { ok: false, items: [] }; // CA-MA8: degrada por scope — os outros seguem.
         }
       }),
     );
-    const allResults: Mem0MemoryItem[] = perScope.flat();
+    // UM recall = UM uso, mesmo com N escopos em paralelo (o multi-escopo é detalhe
+    // de migração F80, não "mais consultas" aos olhos de quem lê a barra). Basta UM
+    // escopo ter respondido p/ o recall ter sido aproveitado.
+    this.report(perScope.some((r) => r.ok));
+    const allResults: Mem0MemoryItem[] = perScope.flatMap((r) => r.items);
 
     // Converte Mem0MemoryItem[] → MemorySearchHit[].
     // Recall = DADO envelopado (CLI-SEC-15-B) — nunca instrução.

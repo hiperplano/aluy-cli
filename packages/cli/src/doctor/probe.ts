@@ -28,6 +28,8 @@ import {
   parseMcpConfig,
   McpConfigError,
   resolveSidecarToggles,
+  // F-SIDECAR-USO — só o TIPO: os contadores chegam prontos da sessão.
+  type SidecarUsageView,
   resolveBackend,
   type RedactedCredential,
   type McpConfig,
@@ -126,6 +128,14 @@ export interface DoctorProbeDeps {
   readonly memory?: MemoryCounter;
   /** Flags efetivas adicionais a exibir (sessão passa `--yolo`/modo; shell deriva do env). */
   readonly extraFlags?: readonly string[];
+
+  /**
+   * F-SIDECAR-USO — contadores de USO dos sidecars MEDIDOS na sessão viva. Não é um
+   * gatherer (não há o que probar): é um FATO que só a sessão possui, então ela o
+   * INJETA. Ausente no `aluy doctor` de shell — processo novo, sem loop e sem
+   * contadores; a linha de uso simplesmente não sai (ver `SidecarsFact.usage`).
+   */
+  readonly sidecarUsage?: SidecarUsageView;
 
   /**
    * EST-0970 (validação ATIVA do MCP) — fábrica de transport p/ CONECTAR de verdade cada
@@ -701,7 +711,15 @@ async function gatherSidecars(deps: DoctorProbeDeps): Promise<SidecarsFact> {
     // config ausente/corrompida ⇒ defaults (TURBO, 3-ON).
   }
 
-  return { headroom, ollama, mem0, profile, toggles };
+  // F-SIDECAR-USO — os contadores vêm INJETADOS pela sessão (não são probáveis).
+  return {
+    headroom,
+    ollama,
+    mem0,
+    profile,
+    toggles,
+    ...(deps.sidecarUsage !== undefined ? { usage: deps.sidecarUsage } : {}),
+  };
 }
 
 // ── #10 Maestro — supervisor de sessão (resolveMaestro do wiring) ──────────

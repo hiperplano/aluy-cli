@@ -666,3 +666,66 @@ describe('doctor/checks — sidecars/Maestro', () => {
     expect(hasFailure(report)).toBe(true);
   });
 });
+
+// ── F-SIDECAR-USO — a linha de USO no `/doctor` ──────────────────────────
+//
+// Os probes acima respondem "o sidecar está DE PÉ?"; esta linha responde "ele foi
+// CONSULTADO?" — a pergunta que o `✓ (200)` nunca respondeu e que o dono queria ver.
+// Ela é INFORMATIVA: sidecar ocioso não é defeito (pode ser que a sessão não tenha
+// precisado dele), então NÃO pode mexer no status do check.
+describe('doctor/checks — sidecars: USO na sessão (F-SIDECAR-USO)', () => {
+  it('sem contadores (o `aluy doctor` de shell) ⇒ a linha de uso nem aparece', () => {
+    // Processo novo, sem loop: inventar zeros diria "nunca usado" quando o certo é
+    // "não há o que medir".
+    expect(checkOf(okFacts(), 'sidecars').detail).not.toContain('uso na sessão');
+  });
+
+  it('dentro da sessão ⇒ mostra uso e falhas por sidecar, e o que está desligado', () => {
+    const f = okFacts();
+    const c = checkOf(
+      {
+        ...f,
+        sidecars: {
+          ...f.sidecars,
+          usage: {
+            profile: 'turbo',
+            enabled: { headroom: true, ollama: true, mem0: false },
+            usage: {
+              headroom: { ok: 12, fail: 1 },
+              ollama: { ok: 0, fail: 0 },
+              mem0: { ok: 0, fail: 0 },
+            },
+          },
+        },
+      },
+      'sidecars',
+    );
+    expect(c.detail).toContain('uso na sessão');
+    expect(c.detail).toContain('headroom: 12 uso(s) · 1 falha');
+    expect(c.detail).toContain('ollama: 0 uso(s)');
+    expect(c.detail).toContain('mem0: desligado');
+  });
+
+  it('sidecar OCIOSO não vira ⚠/✗ — a linha informa, não julga', () => {
+    const f = okFacts();
+    const c = checkOf(
+      {
+        ...f,
+        sidecars: {
+          ...f.sidecars,
+          usage: {
+            profile: 'turbo',
+            enabled: { headroom: true, ollama: true, mem0: true },
+            usage: {
+              headroom: { ok: 0, fail: 0 },
+              ollama: { ok: 0, fail: 0 },
+              mem0: { ok: 0, fail: 0 },
+            },
+          },
+        },
+      },
+      'sidecars',
+    );
+    expect(c.status).toBe('ok');
+  });
+});

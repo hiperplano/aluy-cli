@@ -43,7 +43,8 @@ export type GlyphName =
   | 'sessionDot' // ● identificação colorida da sessão (/rename) 〔EST-0972〕
   | 'barFull' // ▰ célula PREENCHIDA da barra de progresso determinada 〔EST-0973〕
   | 'barEmpty' // ▱ célula VAZIA da barra de progresso determinada 〔EST-0973〕
-  | 'pulseBlock'; // █ bloco GROSSO do pulso "trabalhando" na StatusBar (enche/esvazia) 〔F195〕
+  | 'pulseBlock' // █ bloco GROSSO do pulso "trabalhando" na StatusBar (enche/esvazia) 〔F195〕
+  | 'sidecar'; // ◈ chip de USO dos sidecars (headroom/ollama/mem0) na StatusBar 〔F-SIDECAR-USO〕
 
 /**
  * Marca do Aluy — o Λ do logo (U+039B GREEK CAPITAL LETTER LAMBDA), 1 célula,
@@ -114,6 +115,10 @@ export const UNICODE_GLYPHS: Readonly<Record<GlyphName, string>> = {
   // dono pediu). █ (2588 full block) tem cobertura UNIVERSAL em mono e é o glifo mais
   // "grosso"/cheio — uma barra dele enchendo/esvaziando lê como trabalho VIVO em curso.
   pulseBlock: '█',
+  // F-SIDECAR-USO — chip dos sidecars. ◈ (25C8, white diamond containing black small
+  // diamond): geométrico de cobertura ampla em mono, e DISTINTO dos vizinhos da barra
+  // (◇ normalMode, ● broker, ◔ gauge, ◷ clock) — o olho não confunde os campos.
+  sidecar: '◈',
 };
 
 /**
@@ -157,6 +162,9 @@ export const SAFE_GLYPHS: Readonly<Record<GlyphName, string>> = {
   barFull: '█',
   barEmpty: '░',
   pulseBlock: '█', // F195 — no perfil seguro o bloco cheio segue █ (cobertura universal)
+  // F-SIDECAR-USO — ◈ pode faltar em fonte limitada; ◆ (25C6 black diamond) é
+  // universal e mantém o "ar geométrico" do campo.
+  sidecar: '◆',
 };
 
 /** Fallback ASCII (spec §3.3, coluna "Fallback ASCII"). */
@@ -189,6 +197,9 @@ export const ASCII_GLYPHS: Readonly<Record<GlyphName, string>> = {
   barFull: '#',
   barEmpty: '.',
   pulseBlock: '#', // F195 — ASCII puro: `#` é o bloco "grosso" do pulso (a cor carrega o vivo)
+  // F-SIDECAR-USO — ASCII puro: RÓTULO, no mesmo estilo de `ctx:`/`git:`/`t:`. Em 7-bit
+  // a cor pode não existir (NO_COLOR/16 cores), então a palavra tem de bastar (a11y §6).
+  sidecar: 'sc:',
 };
 
 /**

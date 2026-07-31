@@ -33,6 +33,7 @@
 
 import type { SessionBlock, SessionState } from './model.js';
 import { displayWidth, visualLines } from './visual-lines.js';
+import { aluyNeedsLeadingBlank } from './block-rhythm.js';
 
 /** Fase da sessão (do model) — o que distingue `thinking` (pré-stream) dos demais. */
 type SessionPhase = SessionState['phase'];
@@ -477,15 +478,29 @@ export function liveOverheadLines(input: LiveOverheadInput): number {
   // Há uma prévia de FALA viva (aluy streaming) neste frame?
   const speech = live.find((b) => b.kind === 'aluy' && b.streaming);
 
+  // RESPIRO (achado do dono) — o vizinho de CIMA DENTRO do sufixo vivo. Começa
+  // `undefined` de propósito: p/ o 1º bloco vivo o vizinho está no `<Static>` e a
+  // fronteira JÁ tem sua linha em branco (o `<Box paddingY={1}>` do contêiner da região
+  // viva, contado em `LIVE_CHROME_BASE_ROWS`) ⇒ o `<BlockView>` não repete o respiro lá.
+  // Espelha EXATAMENTE o call-site da viva no <App> (`i > 0 ? live[i-1]?.kind : undefined`)
+  // — medição e desenho têm de concordar, senão o frame fura `rows` por 1 linha e o Ink
+  // cai no `clearTerminal`.
+  let prevKind: SessionBlock['kind'] | undefined = undefined;
+
   for (const b of live) {
     if (b === speech) {
       // A própria fala: cabeçalho `Λ aluy` (1) + cursor (1) + paddingBottom (1).
       // O CORPO de texto é orçado à parte (o `maxLines` devolvido); aqui só o que
       // existe ALÉM do corpo. O marcador `…N acima` (quando corta) entra abaixo.
       lines += 3;
+      // + o respiro (paddingTop 1) quando o vizinho de cima não termina em branco
+      // (`⏺ tool` concluída, testrun, deny, broker-error) — ver `block-rhythm.ts`.
+      if (aluyNeedsLeadingBlank(prevKind)) lines += 1;
+      prevKind = b.kind;
       continue;
     }
     lines += nonSpeechBlockLines(b, columns, tailMax);
+    prevKind = b.kind;
   }
 
   // <Working> de `thinking` (pré-stream) e <ProgressBar> de `compacting` (EST-0973):

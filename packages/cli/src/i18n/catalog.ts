@@ -112,6 +112,15 @@ export interface Catalog {
   'statusbar.subcycles': string;
   /** EST-MCP-STATUSBAR — palavra do aviso discreto quando algum server MCP falhou ao conectar (`· N <mcpFailed>`). */
   'statusbar.mcpFailed': string;
+  /**
+   * F-SIDECAR-USO — rótulo do chip de USO dos sidecars no perfil turbo
+   * (`◈ sidecars hdr·12 oll·3 mem✗`). Os NOMES dos sidecars (`hdr`/`oll`/`mem`) são
+   * de PRODUTO e NÃO se traduzem (mesma regra de `PLAN`/`YOLO`/`MCP`) — só este
+   * rótulo de grupo é prosa.
+   */
+  'statusbar.sidecars': string;
+  /** F-SIDECAR-USO — forma NARROW (<60 col) do rótulo acima, no padrão `banner.yolo.narrow`. */
+  'statusbar.sidecars.narrow': string;
   /** FATIA 2 — rótulo do CICLO no cabeçalho da árvore de fluxos (`↻ ciclo N/M`). */
   'flowtree.cycle': string;
   /** FATIA 2 — rótulo dos SUBCICLOS no cabeçalho da árvore (`subciclos K/T`). */

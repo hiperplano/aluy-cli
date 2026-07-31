@@ -164,6 +164,46 @@ export function parseContextWindow(s: string): number {
 export const CONTEXT_WINDOW_ENV = 'ALUY_CONTEXT_WINDOW';
 
 /**
+ * F-WIN — janela declarada para UM slug, no provider ATIVO do config BYO. É a fonte que
+ * o `resolveContextWindow` consulta como `modelWindow`.
+ *
+ * Casa por `id` OU `label` do provider (o config do dono usa os dois na prática) e por
+ * slug EXATO, case-insensitive (os slugs vêm do provider como `vendor/modelo`). Sem
+ * provider ativo, sem `contextByModel` ou sem o slug ⇒ `undefined` (a precedência segue
+ * p/ o degrau de baixo, que é 0/inerte). PURO — só lê o objeto de config já sanitizado.
+ */
+export function modelWindowFromConfig(
+  providers: readonly ProviderWindowSource[] | undefined,
+  activeProvider: string | undefined,
+  slug: string | undefined,
+): number | undefined {
+  if (!providers || providers.length === 0) return undefined;
+  const wanted = (slug ?? '').trim().toLowerCase();
+  if (wanted === '') return undefined;
+  const pid = (activeProvider ?? '').trim().toLowerCase();
+  for (const p of providers) {
+    const matches =
+      pid === '' ||
+      (p.id ?? '').trim().toLowerCase() === pid ||
+      (p.label ?? '').trim().toLowerCase() === pid;
+    if (!matches) continue;
+    const map = p.contextByModel;
+    if (!map) continue;
+    for (const [k, v] of Object.entries(map)) {
+      if (k.trim().toLowerCase() === wanted && Number.isInteger(v) && v > 0) return v;
+    }
+  }
+  return undefined;
+}
+
+/** Subset do `UserProviderEntry` que a resolução de janela precisa (evita dep circular). */
+export interface ProviderWindowSource {
+  readonly id?: string;
+  readonly label?: string;
+  readonly contextByModel?: Readonly<Record<string, number>>;
+}
+
+/**
  * F64 (fix) — janela EFETIVA: o tier conhecido vence; quando ele é desconhecido
  * (`custom`/vazio ⇒ `contextWindowForTier` = 0, ex. `--backend local` + modelo BYO),
  * cai num OVERRIDE de env `ALUY_CONTEXT_WINDOW` (opt-in). Isso HABILITA a
@@ -177,15 +217,28 @@ export function resolveContextWindow(
   env: Record<string, string | undefined> = {},
   catalog?: readonly TierCatalogEntry[],
   configWindow?: number | undefined, // ADR-0150 balde(a): config.context.window (custom only)
+  modelWindow?: number | undefined, // F-WIN: janela do MODELO concreto (BYO)
 ): number {
   const fromTier = contextWindowForTier(tierKey, catalog);
   if (fromTier > 0) return fromTier; // tier conhecido manda
   // Custom: opt-in via env `ALUY_CONTEXT_WINDOW`, senão config.context.window, senão 0 (inerte).
   const fromEnv = parseContextWindow(env[CONTEXT_WINDOW_ENV] ?? '');
   if (fromEnv > 0) return fromEnv;
-  return configWindow !== undefined && Number.isInteger(configWindow) && configWindow > 0
-    ? configWindow
-    : 0;
+  if (configWindow !== undefined && Number.isInteger(configWindow) && configWindow > 0) {
+    return configWindow;
+  }
+  // F-WIN — a JANELA DO MODELO, o degrau que faltava. A pergunta certa em BYO é "qual a
+  // janela DESTE MODELO?", não "qual a janela deste TIER?": o tier é conceito do BROKER
+  // (HG-2, a única pista que sai do cliente) e em BYO ele é o literal `custom`, que por
+  // construção significa "não uso broker" — e era tratado como "janela imprevisível".
+  // Mas o dono declarou um modelo CONCRETO; imprevisível ela não é. Fica ABAIXO do
+  // `configWindow` de propósito: um override explícito do usuário vence um dado do
+  // catálogo. Ausente ⇒ 0 (inerte), preservando o fail-safe de quem não declarou nada —
+  // é isto que mantém o F134 (`custom` sem janela ⇒ size-aware do Compactor OFF) válido.
+  if (modelWindow !== undefined && Number.isInteger(modelWindow) && modelWindow > 0) {
+    return modelWindow;
+  }
+  return 0;
 }
 
 /**

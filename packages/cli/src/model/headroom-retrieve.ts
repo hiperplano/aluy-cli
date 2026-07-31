@@ -42,6 +42,14 @@ export interface HeadroomRetrieveToolOptions {
   readonly resolver?: HostResolver;
   /** F85 — teto DURO de tempo (ms). Default `RETRIEVE_TIMEOUT_MS` (2.5s). */
   readonly timeoutMs?: number;
+  /**
+   * F-SIDECAR-USO — CONTABILIZA a chamada ao sidecar headroom. Este é o SEGUNDO ponto
+   * de uso real do headroom (o 1º é o `compressViaHeadroom`): aqui quem consulta é o
+   * MODELO, ao recuperar conteúdo dedupado. `ok:true` só quando o proxy devolveu
+   * `original_content` utilizável; hash faltando, destino recusado, 404 (TTL expirado),
+   * HTTP ruim, corpo inútil e timeout são `ok:false`. NUNCA carrega conteúdo/hash.
+   */
+  readonly onUsed?: (ok: boolean) => void;
 }
 
 interface RetrieveResponse {
@@ -135,6 +143,13 @@ export function makeHeadroomRetrieveTool(opts: HeadroomRetrieveToolOptions): Nat
       const onExternalAbort = (): void => ac.abort();
       ctx?.signal?.addEventListener('abort', onExternalAbort, { once: true });
       if (ctx?.signal?.aborted) ac.abort();
+      // F-SIDECAR-USO — só `true` quando o proxy devolveu conteúdo APROVEITÁVEL. Fica
+      // fora do try e é reportado no `finally` pelo mesmo motivo do compress: são 5
+      // saídas de erro + o catch, e o default `false` faz qualquer ramo novo nascer
+      // contado como falha (nunca inventa uso). O ramo "hash ausente" ficou ATRÁS
+      // deste ponto de propósito: ali nada saiu na rede — é erro do modelo, não do
+      // sidecar, e contá-lo marcaria o headroom como caído sem ele ter sido tocado.
+      let used = false;
       try {
         // EST-1075 · HR-SEC-1 — valida (loopback-only) + pina ANTES de qualquer byte sair.
         const outcome = await headroomFetch(
@@ -192,6 +207,7 @@ export function makeHeadroomRetrieveTool(opts: HeadroomRetrieveToolOptions): Nat
         // a convenção do projeto é DUPLO-ENVELOPE p/ conteúdo de proxy/memória — o
         // bloco fica inequívoco mesmo INSPECIONADO ISOLADO (journal/log/export). O
         // header (metadados gerados pelo aluy) fica fora, legível.
+        used = true; // conteúdo recuperado e entregue ao modelo ⇒ USO real do headroom
         return { ok: true, display, observation: `${header}\n${wrapUntrusted(content)}` };
       } catch (err) {
         const reason = timedOut
@@ -207,6 +223,12 @@ export function makeHeadroomRetrieveTool(opts: HeadroomRetrieveToolOptions): Nat
       } finally {
         clearTimeout(timer);
         ctx?.signal?.removeEventListener('abort', onExternalAbort);
+        // F-SIDECAR-USO — observador fail-open: nunca derruba a tool-call.
+        try {
+          opts.onUsed?.(used);
+        } catch {
+          /* observador defeituoso nunca derruba o retrieve */
+        }
       }
     },
   };

@@ -31,6 +31,7 @@ import {
   type SupervisorDecision,
   type JudgeEngine,
   type MemoryEngine,
+  type SidecarUsageMeter,
 } from '@hiperplano/aluy-cli-core';
 import { OllamaJudgeEngine } from './ollama-judge.js';
 import { Mem0MemoryEngine } from '../io/mem0-memory-engine.js';
@@ -56,6 +57,15 @@ export interface ResolveMaestroOptions {
 
   /** Seção `services` do config único (ADR-0150 §8/§9): porta/host do sidecar Ollama (judge). */
   readonly services?: UserServicesConfig;
+
+  /**
+   * F-SIDECAR-USO — medidor de USO dos sidecars. Recebe UMA marcação por consulta ao
+   * juiz (`ok` = veredito `mode:'llm'` aproveitado; `!ok` = degradou p/ motor-a). O
+   * `resolveMaestro` só REPASSA ao engine concreto — a decisão do que conta como uso
+   * é do engine (borda), e os 3 estados exibidos são puros (`sidecar-usage.ts`).
+   * Ausente ⇒ nada é contado (baseline; usado por teste e pelo probe do `/doctor`).
+   */
+  readonly usage?: SidecarUsageMeter;
 }
 
 // ─── resolveMaestro ────────────────────────────────────────────────────────
@@ -104,6 +114,9 @@ export function resolveMaestro(opts: ResolveMaestroOptions = {}): MaestroPort | 
     new OllamaJudgeEngine({
       baseUrl: resolveOllamaUrl(opts.env, opts.services),
       model: JUDGE_MODEL,
+      // F-SIDECAR-USO — só o engine sabe se o veredito foi APROVEITADO (`mode:'llm'`)
+      // ou se degradou p/ o motor-a; ele marca, o medidor acumula, a StatusBar pinta.
+      ...(opts.usage ? { onUsed: (ok: boolean) => opts.usage!.record('ollama', ok) } : {}),
     });
 
   // ── rege: motor-a SEMPRE + judge opcional (CA-MA8) ────────────────────
@@ -226,6 +239,11 @@ export function resolveMemory(opts?: {
   cwd?: string;
   /** Seção `services` do config único (ADR-0150 §8/§9): porta/host do sidecar Mem0. */
   services?: UserServicesConfig;
+  /**
+   * F-SIDECAR-USO — medidor de USO. Recebe UMA marcação por ESCRITA (`add`) e por
+   * RECALL (`search`) que de fato saiu e voltou. Ausente ⇒ nada é contado.
+   */
+  usage?: SidecarUsageMeter;
 }):
   | { memory: MemoryEngine; memoryScope: string; memoryRecallScopes: readonly string[] }
   | undefined {
@@ -244,8 +262,15 @@ export function resolveMemory(opts?: {
   // (ver memory-scope.ts). STORE no escopo novo; RECALL nos dois (migração sem
   // reset das memórias já gravadas).
   const { scope, recallScopes } = deriveMemoryScope(cwd);
+  const usage = opts?.usage;
   const memory =
-    opts?.memory ?? new Mem0MemoryEngine({ mem0Url: resolveMem0Url(e, opts?.services) });
+    opts?.memory ??
+    new Mem0MemoryEngine({
+      mem0Url: resolveMem0Url(e, opts?.services),
+      // F-SIDECAR-USO — escrita/recall que SAIU e VOLTOU. A degradação CA-MA8 (mem0
+      // fora ⇒ hits vazios) reporta falha: recall vazio por sidecar caído não é uso.
+      ...(usage ? { onUsed: (ok: boolean) => usage.record('mem0', ok) } : {}),
+    });
   return { memory, memoryScope: scope, memoryRecallScopes: recallScopes };
 }
 

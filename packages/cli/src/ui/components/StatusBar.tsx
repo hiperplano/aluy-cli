@@ -23,7 +23,13 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
-import { BUDGET_WARN_PCT } from '@hiperplano/aluy-cli-core';
+import {
+  BUDGET_WARN_PCT,
+  buildSidecarChip,
+  sidecarChipCell,
+  type SidecarUsageView,
+  type SidecarUseState,
+} from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { BusyPulse } from './BusyPulse.js';
 import { progressRatio, renderBar } from './ProgressBar.js';
@@ -127,6 +133,23 @@ export interface StatusBarProps {
    * (mesmo critério do `busy`/<BusyPulse> — não é estado de roteamento crítico).
    */
   readonly mcpProgress?: McpProgress;
+  /**
+   * F-SIDECAR-USO (pedido do dono) — USO REAL dos sidecars do modo turbo. Rende um chip
+   * `◈ sidecars hdr·12 oll·3 mem✗` logo antes dos medidores, com CADA sidecar em um de
+   * 3 estados: **usado** (accent + o nº de consultas aproveitadas), **de pé mas ocioso**
+   * (fgDim, só o código) e **fora** (fgDim + `✗`).
+   *
+   * O PORQUÊ do campo: o `/doctor` já dizia se o sidecar responde a `GET /health`, mas
+   * "de pé" é o estado normal no turbo — não informa nada. O que faltava era saber se
+   * ele foi CONSULTADO. Por isso o número é de chamadas APROVEITADAS: as que degradaram
+   * (fail-open) contam como falha e derrubam o estado p/ `fora`, não p/ "ocioso".
+   *
+   * `undefined` (perfil leve, sem medidor armado) ⇒ NADA é renderizado — o
+   * `buildSidecarChip` também devolve `undefined` fora do turbo, então quem roda leve
+   * não paga um pixel. Droppable no narrow? NÃO: só encolhe o rótulo (ver `.narrow`) —
+   * saber se a máquina de sidecars está trabalhando é o ponto do modo turbo.
+   */
+  readonly sidecarUsage?: SidecarUsageView;
 }
 
 /** Papel de cor do `⛁ janela %` por nível (§4). */
@@ -166,6 +189,20 @@ function budgetRole(pct: number): 'fgDim' | 'accent' | 'danger' {
   if (pct >= 100) return 'danger';
   if (pct >= BUDGET_WARN_PCT) return 'accent';
   return 'fgDim';
+}
+
+/**
+ * F-SIDECAR-USO — papel de cor por ESTADO do sidecar (nunca cor crua, §3.1/ADR-0041):
+ *   • `used` ⇒ `accent` — ACENDE, exatamente como o tier ≠ default e o chip de foco. É
+ *     o sinal que o dono pediu: "este sidecar está trabalhando nesta sessão".
+ *   • `idle` ⇒ `fgDim` — de pé, ocioso. Presente sem chamar atenção.
+ *   • `off`  ⇒ `fgDim` — fora. NÃO usa `danger`: sidecar fora é degradação PREVISTA e
+ *     fail-open (o aluy funciona sem), não erro do turno; `danger` está reservado ao
+ *     que exige ação (janela/quota estourada, `⚠` de broker). Quem carrega o "fora" é
+ *     o `✗` colado ao código (a11y §3.3: a cor nunca decide sozinha).
+ */
+function sidecarRole(state: SidecarUseState): 'fgDim' | 'accent' {
+  return state === 'used' ? 'accent' : 'fgDim';
 }
 
 /** Papel de cor do `◔ quota %` (#125) por nível do core (70/90%). */
@@ -212,6 +249,13 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   // (`done:false`); ao terminar a barra vira o ✓/aviso (renderizado direto no JSX
   // abaixo, sem célula-por-célula). `mcpFailed` alimenta os DOIS ramos (cor do ✓ e o
   // "· N falhou" discreto).
+  // F-SIDECAR-USO — a DECISÃO (quais aparecem, em que estado) é PURA e mora no core
+  // (`buildSidecarChip`, ADR-0053 §8: o cli-core não conhece Ink). Aqui a TUI só pinta.
+  // `undefined` ⇒ perfil leve ou sem medidor ⇒ nenhum nó no JSX (zero ruído, zero custo
+  // de largura p/ quem não roda turbo).
+  const sidecarChip =
+    props.sidecarUsage !== undefined ? buildSidecarChip(props.sidecarUsage) : undefined;
+
   const mcpProgress = props.mcpProgress;
   const mcpFailed = mcpProgress?.failed ?? 0;
   const mcpBar =
@@ -284,6 +328,32 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
             ⌁ {props.governance.agents}a·{props.governance.commands}c·{props.governance.skills}s·
             {props.governance.workflows}w·{props.governance.memory}m
           </Role>
+        </>
+      )}
+
+      {/* F-SIDECAR-USO (pedido do dono) — CHIP DE USO dos sidecars do modo turbo, logo
+          ANTES dos medidores: `◈ sidecars hdr·12 oll·3 mem✗`. Cada código acende em
+          `accent` COM o número de consultas aproveitadas (usado), fica `fgDim` seco
+          (de pé, ocioso) ou ganha `✗` (fora). Responde o que o health-probe do
+          `/doctor` não responde — "está sendo USADO?", não "está de pé?".
+          NARROW (<60 col): o chip PERMANECE (é o estado da máquina do turbo, como o
+          `↻ ciclo`), só o rótulo encolhe p/ a forma `.narrow` — enquanto o `cwd`, o
+          `(8.2k)` e os rótulos dos medidores já caíram. Em `--ascii` o `◈` vira `sc:`
+          e o `✗` vira `x` (a11y §3.3: nunca depender de glifo/cor sozinhos). */}
+      {sidecarChip !== undefined && (
+        <>
+          <Text> </Text>
+          <Glyph name="sidecar" role="fgDim" />
+          <Role name="fgDim">
+            {' '}
+            {showLabels ? t('statusbar.sidecars') : t('statusbar.sidecars.narrow')}
+          </Role>
+          {sidecarChip.map((entry) => (
+            <Role key={entry.kind} name={sidecarRole(entry.state)}>
+              {' '}
+              {sidecarChipCell(entry, !theme.unicode)}
+            </Role>
+          ))}
         </>
       )}
 

@@ -43,6 +43,9 @@ import { createOAuthAccessTokenProvider } from '../model/local/oauth-store.js';
 // ADR-0153 — TEST-THEN-REGISTER: a fábrica da porta (fetch PINADO, COND-S1 + memo/
 // teto/sanitização/fail-closed) vive em `test-then-register.ts`, testável isolada.
 import { createVerifyAndRegisterLocalModelPort } from '../model/local/test-then-register.js';
+// F-WIN (descoberta) — porta que PERGUNTA a janela de contexto ao próprio provider BYO
+// (`GET {baseUrl}/models`), p/ o usuário nunca precisar digitar o número à mão.
+import { createDiscoverContextWindowPort } from '../model/local/context-window-discovery.js';
 import { createPinnedStreamFetch } from '../model/local/pinned-stream-fetch.js';
 import { createLocalCredentialProvider } from '../model/local/credential-resolver.js';
 import { setupMcp, ProjectMcpConfigStore, CodexMcpConfigStore } from '../mcp/index.js';
@@ -100,7 +103,7 @@ import {
   type ToolPorts,
   type ModelCaller,
 } from '@hiperplano/aluy-cli-core';
-import { applyTierLiteral } from '../model/catalog.js';
+import { applyTierLiteral, modelWindowFromConfig } from '../model/catalog.js';
 import { TerminalNotificationPort, loadNotifyConfig } from '../io/notify-port.js';
 import { attachNotifyObserver } from './notify-observer.js';
 import { UndoController, type UndoOutcome } from './undo-controller.js';
@@ -136,6 +139,7 @@ import {
   resolveInitialSuggestions,
   configuredLang,
   type UserConfig,
+  type UserProviderEntry,
 } from '../io/user-config.js';
 import { enterAltScreen, registerRestoreHandlers } from './alt-screen.js';
 import { installSignalReset } from './signal-reset.js';
@@ -946,13 +950,21 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // EST-1113 (display) — o provider LOCAL resolvido (ex.: `tokenrouter`), p/ o `meta`
   // mostrar `◷ local · tokenrouter · <modelo>` e não o provider do tier (ex.: `openai`).
   let localProviderForMeta: string | undefined;
+  // F-WIN — o SLUG do modelo LOCAL efetivamente resolvido (`--local-model` > env >
+  // `config.localModel` > default do catálogo do provider). É a CHAVE de consulta da
+  // janela declarada em `providers[].contextByModel` — sem hoistá-lo aqui ele morria
+  // dentro do bloco `if (backend local)` e o boot resolvia a janela sem saber qual
+  // modelo estava ativo ⇒ `contextWindow` 0 em BYO (⛁ % congelado, auto-compact inerte).
+  let localModelForWindow: string | undefined;
   let localModelClient: import('@hiperplano/aluy-cli-core').ModelClient | undefined;
   // ADR-0152 (D6b/D6c) — porta de ROTEAMENTO de sub-agente a um MODELO LOCAL
   // específico + porta do PROBE LOCAL (catálogo declarado). Só existem sob backend
   // LOCAL de verdade (não sob `opts.brokerClient` injetado de teste); ausentes ⇒ o
   // controller trata `kind:'local'` como "não roteia" (erro legível) — fail-safe.
   let callerForLocalModel: ((slug: string) => ModelCaller) | undefined;
-  let localModelCatalogPort: { readonly listNames: () => readonly string[] | undefined } | undefined;
+  let localModelCatalogPort:
+    | { readonly listNames: () => readonly string[] | undefined }
+    | undefined;
   // ADR-0153 — porta de TEST-THEN-REGISTER (D1/D2/D3). Mesma guarda do bloco acima
   // (só existe sob backend LOCAL de verdade); ausente ⇒ o controller preserva o
   // fallback rc.105 (Caso 1 fail-closed / Caso 2 warn-but-allow) — zero regressão.
@@ -960,6 +972,15 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     | ((
         slug: string,
       ) => Promise<{ readonly ok: boolean; readonly detail: string; readonly registered: boolean }>)
+    | undefined;
+  // F-WIN (descoberta) — porta que DESCOBRE a janela de contexto do slug ativo no
+  // próprio provider (`GET {baseUrl}/models` → `context_length`) e a persiste em
+  // `providers[].contextByModel`. Hoistada pela MESMA razão do
+  // `verifyAndRegisterLocalModel` acima (nasce dentro do bloco `backend local`, é usada
+  // DEPOIS do `buildSession`); ausente sob broker/teste com `brokerClient` injetado ⇒
+  // nenhuma chamada de rede extra existe (não-regressão).
+  let discoverContextWindow:
+    | ((slug: string) => Promise<{ readonly window: number; readonly persisted: boolean }>)
     | undefined;
   if (resolvedBackend === 'local' && opts.brokerClient === undefined) {
     // ADR-0118 — o catálogo EFETIVO (built-ins + `~/.aluy/providers.json`). SEM isto, a
@@ -980,6 +1001,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       config: savedConfig,
     });
     localProviderForMeta = localCfg.provider; // p/ o `meta`/status mostrar o provider LOCAL
+    localModelForWindow = localCfg.model; // F-WIN — chave da janela declarada (contextByModel)
     localModelClient = await buildLocalModelClient({
       catalog: localCatalog,
       provider: localCfg.provider,
@@ -1080,7 +1102,44 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       // acima) ver o slug como "conhecido" e não re-testar.
       markSessionRegistered: (slug) => sessionRegisteredLocalModels.add(slug),
     });
+
+    // F-WIN (descoberta) — a MESMA forma do test-then-register acima (ADR-0153), com as
+    // MESMAS travas: `wireFormat`/`baseUrl` SÓ do boot (COND-S9), fetch PINADO anti-SSRF
+    // (COND-S1 — nunca `globalThis.fetch`), credencial do MESMO
+    // `createLocalCredentialProvider` do boot (COND-S2 — nunca lida/logada aqui) e teto
+    // + memoização por sessão (COND-S3). A diferença é a POLÍTICA DE FALHA: aqui é
+    // FAIL-OPEN (a spec da OpenAI não obriga `context_length` no `/models`; provider que
+    // não informa, 401 ou timeout ⇒ simplesmente não descobrimos e tudo segue como hoje).
+    discoverContextWindow = createDiscoverContextWindowPort({
+      wireFormat: findProvider(localCatalog, localCfg.provider)?.wireFormat ?? 'openai-compat',
+      baseUrl: localCfg.baseUrl ?? findProvider(localCatalog, localCfg.provider)?.baseUrl ?? '',
+      fetchImpl: createPinnedStreamFetch({}),
+      getKey: async () => {
+        const cred = await getCredentialForTest();
+        return cred.secret;
+      },
+      // Append IDEMPOTENTE em `providers[<id>].contextByModel` — é o "descobre uma vez,
+      // nunca mais": da 2ª sessão em diante o número já está no config e o
+      // `modelWindowFromConfig` o acha ANTES de qualquer rede. `false` (provider
+      // built-in sem entrada em `providers[]`) ⇒ vale só p/ esta sessão, sem erro.
+      persistContextWindow: (slug, tokens) =>
+        configStore.registerModelContextWindow(localCfg.provider, slug, tokens),
+    });
   }
+
+  // F-WIN — as FONTES da janela do modelo (provider ativo + slug ativo + `providers[]`
+  // do config). HOISTADO p/ uma const (antes ia inline no `buildSession`) porque a
+  // DESCOBERTA automática abaixo precisa das MESMAS chaves: perguntar a janela ao
+  // provider só faz sentido p/ o slug que a sessão está de fato usando, e a checagem
+  // "já está declarada?" tem de olhar exatamente a fonte que o boot consultou — senão a
+  // descoberta pingaria o provider à toa (ou pior, descobriria p/ o slug errado).
+  const windowSources = resolveWindowSources({
+    backend: resolvedBackend,
+    config: savedConfig,
+    ...(localProviderForMeta !== undefined ? { resolvedLocalProvider: localProviderForMeta } : {}),
+    ...(localModelForWindow !== undefined ? { resolvedLocalModel: localModelForWindow } : {}),
+    ...(opts.localModel !== undefined ? { flagLocalModel: opts.localModel } : {}),
+  });
 
   // EST-0962 (`--provider`) — TIRA `provider` do spread cru de `opts`: ele só entra ABAIXO,
   // re-travado em par com o `--model` (custom + slug da CLI). Sem isto, `...opts` vazaria o
@@ -1147,10 +1206,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       });
       return hru !== undefined ? { headroomUrl: hru } : {};
     })(),
+    // F-SIDECAR-USO — PERFIL ativo p/ o chip de uso dos sidecars na StatusBar (só o
+    // TURBO os sobe ⇒ só ele mostra o chip). MESMO default do headroom acima.
+    profile: savedConfig.profile ?? 'turbo',
     // ADR-0150 §5 — limits do config (maxTokens/maxOutputTokens/maxIterations); flag/env vencem.
     ...(savedConfig.limits ? { limits: savedConfig.limits } : {}),
     // ADR-0150 §5 — context do config (window/autocompactAt/autocompactMax); flag/env vencem.
     ...(savedConfig.context ? { context: savedConfig.context } : {}),
+    // F-WIN — JANELA DO MODELO (BYO) ligada no BOOT. Ver `resolveWindowSources` (abaixo)
+    // p/ o PORQUÊ: em BYO o tier é `custom`, `contextWindowForTier` devolve 0 e a janela
+    // declarada pelo dono ficava órfã ⇒ `⛁ %` congelado e auto-compactação inerte.
+    ...windowSources,
     // ADR-0146 (D4) — dial GLOBAL `subAgent.model` (default dos FILHOS quando nem o
     // spawn nem o `.md` setam `model`). MERGE explícito sobre `opts.subAgents` (já veio
     // via `...optsForBuild` com `{ enabled }` de `aluy.ts`) — preserva os campos
@@ -1246,6 +1312,50 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       sampleHeapUsed: () => process.memoryUsage().heapUsed,
     },
   });
+
+  // F-WIN (descoberta) — DISPARA a descoberta da janela de contexto do modelo BYO, em
+  // BACKGROUND. É o que fecha o buraco de UX: até aqui, quem rodava BYO tinha de caçar a
+  // janela na doc do provider e escrevê-la à mão em `providers[].contextByModel`; quem
+  // não escrevia rodava com janela 0 — `⛁ %` congelado e auto-compactação INERTE
+  // (`decideAutoCompact` sai em `contextWindow <= 0`), i.e. sessão longa sem rede de
+  // segurança. O provider quase sempre JÁ SABE o número (`/models` → `context_length`);
+  // faltava perguntar.
+  //
+  // Três guardas, nesta ordem, porque cada uma remove uma chamada de rede INÚTIL:
+  //   1. porta ausente ⇒ não é backend LOCAL de verdade (broker, ou teste com
+  //      `brokerClient` injetado): nada acontece — zero rede nova nesses caminhos;
+  //   2. sem slug ativo ⇒ não há o que perguntar;
+  //   3. janela JÁ DECLARADA p/ este slug ⇒ não perguntamos NUNCA mais ("descobre uma
+  //      vez": a 1ª sessão grava no config, as seguintes acham antes de qualquer rede).
+  //      Um número escrito à mão pelo dono também cai aqui e continua soberano.
+  //
+  // NÃO bloqueia o boot: `void` sobre a promise, DEPOIS do `buildSession` — o render não
+  // espera. Quando (e se) a resposta chegar, `adoptDiscoveredModelWindow` só LIGA a
+  // proteção se a janela ainda for desconhecida (nunca rebaixa/sobrepõe uma conhecida).
+  // Vale p/ TTY e headless: no headless a chamada é disparada ANTES do turno (que dura
+  // segundos), então na prática ela já terminou quando o processo vai sair — e, no pior
+  // caso, o timeout do `/models` ABORTA o socket, de modo que uma sessão `-p` nunca fica
+  // pendurada esperando a descoberta (o handle não sobrevive ao teto).
+  // A porta NUNCA rejeita (fail-open interno); o `.catch` é cinto-e-suspensório p/ que
+  // um erro inesperado jamais vire `unhandledRejection` e derrube a CLI por causa de um
+  // enfeite de status bar.
+  if (discoverContextWindow !== undefined && windowSources.activeModelSlug !== undefined) {
+    const slugForWindow = windowSources.activeModelSlug;
+    const declaredWindow = modelWindowFromConfig(
+      windowSources.providerWindows,
+      windowSources.activeProviderId,
+      slugForWindow,
+    );
+    if (declaredWindow === undefined) {
+      void discoverContextWindow(slugForWindow)
+        .then((r) => {
+          if (r.window > 0) built.controller.adoptDiscoveredModelWindow(slugForWindow, r.window);
+        })
+        .catch(() => {
+          /* best-effort: descoberta é enfeite — nunca derruba a sessão. */
+        });
+    }
+  }
 
   // EST-BOOT-DECOUPLE/EST-MCP-STATUSBAR — `built.controller` já existe: a partir de
   // agora, um server MCP que conecta ANEXA suas tools direto no toolset AO VIVO (não
@@ -2564,6 +2674,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           workspaceRoot,
           unsafe: built.engine.isUnsafe,
           env,
+          // F-SIDECAR-USO — leva p/ o `/doctor` os contadores de USO desta sessão (o
+          // wiring os armou no boot). É o complemento honesto dos health-probes: eles
+          // dizem "de pé", isto diz "consultado N vezes".
+          ...(built.controller.sidecarUsage !== undefined
+            ? { sidecarUsage: built.controller.sidecarUsage }
+            : {}),
           probeOverride: {
             // CONECTA de verdade cada server MCP (mesmo transport stdio do boot, environ
             // mínimo + cwd confinado — CLI-SEC-7/FU-VAU-11-bis). Timeout curto por server.
@@ -3532,6 +3648,70 @@ async function readProjectInstructions(opts: RunSessionOptions): Promise<Project
   } catch {
     return { sources: [] };
   }
+}
+
+/**
+ * F-WIN — as FONTES da janela do modelo (BYO) que o boot entrega ao `buildSession`.
+ *
+ * O BUG que isto fecha: no backend LOCAL/BYO o tier é o literal `custom`, e
+ * `contextWindowForTier('custom')` devolve **0** por design ("janela imprevisível") ⇒ o
+ * `SessionController` nascia com janela 0 ⇒ o `⛁ % janela` da status bar CONGELAVA (a
+ * guarda `this.contextWindow > 0` do `onUsage` nunca passava) e a auto-compactação ficava
+ * INERTE (`decideAutoCompact` sai em `contextWindow <= 0`) — sessão longa sem rede de
+ * segurança, estourando a janela do provider e travando em 100%. Só que em BYO a janela
+ * NÃO é imprevisível: o dono declarou um modelo CONCRETO e pode declarar a janela dele em
+ * `providers[].contextByModel`. As peças da leitura (config sanitizado +
+ * `modelWindowFromConfig` + o re-resolve do `setTier`) já existiam e estavam INERTES
+ * porque NINGUÉM as alimentava no boot — é esta função que as liga.
+ *
+ * HG-2: tudo aqui é DADO público de catálogo (id de provider, slug, número de tokens);
+ * NENHUM destes campos viaja no corpo do request — são chaves de consulta LOCAL.
+ *
+ * PURO/testável (sem I/O). Devolve só as chaves PRESENTES (spread-friendly, respeitando
+ * `exactOptionalPropertyTypes`); ausência ⇒ a resolução cai nos degraus de sempre e, sem
+ * nada declarado, volta a 0/inerte (o fail-safe que o F134 exige).
+ */
+export function resolveWindowSources(input: {
+  /** Backend EFETIVO já resolvido (flag>env>config>default). */
+  readonly backend: string;
+  /** Config único já lido/sanitizado (`providers[]`, `localProvider`, `localModel`). */
+  readonly config: UserConfig;
+  /** Provider LOCAL resolvido de verdade no boot (`resolveLocalProviderConfig`). */
+  readonly resolvedLocalProvider?: string;
+  /** Modelo LOCAL resolvido de verdade no boot (`resolveLocalProviderConfig`). */
+  readonly resolvedLocalModel?: string;
+  /** `--local-model` cru (fallback quando o bloco local não rodou — ex.: broker injetado). */
+  readonly flagLocalModel?: string;
+}): {
+  readonly providerWindows?: readonly UserProviderEntry[];
+  readonly activeProviderId?: string;
+  readonly activeModelSlug?: string;
+} {
+  const nonEmpty = (s: string | undefined): string | undefined => {
+    const v = s?.trim();
+    return v !== undefined && v !== '' ? v : undefined;
+  };
+  // Provider ATIVO — desambigua o MESMO slug declarado em providers diferentes. Sob
+  // backend LOCAL usa o resolvido de verdade (precedência flag>env>config>default); sem
+  // ele (broker, ou teste com `brokerClient` injetado, que pula o bloco local) cai no
+  // `config.localProvider` cru. Ausente ⇒ o casamento é só por slug (degrade honesto,
+  // nunca inventa janela).
+  const activeProviderId =
+    nonEmpty(input.resolvedLocalProvider) ?? nonEmpty(input.config.localProvider);
+  // SLUG ativo — SÓ sob backend LOCAL. Sob broker o slug ativo é o Custom (que o
+  // `buildSession` já conhece como `opts.model`) e o `config.localModel` seria o modelo
+  // ERRADO (o do BYO, que nem está em uso) ⇒ janela de outro modelo na barra.
+  const activeModelSlug =
+    input.backend === 'local'
+      ? (nonEmpty(input.resolvedLocalModel) ??
+        nonEmpty(input.flagLocalModel) ??
+        nonEmpty(input.config.localModel))
+      : undefined;
+  return {
+    ...(input.config.providers ? { providerWindows: input.config.providers } : {}),
+    ...(activeProviderId !== undefined ? { activeProviderId } : {}),
+    ...(activeModelSlug !== undefined ? { activeModelSlug } : {}),
+  };
 }
 
 /**

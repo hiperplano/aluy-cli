@@ -40,3 +40,18 @@ export {
   buildLocalCatalog,
   findProvider,
 } from './catalog.js';
+// F-WIN (descoberta) — PARSE PURO do `GET {baseUrl}/models` p/ DESCOBRIR a janela de
+// contexto de um slug BYO (o número que o dono teria de digitar à mão em
+// `providers[].contextByModel`). Só tipos + parse de um corpo já lido: o fetch PINADO
+// (EST-1115), a credencial e a persistência no `~/.aluy/config.json` moram no `cli`.
+export {
+  type DiscoveredModelContext,
+  MIN_PLAUSIBLE_CONTEXT_TOKENS,
+  MAX_PLAUSIBLE_CONTEXT_TOKENS,
+  MAX_MODELS_PARSED,
+  isPlausibleContextWindow,
+  parseContextTokens,
+  contextFromEntry,
+  parseModelsListContexts,
+  findModelContext,
+} from './context-discovery.js';

@@ -16,6 +16,11 @@
 //              config.json corrompido). SÓ 'fail' faz o `aluy doctor` sair com exit≠0.
 
 import { DEFAULT_BROKER_BASE_URL } from '../model/config.js';
+// F-SIDECAR-USO — o `/doctor` é a tela de DIAGNÓSTICO, então é onde os contadores de
+// USO ganham a forma verbosa (uso + falha por sidecar). O resumo é PURO e vem do core,
+// o MESMO módulo que decide os 3 estados do chip da StatusBar: as duas telas não podem
+// discordar sobre o que é "usado".
+import { sidecarUsageSummary, type SidecarUsageView } from '@hiperplano/aluy-cli-core';
 
 /** Host do PLACEHOLDER default do broker (quando `ALUY_BROKER_URL` não foi configurado). */
 const PLACEHOLDER_BROKER_HOST = (() => {
@@ -206,6 +211,17 @@ export interface SidecarsFact {
   readonly profile: 'leve' | 'turbo';
   /** Toggles ON (ex.: `['ollama']`). Default TURBO = ['ollama', 'mem0']. */
   readonly toggles: readonly string[];
+  /**
+   * F-SIDECAR-USO — USO REAL medido NESTA SESSÃO (≠ dos probes acima, que só medem
+   * DISPONIBILIDADE). É a resposta a "o sidecar está de pé, mas ele está sendo
+   * CONSULTADO?" — a pergunta que o `✓ (200)` nunca respondeu.
+   *
+   * `undefined` fora de uma sessão: o `aluy doctor` de shell é um processo NOVO, sem
+   * loop e sem contadores; inventar zeros ali diria "nunca usado" quando o certo é
+   * "não há o que medir". Só o `/doctor` DENTRO da sessão preenche (o run.tsx passa o
+   * `state.sidecarUsage` que o wiring armou).
+   */
+  readonly usage?: SidecarUsageView;
 }
 
 /** #10 Maestro — supervisor de sessão. Reusa `resolveMaestro` do wiring. */
@@ -643,6 +659,14 @@ function checkSidecars(f: SidecarsFact): DoctorCheck {
 
   const toggleList = f.toggles.length > 0 ? f.toggles.join(', ') : 'nenhum';
   parts.push(`perfil ${f.profile.toUpperCase()} (toggles: ${toggleList})`);
+
+  // F-SIDECAR-USO — a linha que faltava: os probes acima dizem "de pé", ISTO diz
+  // "consultado". Só aparece dentro da sessão (o shell não tem contadores) e NÃO mexe
+  // no status: sidecar ocioso não é defeito — pode ser que a sessão simplesmente não
+  // tenha precisado dele. É informação p/ o dono decidir, não veredito.
+  if (f.usage !== undefined) {
+    parts.push(`uso na sessão: ${sidecarUsageSummary(f.usage).join(' · ')}`);
+  }
 
   const status: DoctorStatus = fail ? 'fail' : warn ? 'warn' : 'ok';
   const fix = fail

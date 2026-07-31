@@ -190,6 +190,7 @@ import {
   type SessionState,
   type GovernanceCounts,
   type McpProgress,
+  type SidecarUsageView,
   type SubAgentChild,
   type SubAgentsBlock,
   type TurnAccountingView,
@@ -210,7 +211,11 @@ import { sessionCommandTool } from '@hiperplano/aluy-cli-core';
 import { FlushThrottle, type FlushThrottleOptions } from './flush-throttle.js';
 import { backoffDelayMs, DEFAULT_BACKOFF, type BackoffPolicy } from './retry-backoff.js';
 import { isLiveBlock, sanitizeOrphans } from './render-split.js';
-import { resolveContextWindow } from '../model/catalog.js';
+import {
+  resolveContextWindow,
+  modelWindowFromConfig,
+  type ProviderWindowSource,
+} from '../model/catalog.js';
 
 /** `true` se o resolver é o da TUI (observável) — guard estrutural. */
 function isTuiResolver(r: AskResolver): r is TuiAskResolver {
@@ -336,6 +341,13 @@ export interface SessionControllerOptions {
   readonly meta: SessionMeta;
   /** Tamanho da janela de contexto p/ derivar `⛁ %` dos tokens. Default 200k. */
   readonly contextWindow?: number;
+  /**
+   * F-WIN — catálogo de providers do config (só o subset com `contextByModel`), p/ que a
+   * janela possa vir do MODELO em BYO. Ausente ⇒ comportamento anterior (tier/config/env).
+   */
+  readonly providerWindows?: readonly ProviderWindowSource[];
+  /** F-WIN — id/label do provider ATIVO (casa a entrada certa do catálogo acima). */
+  readonly activeProviderId?: string;
   /**
    * Tetos da sessão (CLI-SEC-8) repassados ao loop. Default: `DEFAULT_LIMITS` do
    * core. Injetável p/ teste do BudgetGate e base p/ EST-0947 (retomar com novo
@@ -1028,6 +1040,17 @@ export class SessionController {
   // EST-0973 (fix) — NÃO é `readonly`: re-resolvida na troca de tier (`setTier`),
   // pois cada tier tem sua janela real (ex.: Strata=128k, Flui=256k, Cortex=200k).
   private contextWindow: number;
+  /** F-WIN — fonte da janela POR MODELO (config BYO) + provider ativo. */
+  private readonly providerWindows: readonly ProviderWindowSource[] | undefined;
+  private readonly activeProviderId: string | undefined;
+  /**
+   * F-WIN (descoberta) — janelas DESCOBERTAS no provider (`/models`) NESTA sessão, por
+   * slug em minúsculas. Existe porque o `providerWindows` acima é um SNAPSHOT do config
+   * lido no BOOT: o que a descoberta grava DEPOIS é invisível p/ ele, e um `/model`
+   * posterior re-resolveria a janela p/ 0 (auto-compactação inerte no meio da sessão).
+   * Alimentado só por `adoptDiscoveredModelWindow` e lido só na re-resolução do `setTier`.
+   */
+  private readonly discoveredModelWindows = new Map<string, number>();
   // EST-0973 — flag crua `--autocompact-at` (p/ re-resolver na troca de tier).
   private readonly autoCompactAt: string | undefined;
   // EST-0973 — env da auto-compactação (p/ re-resolver na troca de tier).
@@ -1375,6 +1398,8 @@ export class SessionController {
     this.autoCompactAt = opts.autoCompactAt;
     this.contextConfig = opts.contextConfig;
     this.cycleConfig = opts.cycleConfig;
+    this.providerWindows = opts.providerWindows;
+    this.activeProviderId = opts.activeProviderId;
     this.contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
     // EST-0973 — AUTO-COMPACTAÇÃO da JANELA: resolve o limiar (flag `--autocompact-at`
     // > env `ALUY_AUTOCOMPACT_AT` > default 0.85) + a JANELA do modelo (`contextWindow`)
@@ -4250,6 +4275,70 @@ export class SessionController {
   }
 
   /**
+   * F-WIN (descoberta) — APLICA uma janela nova (e tudo que é FRAÇÃO dela). Extraído do
+   * `setTier` (comportamento IDÊNTICO, mesma chamada de `resolveAutoCompact`) porque a
+   * descoberta automática precisa do MESMO efeito: mudar `contextWindow` sem re-resolver
+   * o auto-compact e os orçamentos do Compactor deixaria os três DESSINCRONIZADOS — a %
+   * da barra falaria de uma janela e a compactação dimensionaria por outra.
+   *
+   * F134 (HUNT-COMPACT) — os orçamentos WINDOW-RELATIVOS do Compactor (input do resumo a
+   * 50% + cauda recente a ~40%) são frações da janela: sem re-resolver junto, ficam STALE
+   * (ex.: 200k→Strata 128k mantinha `recent` em 80k=62% e a compactação sub-dimensionava
+   * ⇒ a janela não baixava, regredindo o EST-0973). O `0.5` espelha o input-cap do boot.
+   * Janela 0 (custom sem janela conhecida) ⇒ size-aware OFF, como no boot.
+   *
+   * No-op (devolve `false`) quando a janela não muda — não re-renderiza nem re-arma nada.
+   */
+  private applyContextWindow(newWindow: number): boolean {
+    if (newWindow === this.contextWindow) return false;
+    this.contextWindow = newWindow;
+    this.autoCompactCfg = resolveAutoCompact({
+      ...(this.autoCompactAt !== undefined ? { atFlag: this.autoCompactAt } : {}),
+      atEnv: this.autoCompactEnv.ALUY_AUTOCOMPACT_AT,
+      contextWindow: newWindow,
+      maxConsecutiveEnv: this.autoCompactEnv.ALUY_AUTOCOMPACT_MAX,
+    });
+    this.compactor.setWindow(newWindow, 0.5);
+    return true;
+  }
+
+  /** F-WIN (descoberta) — janela descoberta p/ um slug NESTA sessão (casamento case-insensitive, como o `modelWindowFromConfig`). */
+  private discoveredWindowFor(model: string | undefined): number | undefined {
+    const key = (model ?? '').trim().toLowerCase();
+    if (key === '') return undefined;
+    return this.discoveredModelWindows.get(key);
+  }
+
+  /**
+   * F-WIN (descoberta) — ADOTA a janela que a descoberta automática leu do PRÓPRIO
+   * provider (`GET {baseUrl}/models` → `context_length`, ver
+   * `model/local/context-window-discovery.ts`). É o que faz o usuário NUNCA precisar
+   * digitar o número: o boot dispara a descoberta em BACKGROUND (não bloqueia o render)
+   * e, quando ela volta, chama aqui.
+   *
+   * Duas garantias que a tornam segura de chamar a qualquer momento:
+   *   1. só SOBE de "desconhecida" (`contextWindow <= 0`) p/ um número — NUNCA rebaixa
+   *      nem sobrepõe uma janela já conhecida (tier real, `ALUY_CONTEXT_WINDOW`,
+   *      `config.context.window` ou `contextByModel` declarado à mão). Um dado da REDE
+   *      não pode derrubar o que o dono/tier declarou; e como só liga o que estava
+   *      INERTE, o pior caso é o comportamento de hoje (F134 preservado: sem descoberta,
+   *      janela desconhecida segue desligando o size-aware do Compactor);
+   *   2. memoriza o par slug→janela p/ a sessão, de modo que um `/model` posterior (que
+   *      re-resolve a janela pelo snapshot do config, cego ao que a descoberta gravou)
+   *      não a perca.
+   *
+   * Devolve `true` se a janela EFETIVA mudou agora (i.e. a sessão saiu do inerte).
+   */
+  adoptDiscoveredModelWindow(slug: string, window: number): boolean {
+    const key = slug.trim().toLowerCase();
+    if (key === '' || !Number.isInteger(window) || window <= 0) return false;
+    this.discoveredModelWindows.set(key, window);
+    // Janela já conhecida ⇒ só memoriza (o `/model` futuro achará), sem mexer na atual.
+    if (this.contextWindow > 0) return false;
+    return this.applyContextWindow(window);
+  }
+
+  /**
    * EST-0962 — TROCA o tier de modelo da sessão (seletor `/model`). Troca no CALLER
    * (fonte da verdade da próxima chamada de modelo) e ESPELHA em `meta.tier`/`meta.model`
    * p/ a StatusBar/Header re-renderizarem na hora. HG-2: só o `tier` (+ o slug Custom,
@@ -4280,28 +4369,35 @@ export class SessionController {
     // F64 (fix) — respeita o override `ALUY_CONTEXT_WINDOW` quando o tier novo é
     // `custom` (janela 0): a troca p/ Custom passa a poder auto-compactar se o env
     // estiver setado, em vez de zerar a janela (inerte).
+    // F-WIN — a troca de modelo agora re-resolve pela JANELA DO MODELO NOVO, não só pelo
+    // tier. É o que conserta o rebaixamento silencioso que o dono via: em BYO o tier é
+    // sempre `custom` (janela 0 por design), então TODO `/model` e TODA retomada de sessão
+    // (`resolveResumedModel` → `setTier('custom', slug)`) zeravam a janela do boot — o
+    // `⛁ %` congelava e a auto-compactação virava INERTE pelo resto da sessão. Sessão NOVA
+    // funcionava; quebrava no 1º `/model`/`--continue`.
+    //
+    // NÃO é um "não rebaixar" cego (que colidiria com o F134, cujo ponto é que janela
+    // DESCONHECIDA deve desligar o size-aware do Compactor em vez de dimensioná-lo com um
+    // 200k chutado): quando o modelo novo tem janela DECLARADA, ela entra; quando não tem,
+    // o 0 continua valendo e o F134 segue verdadeiro. O conserto é dar a RESPOSTA CERTA,
+    // não suprimir a pergunta.
     const newWindow = resolveContextWindow(
       tier,
       this.autoCompactEnv,
       undefined,
       this.contextConfig?.window,
+      // F-WIN (descoberta) — a janela DESCOBERTA ao vivo no provider (`/models`) cobre o
+      // slug que o config ainda não declara. Sem este `??`, o `/model <mesmo slug>` (ou
+      // uma retomada, que também passa por aqui) JOGARIA FORA a descoberta desta sessão:
+      // o `providerWindows` é um SNAPSHOT do config lido no boot, então ele não enxerga
+      // o que a descoberta gravou DEPOIS ⇒ a janela voltaria a 0 e a auto-compactação
+      // ficaria inerte de novo no meio da sessão (o mesmo bug que o F-WIN consertou p/
+      // a janela declarada). O config DECLARADO continua vencendo: quem editou o número
+      // à mão manda mais que o que o provider anunciou.
+      modelWindowFromConfig(this.providerWindows, this.activeProviderId, model) ??
+        this.discoveredWindowFor(model),
     );
-    if (newWindow !== this.contextWindow) {
-      this.contextWindow = newWindow;
-      this.autoCompactCfg = resolveAutoCompact({
-        ...(this.autoCompactAt !== undefined ? { atFlag: this.autoCompactAt } : {}),
-        atEnv: this.autoCompactEnv.ALUY_AUTOCOMPACT_AT,
-        contextWindow: newWindow,
-        maxConsecutiveEnv: this.autoCompactEnv.ALUY_AUTOCOMPACT_MAX,
-      });
-      // F134 (HUNT-COMPACT) — os orçamentos WINDOW-RELATIVOS do Compactor (input do
-      // resumo a 50% + cauda recente a ~40%) também são frações da janela: re-resolve
-      // junto com a janela/auto-compact, senão ficam STALE da janela do BOOT (ex.:
-      // 200k→Strata 128k mantinha `recent` em 80k=62% e a compactação sub-dimensionava
-      // ⇒ janela não baixava, regredindo o EST-0973). O `0.5` espelha o input-cap do
-      // boot (linha ~1457). Janela 0 (custom) ⇒ size-aware OFF, como no boot.
-      this.compactor.setWindow(newWindow, 0.5);
-    }
+    this.applyContextWindow(newWindow);
     // `meta.model` só existe na via Custom; fora dela o campo é REMOVIDO (não fica
     // um slug fantasma de um Custom anterior). Reconstrói o meta sem `model` e o
     // re-adiciona só se o caller estiver em Custom (exactOptionalPropertyTypes).
@@ -4440,6 +4536,30 @@ export class SessionController {
    */
   setGovernanceCounts(counts: GovernanceCounts): void {
     this.patch({ governance: counts });
+  }
+
+  /**
+   * F-SIDECAR-USO (pedido do dono) — ARMA o indicador de USO dos sidecars.
+   *
+   * `presence` é a parte ESTÁTICA da sessão (perfil turbo/leve + quais dos três o
+   * wiring de fato LIGOU) — o boot a conhece e ela não muda. `meter` é a parte VIVA:
+   * o controller assina e re-espelha as contagens no `SessionState` a cada consulta,
+   * então a StatusBar (que já re-renderiza a cada frame) acende o chip no MOMENTO em
+   * que o sidecar é usado pela 1ª vez, sem timer nem poll.
+   *
+   * Este é o ponto de junção entre a BORDA (engines que falam HTTP) e a TUI, mantendo
+   * o `cli-core` sem Ink (ADR-0053 §8): o que vem do core é só dado + a decisão pura
+   * dos 3 estados. Sem esta chamada o campo fica `undefined` e nada aparece — que é o
+   * baseline correto p/ o perfil leve e p/ sessões montadas em teste.
+   */
+  armSidecarUsage(
+    presence: Omit<SidecarUsageView, 'usage'>,
+    meter: { snapshot(): SidecarUsageView['usage']; subscribe(fn: (u: SidecarUsageView['usage']) => void): () => void },
+  ): void {
+    this.patch({ sidecarUsage: { ...presence, usage: meter.snapshot() } });
+    meter.subscribe((usage) => {
+      this.patch({ sidecarUsage: { ...presence, usage } });
+    });
   }
 
   pushNote(title: string, lines: readonly string[]): void {
@@ -5205,6 +5325,16 @@ export class SessionController {
     this.toolRegistry.replaceMcpTools(wrapped, serverScope);
     if (serverScope !== undefined) this.toolRegistry.clearMcpServerPending(serverScope);
     this.announceToolsChanged();
+  }
+
+  /**
+   * F-SIDECAR-USO — visão CORRENTE do uso dos sidecars (perfil + ligados + contagens).
+   * Existe p/ o `/doctor` (que roda FORA do render e precisa do snapshot) e p/ teste; a
+   * StatusBar não usa este getter — ela lê `state.sidecarUsage` pela assinatura normal.
+   * `undefined` quando `armSidecarUsage` não foi chamado (perfil leve / sessão de teste).
+   */
+  get sidecarUsage(): SidecarUsageView | undefined {
+    return this.state.sidecarUsage;
   }
 
   /** EST-MCP-STATUSBAR — progresso CORRENTE da conexão MCP (StatusBar/teste). `undefined` = sem MCP configurado neste boot ou já concluído + auto-clear. */
