@@ -122,6 +122,14 @@ export interface StreamingModelCallerOptions {
    * caller lia `ALUY_HEADROOM_URL` do env direto (env-only) — agora é injetada (config-driven).
    */
   readonly headroomUrl?: string;
+  /**
+   * F-SIDECAR-USO — CONTABILIZA cada compressão de contexto. O caller é o ÚNICO lugar
+   * do caminho quente que consulta o headroom (`compressViaHeadroom`, antes de CADA
+   * chamada ao modelo), então é daqui que sai o número que a StatusBar mostra. `ok`
+   * distingue compressão APLICADA de fail-open (que segue com as mensagens originais).
+   * Ausente ⇒ nada é contado (baseline).
+   */
+  readonly onHeadroomUsed?: (ok: boolean) => void;
   /** Para onde os tokens são emitidos ao vivo (a UI). */
   readonly sink: StreamSink;
   /**
@@ -279,6 +287,10 @@ export class StreamingModelCaller implements ModelCaller {
                   );
                 }
               },
+              // F-SIDECAR-USO — marca USO (compressão APLICADA) vs FALHA (fail-open:
+              // recusa/timeout/HTTP ruim/proxy adulterado ⇒ mensagens ORIGINAIS). É o
+              // sinal que faz o chip `hdr` acender em vez de só dizer "está de pé".
+              ...(this.opts.onHeadroomUsed ? { onUsed: this.opts.onHeadroomUsed } : {}),
               onRefused: (reason) => {
                 if (!this.headroomRefusedWarned) {
                   this.headroomRefusedWarned = true;

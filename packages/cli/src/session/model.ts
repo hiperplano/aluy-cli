@@ -15,8 +15,15 @@ import type {
   Quota,
   ServerLimits,
   SessionMode,
+  SidecarUsageView,
   TestScore,
 } from '@hiperplano/aluy-cli-core';
+
+// F-SIDECAR-USO — o cache de render do USO dos sidecars é o próprio `SidecarUsageView`
+// do core (perfil + quais estão ligados + contagens ok/fail). Re-exportado aqui porque
+// a TUI consome tudo de `session/model.js` — sem duplicar tipo nem inverter a fronteira
+// (a decisão dos 3 estados é PURA e mora no core; aqui só trafega o dado).
+export type { SidecarUsageView };
 
 /** Um turno do usuário (▌ você). */
 export interface YouTurn {
@@ -637,6 +644,16 @@ export interface SessionState {
    * já rodou. Ver `McpProgress`.
    */
   readonly mcpProgress?: McpProgress | undefined;
+  /**
+   * F-SIDECAR-USO (pedido do dono) — USO REAL dos sidecars (headroom/ollama/mem0) nesta
+   * sessão, exibido como chip na StatusBar SÓ no perfil TURBO. É a resposta a "eles
+   * estão sendo USADOS de fato?" — que o health-probe do `/doctor` NÃO responde (ele
+   * mede porta aberta, não consulta). O wiring monta a visão estática (perfil + quais
+   * estão ligados) no boot; o controller espelha as CONTAGENS a cada chamada que o
+   * medidor registra. `undefined` ⇒ sem medidor armado (perfil leve, teste, sessão
+   * montada à mão) ⇒ a StatusBar não mostra chip nenhum.
+   */
+  readonly sidecarUsage?: SidecarUsageView | undefined;
   /**
    * LOTE-2 (governança .aluy/) — CONTAGENS do que foi CARREGADO da `.aluy/` (+ `~/.aluy/`
    * global) no boot: agentes, comandos, skills, workflows e itens de memória de projeto. A

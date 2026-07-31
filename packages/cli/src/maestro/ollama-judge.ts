@@ -54,6 +54,17 @@ export interface OllamaJudgeConfig {
 
   /** `fetch` injetável (teste). Default: globalThis.fetch. */
   readonly fetchFn?: typeof fetch;
+
+  /**
+   * F-SIDECAR-USO — CONTABILIZA a consulta ao sidecar ollama (o juiz). `ok:true` SÓ
+   * quando o veredito do LLM foi APROVEITADO — i.e. o `judge()` devolveu
+   * `mode:'llm'`. TODO caminho de `fallback()` reporta `ok:false`, e isso é o ponto:
+   * `mode:'heuristic'` significa que o Maestro decidiu SEM o ollama (motor-a puro),
+   * então o sidecar não serviu — seja porque está fora, seja porque o modelo
+   * respondeu lixo/inválido/alucinado ou estourou o teto de 2.5s. NUNCA carrega
+   * conteúdo do prompt/contexto.
+   */
+  readonly onUsed?: (ok: boolean) => void;
 }
 
 export const DEFAULT_OLLAMA_BASE_URL = OLLAMA_BASE_URL;
@@ -230,6 +241,8 @@ export class OllamaJudgeEngine implements JudgeEngine {
   private readonly timeoutMs: number;
   private readonly resolver: HostResolver;
   private readonly fetchFn: typeof fetch;
+  /** F-SIDECAR-USO — observador de uso (ver `OllamaJudgeConfig.onUsed`). */
+  private readonly onUsed: ((ok: boolean) => void) | undefined;
 
   constructor(config: Partial<OllamaJudgeConfig> = {}) {
     this.baseUrl = config.baseUrl ?? DEFAULT_OLLAMA_BASE_URL;
@@ -237,6 +250,20 @@ export class OllamaJudgeEngine implements JudgeEngine {
     this.timeoutMs = config.timeoutMs ?? DEFAULT_OLLAMA_TIMEOUT_MS;
     this.resolver = config.resolver ?? new NodeHostResolver();
     this.fetchFn = config.fetchFn ?? globalThis.fetch;
+    this.onUsed = config.onUsed;
+  }
+
+  /**
+   * F-SIDECAR-USO — reporta uso/falha ao medidor. Engolir a exceção é deliberado: o
+   * juiz inteiro é fail-open (CA-MA8, NUNCA trava o Maestro) e seria perverso um
+   * INDICADOR de uso conseguir derrubar aquilo que ele apenas observa.
+   */
+  private report(ok: boolean): void {
+    try {
+      this.onUsed?.(ok);
+    } catch {
+      /* observador defeituoso nunca trava o Maestro */
+    }
   }
 
   /**
@@ -319,6 +346,9 @@ export class OllamaJudgeEngine implements JudgeEngine {
       }
 
       // 5. Devolve resultado estruturado (CA-G2-12: DADO envelopado).
+      // F-SIDECAR-USO — ÚNICO ponto de USO real: só aqui o veredito do ollama sai com
+      // `mode:'llm'` e de fato pesa na regência. Todo o resto passa por `fallback()`.
+      this.report(true);
       return {
         chosen: verdict.chosen,
         confidence: clamp01(verdict.confidence),
@@ -348,6 +378,11 @@ export class OllamaJudgeEngine implements JudgeEngine {
    * para auditoria (CLI-SEC-10).
    */
   private fallback(input: JudgeInput, reason: string): JudgeResult {
+    // F-SIDECAR-USO — FUNIL ÚNICO de degradação: sidecar fora, HTTP ruim, timeout,
+    // parse frouxo ou `chosen` alucinado. Em todos, quem decidiu foi o motor-a — o
+    // ollama NÃO foi usado. Marcar aqui (e não em cada `return this.fallback(…)`)
+    // garante que um motivo de degradação NOVO já nasça contabilizado como falha.
+    this.report(false);
     const firstOption = input.options[0];
     const fallbackId = firstOption?.id ?? 'continuar';
     const fallbackLabel = firstOption?.label ?? 'continuar';

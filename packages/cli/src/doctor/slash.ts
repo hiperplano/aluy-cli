@@ -54,6 +54,13 @@ export interface DoctorSlashContext {
   /** `fetch`/glifos/env injetáveis p/ teste (sem rede real). */
   readonly env?: NodeJS.ProcessEnv;
   readonly probeOverride?: Partial<DoctorProbeDeps>;
+  /**
+   * F-SIDECAR-USO — contadores de USO dos sidecars desta sessão (o `state.sidecarUsage`
+   * que o wiring armou). O `/doctor` é a tela de diagnóstico, então é onde eles saem na
+   * forma verbosa (`uso na sessão: headroom: 12 uso(s) · …`), complementando os probes
+   * de disponibilidade. Ausente ⇒ a linha não sai (é o caso do `aluy doctor` de shell).
+   */
+  readonly sidecarUsage?: DoctorProbeDeps['sidecarUsage'];
 }
 
 /**
@@ -89,6 +96,8 @@ export async function runDoctorLive(
     getAccessToken: () => ctx.login.getAccessToken(),
     memory: ctx.memory,
     extraFlags,
+    // F-SIDECAR-USO — fato que só a sessão possui (não há gatherer p/ ele).
+    ...(ctx.sidecarUsage !== undefined ? { sidecarUsage: ctx.sidecarUsage } : {}),
     ...(ctx.probeOverride ?? {}),
     // O `onCheck` é o motor dos ticks AO VIVO — vai por ÚLTIMO p/ NUNCA ser clobberado
     // por um `probeOverride` (teste injeta gatherers/tierTester, não o onCheck).

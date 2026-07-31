@@ -91,3 +91,24 @@ export {
   resolveSidecarPaths,
   targetsToKinds,
 } from './boot-contract.js';
+
+// F-SIDECAR-USO — contabilidade de USO (≠ disponibilidade) dos 3 sidecars: o redutor
+// puro, os 3 estados que a StatusBar pinta e o acumulador de sessão. Ver o cabeçalho
+// de `sidecar-usage.ts` p/ o porquê de o health-probe do `/doctor` não bastar.
+export {
+  type SidecarUseCounts,
+  type SidecarUsage,
+  type SidecarUseState,
+  type SidecarEnabled,
+  type SidecarUsageView,
+  type SidecarChipEntry,
+  EMPTY_SIDECAR_USAGE,
+  SIDECAR_ORDER,
+  SIDECAR_CODE,
+  recordSidecarUse,
+  sidecarUseState,
+  buildSidecarChip,
+  sidecarChipCell,
+  sidecarUsageSummary,
+  SidecarUsageMeter,
+} from './sidecar-usage.js';

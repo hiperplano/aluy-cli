@@ -190,6 +190,7 @@ import {
   type SessionState,
   type GovernanceCounts,
   type McpProgress,
+  type SidecarUsageView,
   type SubAgentChild,
   type SubAgentsBlock,
   type TurnAccountingView,
@@ -4537,6 +4538,30 @@ export class SessionController {
     this.patch({ governance: counts });
   }
 
+  /**
+   * F-SIDECAR-USO (pedido do dono) — ARMA o indicador de USO dos sidecars.
+   *
+   * `presence` é a parte ESTÁTICA da sessão (perfil turbo/leve + quais dos três o
+   * wiring de fato LIGOU) — o boot a conhece e ela não muda. `meter` é a parte VIVA:
+   * o controller assina e re-espelha as contagens no `SessionState` a cada consulta,
+   * então a StatusBar (que já re-renderiza a cada frame) acende o chip no MOMENTO em
+   * que o sidecar é usado pela 1ª vez, sem timer nem poll.
+   *
+   * Este é o ponto de junção entre a BORDA (engines que falam HTTP) e a TUI, mantendo
+   * o `cli-core` sem Ink (ADR-0053 §8): o que vem do core é só dado + a decisão pura
+   * dos 3 estados. Sem esta chamada o campo fica `undefined` e nada aparece — que é o
+   * baseline correto p/ o perfil leve e p/ sessões montadas em teste.
+   */
+  armSidecarUsage(
+    presence: Omit<SidecarUsageView, 'usage'>,
+    meter: { snapshot(): SidecarUsageView['usage']; subscribe(fn: (u: SidecarUsageView['usage']) => void): () => void },
+  ): void {
+    this.patch({ sidecarUsage: { ...presence, usage: meter.snapshot() } });
+    meter.subscribe((usage) => {
+      this.patch({ sidecarUsage: { ...presence, usage } });
+    });
+  }
+
   pushNote(title: string, lines: readonly string[]): void {
     this.dismissBoot();
     // F145 (generaliza F143/F144) — TODA nota de slash-command entra ANTES do sufixo vivo,
@@ -5300,6 +5325,16 @@ export class SessionController {
     this.toolRegistry.replaceMcpTools(wrapped, serverScope);
     if (serverScope !== undefined) this.toolRegistry.clearMcpServerPending(serverScope);
     this.announceToolsChanged();
+  }
+
+  /**
+   * F-SIDECAR-USO — visão CORRENTE do uso dos sidecars (perfil + ligados + contagens).
+   * Existe p/ o `/doctor` (que roda FORA do render e precisa do snapshot) e p/ teste; a
+   * StatusBar não usa este getter — ela lê `state.sidecarUsage` pela assinatura normal.
+   * `undefined` quando `armSidecarUsage` não foi chamado (perfil leve / sessão de teste).
+   */
+  get sidecarUsage(): SidecarUsageView | undefined {
+    return this.state.sidecarUsage;
   }
 
   /** EST-MCP-STATUSBAR — progresso CORRENTE da conexão MCP (StatusBar/teste). `undefined` = sem MCP configurado neste boot ou já concluído + auto-clear. */

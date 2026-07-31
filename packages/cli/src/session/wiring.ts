@@ -95,6 +95,12 @@ import {
   type ProviderWindowSource,
 } from '../model/catalog.js';
 import { resolveMaestro, resolveContinuationCfg, resolveMemory } from '../maestro/wiring.js';
+// F-SIDECAR-USO — o medidor de USO dos sidecars + a resolução de toggles. O medidor é
+// criado UMA vez por sessão aqui (é o único lugar que enxerga os TRÊS pontos de
+// consulta: o caller/headroom, o judge/ollama e a memória/mem0) e o controller o
+// espelha no estado p/ a StatusBar. `resolveSidecarToggles` é a MESMA função que o
+// `resolveMaestro` usa — os "ligados" do indicador não podem divergir do que subiu.
+import { SidecarUsageMeter, resolveSidecarToggles } from '@hiperplano/aluy-cli-core';
 import type {
   UserServicesConfig,
   UserLimitsConfig,
@@ -125,6 +131,13 @@ export interface BuildSessionOptions {
    * Substitui a leitura env-only de antes (o proxy subia mas não era consumido).
    */
   readonly headroomUrl?: string;
+  /**
+   * F-SIDECAR-USO — PERFIL ativo (`~/.aluy/config.json`), resolvido em run.tsx. Só o
+   * TURBO sobe os sidecars, então só ele ganha o chip de uso na StatusBar; em LEVE o
+   * indicador seria três `✗` eternos na barra de quem escolheu rodar magro. Ausente ⇒
+   * assume `turbo` (o default REAL do sistema — mesmo que o boot-trigger usa).
+   */
+  readonly profile?: 'turbo' | 'leve';
   /**
    * ADR-0150 §5 (balde a) — limits do config (maxTokens/maxOutputTokens/maxIterations).
    * Resolvido em run.tsx (savedConfig.limits) e repassado; entra como nível ENTRE env e
@@ -956,11 +969,30 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // O sink precisa do controller; resolvemos a referência circular criando o
   // caller com um sink-proxy que delega ao controller após construído.
   let controllerRef: SessionController | null = null;
+  // F-SIDECAR-USO (pedido do dono) — MEDIDOR ÚNICO de uso dos sidecars nesta sessão.
+  // Nasce zerado e acumula SÓ chamadas que saíram e voltaram aproveitáveis; o
+  // controller o assina no fim deste `buildSession` e a StatusBar pinta os 3 estados.
+  const sidecarUsage = new SidecarUsageMeter();
+  // Toggles do MESMO jeito que o `resolveMaestro` os resolve (default-ON): o chip tem
+  // de dizer "ligado/desligado" pelo critério REAL do wiring, não por um palpite.
+  const sidecarToggles = resolveSidecarToggles({
+    ollama: env['ALUY_MAESTRO_OLLAMA'] !== '0',
+    mem0: env['ALUY_MAESTRO_MEM0'] !== '0',
+  });
+  // Preenchidos DENTRO da construção do controller (é lá que `resolveMaestro`/
+  // `resolveMemory` rodam e decidem, de fato, se o fio existe). Lidos logo depois,
+  // p/ montar a parte ESTÁTICA da visão do chip.
+  let ollamaLigado = false;
+  let mem0Ligado = false;
   const caller = new StreamingModelCaller({
     client: brokerClient,
     tier,
     // headroom config-driven: URL resolvida no run.tsx (turbo+toggle/services/env). undefined ⇒ off.
     ...(opts.headroomUrl !== undefined ? { headroomUrl: opts.headroomUrl } : {}),
+    // F-SIDECAR-USO — compressão APLICADA (ok) vs fail-open (falha). Só o caller do
+    // HUMANO conta: os callers de sub-agente/compactação são o mesmo sidecar e inflar
+    // o número com eles tornaria o indicador ruído em vez de sinal.
+    onHeadroomUsed: (ok: boolean) => sidecarUsage.record('headroom', ok),
     // EST-0972 (BUG Custom) — slug Custom retomado: só sob `tier:'custom'` (bootModel).
     // Sem isto, a 1ª chamada após retomar uma sessão Custom ia SEM model ⇒ 422.
     ...(bootModel !== undefined ? { model: bootModel } : {}),
@@ -1237,7 +1269,15 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // aponta p/ o proxy LOCAL do usuário. Ausente ⇒ a sessão segue idêntica (sem ela).
     // Efeito `network` ⇒ atrás da catraca (`always-ask:network`, Plan-deny) como web_fetch.
     ...(opts.headroomUrl !== undefined
-      ? { headroomRetrieveTool: makeHeadroomRetrieveTool({ baseUrl: opts.headroomUrl }) }
+      ? {
+          headroomRetrieveTool: makeHeadroomRetrieveTool({
+            baseUrl: opts.headroomUrl,
+            // F-SIDECAR-USO — o retrieve é o 2º ponto de uso REAL do headroom (quem
+            // consulta aqui é o MODELO, recuperando conteúdo dedupado). Cai no MESMO
+            // contador do compress: p/ o dono, "o headroom foi usado" é um fato só.
+            onUsed: (ok: boolean) => sidecarUsage.record('headroom', ok),
+          }),
+        }
       : {}),
     // EST-0969 · ADR-0057 — sub-agentes locais paralelos (tool `spawn_agent`). Só
     // entra quando habilitado; o controller monta o spawner com a MESMA engine/
@@ -1369,8 +1409,13 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     ...(() => {
       const maestro = resolveMaestro({
         env,
+        usage: sidecarUsage,
         ...(opts.services ? { services: opts.services } : {}),
       });
+      // F-SIDECAR-USO — o judge só é consultado com o Maestro LIGADO **e** o toggle
+      // `ollama` ON (ver a camada (b) do `rege`). Registrar isto aqui é o que permite
+      // ao chip distinguir "desligado" de "ligado e ocioso" — sem probe de rede.
+      ollamaLigado = maestro !== undefined && sidecarToggles.has('ollama');
       if (!maestro) return {};
       // F54 — também liga a política de CONTINUAÇÃO (fim-de-turno). Sem este fio,
       // o seam fica inerte e o agente "para e pede totó" (default-ON c/ Maestro).
@@ -1380,7 +1425,14 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // F-MEM — liga a MEMÓRIA (Mem0): recall+store no loop, escopo por projeto.
     // Independente do Maestro (kill-switch próprio ALUY_MEM_OFF). Default ON.
     ...(() => {
-      const mem = resolveMemory({ env, ...(opts.services ? { services: opts.services } : {}) });
+      const mem = resolveMemory({
+        env,
+        usage: sidecarUsage,
+        ...(opts.services ? { services: opts.services } : {}),
+      });
+      // F-SIDECAR-USO — `resolveMemory` já aplica os dois desligamentos (`ALUY_MEM_OFF`
+      // e o toggle `ALUY_MAESTRO_MEM0=0`); `undefined` ⇒ mem0 não está no fio.
+      mem0Ligado = mem !== undefined;
       return mem
         ? {
             memoryEngine: mem.memory,
@@ -1402,6 +1454,26 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     },
   });
   controllerRef = controller;
+
+  // F-SIDECAR-USO (pedido do dono: "ver se os sidecars estão sendo USADOS de fato") —
+  // ARMA o indicador. A parte ESTÁTICA (perfil + quem está no fio) é conhecida agora,
+  // depois que `resolveMaestro`/`resolveMemory` rodaram; a VIVA vem do medidor, que o
+  // controller assina. Perfil ausente ⇒ `turbo` (default REAL do sistema); em `leve` o
+  // `buildSidecarChip` devolve `undefined` e a barra não ganha campo nenhum.
+  controller.armSidecarUsage(
+    {
+      profile: opts.profile ?? 'turbo',
+      enabled: {
+        // O headroom não tem toggle próprio no fio da sessão: ele está ligado se, e
+        // somente se, o `resolveHeadroomUrl` (turbo+toggle/services/env) resolveu uma
+        // URL — a MESMA condição que arma o compress e a tool de retrieve.
+        headroom: opts.headroomUrl !== undefined,
+        ollama: ollamaLigado,
+        mem0: mem0Ligado,
+      },
+    },
+    sidecarUsage,
+  );
 
   return {
     controller,

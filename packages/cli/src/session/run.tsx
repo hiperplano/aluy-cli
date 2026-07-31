@@ -1206,6 +1206,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       });
       return hru !== undefined ? { headroomUrl: hru } : {};
     })(),
+    // F-SIDECAR-USO — PERFIL ativo p/ o chip de uso dos sidecars na StatusBar (só o
+    // TURBO os sobe ⇒ só ele mostra o chip). MESMO default do headroom acima.
+    profile: savedConfig.profile ?? 'turbo',
     // ADR-0150 §5 — limits do config (maxTokens/maxOutputTokens/maxIterations); flag/env vencem.
     ...(savedConfig.limits ? { limits: savedConfig.limits } : {}),
     // ADR-0150 §5 — context do config (window/autocompactAt/autocompactMax); flag/env vencem.
@@ -2671,6 +2674,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           workspaceRoot,
           unsafe: built.engine.isUnsafe,
           env,
+          // F-SIDECAR-USO — leva p/ o `/doctor` os contadores de USO desta sessão (o
+          // wiring os armou no boot). É o complemento honesto dos health-probes: eles
+          // dizem "de pé", isto diz "consultado N vezes".
+          ...(built.controller.sidecarUsage !== undefined
+            ? { sidecarUsage: built.controller.sidecarUsage }
+            : {}),
           probeOverride: {
             // CONECTA de verdade cada server MCP (mesmo transport stdio do boot, environ
             // mínimo + cwd confinado — CLI-SEC-7/FU-VAU-11-bis). Timeout curto por server.

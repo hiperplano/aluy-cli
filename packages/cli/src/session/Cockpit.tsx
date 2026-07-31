@@ -413,6 +413,12 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
           {...(props.state.mcpProgress !== undefined
             ? { mcpProgress: props.state.mcpProgress }
             : {})}
+          {...(props.state.sidecarUsage !== undefined
+            ? // F-SIDECAR-USO — o cockpit (alt-screen) usa a MESMA <StatusBar> do inline,
+              // então o chip de uso dos sidecars tem de chegar aqui também: sem este fio,
+              // trocar p/ `/fullscreen` apagaria o indicador sem motivo.
+              { sidecarUsage: props.state.sidecarUsage }
+            : {})}
         />
       </Box>
 

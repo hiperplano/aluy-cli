@@ -48,6 +48,16 @@ export interface HeadroomOptions {
    * caller dedupa). NUNCA carrega conteúdo de mensagem — só o motivo da recusa.
    */
   readonly onRefused?: (reason: string) => void;
+  /**
+   * F-SIDECAR-USO — CONTABILIZA a chamada ao sidecar headroom (o dono quer VER se ele
+   * está sendo usado, não só se está de pé). `ok:true` SÓ quando a compressão de fato
+   * saiu, voltou e o resultado foi ACEITO (forma válida + travas HR-SEC passadas), i.e.
+   * quando `messages` seguiu COMPRIMIDO. Todo o resto — destino recusado, HTTP ruim,
+   * forma inesperada, proxy adulterando, timeout/abort — é FAIL-OPEN (segue com as
+   * mensagens ORIGINAIS) e reporta `ok:false`: não houve uso, houve degradação.
+   * Chamado NO MÁXIMO uma vez por `compressViaHeadroom`. NUNCA carrega conteúdo.
+   */
+  readonly onUsed?: (ok: boolean) => void;
 }
 
 interface CompressResponse {
@@ -91,6 +101,13 @@ export async function compressViaHeadroom(
   const onExternalAbort = (): void => ac.abort();
   opts.signal?.addEventListener('abort', onExternalAbort, { once: true });
   if (opts.signal?.aborted) ac.abort();
+  // F-SIDECAR-USO — só vira `true` no ÚNICO caminho em que a compressão foi de fato
+  // APROVEITADA. Fica aqui (fora do try) e é reportado no `finally` porque o fail-open
+  // tem MUITAS saídas (recusa de destino, HTTP ruim, forma torta, 3 travas HR-SEC,
+  // catch de timeout/abort): marcar cada uma seria fácil de esquecer numa edição
+  // futura. Default `false` ⇒ qualquer caminho novo já nasce contado como FALHA, que é
+  // o lado seguro (nunca inventa uso que não houve).
+  let used = false;
   try {
     // EST-1075 · HR-SEC-1/2 — valida (loopback-only) + pina ANTES de qualquer byte sair.
     // Destino não-loopback ⇒ compress NÃO dispara (fail-open: original) + avisa 1×.
@@ -149,6 +166,9 @@ export async function compressViaHeadroom(
       after: data.tokens_after ?? 0,
       ratio: data.compression_ratio ?? 1,
     });
+    // Passou por TODAS as travas ⇒ a resposta do proxy vai ser aplicada. Este é o
+    // único ponto que caracteriza USO do headroom nesta rota.
+    used = true;
     return messages.map((orig, i) => {
       const c = out[i]?.content;
       // F97 (HR-SEC-3) — compressão DEDUPA/ENCURTA texto EXISTENTE; ela NÃO materializa
@@ -167,5 +187,13 @@ export async function compressViaHeadroom(
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     opts.signal?.removeEventListener('abort', onExternalAbort);
+    // F-SIDECAR-USO — reporta SEMPRE (uso ou falha), inclusive no catch. O medidor é
+    // fail-open como o resto do caminho: um observador que lance NÃO pode derrubar o
+    // turno (seria absurdo o indicador quebrar aquilo que ele só observa).
+    try {
+      opts.onUsed?.(used);
+    } catch {
+      /* observador defeituoso nunca derruba a compressão */
+    }
   }
 }
