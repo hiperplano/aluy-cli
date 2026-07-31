@@ -91,6 +91,7 @@ import { formatElapsed, queueAtRest } from './model.js';
 import { decideEscAction } from './esc-redirect.js';
 import { animTickEnabled, elapsedTickEnabled } from './tick-policy.js';
 import { splitBlocks } from './render-split.js';
+import { aluyNeedsLeadingBlank } from './block-rhythm.js';
 import {
   speechMaxLines,
   slashMenuMaxRows,
@@ -4010,6 +4011,16 @@ export function App(props: AppProps): React.ReactElement {
             maxLines={splitMaxLines}
             columns={splitLayout === 'side' ? splitRes.chatCols : columns}
             rows={rows}
+            // RESPIRO (achado do dono) — só o vizinho DENTRO do sufixo vivo. No 1º item
+            // (`i === 0`) o anterior já migrou p/ o `<Static>`, e a fronteira Static×vivo
+            // JÁ tem sua linha em branco: o contêiner da região viva é um
+            // `<Box paddingY={1}>` (contado em `LIVE_CHROME_BASE_ROWS`). Passar o vizinho
+            // absoluto aqui daria DUAS linhas em branco — provado em PTY. Deixando `i===0`
+            // sem contexto, o par `⏺ tool → Λ aluy` fica com 1 linha ANTES do commit (o
+            // pad do contêiner) e 1 DEPOIS (o paddingTop do próprio aluy, no Static): a
+            // altura não pula no instante em que o bloco desce p/ o scrollback — que é
+            // onde este repo já teve o "buraco no meio da tela".
+            prevKind={i > 0 ? live[i - 1]?.kind : undefined}
           />
         ))
       )}
@@ -4178,7 +4189,18 @@ export function App(props: AppProps): React.ReactElement {
                   <Divider columns={columns} subtle />
                 </Box>
               )}
-              <BlockView block={block} isCurrent={false} frame={0} columns={columns} />
+              {/* RESPIRO (achado do dono) — o vizinho de CIMA no HISTÓRICO. `done` é
+                  prefixo de `state.blocks`, então `done[blockIndex-1]` é o MESMO bloco
+                  que a região viva consultava antes deste descer p/ o scrollback ⇒ a
+                  linha em branco NÃO aparece/some no instante do commit do `<Static>`
+                  (a fronteira Static×vivo é onde este repo já teve "buraco na tela"). */}
+              <BlockView
+                block={block}
+                isCurrent={false}
+                frame={0}
+                columns={columns}
+                prevKind={done[blockIndex - 1]?.kind}
+              />
             </Box>
           );
         }}
@@ -4618,6 +4640,13 @@ export function App(props: AppProps): React.ReactElement {
           ? { cycleProgress: state.cycleProgress }
           : {})}
         {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
+        {...(state.sidecarUsage !== undefined
+          ? // F-SIDECAR-USO — USO REAL dos sidecars (headroom/ollama/mem0). O wiring arma
+            // o medidor e o controller espelha as contagens aqui; o chip só aparece no
+            // perfil TURBO (em leve o `buildSidecarChip` devolve `undefined` e a barra
+            // nem ganha o campo). Responde "estão sendo USADOS?", não "estão de pé?".
+            { sidecarUsage: state.sidecarUsage }
+          : {})}
         busy={busy}
         frame={frame}
       />
@@ -4675,6 +4704,18 @@ export function BlockView(props: {
   readonly columns?: number;
   /** F163 — altura do terminal (linhas): encolhe a cauda viva de shell em tela baixa. */
   readonly rows?: number;
+  /**
+   * RESPIRO (achado do dono) — tipo do bloco IMEDIATAMENTE ANTERIOR na conversa. O
+   * respiro entre turnos é pago pelo `paddingBottom` do bloco de CIMA, mas a
+   * `<ToolLine>` NÃO tem padding (de propósito: tools seguidas = lista compacta) ⇒
+   * `ferramenta → aluy` COLAVA. Com o tipo anterior em mãos, o `aluy` paga o respiro
+   * SÓ quando ninguém pagou (regra em `block-rhythm.ts`) — nunca 2 linhas em branco.
+   * Ausente ⇒ nenhum respiro extra (1º bloco da conversa; e o <Cockpit>, cuja região
+   * de altura fixa é medida 1:1 por `measureConversaBlock`, segue intacto).
+   */
+  // `| undefined` EXPLÍCITO (exactOptionalPropertyTypes): os call-sites passam o
+  // resultado de um índice que pode não existir (`blocks[i-1]?.kind`) direto.
+  readonly prevKind?: SessionState['blocks'][number]['kind'] | undefined;
 }): React.ReactElement {
   const b = props.block;
   switch (b.kind) {
@@ -4686,7 +4727,7 @@ export function BlockView(props: {
       );
     case 'aluy':
       return (
-        <Box paddingBottom={1}>
+        <Box paddingBottom={1} paddingTop={aluyNeedsLeadingBlank(props.prevKind) ? 1 : 0}>
           <AluyBlock
             text={b.text}
             streaming={b.streaming}
