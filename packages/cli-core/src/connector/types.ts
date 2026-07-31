@@ -1,4 +1,4 @@
-// Padrão genérico de CONECTORES (ADR-0135) — a PORTA `Connector` portável e seus tipos.
+// Padrão genérico de CONECTORES (ADR-0154) — a PORTA `Connector` portável e seus tipos.
 // Vivem no @hiperplano/aluy-cli-core: SEM Ink, SEM `fetch` concreto, SEM detalhe de rede
 // (o I/O é injetado por um runtime concreto no @hiperplano/aluy-cli). Espelha a fronteira
 // cli-core×cli do ADR-0053 §8.
@@ -20,7 +20,7 @@ export type ConversationRef = string;
 /**
  * Proveniência da mensagem — distingue o que o DONO escreveu do que é conteúdo de
  * TERCEIRO embutido. Quem CLASSIFICA (instrução×dado×descarte) é a malha; o conector
- * só DESCREVE a proveniência (ADR-0135 §1.a).
+ * só DESCREVE a proveniência (ADR-0154 §1.a).
  */
 export type Provenance =
   | {
@@ -34,7 +34,7 @@ export type Provenance =
       readonly kind: 'third-party-relayed';
     };
 
-/** Uma mensagem que CHEGA de um canal externo (ingresso). Tipos portáveis (ADR-0135 §1). */
+/** Uma mensagem que CHEGA de um canal externo (ingresso). Tipos portáveis (ADR-0154 §1). */
 export interface IncomingMessage {
   /** Conteúdo (texto — v1). */
   readonly content: string;
@@ -73,7 +73,7 @@ export interface ConnectorMeta {
 }
 
 /**
- * A PORTA `Connector` — contrato mínimo (ADR-0135 §1). O concreto implementa transporte +
+ * A PORTA `Connector` — contrato mínimo (ADR-0154 §1). O concreto implementa transporte +
  * identidade; o I/O (rede/keychain) é injetado. A malha consome esta porta.
  */
 export interface Connector {

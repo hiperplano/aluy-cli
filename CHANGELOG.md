@@ -14,6 +14,19 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.110] — 2026-07-31
+
+### Corrigido
+
+- 🩹 **usage do trailer OpenAI era perdido — fecha `⛁ 0% janela`/`◔ 0 sessão`/`0 tokens` no BYO INTEIRO:** a causa raiz por trás de TRÊS sintomas reportados separadamente, mesmo após a rc.109 corrigir a resolução da janela e a nota de descoberta — NENHUM turno BYO em streaming jamais reportava usage, pai ou sub-agente. No estilo OpenAI com `stream_options:{include_usage:true}`, o `usage` REAL vem num chunk SEPARADO, DEPOIS do chunk que traz `finish_reason` — mas o adapter emitia `done` assim que via `finish_reason`, e `done` FECHA O SOCKET; o chunk trailer de usage nunca era lido. Provado no código real (fixture SSE cru via `LocalModelClient.stream()`): antes, `delta → done(finish_reason:"stop")` com `usage: undefined`; depois, `delta → usage{...} → done(...)` com o usage completo. O `done` agora é ADIADO até o sentinela `[DONE]` (depois do trailer); um `ProviderAdapter.finalize?(acc)` novo (opcional) cobre o provider que fecha a conexão sem `[DONE]`, fechando o turno com o `finish_reason` REAL; e um teto anti-hang (`MAX_TRAILER_EVENTS=8`) evita pendurar a sessão num trailer que nunca termina. Confirmado que `anthropic-adapter.ts` não precisa do `finalize`: `usage` e `done` já saem juntos, no mesmo `message_delta`, sem trailer separado no protocolo Anthropic.
+
+## [1.0.0-rc.109] — 2026-07-31
+
+### Corrigido
+
+- 🩹 **status bar espremida no BYO — o modelo agora é campo DESCARTÁVEL:** o chip `◈ sidecars` da rc.108 ESTAVA aparecendo — a barra INTEIRA é que embaralhava entre ~90 e 115 colunas. No backend local o modelo ia COLADO dentro do `tierDisplay` (`local · <provider> · <modelo>`), campo que por projeto nunca é descartado; o limiar `MODEL_MIN_COLS` foi calibrado em 90 col ANTES de o chip existir. Medido no binário instalado (100 col): antes, `◷` sumia e `sidecars`→`sidecar`/`0%`→`0`; depois, a linha inteira cabe. O modelo do BYO passa a viajar no campo descartável `model`, e `sidecarChipCols()` MEDE o custo real do chip em vez de um número fixo.
+- 🩹 **descoberta de janela vazia deixa de ser SILENCIOSA:** investigado no binário real (provider tokenrouter) — não é bug de código, é DADO AUSENTE na fonte: o `/v1/models` do tokenrouter responde 200 sem nenhum campo de janela (confirmado também via `/api/pricing`, headers, `/v1/models/<id>`). A mecânica está certa (provado gravando sozinho a janela ao apontar para o OpenRouter, que publica `context_length`) — só faltava avisar. Agora, descoberta vazia e janela efetiva ainda 0 ⇒ nota dizendo onde declarar (`providers[].contextByModel`), gateada por um getter só-leitura para quem já tem janela conhecida não ver nota nenhuma.
+
 ## [1.0.0-rc.108] — 2026-07-31
 
 ### Corrigido

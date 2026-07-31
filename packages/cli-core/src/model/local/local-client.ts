@@ -126,9 +126,20 @@ export class LocalModelClient implements ModelClient {
         const mapped = this.adapter.mapSse(sse.event, sse.data, acc);
         for (const ev of mapped) {
           yield ev;
+          // O `done` encerra o generator (fecha o socket). Isto é o que fazia o
+          // trailer de `usage` do estilo OpenAI ser perdido — mas a correção mora no
+          // ADAPTER (que agora ADIA o `done` até depois do trailer), não aqui: o
+          // client segue com a regra simples "done = fim", que é o contrato dos
+          // consumidores (`call()`/`StreamingModelCaller`).
           if (ev.type === 'done') return;
         }
       }
+      // BUG-TRAILER (rede) — o corpo acabou SEM `done` (provider fechou a conexão sem
+      // mandar `[DONE]`). Sem isto, com o `done` adiado, o turno voltaria sem o
+      // `finish_reason` REAL (o loop distingue `tool_calls`/`length` por ele) e sem as
+      // tool-calls acumuladas. `finalize` é OPCIONAL: adapter que já emite `done` no
+      // seu próprio evento de fim (Anthropic) não o implementa ⇒ no-op.
+      for (const ev of this.adapter.finalize?.(acc) ?? []) yield ev;
     } catch (err) {
       if (isAbortError(err) || err instanceof ModelCallAbortedError) {
         throw new ModelCallAbortedError();

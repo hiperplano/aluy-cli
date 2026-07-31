@@ -70,7 +70,7 @@ export type CliAction =
       json: boolean;
       which: 'models' | 'providers';
     }
-  // ADR-0134/0135 — `aluy telegram <sub>`: gestão do conector Telegram (login=token no
+  // ADR-0154 — `aluy telegram <sub>`: gestão do conector Telegram (login=token no
   // keychain; allow/deny=allowlist de chat-ids no config; status). Sem rede nesta fatia.
   | {
       kind: 'telegram';
@@ -187,7 +187,7 @@ export type CliAction =
       // cobertura quase universal mesmo em UTF-8 (terminal/fonte teimosos, ex.:
       // Terminator). Equivale a ALUY_SAFE_GLYPHS=1. Não persiste.
       safeGlyphs: boolean;
-      // ADR-0134/0135 — `--telegram` ATIVA a bridge Telegram no boot: o agente passa a
+      // ADR-0154 — `--telegram` ATIVA a bridge Telegram no boot: o agente passa a
       // RECEBER mensagens do dono allowlistado (long-poll) e pode responder (`telegram_send`).
       // DORMENTE sem credencial: sem token no keychain a bridge NÃO sobe (avisa `aluy telegram
       // login`) — zero egress. Só LIGA (não persiste; `false`/ausente ⇒ inerte, como hoje).
@@ -881,7 +881,7 @@ export function parseArgs(argv: readonly string[]): CliAction {
     return { kind: 'models', scope, json, which: sub === 'providers' ? 'providers' : 'models' };
   }
 
-  // ADR-0134/0135 — `aluy telegram <login|logout|allow|deny|status> [args]`. `--help` cai
+  // ADR-0154 — `aluy telegram <login|logout|allow|deny|status> [args]`. `--help` cai
   // no help geral. Subcomando inválido/ausente ⇒ usage-error.
   if (sub === 'telegram' && !argv.includes('-h') && !argv.includes('--help')) {
     const tgSub = argv[1];
@@ -953,7 +953,7 @@ export function parseArgs(argv: readonly string[]): CliAction {
   const dense = argv.includes('--dense');
   // EST-0984 — `--ascii` força o perfil SEGURO de glifos (opt-in explícito).
   const safeGlyphs = argv.includes('--ascii');
-  // ADR-0134/0135 — `--telegram` ATIVA a bridge no boot (só LIGA; ausente ⇒ inerte). A
+  // ADR-0154 — `--telegram` ATIVA a bridge no boot (só LIGA; ausente ⇒ inerte). A
   // ativação real é DORMENTE: sem token no keychain a bridge não sobe (avisa e segue).
   const telegram = argv.includes('--telegram');
   // EST-0990 — `--split` (alias `--view`) LIGA o modo view avançado na largada. Só
@@ -1328,7 +1328,7 @@ export function parseArgs(argv: readonly string[]): CliAction {
     fresh,
     subAgents,
     safeGlyphs,
-    telegram, // ADR-0134/0135 — ativa a bridge Telegram no boot (dormente sem token).
+    telegram, // ADR-0154 — ativa a bridge Telegram no boot (dormente sem token).
     print, // EST-1007 — modo headless one-shot (`-p`/`--print`/`--exec`).
     ...(split !== undefined ? { split } : {}),
     ...(fullscreen !== undefined ? { fullscreen } : {}),

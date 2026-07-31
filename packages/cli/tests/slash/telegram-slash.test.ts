@@ -1,4 +1,4 @@
-// ADR-0134/0135 — `/telegram` (setup do conector DENTRO da sessão): status/allow/deny/
+// ADR-0154 — `/telegram` (setup do conector DENTRO da sessão): status/allow/deny/
 // logout/login. PURO de Ink (deps injetadas): config num tmpdir, secret-store fake.
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';

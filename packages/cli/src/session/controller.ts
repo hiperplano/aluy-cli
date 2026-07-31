@@ -3742,7 +3742,7 @@ export class SessionController {
   }
 
   /**
-   * ADR-0134/0135 (bridge de conectores) — INGRESSO de DADO NÃO-CONFIÁVEL de um canal
+   * ADR-0154 (bridge de conectores) — INGRESSO de DADO NÃO-CONFIÁVEL de um canal
    * externo (ex.: Telegram). DISTINTO do `injectInput` (que é INSTRUÇÃO do dono, canal
    * `user`): aqui o conteúdo entra SEMPRE como `observation` (DADO_NAO_CONFIAVEL, CLI-SEC-4)
    * — o modelo o INTERPRETA, NUNCA o obedece como ordem (a fronteira de PROVENIÊNCIA, igual à

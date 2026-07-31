@@ -1,4 +1,4 @@
-// `aluy telegram <sub>` (ADR-0134 / ADR-0135 §72) — UX de gestão do conector Telegram:
+// `aluy telegram <sub>` (ADR-0154 / ADR-0154 §72) — UX de gestão do conector Telegram:
 // login (token → keychain), logout, allow/deny (allowlist de chat-ids → config), status.
 // É o molde `aluy connector login/allow <id>` com açúcar `aluy telegram`.
 //
@@ -134,7 +134,7 @@ async function statusCmd(
   io.out(
     `  allowlist: ${allow.length > 0 ? `[${allow.join(', ')}]` : 'VAZIA (bridge fechada — autorize com `aluy telegram allow <chat-id>`)'}`,
   );
-  // ADR-0134/0135 — a bridge é DORMENTE: existe e ativa com `aluy --telegram`, mas só sobe
+  // ADR-0154 — a bridge é DORMENTE: existe e ativa com `aluy --telegram`, mas só sobe
   // (abre o long-poll/egress) quando HÁ token. Sem token ⇒ inerte, mesmo com `--telegram`.
   const ready = token !== null && allow.length > 0;
   io.out(

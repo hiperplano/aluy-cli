@@ -221,7 +221,7 @@ export interface RunSessionOptions extends BuildSessionOptions {
    */
   readonly budget?: boolean;
   /**
-   * ADR-0134/0135 — `--telegram`: ATIVA a bridge Telegram no boot (long-poll do dono
+   * ADR-0154 — `--telegram`: ATIVA a bridge Telegram no boot (long-poll do dono
    * allowlistado + tool `telegram_send`). DORMENTE: sem token no keychain a bridge NÃO sobe
    * (avisa `aluy telegram login`, zero egress). Ausente/`false` ⇒ inerte (como hoje).
    * Injetável p/ teste via `telegramActivate` (sem keychain/rede real).
@@ -850,7 +850,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     }
   };
 
-  // ADR-0134/0135 — ATIVAÇÃO da bridge Telegram (`--telegram`). Roda ANTES do `buildSession`
+  // ADR-0154 — ATIVAÇÃO da bridge Telegram (`--telegram`). Roda ANTES do `buildSession`
   // p/ a tool `telegram_send` entrar no toolset (`mcpTools`, síncrono no build). O SINK é
   // DEFERIDO: o pump injeta no `SessionController` que só existe APÓS o build — então o sink
   // guarda uma ref mutável ao controller, preenchida logo depois. DORMENTE (C6): sem token,
@@ -2811,7 +2811,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       // cai no fallback honesto do buildSlashEffect (sem descoberta nesta sessão).
     }
 
-    // ADR-0134/0135 — `/telegram` (setup do conector na sessão): async (config + keychain),
+    // ADR-0154 — `/telegram` (setup do conector na sessão): async (config + keychain),
     // com `args` (subcomando + chat-id). Empurra a nota ao concluir. O token NUNCA é digitado
     // aqui — `login` aponta p/ o terminal; allow/deny/status/logout rodam in-session.
     if (command.id === 'telegram') {
@@ -3373,7 +3373,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     });
     built.controller.startMemoryMonitor();
 
-    // ADR-0134/0135 — LIGA a bridge Telegram agora que o `SessionController` existe: preenche
+    // ADR-0154 — LIGA a bridge Telegram agora que o `SessionController` existe: preenche
     // a ref DEFERIDA do sink e dispara o PUMP do long-poll (em segundo plano). O pump roteia
     // CADA mensagem pela malha (C2) e injeta SÓ o que ela autoriza. NÃO bloqueia o boot/render
     // (`void`); um erro do pump é REDIGIDO (C1) e NÃO derruba a sessão. O `bridge.stop()` no
@@ -3422,7 +3422,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       // waitUntilExit). Idempotente com o `finally` externo (re-remoção é no-op).
       signalReset.dispose();
     }
-    // ADR-0134/0135 — ENCERRA a bridge Telegram ao sair: aborta o long-poll (o connector
+    // ADR-0154 — ENCERRA a bridge Telegram ao sair: aborta o long-poll (o connector
     // termina o `incoming()`). Idempotente; no-op quando a bridge não subiu. Solta a ref
     // deferida do sink (sem injetar em sessão já morta).
     telegramBridge?.stop();

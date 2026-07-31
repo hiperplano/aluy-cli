@@ -1,4 +1,4 @@
-// Conectores (ADR-0135 TC-3 / ADR-0134 §3) — CONTRATO do segredo do conector (o TOKEN do
+// Conectores (ADR-0154 TC-3 / ADR-0154 §3) — CONTRATO do segredo do conector (o TOKEN do
 // bot) e validadores PUROS. PORTÁVEL: aqui só a interface + o naming + a validação de
 // forma. O store concreto é o KEYCHAIN do SO (CLI-SEC-2), que vive no @hiperplano/aluy-cli.
 //

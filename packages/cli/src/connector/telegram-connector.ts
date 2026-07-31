@@ -1,10 +1,10 @@
-// Conector Telegram (ADR-0134) — a impl concreta da porta `Connector` (ADR-0135 §1):
+// Conector Telegram (ADR-0154) — a impl concreta da porta `Connector` (ADR-0154 §1):
 // junta o INGRESSO (long-poll → IncomingMessage) e o EGRESSO (send) por trás da porta
 // portável. A malha consome ESTA porta (classifica o ingresso, trava o alvo do egresso,
 // passa pela catraca). Aqui só a composição Telegram-específica sobre o `TelegramClient`.
 //
 // ⚠️ INERTE: ainda NÃO instanciado pelo boot. A ativação (`--telegram`) + o registro na
-//    malha + a tool `telegram_send` gateada esperam a revisão `seguranca` (ADR-0134).
+//    malha + a tool `telegram_send` gateada esperam a revisão `seguranca` (ADR-0154).
 
 import {
   TELEGRAM_META,

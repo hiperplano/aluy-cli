@@ -458,7 +458,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     agentEffect: 'read-only', // ADR-0147
   },
   {
-    // ADR-0134/0135 — conector Telegram: setup DENTRO da sessão. `status` (read-only),
+    // ADR-0154 — conector Telegram: setup DENTRO da sessão. `status` (read-only),
     // `allow/deny <chat-id>` (allowlist no config), `logout` (apaga o token). `login` (token)
     // aponta p/ o terminal (prompt sem eco). A bridge em si segue inerte até a ativação gated.
     name: 'telegram',

@@ -1,4 +1,4 @@
-// Ativação da bridge Telegram no BOOT (ADR-0134 / ADR-0135) — a peça concreta que junta o
+// Ativação da bridge Telegram no BOOT (ADR-0154 / ADR-0154) — a peça concreta que junta o
 // KEYCHAIN (token) + a CONFIG (allowlist) + o I/O (client/connector) e devolve a `TelegramBridge`
 // pronta, OU sinaliza por que NÃO ativou. É o ponto que o `--telegram` chama em run.tsx.
 //

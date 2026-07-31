@@ -63,7 +63,7 @@ export * from './util/box-table.js';
 export { parseVersion, compareVersions, isNewer } from './version-compare.js';
 export type { ParsedVersion } from './version-compare.js';
 
-// Padrão de conectores (ADR-0135) — porta `Connector` portável + a MALHA genérica (a
+// Padrão de conectores (ADR-0154) — porta `Connector` portável + a MALHA genérica (a
 // fronteira de confiança, single-source). PURO e INERTE (ainda não ligado a `--connector`/
 // `--telegram`/boot); o I/O concreto vive no @hiperplano/aluy-cli.
 export { classifyConnectorIngress } from './connector/mesh.js';
@@ -77,7 +77,7 @@ export type {
   ConversationRef,
   Provenance,
 } from './connector/types.js';
-// Conector Telegram (ADR-0134) — adaptador de ingresso que DELEGA à malha + parser do
+// Conector Telegram (ADR-0154) — adaptador de ingresso que DELEGA à malha + parser do
 // long-poll `getUpdates` (puro, fail-safe; o I/O HTTP vive no @hiperplano/aluy-cli).
 export {
   classifyTelegramIngress,

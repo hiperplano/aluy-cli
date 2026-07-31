@@ -1,4 +1,4 @@
-// Ativação da bridge Telegram no BOOT (ADR-0134/0135) — prova C6 (DORMENTE até credencial):
+// Ativação da bridge Telegram no BOOT (ADR-0154) — prova C6 (DORMENTE até credencial):
 // sem token, a bridge NÃO sobe e NENHUM client/egress é criado. Com token, sobe e a
 // allowlist VAZIA é válida (fechada). Tudo com fakes (sem keychain/rede real).
 

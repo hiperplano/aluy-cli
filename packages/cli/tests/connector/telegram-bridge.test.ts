@@ -1,4 +1,4 @@
-// Bridge Telegram ATIVA (ADR-0134/0135) — prova as CONDIÇÕES de pronto do `seguranca`
+// Bridge Telegram ATIVA (ADR-0154) — prova as CONDIÇÕES de pronto do `seguranca`
 // (C1–C6) no wiring concreto. Tudo com fakes (sem rede real). Cada teste cita a condição.
 
 import { describe, it, expect } from 'vitest';

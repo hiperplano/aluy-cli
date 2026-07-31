@@ -1,4 +1,4 @@
-// Conector Telegram (ADR-0134 §4) — PARSER do `getUpdates` (long-poll, NÃO webhook). PURO
+// Conector Telegram (ADR-0154 §4) — PARSER do `getUpdates` (long-poll, NÃO webhook). PURO
 // e FAIL-SAFE: traduz a resposta CRUA da Bot API → `TelegramUpdate[]` + o próximo offset.
 // Qualquer campo ausente/inesperado ⇒ ignorado (nunca lança). O long-poll concreto (HTTP)
 // vive no @hiperplano/aluy-cli; aqui só a tradução portável.
