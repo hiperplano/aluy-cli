@@ -16,6 +16,7 @@
 
 import { BrokerError } from '../errors.js';
 import type { ModelStreamEvent, ModelUsage, NativeToolCall } from '../types.js';
+import { MAX_TRAILER_EVENTS } from './adapter.js';
 import type { ProviderAdapter, BuiltRequest, SseAccumulator } from './adapter.js';
 import type { LocalRequest, ResolvedCredential, LocalProviderKind } from './types.js';
 
@@ -99,7 +100,13 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
   mapSse(_event: string, data: string, acc: SseAccumulator): readonly ModelStreamEvent[] {
     const trimmed = data.trim();
     if (trimmed === '') return [];
-    if (trimmed === '[DONE]') return this.flush(acc);
+    // BUG-TRAILER — enquanto o `done` está ADIADO, conta os eventos do trailer (teto
+    // anti-hang). Vale p/ QUALQUER data não-vazio, inclusive o `[DONE]` logo abaixo.
+    if (acc.pendingFinish !== undefined && !acc.emittedDone) acc.afterFinish += 1;
+    // Sentinela de fim do estilo OpenAI: é AQUI que o `done` adiado finalmente sai —
+    // depois, portanto, do chunk-trailer de `usage` (que vem entre o `finish_reason`
+    // e o `[DONE]`). Sem turno pendente, mantém o comportamento antigo (só o flush).
+    if (trimmed === '[DONE]') return [...this.flush(acc), ...this.closeTurn(acc)];
 
     const payload = safeJson(trimmed);
     if (!isRecord(payload)) return [];
@@ -122,14 +129,47 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
       if (finish !== undefined && finish !== null && finish !== '') {
         // antes do done, emite as tool-calls acumuladas (se houver).
         out.push(...this.flush(acc));
-        out.push({ type: 'done', finish_reason: finish });
+        // BUG-TRAILER (a raiz do "0 tokens") — o `done` NÃO sai mais aqui. No estilo
+        // OpenAI com `stream_options:{include_usage:true}`, o `usage` REAL vem num
+        // chunk SEPARADO (`choices: []`) DEPOIS deste; como o `LocalModelClient`
+        // encerra o generator no `done` (fecha o socket), emitir `done` agora fazia o
+        // trailer NUNCA ser lido ⇒ `ModelCallResult.usage` undefined ⇒ `budget`,
+        // `applyUsage` do pai e `SubAgentOutcome.usage.tokens` todos ZERADOS. Agora só
+        // ANOTAMOS o motivo; o `done` sai no `[DONE]`/teto/`finalize`.
+        acc.pendingFinish = finish;
+        acc.afterFinish = 0;
       }
     }
     // `usage` pode chegar no MESMO chunk do done (include_usage) ou num chunk só.
     if (isRecord(payload.usage)) {
       out.unshift({ type: 'usage', usage: this.toUsage(payload.usage, payload) });
     }
+    // BUG-TRAILER (anti-hang) — o provider excedeu o teto de eventos pós-`finish_reason`
+    // sem mandar `[DONE]`: fecha o turno à força, com o `finish_reason` REAL anotado.
+    if (acc.pendingFinish !== undefined && acc.afterFinish >= MAX_TRAILER_EVENTS) {
+      out.push(...this.closeTurn(acc));
+    }
     return out;
+  }
+
+  /**
+   * BUG-TRAILER — REDE de fechamento: o corpo do SSE acabou (provider fechou a
+   * conexão) sem `[DONE]`. Emite o que ficou pendente (tool-calls + o `done` com o
+   * `finish_reason` REAL). Idempotente via `acc.emittedDone`.
+   */
+  finalize(acc: SseAccumulator): readonly ModelStreamEvent[] {
+    return [...this.flush(acc), ...this.closeTurn(acc)];
+  }
+
+  /**
+   * Emite o `done` ADIADO — UMA vez por turno (`acc.emittedDone`). Sem
+   * `pendingFinish` (o provider nunca mandou `finish_reason`) o turno fecha como
+   * `'stop'`, que é o default histórico do `LocalModelClient`/`StreamingModelCaller`.
+   */
+  private closeTurn(acc: SseAccumulator): readonly ModelStreamEvent[] {
+    if (acc.emittedDone) return [];
+    acc.emittedDone = true;
+    return [{ type: 'done', finish_reason: acc.pendingFinish ?? 'stop' }];
   }
 
   /** Emite as tool-calls acumuladas UMA vez (idempotente no done/finish/[DONE]). */

@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { LocalModelClient } from '../../../src/model/local/local-client.js';
 import { OpenAiCompatAdapter } from '../../../src/model/local/openai-adapter.js';
+import { newSseAccumulator, MAX_TRAILER_EVENTS } from '../../../src/model/local/adapter.js';
 import { BrokerError } from '../../../src/model/errors.js';
 import type { ModelCallRequest, ModelStreamEvent } from '../../../src/model/types.js';
 import type { ResolvedCredential } from '../../../src/model/local/types.js';
@@ -227,5 +228,218 @@ describe('OpenAiCompatAdapter — request building', () => {
     expect(err).toBeInstanceOf(BrokerError);
     expect(err.code).toBe('PROVIDER_ERROR');
     expect(err.status).toBe(500);
+  });
+});
+
+// BUG-TRAILER — o `usage` real (stream_options.include_usage) chega num chunk
+// TRAILER, DEPOIS do chunk que traz `finish_reason`. Antes do fix, o `done` saía na
+// hora do `finish_reason` e o `LocalModelClient` fechava o socket ⇒ o trailer NUNCA
+// era lido ⇒ `ModelCallResult.usage` undefined (a raiz do "⛁ 0% janela" no BYO).
+// Estes casos cobrem: trailer separado (a), fim sem `[DONE]` via `finalize` (b),
+// idempotência do `done` (c), teto anti-hang (d) e o caminho send-once (e) —
+// sem regredir o comportamento já coberto acima.
+describe('OpenAiCompatAdapter — BUG-TRAILER (usage no chunk trailer, pós finish_reason)', () => {
+  it('(a) usage no chunk TRAILER separado do finish_reason ⇒ chega em ModelCallResult.usage', async () => {
+    const sse = openAiSse([
+      { id: 'c1', choices: [{ delta: { content: 'Olá' } }] },
+      // finish_reason SEM usage no mesmo chunk.
+      { id: 'c1', choices: [{ delta: {}, finish_reason: 'stop' }] },
+      // trailer: usage REAL, num chunk `choices:[]` SEPARADO — o caso que quebrava.
+      { id: 'c1', choices: [], usage: { prompt_tokens: 11, completion_tokens: 4 } },
+    ]);
+    const { fetch } = makeBrokerFetch({ status: 200, sse });
+    const client = new LocalModelClient({
+      adapter: adapter(),
+      config: { provider: 'openrouter', model: 'm' },
+      baseUrl: 'https://openrouter.ai/api/v1',
+      getCredential: cred,
+      fetch,
+    });
+    const events = await drain(client.stream({ request: req() }));
+    // ORDEM: delta → usage (do trailer) → done. O usage chega ANTES do done, nunca
+    // depois (o consumidor `call()` já teria fechado o loop no done).
+    expect(events.map((e) => e.type)).toEqual(['delta', 'usage', 'done']);
+
+    const result = await client.call({ request: req(), idempotencyKey: 'k' });
+    expect(result.usage?.tokens_in).toBe(11);
+    expect(result.usage?.tokens_out).toBe(4);
+    expect(result.finish_reason).toBe('stop');
+  });
+
+  it('(b) provider fecha a conexão SEM [DONE] ⇒ `finalize` fecha o turno com o finish_reason REAL', async () => {
+    // Sem o `data: [DONE]\n\n` final — simula um proxy/timeout que corta o corpo
+    // logo após o trailer de usage.
+    const sse =
+      'data: ' + JSON.stringify({ id: 'c1', choices: [{ delta: { content: 'oi' } }] }) + '\n\n' +
+      'data: ' +
+      JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'length' }] }) +
+      '\n\n' +
+      'data: ' +
+      JSON.stringify({ id: 'c1', choices: [], usage: { prompt_tokens: 3, completion_tokens: 9 } }) +
+      '\n\n';
+    const { fetch } = makeBrokerFetch({ status: 200, sse });
+    const client = new LocalModelClient({
+      adapter: adapter(),
+      config: { provider: 'openrouter', model: 'm' },
+      baseUrl: 'https://openrouter.ai/api/v1',
+      getCredential: cred,
+      fetch,
+    });
+    const events = await drain(client.stream({ request: req() }));
+    expect(events.map((e) => e.type)).toEqual(['delta', 'usage', 'done']);
+    const done = events.find((e) => e.type === 'done') as Extract<
+      ModelStreamEvent,
+      { type: 'done' }
+    >;
+    // `finish_reason` REAL ('length'), NUNCA um 'stop' inventado pelo fallback.
+    expect(done.finish_reason).toBe('length');
+    const usage = events.find((e) => e.type === 'usage') as Extract<
+      ModelStreamEvent,
+      { type: 'usage' }
+    >;
+    expect(usage.usage.tokens_in).toBe(3);
+    expect(usage.usage.tokens_out).toBe(9);
+  });
+
+  it('(b.2) fim de stream sem finish_reason nenhum ⇒ finalize fecha como "stop" (default histórico)', async () => {
+    // Corpo termina no meio (nem finish_reason, nem [DONE]) — o teto de idempotência
+    // não deve inventar um finish_reason específico; cai no default 'stop'.
+    const sse = 'data: ' + JSON.stringify({ id: 'c1', choices: [{ delta: { content: 'x' } }] }) + '\n\n';
+    const { fetch } = makeBrokerFetch({ status: 200, sse });
+    const client = new LocalModelClient({
+      adapter: adapter(),
+      config: { provider: 'openrouter', model: 'm' },
+      baseUrl: 'https://openrouter.ai/api/v1',
+      getCredential: cred,
+      fetch,
+    });
+    const events = await drain(client.stream({ request: req() }));
+    expect(events.map((e) => e.type)).toEqual(['delta', 'done']);
+    const done = events.find((e) => e.type === 'done') as Extract<
+      ModelStreamEvent,
+      { type: 'done' }
+    >;
+    expect(done.finish_reason).toBe('stop');
+  });
+
+  it('(c) idempotência — `finalize` depois do `[DONE]` já ter fechado o turno NÃO duplica o done', () => {
+    const a = adapter();
+    const acc = newSseAccumulator();
+    // finish_reason + [DONE], como um turno normal.
+    a.mapSse('', JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'stop' }] }), acc);
+    const doneEvents = a.mapSse('', '[DONE]', acc);
+    expect(doneEvents).toEqual([{ type: 'done', finish_reason: 'stop' }]);
+    expect(acc.emittedDone).toBe(true);
+    // chamar `finalize` DEPOIS (ex.: o client chamando a rede por segurança) não
+    // deve emitir um segundo `done` nem duplicar tool-calls.
+    expect(a.finalize?.(acc)).toEqual([]);
+  });
+
+  it('(c.2) idempotência — dois `[DONE]` seguidos no MESMO corpo não duplicam o done', () => {
+    const a = adapter();
+    const acc = newSseAccumulator();
+    a.mapSse('', JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'stop' }] }), acc);
+    expect(a.mapSse('', '[DONE]', acc)).toEqual([{ type: 'done', finish_reason: 'stop' }]);
+    // um `[DONE]` redundante (provider mal-comportado) ⇒ [] (não repete o evento).
+    expect(a.mapSse('', '[DONE]', acc)).toEqual([]);
+  });
+
+  it('(d) teto anti-hang — provider nunca manda [DONE]; fecha à força após MAX_TRAILER_EVENTS', async () => {
+    // finish_reason chega, seguido de MUITO mais que MAX_TRAILER_EVENTS chunks de
+    // keep-alive (`choices:[]`, sem usage) — nunca um `[DONE]`. O `done` deve sair à
+    // força, com o finish_reason REAL, sem esperar o resto dos keep-alives.
+    const keepAlive = { id: 'c1', choices: [] as unknown[] };
+    const chunks = [
+      { id: 'c1', choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+      ...Array.from({ length: MAX_TRAILER_EVENTS + 12 }, () => keepAlive),
+    ];
+    // SEM usar o helper `openAiSse` (que sempre acrescenta `[DONE]`) — aqui o corpo
+    // não deve fechar nunca via sentinela.
+    const sse = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join('');
+    const { fetch } = makeBrokerFetch({ status: 200, sse });
+    const client = new LocalModelClient({
+      adapter: adapter(),
+      config: { provider: 'openrouter', model: 'm' },
+      baseUrl: 'https://openrouter.ai/api/v1',
+      getCredential: cred,
+      fetch,
+    });
+    const events = await drain(client.stream({ request: req() }));
+    // Fechou à força — NÃO leu os 12 keep-alives excedentes (só emite `done`, uma
+    // vez, com o finish_reason REAL do 1º chunk).
+    expect(events).toEqual([{ type: 'done', finish_reason: 'tool_calls' }]);
+  });
+
+  it('(e) usage no MESMO chunk do finish_reason (send-once) ⇒ NÃO regride: chega em ModelCallResult.usage', async () => {
+    // Caso já coberto acima ("mapeia o stream p/ delta+usage+done…"), repetido aqui
+    // de forma explícita como guarda de não-regressão do BUG-TRAILER: quando o
+    // provider manda tudo de uma vez (finish_reason + usage no mesmo objeto), o
+    // adiamento do `done` NÃO deve quebrar esse caminho — só espera o `[DONE]`
+    // seguinte, que chega imediatamente.
+    const sse = openAiSse([
+      {
+        id: 'c1',
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 20, completion_tokens: 6 },
+      },
+    ]);
+    const { fetch } = makeBrokerFetch({ status: 200, sse });
+    const client = new LocalModelClient({
+      adapter: adapter(),
+      config: { provider: 'openrouter', model: 'm' },
+      baseUrl: 'https://openrouter.ai/api/v1',
+      getCredential: cred,
+      fetch,
+    });
+    const events = await drain(client.stream({ request: req() }));
+    expect(events.map((e) => e.type)).toEqual(['usage', 'done']);
+    const result = await client.call({ request: req(), idempotencyKey: 'k' });
+    expect(result.usage?.tokens_in).toBe(20);
+    expect(result.usage?.tokens_out).toBe(6);
+  });
+
+  it('(f) tool-calls acumuladas saem ANTES do done tanto em [DONE] quanto em finalize', async () => {
+    // [DONE] normal.
+    const sseDone = openAiSse([
+      {
+        id: 'c1',
+        choices: [
+          { delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'f', arguments: '{}' } }] } },
+        ],
+      },
+      { id: 'c1', choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+    ]);
+    const { fetch: fetchDone } = makeBrokerFetch({ status: 200, sse: sseDone });
+    const clientDone = new LocalModelClient({
+      adapter: adapter(),
+      config: { provider: 'openrouter', model: 'm' },
+      baseUrl: 'https://openrouter.ai/api/v1',
+      getCredential: cred,
+      fetch: fetchDone,
+    });
+    const eventsDone = await drain(clientDone.stream({ request: req() }));
+    expect(eventsDone.map((e) => e.type)).toEqual(['tool_call', 'done']);
+
+    // finalize (sem [DONE]) — mesma garantia.
+    const sseNoDone =
+      'data: ' +
+      JSON.stringify({
+        id: 'c1',
+        choices: [
+          { delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'f', arguments: '{}' } }] } },
+        ],
+      }) +
+      '\n\n' +
+      'data: ' + JSON.stringify({ id: 'c1', choices: [{ delta: {}, finish_reason: 'tool_calls' }] }) + '\n\n';
+    const { fetch: fetchNoDone } = makeBrokerFetch({ status: 200, sse: sseNoDone });
+    const clientNoDone = new LocalModelClient({
+      adapter: adapter(),
+      config: { provider: 'openrouter', model: 'm' },
+      baseUrl: 'https://openrouter.ai/api/v1',
+      getCredential: cred,
+      fetch: fetchNoDone,
+    });
+    const eventsNoDone = await drain(clientNoDone.stream({ request: req() }));
+    expect(eventsNoDone.map((e) => e.type)).toEqual(['tool_call', 'done']);
   });
 });

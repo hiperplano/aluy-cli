@@ -46,6 +46,22 @@ export interface ProviderAdapter {
    * Estado entre eventos (acumulação de tool-call) vive no `acc` mutável.
    */
   mapSse(event: string, data: string, acc: SseAccumulator): readonly ModelStreamEvent[];
+  /**
+   * BUG-TRAILER (contabilidade BYO) — eventos de FECHAMENTO quando o corpo do SSE
+   * ACABOU sem que um `done` tenha sido emitido. Existe porque o `done` do estilo
+   * OpenAI passou a ser ADIADO (ver `openai-adapter.mapSse`): o `usage` real chega
+   * num chunk TRAILER **depois** do chunk que traz o `finish_reason`, então emitir
+   * `done` na hora do `finish_reason` fazia o `LocalModelClient` encerrar o stream
+   * ANTES do trailer — e a sessão inteira (pai E sub-agentes) contabilizava 0 token.
+   *
+   * Com o adiamento, o `done` sai no sentinela `[DONE]`. Um provider que feche a
+   * conexão SEM mandar `[DONE]` deixaria o turno sem `done` (e sem o
+   * `finish_reason` REAL, que o loop usa p/ distinguir `tool_calls`/`length`); este
+   * gancho é a REDE: o client o chama no fim do corpo e o adapter emite o que ficou
+   * pendente. OPCIONAL — adapter que já emite `done` no próprio evento de fim (o
+   * Anthropic, em `message_delta`) não precisa implementá-lo.
+   */
+  finalize?(acc: SseAccumulator): readonly ModelStreamEvent[];
 }
 
 /**
@@ -59,9 +75,34 @@ export interface SseAccumulator {
   readonly toolCalls: Map<number, { id: string; name: string; argsText: string }>;
   /** já emitimos as tool-calls finais? (idempotência no done). */
   emittedToolCalls: boolean;
+  /**
+   * BUG-TRAILER — `finish_reason` JÁ VISTO mas com o `done` ADIADO (esperando o
+   * chunk-trailer de `usage` + o sentinela `[DONE]`). `undefined` ⇒ o turno ainda
+   * não fechou. Guardamos o valor REAL (`stop`/`tool_calls`/`length`) p/ que o
+   * `done` adiado saia com ele — nunca com um `'stop'` inventado.
+   */
+  pendingFinish?: string;
+  /** BUG-TRAILER — já emitimos o `done` deste turno? (idempotência `[DONE]`×finalize). */
+  emittedDone: boolean;
+  /**
+   * BUG-TRAILER (anti-hang) — quantos eventos SSE já chegaram DEPOIS do
+   * `finish_reason`. É o teto do adiamento: o trailer real são 1-2 eventos
+   * (`usage` + `[DONE]`); passar de {@link MAX_TRAILER_EVENTS} significa que o
+   * provider não vai fechar o turno, e o `done` sai à força (não penduramos o
+   * usuário esperando um sentinela que nunca vem).
+   */
+  afterFinish: number;
 }
+
+/**
+ * BUG-TRAILER (anti-hang) — teto de eventos SSE tolerados DEPOIS do `finish_reason`
+ * antes de o `done` sair à força. O trailer legítimo do estilo OpenAI é curto
+ * (chunk de `usage` + `[DONE]`); 8 dá folga p/ `ping`/keep-alive no meio sem nunca
+ * virar espera indefinida.
+ */
+export const MAX_TRAILER_EVENTS = 8;
 
 /** Cria um acumulador SSE vazio (1 por chamada). */
 export function newSseAccumulator(): SseAccumulator {
-  return { toolCalls: new Map(), emittedToolCalls: false };
+  return { toolCalls: new Map(), emittedToolCalls: false, emittedDone: false, afterFinish: 0 };
 }
