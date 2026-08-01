@@ -15,7 +15,13 @@
 // ║  • o motivo do veto volta como DADO não-confiável (CLI-SEC-4) ao loop.        ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
-import type { HookRunner, HooksConfig, PreToolGate, ToolCall } from '@hiperplano/aluy-cli-core';
+import type {
+  HistoryItem,
+  HookRunner,
+  HooksConfig,
+  PreToolGate,
+  ToolCall,
+} from '@hiperplano/aluy-cli-core';
 import { selectGateHooks } from '@hiperplano/aluy-cli-core';
 
 export interface PreToolGateOptions {
@@ -55,7 +61,12 @@ export function makePreToolGate(opts: PreToolGateOptions): PreToolGate | undefin
   };
 }
 
-/** Extrai o texto da observação do hook (HistoryItem) p/ realimentar como DADO. */
-function textOf(observation: { readonly text?: string }): string {
-  return typeof observation.text === 'string' ? observation.text : '';
+/**
+ * Extrai o texto da observação do hook (HistoryItem) p/ realimentar como DADO. O
+ * `HookRunner` sempre constrói `role:'observation'` aqui (runtime); o parâmetro é o
+ * `HistoryItem` INTEIRO (ADR-0159 acrescentou o membro `attachment_image`, sem
+ * `text`) — o guard `'text' in` cobre esse membro sem quebrar a união estruturalmente.
+ */
+function textOf(observation: HistoryItem): string {
+  return 'text' in observation && typeof observation.text === 'string' ? observation.text : '';
 }

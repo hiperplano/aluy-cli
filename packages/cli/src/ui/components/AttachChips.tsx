@@ -15,6 +15,12 @@ export interface AttachChip {
   readonly path: string;
   /** `true` se o conteúdo foi truncado pelo teto de chars. */
   readonly truncated?: boolean;
+  /**
+   * ADR-0159 — `true` se o anexo é uma IMAGEM (reconhecida por magic-bytes no
+   * `AttachReader`, ramo `attachment_image`). Sem miniatura — só o rótulo muda
+   * (`[img]` em vez do `~` de truncamento, que não se aplica a imagem).
+   */
+  readonly isImage?: boolean;
 }
 
 export interface AttachChipsProps {
@@ -33,7 +39,8 @@ export function AttachChips(props: AttachChipsProps): React.ReactElement | null 
         return (
           <Box key={chip.path} marginRight={1}>
             <Role name={isActive ? 'accent' : 'depth'}>
-              {isActive ? '› ' : ''}@{chip.path}
+              {isActive ? '› ' : ''}
+              {chip.isImage ? '[img] ' : ''}@{chip.path}
               {chip.truncated ? '~' : ''}
             </Role>
             <Text> </Text>

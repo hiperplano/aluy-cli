@@ -19,7 +19,7 @@
 // pela catraca (loop.ts + gate). O aviso é defesa-em-profundidade; a catraca é a
 // garantia. (CA-3 verifica AMBOS: canal e não-bypass.)
 
-import type { ChatMessage, NativeToolCall } from '../model/types.js';
+import type { ChatMessage, ContentPart, NativeToolCall } from '../model/types.js';
 import type { NativeTool } from './tools/types.js';
 // EST-0983 (extensão · recall) — só a CONSTANTE de nome (contract.ts é puro: tipos +
 // constantes, sem lógica nem ciclo). Usada p/ condicionar a seção de MEMÓRIA do prompt
@@ -161,6 +161,20 @@ export type HistoryItem =
       readonly toolCallId: string;
       readonly toolName: string;
       readonly text: string;
+    }
+  // ADR-0159 · `@imagem.png`/`--image` — anexo de IMAGEM (reconhecido por magic-bytes
+  // no `AttachReader`, @hiperplano/aluy-cli — lista fechada png/jpeg/gif/webp). DISTINTO da
+  // `observation`: NUNCA passa pelo string-template de `buildMessages` (destruiria os
+  // bytes) — vira `ContentPart[]` de imagem direto. Mesma PROVENIÊNCIA que o anexo de
+  // texto (canal `user`, dado guiado pela ação explícita do `@`, nunca instrução).
+  | {
+      readonly role: 'attachment_image';
+      /** Caminho RELATIVO confinado (o que o chip/rótulo mostra). */
+      readonly path: string;
+      /** Um dos 4 tipos reconhecidos: image/png, image/jpeg, image/gif, image/webp. */
+      readonly mimeType: string;
+      /** Bytes da imagem, já BASE64-codificados (o `AttachReader` lê binário). */
+      readonly base64: string;
     };
 
 /**
@@ -498,6 +512,21 @@ export function attachmentObservation(path: string, content: string): HistoryIte
   };
 }
 
+/** Prefixo do rótulo textual que acompanha um anexo de IMAGEM (ADR-0159). Estável p/ teste. */
+export const ATTACHMENT_IMAGE_LABEL_PREFIX = 'Anexo: ';
+
+/**
+ * ADR-0159 · `@imagem.png`/`--image` — monta o `HistoryItem` de um anexo de IMAGEM
+ * reconhecido pelo `AttachReader` (magic-bytes — lista fechada png/jpeg/gif/webp).
+ * DISTINTO da `attachmentObservation` (texto): os bytes NUNCA passam pelo
+ * string-template — `buildMessages` os serializa direto como `ContentPart[]` (senão
+ * o base64 viraria mojibake dentro de uma string). Mesma proveniência do anexo de
+ * texto (canal `user`, dado guiado pela ação explícita do `@`, nunca instrução).
+ */
+export function attachmentImage(path: string, mimeType: string, base64: string): HistoryItem {
+  return { role: 'attachment_image', path, mimeType, base64 };
+}
+
 /**
  * Monta a lista de `ChatMessage` para o `BrokerModelClient` a partir do histórico
  * local. Garante a separação de canais:
@@ -597,6 +626,20 @@ export function buildMessages(
           content: `Resultado da ferramenta ${item.toolName}:\n${wrapUntrusted(item.text)}`,
         });
         break;
+      case 'attachment_image': {
+        // ADR-0159 — anexo de IMAGEM: `content` é `ContentPart[]` (rótulo em texto +
+        // o bloco de imagem), NÃO uma string — os adapters (openai-compat/anthropic/
+        // broker-client, fase 1 já implementada) sabem serializar este ramo. Canal
+        // `user`, mesma proveniência do anexo de texto (dado guiado pelo `@`, nunca
+        // instrução) — só NÃO passa pelo string-template `wrapUntrusted` porque este
+        // envelope é de TEXTO e destruiria os bytes base64 da imagem.
+        const parts: ContentPart[] = [
+          { type: 'text', text: `${ATTACHMENT_IMAGE_LABEL_PREFIX}${item.path}` },
+          { type: 'image', mimeType: item.mimeType, base64: item.base64 },
+        ];
+        messages.push({ role: 'user', content: parts });
+        break;
+      }
     }
   }
   return messages;

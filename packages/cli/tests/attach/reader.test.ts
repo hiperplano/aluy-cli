@@ -177,4 +177,125 @@ describe('AttachReader — confinamento + path-deny + truncamento + rótulo', ()
     if (res.kind !== 'ok') return;
     expect(res.item.text).toContain('Conteúdo com ação');
   });
+
+  // ADR-0159 — @imagem.png/jpeg/gif/webp: reconhecida por magic-bytes ⇒ vira
+  // `HistoryItem` de imagem (`attachment_image`), NUNCA passa pelo string-template
+  // de texto (base64 destruído viraria mojibake). Confinamento/path-deny (passos 1/2)
+  // seguem intocados — a imagem só é decidida DEPOIS deles (2.5/2.6).
+  const PNG_BYTES = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  ]);
+  const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+  const GIF_BYTES = Buffer.from('GIF89a', 'ascii');
+  const WEBP_BYTES = Buffer.concat([
+    Buffer.from('RIFF', 'ascii'),
+    Buffer.from([0x1a, 0x00, 0x00, 0x00]),
+    Buffer.from('WEBP', 'ascii'),
+  ]);
+
+  it('@imagem.png (magic-bytes PNG reais) ⇒ ok, HistoryItem role attachment_image com base64', async () => {
+    writeFileSync(join(root, 'foto.png'), PNG_BYTES);
+    const res = await reader().attach('foto.png');
+    expect(res.kind).toBe('ok');
+    if (res.kind !== 'ok') return;
+    expect(res.item.role).toBe('attachment_image');
+    if (res.item.role !== 'attachment_image') return;
+    expect(res.item.mimeType).toBe('image/png');
+    expect(res.item.path).toBe('foto.png');
+    expect(res.item.base64).toBe(PNG_BYTES.toString('base64'));
+    expect(res.truncated).toBe(false);
+  });
+
+  it('@imagem.jpg (magic-bytes JPEG) ⇒ ok, mimeType image/jpeg', async () => {
+    writeFileSync(join(root, 'foto.jpg'), JPEG_BYTES);
+    const res = await reader().attach('foto.jpg');
+    expect(res.kind).toBe('ok');
+    if (res.kind !== 'ok') return;
+    expect(res.item.role).toBe('attachment_image');
+    if (res.item.role !== 'attachment_image') return;
+    expect(res.item.mimeType).toBe('image/jpeg');
+  });
+
+  it('@imagem.gif (magic-bytes GIF89a) ⇒ ok, mimeType image/gif', async () => {
+    writeFileSync(join(root, 'foto.gif'), GIF_BYTES);
+    const res = await reader().attach('foto.gif');
+    expect(res.kind).toBe('ok');
+    if (res.kind !== 'ok') return;
+    expect(res.item.role).toBe('attachment_image');
+    if (res.item.role !== 'attachment_image') return;
+    expect(res.item.mimeType).toBe('image/gif');
+  });
+
+  it('@imagem.webp (contêiner RIFF/WEBP) ⇒ ok, mimeType image/webp', async () => {
+    writeFileSync(join(root, 'foto.webp'), WEBP_BYTES);
+    const res = await reader().attach('foto.webp');
+    expect(res.kind).toBe('ok');
+    if (res.kind !== 'ok') return;
+    expect(res.item.role).toBe('attachment_image');
+    if (res.item.role !== 'attachment_image') return;
+    expect(res.item.mimeType).toBe('image/webp');
+  });
+
+  it('@arquivo.pdf (magic-bytes NÃO reconhecidos — fora da lista fechada) ⇒ REJEITADO como binário, igual antes', async () => {
+    const pdfBytes = Buffer.from('%PDF-1.4\n%\x00\x00\x00\x00\n', 'ascii');
+    writeFileSync(join(root, 'doc.pdf'), pdfBytes);
+    const res = await reader().attach('doc.pdf');
+    expect(res.kind).toBe('rejected');
+    if (res.kind !== 'rejected') return;
+    expect(res.reason).toMatch(/binário/i);
+  });
+
+  it('ADR-0159 — imagem em caminho SENSÍVEL (`.env`-like) segue NEGADA: confinamento/path-deny rodam ANTES do ramo de imagem', async () => {
+    // Nome de arquivo sensível (`*secret*`) COM magic-bytes de PNG reais — prova que
+    // o passo 2 (path-deny) intercepta ANTES de a imagem sequer ser considerada.
+    writeFileSync(join(root, 'my-secret-key.png'), PNG_BYTES);
+    const res = await reader().attach('my-secret-key.png');
+    expect(res.kind).toBe('rejected');
+    if (res.kind !== 'rejected') return;
+    expect(res.reason).toMatch(/sensível/i);
+    // nenhum byte/base64 da imagem vaza no resultado de rejeição.
+    expect(JSON.stringify(res)).not.toContain(PNG_BYTES.toString('base64'));
+  });
+
+  it('ADR-0159 — imagem que ESCAPA o workspace (`..`) segue NEGADA por CONFINAMENTO, antes do ramo de imagem', async () => {
+    writeFileSync(join(base, 'fora.png'), PNG_BYTES); // arquivo FORA da raiz, com magic-bytes reais.
+    const res = await reader().attach('../fora.png');
+    expect(res.kind).toBe('rejected');
+    if (res.kind !== 'rejected') return;
+    expect(res.reason).toMatch(/fora do workspace/i);
+    expect(JSON.stringify(res)).not.toContain(PNG_BYTES.toString('base64'));
+  });
+
+  it('imagem MAIOR que o teto (`maxImageBytes`) ⇒ REJEITADA (base64 parcial não é imagem válida)', async () => {
+    const big = Buffer.concat([PNG_BYTES, Buffer.alloc(2000, 0x41)]);
+    writeFileSync(join(root, 'grande.png'), big);
+    const workspace = new NodeWorkspace({ root });
+    const smallReader = new AttachReader({
+      workspace,
+      fs: new NodeFileSystemPort({ workspace }),
+      maxImageBytes: 100,
+    });
+    const res = await smallReader.attach('grande.png');
+    expect(res.kind).toBe('rejected');
+    if (res.kind !== 'rejected') return;
+    expect(res.reason).toMatch(/teto|maior/i);
+  });
+
+  it('ADR-0159 — anexo de imagem entra como ContentPart[] em buildMessages, canal user, NUNCA no system', async () => {
+    writeFileSync(join(root, 'tela.png'), PNG_BYTES);
+    const res = await reader().attach('tela.png');
+    expect(res.kind).toBe('ok');
+    if (res.kind !== 'ok') return;
+    const tools: readonly NativeTool[] = [];
+    const messages = buildMessages(tools, [res.item, { role: 'goal', text: 'descreva a imagem' }]);
+    const system = messages.find((m) => m.role === 'system');
+    expect(JSON.stringify(system?.content)).not.toContain(PNG_BYTES.toString('base64'));
+    const imageMsg = messages.find(
+      (m) => m.role === 'user' && Array.isArray(m.content),
+    );
+    expect(imageMsg).toBeDefined();
+    const parts = imageMsg!.content as readonly { type: string }[];
+    expect(parts.some((p) => p.type === 'text')).toBe(true);
+    expect(parts.some((p) => p.type === 'image')).toBe(true);
+  });
 });
