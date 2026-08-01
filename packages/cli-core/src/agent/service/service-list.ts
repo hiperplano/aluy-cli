@@ -16,10 +16,25 @@ export interface ServicesListNote {
   readonly lines: readonly string[];
 }
 
+/**
+ * ADR-0158 §5 (fase 2) — o estado REAL de um serviço (pidfile+kill-0 do runner
+ * concreto, `@hiperplano/aluy-cli`, `service/status.ts`). Campo OPCIONAL: quando
+ * AUSENTE, `buildServicesNote` mantém o comportamento da fase 1 ("parado" fixo,
+ * NÃO editamos os testes da fase 1 — eles continuam passando sem este campo).
+ */
+export interface ServiceRuntimeStatusInput {
+  readonly running: boolean;
+  /** Só quando `running` (best-effort, pode faltar num runner recém-morto). */
+  readonly turnState?: 'sleeping' | 'running-turn' | 'awaiting-owner';
+  readonly nextFireIso?: string;
+}
+
 /** Um serviço já VALIDADO pelo registry (manifesto parseável + cron/workflow OK). */
 export interface ServiceListEntry {
   readonly name: string;
   readonly manifest: ServiceManifest;
+  /** ADR-0158 §5 (fase 2) — estado REAL, opcional (ver `ServiceRuntimeStatusInput`). */
+  readonly runtimeStatus?: ServiceRuntimeStatusInput;
 }
 
 /** Um serviço REJEITADO pelo registry (RES-MD-3 do parser OU falha de validação do dir). */
@@ -80,9 +95,24 @@ export function buildServicesNote(input: ServicesListInput): ServicesListNote {
       const desc = serviceDescriptionLine(s.manifest);
       const descSuffix = desc !== '' ? ` · ${desc}` : '';
       const schedule = s.manifest.schedule !== undefined ? s.manifest.schedule : 'sem schedule';
-      // Fase 1 — SEM runner: todo serviço instalado está "parado" (não há processo
-      // ainda pra estar em outro estado; ADR-0158 §5 é a fatia 2 deste subsistema).
-      lines.push(`  ✓ ${s.name} · parado · próximo turno: ${schedule}${descSuffix}`);
+      // ADR-0158 §5 (fase 2) — `runtimeStatus` presente ⇒ estado REAL; AUSENTE ⇒
+      // mantém o "parado" fixo da fase 1 (não-regressão dos testes da fase 1).
+      const rt = s.runtimeStatus;
+      const stateLabel =
+        rt === undefined
+          ? 'parado'
+          : !rt.running
+            ? 'parado'
+            : rt.turnState === 'running-turn'
+              ? 'RODANDO · turno em andamento'
+              : rt.turnState === 'awaiting-owner'
+                ? 'RODANDO · ⚠ aguardando dono'
+                : 'RODANDO · dormindo';
+      const nextSuffix =
+        rt?.running === true && rt.turnState === 'sleeping' && rt.nextFireIso !== undefined
+          ? ` (${rt.nextFireIso})`
+          : '';
+      lines.push(`  ✓ ${s.name} · ${stateLabel} · próximo turno: ${schedule}${nextSuffix}${descSuffix}`);
     }
   }
 
@@ -97,7 +127,7 @@ export function buildServicesNote(input: ServicesListInput): ServicesListNote {
 
   lines.push('');
   lines.push(
-    `serviços vivem em ${servicesDir}/<nome>/ · start/stop chegam na fase 2 (ADR-0158 §5).`,
+    `serviços vivem em ${servicesDir}/<nome>/ · "aluy service start|stop <nome>" liga/desliga (ADR-0158 §5).`,
   );
 
   return { title: 'service', lines };

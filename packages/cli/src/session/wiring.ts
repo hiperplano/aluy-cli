@@ -59,6 +59,7 @@ import {
   // controller SÓ p/ o menu (descoberta) de `capabilities`.
   type Skill,
 } from '@hiperplano/aluy-cli-core';
+import { join } from 'node:path';
 import { loadAuthConfig, CLI_CLIENT_ID } from '../auth/config.js';
 import { loadBrokerConfig } from '../model/config.js';
 import { makeHeadroomRetrieveTool } from '../model/headroom-retrieve.js';
@@ -569,6 +570,13 @@ export interface BuiltSession {
  */
 export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   const env = opts.env ?? process.env;
+  // ADR-0158 §2 (fase 2) — mesma env var INTERNA lida em `run.tsx` (o runner de
+  // serviço a seta no `spawn` do turno headless). Aqui só escopa a MEMÓRIA (§2:
+  // "memória mem0 com namespace do serviço" — a peça já wireável nesta fatia é o
+  // `AgentMemory`/`NodeMemoryStore` da tool `remember`, via `memoryBaseDir`; o
+  // sidecar mem0/headroom-retrieve, que é de COMPRESSÃO DE CONTEXTO e não de
+  // memória-por-papel, fica de fora desta fatia — ver relatório da fase 2).
+  const serviceScopeDir = env.ALUY_SERVICE_HOME;
 
   // ── auth (0942) ────────────────────────────────────────────────────────────
   const authConfig = loadAuthConfig(env);
@@ -712,9 +720,17 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // PROJETO em `<workspace>/.aluy/memory/` (confinado pelo WorkspacePort). A
   // `AgentMemory` é a mecânica PORTÁVEL (recall-como-dado/proveniência/pin); a porta
   // de ESCRITA injetada na tool `remember` é ESTREITA (append por escopo, sem path).
+  // ADR-0158 §2 (fase 2) — sob escopo de SERVIÇO, a memória do `remember`/`recall` vai
+  // p/ `<serviceDir>/.state/memory/` — o NAMESPACE do serviço (nunca mistura com a
+  // memória do dono nem de outro serviço). `opts.memoryBaseDir` explícito (teste)
+  // sempre vence.
   const memoryStore = new NodeMemoryStore({
     workspace,
-    ...(opts.memoryBaseDir !== undefined ? { baseDir: opts.memoryBaseDir } : {}),
+    ...(opts.memoryBaseDir !== undefined
+      ? { baseDir: opts.memoryBaseDir }
+      : serviceScopeDir !== undefined
+        ? { baseDir: join(serviceScopeDir, '.state', 'memory') }
+        : {}),
   });
   const memory = new AgentMemory({ store: memoryStore });
 

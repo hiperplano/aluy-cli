@@ -80,10 +80,55 @@ describe('parseServiceCommand', () => {
       yes: true,
     });
   });
-  it('create/start/stop/logs/update/attach ⇒ not-yet (fase 2)', () => {
-    for (const sub of ['create', 'start', 'stop', 'logs', 'update', 'attach']) {
+  it('create/update/attach ⇒ not-yet (fases seguintes)', () => {
+    for (const sub of ['create', 'update', 'attach']) {
       expect(parseServiceCommand([sub])).toEqual({ kind: 'not-yet', sub });
     }
+  });
+  // ADR-0158 §5 (fase 2) — start/stop/logs viram subcomandos REAIS (o runner).
+  it('start <nome> [--yes]', () => {
+    expect(parseServiceCommand(['start', 'trader'])).toEqual({
+      kind: 'start',
+      name: 'trader',
+      yes: false,
+    });
+    expect(parseServiceCommand(['start', 'trader', '--yes'])).toEqual({
+      kind: 'start',
+      name: 'trader',
+      yes: true,
+    });
+  });
+  it('start sem nome ⇒ erro de uso', () => {
+    expect(parseServiceCommand(['start']).kind).toBe('error');
+  });
+  it('stop <nome>', () => {
+    expect(parseServiceCommand(['stop', 'trader'])).toEqual({ kind: 'stop', name: 'trader' });
+  });
+  it('stop sem nome ⇒ erro de uso', () => {
+    expect(parseServiceCommand(['stop']).kind).toBe('error');
+  });
+  it('logs <nome> [-f] [-n N]', () => {
+    expect(parseServiceCommand(['logs', 'trader'])).toEqual({
+      kind: 'logs',
+      name: 'trader',
+      follow: false,
+      lines: 50,
+    });
+    expect(parseServiceCommand(['logs', 'trader', '-f'])).toEqual({
+      kind: 'logs',
+      name: 'trader',
+      follow: true,
+      lines: 50,
+    });
+    expect(parseServiceCommand(['logs', 'trader', '-n', '10'])).toEqual({
+      kind: 'logs',
+      name: 'trader',
+      follow: false,
+      lines: 10,
+    });
+  });
+  it('logs sem nome ⇒ erro de uso', () => {
+    expect(parseServiceCommand(['logs']).kind).toBe('error');
   });
   it('subcomando desconhecido ⇒ erro', () => {
     expect(parseServiceCommand(['bogus']).kind).toBe('error');
@@ -346,11 +391,95 @@ describe('runService — uninstall', () => {
   });
 });
 
-describe('runService — not-yet (fase 2)', () => {
-  it('start/stop/create/logs/update/attach respondem honesto (exit 1)', async () => {
+describe('runService — not-yet (fases seguintes)', () => {
+  it('create/update/attach respondem honesto (exit 1)', async () => {
+    for (const sub of ['create', 'update', 'attach']) {
+      const io = fakeIO();
+      const exit = await runService([sub, 'trader'], { io });
+      expect(exit).toBe(1);
+      expect(io.outLines.join('\n')).toContain('ainda não existe');
+    }
+  });
+});
+
+// ADR-0158 §5 (fase 2) — start/stop/logs contra um registry ISOLADO (baseDir tmpdir,
+// NUNCA o `~/.aluy` real — a mesma trava do smoke manual pedida na missão).
+describe('runService — start/stop/logs (fase 2, sem tocar processo real)', () => {
+  let base: string;
+  let workRoot: string;
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'aluy-svc-runner-'));
+    workRoot = mkdtempSync(join(tmpdir(), 'aluy-svc-runner-src-'));
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+    rmSync(workRoot, { recursive: true, force: true });
+  });
+
+  it('start: serviço inexistente ⇒ erro', async () => {
     const io = fakeIO();
-    const exit = await runService(['start', 'trader'], { io });
+    const store = new UserServicesStore({ baseDir: base });
+    const exit = await runService(['start', 'fantasma', '--yes'], { io, store });
     expect(exit).toBe(1);
-    expect(io.outLines.join('\n')).toContain('fase 2');
+    expect(io.errLines.join('\n')).toContain('não encontrado');
+  });
+
+  it('start: serviço sem "schedule:" ⇒ recusa (o runner não saberia quando acordar)', async () => {
+    const store = new UserServicesStore({ baseDir: base });
+    const dir = join(base, SERVICES_DIRNAME, 'trader');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'service.md'), MINIMAL_SERVICE_MD); // sem schedule:
+    const io = fakeIO();
+    const exit = await runService(['start', 'trader', '--yes'], { io, store });
+    expect(exit).toBe(1);
+    expect(io.errLines.join('\n')).toContain('schedule');
+  });
+
+  it('stop: serviço já parado ⇒ no-op ok (exit 0)', async () => {
+    const store = new UserServicesStore({ baseDir: base });
+    const dir = join(base, SERVICES_DIRNAME, 'trader');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'service.md'), MINIMAL_SERVICE_MD);
+    const io = fakeIO();
+    const exit = await runService(['stop', 'trader'], { io, store });
+    expect(exit).toBe(0);
+    expect(io.outLines.join('\n')).toContain('já está parado');
+  });
+
+  it('stop: serviço inexistente ⇒ erro', async () => {
+    const io = fakeIO();
+    const store = new UserServicesStore({ baseDir: base });
+    const exit = await runService(['stop', 'fantasma'], { io, store });
+    expect(exit).toBe(1);
+  });
+
+  it('logs: sem log ainda ⇒ mensagem honesta (exit 0)', async () => {
+    const store = new UserServicesStore({ baseDir: base });
+    const dir = join(base, SERVICES_DIRNAME, 'trader');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'service.md'), MINIMAL_SERVICE_MD);
+    const io = fakeIO();
+    const exit = await runService(['logs', 'trader'], { io, store });
+    expect(exit).toBe(0);
+    expect(io.outLines.join('\n')).toContain('sem log ainda');
+  });
+
+  it('logs: serviço inexistente ⇒ erro', async () => {
+    const io = fakeIO();
+    const store = new UserServicesStore({ baseDir: base });
+    const exit = await runService(['logs', 'fantasma'], { io, store });
+    expect(exit).toBe(1);
+  });
+
+  it('list/status refletem "parado" quando o serviço nunca rodou', async () => {
+    const store = new UserServicesStore({ baseDir: base });
+    const dir = join(base, SERVICES_DIRNAME, 'trader');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'service.md'), ['---', 'name: trader', 'schedule: "0 9 * * *"', '---', 'Rege.'].join('\n'));
+    const io = fakeIO();
+    const exit = await runService(['status', 'trader'], { io, store });
+    expect(exit).toBe(0);
+    expect(io.outLines.join('\n')).toContain('PARADO');
   });
 });

@@ -1,24 +1,33 @@
-// ADR-0158 (aceito, APR-0148) — `aluy service <sub>`: FASE 1 = fundação SEM runner
-// (o processo-por-serviço é a fase 2, §5). O shell é o ESPELHO do `/service`
-// in-session (canal PRINCIPAL, emenda de aprovação §10) — mesma mecânica, zero
-// lógica duplicada: os dois consomem `UserServicesStore` + os formatadores PUROS
-// do core, como `/telegram`/`aluy telegram` sobre a mesma bridge.
+// ADR-0158 (aceito, APR-0148) — `aluy service <sub>`: fase 1 (list/status/install/
+// uninstall) + FASE 2 (esta fatia): start/stop/logs/run --runner — O RUNNER, §5. O
+// shell é o ESPELHO do `/service` in-session (canal PRINCIPAL, emenda §10) — mesma
+// mecânica, zero lógica duplicada: os dois consomem `UserServicesStore` + os
+// formatadores PUROS do core + `service/*.ts` (pidfile/log/status/runner), como
+// `/telegram`/`aluy telegram` sobre a mesma bridge.
 //
-// Fase 1 (esta fatia):
-//   list       — lista os serviços instalados (estado sempre "parado", §5 fatia 2).
-//   status     — detalhe de UM serviço + a validação (cron/workflow) já conferida.
+// Fase 1:
+//   list       — lista os serviços instalados (agora com estado REAL, §5 fase 2).
+//   status     — detalhe de UM serviço + estado REAL (rodando/turno/aguardando).
 //   install    — copia um diretório local OU clona um repo git p/ `~/.aluy/services/`,
 //                VALIDA antes de ativar, mostra o MANIFESTO VISÍVEL (§9) e exige
 //                confirmação (`--yes` explícito p/ modo não-interativo).
-//   uninstall  — remove o diretório do serviço (pede confirmação).
+//   uninstall  — remove o diretório do serviço (pede confirmação). Recusa se RODANDO
+//                (peça `stop` antes — nunca apaga o diretório debaixo de um processo vivo).
 //
-// `create`/`start`/`stop`/`logs`/`update`/`attach` (superfície completa do ADR-0158
-// §10) respondem HONESTO "disponível numa fase seguinte" — nada finge que start liga
-// um processo que ainda não existe (CRIAR NÃO É LIGAR é doutrina §10, mas aqui nem
-// "criar" liga: é "nem start existe ainda").
+// Fase 2 (esta fatia):
+//   start      — spawn DESTACADO de `aluy service run <nome> --runner` (§5): o
+//                processo QUE É o serviço, do `start` ao `stop`. Recusa se já
+//                rodando ou se o manifesto é inválido (o registry já valida).
+//   stop       — SIGTERM no pid do runner (pidfile); timeout ⇒ SIGKILL; limpa pidfile.
+//   logs       — tail do `runner.log` (últimas N linhas; `-f` opcional).
+//   run --runner (uso INTERNO — não documentado no --help; é o entrypoint que o
+//                `start` spawna, roda em FOREGROUND no processo destacado).
+//
+// `create`/`update`/`attach` seguem "disponível numa fase seguinte" (create é
+// conversacional — fase 5; update é git pull — fase depois; attach é fase 4).
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, cpSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -32,8 +41,15 @@ import {
   UserServicesStore,
   scanServiceDirForInstall,
   isServiceEntryError,
+  type ServiceEntry,
 } from '../io/services-store.js';
 import { validateCronExpr } from './cron.js';
+import { runnerLogPath, runnerPidPath } from '../service/paths.js';
+import { readServiceRuntimeStatus } from '../service/status.js';
+import { isRunnerAlive, readPidFile, removePidFile } from '../service/pid.js';
+import { appendLog, tailLog } from '../service/log.js';
+import { runServiceRunner } from '../service/runner.js';
+import { stopDaemons } from '../service/daemons.js';
 
 export type ServiceCommand =
   | { kind: 'help' }
@@ -42,35 +58,50 @@ export type ServiceCommand =
   | { kind: 'status'; name: string }
   | { kind: 'install'; source: string; yes: boolean }
   | { kind: 'uninstall'; name: string; yes: boolean }
-  // ADR-0158 §5/§10 — chegam com o runner (fase 2). Reconhecidos aqui já agora p/ o
-  // shell NÃO cair em "subcomando desconhecido" (UX ruim) e sim numa resposta honesta.
+  | { kind: 'start'; name: string; yes: boolean }
+  | { kind: 'stop'; name: string }
+  | { kind: 'logs'; name: string; follow: boolean; lines: number }
+  // Uso INTERNO — o entrypoint que `start` spawna destacado (ADR-0158 §5).
+  | { kind: 'run-runner'; name: string }
+  // ADR-0158 §5/§10 — `create`/`update`/`attach` chegam em fases seguintes.
   | { kind: 'not-yet'; sub: string };
 
-const PHASE2_SUBCOMMANDS = new Set(['create', 'start', 'stop', 'logs', 'update', 'attach']);
+const PHASE_LATER_SUBCOMMANDS = new Set(['create', 'update', 'attach']);
 
-const SERVICE_HELP = `aluy service — SERVIÇOS plugáveis (ADR-0158) · fase 1: SEM runner ainda
+const SERVICE_HELP = `aluy service — SERVIÇOS plugáveis (ADR-0158) · o RUNNER (fase 2)
 
 Uso:
   aluy service [list]
   aluy service status <nome>
   aluy service install <path|git-url> [--yes]
   aluy service uninstall <nome> [--yes]
+  aluy service start <nome> [--yes]
+  aluy service stop <nome>
+  aluy service logs <nome> [-f] [-n <N>]
 
 Subcomandos:
-  list                 Lista os serviços instalados (nome, estado, próximo schedule,
-                        descrição). Sem argumento, "aluy service" já lista (espelha o
-                        /service in-session sem args, ADR-0158 §11).
-  status <nome>         Detalhe de um serviço + a validação (cron/workflow) conferida
-                        pelo registry. Serviço inválido mostra o motivo (RES-MD-3).
+  list                 Lista os serviços instalados — nome, estado REAL (rodando/
+                        parado/turno em andamento/dormindo/aguardando dono),
+                        próximo schedule, descrição. Sem argumento, "aluy service"
+                        já lista (espelha o /service in-session, ADR-0158 §11).
+  status <nome>         Detalhe de um serviço + o estado REAL (pid, turno em
+                        andamento ou dormindo até X, pergunta pendente).
   install <path|url>    Copia um diretório local OU clona um repo git p/
                         ~/.aluy/services/<nome>/. Valida ANTES de ativar e mostra o
                         MANIFESTO VISÍVEL (daemons, skills com script, mcp.json, canal,
                         autonomia) — exige confirmação. --yes pula o prompt (scripts/CI).
   uninstall <nome>      Remove o diretório do serviço. Pede confirmação (--yes pula).
+                        Recusa se o serviço estiver RODANDO ("stop" antes).
+  start <nome>          Spawna o PROCESSO DESTACADO do serviço (ADR-0158 §5) — mostra
+                        o manifesto visível e pede confirmação (--yes pula). Recusa se
+                        já rodando ou se o manifesto é inválido.
+  stop <nome>           SIGTERM no processo do serviço (timeout ⇒ SIGKILL); derruba os
+                        daemons próprios e limpa o pidfile.
+  logs <nome>           Últimas linhas do runner.log. -n <N> muda a contagem (padrão
+                        50); -f acompanha ao vivo (Ctrl-C sai).
 
 Notas:
-  - create/start/stop/logs/update/attach chegam na FASE 2 (o processo-por-serviço,
-    ADR-0158 §5). Instalar NÃO liga nada — não há o que ligar ainda nesta fase.
+  - create (conversacional) e update/attach chegam em fases seguintes.
   - O canal PRINCIPAL de gestão é "/service" DENTRO da sessão (ADR-0158 §10, emenda
     de aprovação); este shell é o espelho, útil p/ script/automação.
 `;
@@ -103,7 +134,43 @@ export function parseServiceCommand(argv: readonly string[]): ServiceCommand {
     return { kind: 'uninstall', name, yes };
   }
 
-  if (PHASE2_SUBCOMMANDS.has(sub)) return { kind: 'not-yet', sub };
+  if (sub === 'start') {
+    const rest = argv.slice(1);
+    const yes = rest.includes('--yes');
+    const name = rest.find((a) => !a.startsWith('--'));
+    if (!name) return { kind: 'error', message: 'service start: falta o <nome> do serviço.' };
+    return { kind: 'start', name, yes };
+  }
+
+  if (sub === 'stop') {
+    const name = argv[1];
+    if (!name) return { kind: 'error', message: 'service stop: falta o <nome> do serviço.' };
+    return { kind: 'stop', name };
+  }
+
+  if (sub === 'logs') {
+    const rest = argv.slice(1);
+    const follow = rest.includes('-f') || rest.includes('--follow');
+    const name = rest.find((a) => !a.startsWith('-'));
+    if (!name) return { kind: 'error', message: 'service logs: falta o <nome> do serviço.' };
+    const nIdx = rest.indexOf('-n');
+    const nRaw = nIdx !== -1 ? rest[nIdx + 1] : undefined;
+    const parsedN = nRaw !== undefined ? Number(nRaw) : NaN;
+    const lines = Number.isInteger(parsedN) && parsedN > 0 ? parsedN : 50;
+    return { kind: 'logs', name, follow, lines };
+  }
+
+  // Uso INTERNO — o `start` spawna `aluy service run <nome> --runner` destacado.
+  if (sub === 'run') {
+    const rest = argv.slice(1);
+    const name = rest.find((a) => !a.startsWith('--'));
+    if (!name || !rest.includes('--runner')) {
+      return { kind: 'error', message: 'service run: uso interno — precisa de "<nome> --runner".' };
+    }
+    return { kind: 'run-runner', name };
+  }
+
+  if (PHASE_LATER_SUBCOMMANDS.has(sub)) return { kind: 'not-yet', sub };
 
   return { kind: 'error', message: `service: subcomando desconhecido "${sub}".` };
 }
@@ -115,13 +182,15 @@ export interface ServiceDeps {
   readonly gitClone?: (url: string, dest: string) => void;
 }
 
-/** Resposta honesta p/ subcomandos da fase 2 (§5) — nunca finge que já existem. */
+/** Resposta honesta p/ subcomandos de fases seguintes — nunca finge que já existem. */
 function notYetLines(sub: string): readonly string[] {
-  return [
-    `"aluy service ${sub}" ainda não existe — chega na fase 2 do ADR-0158 (o`,
-    'processo-por-serviço, §5). Esta fase entrega a fundação: manifesto, registry,',
-    'install/uninstall com o manifesto visível, e a listagem.',
-  ];
+  const when =
+    sub === 'create'
+      ? 'fase 5 (criação conversacional, ADR-0158 §10)'
+      : sub === 'attach'
+        ? 'fase 4 (entrar/observar um serviço rodando, ADR-0158 §11)'
+        : 'uma fase seguinte (git pull, ADR-0158 §9)';
+  return [`"aluy service ${sub}" ainda não existe — chega em ${when}.`];
 }
 
 /** Detecta URL git (http(s)/git@/ssh://, ou termina em .git) vs. caminho local. PURO. */
@@ -163,8 +232,13 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
 
     case 'list': {
       const { services, errors } = store.list();
+      // ADR-0158 §5 (fase 2) — estado REAL por serviço (pidfile+kill-0 + status.json).
+      const servicesWithStatus = services.map((s) => ({
+        ...s,
+        runtimeStatus: toRuntimeStatusInput(readServiceRuntimeStatus(s.dir)),
+      }));
       const note = buildServicesNote({
-        services,
+        services: servicesWithStatus,
         errors: errors.map((e) => ({ dirName: e.dirName, reason: e.reason })),
         servicesDir: store.servicesDir,
       });
@@ -185,8 +259,13 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
         return 1;
       }
       const m = entry.manifest;
-      io.out(`serviço "${m.name}" — parado (fase 1, sem runner ainda)`);
+      const rt = readServiceRuntimeStatus(entry.dir);
+      io.out(`serviço "${m.name}" — ${describeRuntimeStatus(rt)}`);
       io.out(`  dir:         ${entry.dir}`);
+      if (rt.running && rt.pid !== undefined) io.out(`  pid:         ${rt.pid}`);
+      if (rt.running && rt.snapshot?.pendingQuestion !== undefined) {
+        io.out(`  ⚠ pergunta pendente: ${rt.snapshot.pendingQuestion}`);
+      }
       if (m.description !== undefined) io.out(`  descrição:   ${m.description}`);
       io.out(`  schedule:    ${m.schedule ?? '(não declarado)'}`);
       io.out(`  until:       ${m.until ?? '(não declarado)'}`);
@@ -210,7 +289,46 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
 
     case 'uninstall':
       return runUninstall(cmd.name, cmd.yes, io, store);
+
+    case 'start':
+      return runStart(cmd.name, cmd.yes, io, store);
+
+    case 'stop':
+      return runStop(cmd.name, io, store);
+
+    case 'logs':
+      return runLogs(cmd.name, cmd.follow, cmd.lines, io, store);
+
+    case 'run-runner':
+      // Uso INTERNO — o processo QUE É o serviço (spawnado destacado por `start`).
+      // Roda em FOREGROUND aqui (o `spawn` do `start` já o desanexou do terminal).
+      return runServiceRunner(cmd.name);
   }
+}
+
+/** Adapta `ServiceRuntimeStatus` (I/O, `service/status.ts`) p/ o formato PURO que
+ * `buildServicesNote` (core) consome — sem o core conhecer pidfile/fs. */
+function toRuntimeStatusInput(rt: ReturnType<typeof readServiceRuntimeStatus>): {
+  readonly running: boolean;
+  readonly turnState?: 'sleeping' | 'running-turn' | 'awaiting-owner';
+  readonly nextFireIso?: string;
+} {
+  return {
+    running: rt.running,
+    ...(rt.snapshot?.turnState !== undefined ? { turnState: rt.snapshot.turnState } : {}),
+    ...(rt.snapshot?.nextFireIso !== undefined ? { nextFireIso: rt.snapshot.nextFireIso } : {}),
+  };
+}
+
+function describeRuntimeStatus(rt: ReturnType<typeof readServiceRuntimeStatus>): string {
+  if (!rt.running) return 'PARADO';
+  const st = rt.snapshot?.turnState;
+  if (st === 'running-turn') return 'RODANDO · turno em andamento';
+  if (st === 'awaiting-owner') return 'RODANDO · ⚠ aguardando dono';
+  if (st === 'sleeping' && rt.snapshot?.nextFireIso !== undefined) {
+    return `RODANDO · dormindo até ${rt.snapshot.nextFireIso}`;
+  }
+  return 'RODANDO';
 }
 
 async function runInstall(
@@ -319,7 +437,7 @@ async function runInstall(
     store.ensureDir();
     cpSync(staging, finalDir, { recursive: true });
     io.out(`✓ serviço "${parsed.name}" instalado em ${finalDir}.`);
-    io.out('  PARADO (fase 1, sem runner ainda) — start/stop chegam na fase 2 (ADR-0158 §5).');
+    io.out(`  PARADO — "aluy service start ${parsed.name}" para ligar (ADR-0158 §5).`);
     return 0;
   } finally {
     cleanup();
@@ -338,6 +456,12 @@ async function runUninstall(
     return 1;
   }
 
+  // ADR-0158 §5 — NUNCA apaga o diretório debaixo de um processo vivo.
+  if (readServiceRuntimeStatus(dir).running) {
+    io.err(`aluy: serviço "${name}" está RODANDO — rode \`aluy service stop ${name}\` antes.`);
+    return 1;
+  }
+
   if (!yes) {
     const ok = await confirm(io, `remover o serviço "${name}" (${dir})? [y/N] `);
     if (!ok) {
@@ -349,4 +473,152 @@ async function runUninstall(
   rmSync(dir, { recursive: true, force: true });
   io.out(`✓ serviço "${name}" removido (${dir}).`);
   return 0;
+}
+
+/**
+ * ADR-0158 §5/§10 — `start`: mostra o MANIFESTO VISÍVEL (mesma disciplina do
+ * `install`, §9 — CRIAR/INSTALAR NÃO É LIGAR, a chave de ignição é sempre um ato
+ * explícito do dono) e, confirmado, faz `spawn` DESTACADO de
+ * `aluy service run <nome> --runner` — o processo QUE É o serviço, do `start` ao
+ * `stop`. Recusa serviço já RODANDO (pidfile+kill-0) ou inválido (registry).
+ */
+async function runStart(
+  name: string,
+  yes: boolean,
+  io: TerminalIO,
+  store: UserServicesStore,
+): Promise<number> {
+  const entry = store.get(name);
+  if (entry === undefined) {
+    io.err(`aluy: serviço "${name}" não encontrado em ${store.servicesDir}.`);
+    return 1;
+  }
+  if (isServiceEntryError(entry)) {
+    io.err(`aluy: serviço "${name}" inválido — ${entry.reason}`);
+    return 1;
+  }
+  const e: ServiceEntry = entry;
+  if (e.manifest.schedule === undefined) {
+    io.err(`aluy: serviço "${name}" não declara "schedule:" — o runner não saberia quando acordar.`);
+    return 1;
+  }
+  if (readServiceRuntimeStatus(e.dir).running) {
+    io.err(`aluy: serviço "${name}" já está RODANDO.`);
+    return 1;
+  }
+
+  const scan = scanServiceDirForInstall(e.dir);
+  const visible = buildServiceManifestVisibleNote({ manifest: e.manifest, ...scan });
+  io.out(visible.title);
+  for (const l of visible.lines) io.out(l);
+  io.out('');
+
+  if (!yes) {
+    const ok = await confirm(io, `iniciar o serviço "${name}" agora? [y/N] `);
+    if (!ok) {
+      io.out('início cancelado.');
+      return 1;
+    }
+  }
+
+  const logPath = runnerLogPath(e.dir);
+  appendLog(logPath, `"aluy service start ${name}" — spawnando o runner…`);
+  const entrypoint = process.argv[1] ?? '';
+  const child = spawn(process.execPath, [entrypoint, 'service', 'run', name, '--runner'], {
+    detached: true,
+    stdio: 'ignore',
+    cwd: e.dir,
+  });
+  child.unref();
+  if (child.pid === undefined) {
+    io.err(`aluy: falha ao dar spawn no runner de "${name}".`);
+    return 1;
+  }
+  io.out(`✓ serviço "${name}" iniciado (pid ${child.pid}).`);
+  io.out(`  logs: aluy service logs ${name}   ·   parar: aluy service stop ${name}`);
+  return 0;
+}
+
+/** ADR-0158 §5 — `stop`: SIGTERM no pid do runner; timeout ⇒ SIGKILL. Também
+ * derruba os daemons próprios DIRETO (defesa em profundidade — mesmo se o runner
+ * estiver travado e não chegar a rodar o próprio shutdown gracioso). */
+async function runStop(name: string, io: TerminalIO, store: UserServicesStore): Promise<number> {
+  const dir = store.resolveDir(name);
+  if (dir === undefined || !existsSync(dir)) {
+    io.err(`aluy: serviço "${name}" não encontrado em ${store.servicesDir}.`);
+    return 1;
+  }
+  const pidPath = runnerPidPath(dir);
+  const pid = readPidFile(pidPath);
+  if (pid === undefined || !isRunnerAlive(pidPath)) {
+    io.out(`serviço "${name}" já está parado.`);
+    removePidFile(pidPath);
+    return 0;
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    /* já morreu entre o check e o kill */
+  }
+  io.out(`SIGTERM enviado ao serviço "${name}" (pid ${pid})…`);
+
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (!isRunnerAlive(pidPath)) break;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  if (isRunnerAlive(pidPath)) {
+    try {
+      process.kill(pid, 'SIGKILL');
+      io.out(`  não encerrou a tempo — SIGKILL enviado.`);
+    } catch {
+      /* já morreu */
+    }
+  }
+  stopDaemons(dir, (line) => appendLog(runnerLogPath(dir), line));
+  removePidFile(pidPath);
+  io.out(`✓ serviço "${name}" parado.`);
+  return 0;
+}
+
+/** ADR-0158 §5 — `logs`: tail do `runner.log`. `-f` faz polling simples (Ctrl-C sai). */
+async function runLogs(
+  name: string,
+  follow: boolean,
+  n: number,
+  io: TerminalIO,
+  store: UserServicesStore,
+): Promise<number> {
+  const dir = store.resolveDir(name);
+  if (dir === undefined || !existsSync(dir)) {
+    io.err(`aluy: serviço "${name}" não encontrado em ${store.servicesDir}.`);
+    return 1;
+  }
+  const logPath = runnerLogPath(dir);
+  const initial = tailLog(logPath, n);
+  if (initial.length === 0) {
+    io.out(`(sem log ainda para "${name}" — o serviço nunca rodou, ou ${logPath} está vazio.)`);
+  } else {
+    for (const l of initial) io.out(l);
+  }
+  if (!follow) return 0;
+
+  let printed = initial.length;
+  io.out('— acompanhando ao vivo (Ctrl-C para sair) —');
+  return await new Promise<number>((resolve) => {
+    const interval = setInterval(() => {
+      const all = tailLog(logPath, printed + 1000);
+      if (all.length > printed) {
+        for (const l of all.slice(printed)) io.out(l);
+        printed = all.length;
+      }
+    }, 500);
+    const stop = (): void => {
+      clearInterval(interval);
+      resolve(0);
+    };
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
 }

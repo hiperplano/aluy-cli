@@ -126,6 +126,10 @@ export {
   buildReanchor,
   buildSelfCheckProbe,
   buildVerificationCapNote,
+  // ADR-0157/APR-0147 — o gate `awaitsUserDecision` (fechamento interrogativo do
+  // turno). ADR-0158 §5 pt.4 o REUSA no runner de serviço: fase 2 (sem canal ainda)
+  // classifica o texto final do turno p/ decidir "aguardando dono" vs. turno normal.
+  awaitsUserDecision,
 } from './self-check.js';
 // EST-F54 — Política de CONTINUAÇÃO do regente (Inv. I Fluidez): decideContinuation
 // (função PURA) + detectores (isAnnounceNoTool) + nudge + resolveContinuationConfig.
@@ -431,6 +435,20 @@ export {
   type ServiceDaemonDeclared,
   type ServiceSkillDeclared,
 } from './service/service-manifest-visible.js';
+// ADR-0158 §5 — RUNNER (fase 2, esta fatia): cálculo PURO do próximo disparo do
+// `schedule` (cron), parse do `budget:` p/ inteiro de tokens, conta do `until:`
+// (fim de expediente) e parser do `daemons/<nome>/daemon.md` (§6). Todo I/O
+// (spawn/pidfile/sleep real) é do runner concreto em `@hiperplano/aluy-cli`.
+export { nextCronFire } from './service/cron-next.js';
+export { parseServiceBudget } from './service/service-budget.js';
+export { parseHHMM, todayAt, msUntilDeadline } from './service/service-until.js';
+export {
+  parseDaemonManifest,
+  isDaemonManifestError,
+  type DaemonManifest,
+  type DaemonManifestError,
+  type DaemonManifestParse,
+} from './service/daemon-parse.js';
 
 // EST-0958 · CLI-SEC-3/4/9 — `!comando` (atalho de shell do composer): executor
 // que reusa a MESMA catraca (`decide`) + shell confinado (ToolPorts) do agente.
