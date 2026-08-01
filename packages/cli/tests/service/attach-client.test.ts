@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { connectAttachSocket, formatSocketErrorReason } from '../../src/service/attach-client.js';
+import { connectAttachSocket, formatSocketErrorReason, decodeDataChunk } from '../../src/service/attach-client.js';
 import { parseServiceAttachClientLine } from '@hiperplano/aluy-cli-core';
 
 /** Espera até `cond()` virar `true` ou o timeout estourar (poll de 10ms) — mesmo
@@ -86,6 +86,20 @@ describe('connectAttachSocket', () => {
     expect(formatSocketErrorReason(econnrefused)).toContain('não está rodando');
     expect(formatSocketErrorReason(outro)).toContain('conexão perdida');
     expect(formatSocketErrorReason(outro)).not.toContain('não está rodando');
+  });
+
+  // O socket real leva `setEncoding('utf8')` — um chunk REAL nunca chega como
+  // `Buffer` no listener `data` (mesma razão do teste acima p/ `formatSocketErrorReason`:
+  // o ramo `Buffer` só é exercitável isolado, sem mockar `node:net`, chamando a
+  // função PURA direto com um `Buffer` sintético).
+  it('decodeDataChunk: string ⇒ devolvida IDÊNTICA (sem tocar Buffer)', () => {
+    expect(decodeDataChunk('já é string')).toBe('já é string');
+    expect(decodeDataChunk('')).toBe('');
+  });
+
+  it('decodeDataChunk: Buffer ⇒ decodificado como UTF-8 (ramo de defesa do tipo Buffer|string)', () => {
+    expect(decodeDataChunk(Buffer.from('olá em utf-8', 'utf8'))).toBe('olá em utf-8');
+    expect(decodeDataChunk(Buffer.alloc(0))).toBe('');
   });
 
   it('caminho feliz: linhas NDJSON válidas viram texto formatado, linha malformada é ignorada em silêncio, `send` manda `say` corretamente codificado', async () => {

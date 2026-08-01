@@ -33,6 +33,19 @@ export function formatSocketErrorReason(err: NodeJS.ErrnoException): string {
     : `conexão perdida — ${String(err)}.`;
 }
 
+/**
+ * Normaliza UM chunk do evento `data` do socket p/ string UTF-8. PURA — sem I/O —
+ * testável direto com um `Buffer` sintético, sem depender de socket real: o socket
+ * já leva `setEncoding('utf8')` (logo abaixo), então na prática um chunk REAL
+ * nunca chega como `Buffer` aqui — mas o tipo do listener `data` do Node continua
+ * `Buffer | string` por contrato (é o próprio Node quem tipa assim), então o ramo
+ * `Buffer` fica de defesa. Só é exercitável sem mockar `node:net` chamando esta
+ * função isolada com um `Buffer` — daí a extração.
+ */
+export function decodeDataChunk(chunk: Buffer | string): string {
+  return typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+}
+
 export interface AttachConnectHooks {
   /** Uma linha JÁ FORMATADA (`formatServiceAttachEventForTerminal`) por evento
    * válido recebido do servidor. Linha malformada ⇒ ignorada em silêncio (mesma
@@ -69,7 +82,7 @@ export function connectAttachSocket(sockPath: string, hooks: AttachConnectHooks)
   socket.setEncoding('utf8');
   let buf = '';
   socket.on('data', (chunk: Buffer | string) => {
-    buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    buf += decodeDataChunk(chunk);
     let idx = buf.indexOf('\n');
     while (idx !== -1) {
       const rawLine = buf.slice(0, idx);
