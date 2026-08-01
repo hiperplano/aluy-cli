@@ -23,14 +23,19 @@
 //   run --runner (uso INTERNO — não documentado no --help; é o entrypoint que o
 //                `start` spawna, roda em FOREGROUND no processo destacado).
 //
-// FASE 4 (esta fatia): attach — "entrar num serviço rodando" (§11). Conecta ao
-// socket local que o PRÓPRIO runner serve (`attach-server.ts`), mostra log+estado
-// (+blocos, melhor esforço) AO VIVO, aceita digitação (linha ⇒ `say`), Ctrl-C
-// (e ESC quando o terminal permite raw-mode — ver o cliente interativo abaixo)
-// faz DETACH sem parar o serviço.
+// FASE 4: attach — "entrar num serviço rodando" (§11). Conecta ao socket local que
+// o PRÓPRIO runner serve (`attach-server.ts`), mostra log+estado (+blocos, melhor
+// esforço) AO VIVO, aceita digitação (linha ⇒ `say`), Ctrl-C (e ESC quando o
+// terminal permite raw-mode — ver o cliente interativo abaixo) faz DETACH sem
+// parar o serviço.
 //
-// `create`/`update` seguem "disponível numa fase seguinte" (create é
-// conversacional — fase 5; update é git pull — fase depois).
+// FASE 5 (esta fatia): `create` — criação CONVERSACIONAL (§10). O canal PRINCIPAL
+// é `/service create` DENTRO da sessão (`slash/service-create.ts` monta o
+// PROMPT-GUIA; `session/run.tsx` o envia como turno) — o agente ENTREVISTA o que
+// faltar e escreve o rascunho em STAGING (nunca em `~/.aluy/services/` — a catraca
+// barra). Este shell (`aluy service create`) não tem canal pra entrevista; por
+// isso só ORIENTA pro `/service create` in-session (ver `createRedirectLines`).
+// `update` (git pull) segue "disponível numa fase seguinte".
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, cpSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
@@ -72,18 +77,23 @@ export type ServiceCommand =
   | { kind: 'logs'; name: string; follow: boolean; lines: number }
   // ADR-0158 §11 (FASE 4) — entrar/observar/interagir com um serviço rodando.
   | { kind: 'attach'; name: string }
+  // ADR-0158 §10 (FASE 5) — `create` é CONVERSACIONAL (entrevista de verdade) e o
+  // shell não tem canal pra isso (ver `slash/service-create.ts`, Decisão 2) — o
+  // shell só ORIENTA pro canal PRINCIPAL, `/service create` dentro da sessão.
+  | { kind: 'create-redirect' }
   // Uso INTERNO — o entrypoint que `start` spawna destacado (ADR-0158 §5).
   | { kind: 'run-runner'; name: string }
-  // ADR-0158 §5/§10 — `create`/`update` chegam em fases seguintes.
+  // ADR-0158 §9 — `update` (git pull) chega numa fase seguinte.
   | { kind: 'not-yet'; sub: string };
 
-const PHASE_LATER_SUBCOMMANDS = new Set(['create', 'update']);
+const PHASE_LATER_SUBCOMMANDS = new Set(['update']);
 
-const SERVICE_HELP = `aluy service — SERVIÇOS plugáveis (ADR-0158) · attach (fase 4)
+const SERVICE_HELP = `aluy service — SERVIÇOS plugáveis (ADR-0158) · attach (fase 4) · create (fase 5)
 
 Uso:
   aluy service [list]
   aluy service status <nome>
+  aluy service create
   aluy service install <path|git-url> [--yes]
   aluy service uninstall <nome> [--yes]
   aluy service start <nome> [--yes]
@@ -98,6 +108,9 @@ Subcomandos:
                         já lista (espelha o /service in-session, ADR-0158 §11).
   status <nome>         Detalhe de um serviço + o estado REAL (pid, turno em
                         andamento ou dormindo até X, pergunta pendente).
+  create                Criação CONVERSACIONAL (ADR-0158 §10) — o shell não tem
+                        canal p/ a entrevista; ORIENTA a rodar "/service create
+                        <descrição>" numa sessão do aluy (o canal PRINCIPAL).
   install <path|url>    Copia um diretório local OU clona um repo git p/
                         ~/.aluy/services/<nome>/. Valida ANTES de ativar e mostra o
                         MANIFESTO VISÍVEL (daemons, skills com script, mcp.json, canal,
@@ -117,9 +130,10 @@ Subcomandos:
                         serviço SEGUE rodando (nunca para por causa do attach).
 
 Notas:
-  - create (conversacional) e update chegam em fases seguintes.
+  - update (git pull) chega numa fase seguinte.
   - O canal PRINCIPAL de gestão é "/service" DENTRO da sessão (ADR-0158 §10, emenda
-    de aprovação); este shell é o espelho, útil p/ script/automação.
+    de aprovação); este shell é o espelho, útil p/ script/automação — EXCETO
+    "create", que é conversacional e só existe de verdade in-session.
 `;
 
 /** Parser fino de `aluy service <argv>` — espelha `parseCronCommand`. PURO. */
@@ -182,6 +196,10 @@ export function parseServiceCommand(argv: readonly string[]): ServiceCommand {
     return { kind: 'attach', name };
   }
 
+  // ADR-0158 §10 (FASE 5) — `create` é CONVERSACIONAL; o shell só ORIENTA pro
+  // canal PRINCIPAL (`/service create` in-session). Ver `createRedirectLines`.
+  if (sub === 'create') return { kind: 'create-redirect' };
+
   // Uso INTERNO — o `start` spawna `aluy service run <nome> --runner` destacado.
   if (sub === 'run') {
     const rest = argv.slice(1);
@@ -213,9 +231,32 @@ export interface ServiceDeps {
 
 /** Resposta honesta p/ subcomandos de fases seguintes — nunca finge que já existem. */
 function notYetLines(sub: string): readonly string[] {
-  const when =
-    sub === 'create' ? 'fase 5 (criação conversacional, ADR-0158 §10)' : 'uma fase seguinte (git pull, ADR-0158 §9)';
-  return [`"aluy service ${sub}" ainda não existe — chega em ${when}.`];
+  return [`"aluy service ${sub}" ainda não existe — chega numa fase seguinte (git pull, ADR-0158 §9).`];
+}
+
+/**
+ * ADR-0158 §10 (FASE 5) — `aluy service create` no SHELL: `create` é CONVERSACIONAL
+ * (o agente ENTREVISTA o que faltar — schedule? canal? funil de risco?) e um
+ * comando de shell não tem CANAL pra essa ida-e-volta (não é um turno headless de
+ * um tiro como o `aluy bootstrap --agent`, que só instala pacotes de forma
+ * DETERMINÍSTICA). DECISÃO (missão explícita: "decisão sua, liste-a"): o shell
+ * ORIENTA pro canal PRINCIPAL — `/service create` DENTRO de uma sessão (ADR-0158
+ * §10, emenda de aprovação do dono: "/service é o canal principal"). Ver a
+ * DECISÃO 2 completa em `slash/service-create.ts`.
+ */
+function createRedirectLines(): readonly string[] {
+  return [
+    '"aluy service create" é CONVERSACIONAL — o agente entrevista o que faltar',
+    '(schedule/canal/autonomia/funil de risco) antes de escrever. Isso exige um',
+    'CANAL de ida-e-volta que o shell não tem (ao contrário de "install"/"start",',
+    'que só confirmam um "sim/não").',
+    '',
+    'Abra uma sessão do aluy e rode:',
+    '  /service create <descrição em prosa do serviço>',
+    '',
+    'o agente escreve o rascunho em staging (PARADO); revise e então',
+    '"aluy service install <path>" para ativar de verdade (ADR-0158 §10).',
+  ];
 }
 
 /** Detecta URL git (http(s)/git@/ssh://, ou termina em .git) vs. caminho local. PURO. */
@@ -329,6 +370,10 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
 
     case 'attach':
       return runAttach(cmd.name, io, store, deps.attachConnect ?? connectAttachSocket, deps.attachStdin ?? process.stdin);
+
+    case 'create-redirect':
+      for (const l of createRedirectLines()) io.out(l);
+      return 0;
 
     case 'run-runner':
       // Uso INTERNO — o processo QUE É o serviço (spawnado destacado por `start`).

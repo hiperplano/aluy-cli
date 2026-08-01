@@ -127,9 +127,29 @@ function killGracefully(child: ChildProcess): void {
   t.unref();
 }
 
-/** Espera até `date` OU até `stop` disparar — o que vier primeiro. */
-function sleepUntil(date: Date, stop: AbortSignal): Promise<'woke' | 'stopped'> {
-  const ms = Math.max(0, date.getTime() - Date.now());
+// FIX (bug pré-existente da FASE 2, achado na FASE 4) — `setTimeout(ms)` do Node
+// CLAMPA silenciosamente qualquer `ms` > 2^31-1 (~24,8 dias — overflow do int32
+// interno do timer) para ~1ms. Um serviço com `schedule:` apontando bem longe no
+// futuro (cron mensal/anual, ou o dono corrigindo o relógio do sistema pra trás)
+// faria o `setTimeout` de UM TIRO da versão anterior acordar quase instantaneamente
+// e o runner ENTRAR EM LOOP DE TURNOS — reabrindo o turno a cada ~1ms até o
+// `schedule` de verdade chegar. O fix: dormir em FATIAS com teto por fatia
+// (`MAX_SLEEP_SLICE_MS`, bem abaixo do limite do Node), RE-CHECANDO o alvo a cada
+// fatia — nenhuma fatia individual jamais chega perto do overflow.
+const MAX_SLEEP_SLICE_MS = 24 * 60 * 60_000; // 1 dia — teto por fatia.
+
+/**
+ * Calcula quanto dormir NESTA fatia — PURA (sem I/O/timer), testável direto sem
+ * mockar relógio/timer. O menor entre o tempo restante até `targetMs` e o teto
+ * `capMs`; nunca negativo (alvo já passado ⇒ 0, "dormir zero" = acordar já).
+ */
+export function sleepSliceMs(nowMs: number, targetMs: number, capMs: number = MAX_SLEEP_SLICE_MS): number {
+  const remaining = Math.max(0, targetMs - nowMs);
+  return Math.min(remaining, capMs);
+}
+
+/** Uma ÚNICA espera de `ms` (< teto por fatia, nunca clampa) OU até `stop` disparar. */
+function sleepOnce(ms: number, stop: AbortSignal): Promise<'woke' | 'stopped'> {
   return new Promise((resolve) => {
     if (stop.aborted) {
       resolve('stopped');
@@ -145,6 +165,25 @@ function sleepUntil(date: Date, stop: AbortSignal): Promise<'woke' | 'stopped'> 
     };
     stop.addEventListener('abort', onAbort, { once: true });
   });
+}
+
+/**
+ * Espera até `date` OU até `stop` disparar — o que vier primeiro. Dorme em FATIAS
+ * (teto `MAX_SLEEP_SLICE_MS`, ver comentário acima) — nunca um único
+ * `setTimeout` com `ms` grande o bastante pra clampar no Node. A cada fatia,
+ * RE-CHECA o alvo contra o relógio atual (`Date.now()`), então também se recupera
+ * corretamente se o relógio do sistema mudar durante a espera.
+ */
+export async function sleepUntil(date: Date, stop: AbortSignal): Promise<'woke' | 'stopped'> {
+  const targetMs = date.getTime();
+  for (;;) {
+    if (stop.aborted) return 'stopped';
+    const ms = sleepSliceMs(Date.now(), targetMs);
+    if (ms <= 0) return 'woke';
+    const outcome = await sleepOnce(ms, stop);
+    if (outcome === 'stopped') return 'stopped';
+    // fatia terminou sem atingir o alvo ainda ⇒ volta ao topo, recalcula o restante.
+  }
 }
 
 /**

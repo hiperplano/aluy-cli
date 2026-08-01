@@ -1022,12 +1022,12 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // aprovação §10: `/service` DENTRO da sessão é o canal PRINCIPAL de gestão (o
     // shell `aluy service` é o espelho, não o contrário — hierarquia invertida em
     // relação aos outros subsistemas). `list`/`status`/`start`/`stop`/`logs`
-    // (fase 2) e `attach` (fase 4, §11 — snapshot in-session; sessão viva é o
-    // shell) já funcionam de verdade; só `create` (conversacional) segue honesto
-    // "fase seguinte" — nada finge ligar um processo/escrever um diretório que
-    // ainda não existe.
+    // (fase 2), `attach` (fase 4, §11 — snapshot in-session; sessão viva é o
+    // shell) e `create` (fase 5, §10 — CONVERSACIONAL: entrevista + escreve em
+    // STAGING, PROMPT-DRIVEN igual ao `/init`, `slash/service-create.ts`) já
+    // funcionam de verdade.
     name: 'service',
-    summary: 'serviços plugáveis (ADR-0158) · list/status/start/stop/logs/attach',
+    summary: 'serviços plugáveis (ADR-0158) · list/status/create/start/stop/logs/attach',
     summaryKey: 'cmd.service',
     source: 'native',
     id: 'service',
@@ -1038,7 +1038,10 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // propósito FORA do `read-only` geral (o `agentEffect` de baixo cobre o efeito
     // AGREGADO do comando p/ o agente invocar sozinho; `subcommandEffects` afina).
     agentEffect: 'read-only',
-    subcommandEffects: { status: 'read-only', attach: 'read-only' },
+    // `create` espelha o `/init` (`agentEffect: 'session-effect'`) — é um turno
+    // guiado que ESCREVE arquivos (em staging, nunca em `~/.aluy/services/`,
+    // `slash/service-create.ts`), não uma leitura.
+    subcommandEffects: { status: 'read-only', attach: 'read-only', create: 'session-effect' },
     subcommands: [
       {
         name: 'list',
@@ -1059,8 +1062,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
       },
       {
         name: 'create',
-        summary: 'criação conversacional (disponível na próxima fase)',
-        terminal: true,
+        summary: 'criação conversacional — descreva em prosa; o agente entrevista e escreve o rascunho',
+        usage: 'create <descrição em prosa do serviço>',
       },
       {
         name: 'start',

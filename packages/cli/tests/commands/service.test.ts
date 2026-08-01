@@ -84,10 +84,14 @@ describe('parseServiceCommand', () => {
       yes: true,
     });
   });
-  it('create/update ⇒ not-yet (fases seguintes)', () => {
-    for (const sub of ['create', 'update']) {
-      expect(parseServiceCommand([sub])).toEqual({ kind: 'not-yet', sub });
-    }
+  it('update ⇒ not-yet (fase seguinte)', () => {
+    expect(parseServiceCommand(['update'])).toEqual({ kind: 'not-yet', sub: 'update' });
+  });
+  // ADR-0158 §10 (FASE 5) — `create` vira subcomando REAL no shell, mas só
+  // REDIRECIONA pro canal principal in-session (a entrevista de verdade não cabe
+  // num comando de shell sem canal — ver `slash/service-create.ts`).
+  it('create ⇒ create-redirect (o shell orienta pro "/service create" in-session)', () => {
+    expect(parseServiceCommand(['create'])).toEqual({ kind: 'create-redirect' });
   });
   // ADR-0158 §11 (FASE 4) — attach vira subcomando REAL (deixa de ser "not-yet").
   it('attach <nome>', () => {
@@ -403,13 +407,24 @@ describe('runService — uninstall', () => {
 });
 
 describe('runService — not-yet (fases seguintes)', () => {
-  it('create/update respondem honesto (exit 1)', async () => {
-    for (const sub of ['create', 'update']) {
-      const io = fakeIO();
-      const exit = await runService([sub, 'trader'], { io });
-      expect(exit).toBe(1);
-      expect(io.outLines.join('\n')).toContain('ainda não existe');
-    }
+  it('update responde honesto (exit 1)', async () => {
+    const io = fakeIO();
+    const exit = await runService(['update', 'trader'], { io });
+    expect(exit).toBe(1);
+    expect(io.outLines.join('\n')).toContain('ainda não existe');
+  });
+});
+
+// ADR-0158 §10 (FASE 5) — `create` no shell: ORIENTA pro canal principal
+// in-session (nunca finge entrevistar sem canal pra isso).
+describe('runService — create (fase 5, redireciona pro /service create in-session)', () => {
+  it('"aluy service create" ⇒ exit 0 + orienta pro "/service create" numa sessão', async () => {
+    const io = fakeIO();
+    const exit = await runService(['create'], { io });
+    expect(exit).toBe(0);
+    const out = io.outLines.join('\n');
+    expect(out).toContain('/service create');
+    expect(out.toLowerCase()).toContain('conversacional');
   });
 });
 

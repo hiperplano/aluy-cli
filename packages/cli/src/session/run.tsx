@@ -194,6 +194,7 @@ import {
 } from '@hiperplano/aluy-cli-core';
 import { DEFAULT_TIER } from './wiring.js';
 import { runInit, buildScaffoldSystemPrompt } from '../slash/init.js';
+import { buildServiceCreateSystemPrompt, SERVICE_DRAFTS_DIRNAME } from '../slash/service-create.js';
 import { parseMemoryCommand, runMemoryCommand } from '../slash/memory.js';
 import { parseTodoCommand, runTodoCommand } from '../slash/todo.js';
 import { runCron } from '../commands/cron.js';
@@ -2936,19 +2937,42 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         return;
       }
 
+      // ADR-0158 §10 (FASE 5) — `/service create <descrição>`: criação CONVERSACIONAL,
+      // canal PRINCIPAL (emenda de aprovação do dono). Mesmo padrão PROMPT-DRIVEN do
+      // `/init` (EST-INIT-02): a descrição vira o `goal` de um turno normal — o agente
+      // ENTREVISTA o que faltar e ESCREVE o diretório em STAGING (nunca direto em
+      // `~/.aluy/services/` — a catraca `aluy-config-write-deny` já barra isso por
+      // design; ver `slash/service-create.ts`). Sem descrição ⇒ orienta o uso (não há
+      // "modo estático" aqui — ao contrário do `/init`, um serviço sem descrição não
+      // tem o que criar).
+      const createMatch = /^\s*create\b(.*)$/s.exec(args);
+      if (createMatch) {
+        const desc = createMatch[1]!.trim();
+        if (desc === '') {
+          built.controller.pushNote('service', [
+            'uso: /service create <descrição em prosa do serviço>',
+            'ex.: /service create um time de operações com 3 estudos e um gestor de',
+            '  risco, opera 9h-17h30, reporta no telegram, drawdown máximo 2% ao dia.',
+            `o agente entrevista o que faltar e escreve o rascunho em ${SERVICE_DRAFTS_DIRNAME}/<nome>/`,
+            '(PARADO — revise e rode `aluy service install` depois; criar não é ligar, ADR-0158 §10).',
+          ]);
+          return;
+        }
+        const goal = buildServiceCreateSystemPrompt(desc);
+        built.controller.pushNote('service', [
+          `criando o rascunho de serviço para: ${desc}`,
+          'o agente vai entrevistar o que faltar (schedule/canal/autonomia/funil) e',
+          `escrever em ${SERVICE_DRAFTS_DIRNAME}/<nome>/ — PARADO até você revisar e instalar.`,
+        ]);
+        void built.controller.submit(goal);
+        return;
+      }
       const subMatch = /^\s*(install|uninstall)\b/.exec(args);
       if (subMatch) {
         built.controller.pushNote('service', [
           `"/service ${subMatch[1]}" ainda orienta pro shell nesta fase — rode ` +
             `\`aluy service ${subMatch[1]} …\` no terminal (mostra o manifesto visível`,
           'e pede confirmação antes de escrever em ~/.aluy/services/).',
-        ]);
-        return;
-      }
-      const notYetMatch = /^\s*(create)\b/.exec(args);
-      if (notYetMatch) {
-        built.controller.pushNote('service', [
-          `"/service ${notYetMatch[1]}" ainda não existe — chega numa fase seguinte do ADR-0158.`,
         ]);
         return;
       }
