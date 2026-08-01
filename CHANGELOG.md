@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.114] — 2026-08-01
+
+### Corrigido
+
+- 🔒 **enforcement REAL do funil (fecha o degrade #3 da rc.113):** o `[agente]` de uma atividade do workflow de serviço deixa de ser dica textual — o turno headless NASCE travado na persona, reusando a trilha já testada do `/subagent` (`childEngineOf`: tools ⊆ pai negadas na catraca; `bindNamedAgent`: fail-closed em nome desconhecido — exit≠0 antes de montar sessão, provider nunca é chamado). Prova decisiva na fumaça real: um estudo sem `write_file` foi BLOQUEADO **mesmo sob `--yolo`** — o gate de persona intercepta antes do relaxamento de modo. A garantia central do funil (ADR-0158 §4.1: "a ferramenta não existe no mundo do estudo") agora é estrutural, não pedido educado.
+
 ## [1.0.0-rc.113] — 2026-08-01
 
 ### Adicionado

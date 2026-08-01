@@ -187,9 +187,74 @@ export async function sleepUntil(date: Date, stop: AbortSignal): Promise<'woke' 
 }
 
 /**
+ * ADR-0158 §4.1 (FUNIL) — monta o `goal` de UMA atividade do workflow. PURA (sem
+ * I/O) — testável direto, sem spawnar processo nenhum.
+ *
+ * Fecha o DEGRADE #3 da rc.113: antes, TODA atividade recebia o preâmbulo do
+ * orquestrador + (se `[agente]`) uma DICA TEXTUAL ("execute como o agente X via
+ * spawn_agent") que o modelo podia simplesmente ignorar — rodando como
+ * orquestrador, com o toolset COMPLETO do serviço. Agora:
+ *   · atividade COM `activity.agent` ([agente]) ⇒ o preâmbulo do orquestrador NÃO
+ *     entra — a atividade É da persona, não do orquestrador (anatomia do
+ *     `service.md`, ADR-0158 §1: "atividades SEM [agente] executam COMO O
+ *     ORQUESTRADOR; passos com [agente] delegam"). A dica textual de `spawn_agent`
+ *     SAI do prompt — não é mais dica, é TRAVA: o turno filho nasce JÁ TRAVADO
+ *     naquela persona via `ALUY_SERVICE_PERSONA` (`buildActivityEnv` abaixo),
+ *     consumida por `run.tsx`/`controller.lockPersonaForTurn` ANTES do primeiro
+ *     tool-call — a persona não escolhe obedecer, o boot decide por construção.
+ *   · atividade SEM `activity.agent` ⇒ comportamento IDÊNTICO ao de antes (o
+ *     preâmbulo entra — a atividade roda COMO O ORQUESTRADOR, toolset completo).
+ */
+export function buildActivityGoal(args: {
+  readonly orchestratorPreamble: string;
+  readonly activity: Pick<WorkflowActivity, 'id' | 'goal' | 'agent'>;
+  readonly index: number;
+  readonly total: number;
+  /** ADR-0158 §5 pt.4 (FASE 3) — RETOMADA pós ASK-ESPERA (pergunta+resposta do dono). */
+  readonly resumeContext?: string;
+  /** ADR-0158 §11 (FASE 4) — fala(s) do dono via `aluy service attach`. */
+  readonly ownerSayContext?: string;
+}): string {
+  const resumePrefix = args.resumeContext !== undefined ? `${args.resumeContext}\n\n` : '';
+  const sayPrefix = args.ownerSayContext !== undefined ? `${args.ownerSayContext}\n\n` : '';
+  const activityHeader =
+    `[Atividade ${args.index + 1}/${args.total} do workflow — id "${args.activity.id}"]\n` +
+    args.activity.goal;
+  return args.activity.agent !== undefined
+    ? `${resumePrefix}${sayPrefix}${activityHeader}`
+    : `${args.orchestratorPreamble}\n\n${resumePrefix}${sayPrefix}${activityHeader}`;
+}
+
+/**
+ * ADR-0158 §4.1 (FUNIL) — monta o `env` do turno-filho de UMA atividade. PURA (sem
+ * I/O) — testável direto. `ALUY_SERVICE_HOME` sempre entra (§2, wiring escopado);
+ * `ALUY_SERVICE_PERSONA` SÓ quando a atividade declara `[agente]` — a env INTERNA
+ * (mesmo padrão de `ALUY_SERVICE_HOME`, nunca flag pública) que `run.tsx` consome
+ * no BOOT do turno filho para travá-lo na persona ANTES do primeiro tool-call
+ * (fail-closed lá: nome desconhecido ⇒ o filho nem abre sessão).
+ */
+export function buildActivityEnv(
+  serviceDir: string,
+  agent: string | undefined,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return {
+    ...baseEnv,
+    ALUY_SERVICE_HOME: serviceDir,
+    ...(agent !== undefined ? { ALUY_SERVICE_PERSONA: agent } : {}),
+  };
+}
+
+/**
  * Roda UMA atividade como um turno headless `aluy -p` em processo FILHO, com wiring
  * ESCOPADO ao serviço (§2, via `ALUY_SERVICE_HOME`). Mata o filho se `stop` disparar
  * OU se o `deadlineMs` (restante até o `until:`, ou o teto duro) vencer PRIMEIRO.
+ *
+ * ADR-0158 §4.1 (FUNIL) — quando `activity.agent` está presente, o turno filho nasce
+ * TRAVADO naquela persona (`ALUY_SERVICE_PERSONA`, consumida por `run.tsx`/
+ * `controller.lockPersonaForTurn`: toolset ⊆ `tools:` da persona + corpo dela no
+ * canal `system`, no lugar do preâmbulo do orquestrador). Fecha o DEGRADE #3 da
+ * rc.113 (antes: só uma dica textual no `goal`, ignorável pelo modelo).
  */
 async function runActivityTurn(args: {
   readonly serviceDir: string;
@@ -224,30 +289,32 @@ async function runActivityTurn(args: {
     return { ok: false, stop: 'limit' };
   }
 
-  const agentHint =
-    activity.agent !== undefined
-      ? `\n\n(Execute esta atividade especificamente como o agente "${activity.agent}" — ` +
-        `use \`spawn_agent\` com esse nome se fizer sentido; ele está disponível no ` +
-        `registro escopado deste serviço.)`
-      : '';
-  const resumePrefix = args.resumeContext !== undefined ? `${args.resumeContext}\n\n` : '';
-  const sayPrefix = args.ownerSayContext !== undefined ? `${args.ownerSayContext}\n\n` : '';
   if (args.ownerSayContext !== undefined) {
     log(`atividade ${index + 1}/${total} "${activity.id}": entregando fala(s) do dono via attach.`);
   }
-  const goal =
-    `${args.orchestratorPreamble}\n\n${resumePrefix}${sayPrefix}` +
-    `[Atividade ${index + 1}/${total} do workflow — id "${activity.id}"]\n${activity.goal}${agentHint}`;
+  const goal = buildActivityGoal({
+    orchestratorPreamble: args.orchestratorPreamble,
+    activity,
+    index,
+    total,
+    ...(args.resumeContext !== undefined ? { resumeContext: args.resumeContext } : {}),
+    ...(args.ownerSayContext !== undefined ? { ownerSayContext: args.ownerSayContext } : {}),
+  });
 
   const argv = [args.aluyEntrypoint, '-p', goal, '--output-format', 'json', '--quiet'];
   if (args.budgetTokens !== undefined) argv.push('--max-tokens', String(args.budgetTokens));
 
   const timeoutMs = Math.min(deadlineMs, MAX_ACTIVITY_MS);
-  log(`atividade ${index + 1}/${total} "${activity.id}": iniciando turno (teto ${Math.round(timeoutMs / 1000)}s)…`);
+  log(
+    activity.agent !== undefined
+      ? `atividade ${index + 1}/${total} "${activity.id}": iniciando turno TRAVADO na persona ` +
+          `"${activity.agent}" (teto ${Math.round(timeoutMs / 1000)}s)…`
+      : `atividade ${index + 1}/${total} "${activity.id}": iniciando turno (teto ${Math.round(timeoutMs / 1000)}s)…`,
+  );
 
   const child = spawn(args.execPath, argv, {
     cwd: args.serviceDir,
-    env: { ...process.env, ALUY_SERVICE_HOME: args.serviceDir },
+    env: buildActivityEnv(args.serviceDir, activity.agent),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

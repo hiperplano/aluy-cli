@@ -181,6 +181,7 @@ import {
   expandUserCommand,
   selectHooks,
   AgentRegistry,
+  bindNamedAgent,
   resolveHeapLimitMb,
   parseDuration,
   parseCycleInput,
@@ -475,6 +476,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // NORMAL, sessão do dono) ⇒ ZERO mudança de comportamento (todo `?? new Loader()`
   // abaixo cai no mesmo default de sempre).
   const serviceScopeDir = env.ALUY_SERVICE_HOME;
+  // ADR-0158 §4.1 (FUNIL) — ENFORCEMENT REAL da persona `[agente]` do workflow, fecha
+  // o DEGRADE #3 da rc.113 (antes: só uma DICA TEXTUAL no prompt — se o modelo a
+  // ignorasse, a atividade rodava com o toolset COMPLETO do orquestrador). Env INTERNA
+  // (MESMO padrão de `ALUY_SERVICE_HOME` acima — nunca flag pública), setada por
+  // `service/runner.ts` SÓ quando a atividade do workflow declara `[agente]`. Presente
+  // ⇒ o boot deste turno nasce JÁ TRAVADO naquela persona (ver a resolução logo abaixo
+  // do `agentRegistry` e o `lockPersonaForTurn` após o `buildSession`, mais abaixo).
+  // Ausente (caminho normal — sessão do dono, ou atividade SEM `[agente]`) ⇒ ZERO
+  // mudança de comportamento.
+  const servicePersonaName = env.ALUY_SERVICE_PERSONA?.trim();
   // EST-1007 — MODO HEADLESS (`-p`/`--print`/`--exec`): força o caminho NÃO-TTY mesmo
   // num terminal interativo (EXPLÍCITO, não depende de pipe). Sem splash, sem render
   // Ink, sem auto-detecção OSC/notify: roda o loop e imprime SÓ o resultado final.
@@ -958,6 +969,34 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const agentRegistry = new AgentRegistry(globalAgents.profiles, projectAgents.profiles);
   const agentLoadErrors = [...globalAgents.errors, ...projectAgents.errors];
 
+  // ADR-0158 §4.1 (FUNIL) — RESOLVE a persona do enforcement AGORA (o registro acima já
+  // está ESCOPADO ao serviço via `serviceScopeDir`), ANTES de gastar o resto do boot
+  // (backend/broker/MCP). Mesmo caminho de resolução do `spawn_agent`/`/subagent`
+  // (`bindNamedAgent`, GS-MD7): nome DESCONHECIDO ⇒ `ok:false` com erro LEGÍVEL — nunca
+  // um perfil default elevado. FAIL-CLOSED por construção: lançamos AQUI — o processo
+  // nunca chega a montar sessão/toolset, e o `main().catch` do binário (`bin/aluy.ts`)
+  // imprime a mensagem em STDERR e sai com exit≠0. `service/runner.ts` já trata
+  // stdout ilegível/exit≠0 como turno em ERRO (nunca reinterpreta como sucesso do
+  // orquestrador) — não há caminho para o toolset completo escapar por aqui.
+  const servicePersonaLock: { name: string; systemPrompt: string; toolScope?: ReadonlySet<string> } | undefined =
+    servicePersonaName !== undefined && servicePersonaName !== ''
+      ? ((): { name: string; systemPrompt: string; toolScope?: ReadonlySet<string> } => {
+          const binding = bindNamedAgent(agentRegistry, {
+            label: servicePersonaName,
+            goal: '',
+            agent: servicePersonaName,
+          });
+          if (!binding.ok) {
+            throw new Error(`ADR-0158 §4.1 — enforcement de persona do serviço: ${binding.error}`);
+          }
+          return {
+            name: servicePersonaName,
+            systemPrompt: binding.profile.systemPrompt ?? '',
+            ...(binding.profile.toolScope !== undefined ? { toolScope: binding.profile.toolScope } : {}),
+          };
+        })()
+      : undefined;
+
   // ADR-0145 (frente d/e) — SKILLS carregadas AQUI (antes do `buildSession`) p/ ir ao
   // menu de `capabilities` (DESCOBERTA-APENAS — a invocação de skill NÃO é desta onda).
   // Reusa os MESMOS loaders confinados do `/skills` (global `~/.aluy/skills/` + projeto
@@ -1361,6 +1400,18 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       sampleHeapUsed: () => process.memoryUsage().heapUsed,
     },
   });
+
+  // ADR-0158 §4.1 (FUNIL) — APLICA o enforcement JÁ RESOLVIDO acima (fail-closed lá:
+  // nome desconhecido nunca chega até aqui — a exceção já teria interrompido o boot
+  // antes deste `buildSession` sequer rodar). TRAVA a sessão INTEIRA nesta persona
+  // ANTES do primeiro `submit()` (mais abaixo, no ramo headless/TTY): engine ESCOPADA
+  // (`childEngineOf` — tools fora de `tools:` da persona são NEGADAS na catraca, nunca
+  // "ficam faltando por acaso") + o corpo da persona no canal `system` (o `service.md`/
+  // orquestrador NÃO participa deste turno — a atividade É da persona). MESMA mecânica
+  // do `/subagent` interativo (`controller.enterSubagentFocus`), aplicada no BOOT.
+  if (servicePersonaLock !== undefined) {
+    built.controller.lockPersonaForTurn(servicePersonaLock);
+  }
 
   // F-WIN (descoberta) — DISPARA a descoberta da janela de contexto do modelo BYO, em
   // BACKGROUND. É o que fecha o buraco de UX: até aqui, quem rodava BYO tinha de caçar a
