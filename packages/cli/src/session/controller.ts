@@ -4790,6 +4790,25 @@ export class SessionController {
   }
 
   /**
+   * ADR-0126(A·PR2) · ADR-0158 §4.1 — mecânica COMUM de foco: monta a engine ESCOPADA
+   * (`childEngineOf`, tools ⊆ pai, F118; `spawn_agent` negado, E-A1) + um loop NOVO com
+   * a persona do `.md` no canal `system` (substitui `projectInstructions` do loop
+   * principal — a sessão focada é a persona, não mais o AGENT.md do repo), e ENTRA em
+   * foco (`this.focus`). Reusa MESMOS ports/budget/tools/catraca da sessão (não-bypass).
+   * Compartilhada por `enterSubagentFocus` (`/subagent`, interativo) e
+   * `lockPersonaForTurn` (boot headless de serviço, ADR-0158 §4.1 — ver lá).
+   */
+  private enterFocusWithProfile(name: string, systemPrompt: string, toolScope?: ReadonlySet<string>): void {
+    const engine = childEngineOf(this.permissionEngine, toolScope);
+    const loop = this.makeLoop({
+      permission: engine,
+      ...(systemPrompt.trim() !== '' ? { projectInstructions: systemPrompt } : {}),
+    });
+    this.focus = { label: name, loop, history: [] };
+    this.patch({ meta: { ...this.state.meta, focus: name } });
+  }
+
+  /**
    * ADR-0126(A·PR2) — `/subagent <nome>`: abre uma SUB-SESSÃO FOCADA 1:1 com o perfil `.md`.
    * Daqui em diante a sua entrada vai SÓ p/ este sub-agente (histórico ISOLADO), até `/back`.
    * Segurança: engine ESCOPADA via `childEngineOf` (tools ⊆ pai, F118; `spawn_agent` negado,
@@ -4818,18 +4837,36 @@ export class SessionController {
     }
     const profile = res.profile;
     const toolScope = profile.tools !== undefined ? new Set(profile.tools) : undefined;
-    const engine = childEngineOf(this.permissionEngine, toolScope);
-    const loop = this.makeLoop({
-      permission: engine,
-      ...(profile.systemPrompt.trim() !== '' ? { projectInstructions: profile.systemPrompt } : {}),
-    });
-    this.focus = { label: profile.name, loop, history: [] };
-    this.patch({ meta: { ...this.state.meta, focus: profile.name } });
+    this.enterFocusWithProfile(profile.name, profile.systemPrompt, toolScope);
     this.pushNote(`foco: ${profile.name}`, [
       `você agora fala SÓ com o sub-agente "${profile.name}" (escopo ⊆ você).`,
       profile.description ? `— ${profile.description}` : '— sub-agente do seu registro `.md`.',
       '`/back` (ou `/subagent` sem nome) volta ao agente principal.',
     ]);
+  }
+
+  /**
+   * ADR-0158 §4.1 (funil de SERVIÇO — fecha o DEGRADE #3 da rc.113) — TRAVA a sessão
+   * INTEIRA nesta persona, ANTES do primeiro turno: o `run.tsx` chama isto no BOOT
+   * headless quando o runner de serviço (`service/runner.ts`) marcou a atividade com
+   * `[agente]` — a atividade É a persona (o corpo do `service.md`/orquestrador NÃO
+   * entra no canal `system` deste turno; só o `goal` da atividade, já sem o preâmbulo
+   * do orquestrador — ver `runner.ts`). MESMA mecânica de `/subagent` (engine
+   * `childEngineOf` ⊆ pai — a tool fora do `tools:` da persona nem sequer é permitida
+   * na catraca — + persona no canal `system`), mas aplicada ANTES de qualquer
+   * `submit()`, não como um comando do usuário num turno já aberto.
+   *
+   * FAIL-CLOSED por CONSTRUÇÃO: este método só recebe o perfil JÁ RESOLVIDO — a
+   * resolução por nome (`AgentRegistry.resolveByName`/`bindNamedAgent`, GS-MD7) e o
+   * "nome desconhecido ⇒ erro" acontecem no CALLER (`run.tsx`), ANTES de a sessão
+   * inteira ser montada (nunca chega a existir um turno com o toolset completo).
+   */
+  lockPersonaForTurn(profile: {
+    readonly name: string;
+    readonly systemPrompt: string;
+    readonly toolScope?: ReadonlySet<string>;
+  }): void {
+    this.enterFocusWithProfile(profile.name, profile.systemPrompt, profile.toolScope);
   }
 
   /** ADR-0126(A·PR2) — `/back`: sai do foco e volta ao agente principal. */
