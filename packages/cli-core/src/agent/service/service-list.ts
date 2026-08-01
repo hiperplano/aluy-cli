@@ -9,6 +9,9 @@
 // PORTÁVEL (ADR-0053 §8): formatação de string PURA (sem `node:*`, sem I/O).
 
 import type { ServiceManifest } from './service-parse.js';
+// ADR-0158 §5 pt.4 (FASE 3, item 4 da missão) — "status/list mostram 'aguardando
+// dono (pergunta enviada há X)'": reusa o MESMO formatador de elapsed do canal.
+import { formatElapsedSince } from './service-messages.js';
 
 /** Uma nota (título + linhas) — espelha o `SlashNote` do @hiperplano/aluy-cli, sem acoplar a ele. */
 export interface ServicesListNote {
@@ -27,6 +30,13 @@ export interface ServiceRuntimeStatusInput {
   /** Só quando `running` (best-effort, pode faltar num runner recém-morto). */
   readonly turnState?: 'sleeping' | 'running-turn' | 'awaiting-owner';
   readonly nextFireIso?: string;
+  /**
+   * ADR-0158 §5 pt.4 (FASE 3) — ISO do momento em que a pergunta PENDENTE foi
+   * enviada ao canal (só relevante quando `turnState === 'awaiting-owner'`) — usado
+   * p/ exibir "pergunta enviada há X" (missão item 4). Ausente ⇒ mostra sem o "há X"
+   * (não regressão de quem não tem o dado, ex.: snapshot de uma versão anterior).
+   */
+  readonly pendingSinceIso?: string;
 }
 
 /** Um serviço já VALIDADO pelo registry (manifesto parseável + cron/workflow OK). */
@@ -50,6 +60,9 @@ export interface ServicesListInput {
   readonly errors: readonly ServiceListRejection[];
   /** O caminho do dir de serviços (`~/.aluy/services/`), abreviado p/ exibição. */
   readonly servicesDir?: string;
+  /** Relógio INJETÁVEL (teste) p/ o "há X" do `pendingSinceIso` — default `Date.now()`
+   * no caller (esta função é PURA; não lê o relógio sozinha se isto for passado). */
+  readonly nowMs?: number;
 }
 
 /** Teto de chars da 1 linha de descrição exibida (espelha `workflowDescriptionLine`). */
@@ -72,6 +85,7 @@ export function serviceDescriptionLine(m: ServiceManifest): string {
  */
 export function buildServicesNote(input: ServicesListInput): ServicesListNote {
   const servicesDir = input.servicesDir ?? '~/.aluy/services';
+  const nowMs = input.nowMs ?? Date.now();
   const lines: string[] = [];
 
   const valid = [...input.services].sort((a, b) => a.name.localeCompare(b.name));
@@ -98,6 +112,13 @@ export function buildServicesNote(input: ServicesListInput): ServicesListNote {
       // ADR-0158 §5 (fase 2) — `runtimeStatus` presente ⇒ estado REAL; AUSENTE ⇒
       // mantém o "parado" fixo da fase 1 (não-regressão dos testes da fase 1).
       const rt = s.runtimeStatus;
+      // ADR-0158 §5 pt.4 (FASE 3, missão item 4) — "aguardando dono (pergunta
+      // enviada há X)": só quando temos `pendingSinceIso` (ausência = não regride
+      // p/ quem ainda não tem o dado — snapshot antigo, ou dado apagado por erro).
+      const pendingSuffix =
+        rt?.turnState === 'awaiting-owner' && rt.pendingSinceIso !== undefined
+          ? ` (pergunta enviada há ${formatElapsedSince(nowMs - Date.parse(rt.pendingSinceIso))})`
+          : '';
       const stateLabel =
         rt === undefined
           ? 'parado'
@@ -106,7 +127,7 @@ export function buildServicesNote(input: ServicesListInput): ServicesListNote {
             : rt.turnState === 'running-turn'
               ? 'RODANDO · turno em andamento'
               : rt.turnState === 'awaiting-owner'
-                ? 'RODANDO · ⚠ aguardando dono'
+                ? `RODANDO · ⚠ aguardando dono${pendingSuffix}`
                 : 'RODANDO · dormindo';
       const nextSuffix =
         rt?.running === true && rt.turnState === 'sleeping' && rt.nextFireIso !== undefined

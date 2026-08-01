@@ -35,6 +35,7 @@ import {
   buildServiceManifestVisibleNote,
   parseServiceManifest,
   isServiceManifestError,
+  formatElapsedSince,
 } from '@hiperplano/aluy-cli-core';
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
 import {
@@ -241,6 +242,7 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
         services: servicesWithStatus,
         errors: errors.map((e) => ({ dirName: e.dirName, reason: e.reason })),
         servicesDir: store.servicesDir,
+        nowMs: Date.now(),
       });
       io.out(`${note.title} — serviços instalados`);
       for (const l of note.lines) io.out(l);
@@ -264,7 +266,9 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
       io.out(`  dir:         ${entry.dir}`);
       if (rt.running && rt.pid !== undefined) io.out(`  pid:         ${rt.pid}`);
       if (rt.running && rt.snapshot?.pendingQuestion !== undefined) {
-        io.out(`  ⚠ pergunta pendente: ${rt.snapshot.pendingQuestion}`);
+        const since = rt.snapshot.updatedAtIso;
+        const elapsed = since !== undefined ? ` (enviada há ${formatElapsedSince(Date.now() - Date.parse(since))})` : '';
+        io.out(`  ⚠ pergunta pendente${elapsed}: ${rt.snapshot.pendingQuestion}`);
       }
       if (m.description !== undefined) io.out(`  descrição:   ${m.description}`);
       io.out(`  schedule:    ${m.schedule ?? '(não declarado)'}`);
@@ -312,11 +316,19 @@ function toRuntimeStatusInput(rt: ReturnType<typeof readServiceRuntimeStatus>): 
   readonly running: boolean;
   readonly turnState?: 'sleeping' | 'running-turn' | 'awaiting-owner';
   readonly nextFireIso?: string;
+  readonly pendingSinceIso?: string;
 } {
   return {
     running: rt.running,
     ...(rt.snapshot?.turnState !== undefined ? { turnState: rt.snapshot.turnState } : {}),
     ...(rt.snapshot?.nextFireIso !== undefined ? { nextFireIso: rt.snapshot.nextFireIso } : {}),
+    // ADR-0158 §5 pt.4 (FASE 3, missão item 4) — o MOMENTO da pergunta pendente é o
+    // `updatedAtIso` do snapshot: `writeServiceStatus` só é chamado de novo (fase 2/3)
+    // quando o estado MUDA — enquanto `turnState === 'awaiting-owner'` fica parado,
+    // `updatedAtIso` É o instante em que a pergunta foi enviada (runner.ts).
+    ...(rt.snapshot?.turnState === 'awaiting-owner' && rt.snapshot.updatedAtIso !== undefined
+      ? { pendingSinceIso: rt.snapshot.updatedAtIso }
+      : {}),
   };
 }
 
@@ -324,7 +336,11 @@ function describeRuntimeStatus(rt: ReturnType<typeof readServiceRuntimeStatus>):
   if (!rt.running) return 'PARADO';
   const st = rt.snapshot?.turnState;
   if (st === 'running-turn') return 'RODANDO · turno em andamento';
-  if (st === 'awaiting-owner') return 'RODANDO · ⚠ aguardando dono';
+  if (st === 'awaiting-owner') {
+    const since = rt.snapshot?.updatedAtIso;
+    const suffix = since !== undefined ? ` (pergunta enviada há ${formatElapsedSince(Date.now() - Date.parse(since))})` : '';
+    return `RODANDO · ⚠ aguardando dono${suffix}`;
+  }
   if (st === 'sleeping' && rt.snapshot?.nextFireIso !== undefined) {
     return `RODANDO · dormindo até ${rt.snapshot.nextFireIso}`;
   }

@@ -12,8 +12,14 @@
 //   5. `budget:` ⇒ vira `--max-tokens` (reusa `resolveMaxTokens`/`limits.ts` via a
 //      flag JÁ existente do `aluy -p`, sem duplicar o clamp anti-runaway);
 //   6. fechamento de turno com pergunta pendente (`awaitsUserDecision`, ADR-0157) ⇒
-//      loga "aguardando dono" e PARA — nunca prossegue com suposição (§5 pt.4/§3;
-//      canal/Telegram é fase 3 — aqui só o log + `status` sinalizam);
+//      loga "aguardando dono", ENVIA a pergunta ao `channel:` do manifesto e ENTRA
+//      EM ASK-ESPERA (long-poll Telegram via `channel.ts`, FASE 3, §5 pt.4) — nunca
+//      prossegue com suposição. Resposta do dono ⇒ RETOMA a MESMA atividade com
+//      pergunta+resposta anexadas; timeout (24h default) ⇒ alerta e encerra o turno
+//      sem ação; sem canal/token utilizável ⇒ fail-open, cai no comportamento da
+//      fase 2 (loga e para o processo até `aluy service start` manual);
+//   6b. fim de turno (ok/parado) ⇒ REPORTE de fechamento no canal (§8.2); turno que
+//      não abriu/crashou ⇒ ALERTA (§8.1) — `channel.ts`, sempre fail-open sem token;
 //   7. volta a dormir até o próximo `schedule`.
 //
 // Cada ATIVIDADE do workflow é UM turno headless `aluy -p` em processo FILHO
@@ -36,6 +42,7 @@ import {
   runWorkflow,
   parseWorkflow,
   isWorkflowError,
+  formatServiceResumeInstruction,
   type WorkflowActivity,
   type WorkflowActivityOutcome,
   type WorkflowActivityRunner,
@@ -47,6 +54,16 @@ import { appendLog } from './log.js';
 import { runnerLogPath } from './paths.js';
 import { writeServiceStatus } from './status.js';
 import { startDaemons, stopDaemons } from './daemons.js';
+// ADR-0158 §5 pt.4/§8.1/§8.2 (FASE 3) — o CANAL do serviço: reporte de fechamento,
+// alerta de falha e a ASK-ESPERA (reusa TelegramClient/EgressRateLimiter/malha do
+// ADR-0154 — ver `channel.ts`). Todo I/O de rede/keychain fica confinado ali.
+import {
+  sendServiceReport,
+  sendServiceAlert,
+  waitForOwnerReply,
+  newServiceEgressLimiter,
+  type ServiceChannelDeps,
+} from './channel.js';
 
 /** Teto duro por ATIVIDADE, mesmo sem `until:` declarado — anti-runaway (CLI-SEC-8):
  * um serviço sem `until:` não pode travar o runner p/ sempre num turno preso. */
@@ -66,6 +83,11 @@ export interface RunServiceRunnerDeps {
   readonly execPath?: string;
   /** Sinal externo de parada (teste) — além do SIGTERM/SIGINT reais do processo. */
   readonly externalStop?: AbortSignal;
+  /** ADR-0158 §5 pt.4 (FASE 3) — overrides do CANAL (keychain/client/relógio/timeout
+   * da ask-espera), INJETÁVEIS p/ teste — a suíte NUNCA toca keychain/rede reais. O
+   * `egressLimiter` (TC-6), quando omitido, é criado UMA vez por processo (abaixo) —
+   * nunca por chamada, senão o teto anti-spam perderia o efeito. */
+  readonly channelDeps?: Partial<ServiceChannelDeps>;
 }
 
 function killGracefully(child: ChildProcess): void {
@@ -125,6 +147,10 @@ async function runActivityTurn(args: {
   readonly log: (line: string) => void;
   /** Preenchido com o texto da pergunta pendente quando o outcome é `awaiting-owner`. */
   readonly pendingQuestionRef: { current?: string };
+  /** ADR-0158 §5 pt.4 (FASE 3) — RETOMADA: quando presente, é a atividade que HAVIA
+   * perguntado, reexecutando com pergunta+resposta do dono anexadas ao `goal`
+   * (`formatServiceResumeInstruction`, cli-core). `undefined` = turno normal. */
+  readonly resumeContext?: string;
 }): Promise<WorkflowActivityOutcome> {
   const { activity, index, total, deadlineMs, stop, log } = args;
 
@@ -140,8 +166,9 @@ async function runActivityTurn(args: {
         `use \`spawn_agent\` com esse nome se fizer sentido; ele está disponível no ` +
         `registro escopado deste serviço.)`
       : '';
+  const resumePrefix = args.resumeContext !== undefined ? `${args.resumeContext}\n\n` : '';
   const goal =
-    `${args.orchestratorPreamble}\n\n` +
+    `${args.orchestratorPreamble}\n\n${resumePrefix}` +
     `[Atividade ${index + 1}/${total} do workflow — id "${activity.id}"]\n${activity.goal}${agentHint}`;
 
   const argv = [args.aluyEntrypoint, '-p', goal, '--output-format', 'json', '--quiet'];
@@ -211,10 +238,9 @@ async function runActivityTurn(args: {
 
   const resultText = parsed.result;
   if (awaitsUserDecision(resultText)) {
-    // ADR-0158 §5 pt.4/§3 — regra dura: NUNCA prossegue com suposição. Sem canal
-    // ainda (fase 3), a "espera pelo canal" desta fase é: loga + PARA o workflow;
-    // `status`/`/service status` sinalizam "aguardando dono" até o próximo `start`
-    // manual ou (fase 3) resposta pelo canal.
+    // ADR-0158 §5 pt.4/§3 — regra dura: NUNCA prossegue com suposição. O CALLER
+    // (`runServiceRunner`) é quem envia a pergunta ao canal e entra em ASK-ESPERA
+    // (`channel.ts`, FASE 3) — aqui só sinalizamos "parou aqui, com esta pergunta".
     const tail = resultText.trim().split('\n').slice(-3).join(' ');
     args.pendingQuestionRef.current = tail;
     log(`atividade ${index + 1}/${total} "${activity.id}": AGUARDANDO DONO — "${tail}"`);
@@ -244,8 +270,23 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
   const logPath = deps.log ? undefined : runnerLogPath(serviceDir);
   const log = deps.log ?? ((line: string) => appendLog(logPath!, line));
 
+  // ADR-0158 §5 pt.4/§8.1/§8.2 (FASE 3) — o CANAL: UMA base de deps por PROCESSO
+  // (o `egressLimiter`/TC-6 tem que persistir por todo o runner — nunca recriado por
+  // chamada, ou o teto anti-spam perde o efeito). Overrides SÓ de teste (`channelDeps`).
+  const channelBaseDeps: ServiceChannelDeps = {
+    egressLimiter: deps.channelDeps?.egressLimiter ?? newServiceEgressLimiter(),
+    log,
+    ...(deps.channelDeps?.secretStore !== undefined ? { secretStore: deps.channelDeps.secretStore } : {}),
+    ...(deps.channelDeps?.clientFactory !== undefined ? { clientFactory: deps.channelDeps.clientFactory } : {}),
+    ...(deps.channelDeps?.now !== undefined ? { now: deps.channelDeps.now } : {}),
+    ...(deps.channelDeps?.askTimeoutMs !== undefined ? { askTimeoutMs: deps.channelDeps.askTimeoutMs } : {}),
+  };
+
   if (service.manifest.schedule === undefined) {
-    log('FATAL: serviço sem "schedule:" declarado — o runner não sabe quando acordar. Abortando.');
+    const reason = 'serviço sem "schedule:" declarado — o runner não sabe quando acordar.';
+    log(`FATAL: ${reason} Abortando.`);
+    // §8.1 — turno que NUNCA abre (nem vai abrir) ⇒ alerta no canal, nunca silêncio.
+    await sendServiceAlert(service.manifest, reason, channelBaseDeps);
     return 1;
   }
 
@@ -279,7 +320,10 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
       const now = new Date();
       const next = nextCronFire(service.manifest.schedule, now);
       if (next === undefined) {
-        log(`FATAL: "schedule: ${service.manifest.schedule}" nunca dispara (ou é inválido). Abortando.`);
+        const reason = `"schedule: ${service.manifest.schedule}" nunca dispara (ou é inválido).`;
+        log(`FATAL: ${reason} Abortando.`);
+        // §8.1 — idem: o serviço NUNCA mais vai abrir turno sozinho ⇒ alerta.
+        await sendServiceAlert(service.manifest, reason, channelBaseDeps);
         // FATAL fora do `stopController.abort()` — o `finally` abaixo só limpa em
         // shutdown GRACIOSO (sinal); aqui precisamos limpar manualmente p/ nunca
         // deixar um pidfile órfão apontando pra um processo que já morreu.
@@ -294,12 +338,30 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
       const wake = await sleepUntil(next, stopController.signal);
       if (wake === 'stopped') break;
 
+      // ADR-0158 §8.1 (FASE 3) — "manifesto inválido pós-edição" é um dos motivos
+      // explícitos de ALERTA: o dono pode ter editado `service.md` DEPOIS do
+      // `start` (o processo só releu uma vez, no boot). Reler+revalidar A CADA
+      // despertar detecta isso ANTES de abrir o turno — em vez de travar o runner
+      // inteiro, PULA este turno (alerta pelo ÚLTIMO canal válido conhecido,
+      // `service.manifest`) e volta a dormir até o próximo `schedule` (calculado
+      // com o schedule ANTIGO — é a melhor aproximação sem um manifesto novo válido).
+      const revalidated = store.get(name);
+      if (revalidated === undefined || isServiceEntryError(revalidated)) {
+        const reason =
+          revalidated === undefined
+            ? 'o diretório do serviço sumiu do disco entre um despertar e outro — turno pulado.'
+            : `manifesto inválido pós-edição — ${revalidated.reason} — turno pulado.`;
+        log(`FALHA ao abrir o turno: ${reason}`);
+        await sendServiceAlert(service.manifest, reason, channelBaseDeps);
+        continue; // volta ao topo do while — dorme até o PRÓXIMO schedule (o antigo).
+      }
+
       // ── início do expediente (§5 pt.3/§6) ──────────────────────────────────
       log('acordou — início do expediente: subindo daemons próprios (se houver)…');
       startDaemons(serviceDir, log);
       writeServiceStatus(serviceDir, { turnState: 'running-turn' });
 
-      const outcome = await runOneWorkflow({
+      const baseWorkflowArgs = {
         serviceDir,
         serviceName: service.manifest.name,
         workflowName: service.manifest.workflow,
@@ -310,30 +372,97 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         execPath,
         aluyEntrypoint,
         log,
-      });
+      };
 
-      if (outcome.kind === 'awaiting-owner') {
+      let outcome = await runOneWorkflow(baseWorkflowArgs);
+
+      // ADR-0158 §5 pt.4 (FASE 3 — O CORAÇÃO DESTA FASE) — ASK-ESPERA: turno fechou
+      // "aguardando dono" ⇒ envia a pergunta ao CANAL do manifesto e ESPERA a
+      // resposta (nunca prossegue com suposição). Resposta chegou ⇒ RETOMA a MESMA
+      // atividade com pergunta+resposta anexadas, e o workflow CONTINUA de onde
+      // parou. A nova execução pode, ela mesma, terminar "aguardando dono" de novo
+      // (outra pergunta) — o `while` cobre isso naturalmente.
+      while (outcome.kind === 'awaiting-owner') {
         writeServiceStatus(serviceDir, {
           turnState: 'awaiting-owner',
           pendingQuestion: outcome.question,
           lastReportSummary: `aguardando dono: ${outcome.question}`,
         });
-        log('turno encerrado — AGUARDANDO DONO (sem canal nesta fase: revise o log e "aluy service start" de novo quando resolver).');
-      } else {
-        log(`turno encerrado — ${outcome.summary}`);
+        log('turno pausado — AGUARDANDO DONO — enviando a pergunta ao canal e entrando em modo espera…');
+
+        const ask = await waitForOwnerReply({
+          manifest: service.manifest,
+          question: outcome.question,
+          stop: stopController.signal,
+          deps: channelBaseDeps,
+        });
+
+        if (ask.kind === 'stopped') {
+          log('ask-espera interrompida (stop do runner).');
+          break; // `outcome` continua "awaiting-owner" — o guard abaixo pula report/alert.
+        }
+
+        if (ask.kind === 'no-channel') {
+          // Sem canal utilizável ⇒ cai no comportamento da FASE 2 (fail-open):
+          // encerra o processo do runner; o dono religa manualmente quando resolver
+          // (nunca finge que perguntou, nunca prossegue sozinho — §5 pt.4/§3).
+          log(
+            `ask-espera não pôde ser feita (${ask.reason}) — encerrando o runner ` +
+              `(religue com "aluy service start" quando resolver o canal/decisão).`,
+          );
+          stopDaemons(serviceDir, log);
+          removePidFile(pidPath);
+          process.off('SIGTERM', onSignal);
+          process.off('SIGINT', onSignal);
+          log('runner encerrado (aguardando dono, sem canal disponível).');
+          return 0;
+        }
+
+        if (ask.kind === 'timeout') {
+          outcome = {
+            kind: 'stopped',
+            critical: false,
+            summary:
+              'aguardando dono — SEM RESPOSTA a tempo (ask-espera expirou); turno encerrado sem ação.',
+          };
+          break;
+        }
+
+        // ask.kind === 'answered' — retoma a atividade que perguntou.
+        log(`dono respondeu pelo canal — retomando a atividade ${outcome.activityIndex + 1} do workflow.`);
+        outcome = await runOneWorkflow({
+          ...baseWorkflowArgs,
+          resume: { activityIndex: outcome.activityIndex, question: outcome.question, answer: ask.text },
+        });
       }
 
-      log('fim do expediente — derrubando daemons próprios…');
-      stopDaemons(serviceDir, log);
+      // `outcome.kind === 'awaiting-owner'` só sobra aqui quando o `break` acima foi
+      // por `ask.kind === 'stopped'` (SIGTERM durante a ask-espera) — nesse caso
+      // NÃO reportamos/alertamos (o `finally` do shutdown gracioso já cobre; o
+      // `while` externo termina, `stopController.signal.aborted` já é `true`) e
+      // TAMBÉM não derrubamos os daemons aqui (o `shutdown()` já o faz).
+      if (outcome.kind !== 'awaiting-owner') {
+        // §8.2 (turno concluiu/parou por motivo neutro) × §8.1 (falha que MERECE
+        // alerta) — a mesma disciplina "nunca silêncio" do resto do runner.
+        log(`turno encerrado — ${outcome.summary}`);
+        if (outcome.kind === 'ok') {
+          await sendServiceReport(
+            service.manifest,
+            { serviceName: service.manifest.name, ok: true, critical: false, summary: outcome.summary },
+            channelBaseDeps,
+          );
+        } else if (outcome.critical) {
+          await sendServiceAlert(service.manifest, outcome.summary, channelBaseDeps);
+        } else {
+          await sendServiceReport(
+            service.manifest,
+            { serviceName: service.manifest.name, ok: false, critical: false, summary: outcome.summary },
+            channelBaseDeps,
+          );
+        }
 
-      if (outcome.kind === 'awaiting-owner') {
-        // Regra dura §5 pt.4: não volta a tentar sozinho. Encerra o processo do
-        // runner inteiro (o dono decide quando religar via `aluy service start`).
-        removePidFile(pidPath);
-        process.off('SIGTERM', onSignal);
-        process.off('SIGINT', onSignal);
-        log('runner encerrado (aguardando dono).');
-        return 0;
+        log('fim do expediente — derrubando daemons próprios…');
+        stopDaemons(serviceDir, log);
       }
     }
   } finally {
@@ -344,8 +473,15 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
 
 type WorkflowOutcome =
   | { readonly kind: 'ok'; readonly summary: string }
-  | { readonly kind: 'stopped'; readonly summary: string }
-  | { readonly kind: 'awaiting-owner'; readonly question: string };
+  /**
+   * `critical` distingue, p/ o CALLER decidir reporte (§8.2) × alerta (§8.1): `true`
+   * p/ o que impediu o turno de sequer completar de um jeito normal (workflow
+   * ausente/inválido, atividade que terminou em `stop:'error'` — erro de
+   * spawn/crash); `false` p/ parada NEUTRA (`until:`/teto atingido, `stop` do
+   * runner, conclusão antecipada do agente) — essas viram reporte, não alerta.
+   */
+  | { readonly kind: 'stopped'; readonly summary: string; readonly critical: boolean }
+  | { readonly kind: 'awaiting-owner'; readonly question: string; readonly activityIndex: number };
 
 async function runOneWorkflow(args: {
   readonly serviceDir: string;
@@ -358,6 +494,10 @@ async function runOneWorkflow(args: {
   readonly execPath: string;
   readonly aluyEntrypoint: string;
   readonly log: (line: string) => void;
+  /** ADR-0158 §5 pt.4 (FASE 3) — RETOMADA pós ASK-ESPERA: a atividade em
+   * `activityIndex` reexecuta com pergunta+resposta anexadas ao `goal` (as
+   * atividades ANTERIORES já concluíram no turno original — não rodam de novo). */
+  readonly resume?: { readonly activityIndex: number; readonly question: string; readonly answer: string };
 }): Promise<WorkflowOutcome> {
   const { serviceDir, workflowName, log } = args;
   if (workflowName === undefined) {
@@ -367,33 +507,56 @@ async function runOneWorkflow(args: {
   const wfPath = join(serviceDir, 'workflows', `${workflowName}.md`);
   if (!existsSync(wfPath)) {
     log(`FATAL do turno: workflows/${workflowName}.md não encontrado.`);
-    return { kind: 'stopped', summary: `workflow "${workflowName}" não encontrado.` };
+    return { kind: 'stopped', critical: true, summary: `workflow "${workflowName}" não encontrado.` };
   }
   const raw = readFileSync(wfPath, 'utf8');
   const parsed = parseWorkflow(`${workflowName}.md`, raw, 'project');
   if (isWorkflowError(parsed)) {
     log(`FATAL do turno: workflow "${workflowName}" inválido — ${parsed.reason}`);
-    return { kind: 'stopped', summary: `workflow inválido — ${parsed.reason}` };
+    return { kind: 'stopped', critical: true, summary: `workflow inválido — ${parsed.reason}` };
   }
+
+  const startOffset = args.resume?.activityIndex ?? 0;
+  if (startOffset >= parsed.activities.length) {
+    log('retomada: a atividade pendente não existe mais no workflow (editado entre a pergunta e a resposta) — turno encerrado.');
+    return {
+      kind: 'stopped',
+      critical: true,
+      summary: 'a atividade da retomada não existe mais no workflow (editado entre a pergunta e a resposta).',
+    };
+  }
+  const activitiesToRun = parsed.activities.slice(startOffset);
 
   const budgetTokens = parseServiceBudget(args.budgetRaw);
   const orchestratorPreamble =
     `Você coordena o serviço "${args.serviceName}" (ADR-0158) — rege, não opera:\n${args.orchestratorBody}`;
 
   const pendingQuestionRef: { current?: string } = {};
+  let pendingActivityIndex: number | undefined;
   const runner: WorkflowActivityRunner = {
-    async runActivity({ index, total, id, goal, signal: _rootSignal }) {
+    async runActivity({ index, id, goal, signal: _rootSignal }) {
       void _rootSignal; // o `runWorkflow` já checa entre atividades; usamos `args.stop`.
+      // `index`/`total` que `runWorkflow` passa são relativos a `activitiesToRun`
+      // (o array FATIADO a partir de `startOffset`) — convertidos aqui pro índice/
+      // total REAIS do workflow inteiro, p/ o log e o `goal` ("Atividade X/Y")
+      // continuarem corretos mesmo numa retomada parcial.
+      const realIndex = index + startOffset;
       const now = new Date();
       const remaining = msUntilDeadline(now, args.untilRaw);
       const deadlineMs = remaining ?? MAX_ACTIVITY_MS;
-      return runActivityTurn({
+      // A primeira atividade da FATIA (`index === 0`) é a que estava pendente —
+      // só ELA leva o contexto de retomada (as seguintes são turno normal).
+      const resumeContext =
+        args.resume !== undefined && index === 0
+          ? formatServiceResumeInstruction(args.resume.question, args.resume.answer)
+          : undefined;
+      const outcome = await runActivityTurn({
         serviceDir,
         serviceName: args.serviceName,
         orchestratorPreamble,
-        activity: { id, goal, agent: parsed.activities[index]?.agent } as WorkflowActivity,
-        index,
-        total,
+        activity: { id, goal, agent: parsed.activities[realIndex]?.agent } as WorkflowActivity,
+        index: realIndex,
+        total: parsed.activities.length,
         ...(budgetTokens !== undefined ? { budgetTokens } : {}),
         deadlineMs,
         stop: args.stop,
@@ -401,19 +564,30 @@ async function runOneWorkflow(args: {
         aluyEntrypoint: args.aluyEntrypoint,
         log: args.log,
         pendingQuestionRef,
+        ...(resumeContext !== undefined ? { resumeContext } : {}),
       });
+      if (!outcome.ok && outcome.stop === 'awaiting-owner') pendingActivityIndex = realIndex;
+      return outcome;
     },
   };
 
-  const res = await runWorkflow(parsed.activities, runner, args.stop);
+  const res = await runWorkflow(activitiesToRun, runner, args.stop);
   if (res.lastStop === 'awaiting-owner') {
-    return { kind: 'awaiting-owner', question: pendingQuestionRef.current ?? '(ver runner.log)' };
+    return {
+      kind: 'awaiting-owner',
+      question: pendingQuestionRef.current ?? '(ver runner.log)',
+      activityIndex: pendingActivityIndex ?? startOffset,
+    };
   }
   if (res.stopped) {
     return {
       kind: 'stopped',
-      summary: `parou em ${res.activitiesRun}/${parsed.activities.length} atividades (${res.lastStop ?? 'motivo desconhecido'}).`,
+      critical: res.lastStop === 'error',
+      summary: `parou em ${startOffset + res.activitiesRun}/${parsed.activities.length} atividades (${res.lastStop ?? 'motivo desconhecido'}).`,
     };
   }
-  return { kind: 'ok', summary: `${res.activitiesRun}/${parsed.activities.length} atividades concluídas.` };
+  return {
+    kind: 'ok',
+    summary: `${startOffset + res.activitiesRun}/${parsed.activities.length} atividades concluídas.`,
+  };
 }

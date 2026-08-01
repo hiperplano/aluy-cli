@@ -100,6 +100,7 @@ import {
   buildAvailableAgentsNote,
   buildServicesNote,
   buildServiceManifestVisibleNote,
+  formatElapsedSince,
   findProvider,
   type NativeTool,
   type ToolPorts,
@@ -2705,12 +2706,19 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         }
         const m = entry.manifest;
         const rt = readServiceRuntimeStatus(entry.dir);
+        // ADR-0158 §5 pt.4 (FASE 3, missão item 4) — "aguardando dono (pergunta
+        // enviada há X)": `updatedAtIso` do snapshot É o instante do último envio
+        // (o status só é regravado quando o estado MUDA — runner.ts).
+        const pendingSince =
+          rt.snapshot?.turnState === 'awaiting-owner' && rt.snapshot.updatedAtIso !== undefined
+            ? ` (pergunta enviada há ${formatElapsedSince(Date.now() - Date.parse(rt.snapshot.updatedAtIso))})`
+            : '';
         const stateLine = !rt.running
           ? 'PARADO'
           : rt.snapshot?.turnState === 'running-turn'
             ? 'RODANDO · turno em andamento'
             : rt.snapshot?.turnState === 'awaiting-owner'
-              ? 'RODANDO · ⚠ aguardando dono'
+              ? `RODANDO · ⚠ aguardando dono${pendingSince}`
               : rt.snapshot?.turnState === 'sleeping' && rt.snapshot.nextFireIso !== undefined
                 ? `RODANDO · dormindo até ${rt.snapshot.nextFireIso}`
                 : 'RODANDO';
@@ -2718,7 +2726,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           `${stateLine} · dir: ${entry.dir}`,
           ...(rt.running && rt.pid !== undefined ? [`pid: ${rt.pid}`] : []),
           ...(rt.snapshot?.pendingQuestion !== undefined
-            ? [`⚠ pergunta pendente: ${rt.snapshot.pendingQuestion}`]
+            ? [`⚠ pergunta pendente${pendingSince}: ${rt.snapshot.pendingQuestion}`]
             : []),
           ...(m.description !== undefined ? [`descrição: ${m.description}`] : []),
           `schedule: ${m.schedule ?? '(não declarado)'}`,
@@ -2882,6 +2890,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             running: rt.running,
             ...(rt.snapshot?.turnState !== undefined ? { turnState: rt.snapshot.turnState } : {}),
             ...(rt.snapshot?.nextFireIso !== undefined ? { nextFireIso: rt.snapshot.nextFireIso } : {}),
+            // ADR-0158 §5 pt.4 (FASE 3, missão item 4) — "pergunta enviada há X".
+            ...(rt.snapshot?.turnState === 'awaiting-owner' && rt.snapshot.updatedAtIso !== undefined
+              ? { pendingSinceIso: rt.snapshot.updatedAtIso }
+              : {}),
           },
         };
       });
@@ -2889,6 +2901,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         services: servicesWithStatus,
         errors: errors.map((e) => ({ dirName: e.dirName, reason: e.reason })),
         servicesDir: store.servicesDir,
+        nowMs: Date.now(),
       });
       built.controller.pushNote(note.title, note.lines);
       return;

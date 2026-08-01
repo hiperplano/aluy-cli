@@ -449,6 +449,23 @@ export {
   type DaemonManifestError,
   type DaemonManifestParse,
 } from './service/daemon-parse.js';
+// ADR-0158 §5 pt.4/§8.1/§8.2 (FASE 3) — o CANAL do serviço: resolução PURA do
+// `channel:` p/ o chat-id do Telegram (TC-5 — o alvo é sempre o do manifesto, nunca
+// um argumento de runtime) + os FORMATADORES puros do reporte de fechamento (§8.2),
+// do alerta de falha (§8.1) e das duas pontas da ASK-ESPERA (§5 pt.4). O I/O
+// (TelegramClient/keychain/EgressRateLimiter) é do runner concreto, `@hiperplano/aluy-cli`.
+export { parseServiceTelegramChatId } from './service/service-channel.js';
+export {
+  formatServiceTurnReport,
+  formatServiceFailureAlert,
+  formatServiceAskMessage,
+  formatServiceResumeInstruction,
+  formatServiceAskTimeoutAlert,
+  formatElapsedSince,
+  hasAskTimedOut,
+  DEFAULT_ASK_TIMEOUT_MS,
+  type ServiceTurnClosure,
+} from './service/service-messages.js';
 
 // EST-0958 · CLI-SEC-3/4/9 — `!comando` (atalho de shell do composer): executor
 // que reusa a MESMA catraca (`decide`) + shell confinado (ToolPorts) do agente.
