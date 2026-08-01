@@ -14,6 +14,16 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.113] — 2026-08-01
+
+### Adicionado
+
+- 🌱 **SERVIÇOS plugáveis (ADR-0158/APR-0148) — o aluy como "uma pessoa ou um time" contínuo:** um serviço é um DIRETÓRIO em `~/.aluy/services/<nome>/` (`service.md` com frontmatter=contrato duro e corpo=orquestrador + `agents/`/`workflows/`/`skills/`/`daemons/`/`rules.md`/`mcp.json` nos formatos existentes). Superfície completa: `aluy service create|install|start|stop|status|logs|attach|uninstall` com `/service` in-session como canal PRINCIPAL. Runner = UM PROCESSO POR SERVIÇO (dorme até o `schedule`, sobe daemons próprios, roda o workflow em turnos headless com wiring ESCOPADO ao diretório, enforça `until:`/`budget:` por CÓDIGO); canal Telegram (reporte de fechamento, alerta de falha, ASK-ESPERA: pergunta pendente vai ao chat do dono e o turno retoma com a resposta — allowlist só o chat-id do manifesto, egresso travado TC-5/TC-6); ATTACH (socket UNIX 0600: ver a conversa viva, falar com o serviço via `say`, detach sem parar); CREATE conversacional (prompt-guia estilo `/init`, escreve em STAGING — a catraca `aluy-config-write-deny` foi verificada e PRESERVADA; fluxo create→revisar→install com manifesto visível→start). Topologia de FUNIL nativa: `tools:` por persona (só o decisor executa), room como DADO, teto no script do dono, `autonomy: ask`. 5 fases, +254 testes (676 arquivos / 8470 passing), cada fase fumada no binário real. ⚠ Gate `seguranca` (AG-0008) do ADR segue ABERTO — recomendado antes de uso com dinheiro real.
+
+### Corrigido
+
+- 🩹 **runner não loopa mais com `schedule` distante:** `setTimeout` de um tiro clampava >2^31-1ms (~24,8 dias) para ~1ms — agora dorme em fatias de 1 dia.
+
 ## [1.0.0-rc.112] — 2026-07-31
 
 ### Alterado
