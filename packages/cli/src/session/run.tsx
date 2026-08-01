@@ -1680,6 +1680,19 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         const detachHeadlessToolHooks = toolHooksObserver
           ? built.controller.addToolObserver(toolHooksObserver)
           : () => {};
+        // ADR-0158 §11 (FASE 4 — attach) — autosave INCREMENTAL também no headless
+        // `-p`: antes desta linha, o one-shot só gravava a sessão UMA vez, no fim
+        // (`saveNow()` logo abaixo do `finally`) — um `attach` externo lendo
+        // `<serviceDir>/.state/sessions/<id>.json` durante o turno via
+        // `service/attach-blocks.ts` só veria o arquivo do turno ANTERIOR (ou nada),
+        // nunca os blocos do turno em andamento. Mesmo padrão de `unsubSave` já usado
+        // no `runLinear` (linha ~1965) e na TUI interativa (linha ~3640) — aqui
+        // estendido ao ramo `-p`/`--print` (que é exatamente o que o runner de
+        // serviço spawna por atividade, `service/runner.ts`). Sem isto, o `attach`
+        // teria que degradar para "só log+estado" (a v1 explicitamente permite esse
+        // degrade — ver a nota em `attach-blocks.ts` — mas esta é a via barata que a
+        // FASE 4 pediu para tentar primeiro).
+        const unsubHeadlessSave = built.controller.subscribe(() => saveNow());
         let res;
         try {
           if (format === 'stream-json') {
@@ -1777,8 +1790,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         } finally {
           detachHeadlessHooks();
           detachHeadlessToolHooks(); // EST-1018 — solta o observador de pre/post-tool.
+          unsubHeadlessSave(); // ADR-0158 §11 — solta o autosave incremental do attach.
         }
-        saveNow(); // grava a transcrição do one-shot (auto-save best-effort).
+        saveNow(); // grava a transcrição do one-shot (auto-save best-effort, final).
         // Diagnóstico (anexos recusados, falha) → STDERR; nunca polui o stdout scriptável.
         if (res.diagnostic !== undefined) process.stderr.write(`aluy: ${res.diagnostic}\n`);
         if (format === 'json') {
@@ -2863,6 +2877,65 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         return;
       }
 
+      // ADR-0158 §11 (FASE 4) — "/service attach <nome>" IN-SESSION. DECISÃO (além
+      // do ADR — a missão listava a opção de delegar OU um modo de visualização
+      // simples, "decisão sua"): a v1 aqui é um SNAPSHOT — estado real + últimas
+      // linhas do log, na MESMA nota estática que `/service logs`/`status` já usam
+      // — e orienta pro `aluy service attach <nome>` do shell p/ a sessão VIVA e
+      // INTERATIVA (ver ao vivo + `say`). Racional: um attach de verdade dentro da
+      // TUI (stream contínuo + digitação roteada pro socket) exigiria um tipo de
+      // bloco NOVO com atualização assíncrona própria — peça de UI que não cabe
+      // barato nesta fase (o snapshot cobre "ver o que está acontecendo" sem essa
+      // peça nova; "interagir" continua disponível via `aluy service attach`, que
+      // JÁ tem a mesma autoridade de instrução, §11).
+      const attachMatch = /^\s*attach\s+(\S+)/.exec(args);
+      if (attachMatch) {
+        const name = attachMatch[1]!;
+        const entry = store.get(name);
+        if (entry === undefined) {
+          built.controller.pushNote('service', [`serviço "${name}" não encontrado.`]);
+          return;
+        }
+        if (isServiceEntryError(entry)) {
+          built.controller.pushNote(`service — ${name} (inválido)`, [`⚠ ${entry.reason}`]);
+          return;
+        }
+        const rt = readServiceRuntimeStatus(entry.dir);
+        if (!rt.running) {
+          built.controller.pushNote('service', [
+            `serviço "${name}" está PARADO — rode \`aluy service start ${name}\` (ou "/service start ${name}") primeiro.`,
+          ]);
+          return;
+        }
+        const pendingSince =
+          rt.snapshot?.turnState === 'awaiting-owner' && rt.snapshot.updatedAtIso !== undefined
+            ? ` (pergunta enviada há ${formatElapsedSince(Date.now() - Date.parse(rt.snapshot.updatedAtIso))})`
+            : '';
+        const stateLine =
+          rt.snapshot?.turnState === 'running-turn'
+            ? 'turno em andamento'
+            : rt.snapshot?.turnState === 'awaiting-owner'
+              ? `⚠ aguardando dono${pendingSince}`
+              : rt.snapshot?.turnState === 'sleeping' && rt.snapshot.nextFireIso !== undefined
+                ? `dormindo até ${rt.snapshot.nextFireIso}`
+                : 'rodando';
+        const logLines = tailServiceLog(runnerLogPath(entry.dir), 15);
+        built.controller.pushNote(`service — ${name} — attach (snapshot)`, [
+          `RODANDO · ${stateLine}${rt.pid !== undefined ? ` · pid ${rt.pid}` : ''}`,
+          ...(rt.snapshot?.pendingQuestion !== undefined
+            ? [`⚠ pergunta pendente: ${rt.snapshot.pendingQuestion}`]
+            : []),
+          '',
+          ...(logLines.length > 0 ? logLines : ['(sem log ainda.)']),
+          '',
+          `— isto é um retrato ESTÁTICO, não ao vivo. Para acompanhar em tempo real e`,
+          `poder DIGITAR (a fala vira instrução do serviço, §11), abra um terminal e rode:`,
+          `  aluy service attach ${name}`,
+          `Esc/Ctrl-C lá faz DETACH — o serviço segue rodando.`,
+        ]);
+        return;
+      }
+
       const subMatch = /^\s*(install|uninstall)\b/.exec(args);
       if (subMatch) {
         built.controller.pushNote('service', [
@@ -2872,7 +2945,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         ]);
         return;
       }
-      const notYetMatch = /^\s*(create|attach)\b/.exec(args);
+      const notYetMatch = /^\s*(create)\b/.exec(args);
       if (notYetMatch) {
         built.controller.pushNote('service', [
           `"/service ${notYetMatch[1]}" ainda não existe — chega numa fase seguinte do ADR-0158.`,

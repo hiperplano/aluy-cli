@@ -117,6 +117,30 @@ export function hasAskTimedOut(
 }
 
 /**
+ * ADR-0158 §11 (FASE 4 — attach) — o CONTEXTO injetado na PRÓXIMA atividade do
+ * workflow quando o dono digitou algo em `aluy service attach` (evento `say`,
+ * `attach-protocol.ts`) enquanto o serviço estava DORMINDO ou com um TURNO EM
+ * ANDAMENTO (não em ask-espera — essa tem seu próprio caminho, a resposta LOCAL via
+ * `waitForOwnerReply`, `channel.ts`).
+ *
+ * DEGRADE DOCUMENTADO (missão da FASE 4, item 3): injeção mid-turno DE VERDADE
+ * exigiria o processo-filho (`aluy -p` de uma atividade já em voo) consultar uma
+ * fila externa entre chamadas de modelo — plumbing que não existe hoje no loop
+ * headless. A via barata e honesta: a fala do dono é entregue à PRÓXIMA atividade
+ * que abrir (a primeira do próximo turno, se o serviço estava dormindo; a atividade
+ * seguinte do workflow, se um turno já estava em andamento) — nunca silenciosamente
+ * descartada, nunca fingida como "já entregue" no meio da atividade corrente. PURO.
+ */
+export function formatOwnerSayInjection(sayings: readonly string[]): string {
+  const body = sayings.map((s) => `- ${s}`).join('\n');
+  return (
+    `[Fala do dono recebida via "aluy service attach" (ADR-0158 §11) — pode ter ` +
+    `chegado enquanto outra atividade rodava; é entregue nesta, a PRÓXIMA a abrir:]\n` +
+    `${body}`
+  );
+}
+
+/**
  * §4 do item de missão "status/list mostram aguardando dono (pergunta enviada há
  * X)" — formata um `waitedMs` num rótulo humano curto (min/h/dia). PURO.
  */

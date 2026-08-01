@@ -461,11 +461,29 @@ export {
   formatServiceAskMessage,
   formatServiceResumeInstruction,
   formatServiceAskTimeoutAlert,
+  formatOwnerSayInjection,
   formatElapsedSince,
   hasAskTimedOut,
   DEFAULT_ASK_TIMEOUT_MS,
   type ServiceTurnClosure,
 } from './service/service-messages.js';
+// ADR-0158 §11 (FASE 4 — attach) — o PROTOCOLO NDJSON puro do socket local de
+// attach (eventos de saída log/state/block; o único evento de entrada, `say`). O
+// socket/fs em si (`attach-server.ts`, `attach-blocks.ts`) mora no `cli` — ver §8.
+export {
+  encodeServiceAttachServerEvent,
+  encodeServiceAttachClientEvent,
+  parseServiceAttachServerLine,
+  parseServiceAttachClientLine,
+  formatServiceAttachEventForTerminal,
+  type ServiceAttachTurnState,
+  type ServiceAttachLogEvent,
+  type ServiceAttachStateEvent,
+  type ServiceAttachBlockEvent,
+  type ServiceAttachServerEvent,
+  type ServiceAttachSayEvent,
+  type ServiceAttachClientEvent,
+} from './service/attach-protocol.js';
 
 // EST-0958 · CLI-SEC-3/4/9 — `!comando` (atalho de shell do composer): executor
 // que reusa a MESMA catraca (`decide`) + shell confinado (ToolPorts) do agente.

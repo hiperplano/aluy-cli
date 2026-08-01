@@ -14,7 +14,7 @@
 //   uninstall  — remove o diretório do serviço (pede confirmação). Recusa se RODANDO
 //                (peça `stop` antes — nunca apaga o diretório debaixo de um processo vivo).
 //
-// Fase 2 (esta fatia):
+// Fase 2:
 //   start      — spawn DESTACADO de `aluy service run <nome> --runner` (§5): o
 //                processo QUE É o serviço, do `start` ao `stop`. Recusa se já
 //                rodando ou se o manifesto é inválido (o registry já valida).
@@ -23,11 +23,18 @@
 //   run --runner (uso INTERNO — não documentado no --help; é o entrypoint que o
 //                `start` spawna, roda em FOREGROUND no processo destacado).
 //
-// `create`/`update`/`attach` seguem "disponível numa fase seguinte" (create é
-// conversacional — fase 5; update é git pull — fase depois; attach é fase 4).
+// FASE 4 (esta fatia): attach — "entrar num serviço rodando" (§11). Conecta ao
+// socket local que o PRÓPRIO runner serve (`attach-server.ts`), mostra log+estado
+// (+blocos, melhor esforço) AO VIVO, aceita digitação (linha ⇒ `say`), Ctrl-C
+// (e ESC quando o terminal permite raw-mode — ver o cliente interativo abaixo)
+// faz DETACH sem parar o serviço.
+//
+// `create`/`update` seguem "disponível numa fase seguinte" (create é
+// conversacional — fase 5; update é git pull — fase depois).
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, cpSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -45,12 +52,13 @@ import {
   type ServiceEntry,
 } from '../io/services-store.js';
 import { validateCronExpr } from './cron.js';
-import { runnerLogPath, runnerPidPath } from '../service/paths.js';
+import { runnerLogPath, runnerPidPath, attachSocketPath } from '../service/paths.js';
 import { readServiceRuntimeStatus } from '../service/status.js';
 import { isRunnerAlive, readPidFile, removePidFile } from '../service/pid.js';
 import { appendLog, tailLog } from '../service/log.js';
 import { runServiceRunner } from '../service/runner.js';
 import { stopDaemons } from '../service/daemons.js';
+import { connectAttachSocket } from '../service/attach-client.js';
 
 export type ServiceCommand =
   | { kind: 'help' }
@@ -62,14 +70,16 @@ export type ServiceCommand =
   | { kind: 'start'; name: string; yes: boolean }
   | { kind: 'stop'; name: string }
   | { kind: 'logs'; name: string; follow: boolean; lines: number }
+  // ADR-0158 §11 (FASE 4) — entrar/observar/interagir com um serviço rodando.
+  | { kind: 'attach'; name: string }
   // Uso INTERNO — o entrypoint que `start` spawna destacado (ADR-0158 §5).
   | { kind: 'run-runner'; name: string }
-  // ADR-0158 §5/§10 — `create`/`update`/`attach` chegam em fases seguintes.
+  // ADR-0158 §5/§10 — `create`/`update` chegam em fases seguintes.
   | { kind: 'not-yet'; sub: string };
 
-const PHASE_LATER_SUBCOMMANDS = new Set(['create', 'update', 'attach']);
+const PHASE_LATER_SUBCOMMANDS = new Set(['create', 'update']);
 
-const SERVICE_HELP = `aluy service — SERVIÇOS plugáveis (ADR-0158) · o RUNNER (fase 2)
+const SERVICE_HELP = `aluy service — SERVIÇOS plugáveis (ADR-0158) · attach (fase 4)
 
 Uso:
   aluy service [list]
@@ -79,6 +89,7 @@ Uso:
   aluy service start <nome> [--yes]
   aluy service stop <nome>
   aluy service logs <nome> [-f] [-n <N>]
+  aluy service attach <nome>
 
 Subcomandos:
   list                 Lista os serviços instalados — nome, estado REAL (rodando/
@@ -100,9 +111,13 @@ Subcomandos:
                         daemons próprios e limpa o pidfile.
   logs <nome>           Últimas linhas do runner.log. -n <N> muda a contagem (padrão
                         50); -f acompanha ao vivo (Ctrl-C sai).
+  attach <nome>          ENTRA no serviço rodando (ADR-0158 §11): mostra log+estado
+                        (+blocos da conversa, melhor esforço) ao vivo; qualquer linha
+                        digitada vira instrução (Enter envia); Ctrl-C faz DETACH — o
+                        serviço SEGUE rodando (nunca para por causa do attach).
 
 Notas:
-  - create (conversacional) e update/attach chegam em fases seguintes.
+  - create (conversacional) e update chegam em fases seguintes.
   - O canal PRINCIPAL de gestão é "/service" DENTRO da sessão (ADR-0158 §10, emenda
     de aprovação); este shell é o espelho, útil p/ script/automação.
 `;
@@ -161,6 +176,12 @@ export function parseServiceCommand(argv: readonly string[]): ServiceCommand {
     return { kind: 'logs', name, follow, lines };
   }
 
+  if (sub === 'attach') {
+    const name = argv[1];
+    if (!name) return { kind: 'error', message: 'service attach: falta o <nome> do serviço.' };
+    return { kind: 'attach', name };
+  }
+
   // Uso INTERNO — o `start` spawna `aluy service run <nome> --runner` destacado.
   if (sub === 'run') {
     const rest = argv.slice(1);
@@ -181,16 +202,19 @@ export interface ServiceDeps {
   readonly store?: UserServicesStore;
   /** Clonador de git injetável p/ teste (default: `git clone --depth 1`). */
   readonly gitClone?: (url: string, dest: string) => void;
+  /** ADR-0158 §11 (FASE 4) — conector do socket de attach injetável p/ teste
+   * (default: `connectAttachSocket` real, net.createConnection). */
+  readonly attachConnect?: typeof connectAttachSocket;
+  /** ADR-0158 §11 (FASE 4) — stdin injetável p/ teste do `attach` (default:
+   * `process.stdin`) — um `Readable` (não precisa ser TTY: `readline` funciona
+   * sobre qualquer stream; um teste alimenta linhas via um stream fake). */
+  readonly attachStdin?: NodeJS.ReadableStream;
 }
 
 /** Resposta honesta p/ subcomandos de fases seguintes — nunca finge que já existem. */
 function notYetLines(sub: string): readonly string[] {
   const when =
-    sub === 'create'
-      ? 'fase 5 (criação conversacional, ADR-0158 §10)'
-      : sub === 'attach'
-        ? 'fase 4 (entrar/observar um serviço rodando, ADR-0158 §11)'
-        : 'uma fase seguinte (git pull, ADR-0158 §9)';
+    sub === 'create' ? 'fase 5 (criação conversacional, ADR-0158 §10)' : 'uma fase seguinte (git pull, ADR-0158 §9)';
   return [`"aluy service ${sub}" ainda não existe — chega em ${when}.`];
 }
 
@@ -302,6 +326,9 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
 
     case 'logs':
       return runLogs(cmd.name, cmd.follow, cmd.lines, io, store);
+
+    case 'attach':
+      return runAttach(cmd.name, io, store, deps.attachConnect ?? connectAttachSocket, deps.attachStdin ?? process.stdin);
 
     case 'run-runner':
       // Uso INTERNO — o processo QUE É o serviço (spawnado destacado por `start`).
@@ -636,5 +663,102 @@ async function runLogs(
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
+  });
+}
+
+/**
+ * ADR-0158 §11 (FASE 4) — `attach`: ENTRA num serviço rodando. Conecta ao socket
+ * local que o PRÓPRIO runner serve (`attach-server.ts`), imprime log+estado(+blocos,
+ * melhor esforço) ao vivo, e lê linhas do stdin — cada Enter manda `say` (a fala do
+ * dono, tratada pelo runner como INSTRUÇÃO — §11: "a mesma autoridade que teria pelo
+ * canal remoto"). Ctrl-C (SIGINT) faz DETACH — fecha só a conexão do LADO DO
+ * CLIENTE; o serviço SEGUE rodando (nunca é este comando que o para — "stop" é
+ * sempre um ato explícito à parte).
+ *
+ * DECISÃO (além do ADR — a missão listava "Esc/Ctrl-C"): Ctrl-C (SIGINT) é o
+ * detach PRIMÁRIO e único testado automaticamente (funciona em qualquer stdin —
+ * TTY ou não). ESC como tecla crua exigiria colocar o stdin em raw-mode, o que
+ * quebraria a edição de linha do `readline` usada p/ digitar o `say` — as duas
+ * coisas competem pelo MESMO stdin. Combiná-las direito (raw-mode com um editor de
+ * linha próprio) é viável mas não cabe na v1 sem um teste automatizado de TTY real
+ * (fora do alcance da suíte headless) — DEGRADE DOCUMENTADO: só Ctrl-C na v1; ESC
+ * fica para quando houver um terminal de verdade pra testar contra.
+ */
+async function runAttach(
+  name: string,
+  io: TerminalIO,
+  store: UserServicesStore,
+  connect: typeof connectAttachSocket,
+  stdin: NodeJS.ReadableStream,
+): Promise<number> {
+  const dir = store.resolveDir(name);
+  if (dir === undefined || !existsSync(dir)) {
+    io.err(`aluy: serviço "${name}" não encontrado em ${store.servicesDir}.`);
+    return 1;
+  }
+  if (!readServiceRuntimeStatus(dir).running) {
+    io.err(`aluy: serviço "${name}" está PARADO — rode \`aluy service start ${name}\` primeiro.`);
+    return 1;
+  }
+
+  const sockPath = attachSocketPath(dir);
+  // ADR-0158 §11 (FASE 4) — corrida honesta: "rodando" (pidfile+kill-0, checado
+  // acima) fica `true` assim que o runner ESCREVE O PIDFILE — um instante ANTES de
+  // ele terminar de subir o socket de attach (`startAttachServer` roda depois, no
+  // corpo de `runServiceRunner`). `aluy service start && aluy service attach` em
+  // sequência rápida bateria nessa janela. Espera até ~3s pelo ARQUIVO do socket
+  // aparecer antes de tentar conectar — best-effort, nunca trava p/ sempre.
+  const socketDeadline = Date.now() + 3000;
+  while (!existsSync(sockPath) && Date.now() < socketDeadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  io.out(`conectando ao serviço "${name}"… (Ctrl-C p/ detach — o serviço segue rodando)`);
+
+  return await new Promise<number>((resolve) => {
+    let finished = false;
+    let cleanupInput: () => void = () => {};
+
+    const finish = (code: number): void => {
+      if (finished) return;
+      finished = true;
+      cleanupInput();
+      resolve(code);
+    };
+
+    const conn = connect(sockPath, {
+      onLine: (line) => io.out(line),
+      onClose: (reason) => {
+        io.out(`— ${reason} —`);
+        finish(0);
+      },
+    });
+
+    const detach = (): void => {
+      if (finished) return;
+      io.out('— detach — o serviço segue rodando —');
+      conn.close();
+      finish(0);
+    };
+
+    // `terminal:false` — o attach não precisa de edição de linha rica (histórico/
+    // setas); só linha ⇒ Enter ⇒ `say`. Funciona sobre QUALQUER `Readable` (TTY ou
+    // não), o que torna o caminho testável sem TTY real (ver o comentário acima).
+    const rl = createInterface({ input: stdin, terminal: false });
+    rl.on('line', (text) => {
+      const trimmed = text.trim();
+      if (trimmed === '') return;
+      conn.send(trimmed);
+    });
+    // EOF do stdin (pipe fechado, Ctrl-D) É um detach — mesma disciplina de
+    // qualquer client interativo (docker attach/ssh): sem mais entrada, sai.
+    rl.on('close', detach);
+
+    const onSigint = (): void => detach();
+    process.once('SIGINT', onSigint);
+
+    cleanupInput = (): void => {
+      rl.close();
+      process.off('SIGINT', onSigint);
+    };
   });
 }

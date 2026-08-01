@@ -1021,22 +1021,24 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // ADR-0158 (aceito, APR-0148) — `/service`: SERVIÇOS plugáveis. Emenda de
     // aprovação §10: `/service` DENTRO da sessão é o canal PRINCIPAL de gestão (o
     // shell `aluy service` é o espelho, não o contrário — hierarquia invertida em
-    // relação aos outros subsistemas). Fase 1 = fundação SEM runner: `list`/`status`
-    // já funcionam de verdade; `create`/`start`/`stop`/`attach` (§10/§11) respondem
-    // honesto "fase seguinte" — nada finge ligar um processo que ainda não existe.
+    // relação aos outros subsistemas). `list`/`status`/`start`/`stop`/`logs`
+    // (fase 2) e `attach` (fase 4, §11 — snapshot in-session; sessão viva é o
+    // shell) já funcionam de verdade; só `create` (conversacional) segue honesto
+    // "fase seguinte" — nada finge ligar um processo/escrever um diretório que
+    // ainda não existe.
     name: 'service',
-    summary: 'serviços plugáveis (ADR-0158) · lista/status · fase 1, sem runner ainda',
+    summary: 'serviços plugáveis (ADR-0158) · list/status/start/stop/logs/attach',
     summaryKey: 'cmd.service',
     source: 'native',
     id: 'service',
     section: 'workspace',
-    // Sem argumento ⇒ LISTA (read-only); `status` também é read-only. Fase 1 in-session
-    // só entrega list/status DE VERDADE (§ mapeamento no mission); install/uninstall
-    // JÁ funcionam no shell (`aluy service install|uninstall`) mas AQUI (dentro da
-    // sessão) ainda só respondem com a orientação — por isso `read-only` também: não
-    // tocam disco nesta camada. create/start/stop/attach são fase 2 (nem no shell).
+    // Sem argumento ⇒ LISTA (read-only); `status`/`attach` também são read-only
+    // (attach in-session é um SNAPSHOT — nunca escreve; a sessão VIVA/interativa é
+    // o shell, `aluy service attach`). `start`/`stop` MUTAM (spawn/SIGTERM) — de
+    // propósito FORA do `read-only` geral (o `agentEffect` de baixo cobre o efeito
+    // AGREGADO do comando p/ o agente invocar sozinho; `subcommandEffects` afina).
     agentEffect: 'read-only',
-    subcommandEffects: { status: 'read-only' },
+    subcommandEffects: { status: 'read-only', attach: 'read-only' },
     subcommands: [
       {
         name: 'list',
@@ -1062,17 +1064,18 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
       },
       {
         name: 'start',
-        summary: 'liga o serviço (disponível na próxima fase)',
+        summary: 'liga o serviço (spawn destacado, mostra manifesto visível + confirma)',
         usage: 'start <nome>',
       },
       {
         name: 'stop',
-        summary: 'para o serviço (disponível na próxima fase)',
+        summary: 'para o serviço (SIGTERM/SIGKILL, derruba daemons próprios)',
         usage: 'stop <nome>',
       },
       {
         name: 'attach',
-        summary: 'observa/interage com um serviço rodando (disponível na próxima fase)',
+        summary:
+          'snapshot do estado+log de um serviço rodando (ADR-0158 §11) — p/ sessão AO VIVO e interativa use `aluy service attach <nome>` no shell',
         usage: 'attach <nome>',
       },
     ],

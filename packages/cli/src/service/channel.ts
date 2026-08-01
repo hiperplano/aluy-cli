@@ -174,6 +174,20 @@ export type AskWaitResult =
   | { readonly kind: 'stopped' };
 
 /**
+ * ADR-0158 §11 (FASE 4 — attach) — contrato que `waitForOwnerReply` consome p/
+ * correr a resposta LOCAL (via `aluy service attach`, evento `say`) contra o
+ * long-poll do canal remoto (Telegram). Implementado por `LocalAnswerChannel`
+ * (`attach-say.ts`) — aqui é só o CONTRATO (a interface que este módulo precisa,
+ * sem depender do socket/attach concreto — `channel.ts` não sabe o que é um
+ * "attach", só sabe que ALGUÉM pode entregar uma resposta local).
+ */
+export interface LocalAnswerSource {
+  /** Resolve com a PRÓXIMA resposta local que chegar; nunca resolve se `stop`
+   * abortar antes (o caller descarta a promise perdedora da corrida). */
+  waitForAnswer(stop: AbortSignal): Promise<string>;
+}
+
+/**
  * §5 pt.4 (O CORAÇÃO DA FASE 3) — envia a PERGUNTA pendente ao canal do manifesto e
  * ENTRA EM MODO ESPERA: long-poll `getUpdates` (via `TelegramClient.poll`, cancelável
  * por `stop`), classificando CADA update pela MESMA malha da sessão interativa
@@ -189,6 +203,10 @@ export async function waitForOwnerReply(args: {
   readonly question: string;
   readonly stop: AbortSignal;
   readonly deps: ServiceChannelDeps;
+  /** ADR-0158 §11 (FASE 4) — quando presente, cada rodada do loop CORRE o long-poll
+   * do canal remoto contra esta fonte local; quem responder primeiro decide.
+   * `undefined` = comportamento da FASE 3, sem alteração (só o canal remoto). */
+  readonly localAnswer?: LocalAnswerSource;
 }): Promise<AskWaitResult> {
   const { manifest, question, stop, deps } = args;
   const log = deps.log;
@@ -246,15 +264,35 @@ export async function waitForOwnerReply(args: {
       return { kind: 'timeout' };
     }
 
-    let updates: readonly TelegramUpdate[];
-    try {
-      updates = await client.poll(stop);
-    } catch {
-      updates = []; // fail-safe — uma rodada ruim não derruba a espera.
-    }
+    // ADR-0158 §11 (FASE 4) — corrida entre o poll do canal REMOTO (Telegram) e uma
+    // resposta LOCAL (attach). `pollController` deriva de `stop` (aborta junto) e é
+    // abortado de novo ao fim de CADA rodada — cancela o lado que NÃO venceu (o poll
+    // pendente se ganhou o local; a espera local pendente se ganhou o poll), sem
+    // deixar nada pendurado entre rodadas.
+    const pollController = new AbortController();
+    const onStopAbort = (): void => pollController.abort();
+    stop.addEventListener('abort', onStopAbort, { once: true });
+
+    const pollPromise: Promise<{ readonly kind: 'poll'; readonly updates: readonly TelegramUpdate[] }> =
+      client
+        .poll(pollController.signal)
+        .then((updates) => ({ kind: 'poll' as const, updates }))
+        .catch(() => ({ kind: 'poll' as const, updates: [] })); // fail-safe — uma rodada ruim não derruba a espera.
+    const localPromise = args.localAnswer
+      ?.waitForAnswer(pollController.signal)
+      .then((text) => ({ kind: 'local' as const, text }));
+
+    const winner = localPromise ? await Promise.race([pollPromise, localPromise]) : await pollPromise;
+    pollController.abort(); // cancela o perdedor da corrida (poll OU espera local).
+    stop.removeEventListener('abort', onStopAbort);
     if (stop.aborted) break;
 
-    for (const u of updates) {
+    if (winner.kind === 'local') {
+      log('[service/channel] resposta LOCAL recebida via "aluy service attach" — retomando o turno de onde parou.');
+      return { kind: 'answered', text: winner.text };
+    }
+
+    for (const u of winner.updates) {
       const decision = classifyTelegramIngress(u, allowlist);
       if (decision.kind === 'instruction') {
         log('[service/channel] dono respondeu no canal — retomando o turno de onde parou.');

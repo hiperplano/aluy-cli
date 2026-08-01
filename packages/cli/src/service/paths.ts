@@ -9,6 +9,13 @@
 //   status.json   — retrato do estado VIVO (dormindo até X / turno em andamento /
 //                   aguardando dono) — best-effort, cruzado com o pidfile em
 //                   `status.ts` (pidfile+kill-0 é a fonte de verdade de "rodando").
+//   attach.sock   — ADR-0158 §11 (FASE 4) — o socket UNIX local do `attach`, servido
+//                   pelo PROCESSO DO RUNNER (`attach-server.ts`). Permissão 0600,
+//                   removido no teardown — NUNCA TCP (a autenticação é a posse da
+//                   máquina/arquivo, não credencial de rede).
+//   sessions/     — SessionStore ESCOPADO ao serviço (`ALUY_SERVICE_HOME`, `run.tsx`)
+//                   — a transcrição de cada turno headless; é o que `attach-blocks.ts`
+//                   faz tail p/ publicar blocos no attach.
 //   <daemon>.pid / <daemon>.log — por daemon PRÓPRIO declarado (§6).
 //
 // I/O concreto (fs) — não é puro; mora no `cli` (ADR-0053 §8).
@@ -31,6 +38,13 @@ export function runnerLogPath(serviceDir: string): string {
 
 export function runnerStatusPath(serviceDir: string): string {
   return join(serviceStateDir(serviceDir), 'status.json');
+}
+
+/** ADR-0158 §11 (FASE 4) — o socket UNIX local do `attach`, dentro do `.state/` do
+ * PRÓPRIO serviço (mesma disciplina de `runnerPidPath`/`runnerStatusPath` — nunca
+ * `/tmp`, nunca espalhado). */
+export function attachSocketPath(serviceDir: string): string {
+  return join(serviceStateDir(serviceDir), 'attach.sock');
 }
 
 /** Nome do daemon já vem SANEADO (dirname sob `daemons/`, sem path traversal). */

@@ -11,11 +11,15 @@
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { PassThrough } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TerminalIO } from '../../src/auth/io.js';
 import { UserServicesStore, SERVICES_DIRNAME } from '../../src/io/services-store.js';
 import { parseServiceCommand, runService } from '../../src/commands/service.js';
+import { writePidFile } from '../../src/service/pid.js';
+import { runnerPidPath } from '../../src/service/paths.js';
+import { startAttachServer, type AttachServer } from '../../src/service/attach-server.js';
 
 /** IO fake: coleta out/err e devolve respostas de prompt PRÉ-programadas (fila). */
 function fakeIO(promptAnswers: readonly string[] = []): TerminalIO & {
@@ -80,10 +84,17 @@ describe('parseServiceCommand', () => {
       yes: true,
     });
   });
-  it('create/update/attach ⇒ not-yet (fases seguintes)', () => {
-    for (const sub of ['create', 'update', 'attach']) {
+  it('create/update ⇒ not-yet (fases seguintes)', () => {
+    for (const sub of ['create', 'update']) {
       expect(parseServiceCommand([sub])).toEqual({ kind: 'not-yet', sub });
     }
+  });
+  // ADR-0158 §11 (FASE 4) — attach vira subcomando REAL (deixa de ser "not-yet").
+  it('attach <nome>', () => {
+    expect(parseServiceCommand(['attach', 'trader'])).toEqual({ kind: 'attach', name: 'trader' });
+  });
+  it('attach sem nome ⇒ erro de uso', () => {
+    expect(parseServiceCommand(['attach']).kind).toBe('error');
   });
   // ADR-0158 §5 (fase 2) — start/stop/logs viram subcomandos REAIS (o runner).
   it('start <nome> [--yes]', () => {
@@ -392,8 +403,8 @@ describe('runService — uninstall', () => {
 });
 
 describe('runService — not-yet (fases seguintes)', () => {
-  it('create/update/attach respondem honesto (exit 1)', async () => {
-    for (const sub of ['create', 'update', 'attach']) {
+  it('create/update respondem honesto (exit 1)', async () => {
+    for (const sub of ['create', 'update']) {
       const io = fakeIO();
       const exit = await runService([sub, 'trader'], { io });
       expect(exit).toBe(1);
@@ -481,5 +492,133 @@ describe('runService — start/stop/logs (fase 2, sem tocar processo real)', () 
     const exit = await runService(['status', 'trader'], { io, store });
     expect(exit).toBe(0);
     expect(io.outLines.join('\n')).toContain('PARADO');
+  });
+});
+
+/** Espera até `cond()` virar `true` ou o timeout estourar (poll de 10ms) — usado p/
+ * esperar o cliente do attach terminar de conectar ao socket real ANTES de mandar
+ * eventos (a conexão é assíncrona; sem isto o teste seria dependente de sorte). */
+async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error('waitFor: timeout');
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+// ADR-0158 §11 (FASE 4) — `attach`: contra um socket REAL (`startAttachServer`, o
+// MESMO módulo que o runner usa) num serviço "RODANDO" fabricado (pidfile apontando
+// pro PRÓPRIO processo de teste — sempre vivo). `attachStdin` é um `PassThrough`
+// controlado pelo teste (linha ⇒ `say`; `.end()` ⇒ EOF ⇒ detach, mesma disciplina
+// de qualquer client interativo). Sem TTY real — exatamente o caminho testável
+// documentado em `runAttach` (ver o comentário no `commands/service.ts`).
+describe('runService — attach (fase 4, ADR-0158 §11)', () => {
+  let base: string;
+  let dir: string;
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'aluy-svc-attach-'));
+    dir = join(base, SERVICES_DIRNAME, 'trader');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'service.md'), MINIMAL_SERVICE_MD);
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('serviço inexistente ⇒ erro (exit 1)', async () => {
+    const io = fakeIO();
+    const exit = await runService(['attach', 'fantasma'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+      attachStdin: new PassThrough(),
+    });
+    expect(exit).toBe(1);
+    expect(io.errLines.join('\n')).toContain('não encontrado');
+  });
+
+  it('serviço PARADO ⇒ recusa com mensagem clara (não tenta conectar)', async () => {
+    const io = fakeIO();
+    const exit = await runService(['attach', 'trader'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+      attachStdin: new PassThrough(),
+    });
+    expect(exit).toBe(1);
+    expect(io.errLines.join('\n')).toContain('PARADO');
+    expect(io.errLines.join('\n')).toContain('service start');
+  });
+
+  it('serviço RODANDO ⇒ vê log/estado ao vivo, "say" chega ao runner, EOF do stdin faz DETACH', async () => {
+    // Fabrica "rodando": pidfile apontando pro PRÓPRIO processo de teste (sempre vivo).
+    writePidFile(runnerPidPath(dir), process.pid);
+
+    const sayReceived: string[] = [];
+    const server: AttachServer = startAttachServer(
+      dir,
+      { onSay: (text) => sayReceived.push(text) },
+      () => {}, // log do SERVIDOR (não é o `io` do teste — silencioso aqui).
+    );
+
+    const stdin = new PassThrough();
+    const io = fakeIO();
+    const donePromise = runService(['attach', 'trader'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+      attachStdin: stdin,
+    });
+
+    try {
+      // Espera o cliente conectar ANTES de publicar — senão o evento se perde (o
+      // servidor não bufferiza p/ quem ainda não chegou, exceto o ÚLTIMO `state`).
+      await waitFor(() => server.clientCount() > 0);
+
+      server.broadcastLog('runner iniciado (pid 123).');
+      server.broadcastState('running-turn');
+      server.broadcastBlock('aluy', 'fechamento do turno ok.');
+
+      await waitFor(() => io.outLines.some((l) => l.includes('runner iniciado')));
+      await waitFor(() => io.outLines.some((l) => l.includes('turno em andamento')));
+      await waitFor(() => io.outLines.some((l) => l.includes('fechamento do turno ok.')));
+
+      // Digita uma fala — Enter ⇒ vira `say` no socket, entregue ao `onSay` do runner.
+      stdin.write('aumenta pra 3 lotes\n');
+      await waitFor(() => sayReceived.includes('aumenta pra 3 lotes'));
+
+      // EOF do stdin ⇒ DETACH — NUNCA para o serviço (só fecha o lado do cliente).
+      stdin.end();
+      const exit = await donePromise;
+      expect(exit).toBe(0);
+      expect(io.outLines.some((l) => l.includes('— detach — o serviço segue rodando —'))).toBe(true);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('servidor fecha a conexão (serviço parou) ⇒ o attach relata e sai (exit 0), sem "detach"', async () => {
+    writePidFile(runnerPidPath(dir), process.pid);
+    const server: AttachServer = startAttachServer(dir, { onSay: () => {} }, () => {});
+
+    const stdin = new PassThrough();
+    const io = fakeIO();
+    const donePromise = runService(['attach', 'trader'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+      attachStdin: stdin,
+    });
+
+    await waitFor(() => server.clientCount() > 0);
+    server.close(); // simula o runner encerrando (shutdown) — derruba a conexão.
+
+    const exit = await donePromise;
+    expect(exit).toBe(0);
+    // O attach relatou a queda — mas NÃO imprimiu a mensagem de DETACH (quem fechou
+    // foi o SERVIDOR, não o dono largando o terminal — mensagens distintas de
+    // propósito). A linha inicial de instrução ("Ctrl-C p/ detach") MENCIONA a
+    // palavra "detach" de passagem — por isso o teste checa a frase de despedida
+    // exata (`— detach — o serviço segue rodando —`), não a substring solta.
+    expect(io.outLines.some((l) => l.includes('encerrada'))).toBe(true);
+    expect(io.outLines.some((l) => l.includes('— detach — o serviço segue rodando —'))).toBe(false);
+    stdin.end();
   });
 });

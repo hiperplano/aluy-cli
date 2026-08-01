@@ -30,6 +30,20 @@
 //
 // SIGTERM (`aluy service stop`) ⇒ derruba os daemons, mata o turno em andamento
 // (gracioso: SIGTERM no filho, SIGKILL de timeout), remove o pidfile, sai.
+//
+// ADR-0158 §11 (FASE 4) — o ATTACH: o socket local (`attach-server.ts`) sobe JUNTO
+// com o runner (o próprio processo do serviço o serve, §11 — "conecta ao processo do
+// serviço") e publica TRÊS coisas: (a) toda linha de log ao vivo (o `log()` local
+// abaixo é ENVOLVIDO p/ também `broadcastLog`); (b) toda transição de estado (o
+// helper `setStatus` abaixo ENVOLVE `writeServiceStatus` do jeito que `log` envolve
+// `appendLog`); (c) melhor esforço, os blocos NOVOS da sessão ativa do turno em
+// andamento (`attach-blocks.ts`, tail periódico). Em troca, o socket aceita UM
+// evento de entrada — `say` (a fala do dono digitado no `attach`) — tratado conforme
+// a FASE corrente (`currentPhase`, abaixo): ASK-ESPERA ⇒ resposta LOCAL (corre
+// contra o Telegram via `LocalAnswerChannel`/`waitForOwnerReply`); DORMINDO/TURNO EM
+// ANDAMENTO ⇒ enfileirado (`pendingSay`) e entregue à PRÓXIMA atividade que abrir
+// (degrade documentado — `formatOwnerSayInjection`, cli-core: mid-turno DE VERDADE
+// exigiria plumbing no processo-filho que não existe).
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
@@ -43,6 +57,7 @@ import {
   parseWorkflow,
   isWorkflowError,
   formatServiceResumeInstruction,
+  formatOwnerSayInjection,
   type WorkflowActivity,
   type WorkflowActivityOutcome,
   type WorkflowActivityRunner,
@@ -52,7 +67,7 @@ import { runnerPidPath } from './paths.js';
 import { writePidFile, removePidFile } from './pid.js';
 import { appendLog } from './log.js';
 import { runnerLogPath } from './paths.js';
-import { writeServiceStatus } from './status.js';
+import { writeServiceStatus, type ServiceTurnState, type ServiceStatusSnapshot } from './status.js';
 import { startDaemons, stopDaemons } from './daemons.js';
 // ADR-0158 §5 pt.4/§8.1/§8.2 (FASE 3) — o CANAL do serviço: reporte de fechamento,
 // alerta de falha e a ASK-ESPERA (reusa TelegramClient/EgressRateLimiter/malha do
@@ -64,6 +79,11 @@ import {
   newServiceEgressLimiter,
   type ServiceChannelDeps,
 } from './channel.js';
+// ADR-0158 §11 (FASE 4) — o ATTACH: socket local (servido POR este processo) + o
+// tail de blocos da sessão ativa. Ver o comentário do topo do arquivo.
+import { startAttachServer, type AttachServer } from './attach-server.js';
+import { pollNewServiceBlocks, newAttachBlockTailState } from './attach-blocks.js';
+import { LocalAnswerChannel } from './attach-say.js';
 
 /** Teto duro por ATIVIDADE, mesmo sem `until:` declarado — anti-runaway (CLI-SEC-8):
  * um serviço sem `until:` não pode travar o runner p/ sempre num turno preso. */
@@ -151,6 +171,11 @@ async function runActivityTurn(args: {
    * perguntado, reexecutando com pergunta+resposta do dono anexadas ao `goal`
    * (`formatServiceResumeInstruction`, cli-core). `undefined` = turno normal. */
   readonly resumeContext?: string;
+  /** ADR-0158 §11 (FASE 4) — fala(s) do dono via `aluy service attach` (`say`),
+   * já formatadas (`formatOwnerSayInjection`, cli-core), a entregar NESTA atividade
+   * (a PRÓXIMA a abrir desde que chegaram — degrade documentado, ver topo do
+   * arquivo). `undefined` = nenhuma pendente. */
+  readonly ownerSayContext?: string;
 }): Promise<WorkflowActivityOutcome> {
   const { activity, index, total, deadlineMs, stop, log } = args;
 
@@ -167,8 +192,12 @@ async function runActivityTurn(args: {
         `registro escopado deste serviço.)`
       : '';
   const resumePrefix = args.resumeContext !== undefined ? `${args.resumeContext}\n\n` : '';
+  const sayPrefix = args.ownerSayContext !== undefined ? `${args.ownerSayContext}\n\n` : '';
+  if (args.ownerSayContext !== undefined) {
+    log(`atividade ${index + 1}/${total} "${activity.id}": entregando fala(s) do dono via attach.`);
+  }
   const goal =
-    `${args.orchestratorPreamble}\n\n${resumePrefix}` +
+    `${args.orchestratorPreamble}\n\n${resumePrefix}${sayPrefix}` +
     `[Atividade ${index + 1}/${total} do workflow — id "${activity.id}"]\n${activity.goal}${agentHint}`;
 
   const argv = [args.aluyEntrypoint, '-p', goal, '--output-format', 'json', '--quiet'];
@@ -268,7 +297,19 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
   const service: ServiceEntry = entry;
   const serviceDir = service.dir;
   const logPath = deps.log ? undefined : runnerLogPath(serviceDir);
-  const log = deps.log ?? ((line: string) => appendLog(logPath!, line));
+  const baseLog = deps.log ?? ((line: string) => appendLog(logPath!, line));
+  // ADR-0158 §11 (FASE 4) — `attachServerRef.current` nasce `undefined` e é
+  // atribuído logo abaixo; `log` fecha sobre o HOLDER (`const`, nunca reatribuído —
+  // só a propriedade `.current` muda), então já pode ser definido AQUI e usado por
+  // tudo (inclusive `startAttachServer`, que recebe este MESMO `log` — nesse
+  // instante `attachServerRef.current` ainda é `undefined`, então essas linhas só
+  // vão pro arquivo, não pro socket; nenhum cliente estaria conectado àquela altura
+  // mesmo). Publica no socket TODA linha que já ia pro `runner.log`.
+  const attachServerRef: { current?: AttachServer } = {};
+  const log = (line: string): void => {
+    baseLog(line);
+    attachServerRef.current?.broadcastLog(line);
+  };
 
   // ADR-0158 §5 pt.4/§8.1/§8.2 (FASE 3) — o CANAL: UMA base de deps por PROCESSO
   // (o `egressLimiter`/TC-6 tem que persistir por todo o runner — nunca recriado por
@@ -294,6 +335,48 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
   writePidFile(pidPath, process.pid);
   log(`runner iniciado (pid ${process.pid}) — serviço "${service.manifest.name}".`);
 
+  // ADR-0158 §11 (FASE 4) — estado do ATTACH, vivo pelo processo INTEIRO (não por
+  // turno): `currentPhase` espelha o `turnState` corrente (o `setStatus` abaixo é o
+  // ÚNICO escritor); `pendingSay`/`localAnswers` são as DUAS metades do "dono pode
+  // DIGITAR" — ver o comentário do topo do arquivo p/ o racional completo.
+  let currentPhase: ServiceTurnState = 'sleeping';
+  const pendingSay: string[] = [];
+  const localAnswers = new LocalAnswerChannel();
+  attachServerRef.current = startAttachServer(
+    serviceDir,
+    {
+      onSay: (text) => {
+        const trimmed = text.trim();
+        if (trimmed === '') return;
+        if (currentPhase === 'awaiting-owner') {
+          log('[attach] "say" recebido durante ASK-ESPERA — tratado como resposta LOCAL do dono.');
+          localAnswers.submit(trimmed);
+          return;
+        }
+        pendingSay.push(trimmed);
+        log(
+          currentPhase === 'sleeping'
+            ? '[attach] "say" recebido com o serviço DORMINDO — vira instrução do PRÓXIMO despertar.'
+            : '[attach] "say" recebido com turno EM ANDAMENTO — entregue à PRÓXIMA atividade do ' +
+                'workflow (degrade documentado — ADR-0158 §11: sem plumbing de mid-turno de verdade ' +
+                'no processo-filho).',
+        );
+      },
+    },
+    log,
+  );
+  // §11, item 2 (melhor esforço) — tail periódico dos blocos NOVOS da sessão ativa
+  // do serviço (`attach-blocks.ts`). Frequência modesta (1.5s): não é streaming
+  // token-a-token, é "o attach que acabou de conectar vê o que mudou desde a
+  // última rodada" — suficiente p/ observar sem virar um segundo hot-path de I/O.
+  const blockTailState = newAttachBlockTailState();
+  const blockTailTimer = setInterval(() => {
+    for (const b of pollNewServiceBlocks(serviceDir, blockTailState)) {
+      attachServerRef.current?.broadcastBlock(b.role, b.text);
+    }
+  }, 1500);
+  blockTailTimer.unref();
+
   const stopController = new AbortController();
   const onSignal = (sig: NodeJS.Signals): void => {
     log(`sinal ${sig} recebido — encerrando graciosamente…`);
@@ -303,9 +386,24 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
   process.on('SIGINT', onSignal);
   deps.externalStop?.addEventListener('abort', () => stopController.abort(), { once: true });
 
+  // ADR-0158 §11 — TODA transição de `turnState` passa por aqui (nunca mais
+  // `writeServiceStatus` direto): grava o `status.json` (como antes) E publica o
+  // evento `state` pro attach, E mantém `currentPhase` em dia p/ o `onSay` acima
+  // decidir o que fazer com uma fala recebida.
+  const setStatus = (snapshot: Omit<ServiceStatusSnapshot, 'updatedAtIso'>): void => {
+    writeServiceStatus(serviceDir, snapshot);
+    currentPhase = snapshot.turnState;
+    attachServerRef.current?.broadcastState(
+      snapshot.turnState,
+      snapshot.pendingQuestion ?? snapshot.lastReportSummary,
+    );
+  };
+
   const shutdown = (): void => {
     stopDaemons(serviceDir, log);
-    writeServiceStatus(serviceDir, { turnState: 'sleeping' });
+    setStatus({ turnState: 'sleeping' });
+    clearInterval(blockTailTimer);
+    attachServerRef.current?.close();
     removePidFile(pidPath);
     process.off('SIGTERM', onSignal);
     process.off('SIGINT', onSignal);
@@ -329,10 +427,12 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         // deixar um pidfile órfão apontando pra um processo que já morreu.
         process.off('SIGTERM', onSignal);
         process.off('SIGINT', onSignal);
+        clearInterval(blockTailTimer);
+        attachServerRef.current?.close();
         removePidFile(pidPath);
         return 1;
       }
-      writeServiceStatus(serviceDir, { turnState: 'sleeping', nextFireIso: next.toISOString() });
+      setStatus({ turnState: 'sleeping', nextFireIso: next.toISOString() });
       log(`dormindo até ${next.toISOString()} (próximo turno).`);
 
       const wake = await sleepUntil(next, stopController.signal);
@@ -359,7 +459,7 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
       // ── início do expediente (§5 pt.3/§6) ──────────────────────────────────
       log('acordou — início do expediente: subindo daemons próprios (se houver)…');
       startDaemons(serviceDir, log);
-      writeServiceStatus(serviceDir, { turnState: 'running-turn' });
+      setStatus({ turnState: 'running-turn' });
 
       const baseWorkflowArgs = {
         serviceDir,
@@ -372,6 +472,11 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         execPath,
         aluyEntrypoint,
         log,
+        // ADR-0158 §11 (FASE 4) — a MESMA fila `pendingSay` do processo inteiro,
+        // passada por referência: `runOneWorkflow` a drena na PRÓXIMA atividade que
+        // abrir, mesmo através de uma retomada pós-ask-espera (`{...baseWorkflowArgs,
+        // resume: ...}` abaixo reusa este MESMO array).
+        ownerSay: pendingSay,
       };
 
       let outcome = await runOneWorkflow(baseWorkflowArgs);
@@ -383,7 +488,7 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
       // parou. A nova execução pode, ela mesma, terminar "aguardando dono" de novo
       // (outra pergunta) — o `while` cobre isso naturalmente.
       while (outcome.kind === 'awaiting-owner') {
-        writeServiceStatus(serviceDir, {
+        setStatus({
           turnState: 'awaiting-owner',
           pendingQuestion: outcome.question,
           lastReportSummary: `aguardando dono: ${outcome.question}`,
@@ -395,6 +500,10 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
           question: outcome.question,
           stop: stopController.signal,
           deps: channelBaseDeps,
+          // ADR-0158 §11 (FASE 4) — corre a resposta REMOTA (Telegram) contra uma
+          // resposta LOCAL via `aluy service attach` — quem chegar primeiro decide
+          // (mesma autoridade dos dois canais, §11).
+          localAnswer: localAnswers,
         });
 
         if (ask.kind === 'stopped') {
@@ -411,6 +520,8 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
               `(religue com "aluy service start" quando resolver o canal/decisão).`,
           );
           stopDaemons(serviceDir, log);
+          clearInterval(blockTailTimer);
+          attachServerRef.current?.close();
           removePidFile(pidPath);
           process.off('SIGTERM', onSignal);
           process.off('SIGINT', onSignal);
@@ -498,6 +609,12 @@ async function runOneWorkflow(args: {
    * `activityIndex` reexecuta com pergunta+resposta anexadas ao `goal` (as
    * atividades ANTERIORES já concluíram no turno original — não rodam de novo). */
   readonly resume?: { readonly activityIndex: number; readonly question: string; readonly answer: string };
+  /** ADR-0158 §11 (FASE 4) — fila MUTÁVEL (array compartilhado, o mesmo em todo o
+   * processo do runner) de falas do dono via `aluy service attach` ainda não
+   * entregues. DRENADA (splice) na PRÓXIMA atividade que abrir — ver `runner.
+   * runActivity` abaixo. `undefined` ⇒ attach não fiado (nunca acontece em produção;
+   * só testes que chamem `runOneWorkflow` isoladamente sem essa peça). */
+  readonly ownerSay?: string[];
 }): Promise<WorkflowOutcome> {
   const { serviceDir, workflowName, log } = args;
   if (workflowName === undefined) {
@@ -550,6 +667,14 @@ async function runOneWorkflow(args: {
         args.resume !== undefined && index === 0
           ? formatServiceResumeInstruction(args.resume.question, args.resume.answer)
           : undefined;
+      // ADR-0158 §11 (FASE 4) — DRENA a fila de "say" pendentes AGORA (esta é a
+      // PRÓXIMA atividade a abrir desde que chegaram, seja o serviço estivesse
+      // dormindo ou outra atividade estivesse em voo — degrade documentado, ver
+      // `formatOwnerSayInjection`). Drenar aqui (não antes) evita duplicar a
+      // entrega numa retomada pós-ask-espera (`runOneWorkflow` chamado de novo com
+      // `resume` — a fila só é preenchida por `onSay`, nunca por este loop).
+      const drainedSay = args.ownerSay?.splice(0, args.ownerSay.length) ?? [];
+      const ownerSayContext = drainedSay.length > 0 ? formatOwnerSayInjection(drainedSay) : undefined;
       const outcome = await runActivityTurn({
         serviceDir,
         serviceName: args.serviceName,
@@ -563,6 +688,7 @@ async function runOneWorkflow(args: {
         execPath: args.execPath,
         aluyEntrypoint: args.aluyEntrypoint,
         log: args.log,
+        ...(ownerSayContext !== undefined ? { ownerSayContext } : {}),
         pendingQuestionRef,
         ...(resumeContext !== undefined ? { resumeContext } : {}),
       });
