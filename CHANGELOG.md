@@ -14,6 +14,16 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.115] — 2026-08-01
+
+### Adicionado
+
+- 🖼️ **suporte a imagem (ADR-0159/APR-0149):** `@screenshot.png` no composer interativo e em `aluy -p "descreva @screenshot.png"` (headless) — mesma menção `@`, mesmo `AttachReader` que já servia texto, sem mecanismo paralelo. `--image <path>` (repetível) como açúcar sintático p/ automação. Detecção por MAGIC BYTES (não extensão — não-spoofável), lista FECHADA de 4 tipos (`png`/`jpeg`/`gif`/`webp`) que os adapters sabem serializar; qualquer outro binário continua rejeitado exatamente como antes. `ChatMessage`/`LocalMessage.content` viram `string | ContentPart[]` (união retrocompatível); os adapters OpenAI-compat, Anthropic e broker-client aprendem o bloco de imagem. Confinamento/path-deny do `@attach` correm exatamente como hoje, antes do ramo de imagem — nenhuma relaxação geral do guard. Paste de clipboard/terminal (OSC52/Kitty/iTerm2) fica fora de escopo desta entrega.
+
+### Testes
+
+- Cobertura e mutation testing (Stryker, diagnóstico pontual — não entrou no repo) do subsistema de SERVIÇOS (ADR-0158): +38 testes de imagem, +8 de cobertura real (`attach-client.ts`, limpeza self-healing de `daemons.ts`), +56 de fronteira/boundary (achados por mutation testing — ranges min/max nunca testados no limite exato). Verificação empírica via PTY real confirmou operação nonstop/autônoma de um serviço rodando (múltiplos turnos agendados, `attach`/`say`/detach ao vivo, `stop` sem órfãos) — zero bugs encontrados no subsistema. Achado convergente (cobertura + mutation, ângulos independentes): `packages/cli/src/service/runner.ts` (o loop do daemon) é o arquivo mais fracamente testado do subsistema — sinalizado para follow-up antes de uso autônomo mais pesado.
+
 ## [1.0.0-rc.114] — 2026-08-01
 
 ### Corrigido
