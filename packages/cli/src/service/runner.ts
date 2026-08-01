@@ -61,6 +61,7 @@ import {
   type WorkflowActivity,
   type WorkflowActivityOutcome,
   type WorkflowActivityRunner,
+  type WorkflowRunResult,
 } from '@hiperplano/aluy-cli-core';
 import { UserServicesStore, isServiceEntryError, type ServiceEntry } from '../io/services-store.js';
 import { runnerPidPath } from './paths.js';
@@ -245,6 +246,110 @@ export function buildActivityEnv(
   };
 }
 
+export type ActivityTimeDecision =
+  | { readonly hasTime: false }
+  | { readonly hasTime: true; readonly timeoutMs: number };
+
+/**
+ * ADR-0158 §5 pt.4 — decide se uma atividade AINDA tem tempo (`deadlineMs > 0`) e,
+ * se sim, o TETO real do turno-filho: o menor entre o restante até o `until:`
+ * (`deadlineMs`) e o teto duro anti-runaway (`cap`, default `MAX_ACTIVITY_MS`).
+ * PURA — sem I/O, testável direto. Extraída de `runActivityTurn` (juntava os dois
+ * `if`s soltos: o guard "expediente encerrado" + o `Math.min` do timeout — a
+ * MESMA decisão, uma vez só). `deadlineMs <= 0` ⇒ sem tempo (nunca negativo
+ * "sobra" pro `Math.min` — zero ou menos é "pulada", não "timeout de 0ms").
+ */
+export function resolveActivityTimeout(deadlineMs: number, cap: number = MAX_ACTIVITY_MS): ActivityTimeDecision {
+  if (deadlineMs <= 0) return { hasTime: false };
+  return { hasTime: true, timeoutMs: Math.min(deadlineMs, cap) };
+}
+
+export type ActivityExitClassification = 'cancelled' | 'deadline' | 'continue';
+
+/**
+ * Classifica o desfecho do processo-filho de UMA atividade, DEPOIS que ele já
+ * fechou — PURA (dado só o que já observamos: se o `stop` do runner disparou e o
+ * `signal` com que o filho morreu). `stopAborted` tem PRIORIDADE (fomos NÓS que
+ * pedimos pra parar — mesmo que o timer do deadline TAMBÉM tenha disparado numa
+ * corrida); senão, qualquer SINAL (SIGTERM/SIGKILL) só pode ter vindo do
+ * `killGracefully` do timer do deadline (`until:`/teto duro) — `stopAborted` já
+ * foi descartado. `signal === null` ⇒ o filho terminou sozinho (saída normal) —
+ * segue pra ler/validar o `stdout`.
+ */
+export function classifyActivityExit(args: {
+  readonly stopAborted: boolean;
+  readonly signal: NodeJS.Signals | null;
+}): ActivityExitClassification {
+  if (args.stopAborted) return 'cancelled';
+  if (args.signal !== null) return 'deadline';
+  return 'continue';
+}
+
+export interface ActivityTurnOutput {
+  readonly result: string;
+  readonly ok: boolean;
+}
+
+/**
+ * Extrai e valida a ÚLTIMA linha de `stdout` do turno-filho como o JSON de saída
+ * do `aluy -p --output-format json` — PURA. `undefined` ⇒ saída ILEGÍVEL (JSON
+ * inválido na última linha, ou faltando/com tipo errado os campos `result`
+ * string/`ok` boolean do formato esperado); o CALLER decide o log/outcome
+ * (`stop:'error'`) — aqui só a extração+validação de forma, sem I/O.
+ */
+export function parseActivityTurnOutput(stdout: string): ActivityTurnOutput | undefined {
+  const line = stdout.trim().split('\n').pop() ?? '';
+  let parsed: { result?: unknown; ok?: unknown } | undefined;
+  try {
+    parsed = JSON.parse(line) as { result?: unknown; ok?: unknown };
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === undefined || typeof parsed.result !== 'string' || typeof parsed.ok !== 'boolean') {
+    return undefined;
+  }
+  return { result: parsed.result, ok: parsed.ok };
+}
+
+export type SayRoutingDecision =
+  | { readonly action: 'ignore' }
+  | { readonly action: 'answer-local'; readonly text: string; readonly logLine: string }
+  | { readonly action: 'queue'; readonly text: string; readonly logLine: string };
+
+/**
+ * ADR-0158 §11 (FASE 4) — decide o que fazer com UM evento `say` recebido pelo
+ * socket de attach, dado o `currentPhase` do runner NO MOMENTO em que chegou —
+ * PURA (nenhum I/O; o CALLER é quem de fato loga/empilha/submete). Extraída do
+ * handler `onSay` de `runServiceRunner` (fechava sobre `currentPhase`/`pendingSay`/
+ * `localAnswers` — nada disso testável sem subir o runner inteiro; a DECISÃO em
+ * si não precisa de nenhum desses). Texto vazio (só whitespace) ⇒ ignorado (nunca
+ * vira instrução vazia nem resposta vazia). ASK-ESPERA ⇒ é a resposta LOCAL do
+ * dono à pergunta pendente. Qualquer OUTRA fase (dormindo/turno em andamento) ⇒
+ * enfileirado p/ a PRÓXIMA atividade que abrir (degrade documentado — sem
+ * plumbing de mid-turno de verdade no processo-filho).
+ */
+export function decideSayRouting(currentPhase: ServiceTurnState, rawText: string): SayRoutingDecision {
+  const trimmed = rawText.trim();
+  if (trimmed === '') return { action: 'ignore' };
+  if (currentPhase === 'awaiting-owner') {
+    return {
+      action: 'answer-local',
+      text: trimmed,
+      logLine: '[attach] "say" recebido durante ASK-ESPERA — tratado como resposta LOCAL do dono.',
+    };
+  }
+  return {
+    action: 'queue',
+    text: trimmed,
+    logLine:
+      currentPhase === 'sleeping'
+        ? '[attach] "say" recebido com o serviço DORMINDO — vira instrução do PRÓXIMO despertar.'
+        : '[attach] "say" recebido com turno EM ANDAMENTO — entregue à PRÓXIMA atividade do ' +
+          'workflow (degrade documentado — ADR-0158 §11: sem plumbing de mid-turno de verdade ' +
+          'no processo-filho).',
+  };
+}
+
 /**
  * Roda UMA atividade como um turno headless `aluy -p` em processo FILHO, com wiring
  * ESCOPADO ao serviço (§2, via `ALUY_SERVICE_HOME`). Mata o filho se `stop` disparar
@@ -284,7 +389,8 @@ async function runActivityTurn(args: {
   const { activity, index, total, deadlineMs, stop, log } = args;
 
   if (stop.aborted) return { ok: false, stop: 'cancelled' };
-  if (deadlineMs <= 0) {
+  const timeDecision = resolveActivityTimeout(deadlineMs);
+  if (!timeDecision.hasTime) {
     log(`atividade ${index + 1}/${total} "${activity.id}": expediente já encerrado (until) — pulada.`);
     return { ok: false, stop: 'limit' };
   }
@@ -304,7 +410,7 @@ async function runActivityTurn(args: {
   const argv = [args.aluyEntrypoint, '-p', goal, '--output-format', 'json', '--quiet'];
   if (args.budgetTokens !== undefined) argv.push('--max-tokens', String(args.budgetTokens));
 
-  const timeoutMs = Math.min(deadlineMs, MAX_ACTIVITY_MS);
+  const timeoutMs = timeDecision.timeoutMs;
   log(
     activity.agent !== undefined
       ? `atividade ${index + 1}/${total} "${activity.id}": iniciando turno TRAVADO na persona ` +
@@ -339,26 +445,21 @@ async function runActivityTurn(args: {
   clearTimeout(deadlineTimer);
   stop.removeEventListener('abort', onStopAbort);
 
-  if (stop.aborted) {
+  const exitClass = classifyActivityExit({ stopAborted: stop.aborted, signal: exit.signal });
+  if (exitClass === 'cancelled') {
     log(`atividade ${index + 1}/${total} "${activity.id}": interrompida (stop do runner).`);
     return { ok: false, stop: 'cancelled' };
   }
   // O filho morreu por SINAL (SIGTERM/SIGKILL) ⇒ fomos NÓS que o derrubamos — via
   // `killGracefully` no timer do deadline (`until:`/teto duro). `stop.aborted` já
   // foi descartado acima, então um sinal aqui só pode ser o deadline.
-  if (exit.signal !== null) {
+  if (exitClass === 'deadline') {
     log(`atividade ${index + 1}/${total} "${activity.id}": ATINGIU O TETO (until/teto duro) — encerrada.`);
     return { ok: false, stop: 'limit' };
   }
 
-  const line = stdout.trim().split('\n').pop() ?? '';
-  let parsed: { result?: unknown; ok?: unknown } | undefined;
-  try {
-    parsed = JSON.parse(line) as { result?: unknown; ok?: unknown };
-  } catch {
-    parsed = undefined;
-  }
-  if (parsed === undefined || typeof parsed.result !== 'string' || typeof parsed.ok !== 'boolean') {
+  const parsed = parseActivityTurnOutput(stdout);
+  if (parsed === undefined) {
     log(
       `atividade ${index + 1}/${total} "${activity.id}": saída ilegível (exit ${exit.code}) — ` +
         `${stderr.trim().slice(0, 500) || '(sem stderr)'}`,
@@ -452,21 +553,15 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
     serviceDir,
     {
       onSay: (text) => {
-        const trimmed = text.trim();
-        if (trimmed === '') return;
-        if (currentPhase === 'awaiting-owner') {
-          log('[attach] "say" recebido durante ASK-ESPERA — tratado como resposta LOCAL do dono.');
-          localAnswers.submit(trimmed);
+        const decision = decideSayRouting(currentPhase, text);
+        if (decision.action === 'ignore') return;
+        if (decision.action === 'answer-local') {
+          log(decision.logLine);
+          localAnswers.submit(decision.text);
           return;
         }
-        pendingSay.push(trimmed);
-        log(
-          currentPhase === 'sleeping'
-            ? '[attach] "say" recebido com o serviço DORMINDO — vira instrução do PRÓXIMO despertar.'
-            : '[attach] "say" recebido com turno EM ANDAMENTO — entregue à PRÓXIMA atividade do ' +
-                'workflow (degrade documentado — ADR-0158 §11: sem plumbing de mid-turno de verdade ' +
-                'no processo-filho).',
-        );
+        pendingSay.push(decision.text);
+        log(decision.logLine);
       },
     },
     log,
@@ -700,6 +795,63 @@ type WorkflowOutcome =
   | { readonly kind: 'stopped'; readonly summary: string; readonly critical: boolean }
   | { readonly kind: 'awaiting-owner'; readonly question: string; readonly activityIndex: number };
 
+export type ResumeSliceDecision =
+  | { readonly ok: true; readonly startOffset: number }
+  | { readonly ok: false; readonly startOffset: number };
+
+/**
+ * ADR-0158 §5 pt.4 — decide o `startOffset` de uma RETOMADA pós-ask-espera: a
+ * atividade em `resumeActivityIndex` ainda precisa EXISTIR no workflow (o dono
+ * pode ter editado `service.md`/o workflow ENTRE a pergunta e a resposta) — PURA.
+ * `resumeActivityIndex === undefined` (turno normal, não é retomada) ⇒ sempre
+ * `startOffset: 0` e `ok:true` (nada a validar — a fatia é o workflow inteiro).
+ */
+export function resolveResumeSlice(
+  totalActivities: number,
+  resumeActivityIndex: number | undefined,
+): ResumeSliceDecision {
+  const startOffset = resumeActivityIndex ?? 0;
+  return startOffset >= totalActivities ? { ok: false, startOffset } : { ok: true, startOffset };
+}
+
+/**
+ * ADR-0158 §5 pt.4/§8.1/§8.2 — monta o `WorkflowOutcome` FINAL de um turno, a
+ * partir do `WorkflowRunResult` puro do `runWorkflow` (cli-core) + o que só o
+ * CALLER sabe (o `startOffset` da fatia rodada, o total REAL de atividades do
+ * workflow inteiro, e — só no caso "aguardando dono" — a pergunta pendente e o
+ * índice da atividade que perguntou). PURA — nenhum I/O, testável direto sem
+ * rodar um workflow de verdade. `res.lastStop === 'awaiting-owner'` tem
+ * PRIORIDADE sobre `res.stopped` (o mesmo motivo também deixa `stopped:true`,
+ * mas "aguardando dono" NÃO é reporte/alerta — é o CALLER que entra em ask-espera).
+ */
+export function buildWorkflowOutcome(args: {
+  readonly res: WorkflowRunResult;
+  readonly startOffset: number;
+  readonly totalActivities: number;
+  readonly pendingQuestionText: string | undefined;
+  readonly pendingActivityIndex: number | undefined;
+}): WorkflowOutcome {
+  const { res, startOffset, totalActivities, pendingQuestionText, pendingActivityIndex } = args;
+  if (res.lastStop === 'awaiting-owner') {
+    return {
+      kind: 'awaiting-owner',
+      question: pendingQuestionText ?? '(ver runner.log)',
+      activityIndex: pendingActivityIndex ?? startOffset,
+    };
+  }
+  if (res.stopped) {
+    return {
+      kind: 'stopped',
+      critical: res.lastStop === 'error',
+      summary: `parou em ${startOffset + res.activitiesRun}/${totalActivities} atividades (${res.lastStop ?? 'motivo desconhecido'}).`,
+    };
+  }
+  return {
+    kind: 'ok',
+    summary: `${startOffset + res.activitiesRun}/${totalActivities} atividades concluídas.`,
+  };
+}
+
 async function runOneWorkflow(args: {
   readonly serviceDir: string;
   readonly serviceName: string;
@@ -739,8 +891,8 @@ async function runOneWorkflow(args: {
     return { kind: 'stopped', critical: true, summary: `workflow inválido — ${parsed.reason}` };
   }
 
-  const startOffset = args.resume?.activityIndex ?? 0;
-  if (startOffset >= parsed.activities.length) {
+  const resumeSlice = resolveResumeSlice(parsed.activities.length, args.resume?.activityIndex);
+  if (!resumeSlice.ok) {
     log('retomada: a atividade pendente não existe mais no workflow (editado entre a pergunta e a resposta) — turno encerrado.');
     return {
       kind: 'stopped',
@@ -748,6 +900,7 @@ async function runOneWorkflow(args: {
       summary: 'a atividade da retomada não existe mais no workflow (editado entre a pergunta e a resposta).',
     };
   }
+  const startOffset = resumeSlice.startOffset;
   const activitiesToRun = parsed.activities.slice(startOffset);
 
   const budgetTokens = parseServiceBudget(args.budgetRaw);
@@ -804,22 +957,11 @@ async function runOneWorkflow(args: {
   };
 
   const res = await runWorkflow(activitiesToRun, runner, args.stop);
-  if (res.lastStop === 'awaiting-owner') {
-    return {
-      kind: 'awaiting-owner',
-      question: pendingQuestionRef.current ?? '(ver runner.log)',
-      activityIndex: pendingActivityIndex ?? startOffset,
-    };
-  }
-  if (res.stopped) {
-    return {
-      kind: 'stopped',
-      critical: res.lastStop === 'error',
-      summary: `parou em ${startOffset + res.activitiesRun}/${parsed.activities.length} atividades (${res.lastStop ?? 'motivo desconhecido'}).`,
-    };
-  }
-  return {
-    kind: 'ok',
-    summary: `${startOffset + res.activitiesRun}/${parsed.activities.length} atividades concluídas.`,
-  };
+  return buildWorkflowOutcome({
+    res,
+    startOffset,
+    totalActivities: parsed.activities.length,
+    pendingQuestionText: pendingQuestionRef.current,
+    pendingActivityIndex,
+  });
 }
