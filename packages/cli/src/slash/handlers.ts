@@ -789,6 +789,25 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           ],
         },
       };
+    case 'service':
+      // ADR-0158 (aceito, APR-0148) — o `/service` REAL (lista/status contra o
+      // registry confinado de `~/.aluy/services/`) é roteado ANTES em run.tsx (espelha
+      // `/agents`/`/workflows`). Cair aqui só sem esse roteamento (não-TTY sem wiring):
+      // explica o comando, sem ler nada. `create`/`start`/`stop`/`attach` (fase 2) são
+      // honestos mesmo NO roteamento real — aqui nem chegam a isso.
+      return {
+        kind: 'note',
+        note: {
+          title: 'service',
+          lines: [
+            'SERVIÇOS plugáveis (ADR-0158) — papéis contínuos (trader, pesquisador, …):',
+            'um diretório-manifesto em ~/.aluy/services/<nome>/ com service.md (contrato',
+            'duro + orquestrador) e as subpastas agents/workflows/skills/… já existentes.',
+            'uso: /service [list | status <nome> | install <path|git-url> | uninstall <nome>]',
+            'create/start/stop/attach chegam numa fase seguinte (o processo-por-serviço).',
+          ],
+        },
+      };
     case 'add-dir':
       // EST-0982 — o `/add-dir` REAL (lista/autoriza raízes extras via o workspace
       // da sessão) é roteado ANTES em run.tsx via `runAddDir` (precisa do

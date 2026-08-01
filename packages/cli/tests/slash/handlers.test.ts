@@ -144,6 +144,18 @@ describe('buildSlashEffect — cada comando tem efeito (nada de no-op silencioso
       expect(e.kind).toBe('note');
     }
   });
+
+  it('/service (fallback) ⇒ nota explicativa (o REAL é roteado ANTES em run.tsx)', () => {
+    // ADR-0158 — cair aqui só acontece sem o roteamento real (não-TTY/linear, espelha
+    // /agents·/workflows·/telegram): explica o comando, sem tocar ~/.aluy/services/.
+    const e = buildSlashEffect('service', CTX);
+    expect(e.kind).toBe('note');
+    if (e.kind === 'note') {
+      const joined = e.note.lines.join('\n');
+      expect(joined).toContain('ADR-0158');
+      expect(joined).toContain('/service');
+    }
+  });
 });
 
 describe('runAsyncSlash — whoami/logout consomem o LoginService', () => {

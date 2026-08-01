@@ -400,6 +400,38 @@ export {
   type WorkflowRunResult,
 } from './workflow/workflow-runner.js';
 
+// ADR-0158 (aceito, APR-0148) — SERVIÇOS plugáveis: parser PURO do manifesto
+// `service.md` (frontmatter = contrato duro/§3 + corpo = orquestrador/§1; autonomy
+// v1 só `ask`; tunáveis/circuit-breakers com faixa `[min..max]`/§8.3/§8.5a; FALHA
+// FECHADA RES-MD-3), o FORMATADOR PURO da listagem (`/service`, canal principal —
+// §10) e o FORMATADOR PURO do "manifesto visível" exigido antes do `install` (§9).
+// A leitura confinada de `~/.aluy/services/<nome>/` + a validação semântica
+// (cron/workflow existente) são do locus concreto (@hiperplano/aluy-cli, io/services-store.ts).
+export {
+  parseServiceManifest,
+  isServiceManifestError,
+  normalizeServiceName,
+  type ServiceManifest,
+  type ServiceManifestError,
+  type ServiceManifestParse,
+  type ServiceTunable,
+} from './service/service-parse.js';
+export {
+  buildServicesNote,
+  serviceDescriptionLine,
+  type ServicesListNote,
+  type ServicesListInput,
+  type ServiceListEntry,
+  type ServiceListRejection,
+} from './service/service-list.js';
+export {
+  buildServiceManifestVisibleNote,
+  type ServiceManifestVisibleNote,
+  type ServiceManifestVisibleInput,
+  type ServiceDaemonDeclared,
+  type ServiceSkillDeclared,
+} from './service/service-manifest-visible.js';
+
 // EST-0958 · CLI-SEC-3/4/9 — `!comando` (atalho de shell do composer): executor
 // que reusa a MESMA catraca (`decide`) + shell confinado (ToolPorts) do agente.
 // NÃO é um bypass — é o mesmo tool-call `run_command` atrás do mesmo ponto único.

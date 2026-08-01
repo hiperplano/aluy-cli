@@ -98,6 +98,7 @@ import {
   buildWorkflowsNote,
   buildSkillsNote,
   buildAvailableAgentsNote,
+  buildServicesNote,
   findProvider,
   type NativeTool,
   type ToolPorts,
@@ -128,6 +129,8 @@ import {
   NodeMemoryStore,
   HooksConfigStore,
   ExportStore,
+  UserServicesStore,
+  isServiceEntryError,
 } from '../io/index.js';
 import type { ProjectInstructionsLoad } from '../io/index.js';
 import { attachHooksObserver } from './hooks-observer.js';
@@ -2620,6 +2623,73 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       const note = buildWorkflowsNote({
         workflows: [...globalWf.workflows, ...projectWf.workflows],
         errors: [...globalWf.errors, ...projectWf.errors],
+      });
+      built.controller.pushNote(note.title, note.lines);
+      return;
+    }
+
+    // ADR-0158 (aceito, APR-0148) — `/service`: SERVIÇOS plugáveis, o canal PRINCIPAL
+    // de gestão dentro da sessão (§10, emenda de aprovação — o shell é o espelho).
+    // Fase 1 = SEM runner: só `list` (bare) e `status <nome>` são REAIS aqui —
+    // `install`/`uninstall` já funcionam no shell (`aluy service …`) mas nesta camada
+    // ainda só orientam pra lá (confirmação interativa de install/uninstall pede um
+    // fluxo de UI que chega com o runner); `create`/`start`/`stop`/`attach` são fase 2
+    // por inteiro (nem no shell). Read-only, sem modelo, sem rede — reusa o MESMO
+    // registry confinado (`UserServicesStore`) e o formatador PURO do core.
+    if (command.id === 'service') {
+      const statusMatch = /^\s*status\s+(\S+)/.exec(args);
+      const store = new UserServicesStore();
+      if (statusMatch) {
+        const name = statusMatch[1]!;
+        const entry = store.get(name);
+        if (entry === undefined) {
+          built.controller.pushNote('service', [
+            `serviço "${name}" não encontrado em ${store.servicesDir}.`,
+          ]);
+          return;
+        }
+        if (isServiceEntryError(entry)) {
+          built.controller.pushNote(`service — ${name} (inválido)`, [`⚠ ${entry.reason}`]);
+          return;
+        }
+        const m = entry.manifest;
+        const lines: string[] = [
+          `parado (fase 1, sem runner ainda) · dir: ${entry.dir}`,
+          ...(m.description !== undefined ? [`descrição: ${m.description}`] : []),
+          `schedule: ${m.schedule ?? '(não declarado)'}`,
+          `until: ${m.until ?? '(não declarado)'}`,
+          `workflow: ${m.workflow ?? '(não declarado)'}`,
+          `canal: ${m.channel ?? '(NENHUM)'}`,
+          `autonomia: ${m.autonomy ?? '(não declarada)'}`,
+          `budget: ${m.budget ?? '(não declarado)'}`,
+          'validação: OK (schedule/workflow conferidos pelo registry)',
+        ];
+        built.controller.pushNote(`service — ${m.name}`, lines);
+        return;
+      }
+      const subMatch = /^\s*(install|uninstall)\b/.exec(args);
+      if (subMatch) {
+        built.controller.pushNote('service', [
+          `"/service ${subMatch[1]}" ainda orienta pro shell nesta fase — rode ` +
+            `\`aluy service ${subMatch[1]} …\` no terminal (mostra o manifesto visível`,
+          'e pede confirmação antes de escrever em ~/.aluy/services/).',
+        ]);
+        return;
+      }
+      const notYetMatch = /^\s*(create|start|stop|attach)\b/.exec(args);
+      if (notYetMatch) {
+        built.controller.pushNote('service', [
+          `"/service ${notYetMatch[1]}" ainda não existe — chega na fase 2 do ADR-0158 ` +
+            '(o processo-por-serviço).',
+        ]);
+        return;
+      }
+      // `/service` puro (sem args) ⇒ LISTA — a "sala de controle" mínima (ADR-0158 §11).
+      const { services, errors } = store.list();
+      const note = buildServicesNote({
+        services,
+        errors: errors.map((e) => ({ dirName: e.dirName, reason: e.reason })),
+        servicesDir: store.servicesDir,
       });
       built.controller.pushNote(note.title, note.lines);
       return;

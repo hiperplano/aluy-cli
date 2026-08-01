@@ -51,6 +51,7 @@ export type NativeCommandId =
   | 'inventory'
   | 'workflows'
   | 'telegram'
+  | 'service'
   | 'add-dir'
   | 'split'
   | 'fullscreen'
@@ -1014,6 +1015,68 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
       },
     ],
     // EST-0982 — read-only puro (lista workflows numa nota): roda JÁ mid-turn.
+    parallelWhileBusy: true,
+  },
+  {
+    // ADR-0158 (aceito, APR-0148) — `/service`: SERVIÇOS plugáveis. Emenda de
+    // aprovação §10: `/service` DENTRO da sessão é o canal PRINCIPAL de gestão (o
+    // shell `aluy service` é o espelho, não o contrário — hierarquia invertida em
+    // relação aos outros subsistemas). Fase 1 = fundação SEM runner: `list`/`status`
+    // já funcionam de verdade; `create`/`start`/`stop`/`attach` (§10/§11) respondem
+    // honesto "fase seguinte" — nada finge ligar um processo que ainda não existe.
+    name: 'service',
+    summary: 'serviços plugáveis (ADR-0158) · lista/status · fase 1, sem runner ainda',
+    summaryKey: 'cmd.service',
+    source: 'native',
+    id: 'service',
+    section: 'workspace',
+    // Sem argumento ⇒ LISTA (read-only); `status` também é read-only. Fase 1 in-session
+    // só entrega list/status DE VERDADE (§ mapeamento no mission); install/uninstall
+    // JÁ funcionam no shell (`aluy service install|uninstall`) mas AQUI (dentro da
+    // sessão) ainda só respondem com a orientação — por isso `read-only` também: não
+    // tocam disco nesta camada. create/start/stop/attach são fase 2 (nem no shell).
+    agentEffect: 'read-only',
+    subcommandEffects: { status: 'read-only' },
+    subcommands: [
+      {
+        name: 'list',
+        summary: 'lista os serviços instalados (estado, próximo turno)',
+        terminal: true,
+      },
+      { name: 'status', summary: 'detalhe de um serviço + validação', usage: 'status <nome>' },
+      {
+        name: 'install',
+        summary:
+          'instala um diretório-manifesto local ou repo git (por ora, via `aluy service install` no shell)',
+        usage: 'install <path|git-url>',
+      },
+      {
+        name: 'uninstall',
+        summary: 'remove um serviço instalado (por ora, via `aluy service uninstall` no shell)',
+        usage: 'uninstall <nome>',
+      },
+      {
+        name: 'create',
+        summary: 'criação conversacional (disponível na próxima fase)',
+        terminal: true,
+      },
+      {
+        name: 'start',
+        summary: 'liga o serviço (disponível na próxima fase)',
+        usage: 'start <nome>',
+      },
+      {
+        name: 'stop',
+        summary: 'para o serviço (disponível na próxima fase)',
+        usage: 'stop <nome>',
+      },
+      {
+        name: 'attach',
+        summary: 'observa/interage com um serviço rodando (disponível na próxima fase)',
+        usage: 'attach <nome>',
+      },
+    ],
+    // EST-0982 — read-only puro (lista serviços numa nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
   },
   {
