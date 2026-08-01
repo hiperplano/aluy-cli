@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { connectAttachSocket } from '../../src/service/attach-client.js';
+import { connectAttachSocket, formatSocketErrorReason } from '../../src/service/attach-client.js';
 import { parseServiceAttachClientLine } from '@hiperplano/aluy-cli-core';
 
 /** Espera até `cond()` virar `true` ou o timeout estourar (poll de 10ms) — mesmo
@@ -73,21 +73,19 @@ describe('connectAttachSocket', () => {
     expect(onCloseReasons[0]).toContain('não está rodando');
   });
 
-  it('erro assíncrono que NÃO é ENOENT/ECONNREFUSED (ex.: path malformado) ⇒ ramo genérico "conexão perdida"', async () => {
-    base = mkdtempSync(join(tmpdir(), 'attach-client-'));
-    // path com um byte NUL no meio ⇒ o socket real do SO recusa com EINVAL (não
-    // ENOENT nem ECONNREFUSED) — o único jeito barato/portável de bater o ramo
-    // `else` da formatação de erro sem mockar `node:net`.
-    const badPath = join(base, `x${String.fromCharCode(0)}y.sock`);
-    const onCloseReasons: string[] = [];
-    connectAttachSocket(badPath, {
-      onLine: () => {},
-      onClose: (r) => onCloseReasons.push(r),
-    });
-    await waitFor(() => onCloseReasons.length > 0);
-    expect(onCloseReasons).toHaveLength(1);
-    expect(onCloseReasons[0]).toContain('conexão perdida');
-    expect(onCloseReasons[0]).not.toContain('não está rodando');
+  // A classificação de erro do SO p/ um path malformado (NUL embutido, etc.) varia
+  // por plataforma/versão do Node (ENOENT numa, EINVAL noutra) — não é portátil
+  // reproduzir um terceiro código via socket real sem mockar `node:net`. O ramo
+  // `else` (qualquer código que NÃO seja ENOENT/ECONNREFUSED) é testado direto na
+  // função PURA que decide a frase — mesma cobertura, sem depender do SO.
+  it('formatSocketErrorReason: código ENOENT/ECONNREFUSED ⇒ "não está rodando"; qualquer outro ⇒ "conexão perdida"', () => {
+    const enoent = Object.assign(new Error('enoent'), { code: 'ENOENT' });
+    const econnrefused = Object.assign(new Error('econnrefused'), { code: 'ECONNREFUSED' });
+    const outro = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    expect(formatSocketErrorReason(enoent)).toContain('não está rodando');
+    expect(formatSocketErrorReason(econnrefused)).toContain('não está rodando');
+    expect(formatSocketErrorReason(outro)).toContain('conexão perdida');
+    expect(formatSocketErrorReason(outro)).not.toContain('não está rodando');
   });
 
   it('caminho feliz: linhas NDJSON válidas viram texto formatado, linha malformada é ignorada em silêncio, `send` manda `say` corretamente codificado', async () => {

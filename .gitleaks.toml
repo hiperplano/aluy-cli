@@ -105,6 +105,10 @@ description = "PAT sintético dos testes de binário headless (F166) — só est
 paths = [
   '''packages/cli/tests/session/headless-exit\.test\.ts$''',
   '''packages/cli/tests/session/headless-yolo-bin\.test\.ts$''',
+  # ADR-0159 fase 2 — smoke real-binário do anexo de imagem (`aluy -p --image`);
+  # mesmo PAT sintético F166 (mesma necessidade: passar pelo `isPat` do fallback
+  # de env), mesmo padrão sequencial/entropia-zero.
+  '''packages/cli/tests/session/headless-image-attach-bin\.test\.ts$''',
 ]
 
 # ── Allowlist de FIXTURE da REDAÇÃO do /export — MODO COCKPIT (EST-1000/RES-C-1) ─
