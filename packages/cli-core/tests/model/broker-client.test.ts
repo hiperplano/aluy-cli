@@ -334,6 +334,59 @@ describe('buildChatBody (CLI-SEC-7 — corpo só com tier/messages)', () => {
   });
 });
 
+describe('buildChatBody — ADR-0159 (ContentPart[] · serialização estilo OpenAI)', () => {
+  it('content STRING segue IDÊNTICO a antes (não-regressão)', () => {
+    const body = buildChatBody(req({ messages: [{ role: 'user', content: 'Oi' }] }), true);
+    expect(body.messages).toEqual([{ role: 'user', content: 'Oi' }]);
+  });
+
+  it('content ContentPart[] só-imagem ⇒ vira array com bloco image_url (data URL)', () => {
+    const body = buildChatBody(
+      req({
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'image', mimeType: 'image/png', base64: 'QUJD' }],
+          },
+        ],
+      }),
+      true,
+    );
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } }],
+      },
+    ]);
+  });
+
+  it('content ContentPart[] texto+imagem ⇒ ambos os blocos, na ordem', () => {
+    const body = buildChatBody(
+      req({
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'descreva isto' },
+              { type: 'image', mimeType: 'image/jpeg', base64: 'ZmFrZQ==' },
+            ],
+          },
+        ],
+      }),
+      true,
+    );
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'descreva isto' },
+          { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,ZmFrZQ==' } },
+        ],
+      },
+    ]);
+  });
+});
+
 describe('buildChatBody — via Custom (ADR-0030 §3 / ADR-0065 — model só sob tier:custom)', () => {
   it('tier:custom + model ⇒ o corpo INCLUI o model (slug)', () => {
     const body = buildChatBody(

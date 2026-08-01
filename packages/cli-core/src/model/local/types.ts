@@ -75,10 +75,20 @@ export interface LocalRequest {
   readonly toolChoice?: 'auto' | 'none' | 'required';
 }
 
+/**
+ * ADR-0159 — mesma união de `ContentPart` de `model/types.ts`, REPETIDA aqui de
+ * propósito (mesma razão do `LocalMessage` abaixo: este módulo não acopla ao
+ * pai). Texto puro OU imagem inline (base64).
+ */
+export type ContentPart =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'image'; readonly mimeType: string; readonly base64: string };
+
 /** Mensagem no shape PORTÁVEL (igual ao `ChatMessage`, repetida p/ não acoplar). */
 export interface LocalMessage {
   readonly role: 'system' | 'user' | 'assistant' | 'tool';
-  readonly content: string;
+  /** ADR-0159 — texto puro (sem mudança) OU `ContentPart[]` (imagem). */
+  readonly content: string | readonly ContentPart[];
   readonly tool_calls?: readonly { id: string; name: string; input: Record<string, unknown> }[];
   readonly tool_call_id?: string;
 }

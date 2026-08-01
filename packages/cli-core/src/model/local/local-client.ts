@@ -209,7 +209,17 @@ export class LocalModelClient implements ModelClient {
     for (const m of request.messages) {
       if (m.role === 'system' && system === undefined) {
         // 1ª system vira o campo `system`; subsequentes (raras) viram mensagens.
-        system = m.content;
+        // ADR-0159 — `system` do provider é SEMPRE string; `buildSystemPrompt` só
+        // emite texto, então o ramo `ContentPart[]` aqui é defensivo (não deveria
+        // ocorrer). Em vez de derrubar o type-check ou perder silenciosamente uma
+        // imagem que por engano viesse num turno `system`, extrai só o texto.
+        system =
+          typeof m.content === 'string'
+            ? m.content
+            : m.content
+                .filter((p) => p.type === 'text')
+                .map((p) => p.text)
+                .join('\n');
         continue;
       }
       messages.push({

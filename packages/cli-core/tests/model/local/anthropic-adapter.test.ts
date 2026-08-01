@@ -215,4 +215,96 @@ describe('toAnthropicMessages — conversão de papéis', () => {
       },
     ]);
   });
+
+  it('content STRING (texto puro) segue IDÊNTICO a antes — não-regressão', () => {
+    const out = toAnthropicMessages([{ role: 'user', content: 'Oi' }]);
+    expect(out).toEqual([{ role: 'user', content: 'Oi' }]);
+  });
+});
+
+// ADR-0159 — `ContentPart[]` (imagem via `@mention`/`--image`): o adapter Anthropic
+// já monta `content` como array de blocos em outros ramos (tool_result/tool_use);
+// este é o MESMO padrão aplicado à mensagem de usuário com texto+imagem.
+describe('toAnthropicMessages — ADR-0159 (ContentPart[] · blocos texto/imagem)', () => {
+  it('content ContentPart[] só-imagem ⇒ vira bloco {type:image, source:{type:base64,...}}', () => {
+    const out = toAnthropicMessages([
+      { role: 'user', content: [{ type: 'image', mimeType: 'image/png', base64: 'QUJD' }] },
+    ]);
+    expect(out).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QUJD' } },
+        ],
+      },
+    ]);
+  });
+
+  it('content ContentPart[] texto+imagem ⇒ ambos os blocos, na ordem', () => {
+    const out = toAnthropicMessages([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'o que tem aqui?' },
+          { type: 'image', mimeType: 'image/jpeg', base64: 'ZmFrZQ==' },
+        ],
+      },
+    ]);
+    expect(out).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'o que tem aqui?' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'ZmFrZQ==' } },
+        ],
+      },
+    ]);
+  });
+
+  it('assistant com tool_calls + content ContentPart[] (texto+imagem) ⇒ blocos texto/imagem ANTES do tool_use', () => {
+    const out = toAnthropicMessages([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'olha essa imagem' },
+          { type: 'image', mimeType: 'image/gif', base64: 'Z2lm' },
+        ],
+        tool_calls: [{ id: 't1', name: 'read', input: {} }],
+      },
+    ]);
+    expect(out).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'olha essa imagem' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/gif', data: 'Z2lm' } },
+          { type: 'tool_use', id: 't1', name: 'read', input: {} },
+        ],
+      },
+    ]);
+  });
+
+  it('role:tool com content ContentPart[] ⇒ tool_result carrega os blocos (não a string bruta)', () => {
+    const out = toAnthropicMessages([
+      {
+        role: 'tool',
+        content: [{ type: 'image', mimeType: 'image/png', base64: 'aW1n' }],
+        tool_call_id: 'tc1',
+      },
+    ]);
+    expect(out).toEqual([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'tc1',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aW1n' } },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
 });

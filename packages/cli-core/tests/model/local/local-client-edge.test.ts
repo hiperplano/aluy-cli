@@ -103,6 +103,37 @@ describe('LocalModelClient — bordas', () => {
     expect(body.max_tokens).toBe(8192); // DEFAULT_MAX_TOKENS quando não configurado.
   });
 
+  // ADR-0159 — `system` do provider é SEMPRE string (o `buildSystemPrompt` do CLI só
+  // emite texto); este ramo é DEFENSIVO — cobre o guard `typeof m.content === 'string'`
+  // em `toLocalRequest` sem depender de um caminho real que produza `ContentPart[]`
+  // numa mensagem `role:system`.
+  it('toLocalRequest: 1ª system com ContentPart[] ⇒ extrai só o texto (defensivo, não perde silenciosamente)', async () => {
+    const sse = 'data: [DONE]\n\n';
+    const { fetch, calls } = makeBrokerFetch({ status: 200, sse });
+    await drain(
+      client({ fetch }).stream({
+        request: req({
+          messages: [
+            {
+              role: 'system',
+              content: [
+                { type: 'text', text: 'parte 1' },
+                { type: 'image', mimeType: 'image/png', base64: 'QUJD' },
+                { type: 'text', text: 'parte 2' },
+              ],
+            },
+            { role: 'user', content: 'oi' },
+          ],
+        }),
+      }),
+    );
+    const body = calls[0]?.body as Record<string, unknown>;
+    expect((body.messages as unknown[])[0]).toEqual({
+      role: 'system',
+      content: 'parte 1\nparte 2',
+    });
+  });
+
   it('toLocalRequest: tools + tool_choice viajam quando presentes', async () => {
     const sse = 'data: [DONE]\n\n';
     const { fetch, calls } = makeBrokerFetch({ status: 200, sse });

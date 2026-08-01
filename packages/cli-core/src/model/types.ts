@@ -41,6 +41,17 @@ export type LlmTier = 'aluy-strata' | 'aluy-deep' | 'aluy-flux' | 'custom' | (st
 export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
 
 /**
+ * ADR-0159 — uma PARTE de conteúdo multimodal de `ChatMessage.content`: texto puro
+ * OU imagem inline (base64). União MÍNIMA de propósito — sem áudio/vídeo/doc até
+ * uma ADR pedir. `mimeType` é o tipo MIME da imagem (a lista FECHADA de formatos
+ * aceitos — png/jpeg/webp/gif — é responsabilidade do leitor de anexo, não deste
+ * tipo; aqui é só o contrato de transporte).
+ */
+export type ContentPart =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'image'; readonly mimeType: string; readonly base64: string };
+
+/**
  * EST-0996 — uma tool-call ESTRUTURADA proposta pelo modelo via function-calling
  * NATIVO do provider (espelha o `tool_calls` da API OpenAI, achatado p/ o que o
  * loop consome). `id` é o handle que PAREIA o resultado (`ChatMessage` role `tool`
@@ -84,7 +95,12 @@ export interface ToolFunctionSchema {
  */
 export interface ChatMessage {
   readonly role: ChatRole;
-  readonly content: string;
+  /**
+   * ADR-0159 — texto puro (o caminho de SEMPRE, sem mudança) OU `ContentPart[]`
+   * (`@mention`/`--image` de imagem). A união preserva TODO call-site existente
+   * que trata `.content` como string sem qualquer mudança de comportamento.
+   */
+  readonly content: string | readonly ContentPart[];
   readonly tool_calls?: readonly NativeToolCall[];
   readonly tool_call_id?: string;
 }
