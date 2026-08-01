@@ -31,6 +31,17 @@ describe('buildServiceCreateSystemPrompt — PURA', () => {
     expect(prompt.trimEnd().endsWith('manhã')).toBe(true);
   });
 
+  it('apara espaço/quebra à ESQUERDA da descrição também (não só à direita)', () => {
+    // `trimEnd()` (teste acima) mascara um `.trim()` incompleto — ele some com
+    // QUALQUER whitespace à direita da string inteira, mutante ou não. Este
+    // teste isola a linha exata da descrição p/ garantir que a ESQUERDA
+    // também foi aparada (mata o mutante que troca `descricao.trim()` por
+    // `descricao` cru em `buildServiceCreateSystemPrompt`).
+    const prompt = buildServiceCreateSystemPrompt('   um pesquisador que lê fontes toda manhã');
+    const descLine = prompt.split('\n').find((l) => l.includes('um pesquisador que lê fontes toda manhã'));
+    expect(descLine).toBe('um pesquisador que lê fontes toda manhã');
+  });
+
   it('instrui ENTREVISTAR o que faltar (schedule/canal/autonomia/funil) via `perguntar`', () => {
     const prompt = buildServiceCreateSystemPrompt('um serviço qualquer');
     expect(prompt).toContain('ENTREVISTE');

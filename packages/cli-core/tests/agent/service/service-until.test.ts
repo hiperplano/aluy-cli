@@ -10,6 +10,12 @@ describe('parseHHMM', () => {
     expect(parseHHMM('25:00')).toBeUndefined();
     expect(parseHHMM('10:70')).toBeUndefined();
   });
+  it('aceita o limite EXATO 23:59 (faixa válida é inclusiva)', () => {
+    // A validação é `hour > 23 || minute > 59` — sem este teste, um mutante
+    // que troca por `>=` (limite EXCLUSIVO) passaria despercebido, já que o
+    // teste de forma errada acima só cobre valores ACIMA do limite (25:00).
+    expect(parseHHMM('23:59')).toEqual({ hour: 23, minute: 59 });
+  });
 });
 
 describe('todayAt', () => {

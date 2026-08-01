@@ -42,6 +42,16 @@ describe('nextCronFire', () => {
     expect(next).toEqual(new Date('2026-08-01T10:15:00'));
   });
 
+  it('passo /1 (limite mínimo válido) é aceito — equivale a "*"', () => {
+    // A validação é `step < 1` (só rejeita `/0`, que travaria o loop de
+    // varredura em incremento zero) — sem este teste, um mutante que troca
+    // por `<=` (rejeitando também `/1`) passaria despercebido, já que o outro
+    // teste de passo só cobre /15.
+    const from = new Date('2026-08-01T10:02:00');
+    const next = nextCronFire('*/1 * * * *', from);
+    expect(next).toEqual(new Date('2026-08-01T10:03:00'));
+  });
+
   it('lista de minutos', () => {
     const from = new Date('2026-08-01T10:02:00');
     const next = nextCronFire('0,30 * * * *', from);

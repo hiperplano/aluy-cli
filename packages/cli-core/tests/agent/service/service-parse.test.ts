@@ -117,6 +117,27 @@ describe('parseServiceManifest — FALHA FECHADA (RES-MD-3)', () => {
     expect(reason).toMatch(/fora da própria faixa/);
   });
 
+  it('tunável com valor INICIAL exatamente NO limite (min ou max) ⇒ ACEITO (faixa é inclusiva)', () => {
+    // A validação é `value < min || value > max` — sem isto, um mutante que
+    // troca por `<=`/`>=` (limite EXCLUSIVO) passa despercebido, já que os
+    // outros testes só cobrem valor estritamente DENTRO (2 em [1..5]) ou
+    // estritamente FORA (9 em [1..5]), nunca exatamente NO limite.
+    const atMin = ok('service.md', '---\nname: trader\ntamanho-posicao: 1 [1..5]\n---\nOrquestrador.');
+    expect(atMin.tunables.find((t) => t.key === 'tamanho-posicao')).toEqual({
+      key: 'tamanho-posicao',
+      value: 1,
+      min: 1,
+      max: 5,
+    });
+    const atMax = ok('service.md', '---\nname: trader\ntamanho-posicao: 5 [1..5]\n---\nOrquestrador.');
+    expect(atMax.tunables.find((t) => t.key === 'tamanho-posicao')).toEqual({
+      key: 'tamanho-posicao',
+      value: 5,
+      min: 1,
+      max: 5,
+    });
+  });
+
   it('until fora do formato HH:MM ⇒ erro', () => {
     const reason = fail('service.md', '---\nname: trader\nuntil: "5:30pm"\n---\nOrquestrador.');
     expect(reason).toMatch(/HH:MM/);
