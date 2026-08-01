@@ -146,6 +146,23 @@ export { UserWorkflowsLoader, WORKFLOWS_DIRNAME } from './user-workflows.js';
 export type { UserWorkflowsLoaderOptions, WorkflowLoadResult } from './user-workflows.js';
 export { ProjectWorkflowsLoader, PROJECT_WORKFLOWS_DIRNAMES } from './project-workflows.js';
 export type { ProjectWorkflowsLoaderOptions } from './project-workflows.js';
+// ADR-0158 (aceito, APR-0148) — REGISTRY confinado dos SERVIÇOS instalados em
+// `~/.aluy/services/<nome>/` (sem camada de projeto — um serviço é sempre GLOBAL, o
+// dono que instalou). Valida cron (`validateCronExpr`) + `workflow:` existente além do
+// parser puro (RES-MD-3); serviço inválido não derruba a listagem (fail-safe).
+export {
+  UserServicesStore,
+  SERVICES_DIRNAME,
+  safeServiceDirName,
+  isServiceEntryError,
+  scanServiceDirForInstall,
+} from './services-store.js';
+export type {
+  UserServicesStoreOptions,
+  ServiceEntry,
+  ServiceEntryError,
+  ServicesListResult,
+} from './services-store.js';
 // EST-1112 · ADR-0116 (proposto) · CLI-SEC-11 (reaplicado) — LOADERS confinados das
 // SKILLS (`<nome>/SKILL.md`, unidade = DIRETÓRIO por skill): GLOBAL (`~/.aluy/skills/`,
 // dono=confiável → origin='global') e PROJETO (`.claude/skills/` + `.aluy/skills/` no

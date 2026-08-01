@@ -278,6 +278,8 @@ export interface Catalog {
   'cmd.quit': string;
   /** EST-1105 · ADR-workflows — `/workflows`: lista os workflows .md mapeados. */
   'cmd.workflows': string;
+  /** ADR-0158 (aceito, APR-0148) — `/service`: SERVIÇOS plugáveis, canal principal (§10). */
+  'cmd.service': string;
 }
 
 /** Toda chave i18n válida (derivada do `Catalog` — fonte única). */

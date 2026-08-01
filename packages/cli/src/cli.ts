@@ -87,6 +87,13 @@ export type CliAction =
   // EST-1150 · ADR-0128 — `aluy cron`: agendamento PERSISTENTE (jobs disparados
   // pelo cron do SO, sem daemon próprio na v1). 1ª fatia: Linux (crontab).
   | { kind: 'cron'; argv: readonly string[] }
+  // ADR-0158 (aceito, APR-0148) — `aluy service <sub>`: SERVIÇOS plugáveis, fase 1
+  // (fundação SEM runner — list/status/install/uninstall). O parser fino do
+  // subcomando (list/status/install/uninstall + os "not-yet" da fase 2) mora em
+  // `commands/service.ts` (espelha o `cron`: argv cru repassado, sem duplicar regra
+  // de parsing aqui). O canal PRINCIPAL de gestão é `/service` DENTRO da sessão
+  // (ADR-0158 §10, emenda de aprovação); este shell é o espelho.
+  | { kind: 'service'; argv: readonly string[] }
   // invocação interativa default (sem objetivo) ou com objetivo direto
   // (`aluy "objetivo"`). `mode`/`dense` são flags de sessão (não persistem).
   // `unsafe` é derivado de `mode==='unsafe'` (legado, p/ não quebrar chamadores).
@@ -276,6 +283,7 @@ Uso:
   aluy skills
   aluy workflows
   aluy cron
+  aluy service [list | status <nome> | install <path|url> | uninstall <nome>]
 
 Opções:
   -v, --version   Mostra a versão e sai
@@ -509,6 +517,22 @@ Workflows .md:
              (~/.aluy/workflows/*.md) e de PROJETO (.aluy/workflows/*.md no cwd), com
              nome, escopo e descrição. Um workflow é uma sequência de passos
              reutilizável. Read-only, sem modelo, sem rede.
+
+Serviços plugáveis (ADR-0158) — fase 1: fundação SEM runner ainda:
+  service [list]                 Lista os serviços instalados (nome, estado — sempre
+                                  "parado" nesta fase —, próximo schedule, descrição).
+  service status <nome>          Detalhe de um serviço + a validação (cron/workflow)
+                                  já conferida pelo registry.
+  service install <path|url>     Copia um diretório local OU clona um repo git p/
+                                  ~/.aluy/services/<nome>/. Valida ANTES de ativar e
+                                  mostra o MANIFESTO VISÍVEL (daemons, skills com
+                                  script, mcp.json, canal, autonomia) — exige
+                                  confirmação (--yes pula, p/ script/CI).
+  service uninstall <nome>       Remove o diretório do serviço (pede confirmação).
+  Um serviço é um diretório-manifesto (service.md + agents/workflows/skills/…, o
+  mesmo formato já existente) — nada de grafo/YAML aninhado. O canal PRINCIPAL de
+  gestão é "/service" DENTRO da sessão (create/start/stop/attach chegam na fase 2);
+  este shell é o espelho, útil p/ script/automação.
 
 Providers e modelos:
   models [--backend local|broker] [--json]
@@ -931,6 +955,11 @@ export function parseArgs(argv: readonly string[]): CliAction {
   // o runner (subcomandos create/list/remove/run-now são parseados dentro do módulo cron.ts).
   if (sub === 'cron') {
     return { kind: 'cron', argv: argv.slice(1) };
+  }
+  // ADR-0158 — `aluy service ...`: repassa o argv cru p/ o parser próprio do
+  // runner (`commands/service.ts`), mesmo padrão do `cron` acima.
+  if (sub === 'service') {
+    return { kind: 'service', argv: argv.slice(1) };
   }
 
   if (argv.includes('-v') || argv.includes('--version')) {

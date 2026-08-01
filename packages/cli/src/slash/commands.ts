@@ -51,6 +51,7 @@ export type NativeCommandId =
   | 'inventory'
   | 'workflows'
   | 'telegram'
+  | 'service'
   | 'add-dir'
   | 'split'
   | 'fullscreen'
@@ -1014,6 +1015,74 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
       },
     ],
     // EST-0982 — read-only puro (lista workflows numa nota): roda JÁ mid-turn.
+    parallelWhileBusy: true,
+  },
+  {
+    // ADR-0158 (aceito, APR-0148) — `/service`: SERVIÇOS plugáveis. Emenda de
+    // aprovação §10: `/service` DENTRO da sessão é o canal PRINCIPAL de gestão (o
+    // shell `aluy service` é o espelho, não o contrário — hierarquia invertida em
+    // relação aos outros subsistemas). `list`/`status`/`start`/`stop`/`logs`
+    // (fase 2), `attach` (fase 4, §11 — snapshot in-session; sessão viva é o
+    // shell) e `create` (fase 5, §10 — CONVERSACIONAL: entrevista + escreve em
+    // STAGING, PROMPT-DRIVEN igual ao `/init`, `slash/service-create.ts`) já
+    // funcionam de verdade.
+    name: 'service',
+    summary: 'serviços plugáveis (ADR-0158) · list/status/create/start/stop/logs/attach',
+    summaryKey: 'cmd.service',
+    source: 'native',
+    id: 'service',
+    section: 'workspace',
+    // Sem argumento ⇒ LISTA (read-only); `status`/`attach` também são read-only
+    // (attach in-session é um SNAPSHOT — nunca escreve; a sessão VIVA/interativa é
+    // o shell, `aluy service attach`). `start`/`stop` MUTAM (spawn/SIGTERM) — de
+    // propósito FORA do `read-only` geral (o `agentEffect` de baixo cobre o efeito
+    // AGREGADO do comando p/ o agente invocar sozinho; `subcommandEffects` afina).
+    agentEffect: 'read-only',
+    // `create` espelha o `/init` (`agentEffect: 'session-effect'`) — é um turno
+    // guiado que ESCREVE arquivos (em staging, nunca em `~/.aluy/services/`,
+    // `slash/service-create.ts`), não uma leitura.
+    subcommandEffects: { status: 'read-only', attach: 'read-only', create: 'session-effect' },
+    subcommands: [
+      {
+        name: 'list',
+        summary: 'lista os serviços instalados (estado, próximo turno)',
+        terminal: true,
+      },
+      { name: 'status', summary: 'detalhe de um serviço + validação', usage: 'status <nome>' },
+      {
+        name: 'install',
+        summary:
+          'instala um diretório-manifesto local ou repo git (por ora, via `aluy service install` no shell)',
+        usage: 'install <path|git-url>',
+      },
+      {
+        name: 'uninstall',
+        summary: 'remove um serviço instalado (por ora, via `aluy service uninstall` no shell)',
+        usage: 'uninstall <nome>',
+      },
+      {
+        name: 'create',
+        summary: 'criação conversacional — descreva em prosa; o agente entrevista e escreve o rascunho',
+        usage: 'create <descrição em prosa do serviço>',
+      },
+      {
+        name: 'start',
+        summary: 'liga o serviço (spawn destacado, mostra manifesto visível + confirma)',
+        usage: 'start <nome>',
+      },
+      {
+        name: 'stop',
+        summary: 'para o serviço (SIGTERM/SIGKILL, derruba daemons próprios)',
+        usage: 'stop <nome>',
+      },
+      {
+        name: 'attach',
+        summary:
+          'snapshot do estado+log de um serviço rodando (ADR-0158 §11) — p/ sessão AO VIVO e interativa use `aluy service attach <nome>` no shell',
+        usage: 'attach <nome>',
+      },
+    ],
+    // EST-0982 — read-only puro (lista serviços numa nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
   },
   {

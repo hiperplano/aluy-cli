@@ -36,9 +36,13 @@ export interface WorkflowActivityOutcome {
    * Se `ok === false`, por que parou. `'error'` = erro no turno, `'cancelled'` =
    * abortado pelo usuário, `'limit'` = teto/budget estourado. `'final'` = o
    * agente declarou conclusão ANTES do fim do workflow (ex.: tarefa já resolvida).
+   * `'awaiting-owner'` (ADR-0158 §5 pt.4/§3) — o TURNO fechou com uma decisão
+   * PENDENTE do dono (detectada pelo runner de serviço via `awaitsUserDecision`,
+   * ADR-0157): regra dura, o runner PARA o workflow e NUNCA prossegue com suposição
+   * (distinto de `'final'`, que é o agente CONCLUINDO cedo com sucesso).
    * `undefined` com `ok === true` = atividade normal concluída.
    */
-  readonly stop?: 'final' | 'error' | 'cancelled' | 'limit';
+  readonly stop?: 'final' | 'error' | 'cancelled' | 'limit' | 'awaiting-owner';
 }
 
 /** Resultado FINAL do `runWorkflow`. */

@@ -126,6 +126,10 @@ export {
   buildReanchor,
   buildSelfCheckProbe,
   buildVerificationCapNote,
+  // ADR-0157/APR-0147 — o gate `awaitsUserDecision` (fechamento interrogativo do
+  // turno). ADR-0158 §5 pt.4 o REUSA no runner de serviço: fase 2 (sem canal ainda)
+  // classifica o texto final do turno p/ decidir "aguardando dono" vs. turno normal.
+  awaitsUserDecision,
 } from './self-check.js';
 // EST-F54 — Política de CONTINUAÇÃO do regente (Inv. I Fluidez): decideContinuation
 // (função PURA) + detectores (isAnnounceNoTool) + nudge + resolveContinuationConfig.
@@ -399,6 +403,87 @@ export {
   type WorkflowActivityOutcome,
   type WorkflowRunResult,
 } from './workflow/workflow-runner.js';
+
+// ADR-0158 (aceito, APR-0148) — SERVIÇOS plugáveis: parser PURO do manifesto
+// `service.md` (frontmatter = contrato duro/§3 + corpo = orquestrador/§1; autonomy
+// v1 só `ask`; tunáveis/circuit-breakers com faixa `[min..max]`/§8.3/§8.5a; FALHA
+// FECHADA RES-MD-3), o FORMATADOR PURO da listagem (`/service`, canal principal —
+// §10) e o FORMATADOR PURO do "manifesto visível" exigido antes do `install` (§9).
+// A leitura confinada de `~/.aluy/services/<nome>/` + a validação semântica
+// (cron/workflow existente) são do locus concreto (@hiperplano/aluy-cli, io/services-store.ts).
+export {
+  parseServiceManifest,
+  isServiceManifestError,
+  normalizeServiceName,
+  type ServiceManifest,
+  type ServiceManifestError,
+  type ServiceManifestParse,
+  type ServiceTunable,
+} from './service/service-parse.js';
+export {
+  buildServicesNote,
+  serviceDescriptionLine,
+  type ServicesListNote,
+  type ServicesListInput,
+  type ServiceListEntry,
+  type ServiceListRejection,
+} from './service/service-list.js';
+export {
+  buildServiceManifestVisibleNote,
+  type ServiceManifestVisibleNote,
+  type ServiceManifestVisibleInput,
+  type ServiceDaemonDeclared,
+  type ServiceSkillDeclared,
+} from './service/service-manifest-visible.js';
+// ADR-0158 §5 — RUNNER (fase 2, esta fatia): cálculo PURO do próximo disparo do
+// `schedule` (cron), parse do `budget:` p/ inteiro de tokens, conta do `until:`
+// (fim de expediente) e parser do `daemons/<nome>/daemon.md` (§6). Todo I/O
+// (spawn/pidfile/sleep real) é do runner concreto em `@hiperplano/aluy-cli`.
+export { nextCronFire } from './service/cron-next.js';
+export { parseServiceBudget } from './service/service-budget.js';
+export { parseHHMM, todayAt, msUntilDeadline } from './service/service-until.js';
+export {
+  parseDaemonManifest,
+  isDaemonManifestError,
+  type DaemonManifest,
+  type DaemonManifestError,
+  type DaemonManifestParse,
+} from './service/daemon-parse.js';
+// ADR-0158 §5 pt.4/§8.1/§8.2 (FASE 3) — o CANAL do serviço: resolução PURA do
+// `channel:` p/ o chat-id do Telegram (TC-5 — o alvo é sempre o do manifesto, nunca
+// um argumento de runtime) + os FORMATADORES puros do reporte de fechamento (§8.2),
+// do alerta de falha (§8.1) e das duas pontas da ASK-ESPERA (§5 pt.4). O I/O
+// (TelegramClient/keychain/EgressRateLimiter) é do runner concreto, `@hiperplano/aluy-cli`.
+export { parseServiceTelegramChatId } from './service/service-channel.js';
+export {
+  formatServiceTurnReport,
+  formatServiceFailureAlert,
+  formatServiceAskMessage,
+  formatServiceResumeInstruction,
+  formatServiceAskTimeoutAlert,
+  formatOwnerSayInjection,
+  formatElapsedSince,
+  hasAskTimedOut,
+  DEFAULT_ASK_TIMEOUT_MS,
+  type ServiceTurnClosure,
+} from './service/service-messages.js';
+// ADR-0158 §11 (FASE 4 — attach) — o PROTOCOLO NDJSON puro do socket local de
+// attach (eventos de saída log/state/block; o único evento de entrada, `say`). O
+// socket/fs em si (`attach-server.ts`, `attach-blocks.ts`) mora no `cli` — ver §8.
+export {
+  encodeServiceAttachServerEvent,
+  encodeServiceAttachClientEvent,
+  parseServiceAttachServerLine,
+  parseServiceAttachClientLine,
+  formatServiceAttachEventForTerminal,
+  type ServiceAttachTurnState,
+  type ServiceAttachLogEvent,
+  type ServiceAttachStateEvent,
+  type ServiceAttachBlockEvent,
+  type ServiceAttachServerEvent,
+  type ServiceAttachSayEvent,
+  type ServiceAttachClientEvent,
+} from './service/attach-protocol.js';
 
 // EST-0958 · CLI-SEC-3/4/9 — `!comando` (atalho de shell do composer): executor
 // que reusa a MESMA catraca (`decide`) + shell confinado (ToolPorts) do agente.

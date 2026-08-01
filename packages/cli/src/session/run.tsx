@@ -98,6 +98,9 @@ import {
   buildWorkflowsNote,
   buildSkillsNote,
   buildAvailableAgentsNote,
+  buildServicesNote,
+  buildServiceManifestVisibleNote,
+  formatElapsedSince,
   findProvider,
   type NativeTool,
   type ToolPorts,
@@ -128,8 +131,20 @@ import {
   NodeMemoryStore,
   HooksConfigStore,
   ExportStore,
+  UserServicesStore,
+  isServiceEntryError,
+  scanServiceDirForInstall,
 } from '../io/index.js';
 import type { ProjectInstructionsLoad } from '../io/index.js';
+import { existsSync } from 'node:fs';
+// ADR-0158 §5 (fase 2) — `/service` in-session usa a MESMA mecânica do shell
+// (`commands/service.ts`): pidfile/status/log/daemons do runner. Zero lógica
+// duplicada — os dois consomem estes módulos concretos.
+import { runnerPidPath, runnerLogPath } from '../service/paths.js';
+import { readServiceRuntimeStatus } from '../service/status.js';
+import { readPidFile, isRunnerAlive, removePidFile } from '../service/pid.js';
+import { appendLog as appendServiceLog, tailLog as tailServiceLog } from '../service/log.js';
+import { stopDaemons as stopServiceDaemons } from '../service/daemons.js';
 import { attachHooksObserver } from './hooks-observer.js';
 import { makeToolHooksObserver } from './tool-hooks-observer.js';
 import {
@@ -179,6 +194,7 @@ import {
 } from '@hiperplano/aluy-cli-core';
 import { DEFAULT_TIER } from './wiring.js';
 import { runInit, buildScaffoldSystemPrompt } from '../slash/init.js';
+import { buildServiceCreateSystemPrompt, SERVICE_DRAFTS_DIRNAME } from '../slash/service-create.js';
 import { parseMemoryCommand, runMemoryCommand } from '../slash/memory.js';
 import { parseTodoCommand, runTodoCommand } from '../slash/todo.js';
 import { runCron } from '../commands/cron.js';
@@ -188,7 +204,7 @@ import {
   clearArmTransition,
   type ClearArmedVerb,
 } from '../slash/clear.js';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
 
 export interface RunSessionOptions extends BuildSessionOptions {
   /** Objetivo inicial (`aluy "objetivo"`). */
@@ -449,6 +465,16 @@ export function preflightCycleCeiling(
  */
 export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const env = opts.env ?? process.env;
+  // ADR-0158 §2/§5 (fase 2) — WIRING ESCOPADO do runner de SERVIÇO: quando o processo
+  // do serviço (`packages/cli/src/service/runner.ts`) spawna um turno headless via
+  // `aluy -p`, ele seta esta env var (INTERNA — não é flag pública) para o diretório
+  // do serviço. Presente ⇒ os loaders GLOBAIS (`~/.aluy/agents|skills|workflows|
+  // commands|mcp.json`) resolvem para DENTRO do diretório do serviço em vez do
+  // `~/.aluy/` do dono — "o serviço só enxerga o próprio diretório" (§2), sem vazar
+  // personas/skills/mcp/memória do dono nem de outros serviços. Ausente (caminho
+  // NORMAL, sessão do dono) ⇒ ZERO mudança de comportamento (todo `?? new Loader()`
+  // abaixo cai no mesmo default de sempre).
+  const serviceScopeDir = env.ALUY_SERVICE_HOME;
   // EST-1007 — MODO HEADLESS (`-p`/`--print`/`--exec`): força o caminho NÃO-TTY mesmo
   // num terminal interativo (EXPLÍCITO, não depende de pipe). Sem splash, sem render
   // Ink, sem auto-detecção OSC/notify: roda o loop e imprime SÓ o resultado final.
@@ -590,7 +616,13 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // confinada), não o `process.cwd()` cru — casa `--continue` ao diretório real.
   // GC best-effort no start (idade/teto) — nunca bloqueia. Fail-safe: nada casa ⇒
   // sessão nova (resolução `none`), sem id forçado.
-  const sessionStore = opts.sessionStore ?? new SessionStore();
+  // ADR-0158 §2 (fase 2) — sob escopo de SERVIÇO, a transcrição de cada turno vai p/
+  // `<serviceDir>/.state/sessions/` (não mistura com `~/.aluy/sessions/` do dono).
+  const sessionStore =
+    opts.sessionStore ??
+    new SessionStore(
+      serviceScopeDir !== undefined ? { baseDir: join(serviceScopeDir, '.state') } : {},
+    );
   // best-effort: limpa sessões antigas/excedentes (unlink real). Não derruba nada.
   // ADR-0150 (balde b) — `session.gcMaxAgeMs`/`gcMaxCount` do config único, com a
   // sanidade MÍNIMA aplicada por `resolveSessionGcOptions` (idade ≥1 dia, contagem ≥1).
@@ -724,7 +756,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   });
   // EST-0979 (FU-S3-CODEX-TOML) — leitor do `~/.codex/config.toml` (Codex GLOBAL). Fonte
   // de MENOR precedência (`.aluy` global > Codex); DADO do dono; mesma catraca MCP.
-  const codexMcpStore = opts.codexMcpConfigStore ?? new CodexMcpConfigStore();
+  // ADR-0158 §2 (fase 2) — sob escopo de SERVIÇO, o Codex do DONO não é do serviço:
+  // aponta p/ dentro do diretório do serviço (sem `config.toml` lá ⇒ config vazia,
+  // NUNCA vaza o `~/.codex/` real do dono para dentro do turno do serviço).
+  const codexMcpStore =
+    opts.codexMcpConfigStore ??
+    new CodexMcpConfigStore(serviceScopeDir ? { baseDir: serviceScopeDir } : {});
   // Captura se cada fonte compat contribuiu servers (p/ o indicador de fontes).
   let projectMcpHadServers = false;
   let codexMcpHadServers = false;
@@ -766,6 +803,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     ...(mcpSandboxLauncher ? { sandboxLauncher: mcpSandboxLauncher } : {}),
     // ADR-0150 (balde b) — seção `mcp` do config único (connectTimeoutMs/callTimeoutMs).
     ...(savedConfig.mcp ? { mcpConfig: savedConfig.mcp } : {}),
+    // ADR-0158 §2 (fase 2) — sob escopo de SERVIÇO, o `mcp.json` GLOBAL lido é o do
+    // DIRETÓRIO DO SERVIÇO (`<serviceDir>/mcp.json`), não o `~/.aluy/mcp.json` do
+    // dono — "SÓ o mcp.json do serviço" (§2). `undefined` (caminho normal) ⇒
+    // `setupMcp` cai no default de sempre (`~/.aluy/mcp.json`).
+    ...(serviceScopeDir ? { aluyHome: serviceScopeDir } : {}),
     loadProjectConfig: async () => {
       const loaded = await projectMcpStore.load();
       projectMcpHadServers = loaded.config.servers.length > 0;
@@ -902,7 +944,13 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // anti-spoofing cross-camada RES-MD-1; auto-seleção só-globais). Malformado/`tools`
   // ilegível = FALHA FECHADA (RES-MD-3): coletado em `errors` (carga visível), NÃO entra.
   // O registro só tem efeito com sub-agentes habilitados; `spawn_agent({ agent })` o usa.
-  const userAgentsLoader = opts.userAgentsLoader ?? new UserAgentsLoader();
+  // ADR-0158 §2 (fase 2) — escopo de SERVIÇO: `agents/` do PRÓPRIO diretório do
+  // serviço no lugar de `~/.aluy/agents/` do dono (o serviço "só enxerga o próprio
+  // diretório"). A camada de PROJETO segue como sempre (`cwdWorkspace` = o cwd do
+  // processo, que o runner já seta para o dir do serviço via `cwd:` no spawn — sem
+  // `.claude/agents/` lá, ela contribui vazio; sem duplo-escaneio nem leak).
+  const userAgentsLoader =
+    opts.userAgentsLoader ?? new UserAgentsLoader(serviceScopeDir ? { baseDir: serviceScopeDir } : {});
   const projectAgentsLoader =
     opts.projectAgentsLoader ?? new ProjectAgentsLoader({ workspace: cwdWorkspace });
   const globalAgents = userAgentsLoader.load();
@@ -915,8 +963,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // Reusa os MESMOS loaders confinados do `/skills` (global `~/.aluy/skills/` + projeto
   // `.claude/skills/`/`.aluy/skills/`); o array é reaproveitado abaixo p/ a contagem de
   // governança (`setGovernanceCounts`), sem reler o filesystem duas vezes.
+  // ADR-0158 §2 (fase 2) — escopo de SERVIÇO: `skills/` do diretório do serviço.
   const loadedSkills = [
-    ...new UserSkillsLoader().load().skills,
+    ...new UserSkillsLoader(serviceScopeDir ? { baseDir: serviceScopeDir } : {}).load().skills,
     ...new ProjectSkillsLoader({ workspace: cwdWorkspace }).load().skills,
   ];
 
@@ -1480,7 +1529,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // menu/palette E o mapa name→template p/ a expansão. O `.md` é config do dono; o
   // resultado da expansão é um OBJETIVO submetido pelo usuário (passa pela catraca
   // normal) — config de projeto NÃO relaxa a catraca. Idempotente: relê a cada boot.
-  const commandsLoader = opts.userCommandsLoader ?? new UserCommandsLoader();
+  // ADR-0158 §2 (fase 2) — escopo de SERVIÇO: `commands/` do diretório do serviço.
+  const commandsLoader =
+    opts.userCommandsLoader ??
+    new UserCommandsLoader(serviceScopeDir ? { baseDir: serviceScopeDir } : {});
   const projectCommandsLoader =
     opts.projectCommandsLoader ?? new ProjectCommandsLoader({ workspace: cwdWorkspace });
   const globalUserCommands = commandsLoader.load();
@@ -1505,8 +1557,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // ADR-0145 — reusa `loadedSkills` (já carregado acima p/ o `capabilities`), sem
     // reler o filesystem de skills uma 2ª vez.
     const skills = loadedSkills;
+    // ADR-0158 §2 (fase 2) — escopo de SERVIÇO: `workflows/` do diretório do serviço.
     const workflows = [
-      ...new UserWorkflowsLoader().load().workflows,
+      ...new UserWorkflowsLoader(serviceScopeDir ? { baseDir: serviceScopeDir } : {}).load()
+        .workflows,
       ...new ProjectWorkflowsLoader({ workspace: cwdWorkspace }).load().workflows,
     ];
     let memory = 0;
@@ -1627,6 +1681,19 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         const detachHeadlessToolHooks = toolHooksObserver
           ? built.controller.addToolObserver(toolHooksObserver)
           : () => {};
+        // ADR-0158 §11 (FASE 4 — attach) — autosave INCREMENTAL também no headless
+        // `-p`: antes desta linha, o one-shot só gravava a sessão UMA vez, no fim
+        // (`saveNow()` logo abaixo do `finally`) — um `attach` externo lendo
+        // `<serviceDir>/.state/sessions/<id>.json` durante o turno via
+        // `service/attach-blocks.ts` só veria o arquivo do turno ANTERIOR (ou nada),
+        // nunca os blocos do turno em andamento. Mesmo padrão de `unsubSave` já usado
+        // no `runLinear` (linha ~1965) e na TUI interativa (linha ~3640) — aqui
+        // estendido ao ramo `-p`/`--print` (que é exatamente o que o runner de
+        // serviço spawna por atividade, `service/runner.ts`). Sem isto, o `attach`
+        // teria que degradar para "só log+estado" (a v1 explicitamente permite esse
+        // degrade — ver a nota em `attach-blocks.ts` — mas esta é a via barata que a
+        // FASE 4 pediu para tentar primeiro).
+        const unsubHeadlessSave = built.controller.subscribe(() => saveNow());
         let res;
         try {
           if (format === 'stream-json') {
@@ -1724,8 +1791,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         } finally {
           detachHeadlessHooks();
           detachHeadlessToolHooks(); // EST-1018 — solta o observador de pre/post-tool.
+          unsubHeadlessSave(); // ADR-0158 §11 — solta o autosave incremental do attach.
         }
-        saveNow(); // grava a transcrição do one-shot (auto-save best-effort).
+        saveNow(); // grava a transcrição do one-shot (auto-save best-effort, final).
         // Diagnóstico (anexos recusados, falha) → STDERR; nunca polui o stdout scriptável.
         if (res.diagnostic !== undefined) process.stderr.write(`aluy: ${res.diagnostic}\n`);
         if (format === 'json') {
@@ -2620,6 +2688,317 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       const note = buildWorkflowsNote({
         workflows: [...globalWf.workflows, ...projectWf.workflows],
         errors: [...globalWf.errors, ...projectWf.errors],
+      });
+      built.controller.pushNote(note.title, note.lines);
+      return;
+    }
+
+    // ADR-0158 (aceito, APR-0148) — `/service`: SERVIÇOS plugáveis, o canal PRINCIPAL
+    // de gestão dentro da sessão (§10, emenda de aprovação — o shell é o espelho).
+    // FASE 2 (esta fatia): `list`/`status` mostram o estado REAL (pidfile+kill-0,
+    // `service/status.ts`); `start`/`stop`/`logs` viram REAIS aqui também — mesma
+    // mecânica do shell (`commands/service.ts`), zero lógica duplicada. O confirm de
+    // `start` (manifesto visível + pergunta) reusa o `questionResolver` que a TUI já
+    // tem (mesmo mecanismo do `perguntar`/permission-ask — ADR-0158 §10: "manifesto
+    // visível antes do start, chave de ignição do dono", nas DUAS superfícies).
+    // `install`/`uninstall` seguem orientando pro shell (o fluxo de confirmação de
+    // 2 passos com clone/cópia de diretório não coube nesta fatia — ver relatório).
+    if (command.id === 'service') {
+      const store = new UserServicesStore();
+      const statusMatch = /^\s*status\s+(\S+)/.exec(args);
+      if (statusMatch) {
+        const name = statusMatch[1]!;
+        const entry = store.get(name);
+        if (entry === undefined) {
+          built.controller.pushNote('service', [
+            `serviço "${name}" não encontrado em ${store.servicesDir}.`,
+          ]);
+          return;
+        }
+        if (isServiceEntryError(entry)) {
+          built.controller.pushNote(`service — ${name} (inválido)`, [`⚠ ${entry.reason}`]);
+          return;
+        }
+        const m = entry.manifest;
+        const rt = readServiceRuntimeStatus(entry.dir);
+        // ADR-0158 §5 pt.4 (FASE 3, missão item 4) — "aguardando dono (pergunta
+        // enviada há X)": `updatedAtIso` do snapshot É o instante do último envio
+        // (o status só é regravado quando o estado MUDA — runner.ts).
+        const pendingSince =
+          rt.snapshot?.turnState === 'awaiting-owner' && rt.snapshot.updatedAtIso !== undefined
+            ? ` (pergunta enviada há ${formatElapsedSince(Date.now() - Date.parse(rt.snapshot.updatedAtIso))})`
+            : '';
+        const stateLine = !rt.running
+          ? 'PARADO'
+          : rt.snapshot?.turnState === 'running-turn'
+            ? 'RODANDO · turno em andamento'
+            : rt.snapshot?.turnState === 'awaiting-owner'
+              ? `RODANDO · ⚠ aguardando dono${pendingSince}`
+              : rt.snapshot?.turnState === 'sleeping' && rt.snapshot.nextFireIso !== undefined
+                ? `RODANDO · dormindo até ${rt.snapshot.nextFireIso}`
+                : 'RODANDO';
+        const lines: string[] = [
+          `${stateLine} · dir: ${entry.dir}`,
+          ...(rt.running && rt.pid !== undefined ? [`pid: ${rt.pid}`] : []),
+          ...(rt.snapshot?.pendingQuestion !== undefined
+            ? [`⚠ pergunta pendente${pendingSince}: ${rt.snapshot.pendingQuestion}`]
+            : []),
+          ...(m.description !== undefined ? [`descrição: ${m.description}`] : []),
+          `schedule: ${m.schedule ?? '(não declarado)'}`,
+          `until: ${m.until ?? '(não declarado)'}`,
+          `workflow: ${m.workflow ?? '(não declarado)'}`,
+          `canal: ${m.channel ?? '(NENHUM)'}`,
+          `autonomia: ${m.autonomy ?? '(não declarada)'}`,
+          `budget: ${m.budget ?? '(não declarado)'}`,
+          'validação: OK (schedule/workflow conferidos pelo registry)',
+        ];
+        built.controller.pushNote(`service — ${m.name}`, lines);
+        return;
+      }
+
+      const stopMatch = /^\s*stop\s+(\S+)/.exec(args);
+      if (stopMatch) {
+        const name = stopMatch[1]!;
+        const dir = store.resolveDir(name);
+        if (dir === undefined || !existsSync(dir)) {
+          built.controller.pushNote('service', [`serviço "${name}" não encontrado.`]);
+          return;
+        }
+        const pidPath = runnerPidPath(dir);
+        const pid = readPidFile(pidPath);
+        if (pid === undefined || !isRunnerAlive(pidPath)) {
+          built.controller.pushNote('service', [`serviço "${name}" já está parado.`]);
+          removePidFile(pidPath);
+          return;
+        }
+        // `onCommand` é SÍNCRONO (espelha `/workflows run`, que também dispara
+        // fire-and-forget) — a espera pelo SIGTERM roda numa IIFE async à parte.
+        void (async (): Promise<void> => {
+          try {
+            process.kill(pid, 'SIGTERM');
+          } catch {
+            /* já morreu */
+          }
+          const deadline = Date.now() + 10_000;
+          while (Date.now() < deadline && isRunnerAlive(pidPath)) {
+            await new Promise((r) => setTimeout(r, 300));
+          }
+          if (isRunnerAlive(pidPath)) {
+            try {
+              process.kill(pid, 'SIGKILL');
+            } catch {
+              /* já morreu */
+            }
+          }
+          stopServiceDaemons(dir, (l) => appendServiceLog(runnerLogPath(dir), l));
+          removePidFile(pidPath);
+          built.controller.pushNote('service', [`✓ serviço "${name}" parado.`]);
+        })();
+        built.controller.pushNote('service', [`parando o serviço "${name}"…`]);
+        return;
+      }
+
+      const logsMatch = /^\s*logs\s+(\S+)/.exec(args);
+      if (logsMatch) {
+        const name = logsMatch[1]!;
+        const dir = store.resolveDir(name);
+        if (dir === undefined || !existsSync(dir)) {
+          built.controller.pushNote('service', [`serviço "${name}" não encontrado.`]);
+          return;
+        }
+        // `-f` (acompanhar ao vivo) não cabe numa nota estática da TUI — só as
+        // últimas linhas aqui; `aluy service logs <nome> -f` no shell acompanha.
+        const lines = tailServiceLog(runnerLogPath(dir), 50);
+        built.controller.pushNote(
+          `service — ${name} — logs`,
+          lines.length > 0 ? [...lines] : ['(sem log ainda — o serviço nunca rodou.)'],
+        );
+        return;
+      }
+
+      const startMatch = /^\s*start\s+(\S+)/.exec(args);
+      if (startMatch) {
+        const name = startMatch[1]!;
+        const entry = store.get(name);
+        if (entry === undefined) {
+          built.controller.pushNote('service', [`serviço "${name}" não encontrado.`]);
+          return;
+        }
+        if (isServiceEntryError(entry)) {
+          built.controller.pushNote(`service — ${name} (inválido)`, [`⚠ ${entry.reason}`]);
+          return;
+        }
+        if (entry.manifest.schedule === undefined) {
+          built.controller.pushNote('service', [
+            `serviço "${name}" não declara "schedule:" — o runner não saberia quando acordar.`,
+          ]);
+          return;
+        }
+        if (readServiceRuntimeStatus(entry.dir).running) {
+          built.controller.pushNote('service', [`serviço "${name}" já está RODANDO.`]);
+          return;
+        }
+        // MANIFESTO VISÍVEL antes de qualquer confirmação (§9/§10 — CRIAR/INSTALAR
+        // NÃO É LIGAR; a chave de ignição é sempre um ato explícito do dono, mesmo
+        // dentro da sessão). Reusa o `questionResolver` (mesma UI do `perguntar`).
+        // `onCommand` é SÍNCRONO — a pergunta+spawn rodam numa IIFE async à parte.
+        void (async (): Promise<void> => {
+          const scan = scanServiceDirForInstall(entry.dir);
+          const visible = buildServiceManifestVisibleNote({ manifest: entry.manifest, ...scan });
+          const answer = await built.questionResolver.ask({
+            kind: 'single',
+            header: visible.title,
+            question: `${visible.lines.join('\n')}\n\niniciar o serviço "${name}" agora?`,
+            options: [{ label: 'sim, iniciar' }, { label: 'não' }],
+            allowOther: false,
+          });
+          if (answer.kind !== 'choice' || answer.label !== 'sim, iniciar') {
+            built.controller.pushNote('service', ['início cancelado.']);
+            return;
+          }
+          const logPath = runnerLogPath(entry.dir);
+          appendServiceLog(logPath, `"/service start ${name}" — spawnando o runner…`);
+          const { spawn: spawnChild } = await import('node:child_process');
+          const entrypoint = process.argv[1] ?? '';
+          const child = spawnChild(
+            process.execPath,
+            [entrypoint, 'service', 'run', name, '--runner'],
+            { detached: true, stdio: 'ignore', cwd: entry.dir },
+          );
+          child.unref();
+          if (child.pid === undefined) {
+            built.controller.pushNote('service', [`falha ao dar spawn no runner de "${name}".`]);
+            return;
+          }
+          built.controller.pushNote('service', [
+            `✓ serviço "${name}" iniciado (pid ${child.pid}).`,
+            `logs: /service logs ${name}   ·   parar: /service stop ${name}`,
+          ]);
+        })();
+        return;
+      }
+
+      // ADR-0158 §11 (FASE 4) — "/service attach <nome>" IN-SESSION. DECISÃO (além
+      // do ADR — a missão listava a opção de delegar OU um modo de visualização
+      // simples, "decisão sua"): a v1 aqui é um SNAPSHOT — estado real + últimas
+      // linhas do log, na MESMA nota estática que `/service logs`/`status` já usam
+      // — e orienta pro `aluy service attach <nome>` do shell p/ a sessão VIVA e
+      // INTERATIVA (ver ao vivo + `say`). Racional: um attach de verdade dentro da
+      // TUI (stream contínuo + digitação roteada pro socket) exigiria um tipo de
+      // bloco NOVO com atualização assíncrona própria — peça de UI que não cabe
+      // barato nesta fase (o snapshot cobre "ver o que está acontecendo" sem essa
+      // peça nova; "interagir" continua disponível via `aluy service attach`, que
+      // JÁ tem a mesma autoridade de instrução, §11).
+      const attachMatch = /^\s*attach\s+(\S+)/.exec(args);
+      if (attachMatch) {
+        const name = attachMatch[1]!;
+        const entry = store.get(name);
+        if (entry === undefined) {
+          built.controller.pushNote('service', [`serviço "${name}" não encontrado.`]);
+          return;
+        }
+        if (isServiceEntryError(entry)) {
+          built.controller.pushNote(`service — ${name} (inválido)`, [`⚠ ${entry.reason}`]);
+          return;
+        }
+        const rt = readServiceRuntimeStatus(entry.dir);
+        if (!rt.running) {
+          built.controller.pushNote('service', [
+            `serviço "${name}" está PARADO — rode \`aluy service start ${name}\` (ou "/service start ${name}") primeiro.`,
+          ]);
+          return;
+        }
+        const pendingSince =
+          rt.snapshot?.turnState === 'awaiting-owner' && rt.snapshot.updatedAtIso !== undefined
+            ? ` (pergunta enviada há ${formatElapsedSince(Date.now() - Date.parse(rt.snapshot.updatedAtIso))})`
+            : '';
+        const stateLine =
+          rt.snapshot?.turnState === 'running-turn'
+            ? 'turno em andamento'
+            : rt.snapshot?.turnState === 'awaiting-owner'
+              ? `⚠ aguardando dono${pendingSince}`
+              : rt.snapshot?.turnState === 'sleeping' && rt.snapshot.nextFireIso !== undefined
+                ? `dormindo até ${rt.snapshot.nextFireIso}`
+                : 'rodando';
+        const logLines = tailServiceLog(runnerLogPath(entry.dir), 15);
+        built.controller.pushNote(`service — ${name} — attach (snapshot)`, [
+          `RODANDO · ${stateLine}${rt.pid !== undefined ? ` · pid ${rt.pid}` : ''}`,
+          ...(rt.snapshot?.pendingQuestion !== undefined
+            ? [`⚠ pergunta pendente: ${rt.snapshot.pendingQuestion}`]
+            : []),
+          '',
+          ...(logLines.length > 0 ? logLines : ['(sem log ainda.)']),
+          '',
+          `— isto é um retrato ESTÁTICO, não ao vivo. Para acompanhar em tempo real e`,
+          `poder DIGITAR (a fala vira instrução do serviço, §11), abra um terminal e rode:`,
+          `  aluy service attach ${name}`,
+          `Esc/Ctrl-C lá faz DETACH — o serviço segue rodando.`,
+        ]);
+        return;
+      }
+
+      // ADR-0158 §10 (FASE 5) — `/service create <descrição>`: criação CONVERSACIONAL,
+      // canal PRINCIPAL (emenda de aprovação do dono). Mesmo padrão PROMPT-DRIVEN do
+      // `/init` (EST-INIT-02): a descrição vira o `goal` de um turno normal — o agente
+      // ENTREVISTA o que faltar e ESCREVE o diretório em STAGING (nunca direto em
+      // `~/.aluy/services/` — a catraca `aluy-config-write-deny` já barra isso por
+      // design; ver `slash/service-create.ts`). Sem descrição ⇒ orienta o uso (não há
+      // "modo estático" aqui — ao contrário do `/init`, um serviço sem descrição não
+      // tem o que criar).
+      const createMatch = /^\s*create\b(.*)$/s.exec(args);
+      if (createMatch) {
+        const desc = createMatch[1]!.trim();
+        if (desc === '') {
+          built.controller.pushNote('service', [
+            'uso: /service create <descrição em prosa do serviço>',
+            'ex.: /service create um time de operações com 3 estudos e um gestor de',
+            '  risco, opera 9h-17h30, reporta no telegram, drawdown máximo 2% ao dia.',
+            `o agente entrevista o que faltar e escreve o rascunho em ${SERVICE_DRAFTS_DIRNAME}/<nome>/`,
+            '(PARADO — revise e rode `aluy service install` depois; criar não é ligar, ADR-0158 §10).',
+          ]);
+          return;
+        }
+        const goal = buildServiceCreateSystemPrompt(desc);
+        built.controller.pushNote('service', [
+          `criando o rascunho de serviço para: ${desc}`,
+          'o agente vai entrevistar o que faltar (schedule/canal/autonomia/funil) e',
+          `escrever em ${SERVICE_DRAFTS_DIRNAME}/<nome>/ — PARADO até você revisar e instalar.`,
+        ]);
+        void built.controller.submit(goal);
+        return;
+      }
+      const subMatch = /^\s*(install|uninstall)\b/.exec(args);
+      if (subMatch) {
+        built.controller.pushNote('service', [
+          `"/service ${subMatch[1]}" ainda orienta pro shell nesta fase — rode ` +
+            `\`aluy service ${subMatch[1]} …\` no terminal (mostra o manifesto visível`,
+          'e pede confirmação antes de escrever em ~/.aluy/services/).',
+        ]);
+        return;
+      }
+      // `/service` puro (sem args) ⇒ LISTA — a "sala de controle" mínima (ADR-0158 §11),
+      // com estado REAL por serviço (fase 2).
+      const { services, errors } = store.list();
+      const servicesWithStatus = services.map((s) => {
+        const rt = readServiceRuntimeStatus(s.dir);
+        return {
+          ...s,
+          runtimeStatus: {
+            running: rt.running,
+            ...(rt.snapshot?.turnState !== undefined ? { turnState: rt.snapshot.turnState } : {}),
+            ...(rt.snapshot?.nextFireIso !== undefined ? { nextFireIso: rt.snapshot.nextFireIso } : {}),
+            // ADR-0158 §5 pt.4 (FASE 3, missão item 4) — "pergunta enviada há X".
+            ...(rt.snapshot?.turnState === 'awaiting-owner' && rt.snapshot.updatedAtIso !== undefined
+              ? { pendingSinceIso: rt.snapshot.updatedAtIso }
+              : {}),
+          },
+        };
+      });
+      const note = buildServicesNote({
+        services: servicesWithStatus,
+        errors: errors.map((e) => ({ dirName: e.dirName, reason: e.reason })),
+        servicesDir: store.servicesDir,
+        nowMs: Date.now(),
       });
       built.controller.pushNote(note.title, note.lines);
       return;

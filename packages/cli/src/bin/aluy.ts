@@ -439,6 +439,13 @@ async function main(): Promise<void> {
       process.exitCode = await runCron(action.argv);
       return;
     }
+    case 'service': {
+      // ADR-0158 — `aluy service <sub>`: SERVIÇOS plugáveis, fase 1 (list/status/
+      // install/uninstall — sem runner ainda). Espelho do `/service` in-session.
+      const { runService } = await import('../commands/service.js');
+      process.exitCode = await runService(action.argv);
+      return;
+    }
     case 'launch': {
       // TUI rica (EST-0948): monta a sessão (login+broker+loop+catraca+I/O
       // concreto confinado) e renderiza. Import dinâmico p/ não puxar Ink no
