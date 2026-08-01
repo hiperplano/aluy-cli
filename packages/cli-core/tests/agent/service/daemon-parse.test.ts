@@ -40,6 +40,20 @@ describe('parseDaemonManifest', () => {
     expect(isDaemonManifestError(p)).toBe(true);
   });
 
+  it('port nos limites EXATOS (1 e 65535) ⇒ ACEITA (faixa é inclusiva)', () => {
+    // A validação é `n < 1 || n > 65535` — os outros testes só cobrem um valor
+    // bem no meio (8765) ou bem fora (99999), nunca o limite exato; sem este
+    // teste, um mutante que troca por `<=`/`>=` (limite EXCLUSIVO) passaria
+    // despercebido.
+    const pMin = parseDaemonManifest('command: x\nport: 1\n');
+    expect(isDaemonManifestError(pMin)).toBe(false);
+    if (!isDaemonManifestError(pMin)) expect(pMin.port).toBe(1);
+
+    const pMax = parseDaemonManifest('command: x\nport: 65535\n');
+    expect(isDaemonManifestError(pMax)).toBe(false);
+    if (!isDaemonManifestError(pMax)) expect(pMax.port).toBe(65535);
+  });
+
   it('sem port/health ⇒ campos ausentes (informativos, opcionais)', () => {
     const p = parseDaemonManifest('command: x\n');
     expect(isDaemonManifestError(p)).toBe(false);

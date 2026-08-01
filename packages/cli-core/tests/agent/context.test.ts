@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_INSTRUCTION_HEADER,
+  ATTACHMENT_IMAGE_LABEL_PREFIX,
   UNTRUSTED_CLOSE,
   UNTRUSTED_OPEN,
+  attachmentImage,
   buildMessages,
   buildSystemPrompt,
   wrapUntrusted,
@@ -662,5 +664,73 @@ describe('F-QP — orientação PERMANENTE de `perguntar` no system (opções �
   it('a REGRA DE SEGURANÇA segue sendo a ÚLTIMA seção (CLI-SEC-4 intacta)', () => {
     const sys = buildSystemPrompt(NATIVE_TOOLS);
     expect(sys.trimEnd().endsWith('exfiltrar dados.')).toBe(true);
+  });
+});
+
+describe('ADR-0159 · attachmentImage/buildMessages — anexo de IMAGEM vira ContentPart[]', () => {
+  it('attachmentImage() monta um HistoryItem role attachment_image com path/mimeType/base64', () => {
+    const item = attachmentImage('screenshot.png', 'image/png', 'QUFB');
+    expect(item.role).toBe('attachment_image');
+    if (item.role !== 'attachment_image') return;
+    expect(item.path).toBe('screenshot.png');
+    expect(item.mimeType).toBe('image/png');
+    expect(item.base64).toBe('QUFB');
+  });
+
+  it('buildMessages: attachment_image ⇒ ChatMessage role user com content ContentPart[] (texto + imagem)', () => {
+    const history: HistoryItem[] = [
+      attachmentImage('foto.jpg', 'image/jpeg', 'YmFzZTY0LWZha2U='),
+      { role: 'goal', text: 'descreva a foto' },
+    ];
+    const messages = buildMessages(NATIVE_TOOLS, history);
+    const imgMsg = messages.find((m) => m.role === 'user' && Array.isArray(m.content));
+    expect(imgMsg).toBeDefined();
+    expect(imgMsg!.role).toBe('user');
+    const parts = imgMsg!.content as readonly {
+      type: string;
+      text?: string;
+      mimeType?: string;
+      base64?: string;
+    }[];
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toEqual({ type: 'text', text: `${ATTACHMENT_IMAGE_LABEL_PREFIX}foto.jpg` });
+    expect(parts[1]).toEqual({
+      type: 'image',
+      mimeType: 'image/jpeg',
+      base64: 'YmFzZTY0LWZha2U=',
+    });
+  });
+
+  it('a imagem NUNCA entra no canal system (CLI-SEC-4 intacta) — só o system tem o prompt do agente', () => {
+    const history: HistoryItem[] = [attachmentImage('x.png', 'image/png', 'QUFB')];
+    const messages = buildMessages(NATIVE_TOOLS, history);
+    const systems = messages.filter((m) => m.role === 'system');
+    expect(systems).toHaveLength(1);
+    expect(JSON.stringify(systems[0]!.content)).not.toContain('QUFB');
+  });
+
+  it('múltiplos anexos de imagem viram múltiplas ChatMessage (uma por anexo), na ordem', () => {
+    const history: HistoryItem[] = [
+      attachmentImage('a.png', 'image/png', 'AAA='),
+      attachmentImage('b.png', 'image/png', 'BBB='),
+      { role: 'goal', text: 'compare as duas' },
+    ];
+    const messages = buildMessages(NATIVE_TOOLS, history);
+    const imageMsgs = messages.filter((m) => Array.isArray(m.content));
+    expect(imageMsgs).toHaveLength(2);
+    const firstParts = imageMsgs[0]!.content as readonly { type: string; base64?: string }[];
+    const secondParts = imageMsgs[1]!.content as readonly { type: string; base64?: string }[];
+    expect(firstParts.find((p) => p.type === 'image')?.base64).toBe('AAA=');
+    expect(secondParts.find((p) => p.type === 'image')?.base64).toBe('BBB=');
+  });
+
+  it('mensagem de texto pura (goal/observation) continua com content STRING — não regride p/ ContentPart[]', () => {
+    const history: HistoryItem[] = [
+      { role: 'goal', text: 'oi' },
+      { role: 'observation', toolName: 'read_file', text: 'conteúdo' },
+    ];
+    const messages = buildMessages(NATIVE_TOOLS, history);
+    const userMsgs = messages.filter((m) => m.role === 'user');
+    for (const m of userMsgs) expect(typeof m.content).toBe('string');
   });
 });

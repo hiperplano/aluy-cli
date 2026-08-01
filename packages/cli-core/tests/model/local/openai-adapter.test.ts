@@ -235,6 +235,71 @@ describe('OpenAiCompatAdapter — request building', () => {
   });
 });
 
+// ADR-0159 — `ContentPart[]` (imagem via `@mention`/`--image`): o adapter aprende a
+// serializar o shape MULTIMODAL da OpenAI (vision) sem mudar o caminho de texto puro
+// (a 1ª asserção acima, `body.messages` com `content: 'Oi'` string, já cobre o
+// não-regressão — mantida intocada).
+describe('OpenAiCompatAdapter — ADR-0159 (ContentPart[] · vision)', () => {
+  async function bodyFor(request: ModelCallRequest): Promise<Record<string, unknown>> {
+    const { fetch, calls } = makeBrokerFetch({ status: 200, sse: 'data: [DONE]\n\n' });
+    const client = new LocalModelClient({
+      adapter: adapter(),
+      config: { provider: 'openrouter', model: 'm' },
+      baseUrl: 'https://openrouter.ai/api/v1',
+      getCredential: cred,
+      fetch,
+    });
+    await drain(client.stream({ request }));
+    return calls[0]?.body as Record<string, unknown>;
+  }
+
+  it('content ContentPart[] só-imagem ⇒ vira array com bloco image_url (data URL)', async () => {
+    const body = await bodyFor(
+      req({
+        messages: [
+          { role: 'user', content: [{ type: 'image', mimeType: 'image/png', base64: 'QUJD' }] },
+        ],
+      }),
+    );
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } }],
+      },
+    ]);
+  });
+
+  it('content ContentPart[] texto+imagem ⇒ ambos os blocos, na ordem', async () => {
+    const body = await bodyFor(
+      req({
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'o que tem aqui?' },
+              { type: 'image', mimeType: 'image/webp', base64: 'ZmFrZQ==' },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'o que tem aqui?' },
+          { type: 'image_url', image_url: { url: 'data:image/webp;base64,ZmFrZQ==' } },
+        ],
+      },
+    ]);
+  });
+
+  it('mensagem STRING (texto puro) continua saindo IDÊNTICA — não-regressão', async () => {
+    const body = await bodyFor(req({ messages: [{ role: 'user', content: 'texto normal' }] }));
+    expect(body.messages).toEqual([{ role: 'user', content: 'texto normal' }]);
+  });
+});
+
 // BUG-TRAILER — o `usage` real (stream_options.include_usage) chega num chunk
 // TRAILER, DEPOIS do chunk que traz `finish_reason`. Antes do fix, o `done` saía na
 // hora do `finish_reason` e o `LocalModelClient` fechava o socket ⇒ o trailer NUNCA

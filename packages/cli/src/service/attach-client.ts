@@ -20,6 +20,19 @@ export interface AttachConnection {
   readonly close: () => void;
 }
 
+/**
+ * Mapeia o erro assíncrono do socket p/ a frase exibida (`onClose`). PURA — sem
+ * I/O — testável direto com um erro sintético, sem depender de como o SO/versão
+ * do Node classifica um path malformado (esse mapeamento varia entre plataformas
+ * — ENOENT/ECONNREFUSED de verdade são fáceis de reproduzir via socket real; um
+ * terceiro código arbitrário não é, portátil, sem mockar `node:net`).
+ */
+export function formatSocketErrorReason(err: NodeJS.ErrnoException): string {
+  return err.code === 'ENOENT' || err.code === 'ECONNREFUSED'
+    ? 'o serviço não está rodando (ou o socket de attach ainda não subiu).'
+    : `conexão perdida — ${String(err)}.`;
+}
+
 export interface AttachConnectHooks {
   /** Uma linha JÁ FORMATADA (`formatServiceAttachEventForTerminal`) por evento
    * válido recebido do servidor. Linha malformada ⇒ ignorada em silêncio (mesma
@@ -66,13 +79,7 @@ export function connectAttachSocket(sockPath: string, hooks: AttachConnectHooks)
       idx = buf.indexOf('\n');
     }
   });
-  socket.on('error', (err: NodeJS.ErrnoException) => {
-    const reason =
-      err.code === 'ENOENT' || err.code === 'ECONNREFUSED'
-        ? 'o serviço não está rodando (ou o socket de attach ainda não subiu).'
-        : `conexão perdida — ${String(err)}.`;
-    finish(reason);
-  });
+  socket.on('error', (err: NodeJS.ErrnoException) => finish(formatSocketErrorReason(err)));
   socket.on('close', () => {
     finish('conexão encerrada pelo serviço (parou, ou o attach caiu).');
   });

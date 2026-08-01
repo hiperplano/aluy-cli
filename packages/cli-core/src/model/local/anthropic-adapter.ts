@@ -23,7 +23,7 @@
 import { BrokerError } from '../errors.js';
 import type { ModelStreamEvent, ModelUsage, NativeToolCall, ToolFunctionSchema } from '../types.js';
 import type { ProviderAdapter, BuiltRequest, SseAccumulator } from './adapter.js';
-import type { LocalRequest, ResolvedCredential, LocalMessage } from './types.js';
+import type { LocalRequest, ResolvedCredential, LocalMessage, ContentPart } from './types.js';
 
 /** Versão da API Anthropic (header obrigatório `anthropic-version`). */
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -220,7 +220,10 @@ export function toAnthropicMessages(messages: readonly LocalMessage[]): Record<s
           {
             type: 'tool_result',
             tool_use_id: m.tool_call_id ?? '',
-            content: m.content,
+            // ADR-0159 — string SEGUE IDÊNTICA a antes; `ContentPart[]` (não esperado
+            // num resultado de tool nesta fase, mas o tipo widened obriga o ramo)
+            // vira os MESMOS blocos texto/imagem do Anthropic.
+            content: typeof m.content === 'string' ? m.content : toAnthropicContentBlocks(m.content),
           },
         ],
       });
@@ -228,7 +231,11 @@ export function toAnthropicMessages(messages: readonly LocalMessage[]): Record<s
     }
     if (m.role === 'assistant' && m.tool_calls !== undefined && m.tool_calls.length > 0) {
       const blocks: Record<string, unknown>[] = [];
-      if (m.content !== '') blocks.push({ type: 'text', text: m.content });
+      if (typeof m.content === 'string') {
+        if (m.content !== '') blocks.push({ type: 'text', text: m.content });
+      } else {
+        blocks.push(...toAnthropicContentBlocks(m.content));
+      }
       for (const tc of m.tool_calls) {
         blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input ?? {} });
       }
@@ -237,9 +244,26 @@ export function toAnthropicMessages(messages: readonly LocalMessage[]): Record<s
     }
     // system portável (não deveria vir) ⇒ trata como user p/ não perder instrução.
     const role = m.role === 'system' ? 'user' : m.role;
-    out.push({ role, content: m.content });
+    out.push({
+      role,
+      content: typeof m.content === 'string' ? m.content : toAnthropicContentBlocks(m.content),
+    });
   }
   return out;
+}
+
+/**
+ * ADR-0159 — serializa `ContentPart[]` pro shape de BLOCO Anthropic: texto
+ * `{type:'text', text}` e imagem `{type:'image', source:{type:'base64',
+ * media_type, data}}` (Anthropic exige `source.type:'base64'` explícito, ao
+ * contrário da data-URL da OpenAI).
+ */
+function toAnthropicContentBlocks(parts: readonly ContentPart[]): Record<string, unknown>[] {
+  return parts.map((p) =>
+    p.type === 'text'
+      ? { type: 'text', text: p.text }
+      : { type: 'image', source: { type: 'base64', media_type: p.mimeType, data: p.base64 } },
+  );
 }
 
 /** Converte o schema de função OpenAI (`{type:function, function:{...}}`) p/ Anthropic. */

@@ -18,7 +18,7 @@ import { BrokerError } from '../errors.js';
 import type { ModelStreamEvent, ModelUsage, NativeToolCall } from '../types.js';
 import { MAX_TRAILER_EVENTS } from './adapter.js';
 import type { ProviderAdapter, BuiltRequest, SseAccumulator } from './adapter.js';
-import type { LocalRequest, ResolvedCredential, LocalProviderKind } from './types.js';
+import type { LocalRequest, ResolvedCredential, LocalProviderKind, ContentPart } from './types.js';
 
 const ATTRIBUTION_URL = 'https://github.com/hiperplano/aluy-cli';
 const ATTRIBUTION_TITLE = 'aluy-cli';
@@ -221,14 +221,31 @@ function accumulateToolCalls(acc: SseAccumulator, deltas: unknown[]): void {
   }
 }
 
+/**
+ * ADR-0159 — serializa `ContentPart[]` pro shape de conteúdo MULTIMODAL da OpenAI
+ * (vision): array de blocos, `{type:'text', text}` e `{type:'image_url',
+ * image_url:{url:'data:<mime>;base64,<...>'}}` — o formato "data URL" que a
+ * OpenAI/OpenRouter aceitam inline (sem precisar de upload prévio).
+ */
+function serializeContentParts(parts: readonly ContentPart[]): Record<string, unknown>[] {
+  return parts.map((p) =>
+    p.type === 'text'
+      ? { type: 'text', text: p.text }
+      : { type: 'image_url', image_url: { url: `data:${p.mimeType};base64,${p.base64}` } },
+  );
+}
+
 /** Serializa UMA mensagem portável p/ o shape OpenAI (tool_calls/tool_call_id). */
 function serializeMessage(m: {
   role: string;
-  content: string;
+  content: string | readonly ContentPart[];
   tool_calls?: readonly { id: string; name: string; input: Record<string, unknown> }[];
   tool_call_id?: string;
 }): Record<string, unknown> {
-  const out: Record<string, unknown> = { role: m.role, content: m.content };
+  // ADR-0159 — string SEGUE IDÊNTICA a antes (compatibilidade retroativa); só o
+  // ramo `ContentPart[]` é novo.
+  const content = typeof m.content === 'string' ? m.content : serializeContentParts(m.content);
+  const out: Record<string, unknown> = { role: m.role, content };
   if (m.tool_calls !== undefined && m.tool_calls.length > 0) {
     out.tool_calls = m.tool_calls.map((tc) => ({
       id: tc.id,

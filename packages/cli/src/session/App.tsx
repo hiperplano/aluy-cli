@@ -4400,7 +4400,13 @@ export function App(props: AppProps): React.ReactElement {
       {picker.attachments.length > 0 && (
         <Box paddingBottom={1}>
           <AttachChips
-            chips={picker.attachments.map((a) => ({ path: a.path, truncated: a.truncated }))}
+            chips={picker.attachments.map((a) => ({
+              path: a.path,
+              truncated: a.truncated,
+              // ADR-0159 — discrimina pelo `role` do HistoryItem produzido pelo
+              // `AttachReader` (ramo `attachment_image` vs `observation` de texto).
+              isImage: a.item.role === 'attachment_image',
+            }))}
             active={picker.attachments.length - 1}
           />
         </Box>

@@ -549,6 +549,18 @@ async function main(): Promise<void> {
         }
       }
 
+      // ADR-0159 · `--image <path>` (repetível) — açúcar sintático: cada ocorrência
+      // vira uma menção `@<path>` acrescentada ao FIM do objetivo, ANTES do
+      // `resolveLinearMentions` processá-la — MESMO ramo de imagem do `AttachReader`,
+      // sem mecanismo paralelo (ADR-0159 §Decisão item 4).
+      if (action.images !== undefined && action.images.length > 0) {
+        const mentions = action.images.map((p) => `@${p}`).join(' ');
+        headlessGoal =
+          headlessGoal !== undefined && headlessGoal.trim() !== ''
+            ? `${headlessGoal} ${mentions}`
+            : mentions;
+      }
+
       await runSession({
         // EST-0959 · ADR-0055 — o eixo de MODO (`--plan`/`--yolo`); `mode` vence
         // o legado `unsafe`. Sem flag ⇒ `normal`. EST-0991: pode cair de `unsafe` p/

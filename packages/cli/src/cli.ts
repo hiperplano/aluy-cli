@@ -264,6 +264,12 @@ export type CliAction =
       // §2(a). Cru aqui (string); o wiring resolve/valida e a flag VENCE o teto embutido no
       // goal quando divergem. `undefined` quando a flag não veio. Não persiste.
       cycleFor?: string;
+      // ADR-0159 · `--image <path>` (repetível) — açúcar sintático p/ anexar imagem(ns)
+      // via CLI sem precisar escapar `@` dentro de string com aspas (automação/scripts).
+      // Cada ocorrência vira uma menção `@<path>` acrescentada ao objetivo (bin/aluy.ts),
+      // resolvida pelo MESMO `AttachReader`/`resolveLinearMentions` do `@` — não introduz
+      // mecanismo paralelo (ADR-0159 §Decisão item 4). Ausente/vazio ⇒ nenhuma imagem.
+      readonly images?: readonly string[];
     };
 
 export const HELP_TEXT = `aluy — agente de terminal que roda na sua máquina, com o seu provider de LLM
@@ -312,6 +318,11 @@ Opções:
                   (erro se sozinho). É SÓ o NOME (DADO, não credencial); NUNCA
                   base_url/api-key na flag — a credencial vem do keychain/env do
                   provider. Sem a flag, usa o provider configurado.
+  --image <path>  (repetível) Anexa uma imagem (png/jpeg/webp/gif) ao objetivo —
+                  açúcar sintático p/ a MESMA menção \`@caminho\` (evita escapar @
+                  dentro de aspas em scripts). Cada ocorrência soma uma \`@<path>\` ao
+                  objetivo, resolvida pelo MESMO leitor confinado do \`@\` (confinamento
+                  + path-deny inalterados). Repita a flag p/ anexar mais de uma imagem.
   --output-format text|json|stream-json
                   (só com -p) Formato da saída headless. text (padrão) = só o resultado;
                   json = {result, ok, tier, model, ...} numa linha p/ parsing. stream-json
@@ -625,6 +636,38 @@ function shortFlagValue(argv: readonly string[], name: string): string | undefin
   return undefined;
 }
 
+/**
+ * ADR-0159 · `--image <path>` (repetível) — como `flagValue`, mas coleta TODAS as
+ * ocorrências (não só a 1ª): cada `--image <path>` / `--image=<path>` vira um item
+ * da lista devolvida. Também devolve os ÍNDICES de argv que são VALOR de uma
+ * ocorrência SEPARADA (`--image <path>`) — o caller os exclui do objetivo posicional
+ * e do detector de flag desconhecida (mesma disciplina do F109/F10 das flags de
+ * valor único). O token seguinte só conta como valor se NÃO parecer outra flag
+ * (mesmo guard do `flagValue`); sem valor, a ocorrência é ignorada (tolerante).
+ */
+function repeatableFlagValues(
+  argv: readonly string[],
+  name: string,
+): { readonly values: readonly string[]; readonly valueIndices: ReadonlySet<number> } {
+  const values: string[] = [];
+  const valueIndices = new Set<number>();
+  const eq = `--${name}=`;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === undefined) continue;
+    if (a === `--${name}`) {
+      const next = argv[i + 1];
+      if (next !== undefined && !next.startsWith('-')) {
+        values.push(next);
+        valueIndices.add(i + 1);
+      }
+      continue;
+    }
+    if (a.startsWith(eq)) values.push(a.slice(eq.length));
+  }
+  return { values, valueIndices };
+}
+
 export function versionText(): string {
   // Expõe as duas versões (binário + engine) — o engine é pacote separado.
   return `aluy ${CLI_VERSION} (@hiperplano/aluy-cli-core ${CORE_VERSION})`;
@@ -656,6 +699,7 @@ const KNOWN_LONG_FLAGS: ReadonlySet<string> = new Set([
   'exec',
   'fullscreen',
   'help',
+  'image',
   'json',
   'lang',
   'local-auth',
@@ -1054,6 +1098,15 @@ export function parseArgs(argv: readonly string[]): CliAction {
   const cycles = flagValue(argv, 'cycles');
   const cycleFor = flagValue(argv, 'cycle-for');
 
+  // ADR-0159 · `--image <path>` (repetível) — açúcar sintático p/ anexar imagem(ns).
+  // Cada ocorrência vira uma `@<path>` acrescentada ao objetivo (bin/aluy.ts), ANTES
+  // do `resolveLinearMentions` — mesmo ramo de imagem do `AttachReader` (não introduz
+  // mecanismo paralelo, ADR-0159 §Decisão item 4).
+  const { values: images, valueIndices: imageValueIndices } = repeatableFlagValues(
+    argv,
+    'image',
+  );
+
   // ADR-0120 / EST-1113 — `--backend <broker|local>`: seleciona o backend de modelo.
   // Cru aqui (string); o wiring resolve flag>env>config>default broker. Valor inválido
   // ⇒ ignorado lá (cai no default), sem usage-error (mais tolerante que --tier custom).
@@ -1283,7 +1336,8 @@ export function parseArgs(argv: readonly string[]): CliAction {
       i !== maxOutputTokensValueIdx &&
       i !== autoCompactAtValueIdx &&
       i !== cyclesValueIdx &&
-      i !== cycleForValueIdx,
+      i !== cycleForValueIdx &&
+      !imageValueIndices.has(i),
   );
 
   // F180 (OBS-1) — GUARD anti-objetivo-que-é-comando: um objetivo que é EXATAMENTE
@@ -1338,6 +1392,9 @@ export function parseArgs(argv: readonly string[]): CliAction {
       cycleForValueIdx,
     ].filter((i) => i >= 0),
   );
+  // ADR-0159 — `--image` é REPETÍVEL; seus índices de valor já vêm como um Set
+  // próprio (`repeatableFlagValues`), não um escalar como as demais flags acima.
+  for (const idx of imageValueIndices) valueIndices.add(idx);
   // F109 — o token logo após uma flag de VALOR SEPARADO é o valor (prompt/slug/url/nº),
   // texto arbitrário que PODE começar com `--` (ex.: `-p "--algo"`). Exclui INCONDICIONAL-
   // MENTE (mesmo quando o parser não o capturou por parecer flag) p/ não falso-positivar.
@@ -1393,5 +1450,8 @@ export function parseArgs(argv: readonly string[]): CliAction {
     // wiring resolve/valida e a flag VENCE o teto embutido no goal quando divergem.
     ...(cycles !== undefined ? { cycles } : {}),
     ...(cycleFor !== undefined ? { cycleFor } : {}),
+    // ADR-0159 (`--image`) — cada ocorrência é um path cru (o `bin/aluy.ts` os
+    // transforma em menções `@<path>` acrescentadas ao objetivo).
+    ...(images.length > 0 ? { images } : {}),
   };
 }

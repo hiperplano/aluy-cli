@@ -33,6 +33,7 @@ import type {
   ModelStreamEvent,
   ModelUsage,
   NativeToolCall,
+  ContentPart,
 } from './types.js';
 
 /**
@@ -407,11 +408,17 @@ export function buildChatBody(request: ModelCallRequest, stream: boolean): Recor
  */
 function serializeMessage(m: {
   role: string;
-  content: string;
+  content: string | readonly ContentPart[];
   tool_calls?: readonly NativeToolCall[];
   tool_call_id?: string;
 }): Record<string, unknown> {
-  const out: Record<string, unknown> = { role: m.role, content: m.content };
+  // ADR-0159 — string SEGUE IDÊNTICA a antes (compatibilidade retroativa). O
+  // ramo `ContentPart[]` é NOVO: `/v1/chat` espelha o shape OpenAI (ver o
+  // comentário de `ModelCallRequest.messages`), então serializa igual ao
+  // adapter OpenAI-compat (`openai-adapter.ts`) — mesmo formato de wire, código
+  // duplicado de propósito (este módulo não importa de `model/local/`).
+  const content = typeof m.content === 'string' ? m.content : serializeContentParts(m.content);
+  const out: Record<string, unknown> = { role: m.role, content };
   if (m.tool_calls !== undefined && m.tool_calls.length > 0) {
     out.tool_calls = m.tool_calls.map((tc) => ({
       id: tc.id,
@@ -421,6 +428,21 @@ function serializeMessage(m: {
   }
   if (m.tool_call_id !== undefined) out.tool_call_id = m.tool_call_id;
   return out;
+}
+
+/**
+ * ADR-0159 — serializa `ContentPart[]` pro shape de conteúdo MULTIMODAL estilo
+ * OpenAI (o que `/v1/chat` espelha): `{type:'text', text}` e `{type:'image_url',
+ * image_url:{url:'data:<mime>;base64,<...>'}}`. Mesma lógica de
+ * `openai-adapter.ts#serializeContentParts`, duplicada de propósito (este módulo
+ * é o caminho CLI→broker, não importa de `model/local/`).
+ */
+function serializeContentParts(parts: readonly ContentPart[]): Record<string, unknown>[] {
+  return parts.map((p) =>
+    p.type === 'text'
+      ? { type: 'text', text: p.text }
+      : { type: 'image_url', image_url: { url: `data:${p.mimeType};base64,${p.base64}` } },
+  );
 }
 
 /** Mapeia um evento SSE bruto do broker p/ o `ModelStreamEvent`. `error` lança. */
