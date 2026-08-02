@@ -3588,6 +3588,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         attachReader={built.attachReader}
         catalog={built.catalogClient}
         customModels={built.customModelClient}
+        // F161-FIX — `/model` sob backend LOCAL (BYO): a MESMA porta do catálogo local
+        // que já alimenta o roteamento de sub-agente (ADR-0152 D6c/ADR-0153 D2), agora
+        // também alimentando o <LocalModelPicker>. `localModelForWindow` é o slug
+        // resolvido no BOOT (`localCfg.model`) — marca o ● antes de qualquer `/model`.
+        {...(localModelCatalogPort !== undefined
+          ? { localModelCatalog: localModelCatalogPort }
+          : {})}
+        {...(localModelForWindow !== undefined
+          ? { currentLocalModel: localModelForWindow }
+          : {})}
         providersClient={built.providersClient}
         sessionStore={sessionStore}
         onResumeSession={onResumeSession}
@@ -3744,6 +3754,21 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                   'selecione um modelo via `/model` → Custom e refaça o `/provider`.',
                 ],
           );
+        }}
+        onSelectEffort={(choice) => {
+          // F161-FIX · /effort STANDALONE — o seletor confirmou: `set` aplica o
+          // `reasoning_effort` (MESMO efeito de `/effort <valor>` digitado); `keep` não
+          // muda nada (só um "cancelar informativo" — a lista sempre mostra a opção,
+          // mesmo padrão do passo conjugado do /model). SEM tier-gate (vale em qualquer
+          // backend/tier), sem persistência (mesma semântica de hoje).
+          if (choice.kind === 'set') {
+            built.controller.setEffort(choice.value);
+            built.controller.pushNote('effort', [`definido para: ${choice.value}`]);
+          } else {
+            built.controller.pushNote('effort', [
+              `mantido: ${built.controller.effort ?? '(default do modelo)'}`,
+            ]);
+          }
         }}
         permissionControl={{
           // EST-0968 — controle SEGURO do painel `/permissions`. O MODO passa pelo

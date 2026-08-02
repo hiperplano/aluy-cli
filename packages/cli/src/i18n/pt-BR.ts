@@ -122,6 +122,13 @@ export const ptBR: FullCatalog = {
   'picker.effort.customHelp': 'esforço custom · digite o valor · enter confirma · esc volta',
   'picker.effort.warnEmpty': '⚠ digite um valor (não pode ser vazio)',
   'picker.effort.warnTooLong': '⚠ no máximo 32 caracteres',
+  'picker.effort.standaloneHelp': 'esforço de raciocínio · ↑↓ navega · enter aplica · esc fecha',
+
+  // ── LocalModelPicker (/model sob backend LOCAL/BYO) ───────────────────────
+  'picker.localModel.help':
+    'trocar modelo do provider local · digite p/ filtrar · ↑↓ navega · enter seleciona · esc fecha',
+  'picker.localModel.empty': 'nenhum modelo conhecido casa "{query}" — enter usa o texto digitado',
+  'picker.localModel.more': '… {count} modelos a mais (refine o filtro)',
 
   // ── HistoryPicker (/history) ──────────────────────────────────────────────
   'picker.history.help': 'retomar sessão · ↑↓ navega · enter retoma · esc cancela',

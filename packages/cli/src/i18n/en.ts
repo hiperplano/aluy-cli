@@ -121,6 +121,13 @@ export const en: PartialCatalog = {
   'picker.effort.customHelp': 'custom effort · type the value · enter confirm · esc back',
   'picker.effort.warnEmpty': '⚠ type a value (cannot be empty)',
   'picker.effort.warnTooLong': '⚠ at most 32 characters',
+  'picker.effort.standaloneHelp': 'reasoning effort · ↑↓ navigate · enter apply · esc close',
+
+  // ── LocalModelPicker (/model under LOCAL/BYO backend) ─────────────────────
+  'picker.localModel.help':
+    'change the local provider model · type to filter · ↑↓ navigate · enter select · esc close',
+  'picker.localModel.empty': 'no known model matches "{query}" — enter uses the typed text',
+  'picker.localModel.more': '… {count} more models (refine the filter)',
 
   // ── HistoryPicker (/history) ──────────────────────────────────────────────
   'picker.history.help': 'resume session · ↑↓ navigate · enter resume · esc cancel',

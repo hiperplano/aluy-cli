@@ -191,6 +191,16 @@ export interface Catalog {
   'picker.effort.warnEmpty': string;
   /** Aviso: effort custom acima de 32 caracteres. */
   'picker.effort.warnTooLong': string;
+  /** Ajuda do `/effort` STANDALONE (fora do /model): esc FECHA (não há passo anterior). */
+  'picker.effort.standaloneHelp': string;
+
+  // ── LocalModelPicker (/model sob backend LOCAL/BYO) ───────────────────────
+  /** Linha de ajuda no topo do fuzzy-pick de modelo do provider local ativo. */
+  'picker.localModel.help': string;
+  /** Estado vazio/sem-match (enter ainda usa o texto digitado, slug livre). params: {query} */
+  'picker.localModel.empty': string; // params: {query}
+  /** Cauda "… N modelos a mais (refine o filtro)". params: {count} */
+  'picker.localModel.more': string; // params: {count}
 
   // ── HistoryPicker (/history · EST-0972) ───────────────────────────────────
   /** Linha de ajuda no topo do seletor de sessões. */
