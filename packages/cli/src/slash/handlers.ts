@@ -912,12 +912,39 @@ export function runAddDir(
   };
 }
 
+/** Os 4 estados possíveis de um server na listagem — usados p/ AGRUPAR (§ abaixo). */
+type McpGroupKey = 'ok' | 'error' | 'disabled' | 'unknown';
+
+/** Em que grupo um server cai — mesma ordem em que os grupos aparecem na lista. */
+function mcpGroupOf(s: McpListedServer): McpGroupKey {
+  return s.state.kind;
+}
+
+/** Cabeçalho (PT-BR) de cada grupo, com a contagem — espelha `/agents`/`/skills`. */
+function mcpGroupHeading(key: McpGroupKey, count: number): string {
+  switch (key) {
+    case 'ok':
+      return `ativos (${count}) — conectados, com as tools descobertas:`;
+    case 'error':
+      return `com erro (${count}) — falharam a conexão:`;
+    case 'disabled':
+      return `desativados (${count}) — off na config, a descoberta pulou:`;
+    case 'unknown':
+      return `sem descoberta (${count}) — sem handshake nesta vista:`;
+  }
+}
+
 /**
- * EST-0970 — nota do `/mcp` AO VIVO: renderiza a listagem unificada de servers (já
+ * EST-0970 (reorg) — nota do `/mcp` AO VIVO: renderiza a listagem unificada de servers (já
  * resolvida por `buildMcpListing` com a config das fontes + o resultado da descoberta da
- * sessão). PURA: só formata o DADO listável em linhas. Mostra, por server: origem, estado
- * (ok N tools / erro / —), command, env (só CHAVES — nunca valores; CLI-SEC-7) e as tools
- * prefixadas (`mcp__<server>__<tool>`). Lista vazia ⇒ dica de `aluy mcp add`.
+ * sessão). PURA: só formata o DADO listável em linhas. Mostra um resumo (N servers · quantos
+ * ativos/erro/desativados/sem-descoberta), depois cada server AGRUPADO por estado — ativos
+ * primeiro (o caso útil de ver rápido), erro (precisa de atenção), desativado (intencional) e
+ * sem descoberta por último —, alfabético dentro do grupo (determinístico; não depende da
+ * ordem de declaração das fontes). Por server: origem, estado (ok N tools / erro / desativado
+ * / —), command, env (só CHAVES — nunca valores; CLI-SEC-7) e as tools prefixadas
+ * (`mcp__<server>__<tool>`) numa tabela (nome + descrição — nunca um bloco de texto corrido).
+ * Lista vazia ⇒ dica de `aluy mcp add`.
  *
  * @param configError  erro agregado de leitura das configs (UX avisa), se houver.
  */
@@ -929,7 +956,45 @@ export function buildMcpNote(servers: readonly McpListedServer[], configError?: 
     lines.push('adicione sem sair daqui: /mcp add <nome> -- <command> [args...]');
     return { title: 'mcp', lines };
   }
-  for (const s of servers) {
+
+  // Resumo no topo: quantos servers, quantos em cada estado, quantas tools no total —
+  // a visão panorâmica que faltava (a lista corrida não deixava ver de cara).
+  const counts: Record<McpGroupKey, number> = { ok: 0, error: 0, disabled: 0, unknown: 0 };
+  for (const s of servers) counts[mcpGroupOf(s)] += 1;
+  const totalTools = servers.reduce((n, s) => n + s.tools.length, 0);
+  const summary = (
+    [
+      [counts.ok, `✓ ${counts.ok} ativo${counts.ok === 1 ? '' : 's'}`],
+      [counts.error, `✗ ${counts.error} erro`],
+      [counts.disabled, `○ ${counts.disabled} desativado${counts.disabled === 1 ? '' : 's'}`],
+      [counts.unknown, `? ${counts.unknown} sem descoberta`],
+    ] as const
+  )
+    .filter(([n]) => n > 0)
+    .map(([, label]) => label);
+  lines.push(
+    `${servers.length} server${servers.length === 1 ? '' : 's'} MCP — ${summary.join(' · ')} · ` +
+      `${totalTools} tool${totalTools === 1 ? '' : 's'} no total`,
+  );
+
+  // Agrupa por estado (ok < erro < desativado < desconhecido) e ordena alfabético
+  // dentro do grupo — organizado, em vez da ordem arbitrária de declaração das fontes.
+  const GROUP_ORDER: readonly McpGroupKey[] = ['ok', 'error', 'disabled', 'unknown'];
+  const sorted = [...servers].sort((a, b) => {
+    const g = GROUP_ORDER.indexOf(mcpGroupOf(a)) - GROUP_ORDER.indexOf(mcpGroupOf(b));
+    return g !== 0 ? g : a.name.localeCompare(b.name);
+  });
+
+  let currentGroup: McpGroupKey | undefined;
+  for (const s of sorted) {
+    const group = mcpGroupOf(s);
+    if (group !== currentGroup) {
+      currentGroup = group;
+      lines.push('');
+      lines.push(mcpGroupHeading(group, counts[group]));
+    } else {
+      lines.push(''); // separa do server anterior do MESMO grupo — nada de texto corrido.
+    }
     // EST-0970 — estado do interruptor na lista: `✓ ativo` (conectado, N tools) /
     // `○ desativado` (disabled na config — a descoberta pulou) / erro / `—` (sem
     // descoberta nesta vista).
@@ -948,10 +1013,20 @@ export function buildMcpNote(servers: readonly McpListedServer[], configError?: 
     // EST-0970 — config legada quebrada (`command:"--"`): avisa em vez de falhar mudo.
     const warning = invalidCommandWarning(s);
     if (warning !== undefined) lines.push(`  ⚠ ${warning}`);
-    for (const t of s.tools) {
-      lines.push(`  • ${t.qualifiedName}${t.description ? ` — ${t.description}` : ''}`);
+    // Tools em TABELA (nome + descrição) — legível mesmo com várias; nunca um bloco
+    // de bullets corridos sem alinhamento (o que o dono reclamou no `/mcp list`).
+    if (s.tools.length > 0) {
+      lines.push(
+        ...boxTable(
+          ['tool', 'descrição'],
+          s.tools.map((t) => [t.qualifiedName, t.description ?? '']),
+          { maxWidths: [40, 52] },
+        ),
+      );
     }
   }
+
+  lines.push('');
   lines.push(
     'gerencie daqui: /mcp add <nome> -- <command> [args...] · /mcp remove|disable|enable <nome>.',
   );
