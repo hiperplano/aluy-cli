@@ -104,3 +104,84 @@ describe('buildMcpNote — /mcp lista servers + tools', () => {
     expect(note.lines.join('\n')).toContain('não-gerenciado');
   });
 });
+
+// Reorg (queixa do Tiago: "cadê os mcp's organizados") — a lista agora tem um resumo
+// no topo, AGRUPA por estado (ativos < erro < desativado < sem descoberta) em vez da
+// ordem arbitrária de declaração, separa cada server com linha em branco (sem virar
+// texto corrido) e mostra as tools numa TABELA (não bullets soltos).
+describe('buildMcpNote — reorganização da lista (resumo + grupos + tabela)', () => {
+  const mixed: McpSource[] = [
+    // Declarados FORA de ordem de estado de propósito — a saída deve reordenar.
+    { origin: 'codex', config: { servers: [{ name: 'zeta', command: 'z', args: [], env: {} }] } },
+    {
+      origin: 'aluy-global',
+      config: {
+        servers: [
+          { name: 'alpha', command: 'a', args: [], env: {} }, // ok
+          { name: 'beta', command: 'b', args: [], env: {}, disabled: true }, // desativado
+          { name: 'gamma', command: 'g', args: [], env: {} }, // erro
+        ],
+      },
+    },
+  ];
+  const disc: McpDiscoveryResult = {
+    servers: [
+      {
+        server: 'alpha',
+        ok: true,
+        tools: [{ server: 'alpha', descriptor: { name: 'do', description: 'faz algo' }, transport: {} as never }],
+      },
+      { server: 'gamma', ok: false, tools: [], error: 'timeout' },
+      // zeta: sem entrada ⇒ fica 'unknown'.
+    ],
+    tools: [],
+    transports: [],
+  };
+
+  it('resumo no topo conta servers/estados/tools', () => {
+    const note = buildMcpNote(buildMcpListing(mixed, disc));
+    expect(note.lines[0]).toBe(
+      '4 servers MCP — ✓ 1 ativo · ✗ 1 erro · ○ 1 desativado · ? 1 sem descoberta · 1 tool no total',
+    );
+  });
+
+  it('agrupa: ativos aparecem antes de erro, erro antes de desativado, desativado antes de sem-descoberta', () => {
+    const text = buildMcpNote(buildMcpListing(mixed, disc)).lines.join('\n');
+    const iAlpha = text.indexOf('alpha —');
+    const iGamma = text.indexOf('gamma —');
+    const iBeta = text.indexOf('beta —');
+    const iZeta = text.indexOf('zeta —');
+    expect(iAlpha).toBeGreaterThan(-1);
+    expect(iGamma).toBeGreaterThan(iAlpha);
+    expect(iBeta).toBeGreaterThan(iGamma);
+    expect(iZeta).toBeGreaterThan(iBeta);
+  });
+
+  it('cada grupo tem cabeçalho com a contagem', () => {
+    const lines = buildMcpNote(buildMcpListing(mixed, disc)).lines;
+    expect(lines).toContain('ativos (1) — conectados, com as tools descobertas:');
+    expect(lines).toContain('com erro (1) — falharam a conexão:');
+    expect(lines).toContain('desativados (1) — off na config, a descoberta pulou:');
+    expect(lines).toContain('sem descoberta (1) — sem handshake nesta vista:');
+  });
+
+  it('separa cada server com linha em branco — não é mais texto corrido', () => {
+    const lines = buildMcpNote(buildMcpListing(mixed, disc)).lines;
+    const iAlphaLine = lines.findIndex((l) => l.startsWith('alpha —'));
+    expect(iAlphaLine).toBeGreaterThan(0);
+    expect(lines[iAlphaLine - 1]).toBe('ativos (1) — conectados, com as tools descobertas:');
+    const iGammaLine = lines.findIndex((l) => l.startsWith('gamma —'));
+    // gamma é o único do grupo "com erro" — precedido pelo cabeçalho do grupo, não colado no server anterior.
+    expect(lines[iGammaLine - 1]).toBe('com erro (1) — falharam a conexão:');
+  });
+
+  it('tools aparecem numa tabela com bordas (não bullets soltos)', () => {
+    const text = buildMcpNote(buildMcpListing(mixed, disc)).lines.join('\n');
+    expect(text).toContain('┌');
+    expect(text).toContain('│ tool');
+    expect(text).toContain('descrição');
+    expect(text).toContain('mcp__alpha__do');
+    expect(text).toContain('faz algo');
+    expect(text).not.toContain('• mcp__alpha__do'); // não é mais bullet solto.
+  });
+});
