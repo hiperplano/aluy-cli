@@ -151,3 +151,41 @@ describe('aluy doctor — exit code', () => {
     expect(bad.out.join('\n')).toContain('sem crédito');
   });
 });
+
+describe('aluy doctor --json — saída máquina-legível (stdout limpo)', () => {
+  it('tudo ok ⇒ imprime UMA linha JSON (array de checks), sem ticks, exit 0', async () => {
+    const { io, out } = fakeIO();
+    const code = await runDoctor({ io, json: true, probe: probeOf(allOk()) });
+    expect(code).toBe(0);
+    expect(out).toHaveLength(1); // stdout limpo p/ script: só o JSON, nada de "testando…".
+    const parsed = JSON.parse(out[0]!) as ReadonlyArray<{
+      id: string;
+      status: string;
+      label: string;
+      detail: string;
+    }>;
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed.length).toBeGreaterThan(0);
+    for (const c of parsed) {
+      expect(typeof c.id).toBe('string');
+      expect(typeof c.status).toBe('string');
+      expect(typeof c.label).toBe('string');
+      expect(typeof c.detail).toBe('string');
+    }
+    // o fix NÃO é incluído no JSON (contrato do doc-comment de runDoctor).
+    expect(out[0]).not.toContain('"fix"');
+  });
+
+  it('um ✗ (broker fora) ⇒ exit 1, e o JSON reflete o status "fail"', async () => {
+    const facts: DoctorFacts = {
+      ...allOk(),
+      broker: { url: 'https://b.test', probe: { reached: false } },
+    };
+    const { io, out } = fakeIO();
+    const code = await runDoctor({ io, json: true, probe: probeOf(facts) });
+    expect(code).toBe(1);
+    const parsed = JSON.parse(out[0]!) as ReadonlyArray<{ id: string; status: string }>;
+    const brokerCheck = parsed.find((c) => c.id === 'broker');
+    expect(brokerCheck?.status).toBe('fail');
+  });
+});

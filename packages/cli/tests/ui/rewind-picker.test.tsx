@@ -80,4 +80,118 @@ describe('RewindPicker — janelamento da lista de checkpoints', () => {
     const out = plain(lastFrame() ?? '');
     expect(out).toContain('nenhum ponto de restauração');
   });
+
+  // F89 (wrap-aware) — com `columns`, a janela conta LINHAS VISUAIS (não itens), pois em
+  // terminal estreito cada entrada quebra em ≥2 linhas. Sem cobertura anterior deste ramo
+  // (rowHeight só é construído quando `columns` é passado).
+  it('COM `columns` (wrap-aware), ainda janela e mantém o selecionado visível', () => {
+    const { lastFrame } = wrap(
+      <RewindPicker
+        phase="list"
+        checkpoints={MANY}
+        actions={[]}
+        selected={20}
+        maxRows={8}
+        columns={40}
+      />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('prompt-num-20');
+    expect(out).toMatch(/›/);
+  });
+});
+
+const TARGET_CP: Checkpoint = {
+  id: 'cp-target',
+  ordinal: 7,
+  ts: 7000,
+  label: 'prompt-alvo',
+  journalSeq: 7,
+  blockCount: 14,
+};
+
+describe('RewindPicker — etapa `action` (ação sobre o ponto-alvo)', () => {
+  it('mostra a dica de teclas da etapa `action`', () => {
+    const { lastFrame } = wrap(
+      <RewindPicker
+        phase="action"
+        checkpoints={[]}
+        actions={['both', 'conversation', 'code']}
+        selected={0}
+      />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('o que restaurar?');
+    expect(out).toContain('esc volta');
+  });
+
+  it('exibe o cabeçalho do ponto-alvo (`#ordinal · label`) quando `target` é dado', () => {
+    const { lastFrame } = wrap(
+      <RewindPicker
+        phase="action"
+        checkpoints={[]}
+        actions={['both', 'conversation', 'code']}
+        selected={0}
+        target={TARGET_CP}
+      />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('#7');
+    expect(out).toContain('prompt-alvo');
+  });
+
+  it('SEM `target` ⇒ não imprime cabeçalho de alvo', () => {
+    const { lastFrame } = wrap(
+      <RewindPicker phase="action" checkpoints={[]} actions={['both']} selected={0} />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).not.toContain('#7');
+  });
+
+  it('lista as 3 ações traduzidas, marcando a SELECIONADA com ›', () => {
+    const { lastFrame } = wrap(
+      <RewindPicker
+        phase="action"
+        checkpoints={[]}
+        actions={['both', 'conversation', 'code']}
+        selected={1}
+      />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('código + conversa');
+    expect(out).toContain('só a conversa');
+    expect(out).toContain('só o código');
+    const lines = out.split('\n').filter((l) => l.includes('conversa') || l.includes('código'));
+    const selLine = lines.find((l) => l.includes('só a conversa'));
+    expect(selLine).toMatch(/›/);
+  });
+
+  it('SEM avisos de barreira ⇒ nenhum texto de aviso aparece', () => {
+    const { lastFrame } = wrap(
+      <RewindPicker
+        phase="action"
+        checkpoints={[]}
+        actions={['both']}
+        selected={0}
+        barrierWarnings={[]}
+      />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).not.toContain('NÃO é desfeito');
+  });
+
+  it('COM avisos de barreira ⇒ lista cada comando REDIGIDO (CLI-SEC-6)', () => {
+    const { lastFrame } = wrap(
+      <RewindPicker
+        phase="action"
+        checkpoints={[]}
+        actions={['both']}
+        selected={0}
+        barrierWarnings={['rm -rf [REDIGIDO]', 'curl [REDIGIDO]']}
+      />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('rm -rf [REDIGIDO]');
+    expect(out).toContain('curl [REDIGIDO]');
+  });
 });
