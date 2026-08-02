@@ -211,6 +211,12 @@ export async function runHeadlessPrint(
   // Resolve `@path` literais do objetivo (mesmo fallback confinado do não-TTY). As
   // notas de anexo/recusa são DIAGNÓSTICO (stderr-bound) — não poluem o resultado.
   const resolved = await resolveLinearMentions(goal, opts.attachReader);
+  // BUG — antes desta linha, `resolved.notes` (a recusa de um `@`/`--image` fora do
+  // workspace, por exemplo) era calculada e DESCARTADA: o usuário não tinha NENHUM
+  // sinal de por que a imagem não chegou ao modelo (o modelo só via "não recebi
+  // imagem nenhuma", verdade, mas sem contexto). O stderr é o lugar certo (stdout
+  // headless é só o resultado — princípio Unix já documentado acima).
+  for (const note of resolved.notes) process.stderr.write(`aluy: ${note}\n`);
   const effectiveGoal = resolved.goal.trim() === '' ? goal : resolved.goal;
   const attachments =
     opts.seedHistory && opts.seedHistory.length > 0
@@ -357,6 +363,10 @@ export async function runHeadlessStreamJson(
 ): Promise<HeadlessPrintResult> {
   // Resolve `@path` literais (diagnóstico vai para o stderr, não polui o stdout NDJSON).
   const resolved = await resolveLinearMentions(goal, opts.attachReader);
+  // BUG — mesma correção de `runHeadlessPrint` acima: a nota de recusa era calculada
+  // e nunca escrita — o stdout NDJSON fica intocado (contrato preservado), o stderr
+  // é quem ganha o sinal.
+  for (const note of resolved.notes) process.stderr.write(`aluy: ${note}\n`);
   const effectiveGoal = resolved.goal.trim() === '' ? goal : resolved.goal;
   const attachments =
     opts.seedHistory && opts.seedHistory.length > 0
