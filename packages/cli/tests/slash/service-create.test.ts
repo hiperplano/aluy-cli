@@ -91,4 +91,10 @@ describe('buildServiceCreateSystemPrompt — PURA', () => {
     expect(prompt.toLowerCase()).toContain('esqueleto');
     expect(prompt).toContain('NÃO');
   });
+
+  it('NÃO vaza jargão de governança interna (ADR/§) — o prompt vira bloco "you" na tela (controller.submit → pushBlock kind:\'you\'), visível ao dono; "ADR-0158" não significa nada para quem usa o produto', () => {
+    const prompt = buildServiceCreateSystemPrompt('um serviço qualquer');
+    expect(prompt).not.toContain('ADR-');
+    expect(prompt).not.toMatch(/§\d/);
+  });
 });
