@@ -210,3 +210,98 @@ export function createLocalChildCallerFactory(
     return caller;
   };
 }
+
+export interface ProviderAwareLocalChildCallerFactoryOptions {
+  /**
+   * Lê o PROVIDER ATIVO agora — o MESMO par mutável (`activeLocalCatalog`/
+   * `activeLocalProviderId`) que `switchLocalProvider` (`run.tsx`) escreve SÓ no
+   * sucesso do `/provider`. NUNCA um valor congelado do boot.
+   */
+  readonly getActiveProviderId: () => LocalProviderKind;
+  /** Idem, o catálogo ATIVO (pode ganhar um provider custom cadastrado NESTA sessão). */
+  readonly getActiveCatalog: () => LocalProviderCatalog;
+  /** Provider resolvido no BOOT (flag>env>config>default) — usa `bootAuth`/`bootBaseUrl` abaixo. */
+  readonly bootProvider: LocalProviderKind;
+  /** Auth JÁ RESOLVIDO do boot (flag/config aplicados) — só vale p/ o `bootProvider`. */
+  readonly bootAuth: LocalAuthKind;
+  /** Override de base_url do boot (`--local-base-url`) — só vale p/ o `bootProvider`. */
+  readonly bootBaseUrl?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  /** Provedor de access token OAuth por-provider (EST-1114), injetável p/ teste. */
+  readonly oauthAccessTokenFor?: (
+    provider: LocalProviderKind,
+  ) => (() => Promise<string | undefined>) | undefined;
+  /**
+   * `fetch` injetável (TESTES) — repassado a toda fábrica por-provider. Produção NUNCA
+   * passa isto (herda o fetch PINADO `createPinnedStreamFetch`, EST-1115, dentro de
+   * `buildLocalModelClient`); existe só p/ observar requests sem tocar rede real, o
+   * MESMO padrão de `createLocalChildCallerFactory`/`local-child-caller-factory.test.ts`.
+   */
+  readonly fetch?: StreamFetch;
+  /** Idem, credencial injetável (TESTES) — produção nunca passa (herda `createLocalCredentialProvider`). */
+  readonly getCredential?: CredentialProvider;
+  /** Idem, resolvedor de DNS injetável (TESTES do anti-SSRF). */
+  readonly resolver?: { resolve(host: string): Promise<readonly string[]> };
+}
+
+/**
+ * F-PROV — versão de `callerForLocalModel` (ADR-0152 D6b) que segue o PROVIDER ATIVO
+ * da sessão em vez do congelado no boot. Fecha o gap que a rc.117 deixou DECLARADO: o
+ * `/provider` já troca de verdade o `LocalModelClient` do PAI (`switchLocalProvider`)
+ * e o catálogo do `/model` (`localModelCatalog`, run.tsx) já segue o provider trocado —
+ * mas `callerForLocalModel` (a porta de ROTEAMENTO de sub-agente, usada por
+ * `childCallerFor`/`spawn_agent`) continuava fechada SÓ sobre o que o boot resolveu.
+ * Sem este fix, um sub-agente roteado a um modelo local depois de um `/provider`
+ * bem-sucedido no meio da sessão saía pelo endpoint/credencial do provider ANTERIOR —
+ * silenciosamente, o mesmo tipo de defeito que o `/provider` original tinha.
+ *
+ * Estratégia: uma fábrica `createLocalChildCallerFactory` MEMOIZADA por `providerId`
+ * (nunca reconstrói client/valida anti-SSRF de novo p/ um provider já visto — preserva
+ * a memoização por-slug de D6b); a cada CHAMADA (não na construção), o provider ATIVO é
+ * relido via `getActiveProviderId()`. O provider do BOOT usa a config JÁ RESOLVIDA
+ * (`bootAuth`/`bootBaseUrl`, flags/env/config aplicados — ZERO regressão); um provider
+ * TROCADO depois usa os DEFAULTS do catálogo ATIVO (`defaultAuthFor` + base_url
+ * público) — a MESMA resolução que `switchLocalProvider` usa pra montar o client dele
+ * (SEM reaplicar overrides de flag/env que eram do provider ANTERIOR).
+ *
+ * Credencial NUNCA vem do slug/DADO: só o `provider` (lido do estado ATIVO, nunca de
+ * spawn/`.md`/config) decide qual `createLocalCredentialProvider` a fábrica interna usa
+ * (herdado via os defaults do `buildLocalModelClient`, dentro de `createLocalChildCallerFactory`).
+ *
+ * Fail-closed: se o provider ativo não existir no catálogo ativo, `buildLocalModelClient`
+ * (chamado preguiçosamente na 1ª `.call()` da fábrica interna) LANÇA um erro legível —
+ * nunca cai silenciosamente num provider diferente do selecionado; `childCallerFor`/
+ * `runChild` convertem essa rejeição em `ok:false` (não roteia), o mesmo fail-closed que
+ * D6b já garante p/ o caso "pai fora de backend local".
+ */
+export function createProviderAwareLocalChildCallerFactory(
+  opts: ProviderAwareLocalChildCallerFactoryOptions,
+): (slug: string) => ModelCaller {
+  const factoriesByProvider = new Map<string, (slug: string) => ModelCaller>();
+  const factoryFor = (providerId: LocalProviderKind): ((slug: string) => ModelCaller) => {
+    const cached = factoriesByProvider.get(providerId);
+    if (cached !== undefined) return cached;
+    const catalog = opts.getActiveCatalog();
+    const isBootProvider = providerId === opts.bootProvider;
+    const auth: LocalAuthKind = isBootProvider
+      ? opts.bootAuth
+      : defaultAuthFor(providerId, catalog);
+    const oauthAccessToken = opts.oauthAccessTokenFor?.(providerId);
+    const factory = createLocalChildCallerFactory({
+      catalog,
+      provider: providerId,
+      auth,
+      ...(isBootProvider && opts.bootBaseUrl !== undefined ? { baseUrl: opts.bootBaseUrl } : {}),
+      ...(opts.env !== undefined ? { env: opts.env } : {}),
+      ...(auth === 'oauth' && oauthAccessToken !== undefined ? { oauthAccessToken } : {}),
+      // TESTES apenas — produção nunca preenche estes três (ver os comentários dos
+      // campos em `ProviderAwareLocalChildCallerFactoryOptions`).
+      ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
+      ...(opts.getCredential !== undefined ? { getCredential: opts.getCredential } : {}),
+      ...(opts.resolver !== undefined ? { resolver: opts.resolver } : {}),
+    });
+    factoriesByProvider.set(providerId, factory);
+    return factory;
+  };
+  return (slug: string): ModelCaller => factoryFor(opts.getActiveProviderId())(slug);
+}

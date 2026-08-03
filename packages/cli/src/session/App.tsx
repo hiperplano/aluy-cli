@@ -361,6 +361,17 @@ export interface AppProps {
    */
   readonly onSelectProvider?: (provider: string) => void;
   /**
+   * F-PROV-FIX — o dono confirmou o VERBO explícito `/provider save`: fixa o
+   * provider (e modelo) ATIVOS desta sessão como o PADRÃO da PRÓXIMA (o wiring grava
+   * em `~/.aluy/config.json` via `UserConfigStore.saveLocalProvider` e empurra a nota
+   * honesta — o que gravou e onde). Só se aplica ao backend LOCAL/BYO; fora dele (ou
+   * sem provider ativo) o wiring decide e explica por quê, em vez de gravar lixo.
+   * Ausente ⇒ a App empurra uma nota "indisponível" (degradação segura, mesmo padrão
+   * do `onExportTranscript`/`onAddCustomProvider`). NUNCA um efeito colateral de
+   * trocar de provider — só dispara quando o dono digita `save` de propósito.
+   */
+  readonly onSaveProvider?: () => void;
+  /**
    * EST-0962 / ADR-0076 — cliente da lista de providers cadastrados (`GET /v1/providers`,
    * MESMA credencial do chat). A FONTE VIVA do `/provider`: o picker lista os NOMES
    * realmente cadastrados em vez de chumbar openrouter/deepseek. Ausente / broker fora ⇒
@@ -1752,6 +1763,24 @@ export function App(props: AppProps): React.ReactElement {
         const arg = args.trim();
         if (arg === '') {
           providerPicker.openPicker();
+          return;
+        }
+        // F-PROV-FIX — `/provider save`: VERBO (sem argumento adicional) que fixa o
+        // provider (e modelo) ATIVOS desta sessão como o PADRÃO da PRÓXIMA (escrita de
+        // verdade em `run.tsx`, via `onSaveProvider` — só faz sentido no backend
+        // LOCAL/BYO, onde `/provider` de fato troca; o wiring decide e empurra a nota
+        // honesta em qualquer caso, inclusive fora do BYO). Checado ANTES do casamento
+        // por NOME — "save" nunca é confundido com um provider real (nenhum id de
+        // catálogo usa este verbo). NÃO é um `subcommands` declarado (ver o comentário
+        // em `slash/commands.ts`): o espaço de arg do `/provider` é ABERTO (qualquer
+        // nome do catálogo), então declarar um sub aqui prenderia o slash-menu
+        // "esperando" um 2º espaço e quebraria `/provider <nome-real>` digitado inteiro.
+        if (arg.toLowerCase() === 'save') {
+          if (props.onSaveProvider) {
+            props.onSaveProvider();
+          } else {
+            controller.pushNote('provider', ['fixar como padrão indisponível nesta sessão.']);
+          }
           return;
         }
         // Casa contra a lista CARREGADA do picker (viva do broker quando já abriu uma vez,

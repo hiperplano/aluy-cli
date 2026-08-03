@@ -177,7 +177,7 @@ export const ptBR: FullCatalog = {
   'cmd.whoami': 'conta, org e escopos atuais',
   'cmd.telegram': 'conector Telegram · status/allow/deny/logout (setup na sessão)',
   'cmd.model': 'trocar o tier',
-  'cmd.provider': 'seta o provider do modelo Custom',
+  'cmd.provider': 'seta o provider do modelo Custom · "save" fixa como padrão (BYO/local)',
   'cmd.effort': 'seta o reasoning_effort (low/medium/high/custom) · passthrough ≤32 chars',
   'cmd.theme': 'trocar o tema (dark/light) · auto-detecta no boot',
   'cmd.lang': 'trocar o idioma (pt-BR/en) · auto-detecta no boot',
