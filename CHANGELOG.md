@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.118] — 2026-08-03
+
+### Corrigido
+
+- 🛡️ **anexo de IMAGEM não acendia o guardrail de conteúdo não-confiável (achado em auditoria pós-rc.117):** `@foto.png`/`--image` sob `--yolo` NÃO disparava `hasUntrustedInContext` — o aviso de "modo autônomo ativo com conteúdo externo no contexto" simplesmente não aparecia; anexo de TEXTO disparava normalmente. A checagem tinha duas pernas (o PAPEL `observation`/`tool_result`, e um fallback pelo literal `<<<DADO_NAO_CONFIAVEL` no `text`) e o `attachment_image` (ADR-0159) escapava das DUAS: não estava na lista de papéis, e é a ÚNICA proveniência não-confiável que não passa pelo `wrapUntrusted` — não por ser mais confiável, mas porque aquele envelope é de TEXTO e destruiria os bytes base64 (ver `buildMessages`); o item nem campo `text` tem pra casar. Caía na lacuna entre os dois mecanismos. Importa porque é o caso MAIS perigoso: instrução embutida numa imagem escapa de qualquer varredura de texto e é lida como ordem por um modelo de visão. Agora `attachment_image` entra pela checagem de PAPEL — a fronteira de proveniência (CLI-SEC-4), independente de o envelope de texto caber ou não naquele tipo de conteúdo.
+
 ## [1.0.0-rc.117] — 2026-08-03
 
 ### Adicionado
