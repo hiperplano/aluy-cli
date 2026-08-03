@@ -247,7 +247,7 @@ function fileMap(baseDir: string): Array<{ path: string; role: string; exists: b
   };
   return [
     f('config.json', 'configuração durável (este comando)'),
-    f('mcp.json', 'servers MCP (interop; sem credencial — CLI-SEC-7)'),
+    f('mcp.json', 'servers MCP (interop; sem credencial)'),
     f('hooks.json', 'hooks (fronteira de execução; o agente nunca escreve)'),
     f('providers.json', 'catálogo de providers (override do usuário)'),
     f('update-check.json', 'estado/cache (reescrito pela máquina)'),

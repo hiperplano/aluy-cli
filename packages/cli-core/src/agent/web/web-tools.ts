@@ -240,7 +240,7 @@ function fetchResultToObservation(
   // antes voltavam CRUS na observação (ao modelo) E ao journal/export. O `journal-redact`
   // (at-rest) PULA o verbo `web_fetch` DE PROPÓSITO porque assume que a web já redige na
   // ORIGEM (este é o ponto único onde isso acontece); sem esta linha a suposição era falsa
-  // e o segredo vazava. Redige ANTES do cap (anti-OOM) — idempotente, e o cap reflete o
+  // e o segredo vazava. Redige ANTES do cap (EST-0970, anti-OOM) — idempotente, e o cap reflete o
   // tamanho do corpo já redigido (marcador honesto sobre o que se MOSTRA).
   const body = capObservationBody(redactOutputSecrets(result.body), maxObservationChars);
   const header =

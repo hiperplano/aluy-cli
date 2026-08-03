@@ -508,7 +508,7 @@ function checkAgents(f: AgentsFact): DoctorCheck {
       label: 'perfis de agente',
       status: 'warn',
       detail: `${f.validCount} válido(s) · ${f.rejected.length} rejeitado(s): ${first?.file} (${first?.reason})`,
-      fix: 'conserte o frontmatter do .md (ex.: `tools:` precisa ser uma lista legível — RES-MD-3 falha fechada).',
+      fix: 'conserte o frontmatter do .md (ex.: `tools:` precisa ser uma lista legível — falha fechada).',
     };
   }
   return {

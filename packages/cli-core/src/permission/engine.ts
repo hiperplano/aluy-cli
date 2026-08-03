@@ -489,7 +489,7 @@ export class PolicyPermissionEngine implements PermissionEngine {
     if (call.name === SESSION_COMMAND_DESTRUCTIVE_CALL_NAME) {
       return ok(
         'ask',
-        `comando de sessão destrutivo — confirmação obrigatória (CLI-SEC-3, nunca auto-aprovável, nem sob --yolo): ${effect.exact}`,
+        `comando de sessão destrutivo — confirmação obrigatória (nunca auto-aprovável, nem sob --yolo): ${effect.exact}`,
         'always-ask:destructive',
         effect,
       );
@@ -542,7 +542,7 @@ export class PolicyPermissionEngine implements PermissionEngine {
     if (call.name === REMEMBER_TOOL_NAME) {
       return ok(
         'allow',
-        'lembrança autônoma de memória (allow silencioso; recall = dado, CLI-SEC-15)',
+        'lembrança autônoma de memória (allow silencioso; recall = dado)',
         'memory-write',
         effect,
       );
@@ -578,7 +578,7 @@ export class PolicyPermissionEngine implements PermissionEngine {
       }
       return ok(
         'allow',
-        'comunicação entre agentes (membership = consentimento, §13.1; authz na mesh: writer∈writers)',
+        'comunicação entre agentes (membership = consentimento; authz na mesh: writer∈writers)',
         'agent-comms',
         effect,
       );
@@ -599,7 +599,7 @@ export class PolicyPermissionEngine implements PermissionEngine {
     if (call.name === SESSION_COMMAND_TOOL_NAME) {
       return ok(
         'allow',
-        'session_command: roteamento por classe de efeito ocorre na porta (ADR-0147) — destrutivos re-passam decide() internamente',
+        'session_command: roteamento por classe de efeito ocorre na porta — destrutivos re-passam decide() internamente',
         'default',
         effect,
       );
@@ -738,13 +738,13 @@ export class PolicyPermissionEngine implements PermissionEngine {
       return ok('allow', `leitura pura (${call.name}) — default allow`, 'default', effect);
     }
     if (call.name === 'run_command') {
-      return ok('ask', 'run_command = ask por padrão (CLI-SEC-3)', 'default', effect);
+      return ok('ask', 'run_command = ask por padrão', 'default', effect);
     }
     if (call.name === 'edit_file') {
-      return ok('ask', 'edit_file = ask com diff (CLI-SEC-9)', 'default', effect);
+      return ok('ask', 'edit_file = ask com diff', 'default', effect);
     }
     if (call.name === 'write_file') {
-      return ok('ask', 'write_file = ask com diff (CLI-SEC-9)', 'default', effect);
+      return ok('ask', 'write_file = ask com diff', 'default', effect);
     }
     // tool desconhecida / qualquer efeito sem regra ⇒ ask (nunca allow silencioso).
     return ok(

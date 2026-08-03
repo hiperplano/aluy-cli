@@ -206,7 +206,7 @@ export class BwrapSandboxLauncher implements SandboxLauncher<ChildProcess, Spawn
       if (isInside(c, this.aluyHome) || isInside(this.aluyHome, c)) {
         throw new SandboxConfinementError(
           `recusado: bind/cwd "${p}" alcança ~/.aluy/ (${this.aluyHome}) — o sandbox NUNCA ` +
-            'monta o diretório do agente (journal/memória/config) no namespace (ADR-0065 §2).',
+            'monta o diretório do agente (journal/memória/config) no namespace.',
         );
       }
     }
@@ -339,7 +339,7 @@ export class BwrapSandboxLauncher implements SandboxLauncher<ChildProcess, Spawn
       '⚠ SEM CONFINAMENTO DE RECURSO NESTA MÁQUINA — o sandbox confina FUGA ' +
       '(FS/rede/syscall via bwrap) MAS não o RECURSO (cgroup v2 via systemd-run ' +
       'ausente): um fork-bomb/`cat /dev/zero` confinado ainda pode esgotar ' +
-      'CPU/RAM/PIDs da máquina (ADR-0065 §13.2). O comando RODA MESMO ASSIM — ' +
+      'CPU/RAM/PIDs da máquina. O comando RODA MESMO ASSIM — ' +
       `confinamento de recurso é hardening aditivo, não gate duro. Motivo: ${reason}.`
     );
   }
