@@ -132,7 +132,7 @@ async function sendChannelText(
   }
   const now = deps.now ?? Date.now;
   if (!deps.egressLimiter.tryConsume(now())) {
-    log('[service/channel] teto anti-spam (TC-6) atingido — mensagem NÃO enviada.');
+    log('[service/channel] teto anti-spam atingido — mensagem NÃO enviada.');
     return;
   }
   try {
@@ -230,7 +230,7 @@ export async function waitForOwnerReply(args: {
 
   const askText = formatServiceAskMessage(manifest.name, question);
   if (!deps.egressLimiter.tryConsume(now())) {
-    log('[service/channel] ask-espera: teto anti-spam (TC-6) atingido — pergunta NÃO enviada; aguardando mesmo assim.');
+    log('[service/channel] ask-espera: teto anti-spam atingido — pergunta NÃO enviada; aguardando mesmo assim.');
   } else {
     try {
       const ok = await client.send(chatId, askText);

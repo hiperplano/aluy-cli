@@ -129,7 +129,7 @@ export const sessionCommandTool: NativeTool<ToolPorts> = {
     'Dispara um comando de SESSÃO (os mesmos comandos que aparecem em "COMANDOS DA SESSÃO" no seu ' +
     'system prompt, sem a barra). Input: { "command": string, "args"?: string }. Comandos read-only/ ' +
     'de efeito de sessão RODAM DIRETO. Comandos DESTRUTIVOS (ex.: "clear full", "clear memory", ' +
-    '"logout", "cron rm") SEMPRE pedem confirmação do usuário antes de executar (CLI-SEC-3) — isso é ' +
+    '"logout", "cron rm") SEMPRE pedem confirmação do usuário antes de executar — isso é ' +
     'esperado, não um erro. Comandos que só fazem sentido no terminal do humano (tema, idioma, split, ' +
     'fullscreen, login, quit) são RECUSADOS — recomende ao usuário digitá-los. Um comando desconhecido ' +
     'ou não-classificado também é recusado.',

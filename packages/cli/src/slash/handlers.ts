@@ -696,7 +696,7 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           title: 'export',
           lines: [
             'grava o transcript desta sessão num arquivo markdown em ~/.aluy/exports/',
-            '(0600), JÁ REDIGIDO (CLI-SEC-6): segredos/tokens que apareceram na tela',
+            '(0600), JÁ REDIGIDO: segredos/tokens que apareceram na tela',
             'saem como ‹redigido› no arquivo. Útil p/ copiar/compartilhar a conversa.',
           ],
         },

@@ -209,7 +209,7 @@ async function confirmDestructive(
 function destructiveDenied(): SessionCommandOutcome {
   return {
     ok: false,
-    text: 'comando destrutivo NEGADO ou sem confirmação do usuário — nada foi executado (fail-closed, CLI-SEC-3).',
+    text: 'comando destrutivo NEGADO ou sem confirmação do usuário — nada foi executado (fail-closed).',
   };
 }
 

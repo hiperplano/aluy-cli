@@ -55,7 +55,7 @@ export function classifyConnectorIngress(
   // TC-6 — filtro de AUTO-MENSAGEM: remetente-bot (incl. o próprio bot) ⇒ DESCARTA. Fecha o
   // loop "bot reprocessa a própria resposta". O dono (v1) é humano; mensagem de bot nunca é comando.
   if (msg.senderIsBot === true) {
-    return { kind: 'discard', reason: `remetente é bot (anti-loop, TC-6)` };
+    return { kind: 'discard', reason: `remetente é bot (anti-loop)` };
   }
   const text = msg.content.trim();
   if (text === '') {

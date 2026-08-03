@@ -63,7 +63,7 @@ Uso:
 Opções:
   --env K=V    Variável de ambiente do server (repetível). Use REFERÊNCIA
                (--env TOKEN=\\$MEU_TOKEN) em vez de segredo literal — o mcp.json é
-               legível/versionável e NÃO deve carregar credencial (CLI-SEC-7).
+               legível/versionável e NÃO deve carregar credencial.
   --project    Escreve no .mcp.json do PROJETO (cwd) em vez do ~/.aluy/mcp.json global.
   --force      Sobrescreve um server de mesmo nome (por padrão duplicado é erro).
 

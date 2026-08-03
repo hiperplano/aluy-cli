@@ -176,7 +176,7 @@ Notas:
     houver humano, o run PARA e reporta (NAO auto-aprova). Use --yolo com
     consciência para jobs que não precisam de supervisão.
   - Confinamento: o run roda no workspace do job (path-deny).
-  - Anti-runaway: tetos do --cycle são herdados (CLI-SEC-14).
+  - Anti-runaway: tetos do --cycle são herdados.
 `;
 
 /**
