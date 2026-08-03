@@ -99,11 +99,30 @@ jobs:
           echo "stage=$stage" >> "$GITHUB_OUTPUT"
           echo "tgz=$(basename "$tgz")" >> "$GITHUB_OUTPUT"
 
-      - name: npm publish
+      # IDEMPOTENTE (achado real na rc.119): um passo POSTERIOR falhou (403 transitório
+      # do registry no dist-tag) e derrubou o job DEPOIS de o publish ter dado certo —
+      # re-rodar era impossível, porque o publish batia em EPUBLISHCONFLICT e o job
+      # morria antes de chegar nos passos que faltavam. Agora "esta versão já está no
+      # registry" é SUCESSO, não erro: re-execução vira uma opção de verdade quando algo
+      # a jusante falha. NÃO afrouxa nada — publicar de novo o MESMO número de versão é
+      # justamente o no-op que queremos; qualquer outro erro do publish segue FALHANDO.
+      - name: npm publish (idempotente)
+        id: publish
         working-directory: ${{ steps.pack.outputs.stage }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --tag "${{ steps.ver.outputs.disttag }}"
+        run: |
+          set -uo pipefail
+          v='${{ steps.ver.outputs.version }}'
+          out="$(npm publish --access public --tag "${{ steps.ver.outputs.disttag }}" 2>&1)"; rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -eq 0 ]; then exit 0; fi
+          # Só engole o caso EXATO "já publicada"; qualquer outra falha propaga.
+          if printf '%s' "$out" | grep -qiE 'EPUBLISHCONFLICT|cannot publish over|previously published'; then
+            echo "::notice::$v já estava publicada — seguindo p/ os passos restantes (re-execução)."
+            exit 0
+          fi
+          exit "$rc"
 
       - name: dist-tag 'latest' → versão nova (só enquanto não há stable)
         env:
@@ -117,13 +136,34 @@ jobs:
           # prereleases NÃO mexem no latest (mantém o stable).
           cur="$(npm view @hiperplano/aluy-cli@latest version 2>/dev/null || true)"
           if [ -z "$cur" ] || printf '%s' "$cur" | grep -q '-'; then
-            npm dist-tag add "@hiperplano/aluy-cli@$v" latest
+            # RETRY (achado real na rc.119): o registry devolveu 403 AQUI segundos depois
+            # de o MESMO token ter publicado com sucesso — a versão recém-publicada ainda
+            # não tinha propagado. Sem retry, um transitório de segundos deixa o `latest`
+            # apontando p/ a versão ANTERIOR: quem instala sem tag (inclusive o install.sh
+            # do site) continua recebendo a antiga, com a release "parecendo" bem-sucedida.
+            ok=0
+            for attempt in 1 2 3 4 5; do
+              if npm dist-tag add "@hiperplano/aluy-cli@$v" latest; then ok=1; break; fi
+              echo "::warning::dist-tag latest falhou (tentativa $attempt/5) — nova tentativa em $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::dist-tag latest → $v FALHOU após 5 tentativas. A versão ESTÁ publicada; corrija com: npm dist-tag add @hiperplano/aluy-cli@$v latest"
+              exit 1
+            fi
             echo "::notice::dist-tag latest → $v (ainda sem stable)"
           else
             echo "::notice::latest mantido em $cur (já há stable; prerelease não mexe)"
           fi
 
+      # NÃO depende do dist-tag (achado real na rc.119): o dist-tag falhou, este passo foi
+      # PULADO, e a release ficou meio-publicada — pacote no npm, mas sem GitHub Release.
+      # O site lê a versão DAS RELEASES, então a versão nova simplesmente não aparecia,
+      # enquanto o npm dizia "publicado". Basta o PUBLISH ter dado certo: se o pacote está
+      # no registry, a release tem que existir. O dist-tag é ortogonal — falhar lá ainda
+      # marca o job como vermelho (o `exit 1` acima), mas não sonega mais a release.
       - name: GitHub Release (cria ou atualiza) + tarball
+        if: steps.publish.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
