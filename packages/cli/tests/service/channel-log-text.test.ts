@@ -150,7 +150,7 @@ describe('waitForOwnerReply — textos EXATOS de log em cada ramo', () => {
     });
     expect(result.kind).toBe('timeout');
     expect(logs).toContain(
-      '[service/channel] ask-espera: TIMEOUT — sem resposta do dono; turno encerra sem ação (§5 pt.4).',
+      '[service/channel] ask-espera: TIMEOUT — sem resposta do dono; turno encerra sem ação.',
     );
     // waitedMs correto = now() - startedAtMs (uma diferença "pequena", ~horas) —
     // com o operador trocado por `+` a soma dobraria/explodiria o valor (a

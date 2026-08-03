@@ -260,7 +260,7 @@ export async function waitForOwnerReply(args: {
           /* fail-open — o alerta é best-effort; o log já registra o timeout abaixo. */
         }
       }
-      log('[service/channel] ask-espera: TIMEOUT — sem resposta do dono; turno encerra sem ação (§5 pt.4).');
+      log('[service/channel] ask-espera: TIMEOUT — sem resposta do dono; turno encerra sem ação.');
       return { kind: 'timeout' };
     }
 

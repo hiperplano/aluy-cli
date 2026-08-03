@@ -987,7 +987,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             agent: servicePersonaName,
           });
           if (!binding.ok) {
-            throw new Error(`ADR-0158 §4.1 — enforcement de persona do serviço: ${binding.error}`);
+            throw new Error(`enforcement de persona do serviço: ${binding.error}`);
           }
           return {
             name: servicePersonaName,
@@ -2981,7 +2981,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           ...(logLines.length > 0 ? logLines : ['(sem log ainda.)']),
           '',
           `— isto é um retrato ESTÁTICO, não ao vivo. Para acompanhar em tempo real e`,
-          `poder DIGITAR (a fala vira instrução do serviço, §11), abra um terminal e rode:`,
+          `poder DIGITAR (a fala vira instrução do serviço), abra um terminal e rode:`,
           `  aluy service attach ${name}`,
           `Esc/Ctrl-C lá faz DETACH — o serviço segue rodando.`,
         ]);
@@ -3005,7 +3005,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             'ex.: /service create um time de operações com 3 estudos e um gestor de',
             '  risco, opera 9h-17h30, reporta no telegram, drawdown máximo 2% ao dia.',
             `o agente entrevista o que faltar e escreve o rascunho em ${SERVICE_DRAFTS_DIRNAME}/<nome>/`,
-            '(PARADO — revise e rode `aluy service install` depois; criar não é ligar, ADR-0158 §10).',
+            '(PARADO — revise e rode `aluy service install` depois; criar não é ligar).',
           ]);
           return;
         }

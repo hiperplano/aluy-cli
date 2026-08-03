@@ -152,7 +152,7 @@ describe('buildSlashEffect — cada comando tem efeito (nada de no-op silencioso
     expect(e.kind).toBe('note');
     if (e.kind === 'note') {
       const joined = e.note.lines.join('\n');
-      expect(joined).toContain('ADR-0158');
+      expect(joined).toContain('SERVIÇOS plugáveis');
       expect(joined).toContain('/service');
     }
   });

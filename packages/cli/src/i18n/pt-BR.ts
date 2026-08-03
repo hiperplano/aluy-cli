@@ -194,7 +194,7 @@ export const ptBR: FullCatalog = {
   'cmd.export': 'exporta o transcript REDIGIDO desta sessão p/ ~/.aluy/exports/ (0600)',
   'cmd.quit': 'sair do aluy',
   'cmd.workflows': 'fluxos de atividades que coordenam o agente — lista, executa e ativa',
-  'cmd.service': 'serviços plugáveis (ADR-0158) · list/status/create/start/stop/logs/attach',
+  'cmd.service': 'serviços plugáveis · list/status/create/start/stop/logs/attach',
   'cmd.tools': 'inventário unificado das ferramentas · nativas, MCP, permissão (read-only)',
   'cmd.todo': 'vê/gerencia o backlog de tarefas anotadas (done/clear)',
 };

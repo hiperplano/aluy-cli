@@ -1027,7 +1027,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // STAGING, PROMPT-DRIVEN igual ao `/init`, `slash/service-create.ts`) já
     // funcionam de verdade.
     name: 'service',
-    summary: 'serviços plugáveis (ADR-0158) · list/status/create/start/stop/logs/attach',
+    summary: 'serviços plugáveis · list/status/create/start/stop/logs/attach',
     summaryKey: 'cmd.service',
     source: 'native',
     id: 'service',
@@ -1078,7 +1078,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
       {
         name: 'attach',
         summary:
-          'snapshot do estado+log de um serviço rodando (ADR-0158 §11) — p/ sessão AO VIVO e interativa use `aluy service attach <nome>` no shell',
+          'snapshot do estado+log de um serviço rodando — p/ sessão AO VIVO e interativa use `aluy service attach <nome>` no shell',
         usage: 'attach <nome>',
       },
     ],
