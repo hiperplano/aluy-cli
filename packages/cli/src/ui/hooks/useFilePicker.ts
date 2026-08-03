@@ -143,10 +143,20 @@ export function useFilePicker(args: UseFilePickerArgs): FilePickerController {
 
   const confirm = useCallback(async (): Promise<string | null> => {
     const hit = hits[selected];
+    // UX (força-tarefa) — `query` ANTES do `closePicker()` (que zera o state): sem
+    // nenhum hit (ex.: `@arquivo-que-nao-existe`), o Enter fechava o picker em
+    // SILÊNCIO — a query digitada só SUMIA do composer, sem nenhum sinal do porquê
+    // (inconsistente com o `/comando-inexistente`, que avisa "comando desconhecido").
+    // Reusa o MESMO `notice` já usado p/ recusa de anexo — zero canal novo, só mais
+    // um motivo possível na mesma caixa "anexo recusado".
+    const q = query.trim();
     closePicker();
-    if (!hit) return null;
+    if (!hit) {
+      setNotice(q === '' ? 'nenhum arquivo selecionado' : `@${q} — nenhum arquivo encontrado`);
+      return null;
+    }
     return doAttach(hit.path);
-  }, [hits, selected, closePicker, doAttach]);
+  }, [hits, selected, query, closePicker, doAttach]);
 
   // FU (não nesta entrega): remoção de chip ARBITRÁRIO (hoje só `removeLast`) —
   // ex.: `removeAt(index)`/`remove(path)` p/ tirar um anexo do meio sem desfazer

@@ -683,4 +683,14 @@ async function main(): Promise<void> {
 main().catch((err: unknown) => {
   process.stderr.write(`aluy: erro fatal: ${String(err)}\n`);
   process.exitCode = 1;
+  // UX — um erro fatal no `main()` (ex.: `--local-base-url` recusado pelo anti-SSRF, ou
+  // qualquer outra falha entre `createBootSplash` e `splash.finish()` em run.tsx) deixa o
+  // Ink do SPLASH ainda montado sob TTY: o `setInterval` da cauda de pontinhos
+  // (`useTick`/`SPLASH_DOTS_MS`) segue rodando e mantém o event loop vivo — `exitCode=1`
+  // fica setado mas o processo NUNCA sai sozinho (achado da força-tarefa de UX: a tela
+  // "aquecendo os neurônios..." gira pra sempre até o usuário apertar Ctrl-C na mão,
+  // escondendo o erro já impresso acima). `process.exit()` força a saída; o Ink usa
+  // `signal-exit` (ver `ink/build/ink.js`) p/ desmontar (raw-mode/cursor) no evento
+  // `exit` MESMO sem `unmount()` explícito — sair aqui não deixa o terminal quebrado.
+  process.exit(process.exitCode);
 });
