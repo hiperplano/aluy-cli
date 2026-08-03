@@ -578,7 +578,7 @@ export class PolicyPermissionEngine implements PermissionEngine {
       }
       return ok(
         'allow',
-        'comunicação entre agentes (membership = consentimento, §13.1; authz na mesh: writer∈writers)',
+        'comunicação entre agentes (membership = consentimento; authz na mesh: writer∈writers)',
         'agent-comms',
         effect,
       );
@@ -599,7 +599,7 @@ export class PolicyPermissionEngine implements PermissionEngine {
     if (call.name === SESSION_COMMAND_TOOL_NAME) {
       return ok(
         'allow',
-        'session_command: roteamento por classe de efeito ocorre na porta (ADR-0147) — destrutivos re-passam decide() internamente',
+        'session_command: roteamento por classe de efeito ocorre na porta — destrutivos re-passam decide() internamente',
         'default',
         effect,
       );
