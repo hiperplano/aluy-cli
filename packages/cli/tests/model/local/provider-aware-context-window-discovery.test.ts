@@ -121,7 +121,7 @@ describe('F-PROV — createProviderAwareDiscoverContextWindowPort (fecha a lacun
     // catálogo não resolve base_url (ex.: `findProvider` não achou a entrada) devolve
     // `baseUrl: ''` — a mesma forma que `run.tsx` produz (`entry?.baseUrl ?? ''`).
     const persist = vi.fn(() => true);
-    let activeProviderId = 'ghost-provider';
+    const activeProviderId = 'ghost-provider';
     const port = createProviderAwareDiscoverContextWindowPort({
       getActiveProviderId: () => activeProviderId,
       depsForProvider: () => ({

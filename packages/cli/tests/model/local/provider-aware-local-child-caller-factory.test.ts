@@ -142,7 +142,7 @@ describe('F-PROV — createProviderAwareLocalChildCallerFactory (fecha a lacuna 
     // (ex.: `/provider` apontou p/ um id que sumiu do catálogo entre a resolução e a
     // chamada). A garantia de segurança: "falhar explicando" > "funcionar pelo endpoint
     // errado" — a fábrica NUNCA cai de volta no provider do boot por engano.
-    let activeProviderId = 'ghost-provider';
+    const activeProviderId = 'ghost-provider';
     const factory = createProviderAwareLocalChildCallerFactory({
       getActiveProviderId: () => activeProviderId,
       getActiveCatalog: () => CATALOG,
