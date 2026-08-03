@@ -14,6 +14,17 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.116] — 2026-08-03
+
+### Corrigido
+
+- 🔇 **anexo/imagem recusado em `-p` era descartado em silêncio (achado em dogfooding real):** `aluy -p "descreva" --image /tmp/foto.png` (ou `@caminho` fora do workspace) fazia o modelo responder "não recebi imagem nenhuma" sem NENHUM sinal do motivo. A recusa (confinamento do `@attach` — decisão da ADR-0159, intocada aqui) já era corretamente calculada por `resolveLinearMentions`, mas nunca escrita em lugar nenhum nos dois modos headless (`runHeadlessPrint`/`runHeadlessStreamJson`). Agora ambos escrevem a nota (`aluy: [anexo recusado] @caminho — motivo` / `aluy: [anexo] @caminho`) no stderr; stdout/NDJSON seguem limpos.
+- 🗂️ **`/mcp list` reorganizado:** resumo no topo (N servers, quantos ativos/erro/desativados/sem-descoberta, total de tools), agrupado por estado, tools numa tabela com bordas (reusa o `boxTable` já usado por `/agents`/`/skills`, nunca aplicado a `/mcp` até agora). `env:` continua só com as CHAVES.
+- 🔒 **`/service create` não vaza mais "ADR-0158" no prompt visível:** o prompt-guia da entrevista conversacional citava a ADR e seções internas de governança em 12 pontos — texto que o usuário vê na tela como se fosse a própria pergunta do sistema. Removidas as citações do texto, significado preservado; comentários de código (nunca alcançam a tela) intocados.
+- 🎯 **`/model` e `/effort` ganham picker dedicado no backend local (BYO):** o fuzzy-search já existia pro backend broker (tiers); sob `backend:'local'` (o caminho PRINCIPAL do produto — BYO provider), `/model` sem argumento caía numa nota estática, sem lista nenhuma. Agora abre um picker dedicado sobre os slugs do provider ativo; `/effort` ganha seletor standalone (keep/low/medium/high/custom).
+- 🐛 **boot fatal sob TTY travava pra sempre (severidade alta, achado via PTY real):** um erro fatal no boot (ex.: `--local-base-url` recusado pelo anti-SSRF) deixava o splash girando infinitamente — o processo nunca saía sozinho, só com Ctrl-C manual. `process.exitCode` era setado mas `process.exit()` nunca era chamado; o timer da animação do splash mantinha o event loop vivo. Corrigido — verificado com PTY real (antes: hang infinito; depois: sai em ~4s).
+- 🔇 **`@arquivo-inexistente` + Enter descartava o texto em silêncio:** o picker fechava sem nenhum aviso, inconsistente com `/comando-inexistente`. Agora avisa pelo mesmo canal já usado pra recusa de anexo.
+
 ## [1.0.0-rc.115] — 2026-08-01
 
 ### Adicionado
