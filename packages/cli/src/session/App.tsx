@@ -1257,11 +1257,43 @@ export function App(props: AppProps): React.ReactElement {
   // (synchronized-output.ts). Assim o clearScreen não é interceptado pelo transform
   // anti-flicker e o scrollback é REALMENTE limpo — sem acumular conteúdo fantasma a
   // cada restart de sessão.
+  // WEZTERM-GAP (dogfooding real, dono: "redimensionar a janela no WezTerm apaga a
+  // conversa inteira, sobra só uma tela em branco até o composer") — sinal STICKY (sobrevive
+  // a vários renders/settles) de que o `<App>` passou por um frame onde a região viva NÃO
+  // cabia em `rows` (mesmo teste do F196 abaixo) DESDE o último `clearScreen()` de verdade.
+  // MOTIVO (achado por reprodução via PTY real + leitura de `ink.js`): nesse regime o
+  // PRÓPRIO Ink faz `stdout.write(clearTerminal + fullStaticOutput + output)` — um write CRU
+  // que NUNCA passa pelo `log-update` interno dele (`this.log`/`previousLineCount`), então
+  // `previousLineCount` fica DESSINCRONIZADO da tela real. O F196 (abaixo) assume "não cabe ⇒
+  // Ink pinta certo sozinho, nosso clearScreen é redundante" — verdade só para AQUELE frame; a
+  // dessincronia do `previousLineCount` SOBREVIVE à volta pro regime "cabe", e o PRÓXIMO
+  // `eraseLines(previousLineCount)` do Ink (a cada atualização normal da região viva) apaga a
+  // contagem ERRADA de linhas — inclusive linhas REAIS do histórico logo acima, virando o
+  // "espaço vazio gigante". Um `clearScreen()` de verdade CURA isso (o branch
+  // `hasStaticOutput` do Ink faz `log.clear()`+`log(output)`, resincronizando
+  // `previousLineCount`) — mas o COOLDOWN abaixo podia SUPRIMIR exatamente esse clearScreen de
+  // recuperação se caísse < 500ms de um repaint anterior NÃO relacionado (comum numa rajada
+  // densa de resize, o padrão que o WezTerm relata durante um arrasto real de borda — Terminator/
+  // xfce-terminal coalescem e raramente cruzam o regime "não cabe" no meio do arrasto).
+  // PROVADO por harness de PTY real (burst cirúrgico: settle que ENTRA no regime "não cabe" seguido
+  // de um settle que VOLTA a caber mas cai dentro do cooldown de um repaint anterior não relacionado
+  // — o texto de uma pergunta real do histórico sumiu, virou linha em branco; o MESMO burst sem
+  // passar pelo regime "não cabe" preserva o histórico intacto — confirma que é a COMBINAÇÃO dos
+  // dois mecanismos, não o cooldown isolado). Setado sempre que o REGIME NÃO CABE é observado
+  // (render abaixo, F196) — resetado aqui (clearScreen real sempre repara o Ink) e no branch F196
+  // do resize-effect (idempotente).
+  const overflowSeenSinceRepaintRef = useRef<boolean>(false);
   const armAtomicClear = props.armAtomicClear;
   const clearScreen = useCallback((): void => {
     // F-FLICKER (debug) — este é o "carrega TUDO de novo": limpa a tela + remonta o
     // <Static> (re-emite o histórico inteiro). Se isto dispara ao abrir `/`, achamos o bug.
     debugRenderLog('clearScreen() → \\x1b[2J\\x1b[3J + staticKey++ (REEMITE histórico)');
+    // WEZTERM-GAP — um clearScreen DE VERDADE sempre corre o branch `hasStaticOutput` do Ink
+    // (log.clear()+log(output)), que RESSINCRONIZA o `previousLineCount` interno dele — cura
+    // qualquer dessincronia deixada por um dump cru anterior (regime "não cabe"). Reseta o
+    // sinal aqui (e não só no resize-effect) para cobrir TODO caminho que chama clearScreen
+    // (/clear, sair do cockpit, etc.), não só o de resize.
+    overflowSeenSinceRepaintRef.current = false;
     // BURACO-NO-MEIO-RESIZE (dono: "espaço em branco no MEIO da tela ao redimensionar") —
     // ANTES: `stdout?.write('\x1b[H\x1b[2J\x1b[3J')` CRU aqui e SÓ DEPOIS `setStaticKey`
     // (setState ASSÍNCRONO — o remonte real do `<Static>` só acontece no PRÓXIMO render do
@@ -1379,8 +1411,14 @@ export function App(props: AppProps): React.ReactElement {
     // órfãos que o reflow do terminal deixa na região viva (o motivo original do EST-1015).
     if (liveRegionExceedsRowsRef.current) {
       inlineResizeDimRef.current = { rows, columns };
+      // WEZTERM-GAP — MARCA o sinal STICKY: este frame passou pelo dump cru do Ink
+      // (`clearTerminal + fullStaticOutput`), que NÃO passa pelo `log-update` interno dele
+      // ⇒ o `previousLineCount` pode ter ficado dessincronizado. A recuperação (forçar o
+      // clearScreen de verdade, IGNORANDO o cooldown) acontece mais abaixo, na 1ª volta ao
+      // regime "cabe" — ver o `if (overflowSeenSinceRepaintRef.current)` no cooldown.
+      overflowSeenSinceRepaintRef.current = true;
       debugRenderLog(
-        `resize ${prev.rows}x${prev.columns} → ${rows}x${columns} (F196: viva > rows ⇒ PULA clearScreen; Ink repinta via clearTerminal)`,
+        `resize ${prev.rows}x${prev.columns} → ${rows}x${columns} (F196: viva > rows ⇒ PULA clearScreen; Ink repinta via clearTerminal; marca recuperação pendente)`,
       );
       return;
     }
@@ -1388,7 +1426,11 @@ export function App(props: AppProps): React.ReactElement {
     // (EST-1015) precisa de uma LARGURA nova pra rewrapear texto já pintado — altura
     // sozinha não rewrapeia nada. Sem risco de órfão ⇒ pula o clearScreen caro (o
     // re-render normal, já disparado por `bumpResize`, ajusta o orçamento/altura sozinho).
-    if (prev.columns === columns) {
+    // WEZTERM-GAP — mas SÓ pula se não há recuperação pendente: se o regime "não cabe" foi
+    // visto desde o último clearScreen de verdade, o `previousLineCount` do Ink pode estar
+    // dessincronizado independentemente de LARGURA — precisa do repaint completo mesmo
+    // numa mudança só-de-altura (cai no caminho normal abaixo, que trata a recuperação).
+    if (prev.columns === columns && !overflowSeenSinceRepaintRef.current) {
       inlineResizeDimRef.current = { rows, columns };
       debugRenderLog(
         `resize ${prev.rows}x${prev.columns} → ${rows}x${columns} (só ROWS ⇒ PULA clearScreen; sem rewrap de largura)`,
@@ -1412,12 +1454,33 @@ export function App(props: AppProps): React.ReactElement {
       // padrão de terminal que REFLOWA), não deixamos CADA settle pagar o custo O(histórico)
       // + alimentar a bomba do `fullStaticOutput` (ver doc acima). Fora do cooldown, segue
       // valendo 1 clearScreen por settle (o comportamento já provado pelos testes existentes).
+      //
+      // WEZTERM-GAP (dogfooding real do dono, confirmado por PTY real — ver o comentário no
+      // `overflowSeenSinceRepaintRef` acima) — EXCEÇÃO ao cooldown: se a rajada passou pelo
+      // regime "não cabe" (F196) desde o último clearScreen de verdade, o `previousLineCount`
+      // interno do Ink pode estar dessincronizado — SUPRIMIR este repaint deixaria essa
+      // dessincronia PERMANENTE (nada mais dispara uma correção depois que a rajada acaba; o
+      // `inlineResizeDimRef` já foi sincronizado pros branches acima, então nenhum resize
+      // FUTURO revalida esta dimensão). Por isso a recuperação IGNORA o cooldown — é a única
+      // forma de garantir que a rajada, não importa a cadência, sempre termina numa tela
+      // correta. Não enfraquece o cooldown no caso comum (nunca passou por "não cabe"): esse
+      // caminho segue suprimindo normalmente, o mesmo comportamento provado por
+      // `resize-inline-gap.test.tsx`.
       const now = Date.now();
-      if (now - lastForcedRepaintAtRef.current < RESIZE_REPAINT_COOLDOWN_MS) {
+      const mustRecoverFromOverflow = overflowSeenSinceRepaintRef.current;
+      if (
+        !mustRecoverFromOverflow &&
+        now - lastForcedRepaintAtRef.current < RESIZE_REPAINT_COOLDOWN_MS
+      ) {
         debugRenderLog(
           `resize ${rows}x${columns} — clearScreen SUPRIMIDO (cooldown ${RESIZE_REPAINT_COOLDOWN_MS}ms; rajada de resize)`,
         );
         return;
+      }
+      if (mustRecoverFromOverflow) {
+        debugRenderLog(
+          `resize ${rows}x${columns} — clearScreen FORÇADO (ignora cooldown; recuperação WEZTERM-GAP de regime "não cabe" pendente)`,
+        );
       }
       lastForcedRepaintAtRef.current = now;
       clearScreen();
