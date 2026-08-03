@@ -53,6 +53,12 @@ export { FilePicker, elidePath } from './FilePicker.js';
 export type { FilePickerProps } from './FilePicker.js';
 export { ModelPicker } from './ModelPicker.js';
 export type { ModelPickerProps } from './ModelPicker.js';
+// F161-FIX — seletor de modelo do provider LOCAL (BYO) — `/model` sob backend `local`.
+export { LocalModelPicker } from './LocalModelPicker.js';
+export type { LocalModelPickerProps } from './LocalModelPicker.js';
+// F161-FIX — seletor de `reasoning_effort` STANDALONE (`/effort` fora do /model).
+export { EffortPicker } from './EffortPicker.js';
+export type { EffortPickerProps } from './EffortPicker.js';
 export { HistoryPicker } from './HistoryPicker.js';
 export type { HistoryPickerProps } from './HistoryPicker.js';
 export { RewindPicker } from './RewindPicker.js';

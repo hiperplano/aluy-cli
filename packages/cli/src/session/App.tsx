@@ -35,6 +35,8 @@ import {
   CommandPalette,
   FilePicker,
   ModelPicker,
+  LocalModelPicker,
+  EffortPicker,
   ThemePicker,
   LangPicker,
   ProviderPicker,
@@ -64,6 +66,11 @@ import { useTick } from '../ui/hooks/useTick.js';
 import { useFilePicker } from '../ui/hooks/useFilePicker.js';
 import { useModelPicker } from '../ui/hooks/useModelPicker.js';
 import {
+  useLocalModelPicker,
+  type LocalModelCatalogPort,
+} from '../ui/hooks/useLocalModelPicker.js';
+import { useEffortPicker } from '../ui/hooks/useEffortPicker.js';
+import {
   usePermissionsPanel,
   type PermissionEngineControl,
 } from '../ui/hooks/usePermissionsPanel.js';
@@ -81,6 +88,7 @@ import type {
   TierCatalogClient,
   ProvidersClient,
   Checkpoint,
+  EffortChoice,
 } from '@hiperplano/aluy-cli-core';
 import { formatQuota } from '@hiperplano/aluy-cli-core';
 import { DEFAULT_TIER } from './wiring.js';
@@ -237,6 +245,20 @@ export interface AppProps {
    */
   readonly customModels?: Pick<CustomModelClient, 'list'>;
   /**
+   * F161-FIX — porta do catálogo de modelos do backend LOCAL (BYO): os slugs do
+   * provider ATIVO (declarados no catálogo local, ADR-0118, ∪ registrados nesta
+   * sessão, ADR-0153 D2). Alimenta o `/model` sob `state.meta.backend === 'local'`
+   * (onde o `catalog`/`customModels` acima — tiers do BROKER — não se aplicam).
+   * Ausente ⇒ `/model` sem argumento cai na nota antiga (comportamento preservado).
+   */
+  readonly localModelCatalog?: LocalModelCatalogPort;
+  /**
+   * F161-FIX — slug do modelo LOCAL ativo no BOOT (p/ o `<LocalModelPicker>` marcar o
+   * ● antes de qualquer `/model` nesta sessão). O valor LIVE pós-`/model` vem de
+   * `state.meta.model` (prioridade sobre esta prop — mesmo padrão do `currentProvider`).
+   */
+  readonly currentLocalModel?: string;
+  /**
    * EST-0962 — troca o tier da sessão (o controller aplica no caller). Chamado pelo
    * seletor `/model` ao confirmar. Sem ele, o picker não troca (degradação segura).
    * O 2º arg é o slug Custom (ADR-0030 §3): preenchido SÓ quando `tier === 'custom'`
@@ -307,6 +329,14 @@ export interface AppProps {
       | { kind: 'custom'; model: string; supportsTools?: boolean },
     effort: { kind: 'keep' } | { kind: 'set'; value: string },
   ) => void;
+  /**
+   * F161-FIX · /effort STANDALONE — aplica o `EffortChoice` escolhido no seletor
+   * `/effort` (fora do fluxo conjugado do `/model`): `keep` não muda nada (só fecha o
+   * picker); `set` chama `controller.setEffort(value)`, o MESMO efeito de hoje digitar
+   * `/effort <valor>`. Chamado ao confirmar. Sem ele, `/effort` sem argumento cai na
+   * nota antiga (lê o valor atual — comportamento preservado).
+   */
+  readonly onSelectEffort?: (choice: EffortChoice) => void;
   /**
    * EST-0962 (/provider) — seta o provider do modo Custom da sessão (o controller o
    * aplica no caller; a próxima chamada o envia em par com o slug). Chamado pelo
@@ -864,6 +894,25 @@ export function App(props: AppProps): React.ReactElement {
     // EST-1117 — o effort ATIVO da sessão (p/ o passo de effort marcar o ● "atual"). Vem
     // do boot (`--effort`); o valor LIVE pós-`/effort` mora no caller (não em `state.meta`).
     // Best-effort cosmético — a opção "manter" preserva o atual independentemente do ●.
+    ...(props.currentEffort !== undefined ? { currentEffort: props.currentEffort } : {}),
+  });
+
+  // F161-FIX — seletor `/model` sob o backend LOCAL (BYO): os tiers do broker (acima)
+  // não se aplicam ali — este picker DEDICADO lista os slugs do provider LOCAL ativo
+  // (catálogo local ∪ registrados na sessão). O ativo vem de `state.meta.model` (LIVE,
+  // pós-`/model`) com fallback pro slug resolvido no boot (`props.currentLocalModel`).
+  const currentLocalModel: string | undefined =
+    (state.meta.model ?? '') !== '' ? state.meta.model : props.currentLocalModel;
+  const localModelPicker = useLocalModelPicker({
+    ...(props.localModelCatalog !== undefined ? { catalog: props.localModelCatalog } : {}),
+    ...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {}),
+  });
+
+  // F161-FIX · /effort STANDALONE — seletor do `reasoning_effort` fora do fluxo
+  // conjugado do `/model` (EST-1117): reusa as MESMAS opções puras do core. O ativo
+  // é cosmético (mesma fonte do passo conjugado — `props.currentEffort`, o valor do
+  // boot; o LIVE pós-`/effort` mora no caller).
+  const effortPicker = useEffortPicker({
     ...(props.currentEffort !== undefined ? { currentEffort: props.currentEffort } : {}),
   });
 
@@ -1488,10 +1537,19 @@ export function App(props: AppProps): React.ReactElement {
         }
         return;
       }
-      // F161 — no backend LOCAL (BYO) os TIERS DO BROKER não se aplicam: abrir o
-      // seletor (Flui/Granito/…) ali era beco sem saída ("catálogo do broker
-      // indisponível"). Orienta o caminho local em vez de oferecer o que não existe.
+      // F161-FIX — no backend LOCAL (BYO) os TIERS DO BROKER não se aplicam (Flui/
+      // Granito/…): abrir o seletor de tiers ali era beco sem saída ("catálogo do
+      // broker indisponível"). Antes, `/model` sem argumento caía numa nota ESTÁTICA
+      // (digite o slug às cegas / troque via env) — a MESMA reclamação de UX do
+      // seletor de tiers, só que sem NENHUM picker. Agora abre o <LocalModelPicker>
+      // DEDICADO (lista os slugs do provider ativo, fuzzy-search, texto-livre p/ fora
+      // do catálogo — mesmo padrão do <FilePicker>). Sem `onSelectTier` injetado
+      // (degradação/teste antigo), preserva a nota de sempre.
       if (command.id === 'model' && args.trim() === '' && state.meta.backend === 'local') {
+        if (props.onSelectTier !== undefined) {
+          localModelPicker.openPicker();
+          return;
+        }
         controller.replaceNote('model-local', [
           'Backend LOCAL (BYO): os tiers do broker não se aplicam aqui.',
           'O modelo vem do seu provider — troque com /provider, ou defina ALUY_LOCAL_MODEL / --model.',
@@ -1505,6 +1563,15 @@ export function App(props: AppProps): React.ReactElement {
         props.onSelectTier !== undefined
       ) {
         modelPicker.openPicker();
+        return;
+      }
+      // F161-FIX · /effort STANDALONE — `/effort` SEM argumento abria só uma nota
+      // (lê o valor atual); agora abre o PICKER (manter/low/medium/high/custom),
+      // mesma lista do passo conjugado do /model, mas alcançável DIRETO. Com arg
+      // (`/effort high`): segue caindo no `onCommand` de sempre (run.tsx), que já
+      // seta+persiste — zero regressão do caminho digitado/não-TTY.
+      if (command.id === 'effort' && args.trim() === '' && props.onSelectEffort !== undefined) {
+        effortPicker.openPicker();
         return;
       }
       // EST-0968 — `/permissions` abre o PAINEL interativo quando há controle da
@@ -1944,6 +2011,8 @@ export function App(props: AppProps): React.ReactElement {
   const anyPickerOpen =
     picker.open ||
     modelPicker.open ||
+    localModelPicker.open ||
+    effortPicker.open ||
     permPanel.open ||
     themePicker.open ||
     langPicker.open ||
@@ -2977,6 +3046,86 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
+    // ── seletor `/model` sob backend LOCAL CAPTURA o foco (F161-FIX) ───────────
+    // Fuzzy-pick dos slugs do provider ativo: digitar filtra (mesma mecânica do
+    // <FilePicker>/`@`); ↑↓ navega os resultados; enter/tab confirma (linha realçada
+    // OU, sem realce, o texto digitado literal — warn-but-allow); esc fecha.
+    if (localModelPicker.open) {
+      if (key.escape) {
+        localModelPicker.closePicker();
+        return;
+      }
+      if (key.upArrow) {
+        localModelPicker.move(-1);
+        return;
+      }
+      if (key.downArrow) {
+        localModelPicker.move(1);
+        return;
+      }
+      if (key.return || key.tab) {
+        const slug = localModelPicker.confirm();
+        if (slug) props.onSelectTier?.('custom', slug);
+        return;
+      }
+      if (key.backspace || key.delete) {
+        localModelPicker.setQuery(localModelPicker.query.slice(0, -1));
+        return;
+      }
+      // Digitação comum (incl. colar um slug multi-char) filtra; ignora combinações
+      // com ctrl/meta (não fazem parte do filtro/slug).
+      if (char && !key.ctrl && !key.meta) {
+        localModelPicker.setQuery(localModelPicker.query + char);
+      }
+      return;
+    }
+
+    // ── seletor `/effort` STANDALONE CAPTURA o foco (F161-FIX) ─────────────────
+    // Mesma lista do passo conjugado do /model (manter/low/medium/high/custom), mas
+    // como entrada PRÓPRIA a partir do `/effort`: ↑↓ navega, enter aplica, esc FECHA
+    // (não há etapa anterior aqui — ao contrário do passo dentro do /model). No modo
+    // custom (texto-livre), digitar filtra o valor e enter confirma se válido.
+    if (effortPicker.open) {
+      if (effortPicker.customOpen) {
+        if (key.escape) {
+          effortPicker.back();
+          return;
+        }
+        if (key.return) {
+          const choice = effortPicker.confirm();
+          if (choice) props.onSelectEffort?.(choice);
+          return;
+        }
+        if (key.backspace || key.delete) {
+          effortPicker.backspaceCustom();
+          return;
+        }
+        if (char && !key.ctrl && !key.meta) {
+          effortPicker.appendCustom(char);
+        }
+        return;
+      }
+      if (key.upArrow) {
+        effortPicker.move(-1);
+        return;
+      }
+      if (key.downArrow) {
+        effortPicker.move(1);
+        return;
+      }
+      if (key.return || key.tab) {
+        // "custom" ⇒ confirm() abre o texto-livre (null); nível/manter ⇒ aplica.
+        const choice = effortPicker.confirm();
+        if (choice) props.onSelectEffort?.(choice);
+        return;
+      }
+      if (key.escape) {
+        effortPicker.closePicker();
+        return;
+      }
+      return;
+    }
+
     // ── painel `/permissions` CAPTURA o foco (EST-0968) ────────────────────────
     // Mesma mecânica/teclas dos pickers: ↑↓ navega, enter AGE na linha (cicla modo /
     // alterna default de tool segura / revoga grant), esc fecha. Linhas TRAVADAS são
@@ -3837,6 +3986,8 @@ export function App(props: AppProps): React.ReactElement {
   const overlayOpen =
     slashOpen ||
     modelPicker.open ||
+    localModelPicker.open ||
+    effortPicker.open ||
     themePicker.open ||
     langPicker.open ||
     providerPicker.open ||
@@ -3900,6 +4051,34 @@ export function App(props: AppProps): React.ReactElement {
             effortCustomOpen={modelPicker.effortCustomOpen}
             effortCustomInput={modelPicker.effortCustomInput}
             effortCustomWarn={modelPicker.effortCustomWarn}
+          />
+        </Box>
+      )}
+      {/* F161-FIX — seletor `/model` sob backend LOCAL (BYO): fuzzy-pick dedicado
+          dos slugs do provider ativo (os tiers do broker acima não se aplicam). */}
+      {localModelPicker.open && (
+        <Box flexDirection="column">
+          <LocalModelPicker
+            hits={localModelPicker.hits}
+            selected={localModelPicker.selected}
+            query={localModelPicker.query}
+            columns={columns}
+            {...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {})}
+          />
+        </Box>
+      )}
+      {/* F161-FIX — seletor `/effort` STANDALONE (fora do fluxo conjugado do /model). */}
+      {effortPicker.open && (
+        <Box flexDirection="column">
+          <EffortPicker
+            options={effortPicker.options}
+            selected={effortPicker.selected}
+            {...(effortPicker.currentEffort !== undefined
+              ? { currentEffort: effortPicker.currentEffort }
+              : {})}
+            customOpen={effortPicker.customOpen}
+            customInput={effortPicker.customInput}
+            customWarn={effortPicker.customWarn}
           />
         </Box>
       )}
@@ -4531,6 +4710,36 @@ export function App(props: AppProps): React.ReactElement {
             effortCustomOpen={modelPicker.effortCustomOpen}
             effortCustomInput={modelPicker.effortCustomInput}
             effortCustomWarn={modelPicker.effortCustomWarn}
+          />
+        </Box>
+      )}
+
+      {/* F161-FIX — seletor `/model` sob backend LOCAL (BYO): fuzzy-pick dedicado dos
+          slugs do provider ativo (os tiers do broker acima não se aplicam ali). */}
+      {localModelPicker.open && (
+        <Box flexDirection="column" paddingTop={1}>
+          <LocalModelPicker
+            hits={localModelPicker.hits}
+            selected={localModelPicker.selected}
+            query={localModelPicker.query}
+            columns={columns}
+            {...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {})}
+          />
+        </Box>
+      )}
+
+      {/* F161-FIX — seletor `/effort` STANDALONE (fora do fluxo conjugado do /model). */}
+      {effortPicker.open && (
+        <Box flexDirection="column" paddingTop={1}>
+          <EffortPicker
+            options={effortPicker.options}
+            selected={effortPicker.selected}
+            {...(effortPicker.currentEffort !== undefined
+              ? { currentEffort: effortPicker.currentEffort }
+              : {})}
+            customOpen={effortPicker.customOpen}
+            customInput={effortPicker.customInput}
+            customWarn={effortPicker.customWarn}
           />
         </Box>
       )}
