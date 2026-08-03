@@ -44,6 +44,24 @@ describe('buildServiceManifestVisibleNote', () => {
     expect(t).toContain('tamanho-posicao: 2 [1..5]');
   });
 
+  it('teto por atividade: default (30min) quando ausente, valor cru quando declarado', () => {
+    const semDeclarar = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(semDeclarar.lines)).toContain('teto por atividade: 30min (default)');
+
+    const semTeto = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader', activityTimeout: 'sem-teto' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(semTeto.lines)).toContain('teto por atividade: sem-teto');
+  });
+
   it('canal AUSENTE fica visivelmente marcado (nunca escondido)', () => {
     const note = buildServiceManifestVisibleNote({
       manifest: manifest({ name: 'pesquisador' }),

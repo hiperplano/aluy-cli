@@ -51,6 +51,7 @@ import { join } from 'node:path';
 import {
   nextCronFire,
   parseServiceBudget,
+  parseServiceActivityTimeout,
   msUntilDeadline,
   awaitsUserDecision,
   runWorkflow,
@@ -248,20 +249,39 @@ export function buildActivityEnv(
 
 export type ActivityTimeDecision =
   | { readonly hasTime: false }
-  | { readonly hasTime: true; readonly timeoutMs: number };
+  | { readonly hasTime: true; readonly timeoutMs: number }
+  | { readonly hasTime: true; readonly unlimited: true };
 
 /**
- * ADR-0158 §5 pt.4 — decide se uma atividade AINDA tem tempo (`deadlineMs > 0`) e,
- * se sim, o TETO real do turno-filho: o menor entre o restante até o `until:`
- * (`deadlineMs`) e o teto duro anti-runaway (`cap`, default `MAX_ACTIVITY_MS`).
- * PURA — sem I/O, testável direto. Extraída de `runActivityTurn` (juntava os dois
- * `if`s soltos: o guard "expediente encerrado" + o `Math.min` do timeout — a
- * MESMA decisão, uma vez só). `deadlineMs <= 0` ⇒ sem tempo (nunca negativo
- * "sobra" pro `Math.min` — zero ou menos é "pulada", não "timeout de 0ms").
+ * ADR-0158 §5 pt.4 — decide se uma atividade AINDA tem tempo e, se sim, o TETO real
+ * do turno-filho. `untilRemainingMs` é o restante até o `until:` do service.md
+ * (`undefined` ⇒ sem `until` declarado, sem teto de expediente). `cap` é o teto
+ * anti-runaway POR ATIVIDADE — `MAX_ACTIVITY_MS` por padrão, ou o valor declarado
+ * em `activity-timeout:` no service.md, incluindo a opção explícita `'unlimited'`
+ * (achado em dogfooding: o dono quer serviços 24/7 sem corte de 30min por
+ * atividade). PURA — sem I/O, testável direto.
+ *
+ * `untilRemainingMs <= 0` ⇒ sem tempo (expediente já encerrado — nunca negativo
+ * "sobra" pro `Math.min`, zero ou menos é "pulada", não "timeout de 0ms").
+ * `cap === 'unlimited'` E sem `until` declarado ⇒ SEM TETO NENHUM (`unlimited:true`
+ * — o caller NÃO cria `setTimeout` nenhum; um `setTimeout` com um número gigante
+ * pra simular "infinito" reintroduziria o MESMO overflow de 32-bit já corrigido
+ * pro sleep entre ciclos — `unlimited` é tratado como um caso PRÓPRIO, nunca como
+ * um número grande). `cap === 'unlimited'` COM `until` declarado ainda respeita o
+ * `until` — "sem teto por atividade" não é "sem fim de expediente", são regras
+ * independentes.
  */
-export function resolveActivityTimeout(deadlineMs: number, cap: number = MAX_ACTIVITY_MS): ActivityTimeDecision {
-  if (deadlineMs <= 0) return { hasTime: false };
-  return { hasTime: true, timeoutMs: Math.min(deadlineMs, cap) };
+export function resolveActivityTimeout(
+  untilRemainingMs: number | undefined,
+  cap: number | 'unlimited' = MAX_ACTIVITY_MS,
+): ActivityTimeDecision {
+  if (untilRemainingMs !== undefined && untilRemainingMs <= 0) return { hasTime: false };
+  if (cap === 'unlimited') {
+    if (untilRemainingMs === undefined) return { hasTime: true, unlimited: true };
+    return { hasTime: true, timeoutMs: untilRemainingMs };
+  }
+  if (untilRemainingMs === undefined) return { hasTime: true, timeoutMs: cap };
+  return { hasTime: true, timeoutMs: Math.min(untilRemainingMs, cap) };
 }
 
 export type ActivityExitClassification = 'cancelled' | 'deadline' | 'continue';
@@ -369,7 +389,12 @@ async function runActivityTurn(args: {
   readonly index: number;
   readonly total: number;
   readonly budgetTokens?: number;
-  readonly deadlineMs: number;
+  /** Restante até o `until:` do service.md — `undefined` ⇒ sem `until` declarado. */
+  readonly untilRemainingMs: number | undefined;
+  /** ADR-0158 §5 pt.4 (emenda) — teto anti-runaway POR ATIVIDADE: `MAX_ACTIVITY_MS`
+   * por padrão, ou o `activity-timeout:` declarado no service.md (incluindo
+   * `'unlimited'`). Ver `resolveActivityTimeout`. */
+  readonly activityTimeoutCap: number | 'unlimited';
   readonly stop: AbortSignal;
   readonly execPath: string;
   readonly aluyEntrypoint: string;
@@ -386,10 +411,10 @@ async function runActivityTurn(args: {
    * arquivo). `undefined` = nenhuma pendente. */
   readonly ownerSayContext?: string;
 }): Promise<WorkflowActivityOutcome> {
-  const { activity, index, total, deadlineMs, stop, log } = args;
+  const { activity, index, total, untilRemainingMs, activityTimeoutCap, stop, log } = args;
 
   if (stop.aborted) return { ok: false, stop: 'cancelled' };
-  const timeDecision = resolveActivityTimeout(deadlineMs);
+  const timeDecision = resolveActivityTimeout(untilRemainingMs, activityTimeoutCap);
   if (!timeDecision.hasTime) {
     log(`atividade ${index + 1}/${total} "${activity.id}": expediente já encerrado (until) — pulada.`);
     return { ok: false, stop: 'limit' };
@@ -410,12 +435,16 @@ async function runActivityTurn(args: {
   const argv = [args.aluyEntrypoint, '-p', goal, '--output-format', 'json', '--quiet'];
   if (args.budgetTokens !== undefined) argv.push('--max-tokens', String(args.budgetTokens));
 
-  const timeoutMs = timeDecision.timeoutMs;
+  // `unlimited` (emenda: activity-timeout:sem-teto) ⇒ SEM setTimeout nenhum — ver
+  // doc de `resolveActivityTimeout` (um número gigante pra simular "infinito"
+  // reintroduziria o overflow de 32-bit já corrigido pro sleep entre ciclos).
+  const timeoutMs = 'unlimited' in timeDecision ? undefined : timeDecision.timeoutMs;
+  const tetoLabel = timeoutMs === undefined ? 'sem teto' : `teto ${Math.round(timeoutMs / 1000)}s`;
   log(
     activity.agent !== undefined
       ? `atividade ${index + 1}/${total} "${activity.id}": iniciando turno TRAVADO na persona ` +
-          `"${activity.agent}" (teto ${Math.round(timeoutMs / 1000)}s)…`
-      : `atividade ${index + 1}/${total} "${activity.id}": iniciando turno (teto ${Math.round(timeoutMs / 1000)}s)…`,
+          `"${activity.agent}" (${tetoLabel})…`
+      : `atividade ${index + 1}/${total} "${activity.id}": iniciando turno (${tetoLabel})…`,
   );
 
   const child = spawn(args.execPath, argv, {
@@ -435,14 +464,18 @@ async function runActivityTurn(args: {
 
   const onStopAbort = (): void => killGracefully(child);
   stop.addEventListener('abort', onStopAbort, { once: true });
-  const deadlineTimer = setTimeout(() => killGracefully(child), timeoutMs);
-  deadlineTimer.unref();
+  // `timeoutMs === undefined` (sem-teto) ⇒ sem deadlineTimer — só `stop` (SIGTERM
+  // do runner) encerra a atividade. A atividade em si ainda respeita o `until:`
+  // quando declarado (ver `resolveActivityTimeout`) — "sem teto por atividade" e
+  // "sem fim de expediente" são regras independentes.
+  const deadlineTimer = timeoutMs !== undefined ? setTimeout(() => killGracefully(child), timeoutMs) : undefined;
+  deadlineTimer?.unref();
 
   const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.on('close', (code, signal) => resolve({ code, signal }));
     child.on('error', () => resolve({ code: null, signal: null }));
   });
-  clearTimeout(deadlineTimer);
+  if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
   stop.removeEventListener('abort', onStopAbort);
 
   const exitClass = classifyActivityExit({ stopAborted: stop.aborted, signal: exit.signal });
@@ -669,6 +702,7 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         orchestratorBody: service.manifest.orchestrator,
         budgetRaw: service.manifest.budget,
         untilRaw: service.manifest.until,
+        activityTimeoutRaw: service.manifest.activityTimeout,
         stop: stopController.signal,
         execPath,
         aluyEntrypoint,
@@ -859,6 +893,9 @@ async function runOneWorkflow(args: {
   readonly orchestratorBody: string;
   readonly budgetRaw: string | undefined;
   readonly untilRaw: string | undefined;
+  /** ADR-0158 §5 pt.4 (emenda) — `activity-timeout:` cru do manifesto (`45m`/`2h`/
+   * `sem-teto`). Ausente/malformado ⇒ `MAX_ACTIVITY_MS` (default, ver `resolveActivityTimeout`). */
+  readonly activityTimeoutRaw: string | undefined;
   readonly stop: AbortSignal;
   readonly execPath: string;
   readonly aluyEntrypoint: string;
@@ -904,6 +941,7 @@ async function runOneWorkflow(args: {
   const activitiesToRun = parsed.activities.slice(startOffset);
 
   const budgetTokens = parseServiceBudget(args.budgetRaw);
+  const activityTimeoutCap = parseServiceActivityTimeout(args.activityTimeoutRaw) ?? MAX_ACTIVITY_MS;
   const orchestratorPreamble =
     `Você coordena o serviço "${args.serviceName}" (ADR-0158) — rege, não opera:\n${args.orchestratorBody}`;
 
@@ -919,7 +957,6 @@ async function runOneWorkflow(args: {
       const realIndex = index + startOffset;
       const now = new Date();
       const remaining = msUntilDeadline(now, args.untilRaw);
-      const deadlineMs = remaining ?? MAX_ACTIVITY_MS;
       // A primeira atividade da FATIA (`index === 0`) é a que estava pendente —
       // só ELA leva o contexto de retomada (as seguintes são turno normal).
       const resumeContext =
@@ -942,7 +979,8 @@ async function runOneWorkflow(args: {
         index: realIndex,
         total: parsed.activities.length,
         ...(budgetTokens !== undefined ? { budgetTokens } : {}),
-        deadlineMs,
+        untilRemainingMs: remaining,
+        activityTimeoutCap,
         stop: args.stop,
         execPath: args.execPath,
         aluyEntrypoint: args.aluyEntrypoint,

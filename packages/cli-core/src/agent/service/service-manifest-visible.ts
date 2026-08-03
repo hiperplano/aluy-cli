@@ -63,6 +63,7 @@ export function buildServiceManifestVisibleNote(
   lines.push(`canal: ${m.channel ?? '(NENHUM — sem canal, sem onde reportar/perguntar)'}`);
   lines.push(`autonomia: ${m.autonomy ?? '(não declarada)'}`);
   lines.push(`budget: ${m.budget ?? '(não declarado)'}`);
+  lines.push(`teto por atividade: ${m.activityTimeout ?? '30min (default)'}`);
 
   if (m.tunables.length > 0) {
     lines.push(`tunáveis/circuit-breakers (${m.tunables.length}):`);
@@ -77,7 +78,7 @@ export function buildServiceManifestVisibleNote(
   if (input.daemons.length > 0) {
     lines.push(
       `⚠ daemons PRÓPRIOS do usuário (${input.daemons.length}) — rodam como processo do ` +
-        `usuário, FORA da catraca (ADR-0158 §6):`,
+        `usuário, FORA da catraca:`,
     );
     for (const d of input.daemons) {
       const cmd = d.command ?? '(command: não declarado)';
@@ -101,9 +102,7 @@ export function buildServiceManifestVisibleNote(
   );
 
   lines.push('');
-  lines.push(
-    'instalar é ato de CONFIANÇA explícito (ADR-0158 §9/§Consequências): scripts de skill',
-  );
+  lines.push('instalar é ato de CONFIANÇA explícito: scripts de skill');
   lines.push('passam pela catraca quando invocados; os daemons acima NÃO — rodam como qualquer');
   lines.push('software instalado na máquina. Revise antes de confirmar.');
 
