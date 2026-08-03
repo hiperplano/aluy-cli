@@ -142,7 +142,12 @@ export interface StreamingModelCallerOptions {
 }
 
 export class StreamingModelCaller implements ModelCaller {
-  private readonly client: ModelClient;
+  // F-PROV · /provider sob backend LOCAL — MUTÁVEL (não mais `readonly`): o
+  // `SessionController.setLocalProvider` troca este client em runtime via `setClient`
+  // abaixo (fix do "silent no-op": o `LocalModelClient` ignora o campo `provider` do
+  // request — o ÚNICO jeito de o `/provider` ter efeito de verdade sob backend local é
+  // trocar o CLIENT, não só um DADO passageiro do request).
+  private client: ModelClient;
   private readonly opts: StreamingModelCallerOptions;
   private brokerSessionId: string | undefined;
   // EST-0962 — o tier é MUTÁVEL na sessão (o seletor `/model` o troca em runtime).
@@ -229,6 +234,18 @@ export class StreamingModelCaller implements ModelCaller {
   setProvider(name: string | undefined): void {
     this.customProvider =
       this.currentTier === 'custom' && this.customModel !== undefined ? name : undefined;
+  }
+
+  /**
+   * F-PROV · /provider sob backend LOCAL — TROCA o `ModelClient` de verdade (o
+   * `SessionController.setLocalProvider` chama isto DEPOIS de reconstruir o
+   * `LocalModelClient` do provider novo — mesmo caminho do BOOT, `buildLocalModelClient`).
+   * A PRÓXIMA chamada já usa o client novo (base_url/adapter/credencial do provider
+   * escolhido). NUNCA relevante p/ o broker (o `BrokerModelClient` não tem por-provider
+   * a trocar — `setProvider`/`customProvider` acima já bastam ali).
+   */
+  setClient(client: ModelClient): void {
+    this.client = client;
   }
 
   /** O tier corrente da sessão (p/ a status bar/teste). */

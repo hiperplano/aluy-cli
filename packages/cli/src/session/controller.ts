@@ -174,7 +174,7 @@ import { randomBytes } from 'node:crypto';
 import { sep as pathSep } from 'node:path';
 import { redactOutputSecrets } from '@hiperplano/aluy-cli-core';
 import type { StreamSink } from './streaming-caller.js';
-import type { ModelCaller } from '@hiperplano/aluy-cli-core';
+import type { ModelCaller, ModelClient } from '@hiperplano/aluy-cli-core';
 import { withToolReport, type ToolReporter } from './tool-reporter.js';
 import {
   abbreviateCwd,
@@ -267,6 +267,14 @@ export interface TierControl {
    * se ausente). `v` undefined ⇒ LIMPA (volta ao default do provider).
    */
   setEffort?(v: string | undefined): void;
+  /**
+   * F-PROV (/provider sob backend LOCAL) — TROCA o `ModelClient` de verdade. Existe
+   * SÓ no `StreamingModelCaller` (o `BrokerModelCaller`/broker não precisa — o broker
+   * resolve o provider server-side por request). Opcional p/ stubs de teste antigos;
+   * o `setLocalProvider` do controller trata a ausência como "porta indisponível"
+   * (fail-closed, nunca finge que trocou).
+   */
+  setClient?(client: ModelClient): void;
 }
 
 /** `true` se o caller expõe o controle de tier (StreamingModelCaller). */
@@ -650,6 +658,24 @@ export interface SessionControllerOptions {
     readonly registered: boolean;
   }>;
   /**
+   * F-PROV — porta que TROCA DE VERDADE o provider ATIVO sob backend LOCAL (fix do
+   * "silent no-op" achado em dogfooding: `/provider` mudava só um DADO passageiro do
+   * request que o `LocalModelClient` sequer lê — o client seguia fixo no provider do
+   * BOOT pra sempre). Construída em `run.tsx` (MESMO caminho do boot:
+   * `resolveLocalProviderConfig`/`buildLocalModelClient`, catálogo ADR-0118 +
+   * anti-SSRF/fetch-pinado/credencial por-provider); `setLocalProvider` abaixo a chama
+   * e, no sucesso, SWAPA o client do caller (`tierControl.setClient`) + o catálogo de
+   * modelos passa a listar os do provider NOVO (fecha o gap "o /model não segue o
+   * provider trocado"). Ausente ⇒ `setLocalProvider` devolve `ok:false` explícito
+   * (nunca finge sucesso) — ex.: broker, ou teste sem esta porta montada.
+   */
+  readonly switchLocalProvider?: (name: string) => Promise<{
+    readonly ok: boolean;
+    readonly detail: string;
+    readonly client?: ModelClient;
+    readonly defaultModel?: string;
+  }>;
+  /**
    * ADR-0146 (D2/L2) — PORTA do PROBE de nome de modelo: nomes disponíveis no CATÁLOGO
    * VIVO do broker (as MESMAS chaves do seletor `/model`), p/ o `spawnNamed` sugerir
    * (distância de edição) quando um `model` (spawn/`.md`/dial) não bate com nada
@@ -995,6 +1021,15 @@ export class SessionController {
     | ((
         slug: string,
       ) => Promise<{ readonly ok: boolean; readonly detail: string; readonly registered: boolean }>)
+    | undefined;
+  /** F-PROV — porta de troca DE VERDADE do provider ATIVO local (ver doc na options). */
+  private readonly switchLocalProviderPort:
+    | ((name: string) => Promise<{
+        readonly ok: boolean;
+        readonly detail: string;
+        readonly client?: ModelClient;
+        readonly defaultModel?: string;
+      }>)
     | undefined;
   // EST-0948 — os tetos EFETIVOS da sessão (CLI-SEC-8), já resolvidos (flag>env>default,
   // clampados) pelo wiring. Fonte do TETO de tokens p/ os indicadores em % (StatusBar/
@@ -1359,6 +1394,7 @@ export class SessionController {
     this.defaultChildModel = opts.defaultChildModel; // ADR-0146 (D4) — dial global
     this.localModelCatalog = opts.localModelCatalog; // ADR-0152 (D6c) — probe local
     this.verifyAndRegisterLocalModel = opts.verifyAndRegisterLocalModel; // ADR-0153 — TTR
+    this.switchLocalProviderPort = opts.switchLocalProvider; // F-PROV — troca de provider local
     this.clock = opts.clock ?? Date.now;
     this.isRoot =
       opts.isRoot ?? (() => typeof process.geteuid === 'function' && process.geteuid() === 0);
@@ -4465,6 +4501,60 @@ export class SessionController {
   }
 
   /**
+   * F-PROV · /provider sob backend LOCAL (BYO) — TROCA DE VERDADE o provider ativo.
+   *
+   * Achado em dogfooding: sob backend local, `setProvider` (acima) mudava só um DADO
+   * PASSAGEIRO do request (`customProvider`) que o `LocalModelClient` NUNCA lê (ele fala
+   * com um único provider fixo, resolvido no BOOT) — trocar de provider era um NO-OP
+   * SILENCIOSO. Este método é a via CORRETA p/ o backend local: chama a porta
+   * `switchLocalProvider` (construída em `run.tsx`, MESMO caminho do boot —
+   * `resolveLocalProviderConfig`/`buildLocalModelClient`, catálogo ADR-0118, anti-SSRF +
+   * fetch-pinado + credencial por-provider) e, no sucesso, SWAPA o `ModelClient` de
+   * verdade (`tierControl.setClient`) — a PRÓXIMA chamada já fala com o provider novo.
+   *
+   * Alinha tier:'custom'+model ao modelo DEFAULT do provider novo (o par que o
+   * `LocalModelClient.toLocalRequest` de fato lê por request — MESMO caminho que o
+   * `/model` já usa) e espelha `meta.provider`/`meta.model`/`meta.tier` p/ a StatusBar/
+   * pickers re-renderizarem. Falha (provider desconhecido no catálogo, erro ao montar o
+   * client) ⇒ NADA muda (fail-closed — nunca troca pela metade); `detail` explica o
+   * motivo, honesto, p/ a nota que o chamador (run.tsx) empurra.
+   */
+  async setLocalProvider(name: string): Promise<{ readonly ok: boolean; readonly detail: string }> {
+    if (this.state.meta.backend !== 'local') {
+      return {
+        ok: false,
+        detail: 'troca de provider ativo só se aplica sob backend local (BYO).',
+      };
+    }
+    if (this.switchLocalProviderPort === undefined) {
+      return {
+        ok: false,
+        detail: 'troca de provider local indisponível nesta sessão (porta ausente).',
+      };
+    }
+    const result = await this.switchLocalProviderPort(name);
+    if (!result.ok || result.client === undefined || result.defaultModel === undefined) {
+      return { ok: false, detail: result.detail };
+    }
+    this.tierControl?.setClient?.(result.client);
+    if (this.tierControl && typeof this.tierControl.setTier === 'function') {
+      this.tierControl.setTier('custom', result.defaultModel);
+    }
+    if (this.tierControl && typeof this.tierControl.setProvider === 'function') {
+      this.tierControl.setProvider(name);
+    }
+    this.patch({
+      meta: {
+        ...this.state.meta,
+        tier: 'custom',
+        model: result.defaultModel,
+        provider: name,
+      },
+    });
+    return { ok: true, detail: result.detail };
+  }
+
+  /**
    * EST-0962 · /effort — SETA o `reasoning_effort` (slash `/effort`). Aplica no CALLER
    * (fonte da verdade da próxima chamada). SEM tier-gate: vale em qualquer tier. Delega ao
    * caller de streaming; no-op se o caller não expõe `setEffort` (stub de teste antigo).
@@ -4798,7 +4888,11 @@ export class SessionController {
    * Compartilhada por `enterSubagentFocus` (`/subagent`, interativo) e
    * `lockPersonaForTurn` (boot headless de serviço, ADR-0158 §4.1 — ver lá).
    */
-  private enterFocusWithProfile(name: string, systemPrompt: string, toolScope?: ReadonlySet<string>): void {
+  private enterFocusWithProfile(
+    name: string,
+    systemPrompt: string,
+    toolScope?: ReadonlySet<string>,
+  ): void {
     const engine = childEngineOf(this.permissionEngine, toolScope);
     const loop = this.makeLoop({
       permission: engine,

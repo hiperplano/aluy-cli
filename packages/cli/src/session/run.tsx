@@ -37,8 +37,12 @@ import { buildSession, type BuildSessionOptions } from './wiring.js';
 // ADR-0120 / EST-1113 — backend LOCAL (BYO): resolve a config e monta o LocalModelClient
 // (atrás do MESMO contrato `ModelClient`) p/ injetar no wiring quando `backend:'local'`.
 import { resolveModelBackend, resolveLocalProviderConfig } from '../model/local/config.js';
-import { buildLocalModelClient, createLocalChildCallerFactory } from '../model/local/factory.js';
-import { loadLocalProviderCatalog } from '../io/providers-config.js';
+import {
+  buildLocalModelClient,
+  createLocalChildCallerFactory,
+  defaultAuthFor,
+} from '../model/local/factory.js';
+import { loadLocalProviderCatalog, addLocalProviderOverride } from '../io/providers-config.js';
 import { createOAuthAccessTokenProvider } from '../model/local/oauth-store.js';
 // ADR-0153 — TEST-THEN-REGISTER: a fábrica da porta (fetch PINADO, COND-S1 + memo/
 // teto/sanitização/fail-closed) vive em `test-then-register.ts`, testável isolada.
@@ -105,6 +109,7 @@ import {
   type NativeTool,
   type ToolPorts,
   type ModelCaller,
+  type LocalProviderEntry,
 } from '@hiperplano/aluy-cli-core';
 import { applyTierLiteral, modelWindowFromConfig } from '../model/catalog.js';
 import { TerminalNotificationPort, loadNotifyConfig } from '../io/notify-port.js';
@@ -961,7 +966,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // processo, que o runner já seta para o dir do serviço via `cwd:` no spawn — sem
   // `.claude/agents/` lá, ela contribui vazio; sem duplo-escaneio nem leak).
   const userAgentsLoader =
-    opts.userAgentsLoader ?? new UserAgentsLoader(serviceScopeDir ? { baseDir: serviceScopeDir } : {});
+    opts.userAgentsLoader ??
+    new UserAgentsLoader(serviceScopeDir ? { baseDir: serviceScopeDir } : {});
   const projectAgentsLoader =
     opts.projectAgentsLoader ?? new ProjectAgentsLoader({ workspace: cwdWorkspace });
   const globalAgents = userAgentsLoader.load();
@@ -978,7 +984,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // imprime a mensagem em STDERR e sai com exit≠0. `service/runner.ts` já trata
   // stdout ilegível/exit≠0 como turno em ERRO (nunca reinterpreta como sucesso do
   // orquestrador) — não há caminho para o toolset completo escapar por aqui.
-  const servicePersonaLock: { name: string; systemPrompt: string; toolScope?: ReadonlySet<string> } | undefined =
+  const servicePersonaLock:
+    | { name: string; systemPrompt: string; toolScope?: ReadonlySet<string> }
+    | undefined =
     servicePersonaName !== undefined && servicePersonaName !== ''
       ? ((): { name: string; systemPrompt: string; toolScope?: ReadonlySet<string> } => {
           const binding = bindNamedAgent(agentRegistry, {
@@ -992,7 +1000,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           return {
             name: servicePersonaName,
             systemPrompt: binding.profile.systemPrompt ?? '',
-            ...(binding.profile.toolScope !== undefined ? { toolScope: binding.profile.toolScope } : {}),
+            ...(binding.profile.toolScope !== undefined
+              ? { toolScope: binding.profile.toolScope }
+              : {}),
           };
         })()
       : undefined;
@@ -1070,6 +1080,22 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   let discoverContextWindow:
     | ((slug: string) => Promise<{ readonly window: number; readonly persisted: boolean }>)
     | undefined;
+  // F-PROV — porta que TROCA DE VERDADE o provider ATIVO local (`/provider`, fix do
+  // no-op silencioso — ver o comentário completo mais abaixo, junto da implementação).
+  // Hoistada pela MESMA razão das portas acima: nasce dentro do bloco `backend local`,
+  // é usada DEPOIS do `buildSession` (nos props do `<App>`).
+  let switchLocalProvider:
+    | ((name: string) => Promise<{
+        readonly ok: boolean;
+        readonly detail: string;
+        readonly client?: import('@hiperplano/aluy-cli-core').ModelClient;
+        readonly defaultModel?: string;
+      }>)
+    | undefined;
+  // F-PROV — getter do catálogo LOCAL p/ o `<ProviderPicker>` (ADR-0118): reconsultado a
+  // CADA abertura do `/provider` (não cacheado) — se o usuário acabou de cadastrar um
+  // provider custom (fluxo "+ adicionar" do picker), a PRÓXIMA abertura já o lista.
+  let localProviderCatalogGetter: (() => readonly LocalProviderEntry[]) | undefined;
   if (resolvedBackend === 'local' && opts.brokerClient === undefined) {
     // ADR-0118 — o catálogo EFETIVO (built-ins + `~/.aluy/providers.json`). SEM isto, a
     // resolução cairia no `defaultLocalCatalog()` (só built-ins) e um provider CUSTOM
@@ -1103,6 +1129,18 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         : {}),
     });
 
+    // F-PROV — ESTADO MUTÁVEL do catálogo/provider ATIVO local. Achado em dogfooding:
+    // `/provider` sob backend local era um NO-OP SILENCIOSO — o `LocalModelClient`
+    // fala com um provider FIXO, resolvido aqui no boot, e ignora por completo o
+    // `provider` que o caller manda por request; nada do que já existia trocava de
+    // verdade. `switchLocalProvider` (abaixo) é a ÚNICA escrita destas duas variáveis;
+    // toda porta que precisa saber "qual é o provider ATIVO agora" (o catálogo de
+    // modelos do `/model` — `localModelCatalogPort` — e o test-then-register do slug
+    // custom — `verifyPortFor`) LÊ daqui, nunca do `localCfg`/`localCatalog` fixos
+    // do boot acima (que continuam servindo de valor INICIAL).
+    let activeLocalCatalog = localCatalog;
+    let activeLocalProviderId = localCfg.provider;
+
     // ADR-0152 (D6b) — `callerForLocalModel(slug)`: MESMOS parâmetros do client do
     // pai acima (catálogo/provider/auth/baseUrl/env/oauth já resolvidos no BOOT) —
     // só o `model` varia por slug (GS-SAM-L1). NÃO passa `fetch`/`getCredential`
@@ -1135,7 +1173,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // probe vivo/rede aqui (síncrono, dado já em memória).
     localModelCatalogPort = {
       listNames: (): readonly string[] | undefined => {
-        const declared = findProvider(localCatalog, localCfg.provider)?.models ?? [];
+        // F-PROV — lê o provider ATIVO (não o do boot): fecha o gap "o /model não
+        // segue o provider trocado" (`/provider` agora reflete DE VERDADE aqui).
+        const declared = findProvider(activeLocalCatalog, activeLocalProviderId)?.models ?? [];
         const union = [...declared, ...sessionRegisteredLocalModels];
         return union.length > 0 ? union : undefined;
       },
@@ -1161,35 +1201,83 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // (memo/teto/sanitização/fail-closed) vive em `test-then-register.ts` —
     // testável ISOLADA, sem precisar bootar a TUI (mesmo padrão de
     // `createLocalChildCallerFactory`, factory.ts).
-    verifyAndRegisterLocalModel = createVerifyAndRegisterLocalModelPort({
-      // COND-S9 (wireFormat/baseUrl só do boot) — MESMA derivação de `wireFormat`
-      // que `createLocalChildCallerFactory`/`adapterFor` usam (findProvider do
-      // catálogo já resolvido no boot); `baseUrl` = override do boot OU o default
-      // PÚBLICO do MESMO catálogo (mesma resolução de `buildLocalModelClient`) —
-      // nenhum dos dois vem de DADO de spawn/`.md`/config.
-      wireFormat: findProvider(localCatalog, localCfg.provider)?.wireFormat ?? 'openai-compat',
-      baseUrl: localCfg.baseUrl ?? findProvider(localCatalog, localCfg.provider)?.baseUrl ?? '',
-      // COND-S1 (fetch PINADO) — o MESMO `createPinnedStreamFetch` (EST-1115) que
-      // `buildLocalModelClient`/`callerForLocalModel` usam por default; NUNCA
-      // `globalThis.fetch`. `checkModelConnectivity` não seta `init.redirect` ⇒ o
-      // pinado cai no default `'error'` (fail-closed) — um `302 → 169.254.169.254`
-      // nunca é seguido.
-      fetchImpl: createPinnedStreamFetch({}),
-      // COND-S2 (credencial do boot) — MESMO `createLocalCredentialProvider` que o
-      // `localModelClient`/`callerForLocalModel` do pai usam (construído UMA vez,
-      // resolve a CADA chamada — mesma disciplina do resolvedor); `auth:'none'`
-      // (Ollama) devolve `secret:''` (aceito).
-      getKey: async () => {
-        const cred = await getCredentialForTest();
-        return cred.secret;
-      },
-      // D2/COND-S4 — append idempotente no config (só quando o provider ATIVO já
-      // tem entrada em `providers[]`); `false` ⇒ built-in sem entrada, sessão-only.
-      registerLocalModel: (slug) => configStore.registerLocalModel(localCfg.provider, slug),
-      // D2 — o que faz o PRÓXIMO filho do MESMO lote (via `localModelCatalogPort`
-      // acima) ver o slug como "conhecido" e não re-testar.
-      markSessionRegistered: (slug) => sessionRegisteredLocalModels.add(slug),
-    });
+    //
+    // F-PROV — MAS uma única porta fixa no provider do BOOT quebraria o `/model` DEPOIS
+    // de um `/provider` trocado: testar um slug custom pingaria o provider ERRADO
+    // (baseUrl/credencial do boot), um resultado enganoso que desfaria a correção "o
+    // /model segue o provider trocado" (`localModelCatalogPort` acima). Por isso: um
+    // MAPA de portas por-provider — a do provider do BOOT usa a config JÁ RESOLVIDA
+    // (`localCfg`, com flags/env/config aplicados — ZERO regressão do comportamento
+    // anterior); as de providers trocados DEPOIS (via `/provider`) usam os DEFAULTS do
+    // catálogo (`defaultAuthFor`), a MESMA resolução que `switchLocalProvider` (abaixo)
+    // usa pra montar o client deles. A MEMOIZAÇÃO por-slug (D3) de cada porta continua
+    // valendo POR PROVIDER — um slug OK no provider A não "contamina" o B.
+    type VerifyAndRegisterLocalModelPort = (slug: string) => Promise<{
+      readonly ok: boolean;
+      readonly detail: string;
+      readonly registered: boolean;
+    }>;
+    const verifyPortsByProvider = new Map<string, VerifyAndRegisterLocalModelPort>();
+    verifyPortsByProvider.set(
+      localCfg.provider,
+      createVerifyAndRegisterLocalModelPort({
+        // COND-S9 (wireFormat/baseUrl só do boot) — MESMA derivação de `wireFormat`
+        // que `createLocalChildCallerFactory`/`adapterFor` usam (findProvider do
+        // catálogo já resolvido no boot); `baseUrl` = override do boot OU o default
+        // PÚBLICO do MESMO catálogo (mesma resolução de `buildLocalModelClient`) —
+        // nenhum dos dois vem de DADO de spawn/`.md`/config.
+        wireFormat: findProvider(localCatalog, localCfg.provider)?.wireFormat ?? 'openai-compat',
+        baseUrl: localCfg.baseUrl ?? findProvider(localCatalog, localCfg.provider)?.baseUrl ?? '',
+        // COND-S1 (fetch PINADO) — o MESMO `createPinnedStreamFetch` (EST-1115) que
+        // `buildLocalModelClient`/`callerForLocalModel` usam por default; NUNCA
+        // `globalThis.fetch`. `checkModelConnectivity` não seta `init.redirect` ⇒ o
+        // pinado cai no default `'error'` (fail-closed) — um `302 → 169.254.169.254`
+        // nunca é seguido.
+        fetchImpl: createPinnedStreamFetch({}),
+        // COND-S2 (credencial do boot) — MESMO `createLocalCredentialProvider` que o
+        // `localModelClient`/`callerForLocalModel` do pai usam (construído UMA vez,
+        // resolve a CADA chamada — mesma disciplina do resolvedor); `auth:'none'`
+        // (Ollama) devolve `secret:''` (aceito).
+        getKey: async () => {
+          const cred = await getCredentialForTest();
+          return cred.secret;
+        },
+        // D2/COND-S4 — append idempotente no config (só quando o provider ATIVO já
+        // tem entrada em `providers[]`); `false` ⇒ built-in sem entrada, sessão-only.
+        registerLocalModel: (slug) => configStore.registerLocalModel(localCfg.provider, slug),
+        // D2 — o que faz o PRÓXIMO filho do MESMO lote (via `localModelCatalogPort`
+        // acima) ver o slug como "conhecido" e não re-testar.
+        markSessionRegistered: (slug) => sessionRegisteredLocalModels.add(slug),
+      }),
+    );
+    function verifyPortFor(providerId: string): VerifyAndRegisterLocalModelPort {
+      const cached = verifyPortsByProvider.get(providerId);
+      if (cached !== undefined) return cached;
+      const entry = findProvider(activeLocalCatalog, providerId);
+      const auth = defaultAuthFor(providerId, activeLocalCatalog);
+      const getCredentialForProvider = createLocalCredentialProvider({
+        provider: providerId,
+        auth,
+        env,
+        ...(auth === 'oauth'
+          ? { oauthAccessToken: createOAuthAccessTokenProvider(providerId) }
+          : {}),
+      });
+      const port = createVerifyAndRegisterLocalModelPort({
+        wireFormat: entry?.wireFormat ?? 'openai-compat',
+        baseUrl: entry?.baseUrl ?? '',
+        fetchImpl: createPinnedStreamFetch({}),
+        getKey: async () => {
+          const cred = await getCredentialForProvider();
+          return cred.secret;
+        },
+        registerLocalModel: (slug) => configStore.registerLocalModel(providerId, slug),
+        markSessionRegistered: (slug) => sessionRegisteredLocalModels.add(slug),
+      });
+      verifyPortsByProvider.set(providerId, port);
+      return port;
+    }
+    verifyAndRegisterLocalModel = (slug: string) => verifyPortFor(activeLocalProviderId)(slug);
 
     // F-WIN (descoberta) — a MESMA forma do test-then-register acima (ADR-0153), com as
     // MESMAS travas: `wireFormat`/`baseUrl` SÓ do boot (COND-S9), fetch PINADO anti-SSRF
@@ -1213,6 +1301,77 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       persistContextWindow: (slug, tokens) =>
         configStore.registerModelContextWindow(localCfg.provider, slug, tokens),
     });
+
+    // F-PROV — porta `switchLocalProvider(name)`: TROCA DE VERDADE o provider ATIVO
+    // local (achado em dogfooding: "/provider não carrega/não troca nada sob backend
+    // local"). Antes deste fix, `/provider` só mudava um DADO passageiro do request
+    // (`caller.customProvider`) que o `LocalModelClient` NUNCA lê — ele fala com um
+    // único provider FIXO, resolvido aqui no boot; era um NO-OP SILENCIOSO. Resolve o
+    // provider NOVO no catálogo local RE-LIDO na hora (`loadLocalProviderCatalog`, não
+    // o `localCatalog` congelado do boot — um provider custom cadastrado NESTA MESMA
+    // sessão via o fluxo "+ adicionar" do `/provider` já aparece aqui) e reconstrói o
+    // client pelo MESMO caminho do boot (`buildLocalModelClient`: adapter do
+    // `wireFormat`, anti-SSRF só quando há override, fetch PINADO EST-1115,
+    // `createLocalCredentialProvider` por-provider). SEM overrides de flag/env
+    // (`--local-base-url`/`--local-auth` eram do provider do BOOT — reaplicá-los ao
+    // provider novo seria plausivelmente ERRADO): usa os DEFAULTS do catálogo p/ auth
+    // (`defaultAuthFor`) e base_url (o público do provider). Falha (provider
+    // desconhecido, erro ao montar o client) ⇒ NADA muda (fail-closed — nunca troca
+    // pela metade); quem aplica o resultado é `controller.setLocalProvider`.
+    switchLocalProvider = async (
+      name: string,
+    ): Promise<{
+      readonly ok: boolean;
+      readonly detail: string;
+      readonly client?: import('@hiperplano/aluy-cli-core').ModelClient;
+      readonly defaultModel?: string;
+    }> => {
+      const freshCatalog = loadLocalProviderCatalog();
+      const entry = findProvider(freshCatalog, name);
+      if (entry === undefined) {
+        return {
+          ok: false,
+          detail:
+            `provider "${name}" não está no catálogo local (built-ins + ~/.aluy/config.json). ` +
+            'use "+ adicionar provider custom" no /provider p/ cadastrar um novo.',
+        };
+      }
+      try {
+        const auth = defaultAuthFor(entry.id, freshCatalog);
+        const client = await buildLocalModelClient({
+          catalog: freshCatalog,
+          provider: entry.id,
+          model: entry.defaultModel,
+          auth,
+          env,
+          ...(auth === 'oauth'
+            ? { oauthAccessToken: createOAuthAccessTokenProvider(entry.id) }
+            : {}),
+        });
+        // Só ATUALIZA o estado compartilhado (catálogo de modelos do /model, test-
+        // then-register por-provider) DEPOIS do client montar com sucesso — fail-
+        // closed de verdade, nunca um estado "trocado pela metade".
+        activeLocalCatalog = freshCatalog;
+        activeLocalProviderId = entry.id;
+        return {
+          ok: true,
+          detail: `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}).`,
+          client,
+          defaultModel: entry.defaultModel,
+        };
+      } catch (e) {
+        return {
+          ok: false,
+          detail: `falha ao trocar p/ "${entry.id}": ${e instanceof Error ? e.message : String(e)}`,
+        };
+      }
+    };
+
+    // F-PROV — getter do catálogo local p/ o `<ProviderPicker>` (ADR-0118). RE-LÊ a
+    // cada abertura (mesma disciplina do `switchLocalProvider` acima): reflete um
+    // provider custom cadastrado nesta MESMA sessão sem precisar reiniciar.
+    localProviderCatalogGetter = (): readonly LocalProviderEntry[] =>
+      loadLocalProviderCatalog().entries;
   }
 
   // F-WIN — as FONTES da janela do modelo (provider ativo + slug ativo + `providers[]`
@@ -1263,6 +1422,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // ADR-0153 — porta de test-then-register (ausente sob backend broker/teste com
     // `opts.brokerClient` — não-regressão).
     ...(verifyAndRegisterLocalModel !== undefined ? { verifyAndRegisterLocalModel } : {}),
+    // F-PROV — porta de troca DE VERDADE do provider ativo local (fix do no-op
+    // silencioso do /provider sob backend local). Ausente sob broker/teste com
+    // `opts.brokerClient` injetado (não-regressão).
+    ...(switchLocalProvider !== undefined ? { switchLocalProvider } : {}),
     // EST-0991 · ADR-0072 — modo EFETIVO: cai p/ `normal` se a confirmação de YOLO
     // foi recusada no boot. Vence o `opts.mode` cru (e a cerca/anti-SSRF do wiring
     // derivam DESTE modo — então recusar o YOLO também restaura a cerca/SSRF).
@@ -3037,9 +3200,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           runtimeStatus: {
             running: rt.running,
             ...(rt.snapshot?.turnState !== undefined ? { turnState: rt.snapshot.turnState } : {}),
-            ...(rt.snapshot?.nextFireIso !== undefined ? { nextFireIso: rt.snapshot.nextFireIso } : {}),
+            ...(rt.snapshot?.nextFireIso !== undefined
+              ? { nextFireIso: rt.snapshot.nextFireIso }
+              : {}),
             // ADR-0158 §5 pt.4 (FASE 3, missão item 4) — "pergunta enviada há X".
-            ...(rt.snapshot?.turnState === 'awaiting-owner' && rt.snapshot.updatedAtIso !== undefined
+            ...(rt.snapshot?.turnState === 'awaiting-owner' &&
+            rt.snapshot.updatedAtIso !== undefined
               ? { pendingSinceIso: rt.snapshot.updatedAtIso }
               : {}),
           },
@@ -3595,10 +3761,58 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         {...(localModelCatalogPort !== undefined
           ? { localModelCatalog: localModelCatalogPort }
           : {})}
-        {...(localModelForWindow !== undefined
-          ? { currentLocalModel: localModelForWindow }
-          : {})}
+        {...(localModelForWindow !== undefined ? { currentLocalModel: localModelForWindow } : {})}
         providersClient={built.providersClient}
+        // F-PROV — `/provider` sob backend LOCAL (BYO): a fonte da lista é o catálogo
+        // LOCAL do usuário (built-ins + `~/.aluy/config.json`), NUNCA o broker — antes
+        // deste fix o dono via a lista ESTÁTICA do broker (openrouter/deepseek), que não
+        // tem nada a ver com os providers que ele de fato configurou. Presente ⇒
+        // `useProviderPicker` ignora `providersClient` por completo.
+        {...(localProviderCatalogGetter !== undefined
+          ? { localProviderCatalog: localProviderCatalogGetter }
+          : {})}
+        // F-PROV — "+ adicionar provider custom" no `/provider`: reusa a MESMA escrita
+        // do `aluy onboard`/`aluy provider add` (`addLocalProviderOverride`) — nenhum 2º
+        // caminho de persistência. Só existe sob backend local (o broker não tem esse
+        // conceito).
+        {...(resolvedBackend === 'local'
+          ? {
+              onAddCustomProvider: (
+                input: import('../ui/hooks/useProviderPicker.js').AddCustomProviderInput,
+              ) => {
+                try {
+                  addLocalProviderOverride({
+                    id: input.id,
+                    wireFormat: 'openai-compat',
+                    baseUrl: input.baseUrl,
+                    defaultModel: input.defaultModel,
+                  });
+                } catch (e) {
+                  built.controller.pushNote('provider', [
+                    `falha ao registrar o provider custom "${input.id}": ` +
+                      `${e instanceof Error ? e.message : String(e)}`,
+                  ]);
+                  return;
+                }
+                built.controller.pushNote('provider', [
+                  `provider custom "${input.id}" registrado (~/.aluy/config.json).`,
+                  `defina a credencial com: aluy login --provider ${input.id}`,
+                  'trocando p/ ele agora…',
+                ]);
+                void built.controller.setLocalProvider(input.id).then((r) => {
+                  built.controller.pushNote(
+                    'provider',
+                    r.ok
+                      ? [r.detail]
+                      : [
+                          `provider custom "${input.id}" registrado, mas a troca falhou: ${r.detail}`,
+                          'use `/provider` de novo p/ tentar trocar.',
+                        ],
+                  );
+                });
+              },
+            }
+          : {})}
         sessionStore={sessionStore}
         onResumeSession={onResumeSession}
         rewindSource={built.checkpoints}
@@ -3697,6 +3911,44 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             built.controller.pushNote('model', [`tier trocado para: ${tier}`]);
           }
         }}
+        // F-MODEL-CUSTOM (ADR-0153) — achado em dogfooding: "/model não permite
+        // adicionar um modelo custom" sob backend local. O plumbing (test-then-
+        // register) já existia p/ sub-agentes; faltava o caminho da SESSÃO PRINCIPAL.
+        // O `<LocalModelPicker>` chama isto quando o texto digitado NÃO casa nenhuma
+        // linha do catálogo (`App.tsx` distingue antes de confirmar) — testa o slug
+        // AO VIVO no provider ATIVO (`verifyAndRegisterLocalModel`, que já segue o
+        // provider trocado via `/provider` — F-PROV) e só aplica em SUCESSO. Falha ⇒
+        // NADA muda (fail-closed honesto — nunca troca pro slug que falhou o probe).
+        {...(resolvedBackend === 'local'
+          ? {
+              onConfirmCustomLocalModel: (slug: string) => {
+                if (verifyAndRegisterLocalModel === undefined) {
+                  // Porta ausente (wiring degradado/teste) ⇒ preserva o warn-but-allow
+                  // de sempre — nunca descarta o slug digitado em silêncio.
+                  built.controller.setTier('custom', slug);
+                  configStore.saveTier('custom', slug);
+                  built.controller.pushNote('model', [
+                    `modelo Custom: ${slug}`,
+                    '⚠ não deu p/ testar (porta indisponível) — aplicado sem verificação.',
+                  ]);
+                  return;
+                }
+                built.controller.pushNote('model', [`testando "${slug}" no provider local…`]);
+                void verifyAndRegisterLocalModel(slug).then((r) => {
+                  if (!r.ok) {
+                    built.controller.pushNote('model', [
+                      `modelo "${slug}" recusado: ${r.detail}`,
+                      'nada mudou — o modelo ativo continua o mesmo (fail-closed).',
+                    ]);
+                    return;
+                  }
+                  built.controller.setTier('custom', slug);
+                  configStore.saveTier('custom', slug);
+                  built.controller.pushNote('model', [r.detail, `modelo Custom ativo: ${slug}`]);
+                });
+              },
+            }
+          : {})}
         {...bootEffortProp}
         onSelectConjugated={(model, effort) => {
           // EST-1117 — o `/model` CONJUGADO confirmou o trio: aplica MODELO + EFFORT de UMA
@@ -3733,11 +3985,27 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         }}
         {...bootProviderProp}
         onSelectProvider={(provider) => {
-          // EST-0962 (/provider) — o seletor confirmou: SETA o provider do modo Custom
-          // (caller → próxima chamada, em par com o slug) e registra uma nota NEUTRA. HG-2:
-          // só o NOME vai ao broker, que resolve `(provider, model)` → credencial (nunca
-          // exibida). Não persiste (escopo de sessão, como o tier/model). Fora de Custom o
-          // caller o ignora (no-op) — a nota deixa explícito que pareia com `/model` → Custom.
+          // F-PROV — backend LOCAL (BYO): TROCA DE VERDADE o provider ativo (client +
+          // catálogo de modelos do /model). Achado em dogfooding: antes deste fix, o
+          // `setProvider` de baixo (via EST-0962) era um NO-OP SILENCIOSO sob backend
+          // local — o `LocalModelClient` ignora o `provider` do request; nada trocava.
+          if (resolvedBackend === 'local') {
+            void built.controller.setLocalProvider(provider).then((r) => {
+              built.controller.pushNote(
+                'provider',
+                r.ok
+                  ? [r.detail, 'vale só nesta sessão (não persiste — reaplique no próximo boot).']
+                  : [`falha ao trocar p/ "${provider}": ${r.detail}`, 'nada mudou (fail-closed).'],
+              );
+            });
+            return;
+          }
+          // EST-0962 (/provider) — BROKER: o seletor confirmou: SETA o provider do modo
+          // Custom (caller → próxima chamada, em par com o slug) e registra uma nota
+          // NEUTRA. HG-2: só o NOME vai ao broker, que resolve `(provider, model)` →
+          // credencial (nunca exibida). Não persiste (escopo de sessão, como o tier/
+          // model). Fora de Custom o caller o ignora (no-op) — a nota deixa explícito
+          // que pareia com `/model` → Custom.
           built.controller.setProvider(provider);
           const applied = built.controller.provider === provider;
           built.controller.pushNote(

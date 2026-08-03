@@ -11,9 +11,10 @@
 
 import React from 'react';
 import { Box } from 'ink';
-import { Role } from '../theme/index.js';
+import { Role, useTheme } from '../theme/index.js';
 import { useI18n } from '../../i18n/index.js';
 import type { ProviderEntry } from '../../model/providers.js';
+import type { AddCustomProviderStep, AddCustomProviderDraft } from '../hooks/useProviderPicker.js';
 import { displayWidth } from '../../session/visual-lines.js';
 import { windowAround } from '../window.js';
 
@@ -38,10 +39,52 @@ export interface ProviderPickerProps {
   readonly maxRows?: number;
   /** F89 (wrap-aware) — largura do terminal; janela por LINHAS VISUAIS em cols estreito. */
   readonly columns?: number;
+  /**
+   * F-PROV — passo corrente do formulário "+ adicionar provider custom" (`null`/
+   * `undefined` ⇒ mostra a LISTA normal; presente ⇒ mostra o campo de texto do passo).
+   */
+  readonly addCustomStep?: AddCustomProviderStep;
+  /** F-PROV — rascunho em digitação do formulário (campo corrente = `addCustomStep`). */
+  readonly addCustomDraft?: AddCustomProviderDraft;
+}
+
+/** F-PROV — o campo de texto do passo CORRENTE do formulário "+ adicionar provider
+ * custom". Espelha o `TextField` do <QuestionDialog> (mesma densidade/tokens). */
+function AddCustomProviderField(props: {
+  readonly step: Exclude<AddCustomProviderStep, null>;
+  readonly draft: AddCustomProviderDraft;
+}): React.ReactElement {
+  const { t } = useI18n();
+  const theme = useTheme();
+  const label = t(`picker.provider.addCustom.${props.step}`);
+  const value = props.draft[props.step];
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Role name="fgDim">{label}</Role>
+      </Box>
+      <Box>
+        <Role name="depth">{theme.glyph('prompt')} </Role>
+        <Role name="fg">{value}</Role>
+        <Role name="accent">{theme.glyph('cursor')}</Role>
+      </Box>
+      <Box>
+        <Role name="fgDim">{t('picker.provider.addCustom.help')}</Role>
+      </Box>
+    </Box>
+  );
 }
 
 export function ProviderPicker(props: ProviderPickerProps): React.ReactElement {
   const { t } = useI18n();
+  if (props.addCustomStep !== undefined && props.addCustomStep !== null) {
+    return (
+      <AddCustomProviderField
+        step={props.addCustomStep}
+        draft={props.addCustomDraft ?? { id: '', baseUrl: '', model: '' }}
+      />
+    );
+  }
   const maxRows = Math.max(1, props.maxRows ?? 10);
   // F89 — altura visual por provider: prefixo (2) + `● ` (2) + `label · summary` (+ dica
   // "padrão"); quebra em `ceil(largura / columns)`. Sem `columns`, janela por item.

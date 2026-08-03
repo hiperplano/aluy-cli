@@ -125,3 +125,25 @@ export function buildProviderEntries(
 function humanizeProvider(name: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
+
+/**
+ * F-PROV (ADR-0118) — mapeia o catálogo LOCAL (`LocalProviderEntry[]`, built-ins do core
+ * + `~/.aluy/config.json`) p/ o formato do `/provider` (`ProviderEntry[]`). PURA (sem
+ * I/O): `id`→`name`, `label` direto, `summary` deriva do `wireFormat`+contagem de
+ * modelos declarados (nunca expõe `baseUrl`/credencial — CLI-SEC-7). `isDefault`
+ * sempre `false` aqui: quem marca o provider ATIVO é o `●` do picker (`currentProvider`),
+ * não este campo (que no seed do broker indicava o default do BROKER, um conceito que
+ * não existe no catálogo local).
+ */
+export function buildLocalProviderEntries(
+  entries: readonly import('@hiperplano/aluy-cli-core').LocalProviderEntry[],
+): readonly ProviderEntry[] {
+  return entries.map((e) => ({
+    name: e.id,
+    label: e.label,
+    summary:
+      e.models.length > 0
+        ? `${e.wireFormat} · ${e.models.length} modelo${e.models.length === 1 ? '' : 's'}`
+        : e.wireFormat,
+  }));
+}

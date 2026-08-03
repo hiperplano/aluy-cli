@@ -91,6 +91,13 @@ export const en: PartialCatalog = {
   'picker.provider.default': 'default',
   'picker.provider.fallback': '⚠ could not list the registered ones — showing the known providers',
   'picker.provider.more': '… {count} more providers (↑↓ scroll)',
+  'picker.provider.addCustom.id': 'provider id (e.g. tokenrouter) — enter advances',
+  'picker.provider.addCustom.baseUrl':
+    'base URL (OpenAI-compatible, e.g. https://api.example.com/v1) — enter advances',
+  'picker.provider.addCustom.model':
+    'default model (empty enter uses the provider id) — enter confirms',
+  'picker.provider.addCustom.help':
+    'esc cancels · the credential does NOT go here — afterwards use `aluy login --provider <id>`',
 
   // ── ModelPicker (/model) ──────────────────────────────────────────────────
   'picker.model.help': 'change model · ↑↓ navigate · enter select · esc close',
