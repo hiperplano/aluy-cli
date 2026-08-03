@@ -251,4 +251,39 @@ describe('useFilePicker — feedback de recusa (notice)', () => {
     expect(c.notice).toBeNull();
     expect(c.attachments.map((a) => a.path)).toEqual(['README.md']);
   });
+
+  // Força-tarefa de UX (PTY real) — `@arquivo-que-nao-existe` + Enter fechava o
+  // picker em SILÊNCIO (a query só sumia do composer, sem nenhum sinal do motivo).
+  it('confirm sem NENHUM hit (query não bate nada) ⇒ notice avisa, nada é anexado', async () => {
+    const c = await drive([
+      (p) => p.openPicker(),
+      (p) => p.setQuery('xyz-nao-existe-nunca'),
+      async (p) => {
+        await p.confirm();
+      },
+    ]);
+    expect(c.open).toBe(false);
+    expect(c.attachments).toEqual([]);
+    expect(c.notice).toBe('@xyz-nao-existe-nunca — nenhum arquivo encontrado');
+  });
+
+  it('confirm sem query e sem hit (índice vazio) ⇒ notice genérico, nada é anexado', async () => {
+    const emptyIndex: FileIndexPort = { list: async () => [] };
+    let last!: FilePickerController;
+    render(
+      <Probe2
+        index={emptyIndex}
+        steps={[
+          (p) => p.openPicker(),
+          async (p) => {
+            await p.confirm();
+          },
+        ]}
+        onState={(c) => (last = c)}
+      />,
+    );
+    await new Promise((r) => setTimeout(r, 90));
+    expect(last.attachments).toEqual([]);
+    expect(last.notice).toBe('nenhum arquivo selecionado');
+  });
 });
