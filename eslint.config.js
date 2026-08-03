@@ -58,11 +58,11 @@ export default tseslint.config(
   {
     // EST-0970/EST-1007 — fixtures de teste são scripts Node puros: servers MCP ESM
     // (`.mjs`, processo-server no teste stdio) e preloads `--require` (`.cjs`, ex.: o
-    // `force-root` que simula uid 0). Análogos ao harness `scripts/`. Recebem os globais
-    // de Node (process/etc.).
+    // `force-root` que simula uid 0). Análogos ao harness `scripts/`. Recebem os
+    // globais de Node necessários (timers inclusive) — nunca os do DOM/browser.
     files: ['packages/**/tests/**/fixtures/**/*.mjs', 'packages/**/tests/**/fixtures/**/*.cjs'],
     languageOptions: {
-      globals: { process: 'readonly', console: 'readonly' },
+      globals: { process: 'readonly', console: 'readonly', setInterval: 'readonly' },
     },
   },
 );
