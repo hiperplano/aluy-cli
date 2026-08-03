@@ -49,7 +49,23 @@ import { UNTRUSTED_OPEN, type HistoryItem } from './context.js';
 export function hasUntrustedInContext(history: readonly HistoryItem[]): boolean {
   for (const item of history) {
     // CANAL DE DADO (proveniência de ambiente) — o que `buildMessages` envelopa.
-    if (item.role === 'observation' || item.role === 'tool_result') return true;
+    // `attachment_image` (ADR-0159) entra pela MESMA porta de proveniência que a
+    // `observation` do `@anexo` de texto: arquivo apontado pelo usuário, dado de
+    // ambiente, NUNCA instrução. Ele é a única proveniência não-confiável que NÃO
+    // passa pelo `wrapUntrusted` — não por ser mais confiável, mas porque aquele
+    // envelope é de TEXTO e destruiria os bytes base64 (ver `buildMessages`). Ou
+    // seja: o fallback-pelo-literal abaixo NUNCA o pega (nem `text` ele tem), então
+    // sem esta linha um `@foto.png` sob YOLO não acendia o aviso de conteúdo externo
+    // — justo o caso em que o dado é mais perigoso, porque instrução embutida numa
+    // imagem escapa de qualquer varredura de texto. Detectar por PAPEL é a fronteira
+    // de proveniência (CLI-SEC-4), independente de o envelope caber ou não.
+    if (
+      item.role === 'observation' ||
+      item.role === 'tool_result' ||
+      item.role === 'attachment_image'
+    ) {
+      return true;
+    }
     // Fallback: literal já presente (conteúdo previamente envelopado/restaurado).
     const text = (item as { readonly text?: unknown }).text;
     if (typeof text === 'string' && text.includes(UNTRUSTED_OPEN)) return true;

@@ -64,6 +64,20 @@ describe('F21 · hasUntrustedInContext', () => {
     expect(hasUntrustedInContext(h)).toBe(true);
   });
 
+  it('detecta um anexo de IMAGEM (attachment_image) — a proveniência que NÃO é envelopada', () => {
+    // Achado em auditoria pós-rc.117: `attachment_image` (ADR-0159) é a ÚNICA
+    // proveniência não-confiável que não passa pelo `wrapUntrusted` (o envelope é de
+    // TEXTO e destruiria o base64 — ver `buildMessages`). Sem o PAPEL na checagem, o
+    // fallback-pelo-literal nunca o pegava (o item nem tem `text`) e um `@foto.png`
+    // sob YOLO não acendia o aviso — justo o caso mais perigoso, porque instrução
+    // embutida numa imagem escapa de qualquer varredura de texto.
+    const h: HistoryItem[] = [
+      { role: 'goal', text: 'descreva a imagem' },
+      { role: 'attachment_image', path: 'foto.png', mimeType: 'image/png', base64: 'QUJD' },
+    ];
+    expect(hasUntrustedInContext(h)).toBe(true);
+  });
+
   it('histórico vazio ⇒ false', () => {
     expect(hasUntrustedInContext([])).toBe(false);
   });
