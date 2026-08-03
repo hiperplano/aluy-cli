@@ -92,6 +92,13 @@ export const ptBR: FullCatalog = {
   'picker.provider.default': 'padrão',
   'picker.provider.fallback': '⚠ não foi possível listar os cadastrados — mostrando os conhecidos',
   'picker.provider.more': '… {count} providers a mais (↑↓ rola)',
+  'picker.provider.addCustom.id': 'id do provider (ex.: tokenrouter) — enter avança',
+  'picker.provider.addCustom.baseUrl':
+    'base URL (OpenAI-compatível, ex.: https://api.exemplo.com/v1) — enter avança',
+  'picker.provider.addCustom.model':
+    'modelo default (enter vazio usa o id do provider) — enter confirma',
+  'picker.provider.addCustom.help':
+    'esc cancela · a credencial NÃO entra aqui — depois use `aluy login --provider <id>`',
 
   // ── ModelPicker (/model) ──────────────────────────────────────────────────
   'picker.model.help': 'trocar modelo · ↑↓ navega · enter seleciona · esc fecha',

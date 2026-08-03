@@ -42,7 +42,10 @@ function defaultBaseUrlFor(
  * Ollama local) ⇒ `'none'` (sem credencial). Qualquer outro / desconhecido ⇒ `'apikey'`.
  * Usado quando a flag/config não fixa o auth — assim Ollama "só funciona" sem pedir chave.
  */
-function defaultAuthFor(provider: LocalProviderKind, catalog: LocalProviderCatalog): LocalAuthKind {
+export function defaultAuthFor(
+  provider: LocalProviderKind,
+  catalog: LocalProviderCatalog,
+): LocalAuthKind {
   const modes = findProvider(catalog, provider)?.auth;
   if (modes !== undefined && modes.length > 0 && modes.every((m) => m === 'none')) return 'none';
   return 'apikey';

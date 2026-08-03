@@ -263,6 +263,19 @@ export interface BuildSessionOptions {
     readonly detail: string;
     readonly registered: boolean;
   }>;
+  /**
+   * F-PROV — porta que TROCA DE VERDADE o provider ATIVO sob backend LOCAL (fix do
+   * "silent no-op" do `/provider` — o `LocalModelClient` fixo do boot ignorava o
+   * `provider` do request). Construída pelo `run.tsx`; THREADADA aqui até o
+   * `SessionController` sem lógica própria (pass-through). Ver doc completa em
+   * `controller.ts` (`SessionControllerOptions.switchLocalProvider`).
+   */
+  readonly switchLocalProvider?: (name: string) => Promise<{
+    readonly ok: boolean;
+    readonly detail: string;
+    readonly client?: ModelClient;
+    readonly defaultModel?: string;
+  }>;
   /** EST-0962 — override do cliente de catálogo de tiers (testes — broker mockado). */
   readonly catalogClient?: TierCatalogClient;
   /** EST-0962 — override do cliente de modelos custom (testes — broker mockado). */
@@ -1395,6 +1408,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     ...(opts.verifyAndRegisterLocalModel
       ? { verifyAndRegisterLocalModel: opts.verifyAndRegisterLocalModel }
       : {}),
+    // F-PROV — porta de troca DE VERDADE do provider ativo local (construída pelo
+    // `run.tsx`, pass-through aqui). Ausente ⇒ `setLocalProvider` do controller
+    // devolve `ok:false` explícito (broker, ou teste sem esta porta montada).
+    ...(opts.switchLocalProvider ? { switchLocalProvider: opts.switchLocalProvider } : {}),
     // ADR-0146 (D2/L2) — porta do probe de nome de modelo (catálogo vivo p/ sugestão).
     ...(modelProbe ? { modelProbe } : {}),
     // ADR-0146 (D4) — dial global: default dos FILHOS quando nem o spawn nem o `.md`

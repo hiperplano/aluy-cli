@@ -76,7 +76,11 @@ import {
 } from '../ui/hooks/usePermissionsPanel.js';
 import { useThemePicker } from '../ui/hooks/useThemePicker.js';
 import { useLangPicker } from '../ui/hooks/useLangPicker.js';
-import { useProviderPicker } from '../ui/hooks/useProviderPicker.js';
+import {
+  useProviderPicker,
+  ADD_CUSTOM_PROVIDER_SENTINEL,
+  type AddCustomProviderInput,
+} from '../ui/hooks/useProviderPicker.js';
 import { useHistoryPicker } from '../ui/hooks/useHistoryPicker.js';
 import { useRewindPicker, type RewindChoice } from '../ui/hooks/useRewindPicker.js';
 import { useCommandPalette } from '../ui/hooks/useCommandPalette.js';
@@ -89,6 +93,7 @@ import type {
   ProvidersClient,
   Checkpoint,
   EffortChoice,
+  LocalProviderEntry,
 } from '@hiperplano/aluy-cli-core';
 import { formatQuota } from '@hiperplano/aluy-cli-core';
 import { DEFAULT_TIER } from './wiring.js';
@@ -273,6 +278,17 @@ export interface AppProps {
     opts?: { readonly supportsTools: boolean },
   ) => void;
   /**
+   * F-MODEL-CUSTOM (ADR-0153) — o `<LocalModelPicker>` confirmou um slug FORA do
+   * catálogo (nenhuma linha realçada — texto digitado, gap "custom model" do
+   * dogfooding). Em vez de aplicar direto (warn-but-allow cego), o chamador
+   * (run.tsx) testa o slug ao vivo (`verifyAndRegisterLocalModel`, test-then-
+   * register) e só aplica em caso de sucesso — fail-closed honesto: uma falha no
+   * probe NUNCA troca o modelo ativo em silêncio. Ausente ⇒ a App cai no
+   * comportamento de sempre (`onSelectTier('custom', slug)` direto, sem probe) —
+   * degradação segura p/ wiring/testes antigos.
+   */
+  readonly onConfirmCustomLocalModel?: (slug: string) => void;
+  /**
    * EST-0968 — controle SEGURO da catraca p/ o painel interativo `/permissions`:
    * modo (plan/normal/unsafe), grants de sessão (revogar) e default de tools
    * seguras. So expoe o que e SEGURO mudar (CLI-SEC-3) — nao ha caminho p/ relaxar
@@ -351,6 +367,21 @@ export interface AppProps {
    * o picker cai no FALLBACK estático conhecido + nota honesta (degradação segura).
    */
   readonly providersClient?: Pick<ProvidersClient, 'list'>;
+  /**
+   * F-PROV (ADR-0118) — sob backend LOCAL (BYO), a FONTE do `/provider` é o catálogo
+   * LOCAL do usuário (built-ins do core + `~/.aluy/config.json`), NUNCA o broker.
+   * Presente ⇒ `providersClient` acima é ignorado por completo. Reconsultada a CADA
+   * abertura do picker (uma função, não um array — reflete um "+ adicionar" recém-
+   * confirmado nesta sessão).
+   */
+  readonly localProviderCatalog?: () => readonly LocalProviderEntry[];
+  /**
+   * F-PROV — confirma o formulário "+ adicionar provider custom" do `/provider`
+   * (id/baseURL/modelo default coletados no próprio picker). Ausente ⇒ o item "+
+   * adicionar" ainda abre o formulário, mas confirmar no último passo não persiste
+   * nada (degradação segura — sem wiring, sem efeito).
+   */
+  readonly onAddCustomProvider?: (input: AddCustomProviderInput) => void;
   /**
    * EST-0972 — store das sessões persistidas, lido pelo seletor `/history` (lista as
    * sessões anteriores). Quando ausente, o `/history` cai p/ a NOTA informativa (via
@@ -942,6 +973,9 @@ export function App(props: AppProps): React.ReactElement {
   const providerPicker = useProviderPicker({
     ...(currentProvider !== undefined ? { currentProvider } : {}),
     ...(props.providersClient ? { providersClient: props.providersClient } : {}),
+    // F-PROV — sob backend LOCAL, ignora `providersClient` acima por completo (a
+    // presença de `localCatalog` é o que decide a fonte, ver o hook).
+    ...(props.localProviderCatalog ? { localCatalog: props.localProviderCatalog } : {}),
   });
 
   // EST-0989 (i18n) — os NATIVOS LOCALIZADOS no idioma ativo (summaries traduzidos). Memo
@@ -3127,8 +3161,25 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       if (key.return || key.tab) {
+        // F-MODEL-CUSTOM — distingue ANTES de `confirm()` (que já fecha o picker):
+        // uma linha REALÇADA é um slug JÁ CONHECIDO do catálogo (declarado ∪
+        // registrado-na-sessão) — aplica direto, como sempre. SEM linha realçada, o
+        // texto digitado é um slug DESCONHECIDO (o dono pedindo um modelo custom que
+        // não está na lista) — vai por `onConfirmCustomLocalModel` (test-then-register,
+        // ADR-0153) em vez do `onSelectTier` direto: fail-closed, nunca aplica um slug
+        // que falhou o probe.
+        const hadHighlightedHit = localModelPicker.hits[localModelPicker.selected] !== undefined;
         const slug = localModelPicker.confirm();
-        if (slug) props.onSelectTier?.('custom', slug);
+        if (slug) {
+          // Sem `onConfirmCustomLocalModel` wireado (degradação/teste antigo) ⇒
+          // preserva o comportamento de sempre (warn-but-allow direto) — nunca
+          // descarta em silêncio um slug que o usuário digitou.
+          if (hadHighlightedHit || props.onConfirmCustomLocalModel === undefined) {
+            props.onSelectTier?.('custom', slug);
+          } else {
+            props.onConfirmCustomLocalModel(slug);
+          }
+        }
         return;
       }
       if (key.backspace || key.delete) {
@@ -3267,6 +3318,28 @@ export function App(props: AppProps): React.ReactElement {
     // Espelha o /theme//lang: ↑↓ navega, enter seta o provider do modo Custom da sessão
     // (a próxima chamada o envia em par com o slug), esc fecha. Modal.
     if (providerPicker.open) {
+      // F-PROV — dentro do formulário "+ adicionar provider custom" (3 passos: id/
+      // baseURL/modelo), o foco é de TEXTO (mesma mecânica do <LocalModelPicker>/
+      // <QuestionDialog kind:'text'>), não de navegação de lista.
+      if (providerPicker.addCustomStep !== null) {
+        if (key.escape) {
+          providerPicker.cancelAddCustom();
+          return;
+        }
+        if (key.return) {
+          const input = providerPicker.confirmAddCustom();
+          if (input) props.onAddCustomProvider?.(input);
+          return;
+        }
+        if (key.backspace || key.delete) {
+          providerPicker.backspaceAddCustom();
+          return;
+        }
+        if (char && !key.ctrl && !key.meta) {
+          providerPicker.typeAddCustom(char);
+        }
+        return;
+      }
       if (key.upArrow) {
         providerPicker.move(-1);
         return;
@@ -3277,6 +3350,12 @@ export function App(props: AppProps): React.ReactElement {
       }
       if (key.return || key.tab) {
         const name = providerPicker.confirm();
+        // F-PROV — o item sentinela "+ adicionar" NÃO é um provider real: abre o
+        // formulário em vez de aplicar (o `onSelectProvider` nunca vê este valor).
+        if (name === ADD_CUSTOM_PROVIDER_SENTINEL) {
+          providerPicker.startAddCustom();
+          return;
+        }
         if (name) props.onSelectProvider?.(name);
         return;
       }
@@ -4171,6 +4250,8 @@ export function App(props: AppProps): React.ReactElement {
             usingFallback={providerPicker.usingFallback}
             maxRows={slashMenuRowCap - 2}
             columns={columns}
+            addCustomStep={providerPicker.addCustomStep}
+            addCustomDraft={providerPicker.addCustomDraft}
             {...(currentProvider !== undefined ? { currentProvider } : {})}
           />
         </Box>

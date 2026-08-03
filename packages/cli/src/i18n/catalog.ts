@@ -143,6 +143,11 @@ export interface Catalog {
   'picker.provider.fallback': string;
   /** Indicador de janela: `… {count} providers a mais` quando a lista é janelada. */
   'picker.provider.more': string;
+  // F-PROV — formulário "+ adicionar provider custom" (3 passos: id/baseUrl/model).
+  'picker.provider.addCustom.id': string;
+  'picker.provider.addCustom.baseUrl': string;
+  'picker.provider.addCustom.model': string;
+  'picker.provider.addCustom.help': string;
 
   // ── ModelPicker (/model · EST-0962) — ajuda, estados e browser Custom ──────
   /** Linha de ajuda no topo do seletor de tier. */
