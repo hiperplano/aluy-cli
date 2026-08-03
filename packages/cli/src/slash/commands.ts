@@ -507,12 +507,24 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // abre o picker (não-TTY lista); `/provider deepseek` seta direto. Só o NOME (HG-2,
     // DADO — não credencial): o broker resolve `(provider, model)` server-side.
     name: 'provider',
-    summary: 'seta o provider do modelo Custom',
+    summary: 'seta o provider do modelo Custom · "save" fixa como padrão (BYO/local)',
     summaryKey: 'cmd.provider',
     source: 'native',
     id: 'provider',
     section: 'sessão',
     agentEffect: 'session-effect', // ADR-0147 — espelha /model (dual-mode).
+    // F-PROV-FIX — achado de dogfooding: a troca de provider vale só na sessão (por
+    // desenho — você experimenta sem contaminar sessões futuras); faltava um jeito
+    // EXPLÍCITO de fixá-la. `/provider save` é o verbo (App.tsx trata o arg ANTES de
+    // casar por NOME de provider) — mas, DIFERENTE do `/clear full`/`/mcp search`,
+    // NÃO é declarado como `subcommands` aqui: o espaço de argumento do `/provider` é
+    // ABERTO (qualquer nome do catálogo — `deepseek`, `tokenrouter`, …), não um verbo
+    // FECHADO. `isSlashMenuQuery` mantém o MENU aberto (1 nível a mais) sempre que o
+    // comando tem `subcommands` — o que quebraria `/provider <nome-real>` digitado
+    // inteiro de uma vez (o menu ficaria "esperando" um 2º espaço em vez de fechar e
+    // deixar o Enter submeter a linha). `/mcp`/`/clear` não têm esse problema porque
+    // seus verbos são um conjunto FECHADO (nenhum arg livre de 1 token). Descoberta
+    // de "save" fica só no `summary`/doc — não no menu incremental.
   },
   {
     // EST-0962 · /effort — seta o `reasoning_effort` (PASSTHROUGH: qualquer string ≤32 chars;

@@ -175,7 +175,7 @@ export const en: PartialCatalog = {
   'cmd.whoami': 'current account, org and scopes',
   'cmd.telegram': 'Telegram connector · status/allow/deny/logout (in-session setup)',
   'cmd.model': 'switch the tier',
-  'cmd.provider': 'set the Custom model provider',
+  'cmd.provider': 'set the Custom model provider · "save" fixes it as the default (BYO/local)',
   'cmd.effort': 'set the reasoning_effort (low/medium/high/custom) · passthrough ≤32 chars',
   'cmd.theme': 'switch the theme (dark/light) · auto-detected on boot',
   'cmd.lang': 'switch the language (pt-BR/en) · auto-detected on boot',

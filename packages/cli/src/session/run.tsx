@@ -34,6 +34,9 @@ import { CLI_VERSION } from '../version.js';
 import { readUpdateNote, refreshUpdateCheck } from '../io/update-check.js';
 import { ThemeRoot } from './ThemeRoot.js';
 import { buildSession, type BuildSessionOptions } from './wiring.js';
+// F-PROV-FIX — lógica PURA (sem I/O) do ato explícito `/provider save`: decide o
+// que fixar (provider+modelo) a partir do estado corrente da sessão + do boot.
+import { planSaveProvider } from './save-provider.js';
 // ADR-0120 / EST-1113 — backend LOCAL (BYO): resolve a config e monta o LocalModelClient
 // (atrás do MESMO contrato `ModelClient`) p/ injetar no wiring quando `backend:'local'`.
 import { resolveModelBackend, resolveLocalProviderConfig } from '../model/local/config.js';
@@ -4060,6 +4063,53 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                   `provider pretendido: ${provider}`,
                   '⚠ sem modelo Custom ativo — o provider pareia com um modelo Custom.',
                   'selecione um modelo via `/model` → Custom e refaça o `/provider`.',
+                ],
+          );
+        }}
+        // F-PROV-FIX — `/provider save`: o ATO EXPLÍCITO que o dono pediu ("gostei,
+        // fixa isso"). O DEFAULT acima (`onSelectProvider`) CONTINUA session-only —
+        // isto NUNCA dispara sozinho, só quando o dono digita "save" de propósito
+        // (App.tsx trata o verbo ANTES de casar por nome de provider). Só faz sentido
+        // sob backend LOCAL/BYO (onde `/provider` de fato troca o provider ativo,
+        // `setLocalProvider` acima); no broker, o provider Custom pareia com o slug e
+        // é resolvido pelo broker — `planSaveProvider` (PURO, testado isolado) devolve
+        // `applicable:false` e a nota explica o porquê, sem gravar nada.
+        onSaveProvider={() => {
+          const plan = planSaveProvider({
+            backend: resolvedBackend,
+            currentProvider: built.controller.provider,
+            currentModel: built.controller.model,
+            bootProvider: localProviderForMeta,
+            bootModel: localModelForWindow,
+          });
+          if (!plan.applicable) {
+            built.controller.pushNote('provider', [
+              plan.reason === 'not-local'
+                ? 'fixar como padrão só vale no backend LOCAL/BYO.'
+                : 'nenhum provider ativo nesta sessão ainda — nada para fixar.',
+              plan.reason === 'not-local'
+                ? 'no broker, o provider Custom pareia com o slug e é resolvido pelo broker — sem "padrão" local a gravar.'
+                : 'troque de provider com `/provider <nome>` primeiro.',
+            ]);
+            return;
+          }
+          // ÚNICA escrita: os MESMOS campos (`localProvider`/`localModel`) que o boot
+          // já lê de volta (`resolveLocalProviderConfig`) — provar isso é o teste de
+          // round-trip. Fail-safe: `save()` nunca lança; `ok:false` é reportado, a
+          // sessão segue (a troca desta sessão já valia, só a persistência falhou).
+          const ok = configStore.saveLocalProvider(plan.provider, plan.model);
+          built.controller.pushNote(
+            'provider',
+            ok
+              ? [
+                  `provider fixado como padrão: ${plan.provider}${
+                    plan.model ? ` · modelo: ${plan.model}` : ''
+                  }`,
+                  'gravado em ~/.aluy/config.json — a PRÓXIMA sessão já abre nele.',
+                ]
+              : [
+                  'não deu p/ gravar em ~/.aluy/config.json (disco cheio? permissão?).',
+                  'a troca desta sessão continua valendo; só a persistência falhou (sessão não caiu).',
                 ],
           );
         }}

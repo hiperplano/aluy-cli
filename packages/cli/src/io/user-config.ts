@@ -1105,6 +1105,25 @@ export class UserConfigStore {
   }
 
   /**
+   * F-PROV-FIX (ato EXPLÍCITO "/provider save") — Açúcar: fixa o provider (e,
+   * opcionalmente, o modelo) ATIVOS do backend LOCAL (BYO) como o PADRÃO da PRÓXIMA
+   * sessão, preservando as demais preferências. Escreve EXATAMENTE os campos que o
+   * boot já lê de volta (`localProvider`/`localModel`, via `resolveLocalProviderConfig`
+   * em `model/local/config.ts`) — nenhum mecanismo de escrita novo, só o `save()` de
+   * sempre. NUNCA é chamado como efeito colateral de trocar de provider/modelo na
+   * sessão (isso continua session-only, EST-0962/F-PROV) — só quando o dono pede
+   * explicitamente ("save"), fechando o achado de dogfooding "por que o /provider
+   * não fixa?". `model` ausente/vazio ⇒ preserva o `localModel` já salvo (não apaga
+   * um valor bom só porque esta chamada não o trouxe).
+   */
+  saveLocalProvider(provider: string, model?: string): boolean {
+    const p = provider.trim();
+    if (p === '') return false;
+    const m = model?.trim();
+    return this.save({ localProvider: p, ...(m !== undefined && m !== '' ? { localModel: m } : {}) });
+  }
+
+  /**
    * ADR-0146 (D4) — Açúcar: persiste (ou LIMPA, com `undefined`/vazio) o dial GLOBAL
    * de modelo/tier dos SUB-AGENTES (`subAgent.model`), preservando as demais
    * preferências. MESMO vocabulário do `model:` do `.md` (`same-as-parent`/tier/
