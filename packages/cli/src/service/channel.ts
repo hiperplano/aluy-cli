@@ -24,6 +24,13 @@
 // runner NUNCA trava um turno (nem a ask-espera) por falta de canal. Ver `sendChannelText`
 // e o ramo `no-channel` de `waitForOwnerReply`.
 //
+// `channel:` NÃO É OBRIGATÓRIO (achado de dogfooding: "eu não quero ser obrigado a ter
+// um channel"). Sem canal utilizável — não declarado, valor não-Telegram, ou sem token
+// —, a ASK-ESPERA cai na ESPERA LOCAL PURA (`waitForLocalAnswerOnly`): o serviço fica
+// vivo e em silêncio, a pergunta fica no `runner.log` e no `status.json`, e o dono
+// responde entrando com `aluy service attach`. O canal remoto é a camada de ALCANCE
+// (ser avisado longe da máquina), não o requisito para o serviço existir.
+//
 // I/O concreto (keychain + rede) — mora no `cli` (ADR-0053 §8); toda a formatação
 // (§8.1/§8.2/§5 pt.4) e a decisão de timeout são PURAS, em `@hiperplano/aluy-cli-core`
 // (`service-channel.ts`/`service-messages.ts`).
@@ -167,8 +174,16 @@ export async function sendServiceAlert(
 export type AskWaitResult =
   | { readonly kind: 'answered'; readonly text: string }
   | { readonly kind: 'timeout' }
-  /** Sem canal/token utilizável — o CALLER decide o fallback (ADR-0158 fase 2: loga
-   * e para o runner até `aluy service start` manual — nunca finge que perguntou). */
+  /**
+   * Sem canal/token utilizável E sem fonte de resposta LOCAL (`attach`) fiada — o
+   * CALLER decide o fallback (loga e para o runner até `aluy service start` manual;
+   * nunca finge que perguntou).
+   *
+   * Com `localAnswer` presente isto NÃO acontece mais: a ausência de canal cai na
+   * ESPERA LOCAL PURA (ver `waitForOwnerReply`) — `channel:` deixou de ser um campo
+   * de fato obrigatório. Na prática este ramo só sobra em teste que chame a função
+   * isolada sem fiar o attach (em produção `runServiceRunner` sempre fia).
+   */
   | { readonly kind: 'no-channel'; readonly reason: string }
   /** `stop` (SIGTERM/`aluy service stop`) disparou durante a espera. */
   | { readonly kind: 'stopped' };
@@ -185,6 +200,81 @@ export interface LocalAnswerSource {
   /** Resolve com a PRÓXIMA resposta local que chegar; nunca resolve se `stop`
    * abortar antes (o caller descarta a promise perdedora da corrida). */
   waitForAnswer(stop: AbortSignal): Promise<string>;
+}
+
+/**
+ * Passo do relógio da espera SEM canal remoto. Só existe para o `timeout` ser
+ * honrado (a resposta em si chega por promise, não por polling) — por isso é um
+ * tick modesto, não um hot-loop. Também é o TETO de cada `setTimeout` desta
+ * espera: nunca criamos um timer com o `timeoutMs` inteiro, que pode ser enorme
+ * (24h default, e configurável) — `setTimeout` acima de ~24.8 dias estoura o
+ * inteiro de 32 bits e dispara na hora, bug que este repo já pagou uma vez.
+ */
+const LOCAL_ONLY_TICK_MS = 1_000;
+
+/**
+ * ASK-ESPERA quando o serviço NÃO tem canal remoto utilizável — a espera SILENCIOSA
+ * via `aluy service attach` (achado de dogfooding: `channel:` não pode ser
+ * obrigatório). Mesma semântica da espera com canal, menos o Telegram:
+ *
+ *   • só uma resposta do DONO encerra (regra dura — nunca prossegue com suposição);
+ *   • o mesmo `timeoutMs` vale (24h default) ⇒ `{kind:'timeout'}`, e o caller encerra
+ *     o turno sem ação, como já fazia;
+ *   • `stop` (SIGTERM/`aluy service stop`) ⇒ `{kind:'stopped'}`.
+ *
+ * A promise da resposta é criada UMA vez, fora do laço, e re-corrida a cada tick:
+ * recriá-la por rodada abriria uma janela em que um `say` chegando entre o abort e o
+ * re-registro seria entregue à fila em vez do esperador (o `LocalAnswerChannel` até
+ * cobre isso com `queuedAnswers`, mas não depender disso é mais barato que confiar).
+ */
+async function waitForLocalAnswerOnly(args: {
+  readonly stop: AbortSignal;
+  readonly localAnswer: LocalAnswerSource;
+  readonly timeoutMs: number;
+  readonly now: () => number;
+  readonly log: (line: string) => void;
+}): Promise<AskWaitResult> {
+  const { stop, localAnswer, timeoutMs, now, log } = args;
+  const startedAtMs = now();
+
+  const answerController = new AbortController();
+  const onStopAbort = (): void => answerController.abort();
+  stop.addEventListener('abort', onStopAbort, { once: true });
+  const answerPromise = localAnswer
+    .waitForAnswer(answerController.signal)
+    .then((text) => ({ kind: 'local' as const, text }));
+
+  try {
+    while (!stop.aborted) {
+      if (hasAskTimedOut(startedAtMs, now(), timeoutMs)) {
+        log(
+          '[service/channel] ask-espera (sem canal remoto): TIMEOUT — o dono não entrou ' +
+            'por "aluy service attach"; turno encerra sem ação.',
+        );
+        return { kind: 'timeout' };
+      }
+
+      let tick: ReturnType<typeof setTimeout> | undefined;
+      const tickPromise = new Promise<{ readonly kind: 'tick' }>((resolve) => {
+        tick = setTimeout(() => resolve({ kind: 'tick' }), LOCAL_ONLY_TICK_MS);
+        tick.unref?.();
+      });
+      const winner = await Promise.race([answerPromise, tickPromise]);
+      if (tick !== undefined) clearTimeout(tick);
+
+      if (winner.kind === 'local') {
+        log(
+          '[service/channel] resposta recebida via "aluy service attach" — retomando o ' +
+            'turno de onde parou.',
+        );
+        return { kind: 'answered', text: winner.text };
+      }
+    }
+    return { kind: 'stopped' };
+  } finally {
+    answerController.abort();
+    stop.removeEventListener('abort', onStopAbort);
+  }
 }
 
 /**
@@ -223,6 +313,26 @@ export async function waitForOwnerReply(args: {
 
   const resolved = await resolveActiveChannel(manifest, deps);
   if (!('client' in resolved)) {
+    // `channel:` NÃO é obrigatório (achado de dogfooding: "eu não quero ser obrigado
+    // a ter um channel"). Sem canal utilizável, mas COM o attach fiado, o serviço
+    // ESPERA EM SILÊNCIO em vez de encerrar: a pergunta fica no `runner.log` e no
+    // `status.json` (`aluy service status` a mostra), e o dono responde entrando com
+    // `aluy service attach` — o MESMO evento `say` que já vencia a corrida contra o
+    // Telegram, agora sozinho em campo. A regra dura de §5 pt.4 continua intacta: o
+    // turno NÃO prossegue com suposição, só uma resposta do dono o retoma.
+    if (args.localAnswer !== undefined) {
+      log(
+        `[service/channel] sem canal remoto (${resolved.reason}) — ESPERANDO o dono ` +
+          `por "aluy service attach" (a pergunta está no log e em "aluy service status").`,
+      );
+      return waitForLocalAnswerOnly({
+        stop,
+        localAnswer: args.localAnswer,
+        timeoutMs,
+        now,
+        log,
+      });
+    }
     log(`[service/channel] ask-espera não enviada (fail-open) — ${resolved.reason}.`);
     return { kind: 'no-channel', reason: resolved.reason };
   }

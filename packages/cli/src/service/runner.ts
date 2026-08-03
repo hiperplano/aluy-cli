@@ -747,9 +747,12 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         }
 
         if (ask.kind === 'no-channel') {
-          // Sem canal utilizável ⇒ cai no comportamento da FASE 2 (fail-open):
-          // encerra o processo do runner; o dono religa manualmente quando resolver
-          // (nunca finge que perguntou, nunca prossegue sozinho — §5 pt.4/§3).
+          // Só chega aqui quando NEM canal remoto NEM attach existem — o que em
+          // produção não acontece (o `attachServerRef`/`localAnswers` é sempre fiado
+          // logo acima). Sem canal mas COM attach, `waitForOwnerReply` já espera em
+          // silêncio pelo `aluy service attach` e nunca devolve `no-channel`.
+          // Restando este caso, mantém o fail-open antigo: encerra o runner e o dono
+          // religa quando resolver (nunca finge que perguntou, nunca prossegue só).
           log(
             `ask-espera não pôde ser feita (${ask.reason}) — encerrando o runner ` +
               `(religue com "aluy service start" quando resolver o canal/decisão).`,
