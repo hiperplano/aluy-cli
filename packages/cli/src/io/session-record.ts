@@ -131,6 +131,10 @@ export function sanitizeBlock(raw: unknown): SessionBlock | null {
         // restaurada é inerte (sem comando em voo), então não há saída-ao-vivo a restaurar.
         ...(isCount(o.added) ? { added: o.added } : {}),
         ...(isCount(o.removed) ? { removed: o.removed } : {}),
+        // Mesma classe do `added`/`removed` acima — o TEXTO do diff (bloco compacto do
+        // `<ToolLine>` no histórico) é DADO ESTÁVEL, não transiente: sem isto, um edit
+        // retomado (`--resume`) mostraria a contagem `+N/−M` mas perderia o diff em si.
+        ...(isStr(o.diff) ? { diff: o.diff } : {}),
       };
     }
     case 'deny':

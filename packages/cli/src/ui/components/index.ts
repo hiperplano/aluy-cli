@@ -32,6 +32,10 @@ export { ToolLine } from './ToolLine.js';
 export type { ToolLineProps } from './ToolLine.js';
 export { AskDialog } from './AskDialog.js';
 export type { AskDialogProps } from './AskDialog.js';
+// F164 — janela cabeça+cauda + render de linha de diff, REUSADA pelo <AskDialog>
+// (ask) e pelo <ToolLine> (histórico/scrollback pós-execução).
+export { DiffLine, windowEffectLines, ASK_EFFECT_MAX_LINES, langFromPath, diffLangOf } from './DiffView.js';
+export type { EffectWindow } from './DiffView.js';
 // EST-1110 · ADR-0114 — <QuestionDialog>: a UI da tool `perguntar` (single/multi/text + "Outro").
 export { QuestionDialog, OTHER_INDEX } from './QuestionDialog.js';
 export type { QuestionDialogProps } from './QuestionDialog.js';

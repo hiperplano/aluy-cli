@@ -5052,6 +5052,7 @@ export function BlockView(props: {
               : LIVE_SHELL_OUTPUT_MAX_LINES
           }
           {...(props.columns !== undefined ? { columns: props.columns } : {})}
+          {...(b.diff !== undefined ? { diff: b.diff } : {})}
         />
       );
     case 'note':
