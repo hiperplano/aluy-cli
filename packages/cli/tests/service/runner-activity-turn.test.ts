@@ -45,6 +45,23 @@ describe('resolveActivityTimeout — PURA (ADR-0158 §5 pt.4)', () => {
     expect(resolveActivityTimeout(THIRTY_MIN_MS + 1)).toEqual({ hasTime: true, timeoutMs: THIRTY_MIN_MS });
     expect(resolveActivityTimeout(THIRTY_MIN_MS - 1)).toEqual({ hasTime: true, timeoutMs: THIRTY_MIN_MS - 1 });
   });
+
+  it('cap:"unlimited" e untilRemainingMs undefined (sem "until:" declarado) ⇒ unlimited:true, SEM timeoutMs', () => {
+    expect(resolveActivityTimeout(undefined, 'unlimited')).toEqual({ hasTime: true, unlimited: true });
+  });
+
+  it('cap:"unlimited" COM "until:" declarado ainda respeita o until (regras independentes)', () => {
+    expect(resolveActivityTimeout(5_000, 'unlimited')).toEqual({ hasTime: true, timeoutMs: 5_000 });
+  });
+
+  it('cap:"unlimited" com until já vencido (<=0) ⇒ hasTime:false (until sempre tem prioridade)', () => {
+    expect(resolveActivityTimeout(0, 'unlimited')).toEqual({ hasTime: false });
+    expect(resolveActivityTimeout(-1, 'unlimited')).toEqual({ hasTime: false });
+  });
+
+  it('untilRemainingMs undefined SEM cap "unlimited" ⇒ cai no cap numérico normal', () => {
+    expect(resolveActivityTimeout(undefined, 30_000)).toEqual({ hasTime: true, timeoutMs: 30_000 });
+  });
 });
 
 describe('classifyActivityExit — PURA (ADR-0158 §5)', () => {

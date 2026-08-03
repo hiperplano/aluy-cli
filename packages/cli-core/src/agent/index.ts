@@ -441,6 +441,7 @@ export {
 // (spawn/pidfile/sleep real) é do runner concreto em `@hiperplano/aluy-cli`.
 export { nextCronFire } from './service/cron-next.js';
 export { parseServiceBudget } from './service/service-budget.js';
+export { parseServiceActivityTimeout } from './service/service-activity-timeout.js';
 export { parseHHMM, todayAt, msUntilDeadline } from './service/service-until.js';
 export {
   parseDaemonManifest,

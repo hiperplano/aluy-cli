@@ -37,6 +37,7 @@ const ADR_EXAMPLE = [
   'workflow: turno              # rotina do turno (workflows/turno.md do próprio serviço)',
   'channel: telegram:12345      # onde reporta e onde pergunta (ADR-0154)',
   'budget: 200k/turno           # teto de tokens (reusa limits.ts)',
+  'activity-timeout: sem-teto   # teto por atividade — default 30min, sem-teto remove',
   'autonomy: ask                # ask | yolo-scoped',
   'perda-maxima-dia: 500        # circuit breaker — atingiu ⇒ runner ENCERRA o turno (§8.3)',
   'tamanho-posicao: 2 [1..5]    # tunável com FAIXA — a retro ajusta só dentro dela (§8.5)',
@@ -59,6 +60,7 @@ describe('parseServiceManifest — exemplo completo do ADR-0158 §1', () => {
     expect(m.workflow).toBe('turno');
     expect(m.channel).toBe('telegram:12345');
     expect(m.budget).toBe('200k/turno');
+    expect(m.activityTimeout).toBe('sem-teto');
     expect(m.autonomy).toBe('ask');
     expect(m.orchestrator).toContain('Você rege, não opera.');
     expect(m.orchestrator).toContain('Sucesso num dia');
@@ -150,7 +152,7 @@ describe('parseServiceManifest — FALHA FECHADA (RES-MD-3)', () => {
 });
 
 describe('parseServiceManifest — campos opcionais e forward-compat', () => {
-  it('sem description/schedule/until/workflow/channel/budget/autonomy ⇒ todos undefined', () => {
+  it('sem description/schedule/until/workflow/channel/budget/activity-timeout/autonomy ⇒ todos undefined', () => {
     const m = ok('service.md', '---\nname: pesquisador\n---\nLê fontes, memoriza achados.');
     expect(m.description).toBeUndefined();
     expect(m.schedule).toBeUndefined();
@@ -158,8 +160,20 @@ describe('parseServiceManifest — campos opcionais e forward-compat', () => {
     expect(m.workflow).toBeUndefined();
     expect(m.channel).toBeUndefined();
     expect(m.budget).toBeUndefined();
+    expect(m.activityTimeout).toBeUndefined();
     expect(m.autonomy).toBeUndefined();
     expect(m.tunables).toEqual([]);
+  });
+
+  it('"activity-timeout: 45m" ⇒ campo cru pass-through (parsing semântico é do runner)', () => {
+    const m = ok('service.md', '---\nname: trader\nactivity-timeout: 45m\n---\nOrquestrador.');
+    expect(m.activityTimeout).toBe('45m');
+  });
+
+  it('"activity-timeout:" é chave CONHECIDA — nunca vira tunável, mesmo com valor não-numérico', () => {
+    const m = ok('service.md', '---\nname: trader\nactivity-timeout: sem-teto\n---\nOrquestrador.');
+    expect(m.tunables).toEqual([]);
+    expect(m.activityTimeout).toBe('sem-teto');
   });
 
   it('chave desconhecida com valor NÃO-numérico é ignorada (forward-compat, não é erro)', () => {

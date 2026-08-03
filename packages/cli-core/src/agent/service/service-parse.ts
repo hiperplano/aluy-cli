@@ -13,6 +13,7 @@
 //   workflow: turno               # rotina do turno (workflows/turno.md do serviço)
 //   channel: telegram:<chat-id>  # onde reporta/pergunta (ADR-0154)
 //   budget: 200k/turno           # teto de tokens (reusa limits.ts na fase 2)
+//   activity-timeout: sem-teto   # teto por ATIVIDADE — default 30min; "sem-teto" remove
 //   autonomy: ask                # v1 SÓ aceita `ask` (§Consequências — escopo v1)
 //   perda-maxima-dia: 500        # circuit breaker — SEM faixa (§8.3)
 //   tamanho-posicao: 2 [1..5]    # tunável COM faixa — a retro ajusta só dentro dela (§8.5a)
@@ -90,6 +91,12 @@ export interface ServiceManifest {
   readonly channel?: string;
   /** Teto de tokens CRU (frontmatter `budget`, ex.: `200k/turno`) — parsing numérico é da fase 2 (`limits.ts`). */
   readonly budget?: string;
+  /**
+   * Teto anti-runaway POR ATIVIDADE, CRU (frontmatter `activity-timeout`, ex.:
+   * `45m`, `2h`, `sem-teto`) — ausente/malformado ⇒ o runner cai no default
+   * `MAX_ACTIVITY_MS` (30min); parsing semântico é `parseServiceActivityTimeout`.
+   */
+  readonly activityTimeout?: string;
   /** Autonomia — a v1 só aceita `ask` (frontmatter `autonomy`, validado abaixo). */
   readonly autonomy?: 'ask';
   /** Circuit-breakers (sem faixa) + tunáveis (com faixa) — §8.3/§8.5a. */
@@ -147,6 +154,7 @@ const KNOWN_KEYS = new Set([
   'workflow',
   'channel',
   'budget',
+  'activity-timeout',
   'autonomy',
 ]);
 
@@ -175,6 +183,7 @@ interface RawServiceFrontmatter {
   readonly workflow?: string;
   readonly channel?: string;
   readonly budget?: string;
+  readonly activityTimeout?: string;
   /** `undefined` = chave `autonomy:` ausente (distinto de presente-mas-inválida). */
   readonly autonomyRaw?: string;
   /** Pares (chave, valor-cru) de tudo que NÃO é uma chave conhecida — candidatos a tunável. */
@@ -200,6 +209,7 @@ function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body
     workflow?: string;
     channel?: string;
     budget?: string;
+    activityTimeout?: string;
     autonomyRaw?: string;
   } = {};
   const extras: Array<readonly [string, string]> = [];
@@ -230,6 +240,9 @@ function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body
         break;
       case 'budget':
         out.budget = value;
+        break;
+      case 'activity-timeout':
+        out.activityTimeout = value;
         break;
       case 'autonomy':
         out.autonomyRaw = value;
@@ -371,6 +384,8 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
   const workflow = fm.workflow !== undefined && fm.workflow !== '' ? fm.workflow : undefined;
   const channel = fm.channel !== undefined && fm.channel !== '' ? fm.channel : undefined;
   const budget = fm.budget !== undefined && fm.budget !== '' ? fm.budget : undefined;
+  const activityTimeout =
+    fm.activityTimeout !== undefined && fm.activityTimeout !== '' ? fm.activityTimeout : undefined;
 
   return {
     name,
@@ -380,6 +395,7 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
     ...(workflow !== undefined ? { workflow } : {}),
     ...(channel !== undefined ? { channel } : {}),
     ...(budget !== undefined ? { budget } : {}),
+    ...(activityTimeout !== undefined ? { activityTimeout } : {}),
     ...(autonomy !== undefined ? { autonomy } : {}),
     tunables,
     orchestrator: body,

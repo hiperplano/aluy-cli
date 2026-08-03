@@ -72,7 +72,7 @@ export function parseDaemonManifest(raw: string): DaemonManifestParse {
   if (command === undefined || command.trim() === '') {
     return {
       kind: 'error',
-      reason: 'daemon.md sem "command:" — o runner não tem o que executar (ADR-0158 §6).',
+      reason: 'daemon.md sem "command:" — o runner não tem o que executar.',
     };
   }
   if (command.length > MAX_COMMAND_LEN) {

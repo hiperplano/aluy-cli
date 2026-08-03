@@ -88,7 +88,7 @@ export type ServiceCommand =
 
 const PHASE_LATER_SUBCOMMANDS = new Set(['update']);
 
-const SERVICE_HELP = `aluy service — SERVIÇOS plugáveis (ADR-0158) · attach (fase 4) · create (fase 5)
+const SERVICE_HELP = `aluy service — SERVIÇOS plugáveis
 
 Uso:
   aluy service [list]
@@ -105,35 +105,35 @@ Subcomandos:
   list                 Lista os serviços instalados — nome, estado REAL (rodando/
                         parado/turno em andamento/dormindo/aguardando dono),
                         próximo schedule, descrição. Sem argumento, "aluy service"
-                        já lista (espelha o /service in-session, ADR-0158 §11).
+                        já lista (espelha o /service in-session).
   status <nome>         Detalhe de um serviço + o estado REAL (pid, turno em
                         andamento ou dormindo até X, pergunta pendente).
-  create                Criação CONVERSACIONAL (ADR-0158 §10) — o shell não tem
-                        canal p/ a entrevista; ORIENTA a rodar "/service create
-                        <descrição>" numa sessão do aluy (o canal PRINCIPAL).
+  create                Criação CONVERSACIONAL — o shell não tem canal p/ a
+                        entrevista; ORIENTA a rodar "/service create <descrição>"
+                        numa sessão do aluy (o canal PRINCIPAL).
   install <path|url>    Copia um diretório local OU clona um repo git p/
                         ~/.aluy/services/<nome>/. Valida ANTES de ativar e mostra o
                         MANIFESTO VISÍVEL (daemons, skills com script, mcp.json, canal,
                         autonomia) — exige confirmação. --yes pula o prompt (scripts/CI).
   uninstall <nome>      Remove o diretório do serviço. Pede confirmação (--yes pula).
                         Recusa se o serviço estiver RODANDO ("stop" antes).
-  start <nome>          Spawna o PROCESSO DESTACADO do serviço (ADR-0158 §5) — mostra
-                        o manifesto visível e pede confirmação (--yes pula). Recusa se
-                        já rodando ou se o manifesto é inválido.
+  start <nome>          Spawna o PROCESSO DESTACADO do serviço — mostra o manifesto
+                        visível e pede confirmação (--yes pula). Recusa se já rodando
+                        ou se o manifesto é inválido.
   stop <nome>           SIGTERM no processo do serviço (timeout ⇒ SIGKILL); derruba os
                         daemons próprios e limpa o pidfile.
   logs <nome>           Últimas linhas do runner.log. -n <N> muda a contagem (padrão
                         50); -f acompanha ao vivo (Ctrl-C sai).
-  attach <nome>          ENTRA no serviço rodando (ADR-0158 §11): mostra log+estado
-                        (+blocos da conversa, melhor esforço) ao vivo; qualquer linha
-                        digitada vira instrução (Enter envia); Ctrl-C faz DETACH — o
-                        serviço SEGUE rodando (nunca para por causa do attach).
+  attach <nome>          ENTRA no serviço rodando: mostra log+estado (+blocos da
+                        conversa, melhor esforço) ao vivo; qualquer linha digitada
+                        vira instrução (Enter envia); Ctrl-C faz DETACH — o serviço
+                        SEGUE rodando (nunca para por causa do attach).
 
 Notas:
   - update (git pull) chega numa fase seguinte.
-  - O canal PRINCIPAL de gestão é "/service" DENTRO da sessão (ADR-0158 §10, emenda
-    de aprovação); este shell é o espelho, útil p/ script/automação — EXCETO
-    "create", que é conversacional e só existe de verdade in-session.
+  - O canal PRINCIPAL de gestão é "/service" DENTRO da sessão; este shell é o
+    espelho, útil p/ script/automação — EXCETO "create", que é conversacional
+    e só existe de verdade in-session.
 `;
 
 /** Parser fino de `aluy service <argv>` — espelha `parseCronCommand`. PURO. */
@@ -231,7 +231,7 @@ export interface ServiceDeps {
 
 /** Resposta honesta p/ subcomandos de fases seguintes — nunca finge que já existem. */
 function notYetLines(sub: string): readonly string[] {
-  return [`"aluy service ${sub}" ainda não existe — chega numa fase seguinte (git pull, ADR-0158 §9).`];
+  return [`"aluy service ${sub}" ainda não existe — chega numa fase seguinte (git pull).`];
 }
 
 /**
@@ -255,7 +255,7 @@ function createRedirectLines(): readonly string[] {
     '  /service create <descrição em prosa do serviço>',
     '',
     'o agente escreve o rascunho em staging (PARADO); revise e então',
-    '"aluy service install <path>" para ativar de verdade (ADR-0158 §10).',
+    '"aluy service install <path>" para ativar de verdade.',
   ];
 }
 
@@ -466,7 +466,7 @@ async function runInstall(
     try {
       raw = readFileSync(mdPath, 'utf8');
     } catch {
-      io.err(`aluy: "${source}" não tem service.md — não é um diretório-serviço (ADR-0158 §1).`);
+      io.err(`aluy: "${source}" não tem service.md — não é um diretório-serviço.`);
       return 1;
     }
 
@@ -525,7 +525,7 @@ async function runInstall(
     store.ensureDir();
     cpSync(staging, finalDir, { recursive: true });
     io.out(`✓ serviço "${parsed.name}" instalado em ${finalDir}.`);
-    io.out(`  PARADO — "aluy service start ${parsed.name}" para ligar (ADR-0158 §5).`);
+    io.out(`  PARADO — "aluy service start ${parsed.name}" para ligar.`);
     return 0;
   } finally {
     cleanup();
