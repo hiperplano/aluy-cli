@@ -491,6 +491,77 @@ describe('ToolLine — sucesso e erro (§2.5/§2.6)', () => {
   });
 });
 
+// ── ToolLine × diff no histórico/scrollback (o gap que o dono apontou: o diff só
+// aparecia no popup do <AskDialog> — que some ao decidir, e nunca roda em --yolo).
+// Reusa a MESMA janela cabeça+cauda (`windowEffectLines`, ASK_EFFECT_MAX_LINES) e
+// o MESMO `<DiffLine>` (glifo ‹/› + realce) que o `<AskDialog>` já usa — ver
+// `DiffView.tsx`. §2.5/§2.6 (ToolLine) + CLI-SEC-9 (efeito exato, nunca resumo).
+describe('ToolLine — bloco de DIFF compacto no histórico (edit_file/write_file concluído)', () => {
+  it('edit pequeno ⇒ diff completo com ‹/› (direção) — nunca um resumo', () => {
+    const diff = [
+      '--- src/auth/session.ts',
+      '+++ src/auth/session.ts',
+      '-import { httpClient } from "../net/http"',
+      '+import { broker } from "@hiperplano/aluy-cli-core"',
+    ].join('\n');
+    const { lastFrame } = wrap(
+      <ToolLine
+        verb="edit"
+        target="src/auth/session.ts"
+        result="aplicado"
+        status="ok"
+        diff={diff}
+      />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('diff'); // rótulo do bloco compacto
+    expect(out).toContain('‹ import { httpClient } from "../net/http"');
+    expect(out).toContain('› import { broker } from "@hiperplano/aluy-cli-core"');
+    expect(out).not.toContain('linhas ocultas'); // curto ⇒ sem janela/marcador
+  });
+
+  it('edit GIGANTE ⇒ JANELADO (cabeça + contagem do oculto + cauda) — nunca o arquivo inteiro', () => {
+    const diff = [
+      '--- src/big.ts',
+      '+++ src/big.ts',
+      ...Array.from({ length: 100 }, (_, i) => `+linha nova ${i}`),
+    ].join('\n');
+    const { lastFrame } = wrap(
+      <ToolLine verb="edit" target="src/big.ts" result="aplicado" status="ok" diff={diff} />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('--- src/big.ts'); // cabeça: cabeçalho do diff
+    expect(out).toContain('linhas ocultas'); // marcador EXPLÍCITO do recorte
+    expect(out).toContain('linha nova 99'); // cauda: o fim do diff
+    expect(out).not.toContain('linha nova 50'); // o MIOLO não é despejado
+    // bounded: não é o arquivo (102 linhas de corpo) inteiro na tela.
+    expect(out.split('\n').length).toBeLessThan(30);
+  });
+
+  it('sem `diff` (tool que não edita, ex.: read/bash) ⇒ nenhum bloco de diff', () => {
+    const out = plain(
+      wrap(<ToolLine verb="read" target="src/a.ts" result="12 linhas" status="ok" />).lastFrame() ??
+        '',
+    );
+    expect(out).not.toContain('diff');
+  });
+
+  it('PROVA static-vs-live: `status="running"` NUNCA renderiza o diff (mesmo se fornecido)', () => {
+    // O ramo `running` retorna ANTES de qualquer lógica de diff — então mesmo passando
+    // `diff`, nada aparece enquanto a tool está em voo. Isso é o que garante que o bloco
+    // de diff só existe depois que `isLiveBlock` (render-split.ts) já classifica a tool
+    // como CONCLUÍDA (`status !== 'running'`) ⇒ só entra no `<Static>`, nunca na região viva.
+    const diff = '--- a.ts\n+++ a.ts\n+linha nova';
+    const out = plain(
+      wrap(
+        <ToolLine verb="edit" target="a.ts" result="" status="running" verbGerund="editando" diff={diff} />,
+      ).lastFrame() ?? '',
+    );
+    expect(out).not.toContain('linha nova');
+    expect(out).not.toContain('diff ─');
+  });
+});
+
 // ── AskDialog (o coração: CLI-SEC-9 efeito exato) ────────────────────────────
 
 function diffAsk(): AskRequest {

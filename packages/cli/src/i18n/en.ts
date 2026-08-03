@@ -192,7 +192,7 @@ export const en: PartialCatalog = {
   'cmd.export': 'export this session REDACTED transcript to ~/.aluy/exports/ (0600)',
   'cmd.quit': 'quit aluy',
   'cmd.workflows': 'list mapped .md workflows (global + project · valid + rejected)',
-  'cmd.service': 'pluggable services (ADR-0158) · list/status/create/start/stop/logs/attach',
+  'cmd.service': 'pluggable services · list/status/create/start/stop/logs/attach',
   'cmd.todo': 'list the backlog (the agent notes items; done <id> / clear)',
   'cmd.tools': 'unified tool inventory · native, MCP, permission (read-only)',
 

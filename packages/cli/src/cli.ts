@@ -529,7 +529,7 @@ Workflows .md:
              nome, escopo e descrição. Um workflow é uma sequência de passos
              reutilizável. Read-only, sem modelo, sem rede.
 
-Serviços plugáveis (ADR-0158) — fase 1: fundação SEM runner ainda:
+Serviços plugáveis — fase 1: fundação SEM runner ainda:
   service [list]                 Lista os serviços instalados (nome, estado — sempre
                                   "parado" nesta fase —, próximo schedule, descrição).
   service status <nome>          Detalhe de um serviço + a validação (cron/workflow)

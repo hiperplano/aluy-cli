@@ -39,6 +39,22 @@ describe('isLiveBlock — só tool running / aluy streaming são mutáveis', () 
     expect(isLiveBlock(tool('err'))).toBe(false);
   });
 
+  it('o campo `diff` (bloco compacto do <ToolLine> no histórico) NÃO muda a liveness — só `status` decide', () => {
+    // Prova da fronteira Static×viva p/ o diff no transcript: carregar um diff não torna
+    // uma tool `running` "mais viva" nem uma `ok` "menos concluída" — `isLiveBlock` olha
+    // só `status`. É essa invariante que garante que o bloco de diff só existe no `<Static>`.
+    const withDiff = (status: 'ok' | 'running'): SessionBlock => ({
+      kind: 'tool',
+      verb: 'edit',
+      target: 'src/a.ts',
+      result: status === 'running' ? '' : 'aplicado',
+      status,
+      diff: '--- a.ts\n+++ a.ts\n+linha nova',
+    });
+    expect(isLiveBlock(withDiff('running'))).toBe(true);
+    expect(isLiveBlock(withDiff('ok'))).toBe(false);
+  });
+
   it('EST-0982 — `!comando` (bang) running é vivo; ok/err/blocked é concluído', () => {
     // Sem isto o bang running ia direto p/ o Static e o streaming nunca apareceria.
     expect(isLiveBlock(bang('running'))).toBe(true);

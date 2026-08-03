@@ -100,16 +100,22 @@ function quantify(name: string, result: ToolResult): string {
 }
 
 /**
- * EST-0982 (Fase 0) — DIFFSTAT de um `edit_file`/`write_file` (EST-0944): conta linhas
- * `+`/`−` do DIFF unificado que a tool de edição/escrita expõe em `result.display`
- * (CLI-SEC-9). Ignora os cabeçalhos do diff (`+++`/`---`). Best-effort: se a tool não
- * editou ou não há diff, devolve `undefined` (degrada — sem `+/−`). Os números não
- * carregam segredo (só contagem).
+ * EST-0982 (Fase 0) — DIFFSTAT (+ o DIFF em si) de um `edit_file`/`write_file`
+ * (EST-0944): conta linhas `+`/`−` do DIFF unificado que a tool de edição/escrita
+ * expõe em `result.display` (CLI-SEC-9), e devolve o próprio texto do diff junto —
+ * o mesmo `display` que o `<AskDialog>` já mostra no ask, agora reaproveitado p/ o
+ * bloco compacto do `<ToolLine>` no histórico (§ transcript pós-execução, incl.
+ * `--yolo`, onde o ask nunca chega a rodar). Ignora os cabeçalhos do diff (`+++`/
+ * `---`) na CONTAGEM (eles seguem no texto — o `<ToolLine>` os renderiza em dim,
+ * igual ao ask). Best-effort: se a tool não editou/falhou/não há diff, devolve
+ * `undefined` (degrada — sem `+/−` nem bloco de diff). Os números/texto não
+ * carregam segredo além do que o próprio conteúdo do arquivo já carrega (mesma
+ * fidelidade CLI-SEC-9 do ask — já era exposto ali).
  */
 function diffstatOf(
   name: string,
   result: ToolResult,
-): { added: number; removed: number } | undefined {
+): { added: number; removed: number; diff: string } | undefined {
   if ((name !== 'edit_file' && name !== 'write_file') || !result.ok) return undefined;
   const diff = result.display;
   if (typeof diff !== 'string' || diff === '') return undefined;
@@ -120,7 +126,7 @@ function diffstatOf(
     if (line.startsWith('+')) added++;
     else if (line.startsWith('-')) removed++;
   }
-  return { added, removed };
+  return { added, removed, diff };
 }
 
 /**
@@ -150,7 +156,7 @@ export function withToolReport(
         target: targetOf(input),
         result: quantify(tool.name, result),
         status,
-        ...(stat ? { added: stat.added, removed: stat.removed } : {}),
+        ...(stat ? { added: stat.added, removed: stat.removed, diff: stat.diff } : {}),
         ...(status === 'err' ? { output: truncate(result.observation) } : {}),
       };
       reporter.report(block);

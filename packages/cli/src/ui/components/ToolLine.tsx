@@ -14,6 +14,7 @@ import { Glyph, Role, useTheme } from '../theme/index.js';
 import { Working } from './Working.js';
 import { windowTailVisual } from '../../session/visual-lines.js';
 import { clampLiveOutputChars, MAX_LIVE_OUTPUT_CHARS } from '../../session/live-budget.js';
+import { DiffLine, diffLangOf, windowEffectLines } from './DiffView.js';
 
 /** Largura fixa do verbo p/ alinhar a coluna do alvo (§2.7 "tabela limpa"). */
 const VERB_WIDTH = 7;
@@ -54,6 +55,18 @@ export interface ToolLineProps {
    * ao janelar a cauda. Ausente/0 ⇒ janela por linhas-FONTE (comportamento antigo).
    */
   readonly columns?: number;
+  /**
+   * DIFF unificado de um `edit_file`/`write_file` concluído (o mesmo `result.display`
+   * que o `<AskDialog>` já mostra no ask, CLI-SEC-9) — bloco compacto (cabeça+cauda,
+   * `windowEffectLines`/DiffView) ANEXADO abaixo da linha `⏺`. Só faz sentido junto de
+   * `status !== 'running'` (o produtor — `tool-reporter.ts` — só o preenche quando o
+   * `ToolResult` já resolveu com sucesso): por isso este bloco NUNCA aparece no ramo
+   * `running` acima, o que garante que ele só entra em cena depois que `isLiveBlock`
+   * (render-split.ts) já classifica o bloco como CONCLUÍDO — ou seja, só no `<Static>`
+   * (histórico), nunca na região viva. `undefined` ⇒ sem diff a mostrar (tool não
+   * editou, ou editou e falhou).
+   */
+  readonly diff?: string;
 }
 
 export function ToolLine(props: ToolLineProps): React.ReactElement {
@@ -93,6 +106,11 @@ export function ToolLine(props: ToolLineProps): React.ReactElement {
   }
 
   const isErr = props.status === 'err';
+  // Diff compacto (ver doc do prop `diff` acima) — cabeça+cauda, MESMO teto do
+  // `<AskDialog>` (ASK_EFFECT_MAX_LINES via windowEffectLines): um edit grande NUNCA
+  // despeja o arquivo inteiro no scrollback, só o recorte + a contagem do oculto.
+  const diffWin = props.diff ? windowEffectLines(props.diff.split('\n')) : undefined;
+  const diffLang = props.diff ? diffLangOf(props.target) : undefined;
   return (
     <Box flexDirection="column" paddingLeft={2}>
       <Box>
@@ -119,6 +137,35 @@ export function ToolLine(props: ToolLineProps): React.ReactElement {
           {/* rodapé-resumo na própria borda inferior (§2.8): `╰ <result> ─` */}
           <Role name="fgDim">
             {theme.box.bottomLeft} {props.result} {theme.box.horizontal.repeat(4)}
+          </Role>
+        </Box>
+      )}
+      {diffWin && (
+        <Box flexDirection="column" paddingLeft={2}>
+          <Role name="fgDim">
+            {theme.box.topLeft} diff {theme.box.horizontal.repeat(6)}
+          </Role>
+          {diffWin.head.map((line, i) => (
+            <Box key={`dh${i}`}>
+              <Role name="fgDim">{theme.box.vertical} </Role>
+              <DiffLine line={line} lang={diffLang} />
+            </Box>
+          ))}
+          {diffWin.hidden > 0 && (
+            <Box>
+              <Role name="fgDim">
+                {theme.box.vertical} … (+{diffWin.hidden} linhas ocultas)
+              </Role>
+            </Box>
+          )}
+          {diffWin.tail.map((line, i) => (
+            <Box key={`dt${i}`}>
+              <Role name="fgDim">{theme.box.vertical} </Role>
+              <DiffLine line={line} lang={diffLang} />
+            </Box>
+          ))}
+          <Role name="fgDim">
+            {theme.box.bottomLeft} {theme.box.horizontal.repeat(8)}
           </Role>
         </Box>
       )}

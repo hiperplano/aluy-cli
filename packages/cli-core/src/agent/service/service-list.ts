@@ -148,7 +148,7 @@ export function buildServicesNote(input: ServicesListInput): ServicesListNote {
 
   lines.push('');
   lines.push(
-    `serviços vivem em ${servicesDir}/<nome>/ · "aluy service start|stop <nome>" liga/desliga (ADR-0158 §5).`,
+    `serviços vivem em ${servicesDir}/<nome>/ · "aluy service start|stop <nome>" liga/desliga.`,
   );
 
   return { title: 'service', lines };

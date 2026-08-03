@@ -24,45 +24,21 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { AskRequest } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
-import { highlightToSegments, resolveLanguage } from '../markdown/index.js';
+import { resolveLanguage } from '../markdown/index.js';
+import {
+  ASK_EFFECT_MAX_LINES,
+  DiffLine,
+  langFromPath,
+  windowEffectLines,
+  type EffectWindow,
+} from './DiffView.js';
 
-/** Linguagem inferida da extensão do path (p/ realçar o conteúdo do diff). */
-function langFromPath(path: string | undefined): string | undefined {
-  if (!path) return undefined;
-  const ext = path.split('.').pop();
-  return ext && ext !== path ? ext : undefined;
-}
-
-/**
- * F164 (decisão do dono, 2026-07-02) — JANELA do corpo do efeito no ask. Um
- * batch/heredoc ou diff de 100+ linhas despejado INTEIRO no box da catraca não
- * melhora a revisão — PIORA: o box estoura a tela e o COMEÇO do comando (a parte
- * mais importante) rola p/ fora antes de o usuário decidir. A janela mostra a
- * CABEÇA (o comando/começo do diff) + a CAUDA (o fim, onde heredoc/redireção
- * terminam) + a contagem EXPLÍCITA do oculto — e `[e] editar` segue dando acesso
- * ao efeito completo. CLI-SEC-9 continua honesto: nada é RESUMIDO/parafraseado,
- * só recortado com marcador visível; abaixo do teto o render é IDÊNTICO ao de antes.
- */
-export const ASK_EFFECT_MAX_LINES = 14;
-const ASK_EFFECT_HEAD_LINES = 9;
-const ASK_EFFECT_TAIL_LINES = 4; // cabeça + marcador (1) + cauda = ASK_EFFECT_MAX_LINES
-
-export interface EffectWindow {
-  readonly head: readonly string[];
-  /** Linhas OCULTAS entre a cabeça e a cauda (0 = coube inteiro, sem marcador). */
-  readonly hidden: number;
-  readonly tail: readonly string[];
-}
-
-/** PURA (testável sem Ink): janela cabeça+cauda das linhas do efeito. */
-export function windowEffectLines(lines: readonly string[]): EffectWindow {
-  if (lines.length <= ASK_EFFECT_MAX_LINES) return { head: lines, hidden: 0, tail: [] };
-  return {
-    head: lines.slice(0, ASK_EFFECT_HEAD_LINES),
-    hidden: lines.length - ASK_EFFECT_HEAD_LINES - ASK_EFFECT_TAIL_LINES,
-    tail: lines.slice(lines.length - ASK_EFFECT_TAIL_LINES),
-  };
-}
+// F164 (decisão do dono, 2026-07-02) — a JANELA (cabeça+cauda) e o RENDER de uma
+// linha de diff moraram aqui originalmente; foram extraídos p/ `./DiffView.js`
+// (ver comentário lá) p/ o `<ToolLine>` do histórico REUSAR a MESMA lógica em vez
+// de reimplementar. Reexportados abaixo — API pública deste módulo intacta.
+export { ASK_EFFECT_MAX_LINES, windowEffectLines };
+export type { EffectWindow };
 
 export interface AskDialogProps {
   readonly request: AskRequest;
@@ -279,67 +255,5 @@ function EffectBody(props: { readonly request: AskRequest }): React.ReactElement
       {win.hidden > 0 && marker('m')}
       {win.tail.map((line, i) => cmdLine(line, `t${i}`))}
     </Box>
-  );
-}
-
-/**
- * Uma linha de diff com DIREÇÃO no glifo (§2.9 refinado): remoção `‹` em danger,
- * adição `›` em success, contexto em dim. O glifo `‹`/`›` carrega a direção ALÉM
- * da cor (a11y §3.3) — em NO_COLOR/mono nada se perde. Cabeçalhos de hunk do
- * unified diff (`---`/`+++`/`@@`) ficam em dim (meta, não conteúdo).
- */
-function DiffLine(props: {
-  readonly line: string;
-  readonly lang?: string | undefined;
-}): React.ReactElement {
-  const theme = useTheme();
-  const l = props.line;
-  // cabeçalhos do unified diff: meta estrutural (não é uma linha de mudança).
-  if (l.startsWith('---') || l.startsWith('+++') || l.startsWith('@@')) {
-    return <Role name="fgDim">{l}</Role>;
-  }
-  if (l.startsWith('-')) {
-    // SINAL/direção em `danger` (mantém `‹` + vermelho do diff, a11y §3.3); o
-    // CONTEÚDO ganha realce de sintaxe — mas tingido p/ não perder o "isto saiu":
-    // sem lang, fica tudo `danger`; com lang, realça e o sinal segue em danger.
-    return (
-      <Text>
-        <Role name="danger">{theme.glyph('diffDel')} </Role>
-        <HighlightedCode code={l.slice(1)} lang={props.lang} fallback="danger" />
-      </Text>
-    );
-  }
-  if (l.startsWith('+')) {
-    return (
-      <Text>
-        <Role name="success">{theme.glyph('diffAdd')} </Role>
-        <HighlightedCode code={l.slice(1)} lang={props.lang} fallback="success" />
-      </Text>
-    );
-  }
-  return <Role name="fgDim">{l}</Role>;
-}
-
-/**
- * Conteúdo de uma linha (de diff) realçado por sintaxe. Sem `lang` (ou linha
- * vazia) ⇒ um único papel `fallback` (mantém o verde/vermelho do sinal de diff).
- */
-function HighlightedCode(props: {
-  readonly code: string;
-  readonly lang?: string | undefined;
-  readonly fallback: 'danger' | 'success' | 'fg';
-}): React.ReactElement {
-  if (props.lang === undefined || props.code === '') {
-    return <Role name={props.fallback}>{props.code}</Role>;
-  }
-  const segs = highlightToSegments(props.code, props.lang);
-  return (
-    <Text>
-      {segs.map((s, i) => (
-        <Role key={i} name={s.role}>
-          {s.text}
-        </Role>
-      ))}
-    </Text>
   );
 }

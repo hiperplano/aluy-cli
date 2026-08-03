@@ -320,8 +320,8 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
       kind: 'error',
       file,
       reason:
-        `serviço "${name}" (${file}): corpo vazio — sem orquestrador (ADR-0158 §1, ` +
-        `o corpo É a persona de quem coordena o serviço), manifesto rejeitado`,
+        `serviço "${name}" (${file}): corpo vazio — sem orquestrador ` +
+        `(o corpo É a persona de quem coordena o serviço), manifesto rejeitado`,
     };
   }
 
@@ -335,7 +335,7 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
         file,
         reason:
           `serviço "${name}" (${file}): "autonomy: ${fm.autonomyRaw}" não é suportado nesta ` +
-          `fase — a v1 do ADR-0158 só aceita "autonomy: ask" (yolo-scoped fica p/ fase futura).`,
+          `fase — a v1 só aceita "autonomy: ask" (yolo-scoped fica p/ fase futura).`,
       };
     }
     autonomy = 'ask';

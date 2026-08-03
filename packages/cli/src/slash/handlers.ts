@@ -800,7 +800,7 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
         note: {
           title: 'service',
           lines: [
-            'SERVIÇOS plugáveis (ADR-0158) — papéis contínuos (trader, pesquisador, …):',
+            'SERVIÇOS plugáveis — papéis contínuos (trader, pesquisador, …):',
             'um diretório-manifesto em ~/.aluy/services/<nome>/ com service.md (contrato',
             'duro + orquestrador) e as subpastas agents/workflows/skills/… já existentes.',
             'uso: /service [list | status <nome> | install <path|git-url> | uninstall <nome>]',

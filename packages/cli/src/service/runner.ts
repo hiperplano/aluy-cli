@@ -365,7 +365,7 @@ export function decideSayRouting(currentPhase: ServiceTurnState, rawText: string
       currentPhase === 'sleeping'
         ? '[attach] "say" recebido com o serviço DORMINDO — vira instrução do PRÓXIMO despertar.'
         : '[attach] "say" recebido com turno EM ANDAMENTO — entregue à PRÓXIMA atividade do ' +
-          'workflow (degrade documentado — ADR-0158 §11: sem plumbing de mid-turno de verdade ' +
+          'workflow (degrade documentado — sem plumbing de mid-turno de verdade ' +
           'no processo-filho).',
   };
 }
@@ -943,7 +943,7 @@ async function runOneWorkflow(args: {
   const budgetTokens = parseServiceBudget(args.budgetRaw);
   const activityTimeoutCap = parseServiceActivityTimeout(args.activityTimeoutRaw) ?? MAX_ACTIVITY_MS;
   const orchestratorPreamble =
-    `Você coordena o serviço "${args.serviceName}" (ADR-0158) — rege, não opera:\n${args.orchestratorBody}`;
+    `Você coordena o serviço "${args.serviceName}" — rege, não opera:\n${args.orchestratorBody}`;
 
   const pendingQuestionRef: { current?: string } = {};
   let pendingActivityIndex: number | undefined;

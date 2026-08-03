@@ -46,7 +46,7 @@ describe('decideSayRouting — PURA (ADR-0158 §11)', () => {
       text: 'atenção nisso',
       logLine:
         '[attach] "say" recebido com turno EM ANDAMENTO — entregue à PRÓXIMA atividade do ' +
-        'workflow (degrade documentado — ADR-0158 §11: sem plumbing de mid-turno de verdade ' +
+        'workflow (degrade documentado — sem plumbing de mid-turno de verdade ' +
         'no processo-filho).',
     });
   });

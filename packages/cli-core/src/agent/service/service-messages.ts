@@ -68,7 +68,7 @@ export function formatServiceAskMessage(serviceName: string, question: string): 
  */
 export function formatServiceResumeInstruction(question: string, ownerAnswer: string): string {
   return (
-    `[Retomando após pergunta ao dono — ADR-0158 §5 pt.4]\n` +
+    `[Retomando após pergunta ao dono]\n` +
     `Pergunta que você fez: ${question}\n` +
     `Resposta do dono (via canal): ${ownerAnswer}\n` +
     `Prossiga a atividade com esta decisão — não pergunte de novo a mesma coisa.`
@@ -87,7 +87,7 @@ export function formatServiceAskTimeoutAlert(
   const hours = Math.round(waitedMs / 3_600_000);
   return (
     `${ALERT_PREFIX} [${serviceName}] SEM RESPOSTA após ${hours}h — o turno foi encerrado sem ` +
-    `ação (ADR-0158 §5 pt.4: nunca prossegue com suposição). Pergunta que ficou pendente:\n\n${question}`
+    `ação (nunca prossegue com suposição). Pergunta que ficou pendente:\n\n${question}`
   );
 }
 
@@ -134,7 +134,7 @@ export function hasAskTimedOut(
 export function formatOwnerSayInjection(sayings: readonly string[]): string {
   const body = sayings.map((s) => `- ${s}`).join('\n');
   return (
-    `[Fala do dono recebida via "aluy service attach" (ADR-0158 §11) — pode ter ` +
+    `[Fala do dono recebida via "aluy service attach" — pode ter ` +
     `chegado enquanto outra atividade rodava; é entregue nesta, a PRÓXIMA a abrir:]\n` +
     `${body}`
   );

@@ -69,6 +69,15 @@ export interface ToolLineBlock {
   readonly added?: number;
   readonly removed?: number;
   /**
+   * DIFF UNIFICADO do `edit_file`/`write_file` (mesmo `result.display`, CLI-SEC-9,
+   * que o `<AskDialog>` já mostra no ask) — irmão do `added`/`removed` acima.
+   * Alimenta o BLOCO DE DIFF compacto no `<ToolLine>` do histórico/scrollback: até
+   * agora o diff só aparecia no popup de PERMISSÃO (some ao decidir); em `--yolo`/
+   * auto-approved ele nunca era mostrado em lugar NENHUM. `undefined` p/ tools que
+   * não editam, ou quando o edit falhou (sem diff útil a mostrar).
+   */
+  readonly diff?: string;
+  /**
    * EST-0982 — SAÍDA AO VIVO de um `run_command` enquanto roda (`status==='running'`).
    * Acumulada pelos chunks do shell (JÁ REDIGIDA, CLI-SEC-6, pelo core); a TUI a mostra
    * bounded pela cauda (windowTail/live-budget, anti-flicker intacto). É substituída
