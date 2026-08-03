@@ -230,3 +230,77 @@ export function createDiscoverContextWindowPort(
     return p;
   };
 }
+
+/** Peças concretas (wireFormat/baseUrl/credencial/persistência) de UM provider. */
+export interface ProviderDiscoveryDeps {
+  readonly wireFormat: string;
+  readonly baseUrl: string;
+  readonly fetchImpl: ConnectivityFetch;
+  readonly getKey: () => Promise<string>;
+  readonly persistContextWindow?: (slug: string, tokens: number) => boolean;
+}
+
+export interface ProviderAwareDiscoverContextWindowPortOptions {
+  /**
+   * Lê o PROVIDER ATIVO agora — o MESMO par mutável (`activeLocalCatalog`/
+   * `activeLocalProviderId`) que `switchLocalProvider` (`run.tsx`) escreve SÓ no
+   * sucesso do `/provider`. NUNCA um valor congelado do boot.
+   */
+  readonly getActiveProviderId: () => string;
+  /**
+   * Resolve as peças concretas do provider pedido (catálogo ATIVO/credencial/fetch
+   * pinado) — MESMA disciplina de quem monta a porta hoje em `run.tsx`
+   * (`findProvider`/`defaultAuthFor`/`createLocalCredentialProvider`/
+   * `createPinnedStreamFetch`). Chamado NO MÁXIMO 1x por provider distinto (a
+   * memoização abaixo evita reconstruir/revalidar a cada slug).
+   */
+  readonly depsForProvider: (providerId: string) => ProviderDiscoveryDeps;
+  readonly maxDiscoveriesPerSession?: number;
+}
+
+/**
+ * F-WIN (descoberta) — versão de `discoverContextWindow` que segue o PROVIDER ATIVO da
+ * sessão em vez do congelado no boot. Fecha o gap declarado da rc.117: a porta original
+ * fechava `wireFormat`/`baseUrl`/credencial SÓ sobre o `localCfg`/`localCatalog`
+ * resolvidos no BOOT — depois de um `/provider` bem-sucedido no meio da sessão, uma
+ * descoberta disparada para o slug ativo continuaria perguntando ao provider ANTERIOR
+ * (endpoint/credencial errados), o mesmo defeito de fundo que o `switchLocalProvider`
+ * consertou pro client de verdade.
+ *
+ * Uma porta `createDiscoverContextWindowPort` por-provider é criada e MEMOIZADA (Map por
+ * `providerId`) — a MESMA disciplina anti-runaway (COND-S3: 1 chamada de `/models` por
+ * provider por sessão) continua valendo, agora por-provider em vez de uma vez só; nunca
+ * reconstrói a porta de um provider já visto. A cada CHAMADA (não na construção), o
+ * provider ATIVO é relido via `getActiveProviderId()`.
+ *
+ * FAIL-OPEN preservado: um provider cujas `depsForProvider` resolvem p/ `baseUrl` vazio
+ * (ex.: provider desconhecido no catálogo ATIVO) ⇒ a porta interna já sai ANTES da rede
+ * (mesma guarda de `fetchModelsContexts`) — "não descoberto", nunca um erro visível
+ * (a descoberta é enfeite de status bar, não um caminho de segurança que precise
+ * fail-CLOSED; ver o comentário de topo deste arquivo).
+ */
+export function createProviderAwareDiscoverContextWindowPort(
+  opts: ProviderAwareDiscoverContextWindowPortOptions,
+): (slug: string) => Promise<DiscoverContextWindowResult> {
+  const portsByProvider = new Map<string, (slug: string) => Promise<DiscoverContextWindowResult>>();
+  const portFor = (providerId: string): ((slug: string) => Promise<DiscoverContextWindowResult>) => {
+    const cached = portsByProvider.get(providerId);
+    if (cached !== undefined) return cached;
+    const deps = opts.depsForProvider(providerId);
+    const built = createDiscoverContextWindowPort({
+      wireFormat: deps.wireFormat,
+      baseUrl: deps.baseUrl,
+      fetchImpl: deps.fetchImpl,
+      getKey: deps.getKey,
+      ...(deps.persistContextWindow !== undefined
+        ? { persistContextWindow: deps.persistContextWindow }
+        : {}),
+      ...(opts.maxDiscoveriesPerSession !== undefined
+        ? { maxDiscoveriesPerSession: opts.maxDiscoveriesPerSession }
+        : {}),
+    });
+    portsByProvider.set(providerId, built);
+    return built;
+  };
+  return (slug: string): Promise<DiscoverContextWindowResult> => portFor(opts.getActiveProviderId())(slug);
+}

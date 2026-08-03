@@ -39,7 +39,7 @@ import { buildSession, type BuildSessionOptions } from './wiring.js';
 import { resolveModelBackend, resolveLocalProviderConfig } from '../model/local/config.js';
 import {
   buildLocalModelClient,
-  createLocalChildCallerFactory,
+  createProviderAwareLocalChildCallerFactory,
   defaultAuthFor,
 } from '../model/local/factory.js';
 import { loadLocalProviderCatalog, addLocalProviderOverride } from '../io/providers-config.js';
@@ -49,7 +49,7 @@ import { createOAuthAccessTokenProvider } from '../model/local/oauth-store.js';
 import { createVerifyAndRegisterLocalModelPort } from '../model/local/test-then-register.js';
 // F-WIN (descoberta) — porta que PERGUNTA a janela de contexto ao próprio provider BYO
 // (`GET {baseUrl}/models`), p/ o usuário nunca precisar digitar o número à mão.
-import { createDiscoverContextWindowPort } from '../model/local/context-window-discovery.js';
+import { createProviderAwareDiscoverContextWindowPort } from '../model/local/context-window-discovery.js';
 import { createPinnedStreamFetch } from '../model/local/pinned-stream-fetch.js';
 import { createLocalCredentialProvider } from '../model/local/credential-resolver.js';
 import { setupMcp, ProjectMcpConfigStore, CodexMcpConfigStore } from '../mcp/index.js';
@@ -1141,21 +1141,32 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     let activeLocalCatalog = localCatalog;
     let activeLocalProviderId = localCfg.provider;
 
-    // ADR-0152 (D6b) — `callerForLocalModel(slug)`: MESMOS parâmetros do client do
-    // pai acima (catálogo/provider/auth/baseUrl/env/oauth já resolvidos no BOOT) —
-    // só o `model` varia por slug (GS-SAM-L1). NÃO passa `fetch`/`getCredential`
-    // aqui: herda os defaults de `buildLocalModelClient` (fetch PINADO EST-1115 +
-    // `createLocalCredentialProvider`) — NUNCA `globalThis.fetch`, nunca credencial
-    // derivada de DADO (spawn/`.md`/config só fornecem o `slug`, condição 1/2).
-    callerForLocalModel = createLocalChildCallerFactory({
-      catalog: localCatalog,
-      provider: localCfg.provider,
-      auth: localCfg.auth,
-      ...(localCfg.baseUrl !== undefined ? { baseUrl: localCfg.baseUrl } : {}),
+    // ADR-0152 (D6b) · F-PROV (fecha a lacuna declarada da rc.117) — `callerForLocalModel
+    // (slug)`: ANTES deste fix, fechava SÓ sobre o que o BOOT resolveu (catálogo/
+    // provider/auth/baseUrl) — um sub-agente roteado a modelo local, depois de um
+    // `/provider` bem-sucedido no meio da sessão, continuava saindo pelo provider
+    // ANTERIOR (endpoint/credencial errados), silenciosamente. `createProviderAware-
+    // LocalChildCallerFactory` (factory.ts) lê o PROVIDER ATIVO (`activeLocalCatalog`/
+    // `activeLocalProviderId`, o MESMO par que `switchLocalProvider` abaixo escreve SÓ
+    // no sucesso) a CADA chamada — nunca o valor congelado do boot. O provider do BOOT
+    // continua usando `localCfg.auth`/`localCfg.baseUrl` (flags/env/config aplicados,
+    // ZERO regressão); um provider trocado depois usa os DEFAULTS do catálogo ativo —
+    // a MESMA resolução que `switchLocalProvider` usa pra montar o client dele. NÃO
+    // passa `fetch`/`getCredential` explícitos: herda os defaults de
+    // `buildLocalModelClient` (fetch PINADO EST-1115 + `createLocalCredentialProvider`
+    // por-provider) — NUNCA `globalThis.fetch`, nunca credencial derivada de DADO
+    // (spawn/`.md`/config só fornecem o `slug`, condição 1/2). Fail-closed: provider
+    // ativo ausente do catálogo ativo ⇒ `buildLocalModelClient` lança na 1ª chamada
+    // (preguiçosa) — `childCallerFor`/`runChild` convertem em `ok:false`, nunca um
+    // roteamento silencioso pro provider errado.
+    callerForLocalModel = createProviderAwareLocalChildCallerFactory({
+      getActiveProviderId: () => activeLocalProviderId,
+      getActiveCatalog: () => activeLocalCatalog,
+      bootProvider: localCfg.provider,
+      bootAuth: localCfg.auth,
+      ...(localCfg.baseUrl !== undefined ? { bootBaseUrl: localCfg.baseUrl } : {}),
       env,
-      ...(localCfg.auth === 'oauth'
-        ? { oauthAccessToken: createOAuthAccessTokenProvider(localCfg.provider) }
-        : {}),
+      oauthAccessTokenFor: (providerId) => createOAuthAccessTokenProvider(providerId),
     });
 
     // ADR-0153 (D2) — o conjunto de slugs REGISTRADOS NESTA SESSÃO (test-then-
@@ -1279,27 +1290,56 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     }
     verifyAndRegisterLocalModel = (slug: string) => verifyPortFor(activeLocalProviderId)(slug);
 
-    // F-WIN (descoberta) — a MESMA forma do test-then-register acima (ADR-0153), com as
-    // MESMAS travas: `wireFormat`/`baseUrl` SÓ do boot (COND-S9), fetch PINADO anti-SSRF
-    // (COND-S1 — nunca `globalThis.fetch`), credencial do MESMO
-    // `createLocalCredentialProvider` do boot (COND-S2 — nunca lida/logada aqui) e teto
-    // + memoização por sessão (COND-S3). A diferença é a POLÍTICA DE FALHA: aqui é
-    // FAIL-OPEN (a spec da OpenAI não obriga `context_length` no `/models`; provider que
-    // não informa, 401 ou timeout ⇒ simplesmente não descobrimos e tudo segue como hoje).
-    discoverContextWindow = createDiscoverContextWindowPort({
-      wireFormat: findProvider(localCatalog, localCfg.provider)?.wireFormat ?? 'openai-compat',
-      baseUrl: localCfg.baseUrl ?? findProvider(localCatalog, localCfg.provider)?.baseUrl ?? '',
-      fetchImpl: createPinnedStreamFetch({}),
-      getKey: async () => {
-        const cred = await getCredentialForTest();
-        return cred.secret;
+    // F-WIN (descoberta) · F-PROV (fecha a lacuna declarada da rc.117) — a MESMA forma
+    // do test-then-register acima (ADR-0153/`verifyPortFor`), agora POR-PROVIDER: ANTES
+    // deste fix, `wireFormat`/`baseUrl`/credencial ficavam fechados SÓ sobre o
+    // `localCfg`/`localCatalog` do BOOT — uma descoberta disparada depois de um
+    // `/provider` bem-sucedido continuaria perguntando ao provider ANTERIOR. Uma porta
+    // `createDiscoverContextWindowPort` por-provider (MEMOIZADA — nunca reconstrói/
+    // reconsulta um provider já visto) é escolhida a CADA chamada pelo provider ATIVO
+    // (`activeLocalProviderId`, o MESMO estado que `switchLocalProvider` escreve). O
+    // provider do BOOT usa `localCfg.baseUrl` (override do boot); os trocados depois
+    // usam o base_url PÚBLICO do catálogo ativo — mesma resolução do
+    // `switchLocalProvider`. MESMAS travas de sempre: fetch PINADO anti-SSRF (COND-S1 —
+    // nunca `globalThis.fetch`), credencial via `createLocalCredentialProvider`
+    // por-provider (COND-S2 — nunca lida/logada aqui; o provider do BOOT reusa a MESMA
+    // instância `getCredentialForTest` de sempre) e teto + memoização por sessão
+    // (COND-S3, agora por-provider). A POLÍTICA DE FALHA segue FAIL-OPEN (a spec da
+    // OpenAI não obriga `context_length` no `/models`; provider que não informa, 401 ou
+    // timeout ⇒ simplesmente não descobrimos e tudo segue como hoje) — nunca fail-closed
+    // aqui: é enfeite de status bar, não um caminho que arrisca credencial/endpoint.
+    discoverContextWindow = createProviderAwareDiscoverContextWindowPort({
+      getActiveProviderId: () => activeLocalProviderId,
+      depsForProvider: (providerId) => {
+        const isBootProvider = providerId === localCfg.provider;
+        const entry = findProvider(activeLocalCatalog, providerId);
+        const auth = isBootProvider ? localCfg.auth : defaultAuthFor(providerId, activeLocalCatalog);
+        const getCredential = isBootProvider
+          ? getCredentialForTest
+          : createLocalCredentialProvider({
+              provider: providerId,
+              auth,
+              env,
+              ...(auth === 'oauth'
+                ? { oauthAccessToken: createOAuthAccessTokenProvider(providerId) }
+                : {}),
+            });
+        return {
+          wireFormat: entry?.wireFormat ?? 'openai-compat',
+          baseUrl: (isBootProvider ? localCfg.baseUrl : undefined) ?? entry?.baseUrl ?? '',
+          fetchImpl: createPinnedStreamFetch({}),
+          getKey: async () => {
+            const cred = await getCredential();
+            return cred.secret;
+          },
+          // Append IDEMPOTENTE em `providers[<id>].contextByModel` — é o "descobre uma
+          // vez, nunca mais": da 2ª sessão em diante o número já está no config e o
+          // `modelWindowFromConfig` o acha ANTES de qualquer rede. `false` (provider
+          // built-in sem entrada em `providers[]`) ⇒ vale só p/ esta sessão, sem erro.
+          persistContextWindow: (slug, tokens) =>
+            configStore.registerModelContextWindow(providerId, slug, tokens),
+        };
       },
-      // Append IDEMPOTENTE em `providers[<id>].contextByModel` — é o "descobre uma vez,
-      // nunca mais": da 2ª sessão em diante o número já está no config e o
-      // `modelWindowFromConfig` o acha ANTES de qualquer rede. `false` (provider
-      // built-in sem entrada em `providers[]`) ⇒ vale só p/ esta sessão, sem erro.
-      persistContextWindow: (slug, tokens) =>
-        configStore.registerModelContextWindow(localCfg.provider, slug, tokens),
     });
 
     // F-PROV — porta `switchLocalProvider(name)`: TROCA DE VERDADE o provider ATIVO
