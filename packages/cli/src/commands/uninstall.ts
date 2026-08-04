@@ -96,9 +96,14 @@ function uninstallSystemViaAgent(io: TerminalIO): number {
   }
   io.out('  ── Removendo o Ollama de sistema com o próprio aluy ── (acompanhe abaixo)');
   io.out('');
+  // `--anonymous` — mesma razão do spawn da INSTALAÇÃO (sidecar-provisioner): este é
+  // PLUMBING interno, não conversa do dono. Sem isto, desinstalar deixava a sessão da
+  // própria desinstalação gravada e o próximo `aluy` oferecia retomá-la — o inverso do
+  // que quem está removendo coisas espera. Pior aqui do que na instalação: o dono acabou
+  // de pedir p/ REMOVER, e o comando deixava rastro novo para trás.
   spawnSync(
     process.execPath,
-    [aluyScript, '-p', systemUninstallGoal(), '--yolo', '--no-self-check'],
+    [aluyScript, '-p', systemUninstallGoal(), '--yolo', '--no-self-check', '--anonymous'],
     {
       stdio: 'inherit',
       timeout: 600_000,
