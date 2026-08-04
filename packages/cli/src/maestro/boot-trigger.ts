@@ -21,6 +21,13 @@ export interface BootTriggerOptions {
   readonly aluyDir?: string;
   /** HOME do usuário (default: `process.env.HOME`). Injetável p/ teste. */
   readonly homeDir?: string;
+  /**
+   * `--anonymous` — força mem0/headroom OFF (sidecars de DADOS), INDEPENDENTE do
+   * config (`sidecarToggles`). O ollama (provedor de MODELO local) SEGUE o config
+   * normalmente: desligá-lo mataria a sessão local (sem modelo), não a tornaria
+   * anônima. Default `false` (zero mudança de comportamento sem a flag).
+   */
+  readonly dataSidecarsOff?: boolean;
 }
 
 /**
@@ -52,6 +59,12 @@ export function triggerBoot(opts: BootTriggerOptions = {}): Promise<unknown> | u
   if (config.sidecarToggles?.mem0 !== undefined) togglesOpts.mem0 = config.sidecarToggles.mem0;
   if (config.sidecarToggles?.headroom !== undefined)
     togglesOpts.headroom = config.sidecarToggles.headroom;
+  // `--anonymous` — VENCE o config: os sidecars de DADOS não sobem, ponto. O ollama
+  // (linha acima) não é tocado — segue o toggle normal do config.
+  if (opts.dataSidecarsOff === true) {
+    togglesOpts.mem0 = false;
+    togglesOpts.headroom = false;
+  }
   const toggles: ReadonlySet<SidecarTarget> = resolveSidecarToggles(togglesOpts);
 
   // Caminhos ABSOLUTOS (CA-G2-1). Overrides por env permitem apontar p/ uma

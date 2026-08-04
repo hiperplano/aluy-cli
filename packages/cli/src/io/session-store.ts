@@ -152,6 +152,15 @@ export interface SessionStoreOptions {
   readonly baseDir?: string;
   /** "Agora" em ms — injetável (teste determinístico de timestamps/GC). */
   readonly now?: () => number;
+  /**
+   * `--anonymous` — DESLIGA a persistência: `save()` vira no-op (devolve `false`,
+   * NUNCA cria `~/.aluy/sessions/` nem escreve arquivo) e `gc()` também no-op (nada
+   * a coletar de um store que nunca escreve). `load()`/`list()`/`latestForCwd()`
+   * seguem funcionando (leitura de sessões REAIS de OUTRAS execuções não é o que o
+   * anônimo protege — é a PRÓPRIA sessão que não deixa rastro). Default `false`
+   * (zero mudança de comportamento sem a flag).
+   */
+  readonly disabled?: boolean;
 }
 
 /** ADR-0150 (balde b) — DEFAULT de idade de GC (30 dias), exportado p/ `aluy config`. */
@@ -304,11 +313,13 @@ export class SessionStore {
    * (o ciclo de vida do `SessionStore` é o do processo); `remove`/`gc` limpam a entrada.
    */
   private readonly createdAtCache = new Map<string, number>();
+  private readonly disabled: boolean;
 
   constructor(opts: SessionStoreOptions = {}) {
     this.base = opts.baseDir ?? join(homedir(), '.aluy');
     this.dir = join(this.base, SESSIONS_DIRNAME);
     this.now = opts.now ?? (() => Date.now());
+    this.disabled = opts.disabled ?? false;
   }
 
   /** Diretório das sessões (p/ asserts de local/perm em teste). */
@@ -353,6 +364,9 @@ export class SessionStore {
     readonly labelColor?: string;
     readonly blocks: readonly SessionBlock[];
   }): boolean {
+    // `--anonymous` — no-op ANTES de qualquer I/O: nem o `mkdirSync` de
+    // `~/.aluy/sessions/` roda. "Se o arquivo existir no disco, não é anônimo."
+    if (this.disabled) return false;
     if (!SAFE_ID.test(input.id)) return false;
     try {
       const now = this.now();
@@ -566,6 +580,9 @@ export class SessionStore {
    * num arquivo não impede os demais. NUNCA lança.
    */
   gc(opts: SessionGcOptions = {}): void {
+    // `--anonymous` — nada a coletar de um store que nunca escreve; evita um scan
+    // à toa do diretório real a cada boot anônimo.
+    if (this.disabled) return;
     const maxAgeMs = opts.maxAgeMs ?? DEFAULT_GC_MAX_AGE_MS;
     const maxCount = opts.maxCount ?? DEFAULT_GC_MAX_COUNT;
     const summaries = this.list(); // já ordenado por updatedAt desc.

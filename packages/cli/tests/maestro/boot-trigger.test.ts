@@ -273,6 +273,85 @@ describe('CA-BOOT-CONFIG — toggles', () => {
   });
 });
 
+// ─── `--anonymous` — dataSidecarsOff força mem0/headroom OFF, ollama intacto ──
+
+describe('`--anonymous` — dataSidecarsOff', () => {
+  it('dataSidecarsOff:true ⇒ mem0/headroom fora dos toggles, mas ollama SEGUE (config ON)', async () => {
+    const dir = tmpAluyDir();
+    try {
+      writeConfig(dir, {
+        profile: 'turbo',
+        sidecarToggles: { ollama: true, mem0: true, headroom: true },
+      });
+
+      const originalBoot = NodeBootSupervisor.prototype.boot;
+      let capturedToggles: ReadonlySet<string> | undefined;
+      NodeBootSupervisor.prototype.boot = function (_profile, toggles: ReadonlySet<string>) {
+        capturedToggles = toggles;
+        return Promise.resolve({
+          profile: 'turbo',
+          states: [],
+          anyRunning: false,
+          allFailed: false,
+        });
+      };
+
+      try {
+        const result = triggerBoot({ aluyDir: dir, homeDir: '/home/test', dataSidecarsOff: true });
+        await result;
+
+        expect(capturedToggles).toBeDefined();
+        // ollama é o provedor de MODELO local — desligá-lo mataria a sessão, não a
+        // tornaria anônima. Segue ligado (config pediu ON).
+        expect(capturedToggles!.has('ollama')).toBe(true);
+        // mem0/headroom são sidecars de DADOS — o anônimo não sobe nenhum dos dois,
+        // mesmo com o config pedindo ON.
+        expect(capturedToggles!.has('mem0')).toBe(false);
+        expect(capturedToggles!.has('headroom')).toBe(false);
+      } finally {
+        NodeBootSupervisor.prototype.boot = originalBoot;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('dataSidecarsOff ausente/false ⇒ zero mudança (toggles seguem o config)', async () => {
+    const dir = tmpAluyDir();
+    try {
+      writeConfig(dir, {
+        profile: 'turbo',
+        sidecarToggles: { ollama: true, mem0: true, headroom: true },
+      });
+
+      const originalBoot = NodeBootSupervisor.prototype.boot;
+      let capturedToggles: ReadonlySet<string> | undefined;
+      NodeBootSupervisor.prototype.boot = function (_profile, toggles: ReadonlySet<string>) {
+        capturedToggles = toggles;
+        return Promise.resolve({
+          profile: 'turbo',
+          states: [],
+          anyRunning: false,
+          allFailed: false,
+        });
+      };
+
+      try {
+        const result = triggerBoot({ aluyDir: dir, homeDir: '/home/test' });
+        await result;
+
+        expect(capturedToggles!.has('ollama')).toBe(true);
+        expect(capturedToggles!.has('mem0')).toBe(true);
+        expect(capturedToggles!.has('headroom')).toBe(true);
+      } finally {
+        NodeBootSupervisor.prototype.boot = originalBoot;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ─── Config corrompida ⇒ fail-safe ─────────────────────────────────────
 
 describe('config corrompida ⇒ fail-safe', () => {

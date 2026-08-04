@@ -755,6 +755,32 @@ describe('EST-1133-bis — delegação ao agente (SO não-Linux)', () => {
   });
 });
 
+// ─── `--anonymous` — o spawn do agente interno da instalação é ANÔNIMO ───────
+
+describe('`--anonymous` — defaultAgentInstaller spawna o aluy interno com --anonymous', () => {
+  beforeEach(resetAllMocks);
+
+  it('o argv do `aluy -p` interno inclui --anonymous (além de --yolo/--no-self-check)', async () => {
+    // Health-check LIGHT do mem0 (light:true) só olha existência — tudo `true` ⇒
+    // o 1º poll já bate saudável (sem cair nos 24×5s de retry, EST-1133).
+    mockExists.mockReturnValue(true);
+
+    await runProvisioner('turbo', { ollama: false, mem0: true, headroom: false }, {
+      platform: 'linux',
+      useAgent: true,
+    });
+
+    expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+    const argv = mockSpawnSync.mock.calls[0]?.[1] as string[] | undefined;
+    expect(argv).toBeDefined();
+    expect(argv).toContain('--anonymous');
+    // não-regressão: as flags que já existiam continuam lá.
+    expect(argv).toContain('-p');
+    expect(argv).toContain('--yolo');
+    expect(argv).toContain('--no-self-check');
+  });
+});
+
 // ─── F104: todos os pacotes pip são PINADOS por versão (supply-chain) ────────
 describe('F104 — pacotes pip pinados por versão (não puxa LATEST do PyPI)', () => {
   it('MEM0_PIP_PACKAGES: cada pacote tem `==<versão>`', () => {
