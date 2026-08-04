@@ -25,6 +25,17 @@ export interface LocalModelPickerProps {
   readonly columns?: number;
   /** Máx. de linhas visíveis do picker (janela). Default 8. */
   readonly maxRows?: number;
+  /**
+   * F-MODEL-LIVE — a busca AO VIVO no provider está em andamento. A lista DECLARADA já
+   * aparece de imediato (isto é só um indicador "ainda buscando mais"); nunca esconde
+   * a lista corrente.
+   */
+  readonly loading?: boolean;
+  /**
+   * F-MODEL-LIVE — a busca AO VIVO falhou (rede/401/timeout) ⇒ mostra o aviso honesto
+   * de que a lista é só o catálogo conhecido. `null`/`undefined`/`false` ⇒ sem aviso.
+   */
+  readonly usingFallback?: boolean | null;
 }
 
 /** Slug com os índices `matched` realçados em âmbar (a11y: + a seleção). Espelha o
@@ -108,6 +119,32 @@ export function LocalModelPicker(props: LocalModelPickerProps): React.ReactEleme
           </Role>
         </Box>
       )}
+      {/* F-MODEL-LIVE — indicador de carga: a busca AO VIVO no provider (que pode ter
+          centenas de modelos) ainda está em voo. A lista já mostrada (catálogo
+          declarado + ativo) continua completa acima; isto só avisa que mais pode
+          chegar — nunca trava a UI nem esconde o que já dá pra navegar/filtrar. */}
+      {props.loading === true && (
+        <Box>
+          <Role name="fgDim"> {t('picker.localModel.loading')}</Role>
+        </Box>
+      )}
+      {/* F-MODEL-LIVE — a busca ao vivo falhou (provider fora do ar/401/timeout): a
+          lista acima é só o catálogo conhecido, e dizemos isso — nunca uma lista
+          incompleta SILENCIOSA. */}
+      {props.usingFallback === true && props.loading !== true && (
+        <Box>
+          <Role name="fgDim">
+            {'  '}◍ {t('picker.localModel.fallback')}
+          </Role>
+        </Box>
+      )}
+      {/* F-MODEL-CUSTOM — a via "custom" (digitar um slug fora da lista) é o próprio
+          texto-livre; nem sempre óbvio quando a lista tem centenas de itens. Sempre
+          visível (não só no estado vazio) p/ o dono achar sem precisar já saber que
+          existe. */}
+      <Box>
+        <Role name="fgDim"> {t('picker.localModel.customHint')}</Role>
+      </Box>
     </Box>
   );
 }

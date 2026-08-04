@@ -35,6 +35,7 @@ import {
   parseModelsListContexts,
   findModelContext,
   isPlausibleContextWindow,
+  parseModelsListSlugs,
   type DiscoveredModelContext,
 } from '@hiperplano/aluy-cli-core';
 import type { ConnectivityFetch } from './connectivity-check.js';
@@ -84,25 +85,31 @@ export interface FetchModelsContextsArgs {
 }
 
 /**
- * Lê `GET {baseUrl}/models` e devolve os pares `{slug, context}` que o provider
- * informou. NUNCA lança: qualquer falha (rede, timeout, 401/404, corpo não-JSON,
- * redirect BLOQUEADO pelo fetch pinado) ⇒ `[]` = "não descobrimos nada".
+ * F-MODEL-LIVE — I/O CRU do `GET {baseUrl}/models`: SÓ fetch PINADO + timeout + teto de
+ * corpo + `JSON.parse`, SEM decidir o que extrair do corpo (isso é do CHAMADOR —
+ * `parseModelsListContexts` p/ janela, `parseModelsListSlugs` p/ nomes). Extraído de
+ * `fetchModelsContexts` p/ os DOIS consumidores (janela E lista de nomes do picker,
+ * F-MODEL-LIVE) compartilharem o MESMO caminho de rede — nunca um 2º fetch duplicado.
  *
  * SÓ para `openai-compat`. O `wireFormat` `anthropic` também tem `/v1/models`, mas ele
  * NÃO devolve janela de contexto (só `id`/`display_name`/`created_at`) — pingá-lo seria
- * uma chamada garantidamente inútil; `gemini` não fala este dialeto. Nos dois casos
- * saímos ANTES da rede.
+ * uma chamada garantidamente inútil pro caso de janela (o caso de nomes ainda usaria o
+ * `id`, mas por ora nenhum chamador pede nomes de um provider `anthropic`); `gemini` não
+ * fala este dialeto. Saímos ANTES da rede nos dois casos.
  *
  * `{base}/models` (e não `/v1/models`) porque o `baseUrl` do catálogo BYO já inclui o
  * `/v1` quando o provider o usa — é a MESMA composição do `checkModelConnectivity`
  * (`${base}/chat/completions`), então um provider que funciona p/ chat funciona aqui.
+ *
+ * `undefined` ⇒ qualquer falha (rede, timeout, 401/404, corpo não-JSON/grande demais,
+ * redirect BLOQUEADO pelo fetch pinado) — NUNCA lança. NUNCA interpola a exceção em
+ * lugar nenhum: a mensagem do fetch pinado carrega host/`location` (vetor de
+ * SSRF/vazamento) e a do transporte pode ecoar a URL com credencial.
  */
-export async function fetchModelsContexts(
-  args: FetchModelsContextsArgs,
-): Promise<readonly DiscoveredModelContext[]> {
-  if (args.wireFormat !== 'openai-compat') return [];
+async function fetchModelsBody(args: FetchModelsContextsArgs): Promise<unknown> {
+  if (args.wireFormat !== 'openai-compat') return undefined;
   const base = args.baseUrl.replace(/\/+$/, '');
-  if (base === '') return [];
+  if (base === '') return undefined;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), args.timeoutMs ?? DEFAULT_DISCOVERY_TIMEOUT_MS);
   try {
@@ -119,19 +126,39 @@ export async function fetchModelsContexts(
       // SEM `body`: GET com body (mesmo `''`) faz o fetch do Node LANÇAR antes da rede
       // (mesma armadilha documentada no `custom-models-client` do core).
     });
-    if (!res.ok) return []; // 401/404/5xx ⇒ não descobrimos. Sem nota, sem erro (fail-open).
+    if (!res.ok) return undefined; // 401/404/5xx ⇒ não descobrimos. Sem nota, sem erro (fail-open).
     const text = await res.text();
-    if (text.length > MAX_MODELS_BODY_CHARS) return [];
-    const body: unknown = JSON.parse(text);
-    return parseModelsListContexts(body);
+    if (text.length > MAX_MODELS_BODY_CHARS) return undefined;
+    return JSON.parse(text) as unknown;
   } catch {
-    // Rede/timeout/JSON inválido/egress recusado pelo anti-SSRF. NUNCA interpolamos a
-    // exceção em lugar nenhum: a mensagem do fetch pinado carrega host/`location`
-    // (vetor de SSRF/vazamento) e a do transporte pode ecoar a URL com credencial.
-    return [];
+    return undefined;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Lê `GET {baseUrl}/models` e devolve os pares `{slug, context}` que o provider
+ * informou. NUNCA lança: qualquer falha ⇒ `[]` = "não descobrimos nada". Ver
+ * `fetchModelsBody` p/ o que conta como falha.
+ */
+export async function fetchModelsContexts(
+  args: FetchModelsContextsArgs,
+): Promise<readonly DiscoveredModelContext[]> {
+  const body = await fetchModelsBody(args);
+  return body === undefined ? [] : parseModelsListContexts(body);
+}
+
+/**
+ * F-MODEL-LIVE — lê `GET {baseUrl}/models` e devolve os SLUGS anunciados (sem exigir
+ * janela — ver `parseModelsListSlugs`, o irmão de `parseModelsListContexts` que não
+ * descarta modelo por falta de `context_length`). MESMO fetch PINADO/teto/timeout de
+ * `fetchModelsContexts` (via `fetchModelsBody`) — nenhum 2º caminho de rede. NUNCA
+ * lança: qualquer falha ⇒ `[]`.
+ */
+export async function fetchModelsSlugs(args: FetchModelsContextsArgs): Promise<readonly string[]> {
+  const body = await fetchModelsBody(args);
+  return body === undefined ? [] : parseModelsListSlugs(body);
 }
 
 export interface CreateDiscoverContextWindowPortOptions extends Omit<
@@ -283,7 +310,9 @@ export function createProviderAwareDiscoverContextWindowPort(
   opts: ProviderAwareDiscoverContextWindowPortOptions,
 ): (slug: string) => Promise<DiscoverContextWindowResult> {
   const portsByProvider = new Map<string, (slug: string) => Promise<DiscoverContextWindowResult>>();
-  const portFor = (providerId: string): ((slug: string) => Promise<DiscoverContextWindowResult>) => {
+  const portFor = (
+    providerId: string,
+  ): ((slug: string) => Promise<DiscoverContextWindowResult>) => {
     const cached = portsByProvider.get(providerId);
     if (cached !== undefined) return cached;
     const deps = opts.depsForProvider(providerId);
@@ -302,5 +331,119 @@ export function createProviderAwareDiscoverContextWindowPort(
     portsByProvider.set(providerId, built);
     return built;
   };
-  return (slug: string): Promise<DiscoverContextWindowResult> => portFor(opts.getActiveProviderId())(slug);
+  return (slug: string): Promise<DiscoverContextWindowResult> =>
+    portFor(opts.getActiveProviderId())(slug);
+}
+
+// ── F-MODEL-LIVE — lista DINÂMICA de nomes p/ o `<LocalModelPicker>` (`/model`) ─────
+//
+// O DIAGNÓSTICO (dogfooding, já apurado): sob backend LOCAL o `/model` listava só
+// `localModelCatalogPort.listNames()` — os slugs DECLARADOS no catálogo (embutido +
+// `~/.aluy/config.json`) ∪ os registrados NESTA sessão (ADR-0153 D2). Pro `openrouter`
+// built-in isso são só 5 slugs fixos; o provider de verdade expõe CENTENAS via
+// `GET /models` (confirmado em campo: 338 no dia da investigação) — e o modelo que o
+// dono efetivamente usa nem estava entre os 5 (o picker não conseguia sequer MOSTRAR o
+// modelo ativo). A entrega anterior (rc.117) trocou a FONTE (broker → catálogo local)
+// mas manteve a lista ESTÁTICA — não fechou o buraco, só mudou de onde ele vinha.
+//
+// Esta porta busca a lista VIVA (`fetchModelsSlugs`, MESMO fetch PINADO/teto/timeout de
+// `discoverContextWindow` — nenhum 2º caminho de rede) e é a peça que `useLocalModelPicker`
+// (packages/cli/src/ui/hooks/useLocalModelPicker.ts) chama ao ABRIR o picker. A UNIÃO
+// com o catálogo DECLARADO/sessão/modelo ATIVO acontece do lado do hook (que já tem
+// essas três fontes) — esta porta só entrega o que o PROVIDER disse, mais um sinal `ok`
+// p/ a UI decidir se avisa "não foi possível listar" (fail-open honesto: nunca lista
+// vazia SILENCIOSA, sempre com o aviso quando a rede falhou).
+
+/** Resultado de UMA busca da lista viva do `/models`. */
+export interface ListModelNamesResult {
+  /** Slugs anunciados pelo provider (pode ser `[]` em falha OU provider sem modelos). */
+  readonly names: readonly string[];
+  /** `true` ⇒ a rede respondeu (mesmo que `names` venha vazio); `false` ⇒ falhou
+   * (rede/timeout/401/wireFormat não-suportado) — a UI deve avisar o fallback. */
+  readonly ok: boolean;
+}
+
+export interface CreateListModelNamesPortOptions extends Omit<FetchModelsContextsArgs, 'key'> {
+  /** Credencial resolvida A CADA chamada (keychain/OAuth rotacionam) — MESMO padrão de
+   * `CreateDiscoverContextWindowPortOptions.getKey`. */
+  readonly getKey: () => Promise<string>;
+}
+
+/**
+ * Monta a porta `listModelNames()`: busca `GET {baseUrl}/models` UMA vez por sessão
+ * (promise memoizada — MESMA disciplina anti-runaway do `loadList` de
+ * `createDiscoverContextWindowPort`: N aberturas do picker no MESMO provider resolvem 1
+ * chamada de rede). NUNCA lança/rejeita — falha vira `{names:[], ok:false}`.
+ */
+export function createListModelNamesPort(
+  opts: CreateListModelNamesPortOptions,
+): () => Promise<ListModelNamesResult> {
+  let cached: Promise<ListModelNamesResult> | undefined;
+  return (): Promise<ListModelNamesResult> => {
+    if (cached === undefined) {
+      cached = (async (): Promise<ListModelNamesResult> => {
+        try {
+          const key = await opts.getKey();
+          const body = await fetchModelsBody({
+            wireFormat: opts.wireFormat,
+            baseUrl: opts.baseUrl,
+            key,
+            fetchImpl: opts.fetchImpl,
+            ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+          });
+          // `body === undefined` é o sinal ÚNICO de falha (rede/timeout/401/corpo
+          // grande demais/wireFormat não-suportado) — ver `fetchModelsBody`. Um corpo
+          // que existe mas não tem `data`/array válido cai em `parseModelsListSlugs`
+          // devolvendo `[]`, e ainda assim contamos como `ok:true` (a rede respondeu;
+          // só não havia nada útil pra extrair — não é o mesmo caso de "provider fora
+          // do ar", então não merece o aviso de fallback).
+          if (body === undefined) return { names: [], ok: false };
+          return { names: parseModelsListSlugs(body), ok: true };
+        } catch {
+          // `getKey` sem credencial (keychain vazio/locked) ⇒ fallback honesto.
+          return { names: [], ok: false };
+        }
+      })();
+    }
+    return cached;
+  };
+}
+
+export interface ProviderAwareListModelNamesPortOptions {
+  /** MESMO par mutável que `switchLocalProvider` (`run.tsx`) escreve — nunca um valor
+   * congelado do boot (ver `ProviderAwareDiscoverContextWindowPortOptions`). */
+  readonly getActiveProviderId: () => string;
+  /** MESMA resolução de peças concretas usada pelo `discoverContextWindow` — o
+   * `persistContextWindow` do `ProviderDiscoveryDeps` é ignorado aqui (esta porta não
+   * persiste nada, só lista nomes), reutilizamos o tipo p/ o CHAMADOR poder passar a
+   * MESMA função `depsForProvider` das duas portas sem duplicar a resolução. */
+  readonly depsForProvider: (providerId: string) => ProviderDiscoveryDeps;
+}
+
+/**
+ * F-MODEL-LIVE — versão de `listModelNames` que segue o PROVIDER ATIVO da sessão (não o
+ * congelado no boot), MESMA forma de `createProviderAwareDiscoverContextWindowPort`: uma
+ * porta `createListModelNamesPort` por-provider, MEMOIZADA (Map por `providerId`) — a
+ * cada CHAMADA (não na construção) o provider ATIVO é relido via `getActiveProviderId()`.
+ * Um provider trocado via `/provider` no meio da sessão já lista os modelos DELE na
+ * próxima abertura do picker, nunca os do provider anterior.
+ */
+export function createProviderAwareListModelNamesPort(
+  opts: ProviderAwareListModelNamesPortOptions,
+): () => Promise<ListModelNamesResult> {
+  const portsByProvider = new Map<string, () => Promise<ListModelNamesResult>>();
+  const portFor = (providerId: string): (() => Promise<ListModelNamesResult>) => {
+    const cached = portsByProvider.get(providerId);
+    if (cached !== undefined) return cached;
+    const deps = opts.depsForProvider(providerId);
+    const built = createListModelNamesPort({
+      wireFormat: deps.wireFormat,
+      baseUrl: deps.baseUrl,
+      fetchImpl: deps.fetchImpl,
+      getKey: deps.getKey,
+    });
+    portsByProvider.set(providerId, built);
+    return built;
+  };
+  return (): Promise<ListModelNamesResult> => portFor(opts.getActiveProviderId())();
 }

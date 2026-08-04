@@ -205,6 +205,41 @@ export function parseModelsListContexts(body: unknown): readonly DiscoveredModel
 }
 
 /**
+ * F-MODEL-LIVE — saneia o corpo do `GET {baseUrl}/models` em SLUGS (só o `id`), SEM
+ * exigir janela de contexto. É o irmão de `parseModelsListContexts` p/ um consumidor
+ * diferente: o `/model` (picker) precisa listar TODO modelo que o provider anuncia —
+ * inclusive os que não informam `context_length` nenhum (o caso do TokenRouter, ver o
+ * comentário de topo do arquivo: 19 modelos, NENHUM campo de janela). Se este parse
+ * também exigisse janela plausível, um provider assim listaria ZERO modelos no
+ * picker — o MESMO buraco que motivou a descoberta dinâmica, só que pro nome em vez
+ * do número.
+ *
+ * MESMA tolerância a DADO_NÃO_CONFIÁVEL de `parseModelsListContexts`: aceita os dois
+ * envelopes (`{data:[…]}` e array cru), NUNCA lança, dedup por slug (case-insensitive,
+ * 1ª ocorrência vence), teto de `MAX_MODELS_PARSED` entradas lidas (anti-runaway).
+ */
+export function parseModelsListSlugs(body: unknown): readonly string[] {
+  const data = Array.isArray(body) ? body : isRecord(body) ? body['data'] : undefined;
+  if (!Array.isArray(data)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let scanned = 0;
+  for (const raw of data) {
+    if (scanned >= MAX_MODELS_PARSED) break; // anti-runaway (corpo absurdo)
+    scanned += 1;
+    if (!isRecord(raw)) continue;
+    const idRaw = raw['id'];
+    const slug = typeof idRaw === 'string' ? idRaw.trim() : '';
+    if (slug === '') continue;
+    const key = slug.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(slug);
+  }
+  return out;
+}
+
+/**
  * Acha a janela de UM slug na lista já parseada. Casa case-insensitive e ignorando
  * espaço nas pontas (os slugs viajam como `vendor/modelo` e o config do dono pode ter
  * capitalização diferente da do provider) — MESMA disciplina de casamento do

@@ -135,6 +135,10 @@ export const en: PartialCatalog = {
     'change the local provider model · type to filter · ↑↓ navigate · enter select · esc close',
   'picker.localModel.empty': 'no known model matches "{query}" — enter uses the typed text',
   'picker.localModel.more': '… {count} more models (refine the filter)',
+  'picker.localModel.loading': '⋯ fetching more models from the provider…',
+  'picker.localModel.fallback':
+    '⚠ could not list the provider models — showing only the known catalog',
+  'picker.localModel.customHint': "· type a slug that isn't in the list to test it (custom)",
 
   // ── HistoryPicker (/history) ──────────────────────────────────────────────
   'picker.history.help': 'resume session · ↑↓ navigate · enter resume · esc cancel',

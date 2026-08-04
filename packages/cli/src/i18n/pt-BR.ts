@@ -136,6 +136,10 @@ export const ptBR: FullCatalog = {
     'trocar modelo do provider local · digite p/ filtrar · ↑↓ navega · enter seleciona · esc fecha',
   'picker.localModel.empty': 'nenhum modelo conhecido casa "{query}" — enter usa o texto digitado',
   'picker.localModel.more': '… {count} modelos a mais (refine o filtro)',
+  'picker.localModel.loading': '⋯ buscando mais modelos no provider…',
+  'picker.localModel.fallback':
+    '⚠ não foi possível listar os modelos do provider — mostrando só o catálogo conhecido',
+  'picker.localModel.customHint': '· digite um slug que não está na lista p/ testá-lo (custom)',
 
   // ── HistoryPicker (/history) ──────────────────────────────────────────────
   'picker.history.help': 'retomar sessão · ↑↓ navega · enter retoma · esc cancela',

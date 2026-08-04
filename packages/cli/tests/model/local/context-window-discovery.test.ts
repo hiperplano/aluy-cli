@@ -14,6 +14,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createDiscoverContextWindowPort,
   fetchModelsContexts,
+  fetchModelsSlugs,
+  createListModelNamesPort,
   MAX_CONTEXT_DISCOVERIES_PER_SESSION,
   MAX_MODELS_BODY_CHARS,
 } from '../../../src/model/local/context-window-discovery.js';
@@ -275,5 +277,132 @@ describe('fetchModelsContexts — a camada crua', () => {
       fetchImpl: fakeFetch({ throws: new Error('boom') }).fetchImpl,
     });
     expect(r).toEqual([]);
+  });
+});
+
+// F-MODEL-LIVE — a lista VIVA de NOMES p/ o `<LocalModelPicker>` (`/model` sob backend
+// LOCAL). O achado: o TokenRouter (provider REAL do dono) responde 19 modelos no
+// `/models` SEM NENHUM campo de janela — `fetchModelsContexts`/`parseModelsListContexts`
+// devolveriam `[]` (corretamente, pro CASO DELAS: descoberta de janela). Um picker de
+// NOMES que reusasse aquele parse listaria ZERO modelos pra esse provider — o MESMO
+// buraco, só que pro nome em vez do número. `fetchModelsSlugs`/`parseModelsListSlugs`
+// existem por isto: extraem só o `id`, sem exigir janela nenhuma.
+const NAMES_ONLY_BODY = {
+  object: 'list',
+  data: [
+    { id: 'deepseek/deepseek-v4-pro', object: 'model' }, // SEM context_length (TokenRouter)
+    { id: 'moonshotai/kimi-k3', object: 'model' },
+    { id: 'xiaomi/mimo-v2.5-pro', context_length: 1000000 },
+  ],
+};
+
+describe('fetchModelsSlugs — camada crua de NOMES (não exige janela)', () => {
+  it('lista TODO slug, inclusive os sem `context_length` nenhum (caso TokenRouter)', async () => {
+    const { fetchImpl } = fakeFetch({ body: NAMES_ONLY_BODY });
+    const r = await fetchModelsSlugs({
+      wireFormat: 'openai-compat',
+      baseUrl: 'https://api.tokenrouter.test/v1',
+      key: 'sk',
+      fetchImpl,
+    });
+    expect(r).toEqual(['deepseek/deepseek-v4-pro', 'moonshotai/kimi-k3', 'xiaomi/mimo-v2.5-pro']);
+  });
+
+  it('MESMO fetch pinado/teto/timeout de fetchModelsContexts (via o mesmo `fetchImpl` injetado)', async () => {
+    const { fetchImpl, calls } = fakeFetch({ body: NAMES_ONLY_BODY });
+    await fetchModelsSlugs({
+      wireFormat: 'openai-compat',
+      baseUrl: 'https://gateway.test/v1///',
+      key: 'sk',
+      fetchImpl,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe('https://gateway.test/v1/models');
+  });
+
+  it('devolve [] (nunca lança) em qualquer falha — MESMA disciplina fail-open', async () => {
+    const r = await fetchModelsSlugs({
+      wireFormat: 'openai-compat',
+      baseUrl: 'https://gateway.test/v1',
+      key: 'sk',
+      fetchImpl: fakeFetch({ ok: false, status: 401 }).fetchImpl,
+    });
+    expect(r).toEqual([]);
+  });
+
+  it('wireFormat não-openai-compat ⇒ nem sai da máquina', async () => {
+    const { fetchImpl, calls } = fakeFetch({ body: NAMES_ONLY_BODY });
+    const r = await fetchModelsSlugs({
+      wireFormat: 'anthropic',
+      baseUrl: 'https://gateway.test/v1',
+      key: 'sk',
+      fetchImpl,
+    });
+    expect(r).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe('createListModelNamesPort — porta memoizada p/ o picker (F-MODEL-LIVE)', () => {
+  it('caminho feliz: busca a lista e devolve `ok:true`', async () => {
+    const { fetchImpl, calls } = fakeFetch({ body: NAMES_ONLY_BODY });
+    const port = createListModelNamesPort({
+      wireFormat: 'openai-compat',
+      baseUrl: 'https://gateway.test/v1',
+      fetchImpl,
+      getKey: async () => 'sk-test',
+    });
+    const r = await port();
+    expect(r.ok).toBe(true);
+    expect(r.names).toEqual([
+      'deepseek/deepseek-v4-pro',
+      'moonshotai/kimi-k3',
+      'xiaomi/mimo-v2.5-pro',
+    ]);
+    expect(calls[0]!.headers.authorization).toBe('Bearer sk-test');
+  });
+
+  it('memoiza — N chamadas na MESMA sessão resolvem 1 requisição de rede', async () => {
+    const { fetchImpl, calls } = fakeFetch({ body: NAMES_ONLY_BODY });
+    const port = createListModelNamesPort({
+      wireFormat: 'openai-compat',
+      baseUrl: 'https://gateway.test/v1',
+      fetchImpl,
+      getKey: async () => 'sk',
+    });
+    await Promise.all([port(), port(), port()]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('falha (401/rede/timeout) ⇒ `{names:[], ok:false}`, NUNCA lança — fallback honesto', async () => {
+    const port = createListModelNamesPort({
+      wireFormat: 'openai-compat',
+      baseUrl: 'https://gateway.test/v1',
+      fetchImpl: fakeFetch({ ok: false, status: 401 }).fetchImpl,
+      getKey: async () => 'sk',
+    });
+    await expect(port()).resolves.toEqual({ names: [], ok: false });
+  });
+
+  it('provider responde 200 com lista VAZIA ⇒ `ok:true` (a rede respondeu; não é o mesmo caso de fallback)', async () => {
+    const port = createListModelNamesPort({
+      wireFormat: 'openai-compat',
+      baseUrl: 'https://gateway.test/v1',
+      fetchImpl: fakeFetch({ body: { object: 'list', data: [] } }).fetchImpl,
+      getKey: async () => 'sk',
+    });
+    await expect(port()).resolves.toEqual({ names: [], ok: true });
+  });
+
+  it('credencial ausente (`getKey` lança) ⇒ fallback honesto, sem derrubar a sessão', async () => {
+    const port = createListModelNamesPort({
+      wireFormat: 'openai-compat',
+      baseUrl: 'https://gateway.test/v1',
+      fetchImpl: fakeFetch({ body: NAMES_ONLY_BODY }).fetchImpl,
+      getKey: async () => {
+        throw new Error('MissingLocalCredentialError');
+      },
+    });
+    await expect(port()).resolves.toEqual({ names: [], ok: false });
   });
 });

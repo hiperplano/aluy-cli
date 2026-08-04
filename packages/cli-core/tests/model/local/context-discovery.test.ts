@@ -11,6 +11,7 @@ import {
   parseContextTokens,
   contextFromEntry,
   parseModelsListContexts,
+  parseModelsListSlugs,
   findModelContext,
   isPlausibleContextWindow,
   MIN_PLAUSIBLE_CONTEXT_TOKENS,
@@ -181,6 +182,74 @@ describe('parseModelsListContexts — corpo do /models ⇒ pares {slug, context}
       context_length: 128000,
     }));
     expect(parseModelsListContexts({ data })).toHaveLength(MAX_MODELS_PARSED);
+  });
+});
+
+describe('parseModelsListSlugs — corpo do /models ⇒ SÓ slugs (sem exigir janela)', () => {
+  it('lê o `id` de cada entrada, INCLUSIVE as sem nenhum campo de janela (o caso do TokenRouter)', () => {
+    // O achado de campo que motiva esta função: um provider pode responder 200 no
+    // `/models` sem NENHUM campo de janela conhecido — `parseModelsListContexts`
+    // omitiria essas entradas por completo; o picker de nomes não pode.
+    const body = {
+      object: 'list',
+      data: [
+        { id: 'deepseek/deepseek-v4-pro', object: 'model', owned_by: 'deepseek' },
+        { id: 'moonshotai/kimi-k3', object: 'model' },
+        { id: 'xiaomi/mimo-v2.5-pro', context_length: 1000000 },
+      ],
+    };
+    expect(parseModelsListSlugs(body)).toEqual([
+      'deepseek/deepseek-v4-pro',
+      'moonshotai/kimi-k3',
+      'xiaomi/mimo-v2.5-pro',
+    ]);
+  });
+
+  it('ARRAY cru no topo também é aceito', () => {
+    expect(parseModelsListSlugs([{ id: 'llama-3' }])).toEqual(['llama-3']);
+  });
+
+  it('OMITE entradas sem `id`/`id` vazio, mas NUNCA por falta de janela', () => {
+    const body = {
+      data: [
+        { object: 'model' }, // sem id ⇒ inútil
+        { id: '   ' }, // id vazio
+        { id: 'sem-janela-nenhuma' }, // SEM context_length e ainda assim entra
+      ],
+    };
+    expect(parseModelsListSlugs(body)).toEqual(['sem-janela-nenhuma']);
+  });
+
+  it('dedup por slug (case-insensitive) — a 1ª grafia vence', () => {
+    expect(parseModelsListSlugs({ data: [{ id: 'X/Y' }, { id: 'x/y' }] })).toEqual(['X/Y']);
+  });
+
+  it('DESCARTA todo campo extra — só o `id` atravessa (HG-2)', () => {
+    const parsed = parseModelsListSlugs({
+      data: [{ id: 'x/y', api_key_ref: 'sk-vazado', base_url: 'http://evil' }],
+    });
+    expect(parsed).toEqual(['x/y']);
+    expect(JSON.stringify(parsed)).not.toContain('sk-vazado');
+    expect(JSON.stringify(parsed)).not.toContain('evil');
+  });
+
+  it('corpo TORTO ⇒ [] e NUNCA lança (DADO_NÃO_CONFIÁVEL)', () => {
+    for (const body of [
+      undefined,
+      null,
+      42,
+      'texto',
+      {},
+      { data: 'x' },
+      { data: [null, 1, 'a'] },
+    ]) {
+      expect(parseModelsListSlugs(body)).toEqual([]);
+    }
+  });
+
+  it('teto de entradas lidas (anti-runaway) — para de acumular no MAX_MODELS_PARSED', () => {
+    const data = Array.from({ length: MAX_MODELS_PARSED + 50 }, (_v, i) => ({ id: `m-${i}` }));
+    expect(parseModelsListSlugs({ data })).toHaveLength(MAX_MODELS_PARSED);
   });
 });
 

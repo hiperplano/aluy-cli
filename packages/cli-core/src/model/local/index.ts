@@ -54,4 +54,5 @@ export {
   contextFromEntry,
   parseModelsListContexts,
   findModelContext,
+  parseModelsListSlugs,
 } from './context-discovery.js';
