@@ -49,7 +49,7 @@ describe('runUninstall --agent — delega a remoção do Ollama de SISTEMA ao ag
     }
   });
 
-  it('spawna o PRÓPRIO binário com -p/--yolo/--no-self-check e um goal mencionando Ollama', () => {
+  it('spawna o PRÓPRIO binário com -p/--yolo/--no-self-check/--anonymous e um goal mencionando Ollama', () => {
     const original = process.argv[1];
     process.argv[1] = '/caminho/pro/aluy.js';
     spawnSyncMock.mockReturnValue({ status: 0 });
@@ -69,7 +69,15 @@ describe('runUninstall --agent — delega a remoção do Ollama de SISTEMA ao ag
         expect.stringContaining('Ollama'),
         '--yolo',
         '--no-self-check',
+        // Este spawn é PLUMBING interno, não conversa do dono: sem `--anonymous` a
+        // sessão da própria DESINSTALAÇÃO ficava gravada e o `aluy` seguinte oferecia
+        // retomá-la — rastro novo criado justamente pelo comando de remover coisas.
+        '--anonymous',
       ]);
+      // Asserção SEPARADA e explícita: se alguém reordenar/reescrever o argv acima, a
+      // presença da flag continua provada por si — ela é requisito de comportamento,
+      // não detalhe posicional.
+      expect(argv).toContain('--anonymous');
       expect(opts.stdio).toBe('inherit');
       expect(opts.env.ALUY_NO_WEAK_YOLO_WARN).toBe('1');
       expect(out.join('\n')).toMatch(/Removendo o Ollama de sistema/);

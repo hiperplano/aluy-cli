@@ -187,6 +187,13 @@ export type CliAction =
       // o boot OFERECE retomar a conversa anterior do cwd (se houver uma recente).
       // `--new` é o opt-out explícito dessa oferta. Não persiste.
       fresh: boolean;
+      // `--anonymous` — sessão ANÔNIMA: não grava a transcrição em
+      // `~/.aluy/sessions/`, não usa os sidecars de DADOS (mem0/headroom — o ollama,
+      // provedor de MODELO local, segue normal) e não deixa memória (`remember`/
+      // `recall` ficam inertes, sem tocar `~/.aluy/memory/`). Incompatível com
+      // `--continue`/`--resume` (pedir retomada E anonimato ao mesmo tempo é
+      // contraditório) — a combinação vira `usage-error`. Não persiste.
+      anonymous: boolean;
       // EST-0969 · ADR-0057 — sub-agentes locais PARALELOS (tool `spawn_agent`).
       // LIGADO por padrão; `--no-subagents` desliga (mono-agente). Não persiste.
       subAgents: boolean;
@@ -354,6 +361,13 @@ Opções:
   --new           Começa do ZERO, ignorando a oferta de retomar a conversa anterior
                   deste diretório. Sem --new (nem --continue/--resume), ao reabrir o
                   aluy no mesmo diretório ele OFERECE retomar a sessão recente.
+  --anonymous     Sessão ANÔNIMA: não grava a transcrição em ~/.aluy/sessions/ (nada
+                  a retomar depois), não usa os sidecars de DADOS (mem0/headroom — o
+                  ollama, provedor de MODELO local, segue ligado normalmente) e não
+                  deixa memória (remember/recall ficam inertes, nada vai p/
+                  ~/.aluy/memory/). Incompatível com --continue/--resume (pedir
+                  retomada E anonimato ao mesmo tempo é contraditório) — recusa com
+                  erro. Não persiste.
   --backend <local|broker>
                   Backend de modelo. local (PADRÃO): o CLI fala com o seu provider
                   de LLM DIRETO, com a SUA credencial (BYO) — sem intermediário, sem
@@ -683,6 +697,7 @@ export function versionText(): string {
 const KNOWN_LONG_FLAGS: ReadonlySet<string> = new Set([
   'agent',
   'no-agent',
+  'anonymous',
   'ascii',
   'autocompact-at',
   'backend',
@@ -1236,6 +1251,22 @@ export function parseArgs(argv: readonly string[]): CliAction {
   // id de `--resume <id>` (preferindo `--resume=<id>` se vier nessa forma).
   const resumeEq = argv.find((a) => a.startsWith('--resume='));
   const hasResume = resumeIdx >= 0 || resumeEq !== undefined;
+
+  // `--anonymous` — sessão anônima (não grava sessão, não usa sidecars de DADOS, não
+  // deixa memória). Incompatível com `--continue`/`--resume`: RETOMAR por definição
+  // depende de uma sessão salva; ANÔNIMO por definição não grava nenhuma. Em vez de
+  // adivinhar qual das duas vence, recusamos CEDO (erro de uso, exit 2, sem sessão).
+  const anonymous = argv.includes('--anonymous');
+  if (anonymous && (hasContinue || hasResume)) {
+    return {
+      kind: 'usage-error',
+      message:
+        'aluy: --anonymous não combina com --continue/--resume (retomar precisa de ' +
+        'uma sessão salva; anônimo não grava nenhuma). Escolha um dos dois.',
+      exitCode: 2,
+    };
+  }
+
   let resumeId: string | undefined;
   if (resumeEq !== undefined) {
     resumeId = resumeEq.slice('--resume='.length);
@@ -1412,6 +1443,7 @@ export function parseArgs(argv: readonly string[]): CliAction {
     ...(unknownFlags.length > 0 ? { unknownFlags } : {}),
     dense,
     fresh,
+    anonymous,
     subAgents,
     safeGlyphs,
     telegram, // ADR-0154 — ativa a bridge Telegram no boot (dormente sem token).

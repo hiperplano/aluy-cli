@@ -462,6 +462,53 @@ describe('SessionStore — persistência de sessão (EST-0972)', () => {
   });
 });
 
+// ── `--anonymous` — `disabled:true` NÃO escreve NADA em disco ────────────────────
+describe('SessionStore — disabled (`--anonymous`, não grava sessão)', () => {
+  let base: string;
+  let aluyDir: string;
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'aluy-sess-anon-'));
+    aluyDir = join(base, 'home', '.aluy');
+  });
+
+  afterEach(() => rmSync(base, { recursive: true, force: true }));
+
+  it('save() devolve false e NÃO cria nem o diretório de sessões', () => {
+    const store = new SessionStore({ baseDir: aluyDir, disabled: true });
+    const ok = store.save({ id: 'anon-1', cwd: '/proj', tier: 't', blocks: [youHi, aluyHi] });
+    expect(ok).toBe(false);
+    // nem o `~/.aluy/sessions/` nasceu — a prova mais forte de "não escreve nada":
+    // se o diretório não existe, não há COMO um arquivo existir dentro dele.
+    expect(existsSync(store.sessionsDir)).toBe(false);
+    expect(existsSync(aluyDir)).toBe(false);
+  });
+
+  it('save() repetido segue no-op (nunca "esquece" de estar desligado)', () => {
+    const store = new SessionStore({ baseDir: aluyDir, disabled: true });
+    for (let i = 0; i < 5; i++) {
+      expect(
+        store.save({ id: `anon-${i}`, cwd: '/proj', tier: 't', blocks: [youHi] }),
+      ).toBe(false);
+    }
+    expect(existsSync(store.sessionsDir)).toBe(false);
+  });
+
+  it('gc() é no-op (não lança, não toca disco)', () => {
+    const store = new SessionStore({ baseDir: aluyDir, disabled: true });
+    expect(() => store.gc()).not.toThrow();
+    expect(existsSync(store.sessionsDir)).toBe(false);
+  });
+
+  it('não-regressão: SEM `disabled`, save() grava normalmente (o arquivo EXISTE)', () => {
+    const store = new SessionStore({ baseDir: aluyDir });
+    const ok = store.save({ id: 'real-1', cwd: '/proj', tier: 't', blocks: [youHi, aluyHi] });
+    expect(ok).toBe(true);
+    expect(existsSync(store.pathFor('real-1'))).toBe(true);
+    expect(readdirSync(store.sessionsDir)).toContain('real-1.json');
+  });
+});
+
 // ── HUNT-PERF: `save` não relê+parseia o record inteiro a cada chamada ───────────
 //
 // O auto-save dispara a cada state-change durante o stream (cada token/keystroke). O

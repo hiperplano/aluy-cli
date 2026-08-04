@@ -962,6 +962,93 @@ describe('textos', () => {
   });
 });
 
+// ─── `--anonymous` — sessão anônima (não grava sessão, sem sidecars de dados, sem
+// memória) ───────────────────────────────────────────────────────────────────────
+describe('`--anonymous`', () => {
+  it('sem a flag ⇒ anonymous:false (não-regressão)', () => {
+    const a = parseArgs([]);
+    expect(a.kind).toBe('launch');
+    if (a.kind === 'launch') expect(a.anonymous).toBe(false);
+  });
+
+  it('--anonymous ⇒ anonymous:true, sem virar objetivo posicional', () => {
+    const a = parseArgs(['--anonymous']);
+    expect(a.kind).toBe('launch');
+    if (a.kind === 'launch') {
+      expect(a.anonymous).toBe(true);
+      expect(a.goal).toBeUndefined();
+    }
+  });
+
+  it('--anonymous NÃO engole o objetivo posicional', () => {
+    const a = parseArgs(['--anonymous', 'rode os testes']);
+    if (a.kind === 'launch') {
+      expect(a.anonymous).toBe(true);
+      expect(a.goal).toBe('rode os testes');
+    }
+  });
+
+  it('--anonymous combina com outras flags (ex.: --yolo --dense) sem interferir', () => {
+    const a = parseArgs(['--anonymous', '--yolo', '--dense']);
+    if (a.kind === 'launch') {
+      expect(a.anonymous).toBe(true);
+      expect(a.mode).toBe('unsafe');
+      expect(a.dense).toBe(true);
+    }
+  });
+
+  // Decisão: --anonymous × --continue/--resume é CONTRADITÓRIO (retomar exige uma
+  // sessão salva; anônimo não grava nenhuma) — recusa CEDO com usage-error, em vez
+  // de adivinhar qual das duas vence.
+  it('--anonymous --continue ⇒ usage-error (exit 2), NÃO monta sessão', () => {
+    const a = parseArgs(['--anonymous', '--continue']);
+    expect(a.kind).toBe('usage-error');
+    if (a.kind === 'usage-error') {
+      expect(a.exitCode).toBe(2);
+      expect(a.message).toMatch(/--anonymous/);
+      expect(a.message).toMatch(/--continue|--resume/);
+    }
+  });
+
+  it('--continue --anonymous (ordem invertida) ⇒ mesmo usage-error', () => {
+    const a = parseArgs(['--continue', '--anonymous']);
+    expect(a.kind).toBe('usage-error');
+  });
+
+  it('--anonymous --resume ⇒ usage-error (exit 2)', () => {
+    const a = parseArgs(['--anonymous', '--resume']);
+    expect(a.kind).toBe('usage-error');
+    if (a.kind === 'usage-error') expect(a.exitCode).toBe(2);
+  });
+
+  it('--anonymous --resume <id> ⇒ usage-error (exit 2)', () => {
+    const a = parseArgs(['--anonymous', '--resume', 'sess-1']);
+    expect(a.kind).toBe('usage-error');
+  });
+
+  it('--anonymous --new (opt-out de retomada) NÃO é contraditório — combina normal', () => {
+    const a = parseArgs(['--anonymous', '--new']);
+    if (a.kind === 'launch') {
+      expect(a.anonymous).toBe(true);
+      expect(a.fresh).toBe(true);
+    }
+  });
+
+  it('flag desconhecida `--anonimo` (typo em pt-BR) NÃO é confundida com --anonymous', () => {
+    const a = parseArgs(['--anonimo']);
+    if (a.kind === 'launch') {
+      expect(a.unknownFlags).toBeDefined();
+      expect(a.unknownFlags).toContain('--anonimo');
+    }
+  });
+
+  it('HELP_TEXT documenta --anonymous (sessão, sidecars de dados, memória)', () => {
+    expect(HELP_TEXT).toContain('--anonymous');
+    expect(HELP_TEXT).toMatch(/mem0|headroom/);
+    expect(HELP_TEXT).toMatch(/mem[óo]ria/i);
+  });
+});
+
 describe('F180 (OBS-1) — objetivo que é comando de SESSÃO vira usage-error (não turno do modelo)', () => {
   it('`aluy add-dir /x` (comando de sessão) ⇒ usage-error exit 2, com hint p/ /add-dir', () => {
     const a = parseArgs(['add-dir', '/x']);

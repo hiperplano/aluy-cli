@@ -1224,24 +1224,32 @@ async function defaultAgentInstaller(
   process.stdout.write(
     `  ── Instalando o ${seq} ──${queue}\n  (acompanhe abaixo; pode levar alguns minutos)\n\n`,
   );
-  const run = spawnSync(process.execPath, [aluyScript, '-p', goal, '--yolo', '--no-self-check'], {
-    stdio: 'inherit',
-    timeout: 900_000,
-    // Ambiente de saída LIMPA para o agente interno:
-    //  • ALUY_OVERWRITE_RENDER=0 / ALUY_SYNC_OUTPUT=0 — desligam o redesenho
-    //    "overwrite-in-place"; sem isso o agente reescreve por cima das linhas do
-    //    bootstrap e tudo embaralha ("coisas em cima de coisas"). Append-only é legível.
-    //  • ALUY_NO_WEAK_YOLO_WARN=1 — silencia o aviso de modo-autônomo NESTE agente
-    //    interno (a tarefa é nossa e confiável; o aviso é só ruído durante o install).
-    env: {
-      ...process.env,
-      ALUY_OVERWRITE_RENDER: '0',
-      ALUY_SYNC_OUTPUT: '0',
-      ALUY_NO_WEAK_YOLO_WARN: '1',
-      // O dono quer ACOMPANHAR: progresso VERBOSO (comando + saída de cada tool) no stderr.
-      ALUY_PRINT_VERBOSE: '1',
+  // `--anonymous` — este é PLUMBING interno da instalação (headroom/mem0/ollama),
+  // não uma conversa do dono. Sem isto, o install virava uma sessão persistida em
+  // `~/.aluy/sessions/` que o boot da PRÓXIMA sessão real do dono, no mesmo cwd,
+  // oferecia como "retomar a conversa anterior" — achado do dono no dogfooding.
+  const run = spawnSync(
+    process.execPath,
+    [aluyScript, '-p', goal, '--yolo', '--no-self-check', '--anonymous'],
+    {
+      stdio: 'inherit',
+      timeout: 900_000,
+      // Ambiente de saída LIMPA para o agente interno:
+      //  • ALUY_OVERWRITE_RENDER=0 / ALUY_SYNC_OUTPUT=0 — desligam o redesenho
+      //    "overwrite-in-place"; sem isso o agente reescreve por cima das linhas do
+      //    bootstrap e tudo embaralha ("coisas em cima de coisas"). Append-only é legível.
+      //  • ALUY_NO_WEAK_YOLO_WARN=1 — silencia o aviso de modo-autônomo NESTE agente
+      //    interno (a tarefa é nossa e confiável; o aviso é só ruído durante o install).
+      env: {
+        ...process.env,
+        ALUY_OVERWRITE_RENDER: '0',
+        ALUY_SYNC_OUTPUT: '0',
+        ALUY_NO_WEAK_YOLO_WARN: '1',
+        // O dono quer ACOMPANHAR: progresso VERBOSO (comando + saída de cada tool) no stderr.
+        ALUY_PRINT_VERBOSE: '1',
+      },
     },
-  });
+  );
   // mem0: o caminho via agente NÃO copia o script do servidor (só o nativo copia).
   // Garantimos aqui. SOBRESCREVE SEMPRE (não só quando ausente): o script é nosso asset e
   // tem que bater com a versão do CLI — ACHADO DO DONO: ao atualizar o aluy com o venv já

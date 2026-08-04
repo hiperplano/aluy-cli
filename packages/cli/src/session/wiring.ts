@@ -102,6 +102,7 @@ import { resolveMaestro, resolveContinuationCfg, resolveMemory } from '../maestr
 // espelha no estado p/ a StatusBar. `resolveSidecarToggles` é a MESMA função que o
 // `resolveMaestro` usa — os "ligados" do indicador não podem divergir do que subiu.
 import { SidecarUsageMeter, resolveSidecarToggles } from '@hiperplano/aluy-cli-core';
+import type { MemoryStorePort } from '@hiperplano/aluy-cli-core';
 import type {
   UserServicesConfig,
   UserLimitsConfig,
@@ -120,6 +121,17 @@ export const DEFAULT_EXEC_TIMEOUT_MS = 120_000;
 
 export interface BuildSessionOptions {
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * `--anonymous` — sessão ANÔNIMA (não deixa rastro): a memória de agente
+   * (`remember`/`recall`, EST-0983) fica INERTE (nunca lê nem grava
+   * `~/.aluy/memory/`/`<workspace>/.aluy/memory/` — troca o `NodeMemoryStore`
+   * disk-backed por um store em memória que não persiste nada). A sessão/journal e
+   * os sidecars de dados (mem0/headroom) são desligados em NÍVEIS ACIMA (run.tsx/
+   * bin/aluy.ts — SessionStore.disabled + ALUY_MEM_OFF/ALUY_HEADROOM_OFF); este
+   * campo só cobre a memória NATIVA, que não tem kill-switch de env próprio.
+   * `undefined`/`false` ⇒ zero mudança (não-regressão).
+   */
+  readonly anonymous?: boolean;
   /**
    * Seção `services` do config único (ADR-0150 §8/§9): porta/host dos sidecars.
    * Resolvido em run.tsx (savedConfig.services) e repassado ao Maestro/Memória, p/ o
@@ -578,6 +590,34 @@ export interface BuiltSession {
 }
 
 /**
+ * `--anonymous` — `MemoryStorePort` EM MEMÓRIA (RAM do processo), nunca toca disco.
+ * `remember`/`recall`/`/memory` continuam funcionando NORMALMENTE dentro da sessão
+ * (o modelo/usuário não veem erro) — só que o conteúdo some com o processo, nunca
+ * chega em `~/.aluy/memory/` nem `<workspace>/.aluy/memory/`. Uma instância NOVA por
+ * sessão (fechada sobre um array local) — nunca compartilhada entre sessões.
+ */
+function createInertMemoryStore(): MemoryStorePort {
+  let facts: Parameters<MemoryStorePort['append']>[0][] = [];
+  return {
+    async readAll() {
+      return facts;
+    },
+    async append(fact) {
+      facts = [...facts, fact];
+    },
+    async remove(id) {
+      facts = facts.filter((f) => f.id !== id);
+    },
+    async update(fact) {
+      facts = facts.map((f) => (f.id === fact.id ? fact : f));
+    },
+    async clearAll(scope) {
+      facts = scope === undefined ? [] : facts.filter((f) => f.scope !== scope);
+    },
+  };
+}
+
+/**
  * Monta a sessão completa. Não faz I/O de rede ainda — só fia os objetos. A 1ª
  * chamada de modelo (no submit) é que aciona o broker (e o login, se preciso).
  */
@@ -737,14 +777,22 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // p/ `<serviceDir>/.state/memory/` — o NAMESPACE do serviço (nunca mistura com a
   // memória do dono nem de outro serviço). `opts.memoryBaseDir` explícito (teste)
   // sempre vence.
-  const memoryStore = new NodeMemoryStore({
-    workspace,
-    ...(opts.memoryBaseDir !== undefined
-      ? { baseDir: opts.memoryBaseDir }
-      : serviceScopeDir !== undefined
-        ? { baseDir: join(serviceScopeDir, '.state', 'memory') }
-        : {}),
-  });
+  //
+  // `--anonymous` — a memória fica INERTE: em vez do `NodeMemoryStore` (disco), um
+  // store em MEMÓRIA (RAM do processo) que nunca lê nem grava `~/.aluy/memory/`. O
+  // `remember`/`recall` continuam respondendo normalmente DENTRO da sessão (o modelo
+  // não vê erro) — só não sobra NADA no disco quando o processo termina.
+  const memoryStore: MemoryStorePort =
+    opts.anonymous === true
+      ? createInertMemoryStore()
+      : new NodeMemoryStore({
+          workspace,
+          ...(opts.memoryBaseDir !== undefined
+            ? { baseDir: opts.memoryBaseDir }
+            : serviceScopeDir !== undefined
+              ? { baseDir: join(serviceScopeDir, '.state', 'memory') }
+              : {}),
+        });
   const memory = new AgentMemory({ store: memoryStore });
 
   // EST-1108 — store concreto do backlog/TODO: `~/.aluy/todos.json` (0600 atômico,

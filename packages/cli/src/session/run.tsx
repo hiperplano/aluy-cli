@@ -306,6 +306,17 @@ export interface RunSessionOptions extends BuildSessionOptions {
    */
   readonly fresh?: boolean;
   /**
+   * `--anonymous` — sessão ANÔNIMA (não deixa rastro): a transcrição NÃO é gravada
+   * em `~/.aluy/sessions/` (o `SessionStore` nasce `disabled`), os sidecars de DADOS
+   * (mem0/headroom) não são consultados (kill-switches `ALUY_MEM_OFF`/
+   * `ALUY_HEADROOM_OFF`) e a memória de agente fica inerte (wiring.ts troca o store
+   * disco por um em RAM). Também implica `fresh` (a auto-oferta de retomar a sessão
+   * anterior do cwd é pulada — uma sessão anônima começa sempre do zero, nunca
+   * mistura conteúdo de uma conversa REAL anterior). `--continue`/`--resume` juntos
+   * já viraram `usage-error` no parser (cli.ts) — não chegam aqui.
+   */
+  readonly anonymous?: boolean;
+  /**
    * EST-0972 (BUG 2) — prompt de SIM/NÃO do boot (auto-oferta de retomada). Injetável
    * p/ teste (sem TTY real). Recebe a linha do prompt; resolve `true` (retomar) /
    * `false` (sessão nova). Default: lê uma linha do stdin (Enter/`s` ⇒ sim).
@@ -474,6 +485,16 @@ export function preflightCycleCeiling(
  */
 export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const env = opts.env ?? process.env;
+  // `--anonymous` — DESLIGA os sidecars de DADOS (mem0/headroom) pelos kill-switches
+  // JÁ EXISTENTES (`ALUY_MEM_OFF`/`ALUY_HEADROOM_OFF`), ANTES de qualquer resolução
+  // downstream os consultar (`resolveHeadroomUrl` abaixo, `resolveMemory`/
+  // `resolveMaestro` no wiring — ambos leem este MESMO objeto `env`). O ollama
+  // (provedor de MODELO local) NÃO é tocado aqui — desligá-lo mataria a sessão local
+  // em vez de a tornar anônima. Ausente/`false` ⇒ zero mudança (não-regressão).
+  if (opts.anonymous === true) {
+    env.ALUY_MEM_OFF = '1';
+    env.ALUY_HEADROOM_OFF = '1';
+  }
   // ADR-0158 §2/§5 (fase 2) — WIRING ESCOPADO do runner de SERVIÇO: quando o processo
   // do serviço (`packages/cli/src/service/runner.ts`) spawna um turno headless via
   // `aluy -p`, ele seta esta env var (INTERNA — não é flag pública) para o diretório
@@ -639,9 +660,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // `<serviceDir>/.state/sessions/` (não mistura com `~/.aluy/sessions/` do dono).
   const sessionStore =
     opts.sessionStore ??
-    new SessionStore(
-      serviceScopeDir !== undefined ? { baseDir: join(serviceScopeDir, '.state') } : {},
-    );
+    new SessionStore({
+      ...(serviceScopeDir !== undefined ? { baseDir: join(serviceScopeDir, '.state') } : {}),
+      // `--anonymous` — `save()`/`gc()` viram no-op: nenhum arquivo de sessão nasce
+      // em `~/.aluy/sessions/` (nem o diretório, se ainda não existia).
+      ...(opts.anonymous === true ? { disabled: true } : {}),
+    });
   // best-effort: limpa sessões antigas/excedentes (unlink real). Não derruba nada.
   // ADR-0150 (balde b) — `session.gcMaxAgeMs`/`gcMaxCount` do config único, com a
   // sanidade MÍNIMA aplicada por `resolveSessionGcOptions` (idade ≥1 dia, contagem ≥1).
@@ -666,7 +690,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // (sanitizeBlocks já descarta streaming/running) — idêntico ao `--continue`.
   const resumed: ResumeResolution = await decideBootResume({
     request: opts.resume,
-    fresh: opts.fresh === true,
+    // `--anonymous` implica `fresh`: uma sessão anônima nunca mistura conteúdo de
+    // uma conversa REAL anterior (a auto-oferta de retomada é pulada, como `--new`).
+    fresh: opts.fresh === true || opts.anonymous === true,
     isTty,
     store: sessionStore,
     cwd: cwdAbs,
@@ -1873,6 +1899,15 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // inação) em vez de pendurar o processo esperando a tecla impossível. Liga junto.
     built.controller.setNonInteractive(true);
 
+    // `--anonymous` — indicação SIMPLES no STDERR (headless/não-TTY não tem UI de
+    // nota — o stdout tem de ficar LIMPO p/ script, EST-1007). Mesmo padrão do banner
+    // de YOLO/`--unsafe` em bin/aluy.ts: um aviso curto, uma vez, ANTES do turno.
+    if (opts.anonymous === true) {
+      process.stderr.write(
+        'aluy: modo anônimo — esta sessão não é gravada (sem histórico, sem memória, sem sidecars de dados).\n',
+      );
+    }
+
     // EST-1007 (HANG) — o modo NÃO-TTY (headless `-p` E posicional piped) tem MUITOS
     // pontos de `return` (slash-commands literais, one-shot, runLinear). Se algum sair
     // sem fechar o MCP, os processos-server stdio (`~/.aluy/mcp.json`: npx everything/
@@ -2355,6 +2390,15 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // o eco em texto já saiu acima).
   if (yoloCancelled && useSplash) {
     built.controller.pushNote('yolo', ['YOLO cancelado — seguindo em modo normal.']);
+  }
+
+  // `--anonymous` — indicação SIMPLES de que a sessão está anônima (o usuário precisa
+  // ver isto, não só saber que passou a flag): uma nota de boot, mesmo chrome das
+  // demais notas de boot acima/abaixo.
+  if (opts.anonymous === true) {
+    built.controller.pushNote('anonymous', [
+      'modo anônimo — esta sessão não é gravada (sem histórico, sem memória, sem sidecars de dados).',
+    ]);
   }
 
   // EST-0979 — INDICADOR DISCRETO de quais FONTES de config carregaram (instruções

@@ -504,7 +504,9 @@ async function main(): Promise<void> {
       // termina e SAI — subir daemons que ele não vai usar só (a) gera ruído ("3/3
       // prontos") na saída do install e (b) deixa processos-filho que PENDURAM o `node`
       // ("trava no final"). A sessão INTERATIVA é que sobe os sidecars, ao abrir.
-      if (!action.print) triggerBoot();
+      // `--anonymous` — os sidecars de DADOS (mem0/headroom) não sobem; o ollama
+      // (provedor de modelo local) segue o config normal (ver boot-trigger.ts).
+      if (!action.print) triggerBoot({ dataSidecarsOff: action.anonymous === true });
 
       // PROCESSO FINAL (pós-re-exec OU sem re-exec): emite o banner de aviso + audita o ALLOW
       // do YOLO UMA vez. Fica DEPOIS do `ensureHeapLimit` de propósito: se o pai vai re-exec,
@@ -647,6 +649,9 @@ async function main(): Promise<void> {
         ...(action.resume !== undefined ? { resume: action.resume } : {}),
         // EST-0972 (BUG 2) — `--new`: ignora a auto-oferta de retomar a sessão do cwd.
         fresh: action.fresh,
+        // `--anonymous` — sessão anônima: sem arquivo de sessão, sem sidecars de
+        // dados, sem memória (ver run.tsx/wiring.ts). `false` ⇒ zero mudança.
+        anonymous: action.anonymous,
         // EST-0948 — teto de tokens da sessão (`--max-tokens N`); o wiring resolve
         // flag>env>default e clampa. Sem a flag, cai no env/default.
         ...(action.maxTokens !== undefined ? { maxTokens: action.maxTokens } : {}),
