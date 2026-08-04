@@ -47,7 +47,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { resolve, sep } from 'node:path';
 import {
   nextCronFire,
   parseServiceBudget,
@@ -919,7 +919,16 @@ async function runOneWorkflow(args: {
     log('sem "workflow:" declarado — nada a executar neste turno.');
     return { kind: 'ok', summary: 'sem workflow declarado (no-op).' };
   }
-  const wfPath = join(serviceDir, 'workflows', `${workflowName}.md`);
+  // Confinamento do `workflow:` — 3ª camada (parser recusa a FORMA; o registry recusa
+  // o caminho resolvido; aqui o RUNNER reconfere antes de LER). Redundante de
+  // propósito: o runner é o único que de fato executa o conteúdo, e um manifesto pode
+  // ter sido editado no disco DEPOIS de validado (o runner relê a cada despertar).
+  const wfRoot = resolve(serviceDir, 'workflows');
+  const wfPath = resolve(wfRoot, `${workflowName}.md`);
+  if (wfPath !== wfRoot && !wfPath.startsWith(wfRoot + sep)) {
+    log(`FATAL do turno: "workflow: ${workflowName}" aponta para fora de workflows/ — recusado.`);
+    return { kind: 'stopped', critical: true, summary: 'workflow fora do diretório do serviço.' };
+  }
   if (!existsSync(wfPath)) {
     log(`FATAL do turno: workflows/${workflowName}.md não encontrado.`);
     return { kind: 'stopped', critical: true, summary: `workflow "${workflowName}" não encontrado.` };

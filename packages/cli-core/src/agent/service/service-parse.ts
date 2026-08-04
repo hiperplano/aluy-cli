@@ -290,6 +290,33 @@ function parseTunableCandidate(key: string, rawValue: string): ServiceTunable | 
 }
 
 /**
+ * `workflow:` vira CAMINHO (`<serviceDir>/workflows/<valor>.md`) no locus concreto.
+ * Sem validar a FORMA, um `service.md` podia apontar para FORA do diretório do
+ * serviço — `workflow: ../../../../etc/passwd` resolve para fora da árvore. Pior que
+ * o acesso em si: o "manifesto visível" mostrado ANTES do `install` exibe só o valor
+ * declarado, então dava para esconder da revisão do dono qual arquivo de fato roda.
+ *
+ * SUBPASTA É PERMITIDA de propósito (`intraday/turno` ⇒ `workflows/intraday/turno.md`)
+ * — organizar workflows em pastas é legítimo. O que se recusa é ESCAPAR: segmento
+ * `..`, caminho absoluto, barra invertida (traversal no Windows) e byte nulo.
+ *
+ * Validação de FORMA, pura — a contenção REAL (resolver o caminho e conferir que caiu
+ * dentro da árvore do serviço) é do locus concreto, que tem `node:path`. As duas
+ * camadas existem de propósito: esta recusa o manifesto ANTES de virar caminho; a
+ * outra é a rede se alguma forma nova escapar desta. PURA.
+ */
+export function isSafeWorkflowRef(raw: string): boolean {
+  const v = raw.trim();
+  if (v === '') return false;
+  if (v.includes('\0')) return false;
+  if (v.includes('\\')) return false; // separador do Windows — nunca legítimo aqui.
+  if (v.startsWith('/')) return false; // absoluto.
+  if (/^[A-Za-z]:/.test(v)) return false; // "C:" — absoluto no Windows.
+  // Qualquer segmento `..` escapa, esteja onde estiver ("a/../../b" também sobe).
+  return !v.split('/').includes('..');
+}
+
+/**
  * Parseia o conteúdo cru de um `service.md` num `ServiceManifest` OU num
  * `ServiceManifestError` (RES-MD-3, fail-closed).
  *
@@ -347,6 +374,18 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
       kind: 'error',
       file,
       reason: `serviço "${name}" (${file}): "until: ${fm.until}" — formato esperado "HH:MM".`,
+    };
+  }
+
+  // `workflow:` — recusa FORMA que escapa do diretório do serviço (ver `isSafeWorkflowRef`).
+  if (fm.workflow !== undefined && fm.workflow.trim() !== '' && !isSafeWorkflowRef(fm.workflow)) {
+    return {
+      kind: 'error',
+      file,
+      reason:
+        `serviço "${name}" (${file}): "workflow: ${fm.workflow}" — o workflow precisa ficar ` +
+        `DENTRO de workflows/ do próprio serviço (subpasta é permitida; ".." e caminho ` +
+        `absoluto, não).`,
     };
   }
 
