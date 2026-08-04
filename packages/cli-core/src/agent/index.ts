@@ -414,6 +414,7 @@ export {
 export {
   parseServiceManifest,
   isServiceManifestError,
+  isSafeWorkflowRef,
   normalizeServiceName,
   type ServiceManifest,
   type ServiceManifestError,

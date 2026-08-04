@@ -21,7 +21,7 @@
 // que USA este registry para validar ANTES de ativar, ADR-0158 §9/§10).
 
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { readdirSync, readFileSync, mkdirSync, statSync, existsSync, type Dirent } from 'node:fs';
 import {
   parseServiceManifest,
@@ -209,7 +209,24 @@ export class UserServicesStore {
     }
 
     if (parsed.workflow !== undefined) {
-      const wfPath = join(dir, 'workflows', `${parsed.workflow}.md`);
+      // 2ª CAMADA de confinamento do `workflow:` (a 1ª é a forma, recusada já no parser
+      // por `isSafeWorkflowRef`). Aqui resolvemos de verdade e conferimos que o caminho
+      // caiu DENTRO de `workflows/` do serviço — rede para qualquer forma de escape que
+      // a validação textual não tenha previsto (symlink, normalização de plataforma).
+      // Recusa vira "não encontrado": não confirmamos ao chamador que o alvo existe
+      // fora da árvore.
+      const wfRoot = resolve(dir, 'workflows');
+      const wfPath = resolve(wfRoot, `${parsed.workflow}.md`);
+      if (wfPath !== wfRoot && !wfPath.startsWith(wfRoot + sep)) {
+        return {
+          kind: 'error',
+          error: {
+            dirName,
+            reason:
+              `"workflow: ${parsed.workflow}" aponta para fora de workflows/ do serviço — recusado.`,
+          },
+        };
+      }
       let wfExists = false;
       try {
         wfExists = statSync(wfPath).isFile();
