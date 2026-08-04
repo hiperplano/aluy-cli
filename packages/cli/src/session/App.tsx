@@ -68,6 +68,7 @@ import { useModelPicker } from '../ui/hooks/useModelPicker.js';
 import {
   useLocalModelPicker,
   type LocalModelCatalogPort,
+  type RemoteModelNamesFetcher,
 } from '../ui/hooks/useLocalModelPicker.js';
 import { useEffortPicker } from '../ui/hooks/useEffortPicker.js';
 import {
@@ -257,6 +258,15 @@ export interface AppProps {
    * Ausente ⇒ `/model` sem argumento cai na nota antiga (comportamento preservado).
    */
   readonly localModelCatalog?: LocalModelCatalogPort;
+  /**
+   * F-MODEL-LIVE — busca AO VIVO os slugs que o provider LOCAL ativo anuncia
+   * (`GET {baseUrl}/models`, fetch PINADO anti-SSRF — `run.tsx`). Alimenta o MESMO
+   * `<LocalModelPicker>` acima, agora com a lista DINÂMICA em vez de só o catálogo
+   * DECLARADO ∪ sessão (`localModelCatalog`) — pro `openrouter`, por exemplo, a
+   * diferença é 5 slugs curados vs. as centenas que o provider de fato expõe. Ausente
+   * ⇒ o picker fica só no catálogo declarado (comportamento de sempre, sem regressão).
+   */
+  readonly localRemoteModelNames?: RemoteModelNamesFetcher;
   /**
    * F161-FIX — slug do modelo LOCAL ativo no BOOT (p/ o `<LocalModelPicker>` marcar o
    * ● antes de qualquer `/model` nesta sessão). O valor LIVE pós-`/model` vem de
@@ -947,6 +957,9 @@ export function App(props: AppProps): React.ReactElement {
     (state.meta.model ?? '') !== '' ? state.meta.model : props.currentLocalModel;
   const localModelPicker = useLocalModelPicker({
     ...(props.localModelCatalog !== undefined ? { catalog: props.localModelCatalog } : {}),
+    ...(props.localRemoteModelNames !== undefined
+      ? { remoteNames: props.localRemoteModelNames }
+      : {}),
     ...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {}),
   });
 
@@ -4286,6 +4299,8 @@ export function App(props: AppProps): React.ReactElement {
             selected={localModelPicker.selected}
             query={localModelPicker.query}
             columns={columns}
+            loading={localModelPicker.loading}
+            usingFallback={localModelPicker.usingFallback}
             {...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {})}
           />
         </Box>
@@ -4948,6 +4963,8 @@ export function App(props: AppProps): React.ReactElement {
             selected={localModelPicker.selected}
             query={localModelPicker.query}
             columns={columns}
+            loading={localModelPicker.loading}
+            usingFallback={localModelPicker.usingFallback}
             {...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {})}
           />
         </Box>

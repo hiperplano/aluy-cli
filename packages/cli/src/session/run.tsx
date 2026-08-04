@@ -52,7 +52,11 @@ import { createOAuthAccessTokenProvider } from '../model/local/oauth-store.js';
 import { createVerifyAndRegisterLocalModelPort } from '../model/local/test-then-register.js';
 // F-WIN (descoberta) — porta que PERGUNTA a janela de contexto ao próprio provider BYO
 // (`GET {baseUrl}/models`), p/ o usuário nunca precisar digitar o número à mão.
-import { createProviderAwareDiscoverContextWindowPort } from '../model/local/context-window-discovery.js';
+import {
+  createProviderAwareDiscoverContextWindowPort,
+  createProviderAwareListModelNamesPort,
+  type ProviderDiscoveryDeps,
+} from '../model/local/context-window-discovery.js';
 import { createPinnedStreamFetch } from '../model/local/pinned-stream-fetch.js';
 import { createLocalCredentialProvider } from '../model/local/credential-resolver.js';
 import { setupMcp, ProjectMcpConfigStore, CodexMcpConfigStore } from '../mcp/index.js';
@@ -1109,6 +1113,15 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   let discoverContextWindow:
     | ((slug: string) => Promise<{ readonly window: number; readonly persisted: boolean }>)
     | undefined;
+  // F-MODEL-LIVE — porta que busca AO VIVO os slugs do provider ATIVO
+  // (`GET {baseUrl}/models`) p/ o `<LocalModelPicker>` (`/model` sob backend LOCAL)
+  // deixar de listar só o catálogo ESTÁTICO. Hoistada pela MESMA razão das portas
+  // acima (nasce dentro do bloco `backend local`, é usada DEPOIS do `buildSession`);
+  // ausente sob broker/teste com `brokerClient` injetado ⇒ o picker cai no catálogo
+  // declarado ∪ sessão de sempre (não-regressão).
+  let listRemoteModelNames:
+    | (() => Promise<{ readonly names: readonly string[]; readonly ok: boolean }>)
+    | undefined;
   // F-PROV — porta que TROCA DE VERDADE o provider ATIVO local (`/provider`, fix do
   // no-op silencioso — ver o comentário completo mais abaixo, junto da implementação).
   // Hoistada pela MESMA razão das portas acima: nasce dentro do bloco `backend local`,
@@ -1337,38 +1350,63 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // OpenAI não obriga `context_length` no `/models`; provider que não informa, 401 ou
     // timeout ⇒ simplesmente não descobrimos e tudo segue como hoje) — nunca fail-closed
     // aqui: é enfeite de status bar, não um caminho que arrisca credencial/endpoint.
+    // F-MODEL-LIVE — resolução das peças concretas (wireFormat/baseUrl/credencial) de UM
+    // provider, HOISTADA p/ uma FUNÇÃO NOMEADA em vez de inline: além do
+    // `discoverContextWindow` (que já usava esta resolução), a lista VIVA de nomes do
+    // `<LocalModelPicker>` (`listRemoteModelNames`, abaixo) precisa EXATAMENTE das
+    // mesmas peças — mesma disciplina (provider do BOOT usa `localCfg`/credencial já
+    // resolvida; um provider trocado depois via `/provider` usa os defaults do catálogo
+    // ATIVO) — reusar a MESMA função evita duplicar a resolução (e o risco de ela
+    // divergir entre as duas portas).
+    const depsForProvider = (providerId: string): ProviderDiscoveryDeps => {
+      const isBootProvider = providerId === localCfg.provider;
+      const entry = findProvider(activeLocalCatalog, providerId);
+      const auth = isBootProvider ? localCfg.auth : defaultAuthFor(providerId, activeLocalCatalog);
+      const getCredential = isBootProvider
+        ? getCredentialForTest
+        : createLocalCredentialProvider({
+            provider: providerId,
+            auth,
+            env,
+            ...(auth === 'oauth'
+              ? { oauthAccessToken: createOAuthAccessTokenProvider(providerId) }
+              : {}),
+          });
+      return {
+        wireFormat: entry?.wireFormat ?? 'openai-compat',
+        baseUrl: (isBootProvider ? localCfg.baseUrl : undefined) ?? entry?.baseUrl ?? '',
+        fetchImpl: createPinnedStreamFetch({}),
+        getKey: async () => {
+          const cred = await getCredential();
+          return cred.secret;
+        },
+        // Append IDEMPOTENTE em `providers[<id>].contextByModel` — é o "descobre uma
+        // vez, nunca mais": da 2ª sessão em diante o número já está no config e o
+        // `modelWindowFromConfig` o acha ANTES de qualquer rede. `false` (provider
+        // built-in sem entrada em `providers[]`) ⇒ vale só p/ esta sessão, sem erro.
+        persistContextWindow: (slug, tokens) =>
+          configStore.registerModelContextWindow(providerId, slug, tokens),
+      };
+    };
     discoverContextWindow = createProviderAwareDiscoverContextWindowPort({
       getActiveProviderId: () => activeLocalProviderId,
-      depsForProvider: (providerId) => {
-        const isBootProvider = providerId === localCfg.provider;
-        const entry = findProvider(activeLocalCatalog, providerId);
-        const auth = isBootProvider ? localCfg.auth : defaultAuthFor(providerId, activeLocalCatalog);
-        const getCredential = isBootProvider
-          ? getCredentialForTest
-          : createLocalCredentialProvider({
-              provider: providerId,
-              auth,
-              env,
-              ...(auth === 'oauth'
-                ? { oauthAccessToken: createOAuthAccessTokenProvider(providerId) }
-                : {}),
-            });
-        return {
-          wireFormat: entry?.wireFormat ?? 'openai-compat',
-          baseUrl: (isBootProvider ? localCfg.baseUrl : undefined) ?? entry?.baseUrl ?? '',
-          fetchImpl: createPinnedStreamFetch({}),
-          getKey: async () => {
-            const cred = await getCredential();
-            return cred.secret;
-          },
-          // Append IDEMPOTENTE em `providers[<id>].contextByModel` — é o "descobre uma
-          // vez, nunca mais": da 2ª sessão em diante o número já está no config e o
-          // `modelWindowFromConfig` o acha ANTES de qualquer rede. `false` (provider
-          // built-in sem entrada em `providers[]`) ⇒ vale só p/ esta sessão, sem erro.
-          persistContextWindow: (slug, tokens) =>
-            configStore.registerModelContextWindow(providerId, slug, tokens),
-        };
-      },
+      depsForProvider,
+    });
+
+    // F-MODEL-LIVE — porta `listRemoteModelNames()`: busca AO VIVO os slugs que o
+    // provider ATIVO anuncia (`GET {baseUrl}/models`, MESMO fetch PINADO/teto/timeout
+    // do `discoverContextWindow` — via `depsForProvider` acima, nenhum 2º caminho de
+    // rede). Fecha o gap DE VERDADE da rc.117: a lista do `<LocalModelPicker>` deixa de
+    // ser os 5 slugs ESTÁTICOS do catálogo embutido (`openrouter`, por exemplo) e passa
+    // a ser o que o provider de fato tem — para o `openrouter` são CENTENAS, e é onde o
+    // modelo que o dono realmente usa (fora dos 5 curados) mora. A UNIÃO com o catálogo
+    // DECLARADO/sessão/modelo ATIVO (p/ o ativo aparecer MESMO que `/models` não o
+    // liste) é do `useLocalModelPicker` (App/run.tsx só entrega a lista crua + `ok`).
+    // FAIL-OPEN: provider fora do ar/401/sem `/models` ⇒ `ok:false`, a UI cai no
+    // catálogo declarado e AVISA (nunca lista vazia silenciosa).
+    listRemoteModelNames = createProviderAwareListModelNamesPort({
+      getActiveProviderId: () => activeLocalProviderId,
+      depsForProvider,
     });
 
     // F-PROV — porta `switchLocalProvider(name)`: TROCA DE VERDADE o provider ATIVO
@@ -3847,6 +3885,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         // resolvido no BOOT (`localCfg.model`) — marca o ● antes de qualquer `/model`.
         {...(localModelCatalogPort !== undefined
           ? { localModelCatalog: localModelCatalogPort }
+          : {})}
+        // F-MODEL-LIVE — lista VIVA do provider ativo (`GET /models`) p/ o
+        // `<LocalModelPicker>` deixar de ser só o catálogo estático. Ausente sob
+        // broker/teste com `brokerClient` injetado (não-regressão).
+        {...(listRemoteModelNames !== undefined
+          ? { localRemoteModelNames: listRemoteModelNames }
           : {})}
         {...(localModelForWindow !== undefined ? { currentLocalModel: localModelForWindow } : {})}
         providersClient={built.providersClient}

@@ -206,6 +206,12 @@ export interface Catalog {
   'picker.localModel.empty': string; // params: {query}
   /** Cauda "… N modelos a mais (refine o filtro)". params: {count} */
   'picker.localModel.more': string; // params: {count}
+  /** F-MODEL-LIVE — busca ao vivo no provider ainda em voo. */
+  'picker.localModel.loading': string;
+  /** F-MODEL-LIVE — a busca ao vivo falhou; lista é só o catálogo conhecido. */
+  'picker.localModel.fallback': string;
+  /** F-MODEL-CUSTOM — dica sempre visível de que dá p/ digitar um slug fora da lista. */
+  'picker.localModel.customHint': string;
 
   // ── HistoryPicker (/history · EST-0972) ───────────────────────────────────
   /** Linha de ajuda no topo do seletor de sessões. */
