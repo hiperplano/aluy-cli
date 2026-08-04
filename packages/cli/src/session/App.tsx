@@ -1430,6 +1430,23 @@ export function App(props: AppProps): React.ReactElement {
   //       alimentando a bomba do `fullStaticOutput` acima.
   const lastForcedRepaintAtRef = useRef<number>(0);
   const RESIZE_REPAINT_COOLDOWN_MS = 500;
+  // RESIZE-CONGELA (dogfooding real: "se tiver rodando algo e eu redimensiono, às vezes
+  // ele para de atualizar e a tela fica congelada; se dou enter parece que volta").
+  //
+  // O cooldown acima era um debounce SÓ DE BORDA DE SUBIDA: o 1º settle da rajada
+  // pintava e os seguintes, caindo dentro dos 500ms, eram DESCARTADOS — `return` seco,
+  // sem reagendar nada. Numa rajada de arraste, o settle FINAL (o único que importa,
+  // porque carrega as dimensões definitivas) é justamente um dos descartados. A tela
+  // ficava no frame do PRIMEIRO settle, com o layout das dimensões VELHAS, e nada mais
+  // disparava correção — daí "congelada". O Enter "consertava" porque qualquer input
+  // provoca um render novo, que finalmente repinta com as dimensões certas.
+  //
+  // Este timer é a BORDA DE DESCIDA que faltava: um settle suprimido não é mais
+  // perdido, é REAGENDADO para quando o cooldown vencer. O cooldown volta a ser o que
+  // deveria ser — um limitador de FREQUÊNCIA (não paga O(histórico) por settle numa
+  // rajada) — em vez de um descarte de ESTADO FINAL. No máximo UM repaint extra por
+  // rajada, nunca N.
+  const trailingRepaintRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // F196 — sinal (atualizado no corpo do render) de que a região viva NÃO cabe em `rows`
   // ⇒ o Ink está no caminho `outputHeight >= rows` (repaint total por frame). Nesse regime
   // o `clearScreen()` do resize é redundante e DUPLICA o `fullStaticOutput` do Ink (branco
@@ -1517,8 +1534,24 @@ export function App(props: AppProps): React.ReactElement {
         !mustRecoverFromOverflow &&
         now - lastForcedRepaintAtRef.current < RESIZE_REPAINT_COOLDOWN_MS
       ) {
+        // RESIZE-CONGELA — NÃO descarta: reagenda p/ quando o cooldown vencer (ver o
+        // comentário do `trailingRepaintRef`). Só UM trailing fica pendente por vez —
+        // cada settle suprimido REARMA o mesmo timer, então uma rajada de N settles
+        // custa 1 repaint no fim, não N. Sem isto, o settle FINAL da rajada (o que tem
+        // as dimensões definitivas) era perdido e a tela ficava congelada no layout
+        // antigo até um input qualquer forçar render.
+        const waitMs = RESIZE_REPAINT_COOLDOWN_MS - (now - lastForcedRepaintAtRef.current);
+        if (trailingRepaintRef.current !== undefined) clearTimeout(trailingRepaintRef.current);
+        trailingRepaintRef.current = setTimeout(
+          () => {
+            trailingRepaintRef.current = undefined;
+            lastForcedRepaintAtRef.current = Date.now();
+            clearScreen();
+          },
+          Math.max(waitMs, 0) + 1,
+        );
         debugRenderLog(
-          `resize ${rows}x${columns} — clearScreen SUPRIMIDO (cooldown ${RESIZE_REPAINT_COOLDOWN_MS}ms; rajada de resize)`,
+          `resize ${rows}x${columns} — clearScreen adiado ${Math.max(waitMs, 0) + 1}ms (cooldown ${RESIZE_REPAINT_COOLDOWN_MS}ms; rajada — repinta no fim)`,
         );
         return;
       }
@@ -1527,11 +1560,30 @@ export function App(props: AppProps): React.ReactElement {
           `resize ${rows}x${columns} — clearScreen FORÇADO (ignora cooldown; recuperação WEZTERM-GAP de regime "não cabe" pendente)`,
         );
       }
+      // Vamos repintar AGORA ⇒ um trailing pendente virou redundante (repintaria a
+      // MESMA dimensão logo em seguida, pagando O(histórico) à toa). Cancela.
+      if (trailingRepaintRef.current !== undefined) {
+        clearTimeout(trailingRepaintRef.current);
+        trailingRepaintRef.current = undefined;
+      }
       lastForcedRepaintAtRef.current = now;
       clearScreen();
     }, 90);
     return () => clearTimeout(id); // novo resize antes de 90ms ⇒ recancela (trailing-edge)
   }, [rows, columns, fullscreen, clearScreen]);
+
+  // RESIZE-CONGELA — o trailing NÃO é cancelado no cleanup do efeito de resize (seria
+  // exatamente o bug de novo: um resize novo re-roda o efeito e mataria o repaint
+  // pendente do settle anterior). Ele sobrevive a re-runs de propósito; só o UNMOUNT o
+  // cancela, p/ não deixar timer pendurado depois que a UI saiu.
+  useEffect(() => {
+    return () => {
+      if (trailingRepaintRef.current !== undefined) {
+        clearTimeout(trailingRepaintRef.current);
+        trailingRepaintRef.current = undefined;
+      }
+    };
+  }, []);
 
   /**
    * EST-0962 — executa um slash-command. `/model` SEM argumento abre o SELETOR de
