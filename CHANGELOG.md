@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.122] — 2026-08-05
+
+### Adicionado
+
+- 🤖 **`autonomy: yolo-scoped` — serviço autônomo, MAS confinado:** sem isto NENHUM serviço operava sozinho. O runner spawnava cada atividade SEM modo de permissão, então o turno-filho rodava sob a catraca normal, headless e sem TTY — todo efeito que pedisse aprovação FALHAVA FECHADO, porque não há humano para aprovar. Um serviço de trading travava na primeira chamada à bridge. E o `autonomy:` do manifesto não enforçava nada: era validado e exibido, mas nunca chegava ao runtime. A saída ÓBVIA seria passar `--yolo` ao filho — e é justamente o que NÃO se faz: `--yolo` liga `unconfined`, derrubando a cerca de workspace e suspendendo o anti-SSRF; dar isso a um agente que opera dinheiro real é inaceitável. O QUE MUDOU: "não pergunta" e "sem cerca" estavam colados numa flag só, e agora são eixos separados — `unconfined`/`allowInternalHosts` continuam derivando SÓ de `mode === 'unsafe'`, e como o modo novo é um valor DIFERENTE do mesmo eixo, a cerca nunca cai POR CONSTRUÇÃO, sem nenhum `if` novo. O corte do "não pergunta" vira `ask` → `allow` preservando o motivo; QUALQUER `deny` passa INTOCADO (pisos de `~/.aluy`, teto de profundidade, toolScope do agente, teto de memória e modo Plan retornam ANTES desse ponto). O manifesto visível DESTACA (⚠) o serviço que não pergunta — instalar é o momento do consentimento, e não pode existir serviço autônomo que o dono não viu que era autônomo. Só `ask` e `yolo-scoped` são aceitos; `yolo`/`unsafe` seguem recusados fail-closed. PROVADO com binário real sem TTY: sem `autonomy:` o `write_file` NÃO executa; com o modo novo DENTRO do serviço executa; com o modo novo FORA do serviço é NEGADO — esta última é o que distingue o modo do `--yolo`. SINALIZADO (fora de escopo): o guardrail de "autonomia + tier fraco + conteúdo não confiável" é keyed em `unsafe` e não dispara no modo novo. AINDA FALTA para a esteira ficar segura: os tunáveis (`perda-maxima-dia`, `max-contratos`) são parseados e exibidos mas o runner NÃO os lê — a cerca financeira ainda é texto no prompt, então autonomia em PRODUÇÃO só depois disso.
+
 ## [1.0.0-rc.121] — 2026-08-04
 
 ### Adicionado
