@@ -133,7 +133,13 @@ export function buildServicesNote(input: ServicesListInput): ServicesListNote {
         rt?.running === true && rt.turnState === 'sleeping' && rt.nextFireIso !== undefined
           ? ` (${rt.nextFireIso})`
           : '';
-      lines.push(`  ✓ ${s.name} · ${stateLabel} · próximo turno: ${schedule}${nextSuffix}${descSuffix}`);
+      // Descoberta entre serviços (o maestro lista os irmãos por grupo) — só aparece
+      // quando declarado, nunca regride quem não usa `group:`/`model:`.
+      const groupSuffix = s.manifest.group !== undefined ? ` · grupo: ${s.manifest.group}` : '';
+      const modelSuffix = s.manifest.model !== undefined ? ` · modelo: ${s.manifest.model}` : '';
+      lines.push(
+        `  ✓ ${s.name} · ${stateLabel} · próximo turno: ${schedule}${nextSuffix}${descSuffix}${groupSuffix}${modelSuffix}`,
+      );
     }
   }
 

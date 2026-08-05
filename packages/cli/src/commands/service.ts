@@ -36,6 +36,17 @@
 // barra). Este shell (`aluy service create`) não tem canal pra entrevista; por
 // isso só ORIENTA pro `/service create` in-session (ver `createRedirectLines`).
 // `update` (git pull) segue "disponível numa fase seguinte".
+//
+// DESCOBERTA ENTRE SERVIÇOS (`group:`) — um serviço com `autonomy: yolo-scoped`
+// (ex.: um "maestro" que orquestra os demais) precisa achar seus irmãos de mesa.
+// `group:` no `service.md` é só um RÓTULO (parser puro em `service-parse.ts`); AQUI
+// `list --group <nome>` FILTRA a listagem pelo grupo, e `start`/`stop --group <nome>`
+// ITERAM sobre os membros — cada um continua um processo independente, com seu
+// próprio lock; se um falhar, os demais seguem (ver `runStartGroup`/`runStopGroup`).
+// Deliberadamente SEM sala compartilhada, sem estado de grupo, sem qualquer canal
+// novo entre processos — a forma de "falar" com um irmão já existe hoje
+// (`echo "instrução" | aluy service attach <nome>`; o `attach` lê stdin via
+// `readline`, não exige TTY).
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, cpSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
@@ -68,12 +79,17 @@ import { connectAttachSocket } from '../service/attach-client.js';
 export type ServiceCommand =
   | { kind: 'help' }
   | { kind: 'error'; message: string }
-  | { kind: 'list' }
+  // `group` presente ⇒ filtra a listagem (descoberta entre serviços irmãos).
+  | { kind: 'list'; group?: string }
   | { kind: 'status'; name: string }
   | { kind: 'install'; source: string; yes: boolean }
   | { kind: 'uninstall'; name: string; yes: boolean }
   | { kind: 'start'; name: string; yes: boolean }
   | { kind: 'stop'; name: string }
+  // `--group <nome>` — açúcar que ITERA start/stop sobre os membros do grupo (cada
+  // um continua processo independente; falha de um não derruba os outros).
+  | { kind: 'start-group'; group: string; yes: boolean }
+  | { kind: 'stop-group'; group: string }
   | { kind: 'logs'; name: string; follow: boolean; lines: number }
   // ADR-0158 §11 (FASE 4) — entrar/observar/interagir com um serviço rodando.
   | { kind: 'attach'; name: string }
@@ -91,21 +107,26 @@ const PHASE_LATER_SUBCOMMANDS = new Set(['update']);
 const SERVICE_HELP = `aluy service — SERVIÇOS plugáveis
 
 Uso:
-  aluy service [list]
+  aluy service [list] [--group <nome>]
   aluy service status <nome>
   aluy service create
   aluy service install <path|git-url> [--yes]
   aluy service uninstall <nome> [--yes]
   aluy service start <nome> [--yes]
+  aluy service start --group <nome> [--yes]
   aluy service stop <nome>
+  aluy service stop --group <nome>
   aluy service logs <nome> [-f] [-n <N>]
   aluy service attach <nome>
 
 Subcomandos:
   list                 Lista os serviços instalados — nome, estado REAL (rodando/
                         parado/turno em andamento/dormindo/aguardando dono),
-                        próximo schedule, descrição. Sem argumento, "aluy service"
-                        já lista (espelha o /service in-session).
+                        próximo schedule, descrição, grupo/modelo (quando
+                        declarados). Sem argumento, "aluy service" já lista
+                        (espelha o /service in-session). "--group <nome>" filtra
+                        pelo "group:" do service.md — é assim que um serviço
+                        descobre seus irmãos de mesa.
   status <nome>         Detalhe de um serviço + o estado REAL (pid, turno em
                         andamento ou dormindo até X, pergunta pendente).
   create                Criação CONVERSACIONAL — o shell não tem canal p/ a
@@ -114,14 +135,20 @@ Subcomandos:
   install <path|url>    Copia um diretório local OU clona um repo git p/
                         ~/.aluy/services/<nome>/. Valida ANTES de ativar e mostra o
                         MANIFESTO VISÍVEL (daemons, skills com script, mcp.json, canal,
-                        autonomia) — exige confirmação. --yes pula o prompt (scripts/CI).
+                        grupo, modelo, autonomia) — exige confirmação. --yes pula o
+                        prompt (scripts/CI).
   uninstall <nome>      Remove o diretório do serviço. Pede confirmação (--yes pula).
                         Recusa se o serviço estiver RODANDO ("stop" antes).
   start <nome>          Spawna o PROCESSO DESTACADO do serviço — mostra o manifesto
                         visível e pede confirmação (--yes pula). Recusa se já rodando
                         ou se o manifesto é inválido.
+  start --group <nome>  ITERA "start" sobre todo serviço com esse "group:" — cada um
+                        continua um processo independente (lock/estado próprios); se
+                        um falhar, os demais seguem, e o comando reporta cada um.
   stop <nome>           SIGTERM no processo do serviço (timeout ⇒ SIGKILL); derruba os
                         daemons próprios e limpa o pidfile.
+  stop --group <nome>   ITERA "stop" sobre todo serviço com esse "group:" — mesma
+                        independência do "start --group" (um serviço não derruba outro).
   logs <nome>           Últimas linhas do runner.log. -n <N> muda a contagem (padrão
                         50); -f acompanha ao vivo (Ctrl-C sai).
   attach <nome>          ENTRA no serviço rodando: mostra log+estado (+blocos da
@@ -136,10 +163,32 @@ Notas:
     e só existe de verdade in-session.
 `;
 
+/**
+ * Extrai "--group <valor>" de um array de args restantes (descoberta entre
+ * serviços). `{}` = flag ausente (sem filtro). Uma flag PRESENTE mas SEM valor
+ * (ou seguida de outra flag) é erro de uso — nunca vira "sem filtro" silenciosamente
+ * (o dono digitou "--group" querendo filtrar; ignorar de mansinho esconderia o erro
+ * de digitação). PURO.
+ */
+function extractGroupFlag(rest: readonly string[]): { readonly group?: string; readonly error?: string } {
+  const idx = rest.indexOf('--group');
+  if (idx === -1) return {};
+  const value = rest[idx + 1];
+  if (value === undefined || value.startsWith('--')) {
+    return { error: '"--group" precisa de um valor (ex.: --group mesa-trading).' };
+  }
+  return { group: value };
+}
+
 /** Parser fino de `aluy service <argv>` — espelha `parseCronCommand`. PURO. */
 export function parseServiceCommand(argv: readonly string[]): ServiceCommand {
   const sub = argv[0];
-  if (sub === undefined || sub === 'list') return { kind: 'list' };
+  if (sub === undefined || sub === 'list') {
+    const rest = sub === undefined ? argv : argv.slice(1);
+    const { group, error } = extractGroupFlag(rest);
+    if (error !== undefined) return { kind: 'error', message: `service list: ${error}` };
+    return group !== undefined ? { kind: 'list', group } : { kind: 'list' };
+  }
   if (sub === 'help' || sub === '-h' || sub === '--help') return { kind: 'help' };
 
   if (sub === 'status') {
@@ -167,14 +216,31 @@ export function parseServiceCommand(argv: readonly string[]): ServiceCommand {
   if (sub === 'start') {
     const rest = argv.slice(1);
     const yes = rest.includes('--yes');
+    const { group, error } = extractGroupFlag(rest);
+    if (error !== undefined) return { kind: 'error', message: `service start: ${error}` };
+    if (group !== undefined) return { kind: 'start-group', group, yes };
     const name = rest.find((a) => !a.startsWith('--'));
-    if (!name) return { kind: 'error', message: 'service start: falta o <nome> do serviço.' };
+    if (!name) {
+      return {
+        kind: 'error',
+        message: 'service start: falta o <nome> do serviço (ou "--group <nome>").',
+      };
+    }
     return { kind: 'start', name, yes };
   }
 
   if (sub === 'stop') {
-    const name = argv[1];
-    if (!name) return { kind: 'error', message: 'service stop: falta o <nome> do serviço.' };
+    const rest = argv.slice(1);
+    const { group, error } = extractGroupFlag(rest);
+    if (error !== undefined) return { kind: 'error', message: `service stop: ${error}` };
+    if (group !== undefined) return { kind: 'stop-group', group };
+    const name = rest[0];
+    if (!name) {
+      return {
+        kind: 'error',
+        message: 'service stop: falta o <nome> do serviço (ou "--group <nome>").',
+      };
+    }
     return { kind: 'stop', name };
   }
 
@@ -298,8 +364,22 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
 
     case 'list': {
       const { services, errors } = store.list();
+      // Descoberta entre serviços (`group:`) — filtra ANTES de formatar; os
+      // REJEITADOS (sem manifesto parseável, logo sem `group:` legível) seguem
+      // aparecendo de qualquer forma — são diagnóstico, não pertencem a nenhum grupo.
+      const filtered =
+        cmd.group !== undefined ? services.filter((s) => s.manifest.group === cmd.group) : services;
+      if (cmd.group !== undefined && filtered.length === 0 && errors.length === 0) {
+        io.out(
+          services.length === 0
+            ? `nenhum serviço instalado — instale um diretório-manifesto em ${store.servicesDir}/<nome>/.`
+            : `nenhum serviço com "group: ${cmd.group}" (${services.length} instalado(s) no total, ` +
+                `nenhum neste grupo).`,
+        );
+        return 0;
+      }
       // ADR-0158 §5 (fase 2) — estado REAL por serviço (pidfile+kill-0 + status.json).
-      const servicesWithStatus = services.map((s) => ({
+      const servicesWithStatus = filtered.map((s) => ({
         ...s,
         runtimeStatus: toRuntimeStatusInput(readServiceRuntimeStatus(s.dir)),
       }));
@@ -309,7 +389,8 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
         servicesDir: store.servicesDir,
         nowMs: Date.now(),
       });
-      io.out(`${note.title} — serviços instalados`);
+      const groupSuffix = cmd.group !== undefined ? ` (grupo: ${cmd.group})` : '';
+      io.out(`${note.title} — serviços instalados${groupSuffix}`);
       for (const l of note.lines) io.out(l);
       return 0;
     }
@@ -336,6 +417,10 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
         io.out(`  ⚠ pergunta pendente${elapsed}: ${rt.snapshot.pendingQuestion}`);
       }
       if (m.description !== undefined) io.out(`  descrição:   ${m.description}`);
+      // Descoberta entre serviços — a que mesa/equipe este serviço pertence, e com
+      // que modelo o turno roda (fixo por serviço; ausente ⇒ default global da config).
+      io.out(`  grupo:       ${m.group ?? '(não declarado)'}`);
+      io.out(`  modelo:      ${m.model ?? '(não declarado — default global)'}`);
       io.out(`  schedule:    ${m.schedule ?? '(não declarado)'}`);
       io.out(`  until:       ${m.until ?? '(não declarado)'}`);
       io.out(`  workflow:    ${m.workflow ?? '(não declarado)'}`);
@@ -362,8 +447,14 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
     case 'start':
       return runStart(cmd.name, cmd.yes, io, store);
 
+    case 'start-group':
+      return runStartGroup(cmd.group, cmd.yes, io, store);
+
     case 'stop':
       return runStop(cmd.name, io, store);
+
+    case 'stop-group':
+      return runStopGroup(cmd.group, io, store);
 
     case 'logs':
       return runLogs(cmd.name, cmd.follow, cmd.lines, io, store);
@@ -667,6 +758,97 @@ async function runStop(name: string, io: TerminalIO, store: UserServicesStore): 
   stopDaemons(dir, (line) => appendLog(runnerLogPath(dir), line));
   removePidFile(pidPath);
   io.out(`✓ serviço "${name}" parado.`);
+  return 0;
+}
+
+/** Os membros (nomes) de um `group:` — só entre os serviços VÁLIDOS (um manifesto
+ * rejeitado não tem `group:` legível, então não pode ser membro de nada). Ordenado
+ * por nome — determinístico, mesma disciplina do `buildServicesNote`. PURO o
+ * suficiente (só filtra/mapeia o que `store.list()` já leu). */
+function groupMembers(store: UserServicesStore, group: string): readonly string[] {
+  const { services } = store.list();
+  return services
+    .filter((s) => s.manifest.group === group)
+    .map((s) => s.name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * `start --group <nome>` — açúcar que ITERA `runStart` sobre cada membro do grupo.
+ * DELIBERADAMENTE não cria nada novo: cada serviço segue processo independente, com
+ * seu próprio lock/pidfile/estado — este loop só chama o MESMO `runStart` que
+ * "aluy service start <nome>" chamaria, um de cada vez. A falha de UM membro (exit
+ * !== 0, ou uma exceção inesperada) NUNCA impede os demais de tentar — o comando
+ * reporta o resultado de cada um, honestamente, no final.
+ */
+async function runStartGroup(
+  group: string,
+  yes: boolean,
+  io: TerminalIO,
+  store: UserServicesStore,
+): Promise<number> {
+  const members = groupMembers(store, group);
+  if (members.length === 0) {
+    io.err(`aluy: nenhum serviço com "group: ${group}" encontrado em ${store.servicesDir}.`);
+    return 1;
+  }
+  io.out(`grupo "${group}" — ${members.length} serviço(s): ${members.join(', ')}`);
+  const failed: string[] = [];
+  for (const name of members) {
+    io.out('');
+    io.out(`— ${name} —`);
+    try {
+      const code = await runStart(name, yes, io, store);
+      if (code !== 0) failed.push(name);
+    } catch (err) {
+      failed.push(name);
+      io.err(`aluy: erro inesperado ao iniciar "${name}" — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  io.out('');
+  if (failed.length > 0) {
+    io.out(
+      `⚠ grupo "${group}": ${members.length - failed.length}/${members.length} iniciado(s) — ` +
+        `falharam: ${failed.join(', ')} (veja as mensagens acima de cada um).`,
+    );
+    return 1;
+  }
+  io.out(`✓ grupo "${group}": todos os ${members.length} serviço(s) iniciados.`);
+  return 0;
+}
+
+/**
+ * `stop --group <nome>` — mesma disciplina de `runStartGroup`, iterando `runStop`.
+ * Um serviço já parado no grupo não é falha (mesmo comportamento do `stop` singular).
+ */
+async function runStopGroup(group: string, io: TerminalIO, store: UserServicesStore): Promise<number> {
+  const members = groupMembers(store, group);
+  if (members.length === 0) {
+    io.err(`aluy: nenhum serviço com "group: ${group}" encontrado em ${store.servicesDir}.`);
+    return 1;
+  }
+  io.out(`grupo "${group}" — ${members.length} serviço(s): ${members.join(', ')}`);
+  const failed: string[] = [];
+  for (const name of members) {
+    io.out('');
+    io.out(`— ${name} —`);
+    try {
+      const code = await runStop(name, io, store);
+      if (code !== 0) failed.push(name);
+    } catch (err) {
+      failed.push(name);
+      io.err(`aluy: erro inesperado ao parar "${name}" — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  io.out('');
+  if (failed.length > 0) {
+    io.out(
+      `⚠ grupo "${group}": ${members.length - failed.length}/${members.length} parado(s) — ` +
+        `falharam: ${failed.join(', ')} (veja as mensagens acima de cada um).`,
+    );
+    return 1;
+  }
+  io.out(`✓ grupo "${group}": todos os ${members.length} serviço(s) parados.`);
   return 0;
 }
 

@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseServiceManifest,
   isServiceManifestError,
+  isSafeGroupLabel,
   normalizeServiceName,
   type ServiceManifest,
 } from '../../../src/index.js';
@@ -189,6 +190,85 @@ describe('parseServiceManifest — campos opcionais e forward-compat', () => {
   it('sem frontmatter nenhum ⇒ tudo vira corpo ⇒ sem name ⇒ erro', () => {
     const reason = fail('service.md', 'Só prosa, sem frontmatter.');
     expect(reason).toMatch(/sem "name"/);
+  });
+});
+
+// Descoberta entre serviços (`group:`) — como um maestro acha seus irmãos de mesa
+// (`aluy service list/start/stop --group`). RÓTULO puro: sem semântica de execução.
+describe('parseServiceManifest — group: (descoberta entre serviços)', () => {
+  it('"group: mesa-trading" ⇒ campo cru pass-through', () => {
+    const m = ok('service.md', '---\nname: trader\ngroup: mesa-trading\n---\nOrquestrador.');
+    expect(m.group).toBe('mesa-trading');
+  });
+
+  it('sem "group:" ⇒ undefined (zero regressão p/ quem não usa)', () => {
+    const m = ok('service.md', '---\nname: trader\n---\nOrquestrador.');
+    expect(m.group).toBeUndefined();
+  });
+
+  it('"group:" com "/" ⇒ erro (fail-closed, não é identificador simples)', () => {
+    const reason = fail('service.md', '---\nname: trader\ngroup: mesa/trading\n---\nOrquestrador.');
+    expect(reason).toMatch(/group/);
+  });
+
+  it('"group:" com ".." ⇒ erro (fail-closed)', () => {
+    const reason = fail('service.md', '---\nname: trader\ngroup: ../mesa\n---\nOrquestrador.');
+    expect(reason).toMatch(/group/);
+  });
+
+  it('"group:" com byte nulo ⇒ erro (fail-closed)', () => {
+    const reason = fail('service.md', '---\nname: trader\ngroup: mesa\0x\n---\nOrquestrador.');
+    expect(reason).toMatch(/group/);
+  });
+
+  it('"group:" vazio (só espaços) ⇒ tratado como ausente, não erro', () => {
+    const m = ok('service.md', '---\nname: trader\ngroup:    \n---\nOrquestrador.');
+    expect(m.group).toBeUndefined();
+  });
+});
+
+describe('isSafeGroupLabel', () => {
+  it('aceita identificador simples', () => {
+    expect(isSafeGroupLabel('mesa-trading')).toBe(true);
+    expect(isSafeGroupLabel('mesa_2')).toBe(true);
+  });
+  it('recusa vazio/"/"/".."/ byte nulo', () => {
+    expect(isSafeGroupLabel('')).toBe(false);
+    expect(isSafeGroupLabel('  ')).toBe(false);
+    expect(isSafeGroupLabel('a/b')).toBe(false);
+    expect(isSafeGroupLabel('a..b')).toBe(false);
+    expect(isSafeGroupLabel('a\0b')).toBe(false);
+  });
+});
+
+// `model:` — fixa o modelo do TURNO do serviço (não depende do default global).
+describe('parseServiceManifest — model: (modelo fixo por serviço)', () => {
+  it('"model: xiaomi/mimo-v2.5-pro" ⇒ campo cru pass-through (slug com "/")', () => {
+    const m = ok('service.md', '---\nname: trader\nmodel: xiaomi/mimo-v2.5-pro\n---\nOrquestrador.');
+    expect(m.model).toBe('xiaomi/mimo-v2.5-pro');
+  });
+
+  it('sem "model:" ⇒ undefined (zero regressão — runner usa o default global)', () => {
+    const m = ok('service.md', '---\nname: trader\n---\nOrquestrador.');
+    expect(m.model).toBeUndefined();
+  });
+
+  it('"model:" com byte de controle ⇒ erro (fail-closed)', () => {
+    const reason = fail('service.md', '---\nname: trader\nmodel: "bad\x01slug"\n---\nOrquestrador.');
+    expect(reason).toMatch(/model/);
+  });
+
+  it('"model:" vazio (só espaços) ⇒ tratado como ausente, não erro', () => {
+    const m = ok('service.md', '---\nname: trader\nmodel:    \n---\nOrquestrador.');
+    expect(m.model).toBeUndefined();
+  });
+
+  it('"model:" NUNCA vira tunável mesmo com valor que parece número', () => {
+    // "model: 4" teria "cara de número" se não fosse chave CONHECIDA — confere que
+    // o switch intercepta ANTES do fallback pra `extras`/tunáveis.
+    const m = ok('service.md', '---\nname: trader\nmodel: 4\n---\nOrquestrador.');
+    expect(m.model).toBe('4');
+    expect(m.tunables).toEqual([]);
   });
 });
 

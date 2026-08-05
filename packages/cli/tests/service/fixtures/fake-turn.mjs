@@ -46,12 +46,19 @@ const pIndex = argv.indexOf('-p');
 const goal = pIndex >= 0 ? (argv[pIndex + 1] ?? '') : '';
 const maxTokensIndex = argv.indexOf('--max-tokens');
 const maxTokens = maxTokensIndex >= 0 ? argv[maxTokensIndex + 1] : undefined;
+// Descoberta entre serviços (`model:`) — o runner só põe `--model <slug>` no argv
+// quando o service.md declara `model:` (ver runner.ts, `runActivityTurn`). Gravado
+// no debug record p/ os testes provarem presença/ausência, mesmo padrão do
+// `--max-tokens` acima.
+const modelIndex = argv.indexOf('--model');
+const model = modelIndex >= 0 ? argv[modelIndex + 1] : undefined;
 
 const debugFile = process.env.FAKE_TURN_DEBUG_FILE;
 if (debugFile !== undefined && debugFile !== '') {
   const record = {
     goal,
     maxTokens: maxTokens ?? null,
+    model: model ?? null,
     aluyServiceHome: process.env.ALUY_SERVICE_HOME ?? null,
     aluyServicePersona: process.env.ALUY_SERVICE_PERSONA ?? null,
     isResume: goal.includes('[Retomando'),

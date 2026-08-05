@@ -57,6 +57,13 @@ export function buildServiceManifestVisibleNote(
 
   lines.push(`nome: ${m.name}`);
   if (m.description !== undefined) lines.push(`descrição: ${m.description}`);
+  // ADR-0158 (descoberta entre serviços) — `group:` é a "mesa"/equipe que o serviço
+  // declara pertencer; mostrado ANTES de instalar (fronteira, mesmo espírito do
+  // canal/autonomia abaixo: o dono vê a que grupo está aderindo antes de confirmar).
+  if (m.group !== undefined) lines.push(`grupo: ${m.group}`);
+  // `model:` fixa o modelo do TURNO deste serviço — o dono vê ANTES de instalar (é
+  // custo e é qualidade). Ausente ⇒ usa o default global (comportamento de hoje).
+  lines.push(`modelo: ${m.model ?? '(não declarado — usa o default global da config)'}`);
   lines.push(`schedule: ${m.schedule ?? '(não declarado)'}`);
   lines.push(`until: ${m.until ?? '(não declarado)'}`);
   lines.push(`workflow do turno: ${m.workflow ?? '(não declarado)'}`);

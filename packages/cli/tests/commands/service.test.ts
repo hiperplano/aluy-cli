@@ -148,6 +148,54 @@ describe('parseServiceCommand', () => {
   it('subcomando desconhecido ⇒ erro', () => {
     expect(parseServiceCommand(['bogus']).kind).toBe('error');
   });
+
+  // Descoberta entre serviços — "--group <nome>" em list/start/stop.
+  describe('--group (descoberta entre serviços)', () => {
+    it('"list --group <nome>" ⇒ list com filtro', () => {
+      expect(parseServiceCommand(['list', '--group', 'mesa-trading'])).toEqual({
+        kind: 'list',
+        group: 'mesa-trading',
+      });
+    });
+    it('"list --group" sem valor ⇒ erro de uso (nunca vira "sem filtro" silencioso)', () => {
+      const r = parseServiceCommand(['list', '--group']);
+      expect(r.kind).toBe('error');
+    });
+    it('"start --group <nome>" ⇒ start-group (sem exigir <nome> posicional)', () => {
+      expect(parseServiceCommand(['start', '--group', 'mesa-trading'])).toEqual({
+        kind: 'start-group',
+        group: 'mesa-trading',
+        yes: false,
+      });
+      expect(parseServiceCommand(['start', '--group', 'mesa-trading', '--yes'])).toEqual({
+        kind: 'start-group',
+        group: 'mesa-trading',
+        yes: true,
+      });
+    });
+    it('"start --group" sem valor ⇒ erro de uso', () => {
+      expect(parseServiceCommand(['start', '--group']).kind).toBe('error');
+    });
+    it('"stop --group <nome>" ⇒ stop-group', () => {
+      expect(parseServiceCommand(['stop', '--group', 'mesa-trading'])).toEqual({
+        kind: 'stop-group',
+        group: 'mesa-trading',
+      });
+    });
+    it('"stop --group" sem valor ⇒ erro de uso', () => {
+      expect(parseServiceCommand(['stop', '--group']).kind).toBe('error');
+    });
+    it('"start <nome>" sem "--group" continua funcionando igual (zero regressão)', () => {
+      expect(parseServiceCommand(['start', 'trader'])).toEqual({
+        kind: 'start',
+        name: 'trader',
+        yes: false,
+      });
+    });
+    it('"stop <nome>" sem "--group" continua funcionando igual (zero regressão)', () => {
+      expect(parseServiceCommand(['stop', 'trader'])).toEqual({ kind: 'stop', name: 'trader' });
+    });
+  });
 });
 
 const MINIMAL_SERVICE_MD = ['---', 'name: trader', '---', 'Rege, não opera.'].join('\n');
@@ -217,6 +265,43 @@ describe('runService — list/status', () => {
     const t = io.outLines.join('\n');
     expect(t).toContain('autonomia:   ask');
     expect(t).toContain('validação:   OK');
+  });
+
+  // Descoberta entre serviços (`group:`/`model:`) — aparecem no status quando
+  // declarados; ausência mostra o default honesto ("default global").
+  it('status — mostra grupo/modelo quando declarados', async () => {
+    const servicesDir = join(base, SERVICES_DIRNAME);
+    mkdirSync(join(servicesDir, 'trader'), { recursive: true });
+    writeFileSync(
+      join(servicesDir, 'trader', 'service.md'),
+      ['---', 'name: trader', 'group: mesa-trading', 'model: deepseek/deepseek-chat', '---', 'Rege.'].join(
+        '\n',
+      ),
+    );
+    const io = fakeIO();
+    const exit = await runService(['status', 'trader'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(0);
+    const t = io.outLines.join('\n');
+    expect(t).toContain('grupo:       mesa-trading');
+    expect(t).toContain('modelo:      deepseek/deepseek-chat');
+  });
+
+  it('status — sem grupo/modelo ⇒ mostra "não declarado"/default global (zero regressão)', async () => {
+    const servicesDir = join(base, SERVICES_DIRNAME);
+    mkdirSync(join(servicesDir, 'trader'), { recursive: true });
+    writeFileSync(join(servicesDir, 'trader', 'service.md'), MINIMAL_SERVICE_MD);
+    const io = fakeIO();
+    const exit = await runService(['status', 'trader'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(0);
+    const t = io.outLines.join('\n');
+    expect(t).toContain('grupo:       (não declarado)');
+    expect(t).toContain('modelo:      (não declarado — default global)');
   });
 });
 
@@ -507,6 +592,135 @@ describe('runService — start/stop/logs (fase 2, sem tocar processo real)', () 
     const exit = await runService(['status', 'trader'], { io, store });
     expect(exit).toBe(0);
     expect(io.outLines.join('\n')).toContain('PARADO');
+  });
+});
+
+// Descoberta entre serviços (`group:`) — "list/start/stop --group" iteram sobre os
+// membros. Cada teste evita SPAWN real (mesma disciplina do describe acima: só
+// caminhos que retornam antes de abrir um processo de verdade — sem schedule, ou
+// confirmação recusada — e o caminho de "já parado", que nunca chega a matar nada).
+describe('runService — --group (descoberta entre serviços, sem tocar processo real)', () => {
+  let base: string;
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'aluy-svc-group-'));
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  function writeService(name: string, extraFrontmatter: readonly string[] = []): void {
+    const dir = join(base, SERVICES_DIRNAME, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      dir + '/service.md',
+      ['---', `name: ${name}`, ...extraFrontmatter, '---', 'Rege, não opera.'].join('\n'),
+    );
+  }
+
+  it('list --group filtra pelo "group:" — só os membros aparecem', async () => {
+    writeService('trader', ['group: mesa-trading']);
+    writeService('pesquisador', ['group: mesa-trading']);
+    writeService('outro', ['group: mesa-analytics']);
+    const io = fakeIO();
+    const exit = await runService(['list', '--group', 'mesa-trading'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(0);
+    const t = io.outLines.join('\n');
+    expect(t).toContain('✓ trader');
+    expect(t).toContain('✓ pesquisador');
+    expect(t).not.toContain('✓ outro');
+  });
+
+  it('list --group sem membros (mas com outros serviços instalados) ⇒ mensagem honesta, exit 0', async () => {
+    writeService('trader', ['group: mesa-trading']);
+    const io = fakeIO();
+    const exit = await runService(['list', '--group', 'mesa-fantasma'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(0);
+    const t = io.outLines.join('\n');
+    expect(t).toContain('nenhum serviço com "group: mesa-fantasma"');
+    expect(t).toContain('1 instalado(s) no total');
+  });
+
+  it('list --group não filtra os REJEITADOS — continuam aparecendo (diagnóstico, não pertencem a grupo nenhum)', async () => {
+    writeService('trader', ['group: mesa-trading']);
+    const quebradoDir = join(base, SERVICES_DIRNAME, 'quebrado');
+    mkdirSync(quebradoDir, { recursive: true });
+    writeFileSync(quebradoDir + '/service.md', '---\ndescription: sem nome\n---\norq');
+    const io = fakeIO();
+    const exit = await runService(['list', '--group', 'mesa-trading'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(0);
+    const t = io.outLines.join('\n');
+    expect(t).toContain('✓ trader');
+    expect(t).toContain('⚠ quebrado');
+  });
+
+  it('start --group: nenhum membro ⇒ erro (exit 1)', async () => {
+    writeService('solo'); // sem group:
+    const io = fakeIO();
+    const exit = await runService(['start', '--group', 'mesa-fantasma', '--yes'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(1);
+    expect(io.errLines.join('\n')).toContain('nenhum serviço com "group: mesa-fantasma"');
+  });
+
+  it('start --group: ITERA sobre os 2 membros — falha de um NÃO impede o outro de ser tentado', async () => {
+    // "a" falha rápido (sem schedule: — nunca chega a dar spawn). "b" também tem
+    // schedule mas a confirmação é RECUSADA (fila de respostas "n") — outro jeito
+    // de falhar sem tocar processo real. As DUAS falhas são reportadas.
+    writeService('a', ['group: mesa-trading']); // sem schedule:
+    writeService('b', ['group: mesa-trading', 'schedule: "0 9 * * 1-5"']);
+    const io = fakeIO(['n']); // resposta consumida pela confirmação de "b".
+    const exit = await runService(['start', '--group', 'mesa-trading'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(1);
+    const t = io.outLines.join('\n') + io.errLines.join('\n');
+    // As DUAS atividades foram tentadas (a prova de independência: se o loop
+    // parasse na primeira falha, "— b —" nunca apareceria nem a confirmação seria
+    // consumida).
+    expect(t).toContain('— a —');
+    expect(t).toContain('— b —');
+    expect(io.errLines.join('\n')).toContain('schedule'); // motivo de "a".
+    expect(io.outLines.join('\n')).toContain('cancelado'); // motivo de "b" (recusou).
+    expect(io.outLines.join('\n')).toMatch(/falharam: a, b/);
+  });
+
+  it('stop --group: nenhum membro ⇒ erro (exit 1)', async () => {
+    const io = fakeIO();
+    const exit = await runService(['stop', '--group', 'mesa-fantasma'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(1);
+    expect(io.errLines.join('\n')).toContain('nenhum serviço com "group: mesa-fantasma"');
+  });
+
+  it('stop --group: ITERA sobre os membros e reporta cada um (todos já parados ⇒ exit 0)', async () => {
+    writeService('a', ['group: mesa-trading']);
+    writeService('b', ['group: mesa-trading']);
+    const io = fakeIO();
+    const exit = await runService(['stop', '--group', 'mesa-trading'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(0);
+    const t = io.outLines.join('\n');
+    expect(t).toContain('— a —');
+    expect(t).toContain('— b —');
+    expect(t.match(/já está parado/g)?.length).toBe(2);
+    expect(t).toContain('todos os 2 serviço(s) parados');
   });
 });
 

@@ -2314,7 +2314,17 @@ export function App(props: AppProps): React.ReactElement {
     // OBS: só age se nenhum overlay modal está aberto (slash/picker/ask capturam antes,
     // abaixo) — mas no cockpit o composer/slash seguem funcionando: só interceptamos as
     // teclas de NAVEGAÇÃO DE REGIÃO, deixando a digitação cair no composer normalmente.
-    if (cockpitActive && !slashOpen && !picker.open && !palette.open && state.phase !== 'asking') {
+    // F-PICKER-COCKPIT (achado em dogfooding: "no fullscreen a lista aparece mas não
+    // consigo selecionar") — a condição listava só `picker`/`palette` e DEIXAVA DE FORA
+    // todos os demais modais (provider/model/effort/tema/idioma/histórico/rewind). Como
+    // este bloco vem ANTES do handler de cada picker, ele engolia ↑↓ para rolar a região
+    // e dava `return` — o picker aparecia na tela e não respondia a tecla nenhuma (a dica
+    // do rodapé seguia sendo a do composer, denunciando que o foco nunca era dele). O
+    // comentário acima já PROMETIA "picker captura antes" — não cumpria. Trocado pelo
+    // `anyPickerOpen`, que é a lista COMPLETA de modais e já era calculada logo acima
+    // (mesma fonte que o `queueAtRest` usa p/ pausar a fila enquanto há overlay) — assim
+    // um modal novo entra na exclusão de graça, em vez de precisar lembrar de somá-lo aqui.
+    if (cockpitActive && !slashOpen && !anyPickerOpen && state.phase !== 'asking') {
       // Tab — alterna o foco da região de scroll (conversa↔log).
       if (key.tab && !key.shift) {
         setCockpitFocus((f) => (f === 'conversa' ? 'log' : 'conversa'));
@@ -4230,10 +4240,23 @@ export function App(props: AppProps): React.ReactElement {
     historyPicker.open ||
     rewindPicker.open ||
     palette.open;
-  const slashOverlays = (
+  // F-OVERLAY-UNICO — os DOIS caminhos de render (cockpit e inline) mantinham listas
+  // PARALELAS e manuais dos mesmos overlays. A divergência custou dois bugs reais: o
+  // `<ProviderPicker>` existia só no cockpit (no inline o `/provider` abria e não
+  // desenhava nada) e a `<CommandPalette>` idem (o rodapé anunciava "ctrl-p paleta" e
+  // nada acontecia). Agora a LISTA é única; o que difere entre os caminhos é só o
+  // ESPAÇAMENTO — e ele difere por um motivo REAL, não por descuido: no cockpit o
+  // overlay é popover ACIMA da conversa (separa do que vem abaixo ⇒ `paddingBottom`);
+  // no inline ele fica ABAIXO do composer (separa do que vem acima ⇒ `paddingTop`).
+  // Por isso a função recebe o lado: unifica o CONJUNTO sem mexer no layout de nenhum
+  // dos dois (a região viva tem orçamento de linhas apertado — trocar padding aqui
+  // mexeria na altura e é justamente a área que já custou caro estabilizar).
+  const renderOverlays = (pad: 'top' | 'bottom'): React.ReactElement => {
+    const box = pad === 'top' ? { paddingTop: 1 } : { paddingBottom: 1 };
+    return (
     <>
       {palette.open && (
-        <Box flexDirection="column" paddingBottom={1}>
+        <Box flexDirection="column" {...box}>
           <CommandPalette
             hits={palette.hits}
             selected={palette.selected}
@@ -4243,7 +4266,7 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
       {slashOpen && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" {...box}>
           {/* TETO de altura: SEM `maxRows` o menu despejava a lista INTEIRA (40+ comandos) e
               "ocupava a tela toda", empurrando o histórico pro scrollback — e ao fechar (`/`
               apagado) a tela não voltava. Janela de 8 (como a <CommandPalette> irmã): o menu
@@ -4258,7 +4281,7 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
       {modelPicker.open && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" {...box}>
           <ModelPicker
             tiers={modelPicker.tiers}
             selected={modelPicker.selected}
@@ -4293,7 +4316,7 @@ export function App(props: AppProps): React.ReactElement {
       {/* F161-FIX — seletor `/model` sob backend LOCAL (BYO): fuzzy-pick dedicado
           dos slugs do provider ativo (os tiers do broker acima não se aplicam). */}
       {localModelPicker.open && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" {...box}>
           <LocalModelPicker
             hits={localModelPicker.hits}
             selected={localModelPicker.selected}
@@ -4307,7 +4330,7 @@ export function App(props: AppProps): React.ReactElement {
       )}
       {/* F161-FIX — seletor `/effort` STANDALONE (fora do fluxo conjugado do /model). */}
       {effortPicker.open && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" {...box}>
           <EffortPicker
             options={effortPicker.options}
             selected={effortPicker.selected}
@@ -4321,7 +4344,7 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
       {themePicker.open && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" {...box}>
           <ThemePicker
             themes={themePicker.themes}
             selected={themePicker.selected}
@@ -4330,7 +4353,7 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
       {langPicker.open && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" {...box}>
           <LangPicker
             langs={langPicker.langs}
             selected={langPicker.selected}
@@ -4339,7 +4362,7 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
       {providerPicker.open && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" {...box}>
           <ProviderPicker
             providers={providerPicker.providers}
             selected={providerPicker.selected}
@@ -4353,12 +4376,12 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
       {historyPicker.open && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" {...box}>
           <HistoryPicker sessions={historyPicker.sessions} selected={historyPicker.selected} />
         </Box>
       )}
       {rewindPicker.open && rewindPicker.phase !== 'closed' && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" {...box}>
           <RewindPicker
             phase={rewindPicker.phase}
             checkpoints={rewindPicker.checkpoints}
@@ -4370,7 +4393,8 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
     </>
-  );
+    );
+  };
 
   // ── EST-1000 · ADR-0076 — MODO COCKPIT (tela cheia, 6 regiões) ──────────────────
   // Quando o cockpit está ATIVO (fullscreen pedido E o layout cabe — ADR §6), a App
@@ -4402,7 +4426,7 @@ export function App(props: AppProps): React.ReactElement {
         columns={columns}
         frame={frame}
         cwd={state.meta.cwd}
-        overlay={overlayOpen ? slashOverlays : null}
+        overlay={overlayOpen ? renderOverlays('bottom') : null}
         {...(props.version !== undefined ? { version: props.version } : {})}
       />
     );
@@ -4905,145 +4929,11 @@ export function App(props: AppProps): React.ReactElement {
           foco; o <SlashMenu> pode coexistir com o stream (EST-0982). A altura que
           ocupam é a MESMA de antes (só mudou a ordem vertical, não a contagem de
           linhas vivas) ⇒ o orçamento (`LIVE_CHROME_ROWS`/`speechMaxLines`) não muda. */}
-      {slashOpen && (
-        <Box flexDirection="column" paddingTop={1}>
-          {/* EST-1015 — `maxRows` CAPA a altura (janela ↑N/↓N) p/ o menu não estourar `rows` e
-              deixar fantasma ao fechar (só o INLINE; o do cockpit é clipado por conversaRows). */}
-          <SlashMenu
-            commands={slashCommands}
-            selected={slashSel}
-            query={slashQuery}
-            maxRows={slashMenuRowCap}
-            columns={columns}
-          />
-        </Box>
-      )}
-
-      {/* EST-0962 — seletor `/model` (mesma mecânica do slash-menu/file-picker). */}
-      {modelPicker.open && (
-        <Box flexDirection="column" paddingTop={1}>
-          <ModelPicker
-            tiers={modelPicker.tiers}
-            selected={modelPicker.selected}
-            currentTier={state.meta.tier}
-            loading={modelPicker.loading}
-            usingFallback={modelPicker.usingFallback}
-            customSelected={modelPicker.customSelected}
-            customInputOpen={modelPicker.customInputOpen}
-            customInput={modelPicker.customInput}
-            customSuggestions={modelPicker.customSuggestions}
-            customWarnOutOfCatalog={modelPicker.customWarnOutOfCatalog}
-            customBrowserAvailable={modelPicker.customBrowserAvailable}
-            customRows={modelPicker.customRows}
-            customFilteredCount={modelPicker.customFilteredCount}
-            customTotalCount={modelPicker.customTotalCount}
-            customHasMoreAbove={modelPicker.customHasMoreAbove}
-            customHasMoreBelow={modelPicker.customHasMoreBelow}
-            customToolsOnly={modelPicker.customToolsOnly}
-            customNoToolsWarning={modelPicker.customNoToolsWarning}
-            effortStepOpen={modelPicker.effortStepOpen}
-            effortOptions={modelPicker.effortOptions}
-            effortSelected={modelPicker.effortSelected}
-            {...(modelPicker.currentEffort !== undefined
-              ? { currentEffort: modelPicker.currentEffort }
-              : {})}
-            effortCustomOpen={modelPicker.effortCustomOpen}
-            effortCustomInput={modelPicker.effortCustomInput}
-            effortCustomWarn={modelPicker.effortCustomWarn}
-          />
-        </Box>
-      )}
-
-      {/* F161-FIX — seletor `/model` sob backend LOCAL (BYO): fuzzy-pick dedicado dos
-          slugs do provider ativo (os tiers do broker acima não se aplicam ali). */}
-      {localModelPicker.open && (
-        <Box flexDirection="column" paddingTop={1}>
-          <LocalModelPicker
-            hits={localModelPicker.hits}
-            selected={localModelPicker.selected}
-            query={localModelPicker.query}
-            columns={columns}
-            loading={localModelPicker.loading}
-            usingFallback={localModelPicker.usingFallback}
-            {...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {})}
-          />
-        </Box>
-      )}
-
-      {/* F161-FIX — seletor `/effort` STANDALONE (fora do fluxo conjugado do /model). */}
-      {effortPicker.open && (
-        <Box flexDirection="column" paddingTop={1}>
-          <EffortPicker
-            options={effortPicker.options}
-            selected={effortPicker.selected}
-            {...(effortPicker.currentEffort !== undefined
-              ? { currentEffort: effortPicker.currentEffort }
-              : {})}
-            customOpen={effortPicker.customOpen}
-            customInput={effortPicker.customInput}
-            customWarn={effortPicker.customWarn}
-          />
-        </Box>
-      )}
-
-      {/* EST-0966 — seletor `/theme` (mesma mecânica do slash-menu/model-picker). */}
-      {themePicker.open && (
-        <Box flexDirection="column" paddingTop={1}>
-          <ThemePicker
-            themes={themePicker.themes}
-            selected={themePicker.selected}
-            currentTheme={currentTheme}
-          />
-        </Box>
-      )}
-
-      {/* EST-0989 (i18n) — seletor `/lang` (mesma mecânica dos pickers): lista os
-          idiomas (pt-BR/en) e troca o ativo. Espelha o <ThemePicker>. */}
-      {langPicker.open && (
-        <Box flexDirection="column" paddingTop={1}>
-          <LangPicker
-            langs={langPicker.langs}
-            selected={langPicker.selected}
-            currentLang={currentLang}
-          />
-        </Box>
-      )}
-
-      {/* EST-0972 — seletor `/history` (mesma mecânica dos pickers): lista as sessões
-          anteriores e retoma a escolhida AO VIVO. */}
-      {historyPicker.open && (
-        <Box flexDirection="column" paddingTop={1}>
-          {/* F88 (anti-flicker) — `maxRows` JANELA a lista (↑↓ rola) p/ dezenas de sessões
-              salvas não estourarem `rows` no inline ⇒ o Ink cairia no full-screen
-              (clearTerminal/frame) e piscaria no Windows. Reusa o cap do overlay
-              (`slashMenuRowCap`); o componente ainda tem default próprio (10). */}
-          <HistoryPicker
-            sessions={historyPicker.sessions}
-            selected={historyPicker.selected}
-            maxRows={slashMenuRowCap - 2}
-            columns={columns}
-          />
-        </Box>
-      )}
-
-      {/* EST-XXXX — seletor `/rewind` (· Esc Esc): pontos da sessão + ação. */}
-      {rewindPicker.open && rewindPicker.phase !== 'closed' && (
-        <Box flexDirection="column" paddingTop={1}>
-          {/* F88 (anti-flicker) — `maxRows` JANELA os checkpoints (1 por prompt → dezenas
-              numa sessão longa) p/ não estourar `rows` no inline ⇒ evita o full-screen do
-              Ink (clearTerminal/frame) que pisca no Windows. Reusa o cap do overlay. */}
-          <RewindPicker
-            phase={rewindPicker.phase}
-            checkpoints={rewindPicker.checkpoints}
-            actions={rewindPicker.actions}
-            target={rewindPicker.target}
-            selected={rewindPicker.selected}
-            barrierWarnings={rewindBarriers}
-            maxRows={slashMenuRowCap - 2}
-            columns={columns}
-          />
-        </Box>
-      )}
+      {/* F-OVERLAY-UNICO — MESMA lista do cockpit (`renderOverlays`), só que com o
+          espaçamento do inline (`top`): aqui os overlays ficam ABAIXO do composer.
+          Antes esta região duplicava a lista à mão e divergia — foi assim que o
+          `/provider` e a paleta sumiram só neste caminho. */}
+      {renderOverlays('top')}
 
       {/* EST-0985 (3/3) — divisória ABAIXO DO INPUT: separa o composer da área de
           baixo (status / hints / sub-agentes). Com a (2/3), EMOLDURA o input.
