@@ -62,6 +62,18 @@ const MODE_VIEW: Readonly<
     word: 'YOLO',
     caption: 'mode.unsafe.caption',
   },
+  // ADR-0158 — `service-autonomous` é modo de SERVIÇO (o runner o ativa
+  // internamente, headless, a partir do `service.md`) — NUNCA aparece na TUI
+  // interativa (nenhum turno de serviço monta Ink; `-p`/`--quiet` imprime só o
+  // resultado). Esta entrada existe só p/ a exaustividade do `Record<SessionMode,
+  // …>` (TS); se algum dia este indicador rodasse sob este modo (não deveria),
+  // mostra algo honesto em vez de quebrar.
+  'service-autonomous': {
+    glyph: 'ask',
+    role: 'danger',
+    word: 'SERVIÇO AUTÔNOMO',
+    caption: 'mode.unsafe.caption',
+  },
 };
 
 export function ModeIndicator(props: ModeIndicatorProps): React.ReactElement {

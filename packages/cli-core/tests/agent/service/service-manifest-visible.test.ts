@@ -62,6 +62,35 @@ describe('buildServiceManifestVisibleNote', () => {
     expect(text(semTeto.lines)).toContain('teto por atividade: sem-teto');
   });
 
+  it('autonomy: yolo-scoped fica DESTACADA (⚠) — é o momento do consentimento p/ um serviço que não pergunta', () => {
+    const autonomo = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader', autonomy: 'yolo-scoped' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    const t = text(autonomo.lines);
+    expect(t).toContain('⚠ autonomia: yolo-scoped');
+    expect(t).toContain('NÃO PERGUNTA');
+
+    // `ask` (e ausente) seguem SEM o destaque de alerta.
+    const perguntando = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader', autonomy: 'ask' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(perguntando.lines)).not.toContain('⚠ autonomia');
+
+    const semDeclarar = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(semDeclarar.lines)).not.toContain('⚠ autonomia');
+  });
+
   it('canal AUSENTE fica visivelmente marcado (nunca escondido)', () => {
     const note = buildServiceManifestVisibleNote({
       manifest: manifest({ name: 'pesquisador' }),

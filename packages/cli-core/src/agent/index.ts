@@ -405,17 +405,19 @@ export {
 } from './workflow/workflow-runner.js';
 
 // ADR-0158 (aceito, APR-0148) — SERVIÇOS plugáveis: parser PURO do manifesto
-// `service.md` (frontmatter = contrato duro/§3 + corpo = orquestrador/§1; autonomy
-// v1 só `ask`; tunáveis/circuit-breakers com faixa `[min..max]`/§8.3/§8.5a; FALHA
-// FECHADA RES-MD-3), o FORMATADOR PURO da listagem (`/service`, canal principal —
-// §10) e o FORMATADOR PURO do "manifesto visível" exigido antes do `install` (§9).
-// A leitura confinada de `~/.aluy/services/<nome>/` + a validação semântica
-// (cron/workflow existente) são do locus concreto (@hiperplano/aluy-cli, io/services-store.ts).
+// `service.md` (frontmatter = contrato duro/§3 + corpo = orquestrador/§1; `autonomy:
+// ask | yolo-scoped`; tunáveis/circuit-breakers com faixa `[min..max]`/§8.3/§8.5a;
+// FALHA FECHADA RES-MD-3), o FORMATADOR PURO da listagem (`/service`, canal
+// principal — §10) e o FORMATADOR PURO do "manifesto visível" exigido antes do
+// `install` (§9). A leitura confinada de `~/.aluy/services/<nome>/` + a validação
+// semântica (cron/workflow existente) são do locus concreto (@hiperplano/aluy-cli,
+// io/services-store.ts).
 export {
   parseServiceManifest,
   isServiceManifestError,
   isSafeWorkflowRef,
   normalizeServiceName,
+  SERVICE_AUTONOMOUS_MODE,
   type ServiceManifest,
   type ServiceManifestError,
   type ServiceManifestParse,

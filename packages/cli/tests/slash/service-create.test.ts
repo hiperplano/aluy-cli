@@ -71,10 +71,11 @@ describe('buildServiceCreateSystemPrompt — PURA', () => {
     expect(prompt).toContain('Regra dura nunca é prompt');
   });
 
-  it('a v1 só aceita "autonomy: ask" — o prompt não oferece outra opção', () => {
+  it('menciona "ask" (default) e "yolo-scoped" (autônomo, confinado), mas orienta a NUNCA propor yolo-scoped por conta própria', () => {
     const prompt = buildServiceCreateSystemPrompt('um serviço qualquer');
     expect(prompt).toContain('autonomy: ask');
-    expect(prompt).toContain('SÓ aceita `ask`');
+    expect(prompt).toContain('yolo-scoped');
+    expect(prompt).toContain('NUNCA proponha');
   });
 
   it('termina com CRIAR NÃO É LIGAR: PARADO + próximos passos (install → start)', () => {

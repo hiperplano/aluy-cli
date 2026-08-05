@@ -2,9 +2,9 @@
 //
 // Bateria: exemplo completo do ADR (frontmatter + orquestrador); comentário inline
 // com aspas (`"0 9 * * 1-5"     # …`); tunável com faixa válida/inválida; circuit
-// breaker sem faixa; `autonomy: ask` aceito, qualquer outro valor REJEITADO
-// (v1 só `ask`); e o ponto-chave RES-MD-3 — sem `name`/corpo vazio NÃO vira
-// "serviço sem orquestrador".
+// breaker sem faixa; `autonomy: ask`/`autonomy: yolo-scoped` aceitos, qualquer
+// outro valor REJEITADO; e o ponto-chave RES-MD-3 — sem `name`/corpo vazio NÃO
+// vira "serviço sem orquestrador".
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -90,17 +90,22 @@ describe('parseServiceManifest — FALHA FECHADA (RES-MD-3)', () => {
     expect(reason).toMatch(/corpo vazio|sem orquestrador/);
   });
 
-  it('autonomy diferente de "ask" ⇒ erro (v1 só aceita ask)', () => {
+  it('autonomy diferente de "ask"/"yolo-scoped" ⇒ erro (fail-closed)', () => {
     const reason = fail(
       'service.md',
-      '---\nname: trader\nautonomy: yolo-scoped\n---\nOrquestrador.',
+      '---\nname: trader\nautonomy: sempre-executa\n---\nOrquestrador.',
     );
-    expect(reason).toMatch(/autonomy.*não é suportado|v1 do ADR-0158 só aceita/);
+    expect(reason).toMatch(/autonomy.*não é suportado/);
   });
 
   it('autonomy: ask (case-insensitive/trim) ⇒ aceito', () => {
     const m = ok('service.md', '---\nname: trader\nautonomy:  ASK  \n---\nOrquestrador.');
     expect(m.autonomy).toBe('ask');
+  });
+
+  it('autonomy: yolo-scoped (case-insensitive/trim) ⇒ aceito — o modo autônomo confinado', () => {
+    const m = ok('service.md', '---\nname: trader\nautonomy:  YOLO-SCOPED  \n---\nOrquestrador.');
+    expect(m.autonomy).toBe('yolo-scoped');
   });
 
   it('tunável com faixa malformada (min > max) ⇒ erro', () => {

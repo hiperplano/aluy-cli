@@ -59,6 +59,7 @@ import {
   isWorkflowError,
   formatServiceResumeInstruction,
   formatOwnerSayInjection,
+  SERVICE_AUTONOMOUS_MODE,
   type WorkflowActivity,
   type WorkflowActivityOutcome,
   type WorkflowActivityRunner,
@@ -234,16 +235,26 @@ export function buildActivityGoal(args: {
  * (mesmo padrão de `ALUY_SERVICE_HOME`, nunca flag pública) que `run.tsx` consome
  * no BOOT do turno filho para travá-lo na persona ANTES do primeiro tool-call
  * (fail-closed lá: nome desconhecido ⇒ o filho nem abre sessão).
+ *
+ * ADR-0158 — `autonomy` (o `service.manifest.autonomy` cru) vira a env
+ * `ALUY_SERVICE_AUTONOMY`, MESMO padrão: só INTERNA (nunca flag pública, nunca
+ * alcançável pela sessão interativa do dono — `run.tsx` só a lê quando
+ * `ALUY_SERVICE_HOME` TAMBÉM está presente). SÓ entra quando o manifesto
+ * declarou `autonomy: yolo-scoped` — `ask`/ausente ⇒ a CHAVE nem existe no
+ * objeto (o default, "sem `autonomy:` ou com `ask`", fica byte-a-byte igual
+ * a antes: nem uma chave nova aparece no `env`).
  */
 export function buildActivityEnv(
   serviceDir: string,
   agent: string | undefined,
   baseEnv: NodeJS.ProcessEnv = process.env,
+  autonomy?: 'ask' | typeof SERVICE_AUTONOMOUS_MODE,
 ): NodeJS.ProcessEnv {
   return {
     ...baseEnv,
     ALUY_SERVICE_HOME: serviceDir,
     ...(agent !== undefined ? { ALUY_SERVICE_PERSONA: agent } : {}),
+    ...(autonomy === SERVICE_AUTONOMOUS_MODE ? { ALUY_SERVICE_AUTONOMY: autonomy } : {}),
   };
 }
 
@@ -399,6 +410,10 @@ async function runActivityTurn(args: {
   readonly execPath: string;
   readonly aluyEntrypoint: string;
   readonly log: (line: string) => void;
+  /** ADR-0158 — `service.manifest.autonomy` cru, propagado ao turno-filho via
+   * `buildActivityEnv` (env interna `ALUY_SERVICE_AUTONOMY`). `undefined`/`'ask'`
+   * ⇒ comportamento de hoje, byte a byte (nenhuma env nova). */
+  readonly autonomy?: 'ask' | typeof SERVICE_AUTONOMOUS_MODE;
   /** Preenchido com o texto da pergunta pendente quando o outcome é `awaiting-owner`. */
   readonly pendingQuestionRef: { current?: string };
   /** ADR-0158 §5 pt.4 (FASE 3) — RETOMADA: quando presente, é a atividade que HAVIA
@@ -449,7 +464,7 @@ async function runActivityTurn(args: {
 
   const child = spawn(args.execPath, argv, {
     cwd: args.serviceDir,
-    env: buildActivityEnv(args.serviceDir, activity.agent),
+    env: buildActivityEnv(args.serviceDir, activity.agent, process.env, args.autonomy),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -712,6 +727,12 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         // abrir, mesmo através de uma retomada pós-ask-espera (`{...baseWorkflowArgs,
         // resume: ...}` abaixo reusa este MESMO array).
         ownerSay: pendingSay,
+        // ADR-0158 — o modo declarado no manifesto vira o modo do turno-filho
+        // (propagado até `buildActivityEnv` → env `ALUY_SERVICE_AUTONOMY`). Ausente/
+        // `ask` ⇒ comportamento de hoje, byte a byte.
+        ...(service.manifest.autonomy !== undefined
+          ? { autonomy: service.manifest.autonomy }
+          : {}),
       };
 
       let outcome = await runOneWorkflow(baseWorkflowArgs);
@@ -913,6 +934,9 @@ async function runOneWorkflow(args: {
    * runActivity` abaixo. `undefined` ⇒ attach não fiado (nunca acontece em produção;
    * só testes que chamem `runOneWorkflow` isoladamente sem essa peça). */
   readonly ownerSay?: string[];
+  /** ADR-0158 — `service.manifest.autonomy` cru, repassado a CADA `runActivityTurn`
+   * desta fatia (ver o campo homônimo lá). `undefined`/`'ask'` ⇒ sem mudança. */
+  readonly autonomy?: 'ask' | typeof SERVICE_AUTONOMOUS_MODE;
 }): Promise<WorkflowOutcome> {
   const { serviceDir, workflowName, log } = args;
   if (workflowName === undefined) {
@@ -1000,6 +1024,7 @@ async function runOneWorkflow(args: {
         ...(ownerSayContext !== undefined ? { ownerSayContext } : {}),
         pendingQuestionRef,
         ...(resumeContext !== undefined ? { resumeContext } : {}),
+        ...(args.autonomy !== undefined ? { autonomy: args.autonomy } : {}),
       });
       if (!outcome.ok && outcome.stop === 'awaiting-owner') pendingActivityIndex = realIndex;
       return outcome;
