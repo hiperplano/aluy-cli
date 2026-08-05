@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.125] — 2026-08-05
+
+### Corrigido
+
+- 👁️ **o `attach` mostrava `→ err` e ESCONDIA o motivo — que ele já tinha:** depois de horas travado, o dono: *"tá dando erro e não consigo ver"*. No `aluy service attach` aparecia `[tool] spawn_agent → err` e não havia caminho NENHUM para a razão — nem no attach, nem no `runner.log`, nem na transcrição da sessão (o bloco vinha com `result: ""`). O que dói: a razão SEMPRE existiu — `tool-reporter.ts` já grava `output: truncate(result.observation)` exatamente quando `status === 'err'`; ela chegava íntegra ao bloco e era DESCARTADA no último metro, porque a linha era montada com `${b.result || b.status}` e em erro o `result` vem VAZIO, então o `||` caía no `status` e imprimia só "err". Agora a razão aparece — e vai TAMBÉM para o `runner.log`, porque o attach é EFÊMERO (quem não estava conectado no instante do erro nunca via, e a transcrição morre com o turno) e falha de tool é a informação mais cara de um serviço autônomo. Só ERRO entra no log: sucesso continua fora, ou dezenas de tools por turno afogariam o diagnóstico. Cinco testes travam o comportamento, incluindo os mutantes (erro sem `output` degrada para "err", nunca "err: undefined"; sucesso não ganha cauda; o gate é o STATUS, não a presença do campo). SEXTO caso da mesma classe num só dia de dogfooding — a varredura da CLASSE fica como próximo passo.
+
 ## [1.0.0-rc.124] — 2026-08-05
 
 ### Adicionado
