@@ -68,6 +68,22 @@ export function buildServiceManifestVisibleNote(
   lines.push(`until: ${m.until ?? '(não declarado)'}`);
   lines.push(`workflow do turno: ${m.workflow ?? '(não declarado)'}`);
   lines.push(`canal: ${m.channel ?? '(NENHUM — sem canal, sem onde reportar/perguntar)'}`);
+  // ADR-0158 — `workspace:` ABRE UMA PORTA: raiz(es) EXTRA, ALÉM da própria pasta do
+  // serviço (que continua raiz SEMPRE), onde o agente pode ler/escrever. DESTACADO
+  // (⚠), MESMA classe do aviso de `autonomy: yolo-scoped` abaixo — instalar é o
+  // momento do consentimento, e um dono não pode instalar sem VER que está abrindo
+  // acesso a um diretório fora da pasta do serviço. Ausente ⇒ linha sem destaque
+  // (comportamento de hoje: só a própria pasta). NÃO é `unconfined` — tudo FORA das
+  // raízes listadas (a própria + as declaradas) continua negado, "~/.aluy/" incluído.
+  if (m.workspaceRoots !== undefined && m.workspaceRoots.length > 0) {
+    lines.push(
+      `⚠ workspace: ${m.workspaceRoots.length} raiz(es) EXTRA além da própria pasta do ` +
+        `serviço — o agente pode ler/escrever nelas (confinado a elas; "~/.aluy/" continua negado):`,
+    );
+    for (const w of m.workspaceRoots) lines.push(`  · ${w}`);
+  } else {
+    lines.push('workspace: (nenhuma raiz extra — só a própria pasta do serviço)');
+  }
   // ADR-0158 — `autonomy: yolo-scoped` é a informação MAIS importante desta tela: um
   // serviço que roda sem pedir aprovação, DESTACADA (⚠, igual aos avisos de
   // daemon/skill-com-script abaixo) — instalar é o momento do consentimento, e não

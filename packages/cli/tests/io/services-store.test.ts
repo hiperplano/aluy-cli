@@ -169,6 +169,95 @@ describe('UserServicesStore — list() rejeições', () => {
   });
 });
 
+// ADR-0158 — `workspace:` (raiz extra além da própria pasta do serviço). Além do
+// parser puro (cli-core) e do resolver isolado (`workspace-roots.test.ts`), esta
+// bateria prova a INTEGRAÇÃO ponta a ponta: `UserServicesStore` resolve/valida via
+// `this.aluyHome` (o MESMO `baseDir` injetado — nunca o `~/.aluy/` real da
+// máquina), e um serviço com raiz hostil é REJEITADO por inteiro (fail-closed,
+// nem entra em `services`).
+describe('UserServicesStore — workspace: (raiz extra além da própria pasta)', () => {
+  let base: string;
+  let servicesDir: string;
+  /** Raiz FORA de `base` (o "~/.aluy/" desta suíte) — onde vive o "projeto externo"
+   * legítimo (ex.: o `~/projects/fluider` do dono real). NUNCA sob `base`, senão o
+   * próprio piso do teste ("workspace: dentro de ~/.aluy/") derrubaria o cenário
+   * "raiz válida" por acidente. */
+  let externalBase: string;
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'aluy-svc-ws-'));
+    servicesDir = join(base, SERVICES_DIRNAME);
+    externalBase = mkdtempSync(join(tmpdir(), 'aluy-svc-ws-external-'));
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+    rmSync(externalBase, { recursive: true, force: true });
+  });
+
+  it('workspace: declarado apontando p/ diretório existente ⇒ entra resolvido em "resolvedWorkspaceRoots"', () => {
+    const extraDir = join(externalBase, 'projects', 'fluider');
+    mkdirSync(extraDir, { recursive: true });
+    writeService(
+      servicesDir,
+      'trader',
+      ['---', 'name: trader', `workspace: ${extraDir}`, '---', 'orq'].join('\n'),
+    );
+    const { services, errors } = new UserServicesStore({ baseDir: base }).list();
+    expect(errors).toEqual([]);
+    expect(services).toHaveLength(1);
+    expect(services[0]!.resolvedWorkspaceRoots).toEqual([extraDir]);
+  });
+
+  it('sem "workspace:" ⇒ "resolvedWorkspaceRoots" vazio (comportamento de hoje)', () => {
+    writeService(servicesDir, 'trader', MINIMAL);
+    const { services, errors } = new UserServicesStore({ baseDir: base }).list();
+    expect(errors).toEqual([]);
+    expect(services[0]!.resolvedWorkspaceRoots).toEqual([]);
+  });
+
+  it('workspace: apontando p/ diretório INEXISTENTE ⇒ serviço INTEIRO rejeitado (fail-closed)', () => {
+    writeService(
+      servicesDir,
+      'trader',
+      ['---', 'name: trader', `workspace: ${join(base, 'nao-existe')}`, '---', 'orq'].join('\n'),
+    );
+    const { services, errors } = new UserServicesStore({ baseDir: base }).list();
+    expect(services).toEqual([]);
+    expect(errors[0]!.reason).toMatch(/não existe/);
+  });
+
+  // O PISO QUE NÃO CAI — o teste-chave que distingue esta feature de `unconfined`:
+  // declarar `workspace: ~/.aluy` (aqui, o EQUIVALENTE isolado — `baseDir` injetado,
+  // NUNCA o `~/.aluy/` real da máquina) NUNCA vira raiz autorizada, mesmo que o
+  // diretório exista de verdade (ele existe — é o próprio `servicesDir`'s pai).
+  it('workspace: apontando p/ DENTRO do "~/.aluy/" (aqui, o baseDir injetado) ⇒ recusado — o PISO não cai', () => {
+    writeService(
+      servicesDir,
+      'trader',
+      ['---', 'name: trader', `workspace: ${base}`, '---', 'orq'].join('\n'),
+    );
+    const { services, errors } = new UserServicesStore({ baseDir: base }).list();
+    expect(services).toEqual([]);
+    expect(errors[0]!.reason).toMatch(/~\/\.aluy/);
+  });
+
+  it('workspace: apontando p/ a pasta de OUTRO serviço (também sob "~/.aluy/") ⇒ recusado', () => {
+    writeService(
+      servicesDir,
+      'espiao',
+      ['---', 'name: espiao', '---', 'orq'].join('\n'),
+    ); // outro serviço já instalado.
+    writeService(
+      servicesDir,
+      'trader',
+      ['---', 'name: trader', `workspace: ${join(servicesDir, 'espiao')}`, '---', 'orq'].join('\n'),
+    );
+    const { services, errors } = new UserServicesStore({ baseDir: base }).list();
+    expect(services.map((s) => s.name)).toEqual(['espiao']); // "espiao" segue OK; só "trader" cai.
+    expect(errors.find((e) => e.dirName === 'trader')?.reason).toMatch(/~\/\.aluy/);
+  });
+});
+
 describe('UserServicesStore — list() dir ausente (fail-safe)', () => {
   it('sem o subdir services ⇒ { services: [], errors: [] } sem lançar', () => {
     const base = mkdtempSync(join(tmpdir(), 'aluy-svc-'));

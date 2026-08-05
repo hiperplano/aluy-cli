@@ -12,6 +12,10 @@
 //   until: "17:30"               # fim do expediente — ENFORÇADO pelo runner (fase 2)
 //   workflow: turno               # rotina do turno (workflows/turno.md do serviço)
 //   channel: telegram:<chat-id>  # onde reporta/pergunta (ADR-0154)
+//   workspace: ~/projects/fluider  # raiz(es) EXTRA onde o serviço pode ler/escrever,
+//                                 # ALÉM da própria pasta (que continua raiz sempre) —
+//                                 # aceita lista (vírgula ou "- item" em bloco), ver
+//                                 # `isSafeWorkspaceRef`
 //   group: mesa-trading          # RÓTULO — a que "mesa"/equipe este serviço pertence
 //                                 # (descoberta entre serviços irmãos — sem semântica de
 //                                 # execução, sem estado próprio; ver `isSafeGroupLabel`)
@@ -72,6 +76,21 @@
 // ║   (`service-manifest-visible.ts`) e o `aluy service status` mostram essas    ║
 // ║   chaves — foi o silêncio total (escreveu, instalou, nada indicou) que        ║
 // ║   motivou este campo, não só o `immediate:` que o disparou.                  ║
+// ║ • `workspace:` ABRE UMA PORTA — raiz(es) EXTRA, ALÉM da própria pasta do      ║
+// ║   serviço (que continua raiz SEMPRE — `workspace:` ACRESCENTA, nunca         ║
+// ║   substitui), onde o turno pode ler/escrever. Aceita a MESMA gramática de    ║
+// ║   lista de `tools:` (linha única com vírgulas OU `- item` em bloco YAML —    ║
+// ║   ver `readYamlBlockList`/`isSafeWorkspaceRef`). Este parser só valida a     ║
+// ║   FORMA (não-vazio, sem byte nulo/controle) — CAMINHO ABSOLUTO é LEGÍTIMO    ║
+// ║   aqui (é o caso de uso: apontar pra fora da árvore do serviço), então,      ║
+// ║   ao contrário de `workflow:`, NÃO recusamos `/` nem `..` na FORMA. A        ║
+// ║   RESOLUÇÃO real (expandir `~`, resolver relativo contra a pasta do          ║
+// ║   serviço, canonicalizar, exigir diretório EXISTENTE, e — o piso que não     ║
+// ║   cai — recusar qualquer raiz que caia dentro de `~/.aluy/`, mesmo que o     ║
+// ║   dono declare `workspace: ~/.aluy`) é do locus concreto (`@hiperplano/      ║
+// ║   aluy-cli`, `service/workspace-roots.ts` + `io/services-store.ts`), que     ║
+// ║   tem `node:fs`/`node:path`. `tools:` PRESENTE-mas-ILEGÍVEL segue RES-MD-3   ║
+// ║   (falha fechada, nunca "sem workspace = ausente em silêncio").              ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // PORTÁVEL (ADR-0053 §8): parser de string PURO (sem `node:*`, sem I/O). A LEITURA
@@ -79,6 +98,10 @@
 // (@hiperplano/aluy-cli, io/services-store.ts).
 
 import { isReasonableModelSlug } from '../agent-model-tier.js';
+// Reusa a MESMA gramática de lista do `tools:` de agent-profile.ts (linha única
+// com vírgulas OU lista YAML em bloco `- item`) — `workspace:` aceita várias
+// raízes com a IDÊNTICA sintaxe, em vez de inventar uma 2ª forma no mesmo `.md`.
+import { readYamlBlockList } from '../agent-profile.js';
 
 /** Um tunável/circuit-breaker numérico declarado no frontmatter (§8.3/§8.5a). */
 export interface ServiceTunable {
@@ -118,6 +141,24 @@ export interface ServiceManifest {
   readonly workflow?: string;
   /** Canal cru `<conector>:<alvo>` (frontmatter `channel`, ex.: `telegram:123456`). */
   readonly channel?: string;
+  /**
+   * Raiz(es) EXTRA de workspace CRUAS (frontmatter `workspace`, ex.:
+   * `~/projects/fluider`, ou uma lista) — ALÉM da própria pasta do serviço, que
+   * continua raiz SEMPRE (`workspace:` ACRESCENTA, nunca substitui: o turno
+   * precisa do próprio `.state/`/`agents/`/`workflows/`). ABRE UMA PORTA — por
+   * isso aparece com DESTAQUE (⚠) no manifesto visível exigido antes do
+   * `install` (`service-manifest-visible.ts`), mesma classe do aviso de
+   * `autonomy: yolo-scoped`. Valores CRUS, ainda não resolvidos: relativo é
+   * relativo à pasta do serviço, `~` ainda não expandido, path absoluto passa
+   * como veio — a RESOLUÇÃO (expandir `~`, resolver relativo, canonicalizar,
+   * exigir diretório existente, e recusar qualquer raiz que caia dentro de
+   * `~/.aluy/` mesmo se o dono declarar `workspace: ~/.aluy`) é do locus
+   * concreto (`@hiperplano/aluy-cli`), não deste parser puro. Ausente ⇒
+   * `undefined` — comportamento IDÊNTICO ao de hoje (só a pasta do serviço).
+   * Presente mas ilegível/vazio ⇒ RES-MD-3 (manifesto rejeitado, nunca "sem
+   * workspace extra" em silêncio) — ver `isSafeWorkspaceRef`.
+   */
+  readonly workspaceRoots?: readonly string[];
   /**
    * RÓTULO de mesa/equipe (frontmatter `group`, ex.: `mesa-trading`) — como um serviço
    * DESCOBRE seus irmãos (`aluy service list --group <nome>` filtra por ele; `start`/
@@ -258,6 +299,7 @@ const KNOWN_KEYS = new Set([
   'until',
   'workflow',
   'channel',
+  'workspace',
   'group',
   'model',
   'budget',
@@ -290,6 +332,12 @@ interface RawServiceFrontmatter {
   readonly until?: string;
   readonly workflow?: string;
   readonly channel?: string;
+  /** `undefined` = chave `workspace:` ausente. String = valor cru (linha única
+   * com vírgulas, OU itens de bloco YAML já juntados por vírgula — a parsear). */
+  readonly workspaceRaw?: string;
+  /** `true` se a chave `workspace:` apareceu (mesmo vazia) — guia o fail-closed,
+   * MESMO padrão de `hasToolsKey` em agent-profile.ts. */
+  readonly hasWorkspaceKey: boolean;
   readonly group?: string;
   readonly model?: string;
   readonly budget?: string;
@@ -311,7 +359,7 @@ interface RawServiceFrontmatter {
 function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body: string } {
   const text = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const m = /^---\n([\s\S]*?)\n---\n?/.exec(text);
-  if (!m) return { fm: { extras: [] }, body: text.trim() };
+  if (!m) return { fm: { extras: [], hasWorkspaceKey: false }, body: text.trim() };
 
   const out: {
     name?: string;
@@ -320,6 +368,7 @@ function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body
     until?: string;
     workflow?: string;
     channel?: string;
+    workspaceRaw?: string;
     group?: string;
     model?: string;
     budget?: string;
@@ -327,10 +376,12 @@ function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body
     immediateRaw?: string;
     autonomyRaw?: string;
   } = {};
+  let hasWorkspaceKey = false;
   const extras: Array<readonly [string, string]> = [];
 
-  for (const line of m[1]!.split('\n')) {
-    const kv = /^\s*([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(line);
+  const lines = m[1]!.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const kv = /^\s*([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(lines[i]!);
     if (!kv) continue;
     const key = kv[1]!.toLowerCase();
     const value = stripInlineComment(kv[2]!.trim());
@@ -352,6 +403,22 @@ function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body
         break;
       case 'channel':
         out.channel = value;
+        break;
+      case 'workspace':
+        hasWorkspaceKey = true;
+        if (value === '') {
+          // `workspace:` sem valor na mesma linha ⇒ candidato a lista EM BLOCO
+          // (`- <path>` nas linhas seguintes) — MESMO truque de `tools:` em
+          // agent-profile.ts: junta os itens com vírgula p/ reusar o MESMO
+          // parser da forma de uma linha (ÚNICA fonte de verdade). SEM itens
+          // (bloco vazio de verdade, ou a próxima linha já é outra chave) ⇒
+          // `workspaceRaw` continua '' — cai no MESMO fail-closed de sempre.
+          const block = readYamlBlockList(lines, i + 1);
+          out.workspaceRaw = block.items.join(',');
+          i = block.lastIndex; // pula as linhas de item já consumidas.
+        } else {
+          out.workspaceRaw = value;
+        }
         break;
       case 'group':
         out.group = value;
@@ -376,7 +443,7 @@ function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body
         break;
     }
   }
-  return { fm: { ...out, extras }, body: text.slice(m[0].length).trim() };
+  return { fm: { ...out, hasWorkspaceKey, extras }, body: text.slice(m[0].length).trim() };
 }
 
 /**
@@ -438,6 +505,65 @@ export function isSafeWorkflowRef(raw: string): boolean {
   if (/^[A-Za-z]:/.test(v)) return false; // "C:" — absoluto no Windows.
   // Qualquer segmento `..` escapa, esteja onde estiver ("a/../../b" também sobe).
   return !v.split('/').includes('..');
+}
+
+/** Teto defensivo de tamanho de UMA entrada de `workspace:` (anti-string-gigante). */
+const MAX_WORKSPACE_ENTRY_LEN = 1024;
+/** Teto defensivo de QUANTAS raízes um `.md` pode declarar (anti-lista-gigante). */
+const MAX_WORKSPACE_ROOTS = 16;
+
+/**
+ * `workspace:` é o OPOSTO de `workflow:` na forma: aqui CAMINHO ABSOLUTO é
+ * LEGÍTIMO (é o caso de uso — apontar pra fora da árvore do serviço, ex.:
+ * `~/projects/fluider`) e `..` RELATIVO também (o dono pode escrever
+ * `workspace: ../outro-projeto` relativo à própria pasta do serviço). Por
+ * isso esta validação NÃO recusa `/` nem `..` — só a FORMA mínima: não-vazio,
+ * sem byte nulo, sem caractere de controle (evita injeção de escape de
+ * terminal no manifesto VISÍVEL, que ecoa o valor cru), e um teto de tamanho.
+ * A CONTENÇÃO real (canonicalizar, exigir diretório existente, recusar
+ * `~/.aluy/`) é do locus concreto — ver o comentário de `workspaceRoots` na
+ * interface `ServiceManifest`. PURA.
+ */
+export function isSafeWorkspaceRef(raw: string): boolean {
+  const v = raw.trim();
+  if (v === '') return false;
+  if (v.length > MAX_WORKSPACE_ENTRY_LEN) return false;
+  if (v.includes('\0')) return false;
+  // Caracteres de controle (inclusive ANSI/ESC) — nunca legítimos num path, e o
+  // manifesto visível ecoa este valor cru direto no terminal do dono.
+  // eslint-disable-next-line no-control-regex
+  return !/[\u0000-\u001f\u007f]/.test(v);
+}
+
+/**
+ * Parseia o valor cru de `workspace:` numa LISTA de raízes (ainda CRUAS — sem
+ * expandir `~`/resolver relativo/canonicalizar, isso é do locus concreto).
+ * Aceita lista inline (`~/a, ~/b`) e lista YAML em bloco (via `readYamlBlockList`,
+ * já achatada em `,` por `splitServiceFrontmatter`). Devolve `null` (FALHA) quando
+ * a chave existe mas o valor é ILEGÍVEL/vazio/todo hostil — RES-MD-3: o chamador
+ * rejeita o manifesto inteiro (nunca "workspace ilegível = sem raiz extra" em
+ * silêncio — silenciosamente degradar pra "mais restrito" ainda esconderia do
+ * dono que o que ele escreveu não fez o que ele queria). PURA.
+ */
+function parseWorkspaceList(rawValue: string): readonly string[] | null {
+  const inner = rawValue.trim().replace(/^\[/, '').replace(/\]$/, '');
+  if (inner.trim() === '') return null; // chave presente porém vazia ⇒ FALHA FECHADA.
+  const items = inner
+    .split(',')
+    .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+    .filter((s) => s !== '');
+  if (items.length === 0) return null; // só lixo/separadores ⇒ FALHA FECHADA.
+  if (items.length > MAX_WORKSPACE_ROOTS) return null; // lista absurda ⇒ FALHA FECHADA.
+  if (!items.every(isSafeWorkspaceRef)) return null; // qualquer entrada hostil ⇒ FALHA FECHADA.
+  // Dedup preservando ordem (estável) — mesma disciplina de `parseToolsList`.
+  const seen = new Set<string>();
+  const dedup: string[] = [];
+  for (const it of items) {
+    if (seen.has(it)) continue;
+    seen.add(it);
+    dedup.push(it);
+  }
+  return dedup;
 }
 
 /** Teto defensivo do rótulo de grupo (mesma disciplina de `MAX_NAME_LEN`). */
@@ -549,6 +675,32 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
     };
   }
 
+  // `workspace:` — RES-MD-3, MESMA disciplina de `tools:` em agent-profile.ts:
+  // só interpretamos quando a CHAVE existe; se existe e é ilegível/vazia,
+  // REJEITAMOS o manifesto inteiro (nunca degrada em silêncio para "sem raiz
+  // extra" — um dono que escreveu `workspace:` queria abrir uma porta, e um
+  // erro de digitação nessa porta precisa de um ERRO, não de um "como se não
+  // tivesse escrito nada"). Cada entrada é validada só na FORMA aqui
+  // (`isSafeWorkspaceRef`) — a resolução real (existe? é diretório? cai dentro
+  // de `~/.aluy/`?) é do locus concreto.
+  let workspaceRoots: readonly string[] | undefined;
+  if (fm.hasWorkspaceKey) {
+    const parsed = parseWorkspaceList(fm.workspaceRaw ?? '');
+    if (parsed === null) {
+      return {
+        kind: 'error',
+        file,
+        reason:
+          `serviço "${name}" (${file}): "workspace" presente mas ilegível/vazio — ` +
+          `manifesto não carregado (uma raiz vazia/ilegível é tratada como inválida, ` +
+          `nunca como "sem raiz extra"). Formas aceitas: uma linha ("workspace: ` +
+          `~/projects/fluider, ~/projects/outro") ou lista YAML em bloco ("workspace:" ` +
+          `seguido de "  - ~/projects/fluider" nas linhas seguintes).`,
+      };
+    }
+    workspaceRoots = parsed;
+  }
+
   // `group:` — identificador simples (ver `isSafeGroupLabel`); RÓTULO puro, sem
   // resolver a nada aqui (o registry/`list --group` é quem compara).
   if (fm.group !== undefined && fm.group.trim() !== '' && !isSafeGroupLabel(fm.group)) {
@@ -640,6 +792,7 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
     ...(until !== undefined ? { until } : {}),
     ...(workflow !== undefined ? { workflow } : {}),
     ...(channel !== undefined ? { channel } : {}),
+    ...(workspaceRoots !== undefined ? { workspaceRoots } : {}),
     ...(group !== undefined ? { group } : {}),
     ...(model !== undefined ? { model } : {}),
     ...(budget !== undefined ? { budget } : {}),

@@ -23,3 +23,25 @@ describe('buildActivityEnv — ausência de agente ⇒ a CHAVE "ALUY_SERVICE_PER
     expect(env.ALUY_SERVICE_PERSONA).toBe('risco');
   });
 });
+
+// ADR-0158 — MESMA disciplina, agora p/ `ALUY_SERVICE_WORKSPACE_ROOTS`: ausente/
+// vazio ⇒ a CHAVE nem existe no objeto (nunca "presente com valor undefined/[]").
+describe('buildActivityEnv — ausência de workspaceRoots ⇒ a CHAVE "ALUY_SERVICE_WORKSPACE_ROOTS" nem existe no objeto', () => {
+  it('sem workspaceRoots ⇒ chave ausente', () => {
+    const env = buildActivityEnv('/svc/trader', undefined, {});
+    expect('ALUY_SERVICE_WORKSPACE_ROOTS' in env).toBe(false);
+  });
+
+  it('workspaceRoots vazio ([]) ⇒ chave AINDA ausente (nunca "[]" na env)', () => {
+    const env = buildActivityEnv('/svc/trader', undefined, {}, undefined, []);
+    expect('ALUY_SERVICE_WORKSPACE_ROOTS' in env).toBe(false);
+  });
+
+  it('workspaceRoots não-vazio ⇒ chave presente, JSON do array', () => {
+    const env = buildActivityEnv('/svc/trader', undefined, {}, undefined, [
+      '/home/dono/projects/fluider',
+    ]);
+    expect('ALUY_SERVICE_WORKSPACE_ROOTS' in env).toBe(true);
+    expect(JSON.parse(env.ALUY_SERVICE_WORKSPACE_ROOTS!)).toEqual(['/home/dono/projects/fluider']);
+  });
+});

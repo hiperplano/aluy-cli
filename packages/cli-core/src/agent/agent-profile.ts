@@ -207,7 +207,10 @@ interface RawFrontmatter {
  * são itens. Devolve os itens crus (ainda não normalizados) + o índice da ÚLTIMA
  * linha consumida (o CALLER retoma a varredura dali). PURO.
  */
-function readYamlBlockList(lines: readonly string[], startIndex: number): { items: string[]; lastIndex: number } {
+export function readYamlBlockList(
+  lines: readonly string[],
+  startIndex: number,
+): { items: string[]; lastIndex: number } {
   const items: string[] = [];
   let j = startIndex;
   while (j < lines.length) {

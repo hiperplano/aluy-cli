@@ -50,6 +50,9 @@ export interface HarnessManifest {
   readonly until?: string;
   /** `immediate: true|false` — turno já no start/reinício, antes do 1º ciclo de cron. */
   readonly immediate?: boolean;
+  /** `workspace:` — raiz(es) EXTRA além da própria pasta do serviço. String = uma
+   * linha (aceita vírgula); array = lista YAML em bloco ("- item" por linha). */
+  readonly workspace?: string | readonly string[];
   readonly orchestratorBody?: string;
 }
 
@@ -66,6 +69,14 @@ export function writeServiceManifest(base: string, m: HarnessManifest = {}): str
   if (m.activityTimeout !== undefined) fm.push(`activity-timeout: ${m.activityTimeout}`);
   if (m.until !== undefined) fm.push(`until: "${m.until}"`);
   if (m.immediate !== undefined) fm.push(`immediate: ${m.immediate}`);
+  if (m.workspace !== undefined) {
+    if (typeof m.workspace === 'string') {
+      fm.push(`workspace: ${m.workspace}`);
+    } else {
+      fm.push('workspace:');
+      for (const w of m.workspace) fm.push(`  - ${w}`);
+    }
+  }
   fm.push('---', m.orchestratorBody ?? 'Rege, não opera.');
   writeFileSync(join(dir, 'service.md'), fm.join('\n'));
   return dir;
