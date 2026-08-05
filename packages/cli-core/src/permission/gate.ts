@@ -29,12 +29,27 @@ export type PermissionDecision = 'allow' | 'ask' | 'deny';
  *                allow-list/hook/`--unsafe`/injeção (read-only é o teto).
  *   - `normal` ⇒ não interfere; a catraca EST-0945 decide (default seguro).
  *   - `unsafe` ⇒ BYPASS TOTAL (EST-0948): auto-aprova TUDO, inclusive
- *                sempre-ask. Opt-in explícito.
+ *                sempre-ask, E derruba a cerca de workspace/anti-SSRF (o
+ *                locus concreto liga `unconfined`/`allowInternalHosts` SÓ
+ *                para este valor — ver `wiring.ts`). Opt-in explícito.
+ *   - `service-autonomous` ⇒ ADR-0158 (a mecânica que o manifesto de serviço
+ *                chama de `autonomy: yolo-scoped`) — AUTÔNOMO, MAS CONFINADO:
+ *                todo veredito que seria `ask` (não há humano num turno
+ *                headless de serviço para responder) vira `allow`, mas
+ *                QUALQUER `deny` da catraca continua `deny` — inclusive os
+ *                pisos de `~/.aluy` (journal/config) e a leitura de segredos.
+ *                A cerca de workspace e o anti-SSRF NUNCA são tocados por
+ *                este modo (só `unsafe` os deriva) — é essa separação, entre
+ *                "não pergunta" e "sem cerca", que distingue este modo do
+ *                YOLO. Nunca ativável por flag pública nem pela sessão
+ *                interativa — só o runner de serviço, internamente, a partir
+ *                do que o `service.md` declarou.
  *
- * `plan` e `unsafe` são valores do MESMO eixo (mutuamente exclusivos por
- * construção): a sessão tem UM modo. Default `normal`.
+ * `plan`, `unsafe` e `service-autonomous` são valores do MESMO eixo
+ * (mutuamente exclusivos por construção): a sessão tem UM modo. Default
+ * `normal`.
  */
-export type SessionMode = 'plan' | 'normal' | 'unsafe';
+export type SessionMode = 'plan' | 'normal' | 'unsafe' | 'service-autonomous';
 
 /** Descreve um efeito de tool a ser avaliado ANTES de executar. */
 export interface ToolCall {

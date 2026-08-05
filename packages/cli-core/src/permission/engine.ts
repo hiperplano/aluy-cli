@@ -40,6 +40,32 @@
 // ║ → o `seguranca` (AG-0008) reconfere: Plan precede tudo e nega TODO efeito.   ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║ ADR-0158 — MODO `service-autonomous` (o manifesto de serviço chama de        ║
+// ║ `autonomy: yolo-scoped`) — AUTÔNOMO, MAS CONFINADO. Um turno de SERVIÇO      ║
+// ║ (`aluy -p` headless, sem TTY, spawnado pelo runner) não tem humano p/         ║
+// ║ responder um `ask` — sem este modo, TODO `ask` cai no fail-safe "sem TTY ⇒   ║
+// ║ deny por inação" (`TuiAskResolver.nonInteractive`) e o serviço trava. A      ║
+// ║ saída ÓBVIA seria `--yolo`, mas `--yolo` faz DUAS coisas coladas numa flag   ║
+// ║ só: (a) não pergunta MAIS (b) derruba a cerca de workspace + o anti-SSRF     ║
+// ║ (`wiring.ts`: `unconfined`/`allowInternalHosts` derivam SÓ de `mode===       ║
+// ║ 'unsafe'`). Um serviço que opera dinheiro real precisa de (a) SEM (b).       ║
+// ║                                                                            ║
+// ║ O CORTE: implementado como um PÓS-PROCESSAMENTO (`finalizeForAutonomy`,      ║
+// ║ chamado só ao FINAL de `decide()`, depois de TODA a precedência normal já    ║
+// ║ ter rodado) — NUNCA como um `if (mode==='service-autonomous') return        ║
+// ║ allow` no TOPO (que é exatamente o padrão do YOLO acima, e repeti-lo aqui    ║
+// ║ reintroduziria o MESMO acoplamento que este modo existe para desfazer).      ║
+// ║ A regra é: `ask` (não há a quem perguntar) → `vira `allow`; QUALQUER        ║
+// ║ `deny` (piso de `~/.aluy`, segredo, teto de profundidade/memória/toolScope,  ║
+// ║ modo Plan, o re-passe destrutivo de `session_command`) PERMANECE `deny` —    ║
+// ║ o pós-processamento só troca `ask`, nunca mexe em `deny`. A cerca de         ║
+// ║ workspace (`resolveInside`) e o anti-SSRF nem SABEM que este modo existe:    ║
+// ║ eles são portados por `unconfined`/`allowInternalHosts`, que só `unsafe`     ║
+// ║ liga — então continuam intactos por CONSTRUÇÃO, não por uma checagem extra   ║
+// ║ aqui. Nunca ativável por flag pública — só o `service/runner.ts` interno.    ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+//
 // ORDEM DE PRECEDÊNCIA (de cima p/ baixo; a primeira que decide, decide):
 //  -2. E-A1 — teto de profundidade de sub-agente (`spawn_agent` negado num filho).
 //      GASTO/estrutura, NÃO permissão: NÃO cai no YOLO (ADR-0072 §4).
@@ -157,11 +183,17 @@ export interface PermissionEngineOptions {
   /** Hooks de pré-decisão (mecanismo código, regras = dado). Default: nenhum. */
   readonly hooks?: readonly PreToolUseHook[];
   /**
-   * EST-0959 · ADR-0055 — MODO de sessão (`plan | normal | unsafe`), o eixo de
-   * maior precedência (-1). `plan` = teto read-only; `normal` = catraca EST-0945;
-   * `unsafe` = BYPASS TOTAL. Default `normal`. `plan` e `unsafe` são valores do
-   * MESMO eixo — passar ambos é impossível (um só valor). Se `mode` E o legado
-   * `unsafe` forem passados, `mode` VENCE (fonte única do eixo).
+   * EST-0959 · ADR-0055 — MODO de sessão (`plan | normal | unsafe |
+   * service-autonomous`), o eixo de maior precedência (-1). `plan` = teto
+   * read-only; `normal` = catraca EST-0945; `unsafe` = BYPASS TOTAL (também
+   * derruba a cerca de workspace/anti-SSRF, no locus concreto);
+   * `service-autonomous` (ADR-0158, `autonomy: yolo-scoped` do manifesto de
+   * serviço) = AUTÔNOMO mas CONFINADO — todo `ask` vira `allow` (não há
+   * humano num turno headless de serviço), mas `deny` nunca é relaxado e a
+   * cerca de workspace/anti-SSRF permanecem intactas (só `unsafe` as deriva).
+   * Default `normal`. Os quatro são valores do MESMO eixo — passar mais de um
+   * é impossível (um só valor). Se `mode` E o legado `unsafe` forem passados,
+   * `mode` VENCE (fonte única do eixo).
    */
   readonly mode?: SessionMode;
   /**
@@ -531,6 +563,19 @@ export class PolicyPermissionEngine implements PermissionEngine {
       return ok('deny', reasonOf(cats), aluyDeny.category, effect);
     }
 
+    // ADR-0158 — a partir daqui (0.5–7) é a decisão "normal" da catraca. O modo
+    // `service-autonomous` PÓS-PROCESSA só o RESULTADO deste bloco
+    // (`finalizeForAutonomy`) — nunca as precedências que já retornaram acima
+    // (spawn-depth/toolScope/memória/Plan/session-destrutivo/YOLO/piso `~/.aluy`).
+    return this.finalizeForAutonomy(this.decideEffect(call, effect, cats));
+  }
+
+  /** Precedências 0.5–7 de `decide()` — ver o comentário acima da chamada. */
+  private decideEffect(
+    call: ToolCall,
+    effect: ToolEffectDescriptor,
+    cats: readonly CategoryMatch[],
+  ): PermissionVerdict {
     // 0.5) EST-0983 · ADR-0064 · CLI-SEC-15 (GS-M2/GS-M8) — `remember` = ALLOW
     //     SILENCIOSO (lembrança autônoma, Q1/Q2 do Tiago). Chegou aqui ⇒ NÃO está em
     //     Plan (Plan já deu DENY acima — `remember` não está na allow-list de leitura)
@@ -657,6 +702,39 @@ export class PolicyPermissionEngine implements PermissionEngine {
 
     // 7) DEFAULT por tool / piso seguro (CLI-SEC-3).
     return this.defaultFor(call, effect);
+  }
+
+  /**
+   * ADR-0158 — modo `service-autonomous` (manifesto: `autonomy: yolo-scoped`):
+   * converte QUALQUER `ask` do resultado de `decideEffect` em `allow` — um
+   * turno de serviço headless não tem humano para responder, e o fail-safe
+   * "sem TTY ⇒ deny por inação" (`TuiAskResolver`) travaria o serviço para
+   * sempre se `decide()` continuasse devolvendo `ask`. O motivo ORIGINAL
+   * (categoria + texto) é preservado na mensagem — só a `decision` muda — para
+   * a auditoria continuar mostrando POR QUE aquele efeito pediria confirmação
+   * num turno interativo.
+   *
+   * NUNCA toca em `deny`: é essa assimetria (só `ask`→`allow`, `deny` intacto)
+   * que separa este modo do `--yolo` — o piso de `~/.aluy`, a leitura de
+   * segredo, os tetos de profundidade/memória/toolScope e o modo Plan já
+   * retornaram `deny` ACIMA (fora de `decideEffect`) e nem passam por aqui; e a
+   * cerca de workspace/anti-SSRF (`resolveInside`/`allowInternalHosts`) vivem
+   * no locus concreto, amarradas só a `mode==='unsafe'` — este método não as
+   * enxerga, então não há como relaxá-las por aqui mesmo por engano.
+   *
+   * Fora de `service-autonomous` é NO-OP puro (devolve o veredito como veio) —
+   * `normal`/`plan`/`unsafe` não mudam de comportamento (não-regressão).
+   */
+  private finalizeForAutonomy(verdict: PermissionVerdict): PermissionVerdict {
+    if (this.modeValue !== 'service-autonomous' || verdict.decision !== 'ask') return verdict;
+    return {
+      ...verdict,
+      decision: 'allow',
+      reason:
+        `${verdict.reason} — serviço em modo autônomo confinado (autonomy: yolo-scoped): ` +
+        'sem humano no turno para responder, auto-aprovado; a cerca de workspace e o ' +
+        'anti-SSRF continuam intactos.',
+    };
   }
 
   /**

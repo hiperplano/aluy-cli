@@ -113,6 +113,7 @@ import {
   buildServiceManifestVisibleNote,
   formatElapsedSince,
   findProvider,
+  SERVICE_AUTONOMOUS_MODE,
   type NativeTool,
   type ToolPorts,
   type ModelCaller,
@@ -519,6 +520,20 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // Ausente (caminho normal — sessão do dono, ou atividade SEM `[agente]`) ⇒ ZERO
   // mudança de comportamento.
   const servicePersonaName = env.ALUY_SERVICE_PERSONA?.trim();
+  // ADR-0158 — MODO AUTÔNOMO CONFINADO (`autonomy: yolo-scoped` do manifesto de
+  // serviço): MESMO padrão de `ALUY_SERVICE_HOME`/`ALUY_SERVICE_PERSONA` acima —
+  // env INTERNA, nunca flag pública, setada só por `service/runner.ts`. Dois
+  // sinais EXIGIDOS (defesa em profundidade: nenhum dos dois, sozinho, ativa o
+  // modo) — `serviceScopeDir` presente (este turno É um turno de serviço) E o
+  // valor exato que o runner propaga. Isto é o que faz o modo NUNCA vazar para a
+  // sessão interativa do dono: fora de um turno de serviço, `ALUY_SERVICE_HOME`
+  // nunca está setado, e mesmo que alguém exportasse `ALUY_SERVICE_AUTONOMY` à
+  // mão no shell, sem `ALUY_SERVICE_HOME` também presente o modo não ativa. Ver
+  // `permission/gate.ts` (`SessionMode`) e `permission/engine.ts`
+  // (`finalizeForAutonomy`) para o que o modo de fato muda na catraca — aqui só
+  // decidimos SE ele entra.
+  const serviceAutonomous =
+    serviceScopeDir !== undefined && env.ALUY_SERVICE_AUTONOMY === SERVICE_AUTONOMOUS_MODE;
   // EST-1007 — MODO HEADLESS (`-p`/`--print`/`--exec`): força o caminho NÃO-TTY mesmo
   // num terminal interativo (EXPLÍCITO, não depende de pipe). Sem splash, sem render
   // Ink, sem auto-detecção OSC/notify: roda o loop e imprime SÓ o resultado final.
@@ -584,6 +599,15 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // vez (não por-ação) que torna o YOLO um opt-in BARULHENTO, espelhando o Claude Code.
   // EST-0989 — a confirmação agora aparece na CAIXA do splash (não mais linha solta).
   let effectiveMode = opts.mode;
+  // ADR-0158 — o turno de serviço nasce em `service-autonomous` quando os DOIS
+  // sinais internos batem (`serviceAutonomous` acima). Só entra se `effectiveMode`
+  // ainda está no default (`undefined`/`'normal'`) — o runner de serviço NUNCA
+  // passa `--plan`/`--yolo` no `argv` do turno-filho (ver `service/runner.ts`), mas
+  // a guarda extra garante que um `--plan`/`--yolo` explícito (se algum caminho
+  // futuro vier a passá-lo) sempre VENCE este modo interno, nunca o contrário.
+  if (serviceAutonomous && (effectiveMode === undefined || effectiveMode === 'normal')) {
+    effectiveMode = 'service-autonomous';
+  }
   let yoloCancelled = false;
   if (opts.yoloEntryNotice !== undefined && isTty) {
     const proceed = await bootPrompt(opts.yoloEntryNotice);

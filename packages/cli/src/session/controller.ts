@@ -303,6 +303,12 @@ function isModeControl(x: unknown): x is ModeControl {
  * lado SEGURO (`plan`, read-only), NÃO no perigoso. A aresta `→unsafe` (de `plan`) passa a
  * pedir CONFIRMAÇÃO + root-block (ADR-0072 §3b/§3d) no `cycleMode` — antes era `normal→unsafe`
  * direto, sem fricção. PURO/determinística.
+ *
+ * ADR-0158 — `service-autonomous` NÃO entra neste ciclo: é modo de SERVIÇO (o
+ * runner o ativa internamente a partir do `service.md`), nunca alcançável pelo
+ * Tab da sessão interativa. O `case` abaixo existe só p/ a exaustividade do
+ * `switch` (TS) — devolve `normal` como fallback defensivo, nunca exercitado
+ * em produção (nada nesta base ativa o modo por esta via).
  */
 export function nextMode(mode: SessionMode): SessionMode {
   switch (mode) {
@@ -311,6 +317,8 @@ export function nextMode(mode: SessionMode): SessionMode {
     case 'plan':
       return 'unsafe';
     case 'unsafe':
+      return 'normal';
+    case 'service-autonomous':
       return 'normal';
   }
 }

@@ -50,6 +50,10 @@ const MODE_WORD: Readonly<Record<SessionMode, string>> = {
   normal: 'NORMAL (catraca padrão)',
   // EST-0959 — nome de PRODUTO do modo `unsafe` e YOLO (`--yolo`).
   unsafe: 'YOLO (aprovação DESLIGADA)',
+  // ADR-0158 — modo de SERVIÇO (runner, headless) — o painel `/permissions` e
+  // interativo e nunca monta sob este modo (nada nesta base o ativa fora do
+  // runner). Entrada só p/ a exaustividade do Record; nunca renderizada.
+  'service-autonomous': 'SERVIÇO AUTÔNOMO (confinado)',
 };
 
 /** Cabecalho de secao injetado quando o tipo de linha muda. */

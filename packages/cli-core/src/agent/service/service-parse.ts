@@ -14,7 +14,7 @@
 //   channel: telegram:<chat-id>  # onde reporta/pergunta (ADR-0154)
 //   budget: 200k/turno           # teto de tokens (reusa limits.ts na fase 2)
 //   activity-timeout: sem-teto   # teto por ATIVIDADE — default 30min; "sem-teto" remove
-//   autonomy: ask                # v1 SÓ aceita `ask` (§Consequências — escopo v1)
+//   autonomy: ask                # ask (pergunta) | yolo-scoped (autônomo, confinado)
 //   perda-maxima-dia: 500        # circuit breaker — SEM faixa (§8.3)
 //   tamanho-posicao: 2 [1..5]    # tunável COM faixa — a retro ajusta só dentro dela (§8.5a)
 //   ---
@@ -29,12 +29,15 @@
 // ║ • corpo (orquestrador) obrigatório e não-vazio — mesma disciplina de        ║
 // ║   `agent-profile.ts`/`skill.ts`: um serviço sem persona-orquestradora não   ║
 // ║   é um serviço, é um cron job (ADR-0158 alternativa D, rejeitada).          ║
-// ║ • `autonomy:` — a v1 SÓ aceita `ask` (ADR-0158 §Consequências, escopo v1:   ║
-// ║   "autonomy: ask apenas — adiar yolo-scoped"). Qualquer outro valor         ║
-// ║   declarado é FALHA FECHADA (nunca "ignora e segue com ask implícito" —     ║
-// ║   um dono que escreveu `autonomy: yolo-scoped` pensando que já vale isso    ║
-// ║   precisa de um erro, não de um silêncio que reduz sozinho a autonomia      ║
-// ║   pretendida).                                                              ║
+// ║ • `autonomy:` — só aceita `ask` (pergunta antes de agir — default quando a  ║
+// ║   chave está ausente) ou `yolo-scoped` (turno AUTÔNOMO mas CONFINADO: o     ║
+// ║   runner ativa um modo que não pergunta — não há dono no turno para        ║
+// ║   responder — MAS a cerca de workspace/path-deny/anti-SSRF permanecem       ║
+// ║   intactas; enforçado pela catraca em runtime, não por este parser). Um     ║
+// ║   valor DIFERENTE destes dois é FALHA FECHADA (nunca "ignora e segue com    ║
+// ║   ask implícito" — um dono que escreveu algo que não bate com nenhum dos    ║
+// ║   dois precisa de um erro, não de um silêncio que reduz sozinho a           ║
+// ║   autonomia pretendida).                                                    ║
 // ║ • `until:`/`channel:` — validados só ESTRUTURALMENTE aqui (forma). A        ║
 // ║   VALIDAÇÃO SEMÂNTICA de `schedule:` (5 campos cron, `validateCronExpr`) e   ║
 // ║   de `workflow:` (arquivo existe em `workflows/` do serviço) exige I/O —     ║
@@ -97,8 +100,15 @@ export interface ServiceManifest {
    * `MAX_ACTIVITY_MS` (30min); parsing semântico é `parseServiceActivityTimeout`.
    */
   readonly activityTimeout?: string;
-  /** Autonomia — a v1 só aceita `ask` (frontmatter `autonomy`, validado abaixo). */
-  readonly autonomy?: 'ask';
+  /**
+   * Autonomia (frontmatter `autonomy`, validado abaixo): `ask` (pergunta antes
+   * de agir) ou `yolo-scoped` (turno AUTÔNOMO mas CONFINADO — o runner não
+   * pergunta, mas a cerca de workspace/path-deny/anti-SSRF continuam
+   * intactas). `undefined` (chave ausente) equivale a `ask` para todo efeito
+   * de runtime — o campo só fica `undefined` aqui para distinguir "não
+   * declarado" de "declarado como ask" na exibição do manifesto.
+   */
+  readonly autonomy?: 'ask' | typeof SERVICE_AUTONOMOUS_MODE;
   /** Circuit-breakers (sem faixa) + tunáveis (com faixa) — §8.3/§8.5a. */
   readonly tunables: readonly ServiceTunable[];
   /** O corpo do `.md` = a persona do ORQUESTRADOR do serviço (§1). Nunca vazio. */
@@ -125,6 +135,18 @@ export type ServiceManifestParse = ServiceManifest | ServiceManifestError;
 export function isServiceManifestError(p: ServiceManifestParse): p is ServiceManifestError {
   return (p as ServiceManifestError).kind === 'error';
 }
+
+/**
+ * O valor de `autonomy:` que ativa o modo AUTÔNOMO CONFINADO (ADR-0158): o
+ * runner não pergunta (não há dono no turno headless para responder), mas a
+ * cerca de workspace/path-deny/anti-SSRF permanecem intactas (`mode:
+ * 'service-autonomous'` da catraca — ver `@hiperplano/aluy-cli-core`
+ * `permission/gate.ts`). FONTE ÚNICA do literal: o parser (aqui), o runner de
+ * serviço (`service/runner.ts`, que o propaga via env interna p/ o turno-
+ * filho) e o boot do turno (`session/run.tsx`, que a lê) todos importam ESTA
+ * constante — nunca redigitam a string, para não poderem divergir.
+ */
+export const SERVICE_AUTONOMOUS_MODE = 'yolo-scoped' as const;
 
 /** Teto defensivo do nome (anti-nome-gigante / anti-DoS de registro). */
 const MAX_NAME_LEN = 64;
@@ -323,7 +345,7 @@ export function isSafeWorkflowRef(raw: string): boolean {
  * Rejeita (erro de manifesto, NÃO entra no registry):
  *   - `name` ausente/vazio após normalizar;
  *   - corpo (orquestrador) vazio;
- *   - `autonomy:` presente com valor ≠ `ask` (a v1 só aceita `ask` — §Consequências);
+ *   - `autonomy:` presente com valor que não seja `ask` nem `yolo-scoped`;
  *   - qualquer tunável/circuit-breaker com faixa malformada (min>max, ou valor
  *     inicial fora da própria faixa).
  *
@@ -352,20 +374,23 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
     };
   }
 
-  // `autonomy:` — v1 SÓ aceita `ask` (fail-closed p/ qualquer outro valor declarado).
-  let autonomy: 'ask' | undefined;
+  // `autonomy:` — só `ask` ou `yolo-scoped` (fail-closed p/ qualquer outro valor).
+  let autonomy: 'ask' | typeof SERVICE_AUTONOMOUS_MODE | undefined;
   if (fm.autonomyRaw !== undefined) {
     const a = fm.autonomyRaw.trim().toLowerCase();
-    if (a !== 'ask') {
+    if (a !== 'ask' && a !== SERVICE_AUTONOMOUS_MODE) {
       return {
         kind: 'error',
         file,
         reason:
-          `serviço "${name}" (${file}): "autonomy: ${fm.autonomyRaw}" não é suportado nesta ` +
-          `fase — a v1 só aceita "autonomy: ask" (yolo-scoped fica p/ fase futura).`,
+          `serviço "${name}" (${file}): "autonomy: ${fm.autonomyRaw}" não é suportado — ` +
+          `só "autonomy: ask" (pergunta) ou "autonomy: yolo-scoped" (autônomo, confinado) ` +
+          `são aceitos.`,
       };
     }
-    autonomy = 'ask';
+    // `a` segue tipada `string` (a checagem acima EXCLUI, mas não estreita um
+    // `string` largo p/ a união de literais) — reconstrói o literal explícito.
+    autonomy = a === SERVICE_AUTONOMOUS_MODE ? SERVICE_AUTONOMOUS_MODE : 'ask';
   }
 
   // `until:` — forma HH:MM (a semântica de "fim de expediente" é do runner, fase 2).

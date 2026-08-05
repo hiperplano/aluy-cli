@@ -61,7 +61,19 @@ export function buildServiceManifestVisibleNote(
   lines.push(`until: ${m.until ?? '(não declarado)'}`);
   lines.push(`workflow do turno: ${m.workflow ?? '(não declarado)'}`);
   lines.push(`canal: ${m.channel ?? '(NENHUM — sem canal, sem onde reportar/perguntar)'}`);
-  lines.push(`autonomia: ${m.autonomy ?? '(não declarada)'}`);
+  // ADR-0158 — `autonomy: yolo-scoped` é a informação MAIS importante desta tela: um
+  // serviço que roda sem pedir aprovação, DESTACADA (⚠, igual aos avisos de
+  // daemon/skill-com-script abaixo) — instalar é o momento do consentimento, e não
+  // pode existir serviço autônomo que o dono não viu que era autônomo. `ask`
+  // (default, inclusive quando a chave está ausente) segue mostrado sem destaque.
+  if (m.autonomy === 'yolo-scoped') {
+    lines.push(
+      '⚠ autonomia: yolo-scoped — este serviço NÃO PERGUNTA (roda sem aprovação humana ' +
+        'por tool-call); a cerca de workspace, o path-deny e o anti-SSRF continuam ativos.',
+    );
+  } else {
+    lines.push(`autonomia: ${m.autonomy ?? '(não declarada — equivale a "ask")'}`);
+  }
   lines.push(`budget: ${m.budget ?? '(não declarado)'}`);
   lines.push(`teto por atividade: ${m.activityTimeout ?? '30min (default)'}`);
 
