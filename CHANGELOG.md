@@ -14,6 +14,18 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.124] — 2026-08-05
+
+### Adicionado
+
+- ⏱️ **`immediate: true` no `service.md`:** roda um turno AO LIGAR, antes do primeiro sleep de cron (o dono tinha escrito esse campo achando que existia — e ele era ignorado em silêncio). `until:` VENCE: não dispara fora do expediente, porque a regra de expediente é dura em todo o resto do runner e abrir exceção por conveniência seria incoerente. Vale só na PRIMEIRA volta. RISCO ACEITO E DOCUMENTADO: dispara em TODO reinício (crash-loop, `stop`/`start`, reboot) — num serviço que opera, pode virar ordem repetida; marcado com ⚠ no manifesto visível.
+
+### Corrigido
+
+- 🧩 **`tools:` dos `agents/*.md` aceita LISTA YAML (a causa raiz de uma mesa inteira quebrada):** o dono montou 5 agentes num serviço e TODOS foram rejeitados — o `spawn_agent` por nome falhava e as atividades voltavam vazias. Os `.md` usavam `tools:` seguido de itens com `-`, e o parser só aceitava `tools: a, b` numa linha; a linha `tools:` ficava vazia ⇒ "presente mas ilegível" ⇒ perfil rejeitado. O argumento decisivo: foi o PRÓPRIO MODELO que escolheu o formato de lista ao escrever os `.md` a partir do prompt-guia do produto — se a forma natural é recusada, o problema é do parser. As duas formas passam a produzir resultado IDÊNTICO. `tools:` VAZIO segue recusado fail-closed (lista vazia nunca vira "herda tudo" — seria CONCEDER em vez de restringir). A mensagem de erro passa a ENSINAR as duas formas, e o prompt-guia do `/service create` ganhou exemplo literal.
+- 🔦 **diagnóstico de boot chega ao `runner.log` e ao `attach`:** os erros de carga de agente eram `pushNote` — feito para a TUI — posicionado DEPOIS do `return` do ramo headless, portanto INALCANÇÁVEL em `-p`. O serviço falhava com "turno terminou com erro" e o motivo não saía do processo: `attach` e `runner.log` ficavam cegos exatamente quando mais se precisa deles. Agora vão ao stderr (mesma disciplina já usada para as notas de anexo recusadas), e o ramo de saída ilegível do runner anexa a cauda do stderr do filho. Stdout INTOCADO — é contrato: o runner lê a última linha como JSON.
+- 🔕 **campos ignorados do `service.md` param de sumir em silêncio:** chave desconhecida era descartada sem aviso — `immediate: true` (inventado) e `activty-timeout` (typo) tinham o mesmo destino invisível. Agora aparecem como `⚠ campos ignorados: …` no manifesto visível e no `status`. NÃO recusa o manifesto: a tolerância a chave desconhecida é deliberada (o `.md` pode ter anotação do dono); o que faltava era VISIBILIDADE. Tunável numérico não entra na lista.
+
 ## [1.0.0-rc.123] — 2026-08-05
 
 ### Adicionado
