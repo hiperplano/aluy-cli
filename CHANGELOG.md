@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.126] — 2026-08-05
+
+### Adicionado
+
+- 📂 **`workspace:` no `service.md` — o serviço declara ONDE trabalha (achado em produção):** o runner spawna cada atividade com `cwd: serviceDir`, então a raiz do workspace é a pasta do SERVIÇO — e o trabalho do dono está em outro diretório. O `runner.log` dele mostrava `[tool] glob /home/aluy/projects/fluider → erro: acesso fora do workspace bloqueado`. A cerca estava funcionando como projetada (é ela que torna `autonomy: yolo-scoped` seguro); faltava poder ABRIR A PORTA CERTA, explicitamente — o `/add-dir` já existia, mas é comando de SESSÃO e um serviço headless não tem como usar. Aceita as DUAS gramáticas (uma linha com vírgulas e lista YAML com `-`), reusando o helper do `tools:` em vez de um segundo parser; caminho absoluto é legítimo aqui (é o caso de uso, ao contrário do `workflow:`), relativo resolve contra a pasta do serviço, `~` expande no locus concreto. **NÃO é `unconfined`**: a raiz declarada vira AUTORIZADA e o vizinho não declarado continua NEGADO — provado com `NodeWorkspace`/`resolveInside` REAIS, sem mock. ACRESCENTA, nunca substitui: a pasta do serviço segue como raiz. **O PISO NÃO CAI:** declarar `~/.aluy` (ou subcaminho) é RECUSADO, e recusa o manifesto INTEIRO fail-closed antes de entrar no registry — sem isso um serviço autônomo poderia abrir caminho para reescrever a própria config de confiança; três camadas independentes (parser, registry, wiring), cada uma testada com HOME falso. O manifesto visível DESTACA as raízes extras (⚠, mesma classe do aviso de autonomia): abrir acesso fora da própria pasta é ato de confiança e o dono precisa VER antes de confirmar. FORA DE ESCOPO com motivo: validar no INSTALL foi implementado e REVERTIDO — caminho relativo resolveria contra o staging temporário em vez do destino final, dando veredito ERRADO; validar em todo `list`/`get`/`start` troca "aparece mais cedo" por "aparece correto".
+
 ## [1.0.0-rc.125] — 2026-08-05
 
 ### Corrigido
