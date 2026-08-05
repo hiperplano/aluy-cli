@@ -168,7 +168,9 @@ describe('parseServiceManifest — campos opcionais e forward-compat', () => {
     expect(m.budget).toBeUndefined();
     expect(m.activityTimeout).toBeUndefined();
     expect(m.autonomy).toBeUndefined();
+    expect(m.immediate).toBeUndefined();
     expect(m.tunables).toEqual([]);
+    expect(m.ignoredFrontmatterKeys).toEqual([]);
   });
 
   it('"activity-timeout: 45m" ⇒ campo cru pass-through (parsing semântico é do runner)', () => {
@@ -182,9 +184,10 @@ describe('parseServiceManifest — campos opcionais e forward-compat', () => {
     expect(m.activityTimeout).toBe('sem-teto');
   });
 
-  it('chave desconhecida com valor NÃO-numérico é ignorada (forward-compat, não é erro)', () => {
+  it('chave desconhecida com valor NÃO-numérico é ignorada (forward-compat, não é erro) — mas aparece em ignoredFrontmatterKeys', () => {
     const m = ok('service.md', '---\nname: trader\nestrategia: momentum-v2\n---\nOrquestrador.');
     expect(m.tunables).toEqual([]);
+    expect(m.ignoredFrontmatterKeys).toEqual(['estrategia']);
   });
 
   it('sem frontmatter nenhum ⇒ tudo vira corpo ⇒ sem name ⇒ erro', () => {
@@ -269,6 +272,83 @@ describe('parseServiceManifest — model: (modelo fixo por serviço)', () => {
     const m = ok('service.md', '---\nname: trader\nmodel: 4\n---\nOrquestrador.');
     expect(m.model).toBe('4');
     expect(m.tunables).toEqual([]);
+  });
+});
+
+// `immediate:` — dispara UM turno já no start/reinício, antes do 1º ciclo de
+// cron (semântica de runtime é do runner; aqui só a FORMA booleana).
+describe('parseServiceManifest — immediate: (turno já no start/reinício)', () => {
+  it('"immediate: true" ⇒ campo booleano true', () => {
+    const m = ok('service.md', '---\nname: trader\nimmediate: true\n---\nOrquestrador.');
+    expect(m.immediate).toBe(true);
+  });
+
+  it('"immediate: false" ⇒ campo booleano false (declarado, não omitido)', () => {
+    const m = ok('service.md', '---\nname: trader\nimmediate: false\n---\nOrquestrador.');
+    expect(m.immediate).toBe(false);
+  });
+
+  it('"immediate:" case-insensitive/trim ("  TRUE  ") ⇒ aceito', () => {
+    const m = ok('service.md', '---\nname: trader\nimmediate:   TRUE  \n---\nOrquestrador.');
+    expect(m.immediate).toBe(true);
+  });
+
+  it('sem "immediate:" ⇒ undefined (zero regressão — comportamento de hoje)', () => {
+    const m = ok('service.md', '---\nname: trader\n---\nOrquestrador.');
+    expect(m.immediate).toBeUndefined();
+  });
+
+  it('"immediate:" com valor não-booleano ⇒ erro FAIL-CLOSED (nunca vira false em silêncio)', () => {
+    const reason = fail('service.md', '---\nname: trader\nimmediate: yes\n---\nOrquestrador.');
+    expect(reason).toMatch(/immediate.*não é suportado/);
+  });
+
+  it('"immediate: 1" (não é "true"/"false" literal) ⇒ erro FAIL-CLOSED', () => {
+    const reason = fail('service.md', '---\nname: trader\nimmediate: 1\n---\nOrquestrador.');
+    expect(reason).toMatch(/immediate/);
+  });
+
+  it('"immediate:" NUNCA vira tunável mesmo com valor numérico — chave CONHECIDA intercepta antes', () => {
+    const reason = fail('service.md', '---\nname: trader\nimmediate: 1\n---\nOrquestrador.');
+    expect(reason).toMatch(/immediate/); // não "erro de faixa" — é erro de booleano.
+  });
+});
+
+// O problema que motivou tudo isto: o dono escreveu `immediate: true` ANTES do
+// campo existir, instalou, e nada indicou que a linha não fazia nada (mesmo
+// destino de um typo tipo `activty-timeout:`). `ignoredFrontmatterKeys` dá
+// VISIBILIDADE sem recusar o manifesto (forward-compat continua valendo).
+describe('parseServiceManifest — ignoredFrontmatterKeys (visibilidade de chave ignorada)', () => {
+  it('chave desconhecida SEM cara de tunável ⇒ aparece em ignoredFrontmatterKeys', () => {
+    const m = ok('service.md', '---\nname: trader\nactivty-timeout: 45m\n---\nOrquestrador.');
+    expect(m.ignoredFrontmatterKeys).toEqual(['activty-timeout']);
+    expect(m.tunables).toEqual([]);
+  });
+
+  it('tunável numérico válido NÃO aparece em ignoredFrontmatterKeys (ele TEM efeito, não foi ignorado)', () => {
+    const m = ok(
+      'service.md',
+      '---\nname: trader\nperda-maxima-dia: 500\ntamanho-posicao: 2 [1..5]\n---\nOrquestrador.',
+    );
+    expect(m.ignoredFrontmatterKeys).toEqual([]);
+    expect(m.tunables).toHaveLength(2);
+  });
+
+  it('manifesto sem nenhuma chave estranha ⇒ ignoredFrontmatterKeys vazio (zero ruído)', () => {
+    const m = ok(
+      'service.md',
+      '---\nname: trader\nschedule: "* * * * *"\nautonomy: ask\n---\nOrquestrador.',
+    );
+    expect(m.ignoredFrontmatterKeys).toEqual([]);
+  });
+
+  it('mistura: uma chave ignorada + um tunável válido ⇒ só a ignorada aparece na lista', () => {
+    const m = ok(
+      'service.md',
+      '---\nname: trader\nestrategia: momentum-v2\nperda-maxima-dia: 500\n---\nOrquestrador.',
+    );
+    expect(m.ignoredFrontmatterKeys).toEqual(['estrategia']);
+    expect(m.tunables).toEqual([{ key: 'perda-maxima-dia', value: 500 }]);
   });
 });
 

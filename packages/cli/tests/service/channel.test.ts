@@ -19,6 +19,7 @@ function manifest(overrides: Partial<ServiceManifest> = {}): ServiceManifest {
   return {
     name: 'trader',
     tunables: [],
+    ignoredFrontmatterKeys: [],
     orchestrator: 'Rege, não opera.',
     ...overrides,
   };

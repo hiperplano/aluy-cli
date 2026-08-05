@@ -10,6 +10,14 @@
 //   ---
 //   Você é um revisor rigoroso. Leia o diff, aponte bugs e riscos…  ← system prompt
 //
+// `tools:` também aceita a lista YAML EM BLOCO (equivalente à linha única acima):
+//   ---
+//   name: revisor
+//   tools:
+//     - read_file
+//     - grep
+//   ---
+//
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║ FRONTEIRA DE SEGURANÇA (o que o gate FORTE do `seguranca` reconfere) — este ║
 // ║ MÓDULO É PARSER PURO; ele NÃO concede nada. O perfil é DADO de config:      ║
@@ -187,6 +195,30 @@ interface RawFrontmatter {
  * parser YAML). Tolera BOM/CRLF. Sem frontmatter ⇒ tudo é corpo (sem `name` ⇒ o
  * parser rejeita). PURO.
  */
+/**
+ * Extrai os itens de uma LISTA YAML EM BLOCO que segue uma chave `chave:` sem
+ * valor na mesma linha (`tools:` seguido de linhas `- a` / `- b`) — a forma que
+ * QUALQUER UM (humano ou modelo) escreve "naturalmente" ao listar vários itens, e
+ * que o `/service create` (`slash/service-create.ts`) documentava sem deixar
+ * claro que só a forma de uma linha (`tools: a, b`) era aceita. Cada item é uma
+ * linha `- <valor>` (aspas envolventes tiradas, mesma disciplina do valor de uma
+ * linha). Para no primeiro `lines[j]` que NÃO é um item de lista — fim do bloco,
+ * fim do frontmatter, ou a PRÓXIMA chave `chave:` — nunca "engole" linhas que não
+ * são itens. Devolve os itens crus (ainda não normalizados) + o índice da ÚLTIMA
+ * linha consumida (o CALLER retoma a varredura dali). PURO.
+ */
+function readYamlBlockList(lines: readonly string[], startIndex: number): { items: string[]; lastIndex: number } {
+  const items: string[] = [];
+  let j = startIndex;
+  while (j < lines.length) {
+    const itemMatch = /^\s*-\s+(.+?)\s*$/.exec(lines[j]!);
+    if (!itemMatch) break; // não é item de lista ⇒ fim do bloco (não consome esta linha).
+    items.push(itemMatch[1]!.replace(/^["']|["']$/g, ''));
+    j += 1;
+  }
+  return { items, lastIndex: j - 1 };
+}
+
 function splitAgentFrontmatter(raw: string): { fm: RawFrontmatter; body: string } {
   const text = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const m = /^---\n([\s\S]*?)\n---\n?/.exec(text);
@@ -200,8 +232,9 @@ function splitAgentFrontmatter(raw: string): { fm: RawFrontmatter; body: string 
     roomRaw?: string;
   } = {};
   let hasToolsKey = false;
-  for (const line of m[1]!.split('\n')) {
-    const kv = /^\s*([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(line);
+  const lines = m[1]!.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const kv = /^\s*([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(lines[i]!);
     if (!kv) continue;
     const key = kv[1]!.toLowerCase();
     // Tira aspas envolventes (`name: "x"` ⇒ `x`); o valor de `tools` mantém vírgulas.
@@ -211,7 +244,18 @@ function splitAgentFrontmatter(raw: string): { fm: RawFrontmatter; body: string 
     else if (key === 'model') out.model = value;
     else if (key === 'tools') {
       hasToolsKey = true;
-      out.toolsRaw = value;
+      if (value === '') {
+        // `tools:` sem valor na mesma linha ⇒ candidato a lista EM BLOCO — junta os
+        // itens com vírgula p/ reusar `parseToolsList` (mesma validação/normalização
+        // da forma de uma linha, ÚNICA fonte de verdade). SEM itens (bloco vazio de
+        // verdade, ou a próxima linha já é outra chave) ⇒ `toolsRaw` continua '' —
+        // cai no MESMO fail-closed de sempre (nunca "sem tools = herda tudo").
+        const block = readYamlBlockList(lines, i + 1);
+        out.toolsRaw = block.items.join(',');
+        i = block.lastIndex; // pula as linhas de item já consumidas.
+      } else {
+        out.toolsRaw = value;
+      }
     } else if (key === 'room') {
       out.roomRaw = value;
     }
@@ -296,7 +340,9 @@ export function parseAgentProfile(
         reason:
           `agente "${name}" (${file}): "tools" presente mas ilegível/vazio — ` +
           `perfil não carregado (uma lista de tools vazia ou ilegível é tratada como inválida, ` +
-          `nunca como "sem tools = herda tudo")`,
+          `nunca como "sem tools = herda tudo"). Formas aceitas: uma linha ` +
+          `("tools: read_file, grep") ou lista YAML em bloco ("tools:" seguido de ` +
+          `"  - read_file" / "  - grep" nas linhas seguintes).`,
       };
     }
     tools = parsed;

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { buildServicesNote, type ServiceManifest } from '../../../src/index.js';
 
 function manifest(over: Partial<ServiceManifest> & Pick<ServiceManifest, 'name'>): ServiceManifest {
-  return { tunables: [], orchestrator: 'Rege, não opera.', ...over };
+  return { tunables: [], ignoredFrontmatterKeys: [], orchestrator: 'Rege, não opera.', ...over };
 }
 
 function text(lines: readonly string[]): string {

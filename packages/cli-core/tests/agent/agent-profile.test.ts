@@ -83,6 +83,83 @@ describe('parseAgentProfile — frontmatter + corpo (EST-0977)', () => {
   });
 });
 
+// A causa raiz do bug reproduzido: o dono (e o PRÓPRIO MODELO, escrevendo a partir
+// do prompt-guia do `/service create`) escreveu `tools:` como lista YAML EM BLOCO
+// (`tools:\n  - a\n  - b`) — a forma "natural" que qualquer um escreveria — e o
+// parser só aceitava a linha única, então a chave ficava VAZIA ⇒ "presente mas
+// ilegível" ⇒ FALHA FECHADA sem pista nenhuma (agente rejeitado, `spawn_agent`
+// falhava, atividade voltava vazia). Bateria: as duas formas são EQUIVALENTES; a
+// forma de uma linha continua byte a byte igual; vazio (nas duas formas) e
+// ausência continuam com o mesmo comportamento de sempre.
+describe('parseAgentProfile — tools: lista YAML EM BLOCO (equivalente à forma de uma linha)', () => {
+  it('"tools:" + "  - a" / "  - b" ⇒ IDÊNTICO a "tools: a, b"', () => {
+    const bloco = ['---', 'name: a', 'tools:', '  - read_file', '  - grep', '---', 'corpo'].join('\n');
+    const linha = ['---', 'name: a', 'tools: read_file, grep', '---', 'corpo'].join('\n');
+    expect(ok('a.md', bloco).tools).toEqual(ok('a.md', linha).tools);
+    expect(ok('a.md', bloco).tools).toEqual(['read_file', 'grep']);
+  });
+
+  it('itens sem indentação e com aspas — mesmo resultado', () => {
+    const raw = ['---', 'name: a', 'tools:', '- read_file', '- "grep"', '---', 'corpo'].join('\n');
+    expect(ok('a.md', raw).tools).toEqual(['read_file', 'grep']);
+  });
+
+  it('compat Claude Code (Read/Bash) também funciona na forma de lista', () => {
+    const raw = ['---', 'name: a', 'tools:', '  - Read', '  - Bash', '---', 'corpo'].join('\n');
+    expect(ok('a.md', raw).tools).toEqual(['read_file', 'run_command']);
+  });
+
+  it('a lista PARA na próxima chave — não "engole" campos seguintes', () => {
+    const raw = [
+      '---',
+      'name: a',
+      'tools:',
+      '  - read_file',
+      '  - grep',
+      'model: sonnet',
+      '---',
+      'corpo',
+    ].join('\n');
+    const p = ok('a.md', raw);
+    expect(p.tools).toEqual(['read_file', 'grep']);
+    expect(p.model).toBe('sonnet');
+  });
+
+  it('a forma de uma linha "tools: a, b" continua funcionando byte a byte igual (zero regressão)', () => {
+    const raw = '---\nname: a\ntools: read_file, grep\n---\ncorpo';
+    expect(ok('a.md', raw).tools).toEqual(['read_file', 'grep']);
+  });
+
+  it('"tools:" em bloco, mas SEM nenhum item ("-") depois ⇒ CONTINUA fail-closed (invariante de segurança)', () => {
+    // Nem lista de uma linha, nem itens "-" — a próxima linha já é outra chave.
+    const raw = ['---', 'name: a', 'tools:', 'model: sonnet', '---', 'corpo'].join('\n');
+    const p = parseAgentProfile('a.md', raw, 'global');
+    expect(isAgentProfileError(p)).toBe(true);
+    if (isAgentProfileError(p)) expect(p.reason).toMatch(/não carregado|inválida/);
+  });
+
+  it('"tools:" em bloco, mas o bloco de itens está genuinamente VAZIO (fim do frontmatter) ⇒ fail-closed', () => {
+    const raw = ['---', 'name: a', 'tools:', '---', 'corpo'].join('\n');
+    const p = parseAgentProfile('a.md', raw, 'global');
+    expect(isAgentProfileError(p)).toBe(true);
+  });
+
+  it('a mensagem de erro ENSINA as duas formas aceitas (nunca só diz "está errado")', () => {
+    const raw = ['---', 'name: a', 'tools:', 'model: sonnet', '---', 'corpo'].join('\n');
+    const p = parseAgentProfile('a.md', raw, 'global');
+    expect(isAgentProfileError(p)).toBe(true);
+    if (isAgentProfileError(p)) {
+      expect(p.reason).toContain('tools: read_file, grep');
+      expect(p.reason).toMatch(/lista YAML em bloco|- read_file/);
+    }
+  });
+
+  it('ausência TOTAL da chave "tools:" continua herdando o toolset do pai (inalterado)', () => {
+    const raw = '---\nname: a\n---\ncorpo';
+    expect(ok('a.md', raw).tools).toBeUndefined();
+  });
+});
+
 describe('RES-MD-3 — FALHA FECHADA (malformado / tools ilegível)', () => {
   it('`name` ausente ⇒ ERRO (perfil rejeitado, não entra)', () => {
     const p = parseAgentProfile('x.md', '---\ndescription: sem nome\n---\ncorpo', 'global');

@@ -427,12 +427,22 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
       io.out(`  canal:       ${m.channel ?? '(NENHUM)'}`);
       io.out(`  autonomia:   ${m.autonomy ?? '(não declarada)'}`);
       io.out(`  budget:      ${m.budget ?? '(não declarado)'}`);
+      // `immediate: true` — dispara um turno já no start/reinício (ver runner.ts).
+      // Só destacado quando `true`: ausente/`false` é o comportamento de hoje.
+      if (m.immediate === true) {
+        io.out(`  ⚠ imediato:  sim — roda um turno já no start/reinício, antes do 1º cron`);
+      }
       if (m.tunables.length > 0) {
         io.out(`  tunáveis/circuit-breakers:`);
         for (const t of m.tunables) {
           const faixa = t.min !== undefined && t.max !== undefined ? ` [${t.min}..${t.max}]` : '';
           io.out(`    · ${t.key}: ${t.value}${faixa}`);
         }
+      }
+      // Chave desconhecida que não virou tunável — mesma visibilidade do manifesto
+      // visível do `install` (o dono pode ter perdido essa revisão inicial).
+      if (m.ignoredFrontmatterKeys.length > 0) {
+        io.out(`  ⚠ campos ignorados: ${m.ignoredFrontmatterKeys.join(', ')}`);
       }
       io.out(`  validação:   OK (schedule/workflow conferidos pelo registry)`);
       return 0;

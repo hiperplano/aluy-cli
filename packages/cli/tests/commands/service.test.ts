@@ -303,6 +303,57 @@ describe('runService — list/status', () => {
     expect(t).toContain('grupo:       (não declarado)');
     expect(t).toContain('modelo:      (não declarado — default global)');
   });
+
+  // `immediate: true` — dispara turno já no start/reinício; DESTACADO no status
+  // (mesmo espírito do grupo/modelo acima). Ausente ⇒ zero linha (comportamento
+  // de hoje, sem ruído).
+  it('status — mostra "⚠ imediato" quando immediate: true; ausente ⇒ sem linha', async () => {
+    const servicesDir = join(base, SERVICES_DIRNAME);
+    mkdirSync(join(servicesDir, 'trader'), { recursive: true });
+    writeFileSync(
+      join(servicesDir, 'trader', 'service.md'),
+      ['---', 'name: trader', 'immediate: true', '---', 'Rege.'].join('\n'),
+    );
+    const io = fakeIO();
+    const exit = await runService(['status', 'trader'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(0);
+    expect(io.outLines.join('\n')).toContain('⚠ imediato:  sim');
+
+    const servicesDir2 = join(base, SERVICES_DIRNAME);
+    mkdirSync(join(servicesDir2, 'pesquisador'), { recursive: true });
+    writeFileSync(
+      join(servicesDir2, 'pesquisador', 'service.md'),
+      ['---', 'name: pesquisador', '---', 'Rege, não opera.'].join('\n'),
+    );
+    const io2 = fakeIO();
+    const exit2 = await runService(['status', 'pesquisador'], {
+      io: io2,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit2).toBe(0);
+    expect(io2.outLines.join('\n')).not.toContain('imediato');
+  });
+
+  // O silêncio que motivou este item: uma chave desconhecida (typo ou campo
+  // inventado) precisa aparecer no status — não só no manifesto do `install`.
+  it('status — mostra "⚠ campos ignorados" quando há chave de frontmatter não reconhecida', async () => {
+    const servicesDir = join(base, SERVICES_DIRNAME);
+    mkdirSync(join(servicesDir, 'trader'), { recursive: true });
+    writeFileSync(
+      join(servicesDir, 'trader', 'service.md'),
+      ['---', 'name: trader', 'activty-timeout: 45m', '---', 'Rege.'].join('\n'),
+    );
+    const io = fakeIO();
+    const exit = await runService(['status', 'trader'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
+    expect(exit).toBe(0);
+    expect(io.outLines.join('\n')).toContain('⚠ campos ignorados: activty-timeout');
+  });
 });
 
 describe('runService — install (local path)', () => {
