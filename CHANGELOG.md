@@ -14,6 +14,16 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.123] — 2026-08-05
+
+### Adicionado
+
+- 🏷️ **`group:` e `model:` no `service.md`, e `--group` nos comandos:** o dono está montando uma "mesa" de vários serviços com um MAESTRO que os orquestra — e o maestro não tinha como DESCOBRIR os irmãos (precisaria dos nomes chumbados). `group:` é RÓTULO (sem estado, sem acoplar ciclo de vida: cada serviço segue processo independente com lock próprio) e vira a fronteira de autoridade — `aluy service list --group <nome>` é como o maestro descobre a mesa; `start`/`stop --group` iteram, reportando serviço a serviço, e a falha de um NÃO derruba os outros. `model:` fixa o modelo do turno por serviço (antes TODO serviço usava o default global do config, então trocar o padrão trocava a mesa inteira) — propagado como `--model` ao turno-filho só quando declarado, e o `model:` do AGENTE continua vencendo (mais específico ganha). Ambos aparecem no manifesto visível ANTES do install. Ausentes ⇒ comportamento idêntico ao de hoje.
+
+### Corrigido
+
+- 🪟 **pickers sumiam ou não respondiam — os dois caminhos de render divergiam (3 bugs, 1 causa):** o aluy tem DOIS caminhos de render (inline e cockpit) e cada um mantinha sua PRÓPRIA lista MANUAL dos mesmos overlays; as listas divergiram. (1) `/provider` não desenhava no INLINE — o componente existia só no bloco do cockpit; o comando rodava, o gate casava, o picker abria com as 11 entradas carregadas, e não havia o que desenhar: nada na tela, nem erro. Por isso a leitura do código não achava nada — não HAVIA nada errado, faltava DESENHAR (só apareceu instrumentando o binário: `open=true n=11`). (2) `Ctrl+P` idem com a paleta, e pior: o rodapé ANUNCIA "ctrl-p paleta". (3) No COCKPIT o teclado não chegava aos pickers — o ramo de navegação de região se desviava só para 3 dos 11 modais, engolia ↑↓ para rolar e retornava ANTES do handler (a dica do rodapé seguia sendo a do composer, denunciando o foco errado); o comentário do bloco já PROMETIA "picker captura antes" e não cumpria. A causa comum foi eliminada: a lista virou ÚNICA, usada pelos dois caminhos (−179 linhas duplicadas). O ESPAÇAMENTO NÃO foi unificado de propósito — difere por motivo real (no cockpit o overlay é popover ACIMA da conversa, no inline fica ABAIXO do composer), e unificar removeria 9 paddings, mexendo na altura da região viva justo na área que acabou de custar caro estabilizar. VERIFICADO no WezTerm real, inline E fullscreen: abre, ↑↓ navegam, enter APLICA.
+
 ## [1.0.0-rc.122] — 2026-08-05
 
 ### Adicionado
