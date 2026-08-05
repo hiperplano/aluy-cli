@@ -65,6 +65,18 @@ describe('buildServiceCreateSystemPrompt — PURA', () => {
     expect(prompt.toLowerCase()).toContain('decisor');
   });
 
+  // A causa raiz de um bug real: o modelo escreveu `tools:` como lista YAML em
+  // bloco (a forma "natural") seguindo este MESMO prompt-guia, que só mostrava a
+  // forma de uma linha em prosa — sem exemplo literal, o parser rejeitava a lista
+  // em bloco (fail-closed silencioso). Agora as DUAS formas aceitas aparecem como
+  // exemplo literal.
+  it('mostra as DUAS formas aceitas de "tools:" como exemplo LITERAL (uma linha + lista em bloco)', () => {
+    const prompt = buildServiceCreateSystemPrompt('um serviço qualquer');
+    expect(prompt).toContain('tools: read_file, grep');
+    expect(prompt).toContain('- read_file');
+    expect(prompt).toContain('- grep');
+  });
+
   it('distingue regra de JULGAMENTO (rules.md) × regra DURA (frontmatter) — §3', () => {
     const prompt = buildServiceCreateSystemPrompt('um serviço qualquer');
     expect(prompt).toContain('rules.md');

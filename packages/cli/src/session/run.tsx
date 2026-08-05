@@ -1031,6 +1031,24 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const projectAgents = projectAgentsLoader.load();
   const agentRegistry = new AgentRegistry(globalAgents.profiles, projectAgents.profiles);
   const agentLoadErrors = [...globalAgents.errors, ...projectAgents.errors];
+  // EST-0977 — as MESMAS duas classes de aviso de carga de agente (homônimo entre
+  // camadas + `.md` rejeitado, RES-MD-3) viram uma nota da TUI mais abaixo
+  // (`pushNote('agentes', …)`) — mas aquele bloco fica DEPOIS do `return` do
+  // ramo headless (o objetivo/turno já teria terminado e o processo já teria
+  // saído antes de chegar lá). Sem isto, um agente rejeitado é INVISÍVEL no
+  // headless: `spawn_agent` falha, a atividade volta vazia, e nada aponta o
+  // motivo (achado reproduzido: serviço com agentes malformados travando "0
+  // chars / err" sem pista nenhuma, nem no `runner.log`). Computado UMA vez
+  // aqui — a nota da TUI (abaixo) e o STDERR do headless (no ramo `if
+  // (headless)`) leem da MESMA lista, nunca podem divergir no texto.
+  const agentBootWarningLines: string[] = [
+    ...agentRegistry.crossLayerConflicts.map(
+      (c) =>
+        `"${c.name}": há um .md de PROJETO homônimo de um agente GLOBAL confiável — ` +
+        `delegar por nome pedirá CONFIRMAÇÃO (sem TTY ⇒ negado).`,
+    ),
+    ...agentLoadErrors.map((e) => e.reason),
+  ];
 
   // ADR-0158 §4.1 (FUNIL) — RESOLVE a persona do enforcement AGORA (o registro acima já
   // está ESCOPADO ao serviço via `serviceScopeDir`), ANTES de gastar o resto do boot
@@ -1970,6 +1988,19 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       );
     }
 
+    // EST-0977 (headless) — os avisos de carga de agente (`agentBootWarningLines`,
+    // calculados lá em cima) NUNCA chegariam ao usuário sem isto: o bloco que os vira
+    // nota da TUI (`pushNote('agentes', …)`, mais abaixo no arquivo) fica DEPOIS do
+    // `return` deste ramo `if (headless)` — nunca executa aqui. Precedente EXATO:
+    // `resolved.notes` de anexo em `runHeadlessPrint`/`runHeadlessStreamJson`
+    // (linear.ts), que escrevem no STDERR pela MESMA razão. STDOUT continua INTOCADO
+    // (contrato do runner de serviço — `parseActivityTurnOutput` lê a ÚLTIMA linha
+    // como JSON; qualquer diagnóstico ali quebraria o parse). Zero ruído quando não
+    // há aviso nenhum (`agentBootWarningLines` vazio ⇒ o loop não escreve nada).
+    for (const line of agentBootWarningLines) {
+      process.stderr.write(`aluy: ⚠ ${line}\n`);
+    }
+
     // EST-1007 (HANG) — o modo NÃO-TTY (headless `-p` E posicional piped) tem MUITOS
     // pontos de `return` (slash-commands literais, one-shot, runLinear). Se algum sair
     // sem fechar o MCP, os processos-server stdio (`~/.aluy/mcp.json`: npx everything/
@@ -2528,19 +2559,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         .join(' · ');
       lines.push(`${valid} agente(s) .md: ${names}`);
     }
-    // RES-MD-1 (anti-spoofing cross-camada) — AVISA no boot dos HOMÔNIMOS projeto↔global.
-    // É só o aviso de superfície; a TRAVA real é no locus (controller.spawnNamed exige
-    // confirmação com origem visível e, sem TTY, NEGA fail-closed). Aqui o usuário fica
-    // ciente de que delegar por esse nome usa o de PROJETO (DADO), não o global confiável.
-    for (const c of agentRegistry.crossLayerConflicts) {
-      lines.push(
-        `⚠ "${c.name}": há um .md de PROJETO homônimo de um agente GLOBAL confiável — ` +
-          `delegar por nome pedirá CONFIRMAÇÃO (sem TTY ⇒ negado).`,
-      );
-    }
-    for (const e of agentLoadErrors) {
-      lines.push(`⚠ ${e.reason}`);
-    }
+    // RES-MD-1 (anti-spoofing cross-camada) — AVISA no boot dos HOMÔNIMOS projeto↔global
+    // (é só o aviso de superfície; a TRAVA real é no locus, `controller.spawnNamed`) +
+    // os erros de carga de agente (RES-MD-3) — MESMA lista que o STDERR do headless usa
+    // (`agentBootWarningLines`, calculada uma única vez lá em cima), nunca podem divergir.
+    lines.push(...agentBootWarningLines.map((l) => `⚠ ${l}`));
     if (lines.length > 0) built.controller.pushNote('agentes', lines);
   }
 

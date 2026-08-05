@@ -14,7 +14,7 @@ import { waitForOwnerReply, newServiceEgressLimiter, type ServiceChannelClient, 
 import type { ServiceManifest } from '@hiperplano/aluy-cli-core';
 
 function manifest(overrides: Partial<ServiceManifest> = {}): ServiceManifest {
-  return { name: 'trader', tunables: [], orchestrator: 'Rege, não opera.', ...overrides };
+  return { name: 'trader', tunables: [], ignoredFrontmatterKeys: [], orchestrator: 'Rege, não opera.', ...overrides };
 }
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';

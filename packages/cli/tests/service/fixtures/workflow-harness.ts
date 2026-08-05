@@ -48,6 +48,8 @@ export interface HarnessManifest {
   readonly activityTimeout?: string;
   /** `until: "HH:MM"` (fim de expediente, ADR-0158 §3) — cru, sem aspas no valor. */
   readonly until?: string;
+  /** `immediate: true|false` — turno já no start/reinício, antes do 1º ciclo de cron. */
+  readonly immediate?: boolean;
   readonly orchestratorBody?: string;
 }
 
@@ -63,6 +65,7 @@ export function writeServiceManifest(base: string, m: HarnessManifest = {}): str
   if (m.model !== undefined) fm.push(`model: ${m.model}`);
   if (m.activityTimeout !== undefined) fm.push(`activity-timeout: ${m.activityTimeout}`);
   if (m.until !== undefined) fm.push(`until: "${m.until}"`);
+  if (m.immediate !== undefined) fm.push(`immediate: ${m.immediate}`);
   fm.push('---', m.orchestratorBody ?? 'Rege, não opera.');
   writeFileSync(join(dir, 'service.md'), fm.join('\n'));
   return dir;

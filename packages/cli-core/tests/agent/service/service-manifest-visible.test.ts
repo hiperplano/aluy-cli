@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { buildServiceManifestVisibleNote, type ServiceManifest } from '../../../src/index.js';
 
 function manifest(over: Partial<ServiceManifest> & Pick<ServiceManifest, 'name'>): ServiceManifest {
-  return { tunables: [], orchestrator: 'Rege, não opera.', ...over };
+  return { tunables: [], ignoredFrontmatterKeys: [], orchestrator: 'Rege, não opera.', ...over };
 }
 
 function text(lines: readonly string[]): string {
@@ -166,6 +166,63 @@ describe('buildServiceManifestVisibleNote', () => {
     expect(t).toContain('COM SCRIPT PRÓPRIO (1)');
     expect(t).toContain('mt5-executar');
     expect(t).not.toContain('so-instrucoes');
+  });
+
+  // `immediate: true` fura "fora do horário, o serviço nem acorda" — o dono
+  // precisa ver ANTES de instalar que este serviço dispara ao ligar (e a cada
+  // reinício). Ausente/`false` não recebem linha (comportamento de hoje).
+  it('immediate: true fica DESTACADO (⚠) — dispara turno já no start/reinício', () => {
+    const comImediato = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader', immediate: true }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    const t = text(comImediato.lines);
+    expect(t).toContain('⚠ immediate: true');
+    expect(t).toContain('TODO reinício');
+
+    const semImediato = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(semImediato.lines)).not.toContain('immediate');
+
+    const imediatoFalse = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader', immediate: false }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(imediatoFalse.lines)).not.toContain('immediate');
+  });
+
+  // O silêncio que motivou a visibilidade: `immediate:` escrito antes de existir,
+  // ou um typo (`activty-timeout:`) — o dono via de instalar precisa ver que a
+  // chave não fez nada.
+  it('campos ignorados aparecem no manifesto visível; some quando não há nenhum', () => {
+    const comIgnorados = buildServiceManifestVisibleNote({
+      manifest: manifest({
+        name: 'trader',
+        ignoredFrontmatterKeys: ['immediate', 'activty-timeout'],
+      }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(comIgnorados.lines)).toContain(
+      '⚠ campos ignorados (não reconhecidos): immediate, activty-timeout',
+    );
+
+    const semIgnorados = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(semIgnorados.lines)).not.toContain('campos ignorados');
   });
 
   it('mcp.json presente/ausente é mostrado', () => {

@@ -17,6 +17,7 @@
 //                                 # execução, sem estado próprio; ver `isSafeGroupLabel`)
 //   budget: 200k/turno           # teto de tokens (reusa limits.ts na fase 2)
 //   activity-timeout: sem-teto   # teto por ATIVIDADE — default 30min; "sem-teto" remove
+//   immediate: true               # roda UM turno JÁ no start/reinício, antes do 1º cron
 //   autonomy: ask                # ask (pergunta) | yolo-scoped (autônomo, confinado)
 //   perda-maxima-dia: 500        # circuit breaker — SEM faixa (§8.3)
 //   tamanho-posicao: 2 [1..5]    # tunável COM faixa — a retro ajusta só dentro dela (§8.5a)
@@ -58,6 +59,19 @@
 // ║   (min > max, ou o valor DECLARADO fora da própria faixa) é FALHA FECHADA — ║
 // ║   o dono escreveu uma faixa que não bate com o próprio valor inicial; isso   ║
 // ║   é erro de configuração, não algo pra o runner "descobrir" mais tarde.     ║
+// ║ • `immediate:` — só aceita `true`/`false` (fail-closed p/ qualquer outro     ║
+// ║   valor — o dono que escreveu algo que não bate com nenhum dos dois precisa  ║
+// ║   de um erro, MESMA disciplina de `autonomy:`; NUNCA "trata como false em    ║
+// ║   silêncio", que foi exatamente o problema que motivou este campo existir).  ║
+// ║   Semântica de RUNTIME (rodar um turno já no start, respeitando `until:`,    ║
+// ║   repetir a CADA reinício) é do runner (fase 2), não deste parser.           ║
+// ║ • Chave DESCONHECIDA que não vira tunável (não casa o padrão numérico) NÃO   ║
+// ║   é mais um silêncio puro: ela entra em `ignoredFrontmatterKeys` — o manifesto ║
+// ║   ainda NÃO é recusado (forward-compat continua valendo: o `.md` do dono     ║
+// ║   pode ter anotação própria), mas o formatador do manifesto visível          ║
+// ║   (`service-manifest-visible.ts`) e o `aluy service status` mostram essas    ║
+// ║   chaves — foi o silêncio total (escreveu, instalou, nada indicou) que        ║
+// ║   motivou este campo, não só o `immediate:` que o disparou.                  ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // PORTÁVEL (ADR-0053 §8): parser de string PURO (sem `node:*`, sem I/O). A LEITURA
@@ -143,8 +157,43 @@ export interface ServiceManifest {
    * declarado" de "declarado como ask" na exibição do manifesto.
    */
   readonly autonomy?: 'ask' | typeof SERVICE_AUTONOMOUS_MODE;
+  /**
+   * `immediate: true` (frontmatter `immediate`, só `true`/`false` — qualquer outro
+   * valor é fail-closed no parser) — fura a regra dura "fora do horário, o serviço
+   * nem acorda": o runner (fase 2, `service/runner.ts`) roda UM TURNO já no
+   * `start`, ANTES do primeiro ciclo de cron, e só na PRIMEIRA volta do laço —
+   * reinícios NORMAIS de cron continuam esperando o `schedule` como sempre.
+   *
+   * Duas decisões de runtime (não deste parser, que só valida a FORMA booleana):
+   *   · `until:` continua valendo — se o turno imediato cairia FORA do expediente
+   *     já declarado, o runner PULA o imediato e cai no ciclo normal de cron (a
+   *     regra de expediente é mais forte que a conveniência de rodar já).
+   *   · CADA REINÍCIO do processo do runner (crash + relançamento, `stop`/`start`
+   *     manual, máquina reiniciando) volta a `firstIteration = true` e dispara
+   *     OUTRO turno imediato — aceito e documentado (não há proteção adicional
+   *     aqui contra crash-loop); ver o comentário no laço principal do runner e a
+   *     linha ⚠ correspondente no manifesto visível.
+   *
+   * Ausente ⇒ `undefined` aqui (comportamento IDÊNTICO ao de hoje — nunca dispara
+   * fora do `schedule`); só fica `undefined` (em vez de assumir `false`) para
+   * distinguir "não declarado" de "declarado como false" na exibição do manifesto,
+   * mesmo padrão de `autonomy`.
+   */
+  readonly immediate?: boolean;
   /** Circuit-breakers (sem faixa) + tunáveis (com faixa) — §8.3/§8.5a. */
   readonly tunables: readonly ServiceTunable[];
+  /**
+   * Chaves de frontmatter DESCONHECIDAS que NÃO viraram tunável (o valor não casa
+   * o padrão numérico `<número> [min..max]?`) — logo foram IGNORADAS na hora de
+   * montar o manifesto (forward-compat continua valendo: o manifesto não é
+   * recusado por causa delas). Existe para dar VISIBILIDADE — o `service.md` do
+   * dono pode ter um campo inventado (`immediate:` antes de existir) ou um erro de
+   * digitação (`activty-timeout:`) e, sem isto, o único destino de ambos era o
+   * silêncio total. O formatador do manifesto visível e o `aluy service status`
+   * mostram esta lista; este parser só a COLETA (PURO, sem I/O). Nunca inclui uma
+   * chave CONHECIDA (`KNOWN_KEYS`) nem uma que virou `ServiceTunable` de verdade.
+   */
+  readonly ignoredFrontmatterKeys: readonly string[];
   /** O corpo do `.md` = a persona do ORQUESTRADOR do serviço (§1). Nunca vazio. */
   readonly orchestrator: string;
 }
@@ -213,6 +262,7 @@ const KNOWN_KEYS = new Set([
   'model',
   'budget',
   'activity-timeout',
+  'immediate',
   'autonomy',
 ]);
 
@@ -244,6 +294,8 @@ interface RawServiceFrontmatter {
   readonly model?: string;
   readonly budget?: string;
   readonly activityTimeout?: string;
+  /** `undefined` = chave `immediate:` ausente (distinto de presente-mas-inválida). */
+  readonly immediateRaw?: string;
   /** `undefined` = chave `autonomy:` ausente (distinto de presente-mas-inválida). */
   readonly autonomyRaw?: string;
   /** Pares (chave, valor-cru) de tudo que NÃO é uma chave conhecida — candidatos a tunável. */
@@ -272,6 +324,7 @@ function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body
     model?: string;
     budget?: string;
     activityTimeout?: string;
+    immediateRaw?: string;
     autonomyRaw?: string;
   } = {};
   const extras: Array<readonly [string, string]> = [];
@@ -311,6 +364,9 @@ function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body
         break;
       case 'activity-timeout':
         out.activityTimeout = value;
+        break;
+      case 'immediate':
+        out.immediateRaw = value;
         break;
       case 'autonomy':
         out.autonomyRaw = value;
@@ -412,6 +468,7 @@ export function isSafeGroupLabel(raw: string): boolean {
  *   - `name` ausente/vazio após normalizar;
  *   - corpo (orquestrador) vazio;
  *   - `autonomy:` presente com valor que não seja `ask` nem `yolo-scoped`;
+ *   - `immediate:` presente com valor que não seja `true` nem `false`;
  *   - qualquer tunável/circuit-breaker com faixa malformada (min>max, ou valor
  *     inicial fora da própria faixa).
  *
@@ -515,15 +572,49 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
     };
   }
 
+  // `immediate:` — só `true`/`false` (fail-closed p/ qualquer outro valor, MESMA
+  // disciplina de `autonomy:`). É exatamente o campo que o dono tentou usar sem
+  // existir — e o problema não foi ele "não funcionar", foi ser IGNORADO EM
+  // SILÊNCIO (chave desconhecida some no forward-compat abaixo). Agora que existe
+  // de verdade, um valor que não seja um booleano claro também não pode confundir
+  // silenciosamente com "false" — precisa de um erro visível.
+  let immediate: boolean | undefined;
+  if (fm.immediateRaw !== undefined) {
+    const v = fm.immediateRaw.trim().toLowerCase();
+    if (v !== 'true' && v !== 'false') {
+      return {
+        kind: 'error',
+        file,
+        reason:
+          `serviço "${name}" (${file}): "immediate: ${fm.immediateRaw}" não é suportado — ` +
+          `só "immediate: true" ou "immediate: false" são aceitos.`,
+      };
+    }
+    immediate = v === 'true';
+  }
+
   // Tunáveis/circuit-breakers (§8.3/§8.5a) — cada extra numérico vira um `ServiceTunable`;
   // uma faixa malformada é FALHA FECHADA do manifesto inteiro (não só do campo).
+  // Chave DESCONHECIDA que NÃO casa o padrão numérico (nem tunável, nem faixa
+  // malformada) entra em `ignoredKeys` — visibilidade p/ o manifesto visível/
+  // `service status` (ver o campo `ignoredFrontmatterKeys`); o manifesto NÃO é
+  // recusado por causa dela (forward-compat continua valendo).
   const tunables: ServiceTunable[] = [];
+  const ignoredKeys: string[] = [];
   for (const [key, rawValue] of fm.extras) {
-    if (tunables.length >= MAX_TUNABLES) break;
     const parsed = parseTunableCandidate(key, rawValue);
-    if (parsed === undefined) continue; // não tem cara de número ⇒ ignorado (forward-compat).
+    if (parsed === undefined) {
+      ignoredKeys.push(key); // não tem cara de número ⇒ ignorado (forward-compat).
+      continue;
+    }
     if (typeof parsed === 'string') {
       return { kind: 'error', file, reason: `serviço "${name}" (${file}): ${parsed}` };
+    }
+    if (tunables.length >= MAX_TUNABLES) {
+      // teto defensivo atingido — esta chave TINHA cara de tunável válido, mas não
+      // entra (anti-lista-gigante); ainda assim é visível (não é um silêncio novo).
+      ignoredKeys.push(key);
+      continue;
     }
     tunables.push(parsed);
   }
@@ -553,8 +644,10 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
     ...(model !== undefined ? { model } : {}),
     ...(budget !== undefined ? { budget } : {}),
     ...(activityTimeout !== undefined ? { activityTimeout } : {}),
+    ...(immediate !== undefined ? { immediate } : {}),
     ...(autonomy !== undefined ? { autonomy } : {}),
     tunables,
+    ignoredFrontmatterKeys: ignoredKeys,
     orchestrator: body,
   };
 }

@@ -10,7 +10,7 @@ import type { LocalAnswerSource } from '../../src/service/channel.js';
 import type { ServiceManifest, TelegramUpdate } from '@hiperplano/aluy-cli-core';
 
 function manifest(overrides: Partial<ServiceManifest> = {}): ServiceManifest {
-  return { name: 'trader', tunables: [], orchestrator: 'Rege, não opera.', ...overrides };
+  return { name: 'trader', tunables: [], ignoredFrontmatterKeys: [], orchestrator: 'Rege, não opera.', ...overrides };
 }
 
 function fakeSecretStore(token: string | null): { get(): Promise<string | null> } {

@@ -84,6 +84,21 @@ export function buildServiceManifestVisibleNote(
   lines.push(`budget: ${m.budget ?? '(não declarado)'}`);
   lines.push(`teto por atividade: ${m.activityTimeout ?? '30min (default)'}`);
 
+  // ADR-0158 — `immediate: true` fura a regra dura "fora do horário, o serviço nem
+  // acorda": um turno roda JÁ no `start` (e em CADA reinício — crash-loop,
+  // `stop`/`start` manual, reboot da máquina TAMBÉM disparam), antes do primeiro
+  // ciclo de cron. Informação de CONSENTIMENTO, mesmo espírito do `⚠ autonomia`
+  // acima — o dono vê ANTES de instalar que este serviço dispara ao ligar (e que
+  // reiniciar dispara de novo, sem proteção extra contra crash-loop). Ausente/
+  // `false` não recebem linha (nada a destacar — comportamento de hoje).
+  if (m.immediate === true) {
+    lines.push(
+      '⚠ immediate: true — este serviço roda UM TURNO IMEDIATAMENTE ao iniciar ' +
+        '(start e TODO reinício — crash, stop/start manual, reboot da máquina); ' +
+        'só depois entra no ciclo normal de cron.',
+    );
+  }
+
   if (m.tunables.length > 0) {
     lines.push(`tunáveis/circuit-breakers (${m.tunables.length}):`);
     for (const t of m.tunables) {
@@ -91,6 +106,15 @@ export function buildServiceManifestVisibleNote(
         t.min !== undefined && t.max !== undefined ? ` [${t.min}..${t.max}]` : ' (fixo, sem faixa)';
       lines.push(`  · ${t.key}: ${t.value}${faixa}`);
     }
+  }
+
+  // O momento que realmente machuca o dono: escreveu uma chave, instalou, e nada
+  // indicou que ela não fazia nada (`immediate:` antes de existir, ou um typo tipo
+  // `activty-timeout:`). O manifesto não é recusado por causa disso (forward-
+  // compat — pode ser anotação própria do dono), mas o `install` é o MOMENTO de
+  // revisão: mostra a lista ANTES de qualquer confirmação.
+  if (m.ignoredFrontmatterKeys.length > 0) {
+    lines.push(`⚠ campos ignorados (não reconhecidos): ${m.ignoredFrontmatterKeys.join(', ')}`);
   }
 
   lines.push('');

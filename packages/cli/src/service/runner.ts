@@ -4,7 +4,14 @@
 //
 //   1. lê `service.md` (via `UserServicesStore`, já validado — cron/workflow OK);
 //   2. dorme até o `schedule` (§5 pt.2 — "fora do horário, o serviço nem acorda:
-//      regra dura por construção" — `nextCronFire`, cli-core);
+//      regra dura por construção" — `nextCronFire`, cli-core). EXCEÇÃO — só na
+//      PRIMEIRA volta do laço, `immediate: true` fura esta regra de propósito: um
+//      turno roda JÁ, ANTES desta primeira soneca (respeitando `until:` — ver
+//      `canRunImmediateNow`, abaixo, e o comentário no laço principal). Cada
+//      REINÍCIO do runner (crash-loop, `stop`/`start` manual, reboot) começa um
+//      laço NOVO — a própria PRIMEIRA volta dele — então também dispara: risco
+//      aceito e documentado (nenhuma proteção extra contra crash-loop aqui), não
+//      "por descuido" — ver o manifesto visível, onde isto fica marcado com ⚠;
 //   3. no início do expediente: sobe os daemons próprios (§6) + abre um TURNO
 //      HEADLESS por atividade do `workflow:`, com wiring ESCOPADO (§2 — via a env
 //      var interna `ALUY_SERVICE_HOME` que `run.tsx`/`wiring.ts` já respeitam);
@@ -187,6 +194,20 @@ export async function sleepUntil(date: Date, stop: AbortSignal): Promise<'woke' 
     if (outcome === 'stopped') return 'stopped';
     // fatia terminou sem atingir o alvo ainda ⇒ volta ao topo, recalcula o restante.
   }
+}
+
+/**
+ * `immediate: true` decide se o turno JÁ pode rodar (PRIMEIRA volta do laço,
+ * antes de qualquer soneca de cron) — PURA (usa `msUntilDeadline`, cli-core; sem
+ * I/O). Decisão de projeto: `until:` continua valendo — a regra de fim de
+ * expediente é mais forte que a conveniência de rodar já. Sem `until:` declarado
+ * (`undefined`) ⇒ sem teto, sempre pode. Com `until:` já vencido HOJE (`<= 0` ms
+ * restantes) ⇒ não pode — o runner pula o imediato e cai direto no ciclo normal
+ * de cron (o CALLER loga o motivo). Testável direto, sem subir o runner inteiro.
+ */
+export function canRunImmediateNow(now: Date, until: string | undefined): boolean {
+  const remainingMs = msUntilDeadline(now, until);
+  return remainingMs === undefined || remainingMs > 0;
 }
 
 /**
@@ -529,7 +550,21 @@ async function runActivityTurn(args: {
   }
 
   if (!parsed.ok) {
-    log(`atividade ${index + 1}/${total} "${activity.id}": turno terminou com erro.`);
+    // O turno-filho terminou com `ok:false` MAS ainda assim produziu JSON válido
+    // (o caso ilegível, acima, já cobre o stderr NESSE ramo) — antes, o STDERR
+    // capturado era descartado aqui, então um diagnóstico de BOOT do filho (ex.:
+    // agente `.md` rejeitado, RES-MD-3 — ver `session/run.tsx`,
+    // `agentBootWarningLines`) nunca chegava ao `runner.log`, deixando o `aluy
+    // service attach` CEGO bem no momento em que o dono mais precisa (achado
+    // reproduzido: serviço com agentes malformados travando "0 chars/err" sem
+    // pista nenhuma). Mesmo padrão de corte da saída ilegível acima (500
+    // caracteres) — omitido por completo quando vazio (zero ruído no caso comum
+    // sem diagnóstico nenhum, ZERO regressão de texto de log).
+    const stderrTail = stderr.trim().slice(0, 500);
+    log(
+      `atividade ${index + 1}/${total} "${activity.id}": turno terminou com erro.` +
+        (stderrTail !== '' ? ` — ${stderrTail}` : ''),
+    );
     return { ok: false, stop: 'error' };
   }
 
@@ -675,6 +710,19 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
   const execPath = deps.execPath ?? process.execPath;
   const aluyEntrypoint = deps.aluyEntrypoint ?? process.argv[1] ?? '';
 
+  // `immediate: true` — só pode furar a soneca de cron na PRIMEIRA volta deste
+  // laço. Consumida (`= false`) logo na primeira checagem, sucesso ou não (`until:`
+  // vencido também consome — não fica "tentando de novo" na volta seguinte). Cada
+  // REINÍCIO do PROCESSO do runner (crash-loop, `stop`/`start` manual, máquina
+  // reiniciando) recria este `let` do zero — o laço recomeça, `isFirstIteration`
+  // volta a `true`, e o turno imediato dispara DE NOVO. Risco ACEITO e
+  // DOCUMENTADO (crash-loop com `immediate: true` vira turno repetido a cada
+  // relançamento) — sem proteção adicional aqui; ver o comentário no topo do
+  // arquivo e o `⚠` correspondente no manifesto visível (`service-manifest-
+  // visible.ts`), que existe exatamente para o dono ver este risco ANTES de
+  // instalar.
+  let isFirstIteration = true;
+
   try {
     while (!stopController.signal.aborted) {
       const now = new Date();
@@ -694,11 +742,31 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         removePidFile(pidPath);
         return 1;
       }
-      setStatus({ turnState: 'sleeping', nextFireIso: next.toISOString() });
-      log(`dormindo até ${next.toISOString()} (próximo turno).`);
 
-      const wake = await sleepUntil(next, stopController.signal);
-      if (wake === 'stopped') break;
+      // `immediate: true` — decide ANTES de dormir, só nesta volta (consumida
+      // logo abaixo). `until:` continua valendo (decisão de projeto): se o
+      // expediente já encerrou hoje, o imediato é PULADO — a regra de expediente
+      // vence a conveniência de rodar já — e o runner cai no ciclo normal de cron,
+      // exatamente como se `immediate:` não estivesse declarado.
+      const wantsImmediate = isFirstIteration && service.manifest.immediate === true;
+      const runImmediateNow = wantsImmediate && canRunImmediateNow(now, service.manifest.until);
+      if (wantsImmediate && !runImmediateNow) {
+        log(
+          `"immediate: true" declarado, mas o expediente ("until: ${service.manifest.until}") já ` +
+            `encerrou — turno imediato pulado; segue para o ciclo normal de cron.`,
+        );
+      }
+      isFirstIteration = false;
+
+      if (runImmediateNow) {
+        log('"immediate: true" declarado — turno IMEDIATO antes do primeiro ciclo de cron…');
+      } else {
+        setStatus({ turnState: 'sleeping', nextFireIso: next.toISOString() });
+        log(`dormindo até ${next.toISOString()} (próximo turno).`);
+
+        const wake = await sleepUntil(next, stopController.signal);
+        if (wake === 'stopped') break;
+      }
 
       // ADR-0158 §8.1 (FASE 3) — "manifesto inválido pós-edição" é um dos motivos
       // explícitos de ALERTA: o dono pode ter editado `service.md` DEPOIS do
