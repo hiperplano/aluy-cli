@@ -56,11 +56,21 @@ export function summarizeSessionBlockForAttach(b: SessionBlock): AttachBlockSumm
       return b.text.trim() === '' ? undefined : { role: 'you', text: b.text };
     case 'aluy':
       return b.text.trim() === '' ? undefined : { role: 'aluy', text: b.text };
-    case 'tool':
+    case 'tool': {
+      // ATTACH-CEGO (dogfooding real, palavras do dono: "tá dando erro e não consigo
+      // ver") — esta linha usava `b.result || b.status`. Em ERRO o `result` vem VAZIO,
+      // então caía no `status` e imprimia só `err`: o dono via "spawn_agent → err" e
+      // não tinha COMO descobrir o motivo, nem pelo attach, nem pelo log, nem pela
+      // transcrição. A razão SEMPRE existiu — `tool-reporter.ts` já a grava em
+      // `output` (`truncate(result.observation)`) justamente quando `status === 'err'`
+      // — e era DESCARTADA aqui, no último metro. Passa a ser exibida.
+      const motivo = b.status === 'err' ? (b.output ?? '').trim() : '';
+      const cauda = motivo !== '' ? `: ${motivo}` : '';
       return {
         role: 'tool',
-        text: `${b.verb} ${b.target} → ${b.result || b.status}`,
+        text: `${b.verb} ${b.target} → ${b.result || b.status}${cauda}`,
       };
+    }
     case 'bang':
       return { role: 'bang', text: `! ${b.command} (${b.status})` };
     case 'note':
