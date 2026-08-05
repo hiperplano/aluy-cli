@@ -11,6 +11,7 @@ import {
   parseServiceManifest,
   isServiceManifestError,
   isSafeGroupLabel,
+  isSafeWorkspaceRef,
   normalizeServiceName,
   type ServiceManifest,
 } from '../../../src/index.js';
@@ -227,6 +228,87 @@ describe('parseServiceManifest — group: (descoberta entre serviços)', () => {
   it('"group:" vazio (só espaços) ⇒ tratado como ausente, não erro', () => {
     const m = ok('service.md', '---\nname: trader\ngroup:    \n---\nOrquestrador.');
     expect(m.group).toBeUndefined();
+  });
+});
+
+// `workspace:` — raiz(es) EXTRA além da própria pasta do serviço (ADR-0158 — a
+// porta que o dono abre explicitamente para o agente enxergar fora do
+// `~/.aluy/services/<nome>/`). Este parser só valida a FORMA — a resolução real
+// (existe? é diretório? cai dentro de `~/.aluy/`?) é do @hiperplano/aluy-cli.
+describe('parseServiceManifest — workspace: (raiz extra além da própria pasta)', () => {
+  it('uma única raiz (linha simples) ⇒ lista de 1 item', () => {
+    const m = ok('service.md', '---\nname: trader\nworkspace: ~/projects/fluider\n---\nOrquestrador.');
+    expect(m.workspaceRoots).toEqual(['~/projects/fluider']);
+  });
+
+  it('várias raízes numa linha, separadas por vírgula', () => {
+    const m = ok(
+      'service.md',
+      '---\nname: trader\nworkspace: ~/projects/fluider, /opt/dados\n---\nOrquestrador.',
+    );
+    expect(m.workspaceRoots).toEqual(['~/projects/fluider', '/opt/dados']);
+  });
+
+  it('lista YAML em bloco ("workspace:" seguido de "- item")', () => {
+    const raw = [
+      '---',
+      'name: trader',
+      'workspace:',
+      '  - ~/projects/fluider',
+      '  - /opt/dados',
+      '---',
+      'Orquestrador.',
+    ].join('\n');
+    const m = ok('service.md', raw);
+    expect(m.workspaceRoots).toEqual(['~/projects/fluider', '/opt/dados']);
+  });
+
+  it('sem "workspace:" ⇒ undefined (zero regressão p/ quem não usa — só a própria pasta)', () => {
+    const m = ok('service.md', '---\nname: trader\n---\nOrquestrador.');
+    expect(m.workspaceRoots).toBeUndefined();
+  });
+
+  it('"workspace:" presente mas VAZIO ⇒ erro (fail-closed, nunca "sem raiz extra" em silêncio)', () => {
+    const reason = fail('service.md', '---\nname: trader\nworkspace:    \n---\nOrquestrador.');
+    expect(reason).toMatch(/workspace/);
+  });
+
+  it('caminho ABSOLUTO é aceito na FORMA (é o caso de uso — apontar pra fora da pasta)', () => {
+    const m = ok('service.md', '---\nname: trader\nworkspace: /home/dono/projects/fluider\n---\nOrq.');
+    expect(m.workspaceRoots).toEqual(['/home/dono/projects/fluider']);
+  });
+
+  it('".." relativo é aceito na FORMA (ao contrário de workflow:, aqui é legítimo)', () => {
+    const m = ok('service.md', '---\nname: trader\nworkspace: ../outro-projeto\n---\nOrquestrador.');
+    expect(m.workspaceRoots).toEqual(['../outro-projeto']);
+  });
+
+  it('byte de controle numa entrada ⇒ erro (fail-closed)', () => {
+    const reason = fail('service.md', '---\nname: trader\nworkspace: "~/x\x01y"\n---\nOrquestrador.');
+    expect(reason).toMatch(/workspace/);
+  });
+
+  it('dedup preservando ordem quando a mesma raiz aparece 2x', () => {
+    const m = ok(
+      'service.md',
+      '---\nname: trader\nworkspace: ~/a, ~/b, ~/a\n---\nOrquestrador.',
+    );
+    expect(m.workspaceRoots).toEqual(['~/a', '~/b']);
+  });
+});
+
+describe('isSafeWorkspaceRef', () => {
+  it('aceita caminho absoluto, relativo, "~", e ".."', () => {
+    expect(isSafeWorkspaceRef('/home/dono/projects/fluider')).toBe(true);
+    expect(isSafeWorkspaceRef('~/projects/fluider')).toBe(true);
+    expect(isSafeWorkspaceRef('../outro')).toBe(true);
+    expect(isSafeWorkspaceRef('relativo/simples')).toBe(true);
+  });
+  it('recusa vazio/byte nulo/byte de controle', () => {
+    expect(isSafeWorkspaceRef('')).toBe(false);
+    expect(isSafeWorkspaceRef('   ')).toBe(false);
+    expect(isSafeWorkspaceRef('a\0b')).toBe(false);
+    expect(isSafeWorkspaceRef('a\x01b')).toBe(false);
   });
 });
 

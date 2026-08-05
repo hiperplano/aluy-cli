@@ -593,6 +593,16 @@ async function runInstall(
         return 1;
       }
     }
+    // `workspace:` (raiz extra além da própria pasta do serviço) NÃO é revalidado
+    // aqui de propósito — ao contrário de `schedule:`/`workflow:` acima, um
+    // relativo em `workspace:` resolve contra a pasta FINAL do serviço
+    // (`~/.aluy/services/<nome>/`), que ainda não existe neste ponto do install
+    // (só existe `staging`, um diretório TEMPORÁRIO — resolver relativo contra ele
+    // daria um veredito errado). A validação de verdade (`resolveServiceWorkspaceRoots`,
+    // MESMO piso "~/.aluy/ nunca vira raiz") roda em `UserServicesStore.readOne()`
+    // — toda leitura do serviço (inclusive o PRIMEIRO `aluy service start`) passa
+    // por ali; um `workspace:` hostil nunca chega a autorizar nada, só adia o erro
+    // do momento do `install` pro momento do `start`.
 
     const finalDir = store.resolveDir(parsed.name);
     if (finalDir === undefined) {

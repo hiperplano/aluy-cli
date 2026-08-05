@@ -264,18 +264,30 @@ export function buildActivityGoal(args: {
  * declarou `autonomy: yolo-scoped` — `ask`/ausente ⇒ a CHAVE nem existe no
  * objeto (o default, "sem `autonomy:` ou com `ask`", fica byte-a-byte igual
  * a antes: nem uma chave nova aparece no `env`).
+ *
+ * ADR-0158 — `workspaceRoots` (`ServiceEntry.resolvedWorkspaceRoots`, JÁ
+ * canonicalizado/validado por `resolveServiceWorkspaceRoots` — `io/services-store.ts`)
+ * vira a env `ALUY_SERVICE_WORKSPACE_ROOTS` (JSON de um array de paths absolutos),
+ * MESMO padrão: só INTERNA, só quando NÃO-VAZIA. `wiring.ts` (`buildSession`) é
+ * quem lê e chama `workspace.addRoot(...)` p/ cada uma — este parser só monta o
+ * `env`, não autoriza nada ele mesmo. Ausente/vazia ⇒ a CHAVE nem existe no objeto
+ * (comportamento IDÊNTICO ao de hoje — só a raiz primária do turno).
  */
 export function buildActivityEnv(
   serviceDir: string,
   agent: string | undefined,
   baseEnv: NodeJS.ProcessEnv = process.env,
   autonomy?: 'ask' | typeof SERVICE_AUTONOMOUS_MODE,
+  workspaceRoots?: readonly string[],
 ): NodeJS.ProcessEnv {
   return {
     ...baseEnv,
     ALUY_SERVICE_HOME: serviceDir,
     ...(agent !== undefined ? { ALUY_SERVICE_PERSONA: agent } : {}),
     ...(autonomy === SERVICE_AUTONOMOUS_MODE ? { ALUY_SERVICE_AUTONOMY: autonomy } : {}),
+    ...(workspaceRoots !== undefined && workspaceRoots.length > 0
+      ? { ALUY_SERVICE_WORKSPACE_ROOTS: JSON.stringify(workspaceRoots) }
+      : {}),
   };
 }
 
@@ -447,6 +459,11 @@ async function runActivityTurn(args: {
    * `buildActivityEnv` (env interna `ALUY_SERVICE_AUTONOMY`). `undefined`/`'ask'`
    * ⇒ comportamento de hoje, byte a byte (nenhuma env nova). */
   readonly autonomy?: 'ask' | typeof SERVICE_AUTONOMOUS_MODE;
+  /** ADR-0158 — `ServiceEntry.resolvedWorkspaceRoots` (JÁ resolvido/validado por
+   * `resolveServiceWorkspaceRoots`), propagado ao turno-filho via `buildActivityEnv`
+   * (env interna `ALUY_SERVICE_WORKSPACE_ROOTS`). Ausente/vazio ⇒ comportamento de
+   * hoje (só a pasta do serviço é raiz). */
+  readonly workspaceRoots?: readonly string[];
   /** Preenchido com o texto da pergunta pendente quando o outcome é `awaiting-owner`. */
   readonly pendingQuestionRef: { current?: string };
   /** ADR-0158 §5 pt.4 (FASE 3) — RETOMADA: quando presente, é a atividade que HAVIA
@@ -498,7 +515,13 @@ async function runActivityTurn(args: {
 
   const child = spawn(args.execPath, argv, {
     cwd: args.serviceDir,
-    env: buildActivityEnv(args.serviceDir, activity.agent, process.env, args.autonomy),
+    env: buildActivityEnv(
+      args.serviceDir,
+      activity.agent,
+      process.env,
+      args.autonomy,
+      args.workspaceRoots,
+    ),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -823,6 +846,13 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         ...(service.manifest.autonomy !== undefined
           ? { autonomy: service.manifest.autonomy }
           : {}),
+        // ADR-0158 — raízes `workspace:` JÁ resolvidas/validadas (`resolvedWorkspaceRoots`,
+        // `io/services-store.ts` — o piso "~/.aluy/ nunca vira raiz" já foi aplicado
+        // ali). Propagado até `buildActivityEnv` → env `ALUY_SERVICE_WORKSPACE_ROOTS`.
+        // Vazio (sem `workspace:` declarado) ⇒ comportamento de hoje, byte a byte.
+        ...(service.resolvedWorkspaceRoots.length > 0
+          ? { workspaceRoots: service.resolvedWorkspaceRoots }
+          : {}),
       };
 
       let outcome = await runOneWorkflow(baseWorkflowArgs);
@@ -1030,6 +1060,10 @@ async function runOneWorkflow(args: {
   /** ADR-0158 — `service.manifest.autonomy` cru, repassado a CADA `runActivityTurn`
    * desta fatia (ver o campo homônimo lá). `undefined`/`'ask'` ⇒ sem mudança. */
   readonly autonomy?: 'ask' | typeof SERVICE_AUTONOMOUS_MODE;
+  /** ADR-0158 — `ServiceEntry.resolvedWorkspaceRoots`, repassado a CADA
+   * `runActivityTurn` desta fatia (ver o campo homônimo lá). Ausente/vazio ⇒
+   * comportamento de hoje (só a pasta do serviço é raiz). */
+  readonly workspaceRoots?: readonly string[];
 }): Promise<WorkflowOutcome> {
   const { serviceDir, workflowName, log } = args;
   if (workflowName === undefined) {
@@ -1119,6 +1153,7 @@ async function runOneWorkflow(args: {
         pendingQuestionRef,
         ...(resumeContext !== undefined ? { resumeContext } : {}),
         ...(args.autonomy !== undefined ? { autonomy: args.autonomy } : {}),
+        ...(args.workspaceRoots !== undefined ? { workspaceRoots: args.workspaceRoots } : {}),
       });
       if (!outcome.ok && outcome.stop === 'awaiting-owner') pendingActivityIndex = realIndex;
       return outcome;

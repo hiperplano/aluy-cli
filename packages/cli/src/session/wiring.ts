@@ -59,12 +59,13 @@ import {
   // controller SÓ p/ o menu (descoberta) de `capabilities`.
   type Skill,
 } from '@hiperplano/aluy-cli-core';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { loadAuthConfig, CLI_CLIENT_ID } from '../auth/config.js';
 import { loadBrokerConfig } from '../model/config.js';
 import { makeHeadroomRetrieveTool } from '../model/headroom-retrieve.js';
 import { KeychainCredentialStore } from '../auth/keychain-store.js';
 import { createSandbox } from '../sandbox/index.js';
+import { aluyHomeDir } from '../sandbox/aluy-home.js';
 import {
   NodeWorkspace,
   NodeFileSystemPort,
@@ -711,6 +712,49 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     ...(opts.workspaceRoot !== undefined ? { root: opts.workspaceRoot } : {}),
     ...(yolo ? { unconfined: true } : {}),
   });
+
+  // ADR-0158 — `workspace:` do service.md: raízes EXTRA que o RUNNER já resolveu
+  // e validou (`resolveServiceWorkspaceRoots`, `io/services-store.ts` — inclusive
+  // o piso "~/.aluy/ nunca vira raiz", ver o comentário lá). Aqui só AUTORIZA —
+  // MESMO `addRoot` que o `/add-dir` interativo usa (ato do USUÁRIO na sessão do
+  // dono); aqui o "usuário" é o PRÓPRIO `service.md` que o dono escreveu e
+  // instalou — um consentimento equivalente, dado no `install` (o manifesto
+  // visível já mostrou estas raízes ANTES da confirmação, `service-manifest-
+  // visible.ts`). Env INTERNA (nunca flag pública, MESMO padrão de
+  // `ALUY_SERVICE_HOME`/`ALUY_SERVICE_AUTONOMY`) — só existe quando o runner
+  // spawnou este turno como atividade de um serviço com `workspace:` declarado.
+  // Ausente ⇒ ZERO chamada a `addRoot` — comportamento IDÊNTICO ao de hoje (só a
+  // raiz primária). DEFESA EM PROFUNDIDADE: mesmo já validado pelo runner,
+  // re-checa aqui que nenhuma raiz cai dentro do `~/.aluy/` — 2ª camada, MESMO
+  // espírito da revalidação de `workflow:` no runner (ver `service/runner.ts`,
+  // `runOneWorkflow`) — nunca confia numa ÚNICA checagem pra um piso que "não pode
+  // cair". `aluyHomeDir(env.HOME ?? ...)` usa o MESMO `env` já resolvido acima
+  // (`opts.env ?? process.env`) — em produção bate com o `os.homedir()` real (é a
+  // MESMA fonte que `homedir()` já lê no POSIX), e em teste é INJETÁVEL via
+  // `opts.env.HOME` sem precisar mutar o processo inteiro.
+  const rawWorkspaceRoots = env.ALUY_SERVICE_WORKSPACE_ROOTS;
+  if (rawWorkspaceRoots !== undefined) {
+    const aluyHome = aluyHomeDir(env.HOME !== undefined && env.HOME !== '' ? env.HOME : undefined);
+    try {
+      const declared: unknown = JSON.parse(rawWorkspaceRoots);
+      if (Array.isArray(declared)) {
+        for (const root of declared) {
+          if (typeof root !== 'string') continue;
+          if (root === aluyHome || root.startsWith(aluyHome + sep)) continue; // piso — nunca autoriza.
+          try {
+            workspace.addRoot(root);
+          } catch {
+            // best-effort — o diretório pode ter sumido entre a validação do
+            // runner e este turno; fail-safe: NÃO autoriza, `resolveInside`
+            // segue negando normalmente (mesma direção seria segura de qualquer
+            // forma — nunca autoriza "às cegas").
+          }
+        }
+      }
+    } catch {
+      /* env interna ilegível — best-effort, nunca derruba o boot do turno por isso. */
+    }
+  }
 
   // ── journal de snapshot-do-antes (0960a · ADR-0056) ─────────────────────────
   // A captura roda por baixo da `edit_file` (reusa o `before` do diff). O store

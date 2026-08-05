@@ -32,6 +32,7 @@ import {
   type ServiceSkillDeclared,
 } from '@hiperplano/aluy-cli-core';
 import { validateCronExpr } from '../commands/cron.js';
+import { resolveServiceWorkspaceRoots } from '../service/workspace-roots.js';
 
 /** Permissão restrita do dir `~/.aluy/services/` (espelha agents/workflows/commands). */
 const DIR_MODE = 0o700;
@@ -51,6 +52,17 @@ export interface ServiceEntry {
   /** Caminho absoluto do diretório do serviço. */
   readonly dir: string;
   readonly manifest: ServiceManifest;
+  /**
+   * ADR-0158 — raízes `workspace:` JÁ RESOLVIDAS (absolutas, canonicalizadas,
+   * validadas — ver `resolveServiceWorkspaceRoots`): `~` expandido, relativo
+   * resolvido contra `dir`, diretório confirmado EXISTENTE, e NENHUMA delas cai
+   * dentro de `~/.aluy/` (o piso que não cai — ver o módulo de resolução). Vazio
+   * quando o manifesto não declara `workspace:` (comportamento de hoje: só a
+   * própria pasta do serviço é raiz). Um manifesto com raiz HOSTIL nem chega a
+   * `ServiceEntry` — vira `ServiceEntryError` em `readOne()`, mesma disciplina de
+   * `workflow:` (fail-closed do serviço INTEIRO, nunca "entra parcial").
+   */
+  readonly resolvedWorkspaceRoots: readonly string[];
 }
 
 /** Um serviço REJEITADO — nome do diretório + o motivo (RES-MD-3 ou validação estrutural). */
@@ -90,9 +102,18 @@ export function safeServiceDirName(raw: string): string | undefined {
 /** Carregador/registry dos serviços de `~/.aluy/services/<nome>/`. */
 export class UserServicesStore {
   private readonly dir: string;
+  /**
+   * O `~/.aluy/` equivalente desta store (real ou o `baseDir` injetado em teste)
+   * — é o PISO contra o qual `workspace:` é validado (`resolveServiceWorkspaceRoots`,
+   * `readOne()` abaixo): nenhuma raiz declarada pode cair dentro dele. Usar o MESMO
+   * `baseDir` já injetável do resto do registry (em vez de `homedir()` direto)
+   * permite testar o piso com um HOME isolado, nunca o `~/.aluy/` real da máquina.
+   */
+  private readonly aluyHome: string;
 
   constructor(opts: UserServicesStoreOptions = {}) {
     const base = opts.baseDir ?? join(homedir(), '.aluy');
+    this.aluyHome = base;
     this.dir = join(base, SERVICES_DIRNAME);
   }
 
@@ -244,7 +265,27 @@ export class UserServicesStore {
       }
     }
 
-    return { kind: 'ok', entry: { name: parsed.name, dir, manifest: parsed } };
+    // ADR-0158 — `workspace:` (raiz extra além da própria pasta do serviço). O
+    // parser puro só validou a FORMA de cada entrada; aqui é a 2ª camada, MESMO
+    // padrão de `workflow:` acima: resolve de verdade (expande "~", resolve
+    // relativo contra `dir`, canonicaliza, exige diretório existente) e recusa
+    // fail-closed — INCLUSIVE o piso "nenhuma raiz cai dentro de ~/.aluy/", que
+    // NENHUMA validação de FORMA consegue expressar (o parser puro não tem
+    // `node:os`/`node:fs` p/ saber onde fica a home real). Uma raiz hostil
+    // rejeita o serviço INTEIRO (nunca "entra parcial, só com as raízes boas").
+    let resolvedWorkspaceRoots: readonly string[] = [];
+    if (parsed.workspaceRoots !== undefined && parsed.workspaceRoots.length > 0) {
+      const resolved = resolveServiceWorkspaceRoots(dir, parsed.workspaceRoots, this.aluyHome);
+      if (!resolved.ok) {
+        return { kind: 'error', error: { dirName, reason: resolved.reason } };
+      }
+      resolvedWorkspaceRoots = resolved.roots;
+    }
+
+    return {
+      kind: 'ok',
+      entry: { name: parsed.name, dir, manifest: parsed, resolvedWorkspaceRoots },
+    };
   }
 }
 

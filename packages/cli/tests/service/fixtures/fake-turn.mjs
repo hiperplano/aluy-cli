@@ -61,6 +61,12 @@ if (debugFile !== undefined && debugFile !== '') {
     model: model ?? null,
     aluyServiceHome: process.env.ALUY_SERVICE_HOME ?? null,
     aluyServicePersona: process.env.ALUY_SERVICE_PERSONA ?? null,
+    // ADR-0158 — `workspace:` do service.md: o runner só põe
+    // `ALUY_SERVICE_WORKSPACE_ROOTS` (JSON de um array de paths absolutos) quando o
+    // manifesto declara `workspace:` (ver runner.ts, `buildActivityEnv`). Gravado
+    // no debug record p/ os testes provarem presença/ausência, mesmo padrão de
+    // `aluyServicePersona` acima.
+    aluyServiceWorkspaceRoots: process.env.ALUY_SERVICE_WORKSPACE_ROOTS ?? null,
     isResume: goal.includes('[Retomando'),
     hasOwnerSay: goal.includes('aluy service attach'),
   };

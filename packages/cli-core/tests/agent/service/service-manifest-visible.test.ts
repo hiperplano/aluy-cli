@@ -130,6 +130,31 @@ describe('buildServiceManifestVisibleNote', () => {
     expect(text(semDeclarar.lines)).not.toContain('⚠ autonomia');
   });
 
+  // ADR-0158 — `workspace:` ABRE UMA PORTA: o dono precisa VER as raízes extra
+  // ANTES de instalar, com o MESMO destaque (⚠) do aviso de autonomia autônoma.
+  it('workspace: declarado fica DESTACADO (⚠) com cada raiz listada; ausente mostra "nenhuma"', () => {
+    const comWorkspace = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader', workspaceRoots: ['~/projects/fluider', '/opt/dados'] }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    const t = text(comWorkspace.lines);
+    expect(t).toContain('⚠ workspace: 2 raiz(es)');
+    expect(t).toContain('~/projects/fluider');
+    expect(t).toContain('/opt/dados');
+
+    const semWorkspace = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    const t2 = text(semWorkspace.lines);
+    expect(t2).not.toContain('⚠ workspace');
+    expect(t2).toContain('workspace: (nenhuma raiz extra — só a própria pasta do serviço)');
+  });
+
   it('canal AUSENTE fica visivelmente marcado (nunca escondido)', () => {
     const note = buildServiceManifestVisibleNote({
       manifest: manifest({ name: 'pesquisador' }),
