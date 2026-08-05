@@ -670,6 +670,14 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
   const blockTailTimer = setInterval(() => {
     for (const b of pollNewServiceBlocks(serviceDir, blockTailState)) {
       attachServerRef.current?.broadcastBlock(b.role, b.text);
+      // ATTACH-CEGO — o attach é EFÊMERO: quem não estava conectado no instante do
+      // erro nunca o vê, e a transcrição da sessão morre com o turno. Falha de TOOL
+      // é a informação mais cara de um serviço autônomo (o dono passou horas com
+      // "spawn_agent → err" sem nenhum caminho para o motivo), então ela também vai
+      // para o `runner.log` — que PERSISTE e é o que `aluy service logs` mostra.
+      // Só ERRO: sucesso continua fora do log, para não afogar o diagnóstico no
+      // ruído de dezenas de tools por turno.
+      if (b.role === 'tool' && / → err/.test(b.text)) log(`[tool] ${b.text}`);
     }
   }, 1500);
   blockTailTimer.unref();
