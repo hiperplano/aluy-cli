@@ -400,6 +400,18 @@ async function runActivityTurn(args: {
   readonly index: number;
   readonly total: number;
   readonly budgetTokens?: number;
+  /**
+   * Descoberta entre serviços (`group:`) — o `model:` do manifesto (SLUG cru, ex.:
+   * `xiaomi/mimo-v2.5-pro`) fixa o modelo do TURNO deste serviço, para não depender
+   * do default global de `~/.aluy/config.json` (que trocaria o modelo de TODOS os
+   * serviços de uma mesa de uma vez). Ausente ⇒ SEM `--model` no argv do filho —
+   * comportamento IDÊNTICO ao de hoje (default da config). PRECEDÊNCIA: um agente
+   * invocado dentro do turno com seu PRÓPRIO `model:` (via `spawn_agent`) continua
+   * vencendo este default — a resolução de tier (`resolveModelTier`, cli-core) só
+   * herda o caller do pai quando o agente NÃO declara `model:` próprio; este campo
+   * só troca QUAL É o caller do pai, nunca desliga essa herança.
+   */
+  readonly model?: string;
   /** Restante até o `until:` do service.md — `undefined` ⇒ sem `until` declarado. */
   readonly untilRemainingMs: number | undefined;
   /** ADR-0158 §5 pt.4 (emenda) — teto anti-runaway POR ATIVIDADE: `MAX_ACTIVITY_MS`
@@ -449,6 +461,7 @@ async function runActivityTurn(args: {
 
   const argv = [args.aluyEntrypoint, '-p', goal, '--output-format', 'json', '--quiet'];
   if (args.budgetTokens !== undefined) argv.push('--max-tokens', String(args.budgetTokens));
+  if (args.model !== undefined) argv.push('--model', args.model);
 
   // `unlimited` (emenda: activity-timeout:sem-teto) ⇒ SEM setTimeout nenhum — ver
   // doc de `resolveActivityTimeout` (um número gigante pra simular "infinito"
@@ -716,6 +729,7 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         workflowName: service.manifest.workflow,
         orchestratorBody: service.manifest.orchestrator,
         budgetRaw: service.manifest.budget,
+        modelRaw: service.manifest.model,
         untilRaw: service.manifest.until,
         activityTimeoutRaw: service.manifest.activityTimeout,
         stop: stopController.signal,
@@ -916,6 +930,9 @@ async function runOneWorkflow(args: {
   readonly workflowName: string | undefined;
   readonly orchestratorBody: string;
   readonly budgetRaw: string | undefined;
+  /** `model:` cru do manifesto — repassado a CADA `runActivityTurn` desta fatia
+   * (ver o campo homônimo lá; ausente ⇒ sem mudança no argv do filho). */
+  readonly modelRaw: string | undefined;
   readonly untilRaw: string | undefined;
   /** ADR-0158 §5 pt.4 (emenda) — `activity-timeout:` cru do manifesto (`45m`/`2h`/
    * `sem-teto`). Ausente/malformado ⇒ `MAX_ACTIVITY_MS` (default, ver `resolveActivityTimeout`). */
@@ -1015,6 +1032,7 @@ async function runOneWorkflow(args: {
         index: realIndex,
         total: parsed.activities.length,
         ...(budgetTokens !== undefined ? { budgetTokens } : {}),
+        ...(args.modelRaw !== undefined ? { model: args.modelRaw } : {}),
         untilRemainingMs: remaining,
         activityTimeoutCap,
         stop: args.stop,

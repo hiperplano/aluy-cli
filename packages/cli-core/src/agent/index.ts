@@ -416,6 +416,7 @@ export {
   parseServiceManifest,
   isServiceManifestError,
   isSafeWorkflowRef,
+  isSafeGroupLabel,
   normalizeServiceName,
   SERVICE_AUTONOMOUS_MODE,
   type ServiceManifest,

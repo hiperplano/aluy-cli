@@ -44,6 +44,45 @@ describe('buildServiceManifestVisibleNote', () => {
     expect(t).toContain('tamanho-posicao: 2 [1..5]');
   });
 
+  // Descoberta entre serviços (`group:`) + modelo fixo por serviço (`model:`) — o
+  // dono precisa ver AMBOS antes de instalar (fronteira: a que mesa está aderindo,
+  // e com que modelo/custo o serviço vai rodar).
+  it('mostra "grupo:" quando declarado; some quando ausente', () => {
+    const comGrupo = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader', group: 'mesa-trading' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(comGrupo.lines)).toContain('grupo: mesa-trading');
+
+    const semGrupo = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(semGrupo.lines)).not.toContain('grupo:');
+  });
+
+  it('mostra "modelo:" declarado, ou o aviso de default global quando ausente', () => {
+    const comModelo = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader', model: 'xiaomi/mimo-v2.5-pro' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(comModelo.lines)).toContain('modelo: xiaomi/mimo-v2.5-pro');
+
+    const semModelo = buildServiceManifestVisibleNote({
+      manifest: manifest({ name: 'trader' }),
+      daemons: [],
+      skills: [],
+      hasMcp: false,
+    });
+    expect(text(semModelo.lines)).toContain('modelo: (não declarado — usa o default global da config)');
+  });
+
   it('teto por atividade: default (30min) quando ausente, valor cru quando declarado', () => {
     const semDeclarar = buildServiceManifestVisibleNote({
       manifest: manifest({ name: 'trader' }),

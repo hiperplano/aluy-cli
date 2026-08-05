@@ -43,6 +43,8 @@ export interface HarnessManifest {
   readonly workflow?: string;
   readonly channel?: string;
   readonly budget?: string;
+  /** `model:` — descoberta entre serviços (fixa o modelo do turno; ver runner.ts). */
+  readonly model?: string;
   readonly activityTimeout?: string;
   /** `until: "HH:MM"` (fim de expediente, ADR-0158 §3) — cru, sem aspas no valor. */
   readonly until?: string;
@@ -58,6 +60,7 @@ export function writeServiceManifest(base: string, m: HarnessManifest = {}): str
   if (m.workflow !== undefined) fm.push(`workflow: ${m.workflow}`);
   if (m.channel !== undefined) fm.push(`channel: "${m.channel}"`);
   if (m.budget !== undefined) fm.push(`budget: ${m.budget}`);
+  if (m.model !== undefined) fm.push(`model: ${m.model}`);
   if (m.activityTimeout !== undefined) fm.push(`activity-timeout: ${m.activityTimeout}`);
   if (m.until !== undefined) fm.push(`until: "${m.until}"`);
   fm.push('---', m.orchestratorBody ?? 'Rege, não opera.');

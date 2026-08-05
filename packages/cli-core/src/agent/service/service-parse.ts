@@ -12,6 +12,9 @@
 //   until: "17:30"               # fim do expediente — ENFORÇADO pelo runner (fase 2)
 //   workflow: turno               # rotina do turno (workflows/turno.md do serviço)
 //   channel: telegram:<chat-id>  # onde reporta/pergunta (ADR-0154)
+//   group: mesa-trading          # RÓTULO — a que "mesa"/equipe este serviço pertence
+//                                 # (descoberta entre serviços irmãos — sem semântica de
+//                                 # execução, sem estado próprio; ver `isSafeGroupLabel`)
 //   budget: 200k/turno           # teto de tokens (reusa limits.ts na fase 2)
 //   activity-timeout: sem-teto   # teto por ATIVIDADE — default 30min; "sem-teto" remove
 //   autonomy: ask                # ask (pergunta) | yolo-scoped (autônomo, confinado)
@@ -38,10 +41,17 @@
 // ║   ask implícito" — um dono que escreveu algo que não bate com nenhum dos    ║
 // ║   dois precisa de um erro, não de um silêncio que reduz sozinho a           ║
 // ║   autonomia pretendida).                                                    ║
-// ║ • `until:`/`channel:` — validados só ESTRUTURALMENTE aqui (forma). A        ║
-// ║   VALIDAÇÃO SEMÂNTICA de `schedule:` (5 campos cron, `validateCronExpr`) e   ║
+// ║ • `until:`/`channel:`/`group:` — validados só ESTRUTURALMENTE aqui (forma).  ║
+// ║   A VALIDAÇÃO SEMÂNTICA de `schedule:` (5 campos cron, `validateCronExpr`) e  ║
 // ║   de `workflow:` (arquivo existe em `workflows/` do serviço) exige I/O —     ║
 // ║   fica no REGISTRY confinado (`@hiperplano/aluy-cli`, `io/services-store.ts`), não aqui. ║
+// ║ • `group:` é um RÓTULO puro — como um maestro (serviço com                   ║
+// ║   `autonomy: yolo-scoped`) DESCOBRE seus irmãos de mesa: `aluy service list  ║
+// ║   --group <nome>` filtra por ele. NÃO tem semântica de execução, NÃO cria    ║
+// ║   estado de grupo, NÃO acopla ciclo de vida entre serviços — cada serviço    ║
+// ║   segue processo independente com seu próprio lock. Um valor hostil (que     ║
+// ║   escaparia de um identificador simples) é FALHA FECHADA, mesma disciplina   ║
+// ║   leve de `until`/`channel`.                                                 ║
 // ║ • Tunáveis/circuit-breakers (§8.3/§8.5a): QUALQUER chave de frontmatter que  ║
 // ║   não seja uma das conhecidas E cujo valor CASE o padrão numérico           ║
 // ║   `<número> [min..max]?` vira um `ServiceTunable`. Uma faixa malformada      ║
@@ -53,6 +63,8 @@
 // PORTÁVEL (ADR-0053 §8): parser de string PURO (sem `node:*`, sem I/O). A LEITURA
 // confinada de `~/.aluy/services/<nome>/service.md` é do locus concreto
 // (@hiperplano/aluy-cli, io/services-store.ts).
+
+import { isReasonableModelSlug } from '../agent-model-tier.js';
 
 /** Um tunável/circuit-breaker numérico declarado no frontmatter (§8.3/§8.5a). */
 export interface ServiceTunable {
@@ -92,6 +104,28 @@ export interface ServiceManifest {
   readonly workflow?: string;
   /** Canal cru `<conector>:<alvo>` (frontmatter `channel`, ex.: `telegram:123456`). */
   readonly channel?: string;
+  /**
+   * RÓTULO de mesa/equipe (frontmatter `group`, ex.: `mesa-trading`) — como um serviço
+   * DESCOBRE seus irmãos (`aluy service list --group <nome>` filtra por ele; `start`/
+   * `stop --group` iteram sobre eles). SEM semântica de execução própria: não muda
+   * agenda, budget, autonomia nem cria qualquer estado compartilhado — é só o valor
+   * declarado, tal como o dono escreveu (validado só na FORMA, ver `isSafeGroupLabel`).
+   */
+  readonly group?: string;
+  /**
+   * SLUG de modelo CRU (frontmatter `model`, ex.: `xiaomi/mimo-v2.5-pro`,
+   * `deepseek/deepseek-chat`) — fixa o modelo do TURNO do serviço, para não depender
+   * do default global de `~/.aluy/config.json` (que troca de baixo de TODOS os
+   * serviços de uma mesa de uma vez). Ausente ⇒ o runner não passa `--model` ao
+   * turno-filho — comportamento IDÊNTICO ao de hoje (default da config). Um agente
+   * específico invocado dentro do turno (`agents/*.md` com seu próprio `model:`, ou
+   * uma atividade `[agente]`) CONTINUA vencendo este default — este `model:` só
+   * cobre o turno-orquestrador e qualquer atividade SEM agente próprio. Sem
+   * validação semântica aqui (o parser não sabe quais modelos existem; quem
+   * resolve/rejeita é o provider) — só a FORMA (mesmo `isSafeGroupLabel`, um slug
+   * hostil é fail-closed).
+   */
+  readonly model?: string;
   /** Teto de tokens CRU (frontmatter `budget`, ex.: `200k/turno`) — parsing numérico é da fase 2 (`limits.ts`). */
   readonly budget?: string;
   /**
@@ -175,6 +209,8 @@ const KNOWN_KEYS = new Set([
   'until',
   'workflow',
   'channel',
+  'group',
+  'model',
   'budget',
   'activity-timeout',
   'autonomy',
@@ -204,6 +240,8 @@ interface RawServiceFrontmatter {
   readonly until?: string;
   readonly workflow?: string;
   readonly channel?: string;
+  readonly group?: string;
+  readonly model?: string;
   readonly budget?: string;
   readonly activityTimeout?: string;
   /** `undefined` = chave `autonomy:` ausente (distinto de presente-mas-inválida). */
@@ -230,6 +268,8 @@ function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body
     until?: string;
     workflow?: string;
     channel?: string;
+    group?: string;
+    model?: string;
     budget?: string;
     activityTimeout?: string;
     autonomyRaw?: string;
@@ -259,6 +299,12 @@ function splitServiceFrontmatter(raw: string): { fm: RawServiceFrontmatter; body
         break;
       case 'channel':
         out.channel = value;
+        break;
+      case 'group':
+        out.group = value;
+        break;
+      case 'model':
+        out.model = value;
         break;
       case 'budget':
         out.budget = value;
@@ -336,6 +382,26 @@ export function isSafeWorkflowRef(raw: string): boolean {
   if (/^[A-Za-z]:/.test(v)) return false; // "C:" — absoluto no Windows.
   // Qualquer segmento `..` escapa, esteja onde estiver ("a/../../b" também sobe).
   return !v.split('/').includes('..');
+}
+
+/** Teto defensivo do rótulo de grupo (mesma disciplina de `MAX_NAME_LEN`). */
+const MAX_GROUP_LEN = 64;
+
+/**
+ * `group:` é um RÓTULO puro — não vira caminho, não vira chave de estado, não é
+ * resolvido a nada. Ainda assim, valida a FORMA DE LEVE (mesma disciplina de
+ * `until`/`channel`): um IDENTIFICADOR SIMPLES — sem `/` (nunca vira segmento de
+ * caminho por acidente num locus futuro), sem `..` (mesma razão) e sem byte nulo.
+ * NÃO normaliza (o valor exibido é exatamente o que o dono escreveu) — recusa
+ * fail-closed quando hostil, nunca tenta "consertar" silenciosamente. PURA.
+ */
+export function isSafeGroupLabel(raw: string): boolean {
+  const v = raw.trim();
+  if (v === '') return false;
+  if (v.length > MAX_GROUP_LEN) return false;
+  if (v.includes('\0')) return false;
+  if (v.includes('/') || v.includes('\\')) return false;
+  return !v.includes('..');
 }
 
 /**
@@ -426,6 +492,29 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
     };
   }
 
+  // `group:` — identificador simples (ver `isSafeGroupLabel`); RÓTULO puro, sem
+  // resolver a nada aqui (o registry/`list --group` é quem compara).
+  if (fm.group !== undefined && fm.group.trim() !== '' && !isSafeGroupLabel(fm.group)) {
+    return {
+      kind: 'error',
+      file,
+      reason:
+        `serviço "${name}" (${file}): "group: ${fm.group}" — precisa ser um identificador ` +
+        `simples (sem "/", sem "..", sem caractere nulo, até ${MAX_GROUP_LEN} caracteres).`,
+    };
+  }
+
+  // `model:` — SLUG cru (mesma validação de FORMA que já protege `model:` de
+  // agents/*.md, `isReasonableModelSlug`); este parser não sabe quais modelos
+  // existem, só recusa o que tem cara de hostil (byte de controle, tamanho absurdo).
+  if (fm.model !== undefined && fm.model.trim() !== '' && !isReasonableModelSlug(fm.model.trim())) {
+    return {
+      kind: 'error',
+      file,
+      reason: `serviço "${name}" (${file}): "model: ${fm.model}" — slug de modelo inválido.`,
+    };
+  }
+
   // Tunáveis/circuit-breakers (§8.3/§8.5a) — cada extra numérico vira um `ServiceTunable`;
   // uma faixa malformada é FALHA FECHADA do manifesto inteiro (não só do campo).
   const tunables: ServiceTunable[] = [];
@@ -447,6 +536,8 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
   const until = fm.until !== undefined && fm.until !== '' ? fm.until : undefined;
   const workflow = fm.workflow !== undefined && fm.workflow !== '' ? fm.workflow : undefined;
   const channel = fm.channel !== undefined && fm.channel !== '' ? fm.channel : undefined;
+  const group = fm.group !== undefined && fm.group.trim() !== '' ? fm.group.trim() : undefined;
+  const model = fm.model !== undefined && fm.model.trim() !== '' ? fm.model.trim() : undefined;
   const budget = fm.budget !== undefined && fm.budget !== '' ? fm.budget : undefined;
   const activityTimeout =
     fm.activityTimeout !== undefined && fm.activityTimeout !== '' ? fm.activityTimeout : undefined;
@@ -458,6 +549,8 @@ export function parseServiceManifest(basename: string, raw: string): ServiceMani
     ...(until !== undefined ? { until } : {}),
     ...(workflow !== undefined ? { workflow } : {}),
     ...(channel !== undefined ? { channel } : {}),
+    ...(group !== undefined ? { group } : {}),
+    ...(model !== undefined ? { model } : {}),
     ...(budget !== undefined ? { budget } : {}),
     ...(activityTimeout !== undefined ? { activityTimeout } : {}),
     ...(autonomy !== undefined ? { autonomy } : {}),

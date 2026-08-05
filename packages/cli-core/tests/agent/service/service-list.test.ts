@@ -36,6 +36,33 @@ describe('buildServicesNote — válidos', () => {
     expect(t).toContain('Opera contas MT5 no intradiário');
   });
 
+  // Descoberta entre serviços (`group:`/`model:`) — aparecem na linha quando
+  // declarados, e NÃO aparecem quando ausentes (zero regressão p/ quem não usa).
+  it('mostra "grupo:"/"modelo:" quando declarados na linha do serviço', () => {
+    const note = buildServicesNote({
+      services: [
+        {
+          name: 'trader',
+          manifest: manifest({ name: 'trader', group: 'mesa-trading', model: 'deepseek/deepseek-chat' }),
+        },
+      ],
+      errors: [],
+    });
+    const t = text(note.lines);
+    expect(t).toContain('grupo: mesa-trading');
+    expect(t).toContain('modelo: deepseek/deepseek-chat');
+  });
+
+  it('sem group:/model: ⇒ a linha NÃO menciona "grupo:"/"modelo:" (zero regressão)', () => {
+    const note = buildServicesNote({
+      services: [{ name: 'trader', manifest: manifest({ name: 'trader' }) }],
+      errors: [],
+    });
+    const t = text(note.lines);
+    expect(t).not.toContain('grupo:');
+    expect(t).not.toContain('modelo:');
+  });
+
   it('sem schedule ⇒ "sem schedule"', () => {
     const note = buildServicesNote({
       services: [{ name: 'pesquisador', manifest: manifest({ name: 'pesquisador' }) }],
