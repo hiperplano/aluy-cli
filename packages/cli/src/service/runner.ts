@@ -118,6 +118,45 @@ export interface RunServiceRunnerDeps {
    * `egressLimiter` (TC-6), quando omitido, é criado UMA vez por processo (abaixo) —
    * nunca por chamada, senão o teto anti-spam perderia o efeito. */
   readonly channelDeps?: Partial<ServiceChannelDeps>;
+  /**
+   * CHAVE-REVOGADA — resolvedor da credencial local do BOOT do runner. INJETÁVEL p/
+   * teste (a suíte NUNCA toca o keychain real). Ausente em produção ⇒ usa o resolvedor
+   * de verdade, e qualquer falha dele é engolida (best-effort: os filhos seguem
+   * resolvendo sozinhos, como antes).
+   */
+  readonly resolverCredencial?: () => Promise<string | undefined>;
+}
+
+/**
+ * CHAVE-REVOGADA — lê a credencial local UMA vez, p/ o runner segurá-la pelo expediente.
+ * NUNCA lança e NUNCA loga a chave (nem o tamanho): em caso de falha, avisa em UMA linha
+ * sem segredo e devolve `undefined` — o comportamento antigo, byte a byte.
+ */
+async function resolverCredencialDoRunner(
+  injetado: (() => Promise<string | undefined>) | undefined,
+  log: (line: string) => void,
+): Promise<string | undefined> {
+  try {
+    if (injetado !== undefined) return await injetado();
+    const { UserConfigStore } = await import('../io/user-config.js');
+    const cfg = new UserConfigStore().load();
+    // Só faz sentido no backend LOCAL/BYO — no broker a credencial é outra história.
+    const backend = cfg.backend ?? 'local';
+    if (backend !== 'local') return undefined;
+    const provider = cfg.localProvider;
+    if (provider === undefined) return undefined;
+    const { createLocalCredentialProvider } = await import('../model/local/credential-resolver.js');
+    const cred = await createLocalCredentialProvider({
+      provider: provider as Parameters<typeof createLocalCredentialProvider>[0]['provider'],
+    })();
+    return cred.kind === 'apikey' && cred.secret !== '' ? cred.secret : undefined;
+  } catch (e) {
+    log(
+      '[credencial] o runner não conseguiu ler a credencial local no boot — cada atividade ' +
+        `vai resolver sozinha (motivo: ${e instanceof Error ? e.message : String(e)}).`,
+    );
+    return undefined;
+  }
 }
 
 function killGracefully(child: ChildProcess): void {
@@ -279,9 +318,40 @@ export function buildActivityEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
   autonomy?: 'ask' | typeof SERVICE_AUTONOMOUS_MODE,
   workspaceRoots?: readonly string[],
+  credencialLocal?: string,
 ): NodeJS.ProcessEnv {
   return {
     ...baseEnv,
+    // CHAVE-REVOGADA (dogfooding real) — a credencial que o RUNNER resolveu no boot,
+    // repassada aos filhos. Sem isto, o serviço do dono morria assim:
+    //
+    //   atividade 1/6 "scan": ok.
+    //   atividade 2/6 "traduzir": … o keychain do SO NÃO respondeu
+    //     (Couldn't access platform storage: KeyRevoked)
+    //
+    // Um segundo entre as duas. Na máquina dele o backend do keychain é o keyring do
+    // KERNEL — volátil e REVOGADO junto com a sessão que o criou. Cada atividade é um
+    // processo NOVO que relê a chave do zero, então o serviço vivia à mercê de qual
+    // sessão ainda estava viva: a atividade 1 lia, a 2 pegava `KeyRevoked`. Um cache
+    // em memória não resolve (morre com o processo); o RUNNER é o único que dura o
+    // expediente inteiro — ele lê UMA vez e sustenta os filhos.
+    //
+    // Só é usado como ÚLTIMO degrau: o filho tenta keychain e env próprias antes
+    // (`ALUY_LOCAL_API_KEY` é o catch-all já existente do resolvedor). Se o dono
+    // exportou a chave, a dele vence; se o keychain está sadio, ele vence.
+    //
+    // TRADE-OFF EXPLÍCITO: env de processo é legível por `/proc/<pid>/environ` — modo
+    // 0400, MESMO usuário. O keychain protege contra OUTRO usuário e contra roubo em
+    // repouso, e isso continua valendo: nada é escrito em disco nem em log. A chave já
+    // precisa estar na memória do filho de qualquer forma (é ele quem chama o modelo).
+    // Vazia NÃO é credencial: injetar `''` faria o resolvedor do filho ACHAR que tem
+    // chave (o catch-all é consultado antes do erro) e falhar mais adiante, com uma
+    // mensagem pior — a do provider recusando, em vez da que aponta o keychain.
+    ...(credencialLocal !== undefined &&
+    credencialLocal !== '' &&
+    baseEnv.ALUY_LOCAL_API_KEY === undefined
+      ? { ALUY_LOCAL_API_KEY: credencialLocal }
+      : {}),
     ALUY_SERVICE_HOME: serviceDir,
     ...(agent !== undefined ? { ALUY_SERVICE_PERSONA: agent } : {}),
     ...(autonomy === SERVICE_AUTONOMOUS_MODE ? { ALUY_SERVICE_AUTONOMY: autonomy } : {}),
@@ -464,6 +534,12 @@ async function runActivityTurn(args: {
    * (env interna `ALUY_SERVICE_WORKSPACE_ROOTS`). Ausente/vazio ⇒ comportamento de
    * hoje (só a pasta do serviço é raiz). */
   readonly workspaceRoots?: readonly string[];
+  /**
+   * CHAVE-REVOGADA — credencial local que o RUNNER resolveu UMA vez no boot, repassada
+   * aos filhos como último degrau (`ALUY_LOCAL_API_KEY`). Ausente ⇒ nada muda: o filho
+   * resolve sozinho, como sempre.
+   */
+  readonly credencialLocal?: string;
   /** Preenchido com o texto da pergunta pendente quando o outcome é `awaiting-owner`. */
   readonly pendingQuestionRef: { current?: string };
   /** ADR-0158 §5 pt.4 (FASE 3) — RETOMADA: quando presente, é a atividade que HAVIA
@@ -521,6 +597,7 @@ async function runActivityTurn(args: {
       process.env,
       args.autonomy,
       args.workspaceRoots,
+      args.credencialLocal,
     ),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -660,6 +737,29 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
   const pidPath = runnerPidPath(serviceDir);
   writePidFile(pidPath, process.pid);
   log(`runner iniciado (pid ${process.pid}) — serviço "${service.manifest.name}".`);
+
+  // CHAVE-REVOGADA — a credencial local que o runner segura pelo expediente inteiro.
+  // Ver o racional longo em `buildActivityEnv`: cada atividade é um processo NOVO, e o
+  // keyring do KERNEL (backend do keychain quando não há Secret Service) é revogado
+  // junto com a sessão que o criou — o serviço do dono fazia "atividade 1 ok / atividade
+  // 2 KeyRevoked" com DOIS segundos entre elas. O runner é o único processo que dura o
+  // suficiente p/ atravessar isso.
+  //
+  // PREGUIÇOSA e memoizada, resolvida no PRIMEIRO turno — NÃO aqui. Um `await` entre o
+  // "runner iniciado" e o registro do `onSignal` abre uma janela real em que um SIGTERM
+  // chega e NÃO tem handler; foi um teste de sinal que me mostrou isso. Como bônus, um
+  // runner que nunca abre turno nunca toca o keychain.
+  //
+  // BEST-EFFORT e SILENCIOSA no sucesso: nunca loga a chave (nem o tamanho dela). Se
+  // falhar, NÃO aborta — os filhos seguem resolvendo sozinhos exatamente como antes, e
+  // o erro deles já vem com o motivo certo.
+  let credencialDoRunner: string | undefined;
+  let credencialResolvida = false;
+  const garantirCredencial = async (): Promise<void> => {
+    if (credencialResolvida) return;
+    credencialResolvida = true;
+    credencialDoRunner = await resolverCredencialDoRunner(deps.resolverCredencial, log);
+  };
 
   // ADR-0158 §11 (FASE 4) — estado do ATTACH, vivo pelo processo INTEIRO (não por
   // turno): `currentPhase` espelha o `turnState` corrente (o `setStatus` abaixo é o
@@ -822,6 +922,11 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
       startDaemons(serviceDir, log);
       setStatus({ turnState: 'running-turn' });
 
+      // CHAVE-REVOGADA — resolve a credencial no PRIMEIRO turno e a segura daí em diante
+      // (memoizada). Aqui já não há janela de sinal: o `onSignal` está registrado desde
+      // o boot.
+      await garantirCredencial();
+
       const baseWorkflowArgs = {
         serviceDir,
         serviceName: service.manifest.name,
@@ -853,6 +958,9 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         ...(service.resolvedWorkspaceRoots.length > 0
           ? { workspaceRoots: service.resolvedWorkspaceRoots }
           : {}),
+        // CHAVE-REVOGADA — a credencial que o RUNNER segura pelo expediente (resolvida
+        // no 1º turno, logo acima). Só entra se ele conseguiu lê-la UMA vez.
+        ...(credencialDoRunner !== undefined ? { credencialLocal: credencialDoRunner } : {}),
       };
 
       let outcome = await runOneWorkflow(baseWorkflowArgs);
@@ -1064,6 +1172,12 @@ async function runOneWorkflow(args: {
    * `runActivityTurn` desta fatia (ver o campo homônimo lá). Ausente/vazio ⇒
    * comportamento de hoje (só a pasta do serviço é raiz). */
   readonly workspaceRoots?: readonly string[];
+  /**
+   * CHAVE-REVOGADA — credencial local que o RUNNER resolveu UMA vez no boot, repassada
+   * aos filhos como último degrau (`ALUY_LOCAL_API_KEY`). Ausente ⇒ nada muda: o filho
+   * resolve sozinho, como sempre.
+   */
+  readonly credencialLocal?: string;
 }): Promise<WorkflowOutcome> {
   const { serviceDir, workflowName, log } = args;
   if (workflowName === undefined) {
@@ -1154,6 +1268,7 @@ async function runOneWorkflow(args: {
         ...(resumeContext !== undefined ? { resumeContext } : {}),
         ...(args.autonomy !== undefined ? { autonomy: args.autonomy } : {}),
         ...(args.workspaceRoots !== undefined ? { workspaceRoots: args.workspaceRoots } : {}),
+        ...(args.credencialLocal !== undefined ? { credencialLocal: args.credencialLocal } : {}),
       });
       if (!outcome.ok && outcome.stop === 'awaiting-owner') pendingActivityIndex = realIndex;
       return outcome;
