@@ -88,9 +88,14 @@ describe('runActivityTurn — "activity-timeout:" vence primeiro (a atividade nu
     const code = await promise;
 
     expect(code).toBe(0);
-    expect(logs.some((l) => l.includes('atividade 1/1 "trava": ATINGIU O TETO (until/teto duro) — encerrada.'))).toBe(
-      true,
-    );
+    // TETO-DISFARÇADO — a linha do teto ficou ACIONÁVEL: diz o TEMPO que estourou e o
+    // caminho de correção. O dono viu `saída ilegível (exit 143)` numa atividade que
+    // simplesmente passou dos 30 min — texto que o mandava procurar bug no agente.
+    const linhaTeto = logs.find((l) => l.includes('atividade 1/1 "trava": ATINGIU O TETO'));
+    expect(linhaTeto).toBeDefined();
+    expect(linhaTeto).toMatch(/ATINGIU O TETO de \d+s/); // quanto tempo, concretamente.
+    expect(linhaTeto).toContain('encerrada pelo runner'); // QUEM matou — não foi o filho.
+    expect(linhaTeto).toContain('activity-timeout'); // o que fazer a respeito.
     expect(logs.some((l) => l.startsWith('turno encerrado — parou em 1/1 atividades (limit).'))).toBe(true);
     const report = client.sent.find((m) => m.text.includes('parou em 1/1 atividades (limit).'));
     expect(report).toBeDefined();
