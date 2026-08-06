@@ -43,11 +43,42 @@ function verbOf(name: string): string {
 }
 
 /**
- * Alvo legível (path/comando/padrão/pergunta) a partir do input. SEMPRE clampado a
- * 1 linha (`clampTarget`): um batch/heredoc como `command` não pode despejar 100+
+ * Alvo legível (path/comando/padrão/pergunta/agentes) a partir do input. SEMPRE clampado
+ * a 1 linha (`clampTarget`): um batch/heredoc como `command` não pode despejar 100+
  * linhas no transcript — o alvo identifica a ação, não a reproduz.
+ *
+ * FONTE ÚNICA — o `controller.targetOfCall` (que rotula a linha VIVA `◌` no start)
+ * chamava uma CÓPIA desta lógica, com um comentário afirmando "MESMA regra". A cópia
+ * já tinha DIVERGIDO: faltava o ramo de `question`, então um `perguntar` em voo aparecia
+ * sem alvo e ganhava um ao resolver. Duas listas paralelas que precisam bater sempre
+ * acabam não batendo; agora é UMA função, usada nos dois lados.
  */
-function targetOf(input: Readonly<Record<string, unknown>>): string {
+export function targetOf(input: Readonly<Record<string, unknown>>): string {
+  // ALVO-MUDO (dogfooding real) — `spawn_agent` não tem `command`/`path`/`pattern`/
+  // `question`, então caía no `''` do fim e o dono lia `spawn_agent  → err` (dois
+  // espaços, alvo vazio): sabia QUE uma delegação falhou, nunca QUAL. Num serviço que
+  // despacha macro→quant→data-engineer→backtest em cadeia, é a diferença entre um log
+  // diagnosticável e um log inútil. Preferimos o nome do agente/`label` (curtos, feitos
+  // p/ identificar) ao `goal` (o prompt inteiro) — que só entra como último recurso, já
+  // clampado a 1 linha como todo alvo.
+  const lote = input['agents'] ?? input['tasks'];
+  if (Array.isArray(lote) && lote.length > 0) {
+    const nomes = lote
+      .map((a) => {
+        if (typeof a !== 'object' || a === null) return '';
+        const r = a as Record<string, unknown>;
+        for (const k of ['agent', 'label', 'goal']) {
+          const v = r[k];
+          if (typeof v === 'string' && v.trim() !== '') return v.trim();
+        }
+        return '';
+      })
+      .filter((n) => n !== '');
+    if (nomes.length > 0) {
+      const lista = nomes.join(', ');
+      return clampTarget(nomes.length > 1 ? `${nomes.length} agentes: ${lista}` : lista);
+    }
+  }
   const cmd = input['command'];
   if (typeof cmd === 'string') return clampTarget(cmd);
   const path = input['path'];

@@ -3,26 +3,53 @@
 
 import { describe, expect, it } from 'vitest';
 import { sanitizeBlock, sanitizeBlocks, blocksToHistory } from '../../src/io/session-record.js';
+// FALHA-FANTASMA — a demoção de ÓRFÃO saiu do save e ficou SÓ aqui (a fronteira de
+// entrada da restauração); o teste da inércia importa a função de verdade, sem mock.
+import { sanitizeOrphans } from '../../src/session/render-split.js';
 import type { SessionBlock } from '../../src/session/model.js';
 
 describe('sanitizeBlock — valida a forma de cada bloco', () => {
   it('aceita um you/aluy válidos (aluy normalizado p/ não-streaming)', () => {
     expect(sanitizeBlock({ kind: 'you', text: 'oi' })).toEqual({ kind: 'you', text: 'oi' });
+    // FALHA-FANTASMA — este bloco AFIRMAVA `streaming: false` ("restaurado é estático").
+    // A premissa valia quando o save só ocorria no FIM do turno; a FASE 4 (attach) passou
+    // a gravar DURANTE o turno e a normalização virou MENTIRA sobre a sessão VIVA. O
+    // saneamento agora é FIEL; a inércia da restauração continua garantida — por
+    // `sanitizeOrphans`, na fronteira de entrada do controller (asserção abaixo).
     expect(sanitizeBlock({ kind: 'aluy', text: 'ola', streaming: true })).toEqual({
       kind: 'aluy',
       text: 'ola',
-      streaming: false, // restaurado é estático.
+      streaming: true,
     });
   });
 
-  it('normaliza tool/bang RUNNING ⇒ err (não há efeito em voo restaurado)', () => {
+  it('tool/bang RUNNING round-trippa FIEL — o save não pode inventar falha', () => {
+    // Era `RUNNING ⇒ err`. Custou horas ao dono em produção: o `runner.log` do serviço
+    // mostrava `spawn_agent → err` (sem motivo, porque não havia erro) para um agente
+    // que estava trabalhando — 3 filhos vivos, atividade concluindo "ok" minutos depois.
     expect(
       sanitizeBlock({ kind: 'tool', verb: 'bash', target: 'ls', result: '', status: 'running' }),
-    ).toMatchObject({ kind: 'tool', status: 'err' });
+    ).toMatchObject({ kind: 'tool', status: 'running' });
     expect(sanitizeBlock({ kind: 'bang', command: 'ls', status: 'running' })).toMatchObject({
       kind: 'bang',
-      status: 'err',
+      status: 'running',
     });
+  });
+
+  it('a INÉRCIA da restauração NÃO se perdeu — só mudou de lugar (sanitizeOrphans)', () => {
+    // O que os testes antigos protegiam segue protegido: uma sessão RETOMADA nunca
+    // contém efeito em voo. A demoção acontece onde é VERDADE (a fronteira de entrada
+    // do controller), não gravada em disco por cima de um turno vivo.
+    const vivos = sanitizeBlocks([
+      { kind: 'tool', verb: 'bash', target: 'ls', result: '', status: 'running' },
+      { kind: 'bang', command: 'ls', status: 'running' },
+      { kind: 'aluy', text: 'meio da fra', streaming: true },
+    ]);
+    expect(sanitizeOrphans(vivos)).toMatchObject([
+      { kind: 'tool', status: 'err', result: 'interrompido' },
+      { kind: 'bang', status: 'err' },
+      { kind: 'aluy', streaming: false },
+    ]);
   });
 
   it('descarta kind desconhecido e bloco mal-formado', () => {
@@ -122,7 +149,8 @@ describe('sanitizeBlocks — lista', () => {
     ];
     expect(sanitizeBlocks(raw)).toEqual([
       { kind: 'you', text: 'a' },
-      { kind: 'aluy', text: 'b', streaming: false },
+      // FALHA-FANTASMA — round-trip FIEL: o `streaming` gravado volta como estava.
+      { kind: 'aluy', text: 'b', streaming: true },
     ]);
   });
 
