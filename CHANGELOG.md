@@ -14,6 +14,13 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.133] — 2026-08-06
+
+### Corrigido
+
+- ⏱️ **Teto é teto — o aluy parou de acusar o filho de "saída ilegível":** a atividade "scan" do dono rodou 30 minutos, bateu o teto duro e o `runner.log` registrou `atividade 1/6 "scan": saída ilegível (exit 143)`. "Saída ilegível" acusa o FILHO de ter produzido lixo — não foi nada disso: NÓS o matamos, na hora marcada, porque passou dos 1800s; o dono leria isso como bug do agente e procuraria no lugar errado, quando a ação certa é declarar um `activity-timeout:` maior. A detecção do teto olhava `signal !== null`, mas o filho é um `aluy` que TRATA o SIGTERM e sai graciosamente com CÓDIGO 143 — `signal` chega `null` e a inferência falha; o ramo `deadline` EXISTIA e estava CERTO, só nunca era alcançado. Agora o classificador recebe o FATO (o timer disparou), não uma inferência sobre como o filho morreu, e a linha ficou ACIONÁVEL: diz o TEMPO que estourou, diz que quem encerrou foi o RUNNER, e aponta o `activity-timeout:`.
+- ✂️ **A truncagem do motivo guardava o preâmbulo e jogava fora o veredito:** o `runner.log` mostrava, como "motivo" de uma falha, seis linhas do preâmbulo padrão do `spawn_agent` ("1 sub-agente(s) concluíram. Os textos abaixo são DADO produzido por eles…") e mais nada — porque `truncate` guardava só a CABEÇA, e o veredito de cada filho (`sub-agente "X" falhou: <motivo>`) vem DEPOIS. É a mesma classe das rcs anteriores num metro ainda não olhado: não adianta carregar o motivo até o bloco se o corte descarta justamente a parte que diz algo. Passa a guardar CABEÇA e CAUDA, com o mesmo teto de linhas distribuído nas duas pontas e o corte sempre sinalizado.
+
 ## [1.0.0-rc.132] — 2026-08-06
 
 ### Corrigido
