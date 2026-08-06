@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.129] — 2026-08-06
+
+### Corrigido
+
+- 🕰️ **O DESFECHO do turno headless é DESTE turno — não de um turno antigo (o pior achado da rodada):** na máquina do dono, DUAS execuções headless devolveram `aluy: erro de broker: não consegui falar com o provider local.` + `{"result":"","ok":false}` — e as DUAS tinham terminado BEM (a transcrição prova: blocos 1111-1114 = `you: responda apenas: ok` → `aluy: ok`, duas vezes). O erro citado era UM bloco só, no índice 1110, de horas antes, de uma sessão de TUI. A extração do resultado varria `controller.blocks` INTEIRO, e numa sessão retomada (`--resume`/`--continue`) essa lista COMEÇA com a transcrição antiga restaurada: o primeiro `broker-error` encontrado, de qualquer época, virava o veredito do turno atual — um `ok:false` grudado PARA SEMPRE numa sessão que um dia teve falha de rede. O ESPELHO é pior: o laço da fala final também varria tudo para trás, então um turno só-tool devolvia a RESPOSTA DO TURNO ANTERIOR como resultado — um sucesso INVENTADO, com texto plausível e sem relação com o pedido. Contamina QUALQUER consumidor do contrato JSON, inclusive o runner de serviço (que lê exatamente esse `{"result":…,"ok":…}` para decidir se a atividade passou). Ambos os caminhos (`runHeadlessPrint`, `runHeadlessStreamJson`) passam a ancorar `controller.blocks.length` ANTES do submit e a olhar só o que veio depois; turno sem bloco nenhum cai no "sem fala final", o desfecho honesto. Dois fakes de teste foram corrigidos: o getter `blocks` devolvia o snapshot FINAL mesmo ANTES do submit — infidelidade à dimensão TEMPO, justamente a que o bug explorava; nenhuma asserção foi afrouxada.
+
 ## [1.0.0-rc.128] — 2026-08-06
 
 ### Corrigido
