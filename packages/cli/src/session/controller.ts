@@ -7442,7 +7442,7 @@ export function classifyBrokerError(
       headline: `${where} indisponível`,
       message:
         backend === 'local'
-          ? `não conectei ao ${where}.`
+          ? `não conectei ao ${where}.${motivoLocal(err, backend)}`
           : `não conectei ao ${where} — ele está no ar? Confira a ALUY_BROKER_URL.`,
     };
   }
@@ -7453,9 +7453,37 @@ export function classifyBrokerError(
     headline: `${where} indisponível`,
     message:
       backend === 'local'
-        ? `não consegui falar com o ${where}.`
+        ? `não consegui falar com o ${where}.${motivoLocal(err, backend)}`
         : `não consegui falar com o ${where} da Aluy.`,
   };
+}
+
+/**
+ * SILÊNCIO-DO-PROVIDER (dogfooding real) — o MOTIVO de uma falha do provider BYO,
+ * pronto p/ concatenar (` — <motivo>`), ou `''` quando não há o que dizer.
+ *
+ * A regra "nunca ecoa `err.message` cru" existe pela invariante HG-2: no broker
+ * HOSPEDADO a mensagem não pode revelar QUAL vendor atende o tier (roteamento
+ * multi-tenant é segredo do serviço). No backend LOCAL isso não se aplica — o provider
+ * é do PRÓPRIO DONO, configurado por ele, com a credencial dele. Esconder a razão ali
+ * não protege ninguém: só cega quem tem o poder de corrigir.
+ *
+ * Custou caro para valer: o serviço do dono parou com `não consegui falar com o provider
+ * local.` e ponto. A razão real (a sessão retomada tinha ~92k tokens e o provider recusou
+ * o payload) só apareceu depois de reproduzir a chamada à mão, por fora da ferramenta.
+ * O mesmo arquivo JÁ abre exceção idêntica no 422 ("é o usuário que precisa corrigir a
+ * entrada, então a frase útil tem que chegar a ele") — aqui é o mesmo caso.
+ *
+ * REDIGIDO (`redactOutputSecrets`, CLI-SEC-6) e CLAMPADO a uma linha curta: um corpo de
+ * erro de provider pode trazer eco do payload — e do `Authorization`. A redação é a
+ * MESMA da saída de comando; o clamp evita despejar um JSON inteiro no bloco de erro.
+ */
+function motivoLocal(err: unknown, backend: 'broker' | 'local'): string {
+  if (backend !== 'local') return '';
+  const cru = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  const limpo = redactOutputSecrets(cru).replace(/\s+/g, ' ').trim();
+  if (limpo === '') return '';
+  return ` — ${limpo.length > 240 ? `${limpo.slice(0, 239)}…` : limpo}`;
 }
 
 /**
