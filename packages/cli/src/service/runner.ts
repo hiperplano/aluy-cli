@@ -361,6 +361,18 @@ export function servicoAguardaDono(resultText: string): boolean {
  */
 const MAX_PERGUNTA_CHARS = 1500;
 
+/**
+ * LOG-MUDO — reduz a fala do agente a UMA linha de log. O `runner.log` é lido com
+ * `tail`/`aluy service logs`: um turno inteiro despejado quebra a leitura de quem está
+ * procurando o que aconteceu. Junta as quebras, colapsa espaço e corta com reticência.
+ * PURO.
+ */
+export function clampLinhaDeLog(texto: string, max = 220): string {
+  const uma = texto.replace(/\s+/g, ' ').trim();
+  if (uma.length <= max) return uma;
+  return `${uma.slice(0, max - 1)}…`;
+}
+
 export function buildActivityEnv(
   serviceDir: string,
   agent: string | undefined,
@@ -871,13 +883,24 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
     for (const b of pollNewServiceBlocks(serviceDir, blockTailState)) {
       attachServerRef.current?.broadcastBlock(b.role, b.text);
       // ATTACH-CEGO — o attach é EFÊMERO: quem não estava conectado no instante do
-      // erro nunca o vê, e a transcrição da sessão morre com o turno. Falha de TOOL
-      // é a informação mais cara de um serviço autônomo (o dono passou horas com
-      // "spawn_agent → err" sem nenhum caminho para o motivo), então ela também vai
-      // para o `runner.log` — que PERSISTE e é o que `aluy service logs` mostra.
-      // Só ERRO: sucesso continua fora do log, para não afogar o diagnóstico no
-      // ruído de dezenas de tools por turno.
-      if (b.role === 'tool' && / → err/.test(b.text)) log(`[tool] ${b.text}`);
+      // erro nunca o vê, e a transcrição da sessão morre com o turno. Por isso o que
+      // acontece no turno também vai para o `runner.log`, que PERSISTE e é o que
+      // `aluy service logs` mostra.
+      //
+      // LOG-MUDO — antes daqui só ERRO era registrado, "para não afogar o diagnóstico
+      // no ruído". Errei o alvo: otimizei para DIAGNOSTICAR FALHA quando o que um
+      // serviço autônomo precisa é AUDITORIA. O dono olhou o log de um pregão inteiro
+      // e viu 83 linhas — só fronteiras de atividade e daemon. As 17 tools POR
+      // ATIVIDADE que de fato fizeram o trabalho estavam na transcrição
+      // (`.state/sessions/*.json`) e em lugar nenhum legível. Palavras dele: "não
+      // consigo ver efetivamente o que aconteceu em cada atividade".
+      //
+      // Agora TODA tool entra, e a fala final do turno também — é ela que diz o que o
+      // agente concluiu. O volume é modesto de propósito: ~17 tools × 10 atividades
+      // dá algumas centenas de linhas por pregão, que é um REGISTRO, não ruído. Quem
+      // quiser só o essencial tem `aluy service logs -n`.
+      if (b.role === 'tool') log(`[tool] ${b.text}`);
+      else if (b.role === 'aluy') log(`[aluy] ${clampLinhaDeLog(b.text)}`);
     }
   }, 1500);
   blockTailTimer.unref();
