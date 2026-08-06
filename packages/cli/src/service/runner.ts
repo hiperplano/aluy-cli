@@ -312,6 +312,55 @@ export function buildActivityGoal(args: {
  * `env`, não autoriza nada ele mesmo. Ausente/vazia ⇒ a CHAVE nem existe no objeto
  * (comportamento IDÊNTICO ao de hoje — só a raiz primária do turno).
  */
+/**
+ * RELATÓRIO-VIRA-PERGUNTA (dogfooding real) — o serviço do dono ficou `AGUARDANDO DONO`
+ * sobre um turno que tinha CONCLUÍDO. A "pergunta pendente" no `service status` era a
+ * saída INTEIRA da atividade: 4 mil caracteres de análise quantitativa (setups de
+ * USDBRL/IBOV/BTC com entrada, stop, alvo e R:R) abertos por
+ * `"status": "completed", "exitCode": 0`. Ninguém perguntou nada — e o expediente parou.
+ *
+ * A causa é reúso de heurística ENTRE CONTEXTOS COM CUSTOS DIFERENTES.
+ * `awaitsUserDecision` nasceu p/ o gate do SELF-CHECK, e o comentário dela é explícito:
+ * "a heurística pode ser generosa" porque "um falso POSITIVO só faz o loop aceitar a
+ * resposta como final" — inofensivo LÁ. Aqui o mesmo falso positivo PARA UM SERVIÇO
+ * 24/7 por tempo indeterminado; e, num serviço sem `channel:`, para em silêncio.
+ *
+ * Então o serviço ganha o SEU critério, mais estrito, sem tocar no do self-check:
+ *
+ *   • a pergunta tem que estar na ÚLTIMA linha — não "em algum lugar das últimas três".
+ *     Um relatório longo quase sempre TERMINA em conclusão, não em pergunta;
+ *   • e o texto todo precisa ter TAMANHO de pergunta. Um dossiê de 4 mil caracteres não
+ *     é um pedido de decisão, por mais que a cauda diga "confirme".
+ *
+ * A direção do erro também inverte de propósito: aqui preferimos SEGUIR o workflow a
+ * travá-lo. Se o modelo realmente precisa de decisão, ele tem a tool `perguntar` — que é
+ * sinal EXPLÍCITO, não adivinhação sobre prosa.
+ *
+ * PURO/exportado p/ teste.
+ */
+export function servicoAguardaDono(resultText: string): boolean {
+  const texto = (resultText ?? '').trim();
+  if (texto === '') return false;
+  // Teto de tamanho: uma pergunta ao dono cabe folgadamente aqui. O relatório que
+  // travou o serviço tinha ~4000 caracteres.
+  if (texto.length > MAX_PERGUNTA_CHARS) return false;
+  const linhas = texto
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '');
+  const ultima = linhas[linhas.length - 1];
+  if (ultima === undefined) return false;
+  // Reusa o heurístico de sempre (FONTE ÚNICA do "isto é uma pergunta"), mas aplicado
+  // SÓ à última linha — é a estreiteza que falta no contexto do serviço.
+  return awaitsUserDecision(ultima);
+}
+
+/**
+ * Teto de caracteres p/ um texto ainda ser tratado como PERGUNTA ao dono. Acima disso é
+ * relatório — ver `servicoAguardaDono`.
+ */
+const MAX_PERGUNTA_CHARS = 1500;
+
 export function buildActivityEnv(
   serviceDir: string,
   agent: string | undefined,
@@ -669,7 +718,7 @@ async function runActivityTurn(args: {
   }
 
   const resultText = parsed.result;
-  if (awaitsUserDecision(resultText)) {
+  if (servicoAguardaDono(resultText)) {
     // ADR-0158 §5 pt.4/§3 — regra dura: NUNCA prossegue com suposição. O CALLER
     // (`runServiceRunner`) é quem envia a pergunta ao canal e entra em ASK-ESPERA
     // (`channel.ts`, FASE 3) — aqui só sinalizamos "parou aqui, com esta pergunta".
