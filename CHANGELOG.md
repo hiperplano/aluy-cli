@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.130] — 2026-08-06
+
+### Corrigido
+
+- 🔑 **Um blip do keychain não derruba mais um serviço 24/7 (a causa RAIZ do serviço do dono morrendo há dias):** o `runner.log` mostrava `sub-agente "macro" falhou: backend local: sem credencial apikey p/ "openrouter". configure a chave: …` com a chave PRESENTE no keychain o tempo todo — 73 caracteres, lida sem erro nenhum no MESMO ambiente do runner (reconstruído de `/proc/<pid>/environ`), pelo MESMO `@napi-rs/keyring`, segundos depois; e turnos INTERCALADOS passavam (02:10 concluiu uma atividade, 03:55 e 04:00 morreram). Três defeitos empilhados: (1) a credencial é resolvida a CADA requisição — por design, p/ pegar rotação de chave sem reiniciar — e sem cache UM blip do Secret Service derruba o turno inteiro, que num serviço é o expediente; (2) `readKeychain` engolia QUALQUER exceção e devolvia `undefined`, então "não tem entrada" e "não consegui ler" viravam a MESMA coisa; (3) por causa de (2), a mensagem mandava "configure a chave" — conselho ERRADO quando a chave já está lá, fazendo o dono reconfigurar o que já estava certo e o sintoma voltar no blip seguinte. Agora a leitura DISTINGUE ausência de avaria; uma credencial que o keychain entregou de verdade fica memorizada EM MEMÓRIA do processo (nunca em disco/log — CLI-SEC-7 intacto; é a mesma exposição que já existe enquanto a chave viaja em cada requisição) e só é USADA quando a leitura FALHA e não há env; e o erro restante aponta o Secret Service com o motivo CRU do backend em vez de mandar reconfigurar. A ROTAÇÃO continua soberana (leitura boa sempre atualiza o cache, `storeApiKey` idem) e `forgetCachedApiKey` é o ponto de invalidação p/ logout/revogação. Só foi possível achar porque as três rcs anteriores tornaram o erro VISÍVEL — a linha que revela tudo é literalmente o ALVO-MUDO + a cauda do ATTACH-CEGO + o motivo do provider, juntos.
+
 ## [1.0.0-rc.129] — 2026-08-06
 
 ### Corrigido
