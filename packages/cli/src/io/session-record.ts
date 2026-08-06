@@ -109,11 +109,31 @@ export function sanitizeBlock(raw: unknown): SessionBlock | null {
     case 'you':
       return isStr(o.text) ? { kind: 'you', text: o.text } : null;
     case 'aluy':
-      // sempre normaliza p/ NÃO-streaming (a restauração é estática).
-      return isStr(o.text) ? { kind: 'aluy', text: o.text, streaming: false } : null;
+      // FALHA-FANTASMA (mesma classe da tool/bang abaixo) — antes forçava
+      // `streaming: false` SEMPRE. Com o autosave incremental da FASE 4 isso declarava
+      // "resposta completa" sobre um texto que ainda estava CHEGANDO: o attach emitia o
+      // pedaço parcial e nunca mais o corrigia (o bloco cresce IN PLACE), então o dono
+      // lia uma frase cortada no meio como se fosse a resposta final. Round-trippa fiel;
+      // a restauração continua inerte por `sanitizeOrphans` (que apaga o `streaming` na
+      // fronteira de entrada do controller), não por uma mentira gravada em disco.
+      return isStr(o.text) ? { kind: 'aluy', text: o.text, streaming: o.streaming === true } : null;
     case 'tool': {
       if (!isStr(o.verb) || !isStr(o.target) || !isStr(o.result)) return null;
-      const status = o.status === 'ok' || o.status === 'err' ? o.status : 'err';
+      // FALHA-FANTASMA (dogfooding real) — este `status` DEMOVIA `running`→`err`. A
+      // premissa ("a sessão restaurada é inerte") era verdadeira quando o save só
+      // acontecia no FIM do turno. A FASE 4 (attach) fez o autosave rodar DURANTE o
+      // turno, p/ o dono ver os blocos ao vivo — e a mesma linha passou a carimbar
+      // "falhou" em cima de uma tool QUE ESTÁ TRABALHANDO. No serviço do dono um
+      // `spawn_agent` de 11 min aparecia como `spawn_agent → err` no `runner.log`
+      // enquanto os 3 filhos rodavam bem: um erro INVENTADO, sem motivo nenhum
+      // (`output` vazio, porque não havia erro p/ ter motivo).
+      //
+      // `running` é estado LEGÍTIMO do `ToolLineBlock` e agora round-trippa fiel.
+      // A demoção de ÓRFÃO continua existindo, onde ela é VERDADE: na RESTAURAÇÃO
+      // (`sanitizeOrphans`, chamado na fronteira de entrada do controller) e no
+      // `blocksToHistory` (abaixo). Lixo/desconhecido segue virando `err` (fail-closed).
+      const status =
+        o.status === 'ok' || o.status === 'err' || o.status === 'running' ? o.status : 'err';
       return {
         kind: 'tool',
         verb: o.verb,
@@ -143,8 +163,13 @@ export function sanitizeBlock(raw: unknown): SessionBlock | null {
         : null;
     case 'bang': {
       if (!isStr(o.command)) return null;
+      // FALHA-FANTASMA — mesma classe da tool acima: um `!comando` salvo enquanto
+      // AINDA RODA é `running`, não `err`. Round-trippa fiel; a demoção honesta de
+      // órfão fica com `sanitizeOrphans`/`blocksToHistory`.
       const status =
-        o.status === 'ok' || o.status === 'err' || o.status === 'blocked' ? o.status : 'err';
+        o.status === 'ok' || o.status === 'err' || o.status === 'blocked' || o.status === 'running'
+          ? o.status
+          : 'err';
       return {
         kind: 'bang',
         command: o.command,
@@ -245,13 +270,21 @@ export function blocksToHistory(blocks: readonly SessionBlock[]): HistoryItem[] 
         break;
       case 'tool': {
         // resultado quantificado + (se houve) a saída — tudo como DADO do ambiente.
-        const parts = [`${b.verb} ${b.target} → ${b.result || b.status}`];
+        // FALHA-FANTASMA — `running` agora round-trippa fiel (`sanitizeBlock`), então a
+        // DEMOÇÃO honesta de órfão mora aqui: reconstruir histórico é, por construção,
+        // restaurar a partir de blocos (retomada/rewind) — não há tool em voo p/ resolver.
+        // "interrompido" (o mesmo termo do `sanitizeOrphans`) diz a VERDADE ao modelo;
+        // `→ running` o faria esperar um resultado que nunca vem, e `→ err` inventaria
+        // uma falha que não houve.
+        const desfecho = b.status === 'running' ? 'interrompido' : b.result || b.status;
+        const parts = [`${b.verb} ${b.target} → ${desfecho}`];
         if (b.output) parts.push(b.output);
         out.push({ role: 'observation', toolName: RESTORED_TOOL_LABEL, text: parts.join('\n') });
         break;
       }
       case 'bang': {
-        const parts = [`! ${b.command} (${b.status})`];
+        // Idem tool acima — órfão restaurado é "interrompido", não `running` nem `err`.
+        const parts = [`! ${b.command} (${b.status === 'running' ? 'interrompido' : b.status})`];
         if (b.output) parts.push(b.output);
         out.push({ role: 'observation', toolName: RESTORED_TOOL_LABEL, text: parts.join('\n') });
         break;

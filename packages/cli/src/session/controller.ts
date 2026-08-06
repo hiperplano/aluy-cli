@@ -175,11 +175,10 @@ import { sep as pathSep } from 'node:path';
 import { redactOutputSecrets } from '@hiperplano/aluy-cli-core';
 import type { StreamSink } from './streaming-caller.js';
 import type { ModelCaller, ModelClient } from '@hiperplano/aluy-cli-core';
-import { withToolReport, type ToolReporter } from './tool-reporter.js';
+import { withToolReport, targetOf, type ToolReporter } from './tool-reporter.js';
 import {
   abbreviateCwd,
   abbreviateCount,
-  clampTarget,
   gerundOf,
   formatDuration,
   type BangBlock,
@@ -7531,20 +7530,16 @@ function verbOfTool(name: string): string {
 }
 
 /**
- * Alvo legível (path/comando/padrão) a partir do input do tool-call. SEMPRE clampado
- * a 1 linha (`clampTarget`, MESMA regra do `tool-reporter.targetOf` — a linha `◌`
- * criada no start e a `⏺` resolvida no fim precisam BATER p/ a atualização in-place):
- * um batch/heredoc como `command` não pode despejar 100+ linhas no transcript.
+ * Alvo legível a partir do input do tool-call, p/ a linha VIVA `◌` do start. DELEGA ao
+ * `tool-reporter.targetOf` — a MESMA função que rotula a linha `⏺` resolvida no fim.
+ *
+ * Era uma CÓPIA, com um comentário jurando "MESMA regra". A cópia já tinha divergido
+ * (sem o ramo de `question`), e as duas linhas PRECISAM bater: a resolução é IN-PLACE,
+ * então um alvo que muda entre o start e o fim é uma linha que "troca de identidade" na
+ * frente do dono. Uma função só — não há como divergir de novo.
  */
 function targetOfCall(call: ToolCall): string {
-  const input = call.input;
-  const cmd = input['command'];
-  if (typeof cmd === 'string') return clampTarget(cmd);
-  const path = input['path'];
-  if (typeof path === 'string') return clampTarget(path);
-  const pattern = input['pattern'];
-  if (typeof pattern === 'string') return clampTarget(`/${pattern}/`);
-  return '';
+  return targetOf(call.input);
 }
 
 /** Índice do ÚLTIMO bloco de tool ainda em `running` (p/ a atualização in-place). */

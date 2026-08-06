@@ -30,11 +30,19 @@ import type { SessionBlock } from '../session/model.js';
 export interface AttachBlockTailState {
   sessionId?: string;
   emittedCount: number;
+  /**
+   * FALHA-FANTASMA — índices de blocos JÁ emitidos que ainda NÃO tinham desfecho
+   * (`running`). O tail avança por `slice(emittedCount)`: um bloco resolve IN PLACE
+   * (o `resolveToolLine` do controller SUBSTITUI a linha viva, não empurra outra), então
+   * sem isto o desfecho REAL nunca seria emitido — o dono ficaria com a linha "…" para
+   * sempre. Guardamos o texto emitido p/ só reemitir quando MUDOU de verdade.
+   */
+  pendentes: Map<number, string>;
 }
 
 /** Estado inicial de um tail — SEM sessão vista ainda. */
 export function newAttachBlockTailState(): AttachBlockTailState {
-  return { emittedCount: 0 };
+  return { emittedCount: 0, pendentes: new Map() };
 }
 
 export interface AttachBlockSummary {
@@ -57,6 +65,17 @@ export function summarizeSessionBlockForAttach(b: SessionBlock): AttachBlockSumm
     case 'aluy':
       return b.text.trim() === '' ? undefined : { role: 'aluy', text: b.text };
     case 'tool': {
+      // FALHA-FANTASMA (dogfooding real) — uma tool EM VOO chegava aqui como `err`
+      // (o save demovia `running`→`err`; corrigido em `session-record.ts`). O dono via
+      // `spawn_agent → err` no `runner.log` de um agente que estava trabalhando bem.
+      // Agora o in-flight aparece pelo que É — no MESMO formato do transcript vivo
+      // (`linear.ts`: "verbo alvo — gerúndio"), e sem ` → ` p/ não casar com o filtro
+      // de erro do runner. O desfecho REAL chega depois, pela reemissão do
+      // `pollNewServiceBlocks` (a linha resolve; não são dois eventos concorrentes).
+      if (b.status === 'running') {
+        const alvo = b.target !== '' ? ` ${b.target}` : '';
+        return { role: 'tool', text: `${b.verb}${alvo} — ${b.verbGerund ?? 'rodando'}…` };
+      }
       // ATTACH-CEGO (dogfooding real, palavras do dono: "tá dando erro e não consigo
       // ver") — esta linha usava `b.result || b.status`. Em ERRO o `result` vem VAZIO,
       // então caía no `status` e imprimia só `err`: o dono via "spawn_agent → err" e
@@ -95,6 +114,17 @@ export function summarizeSessionBlockForAttach(b: SessionBlock): AttachBlockSumm
 }
 
 /**
+ * FALHA-FANTASMA — um bloco AINDA SEM DESFECHO. O autosave incremental (FASE 4) grava
+ * a transcrição NO MEIO do turno, então o tail enxerga blocos vivos; eles resolvem
+ * IN PLACE e precisam ser reemitidos quando isso acontecer. PURO.
+ */
+function estaEmVoo(b: SessionBlock): boolean {
+  if (b.kind === 'tool' || b.kind === 'bang') return b.status === 'running';
+  if (b.kind === 'aluy') return b.streaming === true;
+  return false;
+}
+
+/**
  * Acha a sessão MAIS RECENTE do serviço (escopo `<serviceDir>/.state`, o MESMO
  * `baseDir` que `run.tsx` usa via `ALUY_SERVICE_HOME`) e devolve os blocos NOVOS
  * desde a última chamada com este `state` (mutado in-place — o caller mantém UMA
@@ -117,16 +147,39 @@ export function pollNewServiceBlocks(
       // reseta o contador e emite TUDO dela desde o início.
       state.sessionId = latest.id;
       state.emittedCount = 0;
+      state.pendentes.clear();
     }
     const rec = store.load(latest.id);
     if (rec === null) return [];
-    const fresh = rec.blocks.slice(state.emittedCount);
-    state.emittedCount = rec.blocks.length;
     const out: AttachBlockSummary[] = [];
-    for (const b of fresh) {
+    // FALHA-FANTASMA — ANTES dos blocos novos: os que já emitimos SEM desfecho. Um
+    // `spawn_agent` de 11 min é emitido "…processando" e resolve IN PLACE; só aqui o
+    // dono fica sabendo COMO terminou (e, em erro, POR QUÊ — a cauda do ATTACH-CEGO).
+    // A ordem importa: num turno as atividades são sequenciais, então o desfecho do
+    // bloco anterior precede os blocos novos.
+    for (const [idx, jaEmitido] of [...state.pendentes].sort((a, b) => a[0] - b[0])) {
+      const b = rec.blocks[idx];
+      if (b === undefined) {
+        state.pendentes.delete(idx); // bloco sumiu (rewind/compactação) — nada a dizer.
+        continue;
+      }
       const s = summarizeSessionBlockForAttach(b);
-      if (s !== undefined) out.push(s);
+      if (s === undefined || s.text === jaEmitido) continue; // ainda em voo, sem novidade.
+      out.push(s);
+      // Só sai da lista quando chega a estado TERMINAL: um `running` que só mudou de
+      // texto (gerúndio/alvo) segue sendo acompanhado até resolver de verdade.
+      if (estaEmVoo(b)) state.pendentes.set(idx, s.text);
+      else state.pendentes.delete(idx);
     }
+    for (let i = state.emittedCount; i < rec.blocks.length; i++) {
+      const b = rec.blocks[i];
+      if (b === undefined) continue;
+      const s = summarizeSessionBlockForAttach(b);
+      if (s === undefined) continue;
+      out.push(s);
+      if (estaEmVoo(b)) state.pendentes.set(i, s.text);
+    }
+    state.emittedCount = rec.blocks.length;
     return out;
   } catch {
     return [];
