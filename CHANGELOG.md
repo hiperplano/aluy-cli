@@ -14,6 +14,16 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.127] — 2026-08-06
+
+### Corrigido
+
+- 👻 **O aluy parava de INVENTAR falha — `running` não é `err` (achado rodando o serviço do dono):** o `runner.log` mostrava `[tool] spawn_agent  → err` para um `spawn_agent` que estava trabalhando NORMALMENTE — 3 processos filhos vivos naquele instante, atividade concluindo "ok" minutos depois, e `output` vazio porque não havia erro para ter motivo. Ele passou horas caçando um erro que NUNCA EXISTIU. A cadeia: `sanitizeBlock` demovia `running`→`err`, sob a premissa "a sessão restaurada é inerte, não há tool em voo" — VERDADEIRA quando o save só acontecia no FIM do turno; a FASE 4 (attach) fez o autosave rodar DURANTE o turno, justamente p/ o dono ver ao vivo, e a mesma linha passou a carimbar "falhou" em cima de "está trabalhando". O saneamento agora é FIEL; a demoção de ÓRFÃO continua onde é VERDADE (`sanitizeOrphans` na fronteira de entrada do controller, e `blocksToHistory` com "interrompido" — nem falha inventada, nem espera eterna); lixo/desconhecido segue virando `err`, fail-closed.
+- ⏳ **O DESFECHO que nunca chegava (mesma família):** o tail do attach avança por `slice(emittedCount)` e um bloco resolve IN PLACE (o `resolveToolLine` SUBSTITUI a linha viva, não empurra outra) — sem reemissão, corrigir o item acima só trocaria um erro falso por um silêncio: o dono ficaria com "…processando" para sempre. `pollNewServiceBlocks` passa a acompanhar os blocos sem desfecho e a reemitir quando resolvem, com o MOTIVO em caso de falha.
+- ✂️ **A RESPOSTA cortada (mesma família):** `streaming` era forçado a `false` no save, declarando "resposta completa" sobre um texto que ainda estava chegando — o attach emitia o pedaço parcial e nunca mais o corrigia, e o dono lia uma frase cortada no meio como se fosse a resposta final.
+- 🎯 **`spawn_agent` diz QUAL agente (ALVO-MUDO):** repare nos DOIS espaços em `spawn_agent  → err` — o alvo era vazio. `targetOf` só conhecia `command`/`path`/`pattern`/`question` e o input do spawn é `{agents:[{label?,goal,agent?}]}`; o dono sabia QUE uma delegação falhou, nunca QUAL. Numa cadeia macro→quant→data-engineer→backtest, é a diferença entre um log diagnosticável e um log inútil.
+- 🔗 **FONTE ÚNICA do alvo:** `controller.targetOfCall` (que rotula a linha VIVA `◌`) era uma CÓPIA da lógica do alvo, com um comentário jurando "MESMA regra do `tool-reporter.targetOf`" — e a cópia JÁ tinha divergido: sem o ramo de `question`, um `perguntar` em voo aparecia sem alvo e ganhava um ao resolver. Como a resolução é in-place, isso é uma linha trocando de identidade na frente do dono. Passa a ser UMA função.
+
 ## [1.0.0-rc.126] — 2026-08-05
 
 ### Adicionado
