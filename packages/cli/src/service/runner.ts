@@ -59,6 +59,7 @@ import {
   nextCronFire,
   parseServiceBudget,
   parseServiceActivityTimeout,
+  avisoActivityTimeout,
   msUntilDeadline,
   awaitsUserDecision,
   runWorkflow,
@@ -995,8 +996,31 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         setStatus({ turnState: 'sleeping', nextFireIso: next.toISOString() });
         log(`dormindo até ${next.toISOString()} (próximo turno).`);
 
-        const wake = await sleepUntil(next, stopController.signal);
+        // MESA-MORRE-COM-O-SUPERVISOR (a outra metade) — agora que os daemons
+        // SOBREVIVEM ao fim de um turno enquanto o expediente está aberto, alguém
+        // precisa derrubá-los quando ele FECHA. Sem isto, um turno que termina cedo
+        // (todas as atividades concluídas às 18h, `until: 20:40`) deixaria a mesa de
+        // pé a noite inteira, até o cron do dia seguinte.
+        //
+        // Então a soneca acorda no que vier PRIMEIRO: o próximo turno, ou o fim do
+        // expediente. Acordando no fim do expediente, derruba e volta a dormir.
+        const fimExpediente = msUntilDeadline(new Date(), service.manifest.until);
+        const acordaNoFimDoExpediente =
+          fimExpediente !== undefined &&
+          fimExpediente > 0 &&
+          Date.now() + fimExpediente < next.getTime();
+        const alvoSoneca = acordaNoFimDoExpediente
+          ? new Date(Date.now() + fimExpediente)
+          : next;
+
+        const wake = await sleepUntil(alvoSoneca, stopController.signal);
         if (wake === 'stopped') break;
+
+        if (acordaNoFimDoExpediente) {
+          log(`fim do expediente ("until: ${service.manifest.until}") — derrubando daemons próprios…`);
+          stopDaemons(serviceDir, log);
+          continue; // volta ao topo: recalcula o próximo cron e dorme de verdade.
+        }
       }
 
       // ADR-0158 §8.1 (FASE 3) — "manifesto inválido pós-edição" é um dos motivos
@@ -1159,8 +1183,34 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
           );
         }
 
-        log('fim do expediente — derrubando daemons próprios…');
-        stopDaemons(serviceDir, log);
+        // MESA-MORRE-COM-O-SUPERVISOR (dogfooding real, custou meio pregão) — esta
+        // derrubada acontecia no fim de TODO turno, embora a linha dissesse "fim do
+        // expediente". Não era só texto errado: era o comportamento.
+        //
+        // O que aconteceu: uma vigília do serviço de execução estourou o teto de
+        // atividade, o turno encerrou em `limit`, e o runner matou os 7 daemons que
+        // sustentavam a mesa — bridge MT5, 5 estratégias e o guarda de posição, todos
+        // saudáveis. A mesa fechou às 14:21 num pregão que ia até 17:40, e ninguém
+        // percebeu por 25 minutos. O MOTOR morreu porque o ACESSÓRIO adoeceu, que é a
+        // inversão exata de prioridade para um serviço que opera dinheiro.
+        //
+        // `until:` é o que define EXPEDIENTE. Enquanto a janela está aberta, o próximo
+        // turno vai acontecer e os daemons têm que estar de pé para ele — `startDaemons`
+        // é idempotente (pula o que já vive pelo pidfile), então manter é seguro.
+        //
+        // Sem `until:` declarado, nada muda: cada turno É o expediente inteiro e a
+        // derrubada segue no fim dele, byte a byte como antes.
+        const restanteExpediente = msUntilDeadline(new Date(), service.manifest.until);
+        if (restanteExpediente !== undefined && restanteExpediente > 0) {
+          log(
+            `turno encerrado — daemons MANTIDOS: o expediente segue aberto até ` +
+              `"${service.manifest.until}" (${Math.round(restanteExpediente / 60_000)}min). ` +
+              `Falha de turno não derruba a mesa.`,
+          );
+        } else {
+          log('fim do expediente — derrubando daemons próprios…');
+          stopDaemons(serviceDir, log);
+        }
       }
     }
   } finally {
@@ -1318,6 +1368,10 @@ async function runOneWorkflow(args: {
   const activitiesToRun = parsed.activities.slice(startOffset);
 
   const budgetTokens = parseServiceBudget(args.budgetRaw);
+  // SEM-TETO-EM-INGLÊS — valor não entendido cai no default de 30min; sem este aviso o
+  // dono só descobre quando o teto MATA uma atividade e o turno leva os daemons junto.
+  const avisoTeto = avisoActivityTimeout(args.activityTimeoutRaw);
+  if (avisoTeto !== undefined) args.log(`[manifesto] ${avisoTeto}`);
   const activityTimeoutCap = parseServiceActivityTimeout(args.activityTimeoutRaw) ?? MAX_ACTIVITY_MS;
   const orchestratorPreamble =
     `Você coordena o serviço "${args.serviceName}" — rege, não opera:\n${args.orchestratorBody}`;
