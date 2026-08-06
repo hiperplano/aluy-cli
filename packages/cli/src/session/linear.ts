@@ -290,6 +290,15 @@ export async function runHeadlessPrint(
     });
   }
 
+  // DESFECHO-DE-OUTRO-TURNO (dogfooding real) — MARCA onde este turno começa. As
+  // buscas abaixo varriam a lista INTEIRA de blocos, que numa sessão RETOMADA
+  // (`--resume`/`--continue`) inclui a transcrição ANTIGA. Um erro de broker de HORAS
+  // atrás era adotado como desfecho do turno de AGORA: a sessão do dono devolvia
+  // `{"ok":false}` + "não consegui falar com o provider local" em duas execuções que
+  // TERMINARAM BEM (a transcrição prova: `you: responda apenas: ok` → `aluy: ok`).
+  // Eu mesmo persegui esse erro inexistente por um bom tempo, e ele contamina QUALQUER
+  // consumidor do contrato JSON — inclusive o runner de serviço.
+  const inicio = controller.blocks.length;
   try {
     await controller.submit(effectiveGoal, attachments);
   } finally {
@@ -310,7 +319,10 @@ export async function runHeadlessPrint(
     };
   }
 
-  const blocks = controller.blocks;
+  // DESFECHO-DE-OUTRO-TURNO — SÓ os blocos DESTE turno. `slice` de um índice além do
+  // fim devolve `[]` (um turno que não empurrou nada cai no "sem fala final", que é o
+  // desfecho honesto — nunca herda a resposta anterior).
+  const blocks = controller.blocks.slice(inicio);
   // Falha de broker (1ª chamada): o resultado é vazio; o diagnóstico (neutro, HG-2)
   // vai p/ o stderr e o exit code reflete a falha. É o "broker fora / sem credencial".
   const brokerError = [...blocks].reverse().find((b) => b.kind === 'broker-error');
@@ -461,6 +473,9 @@ export async function runHeadlessStreamJson(
     }
   });
 
+  // DESFECHO-DE-OUTRO-TURNO — idem `runHeadlessPrint`: marca onde ESTE turno começa,
+  // p/ não adotar erro/fala de uma sessão retomada como desfecho de agora.
+  const inicio = controller.blocks.length;
   try {
     await controller.submit(effectiveGoal, attachments);
   } finally {
@@ -488,8 +503,8 @@ export async function runHeadlessStreamJson(
     };
   }
 
-  // Determina o resultado final (mesma lógica do runHeadlessPrint)
-  const blocks = controller.blocks;
+  // Determina o resultado final (mesma lógica do runHeadlessPrint) — SÓ deste turno.
+  const blocks = controller.blocks.slice(inicio);
   const brokerError = [...blocks].reverse().find((b) => b.kind === 'broker-error');
   if (brokerError && brokerError.kind === 'broker-error') {
     const result = {

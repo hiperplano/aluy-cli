@@ -34,6 +34,12 @@ function makeState(blocks: readonly SessionBlock[], phase: SessionState['phase']
  */
 function fakeController(steps: readonly (readonly SessionBlock[])[]): SessionController {
   let observer: ((s: SessionState) => void) | null = null;
+  // DESFECHO-DE-OUTRO-TURNO — o getter devolvia o snapshot FINAL mesmo ANTES do
+  // `submit`, o que o controller REAL nunca faz (antes do turno ele tem só o que foi
+  // restaurado; os blocos do turno aparecem DURANTE). O fake infiel escondia a
+  // dimensão TEMPO — justamente a que o bug explorava. Agora acompanha o snapshot
+  // corrente, como o de verdade.
+  let current: readonly SessionBlock[] = [];
   const ctrl = {
     subscribe(obs: (s: SessionState) => void): () => void {
       observer = obs;
@@ -47,11 +53,12 @@ function fakeController(steps: readonly (readonly SessionBlock[])[]): SessionCon
       for (let i = 0; i < steps.length; i++) {
         const phase: SessionState['phase'] =
           i === 0 ? 'streaming' : i === steps.length - 1 ? 'done' : 'streaming';
-        observer?.(makeState(steps[i]!, phase));
+        current = steps[i]!;
+        observer?.(makeState(current, phase));
       }
     },
     get blocks(): readonly SessionBlock[] {
-      return steps.length > 0 ? steps[steps.length - 1]! : [];
+      return current;
     },
   };
   return ctrl as unknown as SessionController;
@@ -121,6 +128,7 @@ describe('runHeadlessStreamJson — emite eventos NDJSON ao vivo', () => {
 
     // Um snapshot com phase 'thinking' antes do streaming
     let observer: ((s: SessionState) => void) | null = null;
+    let atual: readonly SessionBlock[] = [];
     const ctrl = {
       subscribe(obs: (s: SessionState) => void): () => void {
         observer = obs;
@@ -131,21 +139,15 @@ describe('runHeadlessStreamJson — emite eventos NDJSON ao vivo', () => {
       },
       async submit(): Promise<void> {
         observer?.(makeState([], 'thinking'));
-        observer?.(
-          makeState(
-            [
-              { kind: 'you', text: 'teste' },
-              { kind: 'aluy', text: 'ok.', streaming: false },
-            ],
-            'done',
-          ),
-        );
-      },
-      get blocks(): readonly SessionBlock[] {
-        return [
+        atual = [
           { kind: 'you', text: 'teste' },
           { kind: 'aluy', text: 'ok.', streaming: false },
         ];
+        observer?.(makeState(atual, 'done'));
+      },
+      // DESFECHO-DE-OUTRO-TURNO — os blocos só existem DEPOIS do submit (idem real).
+      get blocks(): readonly SessionBlock[] {
+        return atual;
       },
     };
 
@@ -166,6 +168,7 @@ describe('runHeadlessStreamJson — emite eventos NDJSON ao vivo', () => {
     const { out, text } = makeOut();
 
     let observer: ((s: SessionState) => void) | null = null;
+    let atual: readonly SessionBlock[] = [];
     const ctrl = {
       subscribe(obs: (s: SessionState) => void): () => void {
         observer = obs;
@@ -175,12 +178,12 @@ describe('runHeadlessStreamJson — emite eventos NDJSON ao vivo', () => {
         };
       },
       async submit(): Promise<void> {
-        observer?.(
-          makeState([{ kind: 'broker-error', message: 'broker fora', status: 502 }], 'error'),
-        );
+        atual = [{ kind: 'broker-error', message: 'broker fora', status: 502 }];
+        observer?.(makeState(atual, 'error'));
       },
+      // DESFECHO-DE-OUTRO-TURNO — idem: o erro aparece DURANTE o turno, não antes.
       get blocks(): readonly SessionBlock[] {
-        return [{ kind: 'broker-error', message: 'broker fora', status: 502 }];
+        return atual;
       },
     };
 

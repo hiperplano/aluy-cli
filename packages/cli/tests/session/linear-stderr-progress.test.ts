@@ -23,6 +23,10 @@ function makeState(blocks: readonly SessionBlock[], phase: SessionState['phase']
  */
 function fakeController(steps: readonly (readonly SessionBlock[])[]): SessionController {
   let observer: ((s: SessionState) => void) | null = null;
+  // DESFECHO-DE-OUTRO-TURNO — o getter devolvia o snapshot FINAL mesmo ANTES do
+  // `submit`, coisa que o controller REAL nunca faz (antes do turno ele tem só o que foi
+  // restaurado). O fake infiel escondia a dimensão TEMPO — a mesma que o bug explorava.
+  let current: readonly SessionBlock[] = [];
   const ctrl = {
     subscribe(obs: (s: SessionState) => void): () => void {
       observer = obs;
@@ -36,11 +40,12 @@ function fakeController(steps: readonly (readonly SessionBlock[])[]): SessionCon
       for (let i = 0; i < steps.length; i++) {
         const phase: SessionState['phase'] =
           i === 0 ? 'streaming' : i === steps.length - 1 ? 'done' : 'streaming';
-        observer?.(makeState(steps[i]!, phase));
+        current = steps[i]!;
+        observer?.(makeState(current, phase));
       }
     },
     get blocks(): readonly SessionBlock[] {
-      return steps.length > 0 ? steps[steps.length - 1]! : [];
+      return current;
     },
   };
   return ctrl as unknown as SessionController;
@@ -317,6 +322,7 @@ describe('runHeadlessPrint — progresso human-readable no stderr', () => {
 
     try {
       let observer: ((s: SessionState) => void) | null = null;
+      let atual: readonly SessionBlock[] = [];
       const ctrl = {
         subscribe(obs: (s: SessionState) => void): () => void {
           observer = obs;
@@ -327,21 +333,15 @@ describe('runHeadlessPrint — progresso human-readable no stderr', () => {
         },
         async submit(): Promise<void> {
           observer?.(makeState([{ kind: 'you', text: 'fase' }], 'thinking'));
-          observer?.(
-            makeState(
-              [
-                { kind: 'you', text: 'fase' },
-                { kind: 'aluy', text: 'ok.', streaming: false },
-              ],
-              'done',
-            ),
-          );
-        },
-        get blocks(): readonly SessionBlock[] {
-          return [
+          atual = [
             { kind: 'you', text: 'fase' },
             { kind: 'aluy', text: 'ok.', streaming: false },
           ];
+          observer?.(makeState(atual, 'done'));
+        },
+        // DESFECHO-DE-OUTRO-TURNO — só depois do submit (idem o controller real).
+        get blocks(): readonly SessionBlock[] {
+          return atual;
         },
       };
 
