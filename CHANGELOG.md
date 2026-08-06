@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.128] — 2026-08-06
+
+### Corrigido
+
+- 🔇 **No BYO local, o erro do provider passa a dizer o MOTIVO:** a sessão do dono parou com `provider local indisponível / não consegui falar com o provider local.` e MAIS NADA — sem status, sem causa, sem log em lugar nenhum (`ALUY_DEBUG_RENDER` é só de render). Nem com o código do aluy na frente dava p/ diagnosticar sem reproduzir a chamada À MÃO, por fora da ferramenta. A regra "nunca ecoa `err.message` cru" existe pela invariante HG-2: no broker HOSPEDADO a mensagem não pode revelar QUAL vendor atende o tier (roteamento multi-tenant é segredo do serviço). No backend LOCAL isso NÃO se aplica — o provider é do PRÓPRIO DONO, endpoint e credencial dele; esconder a razão ali não protege ninguém, só cega quem tem o poder de corrigir. Não é precedente novo: o MESMO classificador já abre exceção idêntica no 422 ("é o usuário que precisa corrigir a entrada, então a frase útil tem que chegar a ele"). O motivo vai REDIGIDO (`redactOutputSecrets`, CLI-SEC-6 — um corpo de erro de provider pode ecoar o payload e junto o `Authorization`) e CLAMPADO a uma linha de 240 chars; vale p/ os dois caminhos cegos (transporte e inesperado). O lado HOSPEDADO fica intacto, travado por teste: causa crua não vaza no broker e o default do parâmetro segue `broker`.
+
 ## [1.0.0-rc.127] — 2026-08-06
 
 ### Corrigido
