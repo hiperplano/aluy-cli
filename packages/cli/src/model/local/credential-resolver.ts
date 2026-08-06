@@ -52,11 +52,19 @@ export function oauthAccount(provider: LocalProviderKind): string {
  * acionável; NUNCA cita segredo.
  */
 export class MissingLocalCredentialError extends Error {
-  constructor(provider: LocalProviderKind, auth: LocalAuthKind) {
+  constructor(provider: LocalProviderKind, auth: LocalAuthKind, erroDoKeychain?: string) {
+    // CREDENCIAL-INTERMITENTE — quando o keychain FALHOU (≠ "nunca foi configurada"), o
+    // conselho "configure a chave" é ERRADO e faz o dono reconfigurar o que já está
+    // certo. O sintoma real é o Secret Service (DBus/keyring trancado/fora), e é ISSO
+    // que ele precisa ler. Motivo do keychain vem CRU do backend — nunca contém segredo
+    // (é diagnóstico do daemon), ao contrário do valor que ele guarda.
     const hint =
-      auth === 'apikey'
-        ? `configure a chave: \`${ENV_API_KEY[provider]}=...\` (env) ou \`aluy login --provider ${provider}\` (keychain)`
-        : `faça login por assinatura: \`aluy login --provider ${provider} --oauth\``;
+      erroDoKeychain !== undefined
+        ? `o keychain do SO NÃO respondeu (${erroDoKeychain}) — a chave pode estar lá e inacessível.` +
+          ` Verifique o Secret Service/DBus da sessão, ou passe \`${ENV_API_KEY[provider]}=...\` no ambiente.`
+        : auth === 'apikey'
+          ? `configure a chave: \`${ENV_API_KEY[provider]}=...\` (env) ou \`aluy login --provider ${provider}\` (keychain)`
+          : `faça login por assinatura: \`aluy login --provider ${provider} --oauth\``;
     super(`backend local: sem credencial ${auth} p/ "${provider}". ${hint}`);
     this.name = 'MissingLocalCredentialError';
   }
@@ -93,17 +101,49 @@ function makeEntry(
   return new Entry(service, account) as unknown as KeyringEntry;
 }
 
-/** Lê uma senha do keychain; ausência/erro ⇒ `undefined` (nunca lança no get). */
+/**
+ * CREDENCIAL-INTERMITENTE (dogfooding real) — última credencial que o keychain
+ * ENTREGOU DE VERDADE nesta sessão, por conta. Vive só em MEMÓRIA do processo (nunca
+ * em disco/log — CLI-SEC-7 intacto); é a MESMA exposição que já existe enquanto a
+ * chave viaja em cada requisição.
+ *
+ * Por que existe: o serviço 24/7 do dono morria com `sem credencial apikey p/
+ * "openrouter"` — com a chave PRESENTE no keychain o tempo todo (73 chars, lida sem
+ * erro no mesmo ambiente, segundos depois). A leitura é feita a CADA requisição (por
+ * design, p/ pegar rotação de chave sem reiniciar) e o Secret Service falha de vez em
+ * quando; UM blip derrubava o turno inteiro. E a mensagem mandava "configure a chave",
+ * conselho ERRADO — ele iria reconfigurar algo que já estava certo.
+ *
+ * A rotação continua soberana: o cache só é CONSULTADO quando a leitura falha e não há
+ * env. Uma leitura bem-sucedida sempre ATUALIZA o cache (chave nova entra na hora).
+ */
+const ultimaCredencialBoa = new Map<string, string>();
+
+/** Resultado de uma leitura do keychain — distingue AUSENTE de ERRO (antes: iguais). */
+interface LeituraKeychain {
+  readonly valor?: string;
+  /** Motivo do FALHO de leitura (backend fora/DBus/locked). Ausente ⇒ leu, só não tinha. */
+  readonly erro?: string;
+}
+
+/**
+ * Lê uma senha do keychain. NUNCA lança. Diferencia "não tem entrada" de "não consegui
+ * ler" — antes os dois viravam `undefined` e o diagnóstico perdia a informação que
+ * importava (o dono via "configure a chave" quando o problema era o Secret Service).
+ */
 function readKeychain(
   factory: ((service: string, account: string) => KeyringEntry) | undefined,
   account: string,
-): string | undefined {
+): LeituraKeychain {
   try {
     const entry = makeEntry(factory, LOCAL_KEYCHAIN_SERVICE, account);
     const v = entry.getPassword();
-    return v !== '' ? v : undefined;
-  } catch {
-    return undefined; // sem entrada / sem backend ⇒ cai no env.
+    return v !== '' ? { valor: v } : {};
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // "no entry"/"not found" é AUSÊNCIA legítima (nunca foi configurada), não avaria.
+    if (/no entry|not found|no such|no matching/i.test(msg)) return {};
+    return { erro: msg };
   }
 }
 
@@ -136,16 +176,24 @@ export function createLocalCredentialProvider(
     // sem Secret Service). Ordem do env: var canônica do provider (built-ins) → genérica
     // por provider (`ALUY_<PROVIDER>_API_KEY`, p/ custom) → catch-all (`ALUY_LOCAL_API_KEY`,
     // p/ o provider local ATIVO). Assim provider CUSTOM (ex.: tokenrouter) também tem env.
-    const fromKeychain = readKeychain(opts.entryFactory, apiKeyAccount(provider));
+    const conta = apiKeyAccount(provider);
+    const doKeychain = readKeychain(opts.entryFactory, conta);
+    // CREDENCIAL-INTERMITENTE — leitura BOA sempre atualiza o cache (rotação entra na hora).
+    if (doKeychain.valor !== undefined) ultimaCredencialBoa.set(conta, doKeychain.valor);
     const provEnvName = ENV_API_KEY[provider];
     const genericEnvName = genericApiKeyEnvName(provider);
     const fromEnv =
       (provEnvName !== undefined ? env[provEnvName] : undefined) ??
       env[genericEnvName] ??
       env.ALUY_LOCAL_API_KEY;
-    const secret = fromKeychain ?? (fromEnv !== undefined && fromEnv !== '' ? fromEnv : undefined);
+    const secret =
+      doKeychain.valor ??
+      (fromEnv !== undefined && fromEnv !== '' ? fromEnv : undefined) ??
+      // Só chega aqui se o keychain FALHOU (ou esvaziou) e não há env: um blip do Secret
+      // Service não pode derrubar um serviço que roda 24/7 com a chave configurada.
+      (doKeychain.erro !== undefined ? ultimaCredencialBoa.get(conta) : undefined);
     if (secret === undefined) {
-      throw new MissingLocalCredentialError(provider, 'apikey');
+      throw new MissingLocalCredentialError(provider, 'apikey', doKeychain.erro);
     }
     return { kind: 'apikey', secret };
   };
@@ -157,6 +205,21 @@ export function storeApiKey(
   key: string,
   factory?: (service: string, account: string) => KeyringEntry,
 ): void {
-  const entry = makeEntry(factory, LOCAL_KEYCHAIN_SERVICE, apiKeyAccount(provider));
+  const conta = apiKeyAccount(provider);
+  const entry = makeEntry(factory, LOCAL_KEYCHAIN_SERVICE, conta);
   entry.setPassword(key);
+  // CREDENCIAL-INTERMITENTE — gravou, o cache anti-blip acompanha na hora: nunca serve
+  // uma chave velha depois de uma troca deliberada.
+  ultimaCredencialBoa.set(conta, key);
+}
+
+/**
+ * CREDENCIAL-INTERMITENTE — ESQUECE a credencial memorizada de um provider. É o ponto
+ * de invalidação para um logout/revogação: sem isto, o cache anti-blip seguiria
+ * atendendo com a chave revogada até o processo morrer. Usado também pelos testes p/
+ * isolar casos (o cache é módulo-global, como a sessão do processo).
+ */
+export function forgetCachedApiKey(provider?: LocalProviderKind): void {
+  if (provider === undefined) ultimaCredencialBoa.clear();
+  else ultimaCredencialBoa.delete(apiKeyAccount(provider));
 }
