@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.131] — 2026-08-06
+
+### Corrigido
+
+- 🔐 **O runner SEGURA a credencial — a atividade 2 não morre porque a 1 rodou:** já na rc.130, o serviço do dono fez `atividade 1/6 "scan": ok.` e, DOIS SEGUNDOS depois, `atividade 2/6 "traduzir": erro — o keychain do SO NÃO respondeu (Couldn't access platform storage: KeyRevoked)`. O `/proc/keys` da máquina fecha o caso: `user keyring:openrouter:apikey@aluy-cli-local: 73` + `expd _ses: empty` — o backend do keychain ali é o keyring do KERNEL (keyutils, máquina sem Secret Service: a condição que o F165 já detecta e avisa no login), preso a keyrings de SESSÃO que expiram. Como cada atividade é um processo NOVO que relê a credencial do zero, o serviço vivia à mercê de qual sessão ainda estava viva — e o cache em memória da rc.130 não alcança este caso (morre junto com o processo, que é justamente a atividade). O RUNNER é o único que dura o expediente inteiro: resolve UMA vez e sustenta os filhos pelo catch-all `ALUY_LOCAL_API_KEY` que o resolvedor já consultava. É ÚLTIMO DEGRAU (keychain e env próprias do filho vêm antes — se o dono exportou a chave, a dele vence) e credencial VAZIA não é injetada (`''` faria o filho achar que tem chave e falhar depois com mensagem pior). TRADE-OFF EXPLÍCITO: env de processo é legível por `/proc/<pid>/environ` — 0400, MESMO usuário; o keychain protege contra OUTRO usuário e contra roubo em repouso, e isso segue valendo (nada em disco, nada em log, nem a chave nem o tamanho dela), sendo que a chave já precisa estar na memória do filho de qualquer forma. A resolução é PREGUIÇOSA (1º turno) e não no boot: um `await` entre o "runner iniciado" e o registro do `onSignal` abria uma janela real em que um SIGTERM chegava SEM handler — foi o teste de sinal que mostrou. NÃO substitui o conserto durável do ambiente (Secret Service instalado ou env var exportada): torna o serviço resiliente enquanto o runner vive.
+
 ## [1.0.0-rc.130] — 2026-08-06
 
 ### Corrigido
