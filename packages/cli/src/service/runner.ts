@@ -462,8 +462,21 @@ export type ActivityExitClassification = 'cancelled' | 'deadline' | 'continue';
 export function classifyActivityExit(args: {
   readonly stopAborted: boolean;
   readonly signal: NodeJS.Signals | null;
+  /**
+   * TETO-DISFARÇADO (dogfooding real) — o timer do teto DISPAROU (fomos nós que
+   * derrubamos o filho). É FATO, não inferência.
+   *
+   * Sem isto, a detecção dependia de `signal !== null` — e o filho é um `aluy`, que
+   * TRATA o SIGTERM e sai graciosamente com CÓDIGO 143 em vez de morrer pelo sinal.
+   * Resultado no log do dono: uma atividade morta pelo teto de 30 min aparecia como
+   * `saída ilegível (exit 143)`, acusando o filho de produzir lixo quando quem o matou
+   * fomos nós, na hora marcada. Ele leria isso como bug do agente e procuraria no lugar
+   * errado — quando a ação certa é declarar um `activity-timeout:` maior.
+   */
+  readonly deadlineFired?: boolean;
 }): ActivityExitClassification {
   if (args.stopAborted) return 'cancelled';
+  if (args.deadlineFired === true) return 'deadline';
   if (args.signal !== null) return 'deadline';
   return 'continue';
 }
@@ -666,7 +679,17 @@ async function runActivityTurn(args: {
   // do runner) encerra a atividade. A atividade em si ainda respeita o `until:`
   // quando declarado (ver `resolveActivityTimeout`) — "sem teto por atividade" e
   // "sem fim de expediente" são regras independentes.
-  const deadlineTimer = timeoutMs !== undefined ? setTimeout(() => killGracefully(child), timeoutMs) : undefined;
+  // TETO-DISFARÇADO — registra o DISPARO do teto: é o único fato que distingue "nós o
+  // matamos na hora marcada" de "o filho produziu lixo". O `aluy` filho trata SIGTERM e
+  // sai com código 143, então `signal` chega `null` e a inferência antiga falhava.
+  let deadlineFired = false;
+  const deadlineTimer =
+    timeoutMs !== undefined
+      ? setTimeout(() => {
+          deadlineFired = true;
+          killGracefully(child);
+        }, timeoutMs)
+      : undefined;
   deadlineTimer?.unref();
 
   const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
@@ -676,7 +699,7 @@ async function runActivityTurn(args: {
   if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
   stop.removeEventListener('abort', onStopAbort);
 
-  const exitClass = classifyActivityExit({ stopAborted: stop.aborted, signal: exit.signal });
+  const exitClass = classifyActivityExit({ stopAborted: stop.aborted, signal: exit.signal, deadlineFired });
   if (exitClass === 'cancelled') {
     log(`atividade ${index + 1}/${total} "${activity.id}": interrompida (stop do runner).`);
     return { ok: false, stop: 'cancelled' };
@@ -685,7 +708,12 @@ async function runActivityTurn(args: {
   // `killGracefully` no timer do deadline (`until:`/teto duro). `stop.aborted` já
   // foi descartado acima, então um sinal aqui só pode ser o deadline.
   if (exitClass === 'deadline') {
-    log(`atividade ${index + 1}/${total} "${activity.id}": ATINGIU O TETO (until/teto duro) — encerrada.`);
+    log(
+      `atividade ${index + 1}/${total} "${activity.id}": ATINGIU O TETO` +
+        (timeoutMs !== undefined ? ` de ${Math.round(timeoutMs / 1000)}s` : ' (until/teto duro)') +
+        ' — encerrada pelo runner. Declare `activity-timeout:` no service.md se esta' +
+        ' atividade precisa de mais tempo.',
+    );
     return { ok: false, stop: 'limit' };
   }
 
