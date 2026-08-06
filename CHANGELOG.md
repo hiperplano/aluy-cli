@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.132] — 2026-08-06
+
+### Corrigido
+
+- 📋 **Relatório NÃO é pergunta — o expediente parava por adivinhação:** com a credencial resolvida (rc.131), o serviço do dono finalmente TRABALHOU — a atividade produziu 4 mil caracteres de análise quantitativa real (setups de USDBRL/IBOV/BTC com entrada, stop, alvo e razão risco-retorno) — e então travou em `AGUARDANDO DONO`. A "pergunta pendente" que o `aluy service status` exibia era a SAÍDA INTEIRA da atividade, aberta literalmente por `"status": "completed", "exitCode": 0`: ninguém perguntou nada, e o expediente parou esperando resposta a uma pergunta inexistente — em silêncio, por não haver `channel:` declarado. A causa é reúso de heurística ENTRE CONTEXTOS COM CUSTOS DIFERENTES: `awaitsUserDecision` nasceu p/ o gate do SELF-CHECK e o comentário dela é explícito ("a heurística pode ser generosa" porque "um falso POSITIVO só faz o loop aceitar a resposta como final") — inofensivo LÁ, mas aqui o MESMO falso positivo para um serviço 24/7 por tempo indeterminado. O serviço passa a ter o SEU critério, sem tocar no do self-check: a pergunta tem que estar na ÚLTIMA linha (relatório longo termina em conclusão, não em pergunta) e o texto todo precisa ter TAMANHO de pergunta (1500 chars). A direção do erro inverte DE PROPÓSITO — preferimos SEGUIR o workflow a travá-lo; quem precisa mesmo de decisão tem a tool `perguntar`, que é sinal EXPLÍCITO e não adivinhação sobre prosa. Um teste trava a divergência: o MESMO texto que o serviço agora ignora continua sendo "espera o usuário" p/ o self-check.
+
 ## [1.0.0-rc.131] — 2026-08-06
 
 ### Corrigido
