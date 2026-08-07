@@ -14,11 +14,11 @@ import { runProvisioner } from '../provisioner/sidecar-provisioner.js';
 import {
   storeApiKey,
   apiKeyAccount,
-  genericApiKeyEnvName,
   LOCAL_KEYCHAIN_SERVICE,
   type KeyringEntry,
 } from '../model/local/credential-resolver.js';
-import { keychainIsVolatile, volatileKeychainWarning } from '../auth/keychain-volatility.js';
+import type { VolatileKeychainProbeOptions } from '../auth/keychain-volatility.js';
+import type { FileVaultOptions } from '../model/local/file-vault.js';
 import { resolveLocalProviderConfig } from '../model/local/config.js';
 import {
   defaultLocalCatalog,
@@ -101,6 +101,10 @@ export async function runFirstRunWizard(opts: {
   out: (line: string) => void;
   err: (line: string) => void;
   entryFactory?: (service: string, account: string) => KeyringEntry;
+  /** F165 — sonda de cofre volátil injetável (testes): platform/leitor de /proc/keys. */
+  volatileProbe?: Omit<VolatileKeychainProbeOptions, 'service'>;
+  /** Opções do cofre em arquivo cifrado injetáveis (testes). */
+  fileVault?: FileVaultOptions;
   isInteractive: boolean;
 }): Promise<boolean> {
   const { config, configStore, prompt, out, err, entryFactory, isInteractive } = opts;
@@ -181,17 +185,26 @@ export async function runFirstRunWizard(opts: {
       return false;
     }
     try {
-      storeApiKey(provider, key, entryFactory);
-      out('✓ Chave guardada no keychain do SO.');
-      // F165 — cofre volátil (keyring do kernel, sem Secret Service): avisa AGORA
-      // que a chave não sobrevive a reboot, com o caminho de correção.
-      if (keychainIsVolatile({ service: LOCAL_KEYCHAIN_SERVICE })) {
-        for (const line of volatileKeychainWarning(genericApiKeyEnvName(provider))) err(line);
+      const result = storeApiKey(provider, key, {
+        ...(entryFactory ? { entryFactory } : {}),
+        ...(opts.volatileProbe ? { volatileProbe: opts.volatileProbe } : {}),
+        ...(opts.fileVault ? { fileVault: opts.fileVault } : {}),
+      });
+      if (result.backend === 'keychain') {
+        out('✓ Chave guardada no keychain do SO.');
+      } else {
+        out('✓ Chave guardada no cofre local cifrado (~/.aluy/credentials.enc).');
+        if (result.volatileKeychainBackedByFile === true) {
+          // F165, emendado — keychain só tem cofre volátil (sem Secret Service); o
+          // cofre em arquivo garante persistência real, então o aviso antigo ("some
+          // no reboot") deixaria de ser verdade — não o repetimos.
+          out('  (o cofre em arquivo cifrado garante que a chave sobrevive a um reboot.)');
+        }
       }
     } catch (e) {
-      err(`Falha ao gravar no keychain: ${e instanceof Error ? e.message : String(e)}`);
+      err(`Falha ao gravar a credencial: ${e instanceof Error ? e.message : String(e)}`);
       err(
-        '(Por segurança, a credencial nunca é gravada em texto. Instale o Secret Service no Linux.)',
+        '(Por segurança, a credencial nunca é gravada em texto. Use uma variável de ambiente como alternativa.)',
       );
       return false;
     }
@@ -257,6 +270,10 @@ export async function runInit(opts: {
    * Fábrica de Entry do keychain (testes). Default: `@napi-rs/keyring`.
    */
   entryFactory?: (service: string, account: string) => KeyringEntry;
+  /** F165 — sonda de cofre volátil injetável (testes): platform/leitor de /proc/keys. */
+  volatileProbe?: Omit<VolatileKeychainProbeOptions, 'service'>;
+  /** Opções do cofre em arquivo cifrado injetáveis (testes). */
+  fileVault?: FileVaultOptions;
   /**
    * Override do config store (testes). Default: `~/.aluy/config.json` real.
    */
@@ -307,6 +324,8 @@ export async function runInit(opts: {
       out,
       err,
       ...(opts.entryFactory !== undefined ? { entryFactory: opts.entryFactory } : {}),
+      ...(opts.volatileProbe !== undefined ? { volatileProbe: opts.volatileProbe } : {}),
+      ...(opts.fileVault !== undefined ? { fileVault: opts.fileVault } : {}),
       isInteractive,
     });
     if (!ok) {

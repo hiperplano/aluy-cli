@@ -1,14 +1,25 @@
 // ADR-0120 / EST-1113 — resolvedor de CREDENCIAL BYO do backend local (I/O concreto).
 //
 // Resolve a credencial de um provider local (API key OU access token OAuth) por
-// provider, na ordem **keychain → env**. PORTÁVEL? Não: toca o keychain do SO (dep
-// nativa) e `process.env` ⇒ mora no `@hiperplano/aluy-cli` (ADR-0053 §8). O core só recebe a
+// provider, na ordem **keychain (acelerador) → cofre em arquivo cifrado → env**.
+// PORTÁVEL? Não: toca o keychain do SO (dep nativa), o cofre em arquivo (fs/crypto)
+// e `process.env` ⇒ mora no `@hiperplano/aluy-cli` (ADR-0053 §8). O core só recebe a
 // `CredentialProvider` (função injetada) que devolve a credencial CORRENTE.
 //
-// CLI-SEC-7 / CLI-SEC-2 (DUROS): a chave NUNCA está no repo/binário; vem do
-// keychain do SO (cifrada pelo SO) OU de uma env var que o usuário exporta. NUNCA
-// é gravada em arquivo texto, nunca logada. Reusa o MESMO `@napi-rs/keyring` do PAT
-// do broker, sob um SERVIÇO/CONTA distinto (`aluy-cli-local` / `<provider>:apikey`).
+// CLI-SEC-7 / CLI-SEC-2 (DUROS, EMENDADO) — a chave NUNCA está no repo/binário;
+// NUNCA é gravada em CLARO (texto legível), nunca logada. A doutrina original só
+// tinha DOIS lugares pro segredo: keychain do SO OU env var — e exigir keychain
+// do SO é LOCK-IN de plataforma (e, num Linux headless sem Secret Service, o único
+// backend que existe é o keyring do KERNEL, que é MEMÓRIA — F165: a chave "some"
+// no primeiro reboot). A EMENDA (ver `file-vault.ts` p/ o raciocínio completo, e
+// CLAUDE.md Regra 3): "em claro" continua proibido — o que muda é que agora existe
+// um TERCEIRO lugar que nunca é em claro: `~/.aluy/credentials.enc`, cifrado
+// AES-256-GCM com chave derivada da identidade da MÁQUINA (nunca escrita em lugar
+// nenhum). O keychain do SO passa a ser ACELERADOR (usado quando existe e não é
+// volátil), NUNCA requisito — sua ausência não bloqueia mais o login.
+//
+// Reusa o MESMO `@napi-rs/keyring` do PAT do broker, sob um SERVIÇO/CONTA distinto
+// (`aluy-cli-local` / `<provider>:apikey`).
 
 import { Entry } from '@napi-rs/keyring';
 import type {
@@ -17,6 +28,16 @@ import type {
   LocalProviderKind,
   LocalAuthKind,
 } from '@hiperplano/aluy-cli-core';
+import {
+  keychainIsVolatile,
+  type VolatileKeychainProbeOptions,
+} from '../../auth/keychain-volatility.js';
+import {
+  readFileVaultAccount,
+  writeFileVaultAccount,
+  type FileVaultOptions,
+  type FileVaultReadResult,
+} from './file-vault.js';
 
 /** Serviço do keychain p/ as credenciais BYO do backend local (≠ do PAT do broker). */
 export const LOCAL_KEYCHAIN_SERVICE = 'aluy-cli-local';
@@ -52,19 +73,26 @@ export function oauthAccount(provider: LocalProviderKind): string {
  * acionável; NUNCA cita segredo.
  */
 export class MissingLocalCredentialError extends Error {
-  constructor(provider: LocalProviderKind, auth: LocalAuthKind, erroDoKeychain?: string) {
+  constructor(
+    provider: LocalProviderKind,
+    auth: LocalAuthKind,
+    erroDoKeychain?: string,
+    erroDoArquivo?: string,
+  ) {
     // CREDENCIAL-INTERMITENTE — quando o keychain FALHOU (≠ "nunca foi configurada"), o
     // conselho "configure a chave" é ERRADO e faz o dono reconfigurar o que já está
     // certo. O sintoma real é o Secret Service (DBus/keyring trancado/fora), e é ISSO
-    // que ele precisa ler. Motivo do keychain vem CRU do backend — nunca contém segredo
-    // (é diagnóstico do daemon), ao contrário do valor que ele guarda.
+    // que ele precisa ler. Motivo do keychain/arquivo vem CRU do backend — nunca contém
+    // segredo (é diagnóstico do backend), ao contrário do valor que ele guarda.
     const hint =
       erroDoKeychain !== undefined
         ? `o keychain do SO NÃO respondeu (${erroDoKeychain}) — a chave pode estar lá e inacessível.` +
           ` Verifique o Secret Service/DBus da sessão, ou passe \`${ENV_API_KEY[provider]}=...\` no ambiente.`
-        : auth === 'apikey'
-          ? `configure a chave: \`${ENV_API_KEY[provider]}=...\` (env) ou \`aluy login --provider ${provider}\` (keychain)`
-          : `faça login por assinatura: \`aluy login --provider ${provider} --oauth\``;
+        : erroDoArquivo !== undefined
+          ? `o cofre em arquivo NÃO pôde ser usado (${erroDoArquivo})`
+          : auth === 'apikey'
+            ? `configure a chave: \`${ENV_API_KEY[provider]}=...\` (env) ou \`aluy login --provider ${provider}\` (keychain/cofre em arquivo)`
+            : `faça login por assinatura: \`aluy login --provider ${provider} --oauth\``;
     super(`backend local: sem credencial ${auth} p/ "${provider}". ${hint}`);
     this.name = 'MissingLocalCredentialError';
   }
@@ -90,6 +118,9 @@ export interface LocalCredentialResolverOptions {
    * detém o store de tokens OAuth (com refresh single-flight). Ausente + oauth ⇒ erro.
    */
   readonly oauthAccessToken?: () => Promise<string | undefined>;
+  /** Opções do cofre em arquivo cifrado injetáveis (testes: `vaultPath` num tmpdir,
+   *  `machineId` determinístico). Default: `~/.aluy/credentials.enc` + machine-id real. */
+  readonly fileVault?: FileVaultOptions;
 }
 
 function makeEntry(
@@ -172,14 +203,25 @@ export function createLocalCredentialProvider(
       }
       return { kind: 'oauth', secret: token };
     }
-    // apikey: keychain primeiro (mais seguro), env como fallback (CI/dogfood/containers
-    // sem Secret Service). Ordem do env: var canônica do provider (built-ins) → genérica
-    // por provider (`ALUY_<PROVIDER>_API_KEY`, p/ custom) → catch-all (`ALUY_LOCAL_API_KEY`,
-    // p/ o provider local ATIVO). Assim provider CUSTOM (ex.: tokenrouter) também tem env.
+    // apikey: keychain primeiro (ACELERADOR — usado quando responde, nunca requisito),
+    // depois o cofre em arquivo cifrado (persistência de verdade, sem lock-in de SO),
+    // depois env como último fallback (CI/dogfood/containers). Ordem do env: var
+    // canônica do provider (built-ins) → genérica por provider (`ALUY_<PROVIDER>_API_KEY`,
+    // p/ custom) → catch-all (`ALUY_LOCAL_API_KEY`, p/ o provider local ATIVO). Assim
+    // provider CUSTOM (ex.: tokenrouter) também tem env.
     const conta = apiKeyAccount(provider);
     const doKeychain = readKeychain(opts.entryFactory, conta);
     // CREDENCIAL-INTERMITENTE — leitura BOA sempre atualiza o cache (rotação entra na hora).
     if (doKeychain.valor !== undefined) ultimaCredencialBoa.set(conta, doKeychain.valor);
+    // COFRE-EM-ARQUIVO — só entra em jogo quando o keychain NÃO respondeu (ausente OU
+    // erro). Ele nunca é preferido sobre um keychain que está funcionando AGORA; só
+    // substitui a ausência dele (é o "nunca requisito" da emenda: o keychain some, o
+    // cofre em arquivo assume — sem exigir Secret Service em lugar nenhum).
+    let doFileVault: FileVaultReadResult = {};
+    if (doKeychain.valor === undefined) {
+      doFileVault = readFileVaultAccount(conta, opts.fileVault);
+      if (doFileVault.valor !== undefined) ultimaCredencialBoa.set(conta, doFileVault.valor);
+    }
     const provEnvName = ENV_API_KEY[provider];
     const genericEnvName = genericApiKeyEnvName(provider);
     const fromEnv =
@@ -188,29 +230,90 @@ export function createLocalCredentialProvider(
       env.ALUY_LOCAL_API_KEY;
     const secret =
       doKeychain.valor ??
+      doFileVault.valor ??
       (fromEnv !== undefined && fromEnv !== '' ? fromEnv : undefined) ??
-      // Só chega aqui se o keychain FALHOU (ou esvaziou) e não há env: um blip do Secret
-      // Service não pode derrubar um serviço que roda 24/7 com a chave configurada.
-      (doKeychain.erro !== undefined ? ultimaCredencialBoa.get(conta) : undefined);
+      // Só chega aqui se keychain E cofre em arquivo FALHARAM (não apenas "ausentes")
+      // e não há env: um blip não pode derrubar um serviço que roda 24/7 com a chave
+      // configurada.
+      (doKeychain.erro !== undefined || doFileVault.erro !== undefined
+        ? ultimaCredencialBoa.get(conta)
+        : undefined);
     if (secret === undefined) {
-      throw new MissingLocalCredentialError(provider, 'apikey', doKeychain.erro);
+      throw new MissingLocalCredentialError(provider, 'apikey', doKeychain.erro, doFileVault.erro);
     }
     return { kind: 'apikey', secret };
   };
 }
 
-/** Grava uma API key BYO no keychain (usado por `aluy login --provider <p>`). */
+/** Resultado de `storeApiKey` — QUAL backend acabou guardando a chave. */
+export interface StoreApiKeyResult {
+  readonly backend: 'keychain' | 'file-vault';
+  /**
+   * `true` quando o keychain do SO respondeu, mas só tem o cofre VOLÁTIL do kernel
+   * (sem Secret Service — F165): o cofre em arquivo foi escrito TAMBÉM, como a
+   * cópia durável. Quando isto é `true`, o aviso antigo "sua chave some no reboot"
+   * deixaria de ser verdade — o caller NÃO deve mais imprimi-lo.
+   */
+  readonly volatileKeychainBackedByFile?: boolean;
+}
+
+export interface StoreApiKeyOptions {
+  /** Fábrica de Entry do keychain injetável (testes). Default: `@napi-rs/keyring`. */
+  readonly entryFactory?: (service: string, account: string) => KeyringEntry;
+  /** Opções do cofre em arquivo cifrado injetáveis (testes). */
+  readonly fileVault?: FileVaultOptions;
+  /** F165 — sonda de cofre volátil injetável (testes): platform/leitor de /proc/keys. */
+  readonly volatileProbe?: Omit<VolatileKeychainProbeOptions, 'service'>;
+}
+
+/**
+ * Grava uma API key BYO (usado por `aluy login --provider <p>`). Ordem: tenta o
+ * keychain do SO primeiro; se ele respondeu E não é volátil, ACABOU — ele é o
+ * ACELERADOR (mais rápido, nativo do SO). Em QUALQUER outro caso — keychain
+ * ausente, keychain com erro, OU keychain só disponível no cofre volátil do
+ * kernel (F165) — o cofre em arquivo cifrado assume a persistência de verdade
+ * (nunca requisito de SO). Nunca cai pra gravar em claro como consolo: se o
+ * cofre em arquivo também falhar (ex.: machine-id ilegível), LANÇA — o caller
+ * decide como reportar (tipicamente: instrui a usar env var).
+ */
 export function storeApiKey(
   provider: LocalProviderKind,
   key: string,
-  factory?: (service: string, account: string) => KeyringEntry,
-): void {
+  opts: StoreApiKeyOptions = {},
+): StoreApiKeyResult {
   const conta = apiKeyAccount(provider);
-  const entry = makeEntry(factory, LOCAL_KEYCHAIN_SERVICE, conta);
-  entry.setPassword(key);
-  // CREDENCIAL-INTERMITENTE — gravou, o cache anti-blip acompanha na hora: nunca serve
-  // uma chave velha depois de uma troca deliberada.
+
+  let keychainOk = false;
+  let keychainVolatile = false;
+  try {
+    const entry = makeEntry(opts.entryFactory, LOCAL_KEYCHAIN_SERVICE, conta);
+    entry.setPassword(key);
+    keychainOk = true;
+    keychainVolatile = keychainIsVolatile({
+      service: LOCAL_KEYCHAIN_SERVICE,
+      ...(opts.volatileProbe ?? {}),
+    });
+  } catch {
+    keychainOk = false;
+  }
+
+  if (keychainOk && !keychainVolatile) {
+    // CREDENCIAL-INTERMITENTE — gravou, o cache anti-blip acompanha na hora: nunca
+    // serve uma chave velha depois de uma troca deliberada.
+    ultimaCredencialBoa.set(conta, key);
+    return { backend: 'keychain' };
+  }
+
+  // Keychain ausente, com erro, OU só no cofre volátil do kernel: em qualquer um
+  // destes três casos ele é "acelerador, nunca requisito" — o cofre em arquivo
+  // cifrado assume. Deixa `writeFileVaultAccount` lançar (`MachineIdUnavailableError`
+  // ou erro de fs) — NUNCA cai pra gravar em claro como consolo.
+  writeFileVaultAccount(conta, key, opts.fileVault);
   ultimaCredencialBoa.set(conta, key);
+  return {
+    backend: 'file-vault',
+    ...(keychainOk && keychainVolatile ? { volatileKeychainBackedByFile: true } : {}),
+  };
 }
 
 /**
