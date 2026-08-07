@@ -23,8 +23,17 @@ MCP TS · **monorepo (npm workspaces)**: `@hiperplano/aluy-cli-core` (engine mod
    (rotas, identificadores, view-ids).
 2. **CI honesta** — lint + type-check + build + testes. **Nunca** `|| true`,
    `continue-on-error` nem `--exit-zero`. Gate vermelho bloqueia o merge.
-3. **Sem segredo versionado** — só `.env.example` com placeholders; credenciais
-   no keychain do SO (nunca em texto, nunca no repo). O `gitleaks` roda na CI.
+3. **Sem segredo versionado** — só `.env.example` com placeholders; credencial
+   **nunca em texto claro, nunca no repo**. O `gitleaks` roda na CI.
+   *Emenda ao CLI-SEC-2 (rc.135):* exigir keychain do SO era lock-in de sistema
+   operacional e deixava servidor headless sem cofre — sem Secret Service o
+   keyring do kernel é MEMÓRIA, e a chave sumia no reboot. Agora há um terceiro
+   lugar legítimo: **arquivo CIFRADO** (`~/.aluy/credentials.enc`, AES-256-GCM,
+   chave derivada por HKDF do machine-id + usuário). O que proíbe segue sendo
+   "em claro": um `0600` puro é só promessa de permissão e sai inteiro num `tar`,
+   num snapshot ou num `scp` — a chave derivada do machine-id NÃO viaja junto,
+   então o arquivo copiado é um blob inútil. O keychain do SO passa a ser
+   ACELERADOR (usado quando existe e não é volátil), nunca requisito.
 4. **Binário público limpo** — zero credencial de provider no repo/binário.
 5. **`main` protegido** — PR + review de CODEOWNERS, sem push direto.
 

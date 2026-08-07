@@ -13,9 +13,29 @@ import {
   LOCAL_KEYCHAIN_SERVICE,
   apiKeyAccount,
 } from '../../src/model/local/credential-resolver.js';
+import type { FileVaultOptions } from '../../src/model/local/file-vault.js';
+import type { VolatileKeychainProbeOptions } from '../../src/auth/keychain-volatility.js';
 import { tmpdir } from 'node:os';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+
+// COFRE-EM-ARQUIVO — mesmo achado do local-login.test.ts: `storeApiKey` agora
+// consulta `keychainIsVolatile()` (lê `/proc/keys` REAL por padrão) pra decidir
+// se também grava o cofre em arquivo. Nesta máquina há uma entrada REAL antiga
+// em `/proc/keys` (`openrouter:apikey@aluy-cli-local`, de uso real anterior) —
+// sem isolar, estes testes (mesmo com keychain FAKE) escreveriam a chave de
+// MENTIRA no `~/.aluy/credentials.enc` REAL. Todo teste injeta um `volatileProbe`
+// hermético + `fileVault` num tmpdir.
+const HERMETIC_VOLATILE_PROBE: Omit<VolatileKeychainProbeOptions, 'service'> = {
+  readProcKeys: () => '',
+};
+function tmpFileVault(baseDir: string): FileVaultOptions {
+  return {
+    vaultPath: join(baseDir, 'credentials.enc'),
+    machineId: { reader: () => 'machine-de-teste-fixa' },
+    username: 'teste',
+  };
+}
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
 
@@ -65,6 +85,8 @@ function fixture(answers: string[], keychainMem?: Map<string, string>, baseDir?:
     configStore,
     keychainMem: mem,
     tmpDir: tmp,
+    volatileProbe: HERMETIC_VOLATILE_PROBE,
+    fileVault: tmpFileVault(tmp),
   };
 }
 
@@ -95,6 +117,8 @@ describe('runFirstRunWizard — testes unitários', () => {
       out: f.out,
       err: f.err,
       entryFactory: f.entryFactory,
+      volatileProbe: f.volatileProbe,
+      fileVault: f.fileVault,
       isInteractive: true,
     });
 
@@ -134,6 +158,8 @@ describe('runFirstRunWizard — testes unitários', () => {
       out: f.out,
       err: f.err,
       entryFactory: f.entryFactory,
+      volatileProbe: f.volatileProbe,
+      fileVault: f.fileVault,
       isInteractive: true,
     });
 
@@ -162,6 +188,8 @@ describe('runFirstRunWizard — testes unitários', () => {
       out: f.out,
       err: f.err,
       entryFactory: f.entryFactory,
+      volatileProbe: f.volatileProbe,
+      fileVault: f.fileVault,
       isInteractive: true,
     });
 
@@ -198,6 +226,8 @@ describe('runFirstRunWizard — testes unitários', () => {
       out: f.out,
       err: f.err,
       entryFactory: f.entryFactory,
+      volatileProbe: f.volatileProbe,
+      fileVault: f.fileVault,
       isInteractive: true,
     });
 
@@ -222,6 +252,8 @@ describe('runFirstRunWizard — testes unitários', () => {
       out: f.out,
       err: f.err,
       entryFactory: f.entryFactory,
+      volatileProbe: f.volatileProbe,
+      fileVault: f.fileVault,
       isInteractive: true,
     });
 
@@ -241,6 +273,8 @@ describe('runFirstRunWizard — testes unitários', () => {
       out: f.out,
       err: f.err,
       entryFactory: f.entryFactory,
+      volatileProbe: f.volatileProbe,
+      fileVault: f.fileVault,
       isInteractive: true,
     });
 
@@ -258,6 +292,8 @@ describe('runFirstRunWizard — testes unitários', () => {
       out: f.out,
       err: f.err,
       entryFactory: f.entryFactory,
+      volatileProbe: f.volatileProbe,
+      fileVault: f.fileVault,
       isInteractive: true,
     });
 
@@ -276,6 +312,8 @@ describe('runFirstRunWizard — testes unitários', () => {
         out: f.out,
         err: f.err,
         entryFactory: f.entryFactory,
+        volatileProbe: f.volatileProbe,
+        fileVault: f.fileVault,
         isInteractive: false, // ← NÃO-interativo
       });
 
@@ -308,6 +346,8 @@ describe('runFirstRunWizard — testes unitários', () => {
         out: f.out,
         err: f.err,
         entryFactory: f.entryFactory,
+        volatileProbe: f.volatileProbe,
+        fileVault: f.fileVault,
         isInteractive: false,
       });
 
@@ -327,6 +367,8 @@ describe('runFirstRunWizard — testes unitários', () => {
       out: f.out,
       err: f.err,
       entryFactory: f.entryFactory,
+      volatileProbe: f.volatileProbe,
+      fileVault: f.fileVault,
       isInteractive: true,
     });
 
@@ -347,6 +389,8 @@ describe('runFirstRunWizard — testes unitários', () => {
       out: f.out,
       err: f.err,
       entryFactory: f.entryFactory,
+      volatileProbe: f.volatileProbe,
+      fileVault: f.fileVault,
       isInteractive: true,
     });
 
@@ -404,6 +448,8 @@ describe('runInit — integração wizard + provisionamento', () => {
       err: (l) => err.push(l),
       configStore,
       entryFactory: fakeEntryFactory(mem),
+      volatileProbe: HERMETIC_VOLATILE_PROBE,
+      fileVault: tmpFileVault(tmp),
       isInteractive: true,
       prompt: async () => '', // não deve ser chamado
       modelProbe: async () => true, // hermético: não toca rede no preflight
@@ -436,6 +482,8 @@ describe('runInit — integração wizard + provisionamento', () => {
       err: (l) => err.push(l),
       prompt,
       entryFactory: fakeEntryFactory(new Map()),
+      volatileProbe: HERMETIC_VOLATILE_PROBE,
+      fileVault: tmpFileVault(tmp),
       configStore,
       isInteractive: true,
       modelProbe: async () => true, // hermético: não toca rede no preflight
@@ -467,6 +515,8 @@ describe('runInit — integração wizard + provisionamento', () => {
       err: (l) => err.push(l),
       configStore,
       entryFactory: fakeEntryFactory(new Map()),
+      volatileProbe: HERMETIC_VOLATILE_PROBE,
+      fileVault: tmpFileVault(tmp),
       isInteractive: false,
     });
 
@@ -503,6 +553,8 @@ describe('runInit — integração wizard + provisionamento', () => {
       err: () => {},
       configStore,
       entryFactory: fakeEntryFactory(mem),
+      volatileProbe: HERMETIC_VOLATILE_PROBE,
+      fileVault: tmpFileVault(tmp),
       isInteractive: true,
       prompt: async () => '',
       agent: true, // pediu o caminho agente…

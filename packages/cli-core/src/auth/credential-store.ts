@@ -10,6 +10,13 @@
 // silencioso para arquivo em claro — se não há keychain, o store DEVE lançar
 // `NoKeychainError` (definido em @hiperplano/aluy-cli), e o caller avisa o usuário SEM
 // gravar nada em claro.
+//
+// EMENDA (escopo LOCAL): a credencial BYO do backend LOCAL (API key do provider
+// que o usuário traz — `packages/cli/src/model/local/credential-resolver.ts`)
+// ganhou um fallback ADICIONAL: um cofre em ARQUIVO CIFRADO (nunca em claro —
+// ver `file-vault.ts`), pra não depender de Secret Service em servidor headless.
+// Este `CredentialStore` (a credencial de SESSÃO do broker — device-flow/PAT)
+// NÃO ganhou essa emenda: continua exatamente como acima, sem fallback nenhum.
 
 import { jwtSubForDisplay } from './jwt-claims.js';
 import type { StoredCredential } from './types.js';
