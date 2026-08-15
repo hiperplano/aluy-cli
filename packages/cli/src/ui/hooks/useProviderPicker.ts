@@ -232,7 +232,16 @@ export function useProviderPicker(args: UseProviderPickerArgs): ProviderPickerCo
 
   const confirm = useCallback((): string | null => {
     const entry = providers[selected];
-    setOpen(false);
+    // F-PROV — o item sentinela "+ adicionar" NÃO é uma escolha final: a App (ao ver
+    // este nome de volta) chama `startAddCustom()` em seguida, reusando o MESMO picker
+    // pro formulário (`open` continua controlando o render em App.tsx). Fechar aqui
+    // incondicionalmente deixava `startAddCustom()` armar o passo 'id' com `open=false`
+    // — o <ProviderPicker> nunca chegava a renderizar o formulário, e o enter no item
+    // "+ adicionar" virava um no-op silencioso (bug relatado: "clico e não acontece
+    // nada"). Só fecha de fato quando a escolha é um provider REAL.
+    if (entry?.name !== ADD_CUSTOM_PROVIDER_SENTINEL) {
+      setOpen(false);
+    }
     return entry ? entry.name : null;
   }, [providers, selected]);
 

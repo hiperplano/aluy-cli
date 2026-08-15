@@ -196,6 +196,28 @@ describe('useProviderPicker — catálogo LOCAL (backend BYO)', () => {
     expect(c.addCustomDraft.id).toBe('ab');
   });
 
+  it('selecionar o sentinela pelo fluxo REAL da App (confirm() → startAddCustom()) NÃO fecha o picker', async () => {
+    // Bug relatado: "clico na opção [+ adicionar provider] e não acontece nada". A
+    // App.tsx (session/App.tsx) SEMPRE chama `confirm()` primeiro (enter no item
+    // selecionado) e só DEPOIS, ao ver o sentinela na resposta, chama `startAddCustom()`
+    // — nunca chama `startAddCustom()` isolado como os testes acima faziam. Se `confirm()`
+    // fecha o picker incondicionalmente, `startAddCustom()` arma o passo 'id' com
+    // `open=false` e o formulário nunca renderiza (a App só desenha o <ProviderPicker>
+    // quando `providerPicker.open`) — enter vira no-op silencioso.
+    let confirmedName: string | null = null;
+    const c = await drive({ localCatalog: () => [localEntry('a')] }, [
+      (p) => p.openPicker(),
+      (p) => p.move(1), // desce até o sentinela: [entrada 'a', sentinela] ⇒ índice 1
+      (p) => {
+        confirmedName = p.confirm();
+        if (confirmedName === ADD_CUSTOM_PROVIDER_SENTINEL) p.startAddCustom();
+      },
+    ]);
+    expect(confirmedName).toBe(ADD_CUSTOM_PROVIDER_SENTINEL);
+    expect(c.open).toBe(true); // o picker CONTINUA aberto — só troca p/ a vista do formulário
+    expect(c.addCustomStep).toBe('id');
+  });
+
   it('esc (cancelAddCustom) sai do formulário sem persistir e sem fechar a lista', async () => {
     const c = await drive({ localCatalog: () => [localEntry('a')] }, [
       (p) => p.openPicker(),

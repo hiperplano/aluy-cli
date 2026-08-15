@@ -4,6 +4,11 @@
 // (mesma dep `@napi-rs/keyring`, mesmo NoKeychainError, mesma disciplina CA-4):
 //   - SEM fallback em claro: keychain ausente ⇒ NoKeychainError, NÃO grava o token em texto.
 //   - get sem login ⇒ null (ausência não é erro).
+//
+// EMENDA (escopo LOCAL, NÃO se aplica aqui) — só a credencial BYO do backend
+// LOCAL (`model/local/credential-resolver.ts`) ganhou o fallback em cofre ARQUIVO
+// CIFRADO (ver `model/local/file-vault.ts`). Token de conector continua nas
+// regras acima, sem exceção.
 
 import { Entry } from '@napi-rs/keyring';
 import {

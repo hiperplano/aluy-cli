@@ -7,10 +7,16 @@
 // persistent-keyring do kernel ainda expira com ~3 dias sem uso) — e o usuário
 // precisa refazer o onboard sem entender o porquê.
 //
-// A gravação nesse cofre volátil acontecia EM SILÊNCIO. Isto aqui não muda o
-// armazenamento (CLI-SEC-2 intacto: NUNCA arquivo em claro por fallback) — só
-// torna a volatilidade VISÍVEL no momento certo (pós-gravação no login/onboard),
-// com o caminho de correção: instalar o Secret Service OU exportar a env var.
+// A gravação nesse cofre volátil acontecia EM SILÊNCIO. Isto aqui NASCEU só pra
+// tornar a volatilidade VISÍVEL (pós-gravação no login/onboard) — mas hoje faz
+// mais: `storeApiKey` (credential-resolver.ts) usa este MESMO probe pra DECIDIR
+// se também grava o cofre em ARQUIVO CIFRADO (EMENDA à CLI-SEC-2, ver o
+// cabeçalho de `file-vault.ts`). "Volátil" aqui deixou de significar só "avisa o
+// dono" — passou a significar "o keychain não é fonte de verdade, o cofre em
+// arquivo assume". Continua verdade que NUNCA há fallback em CLARO — o que mudou
+// é que agora há um fallback em ARQUIVO (sempre cifrado), então este módulo NÃO
+// é mais o fim de linha da persistência: é só o SINAL que aciona o cofre em
+// arquivo quando o keychain do SO não é confiável.
 //
 // DETECÇÃO: quando o backend keyutils é usado, a entrada aparece em `/proc/keys`
 // como `keyring:<conta>@<serviço>` (tipo `user`). Se, logo após um write, o

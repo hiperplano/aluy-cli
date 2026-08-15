@@ -24,15 +24,10 @@ import {
 import { realTerminalIO, type TerminalIO } from '../auth/io.js';
 import {
   storeApiKey,
-  genericApiKeyEnvName,
-  LOCAL_KEYCHAIN_SERVICE,
   type KeyringEntry,
 } from '../model/local/credential-resolver.js';
-import {
-  keychainIsVolatile,
-  volatileKeychainWarning,
-  type VolatileKeychainProbeOptions,
-} from '../auth/keychain-volatility.js';
+import type { VolatileKeychainProbeOptions } from '../auth/keychain-volatility.js';
+import type { FileVaultOptions } from '../model/local/file-vault.js';
 import { loadLocalProviderCatalog } from '../io/providers-config.js';
 import { UserConfigStore } from '../io/user-config.js';
 import { OAuthTokenStore } from '../model/local/oauth-store.js';
@@ -68,6 +63,9 @@ export interface LocalLoginDeps {
   readonly now?: () => number;
   /** F165 — sonda de cofre volátil injetável (testes): platform/leitor de /proc/keys. */
   readonly volatileProbe?: Omit<VolatileKeychainProbeOptions, 'service'>;
+  /** Opções do cofre em arquivo cifrado injetáveis (testes: `vaultPath` num tmpdir,
+   *  `machineId` determinístico). Default: `~/.aluy/credentials.enc` + machine-id real. */
+  readonly fileVault?: FileVaultOptions;
   /**
    * F167 — store de config INJETÁVEL. Sem isto, o `new UserConfigStore()` fixo
    * gravava `backend/localProvider` no ~/.aluy/config.json REAL mesmo nos TESTES
@@ -118,7 +116,7 @@ export async function runLocalLogin(
   return await runApiKeyLogin(provider, opts.token, io, deps);
 }
 
-/** Caminho API key: lê a chave (flag/prompt secreto) e grava no keychain. */
+/** Caminho API key: lê a chave (flag/prompt secreto) e grava (keychain ou cofre em arquivo). */
 async function runApiKeyLogin(
   provider: LocalProviderKind,
   inlineToken: string | undefined,
@@ -133,26 +131,40 @@ async function runApiKeyLogin(
     io.err('login: nenhuma chave informada.');
     return 1;
   }
+  let result;
   try {
-    storeApiKey(provider, key, deps.entryFactory);
+    result = storeApiKey(provider, key, {
+      ...(deps.entryFactory ? { entryFactory: deps.entryFactory } : {}),
+      ...(deps.volatileProbe ? { volatileProbe: deps.volatileProbe } : {}),
+      ...(deps.fileVault ? { fileVault: deps.fileVault } : {}),
+    });
   } catch (err) {
-    io.err(`login: falha ao gravar no keychain do SO: ${errMsg(err)}`);
+    // Nem keychain nem cofre em arquivo funcionaram — ex.: sem Secret Service E
+    // machine-id ilegível (contêiner minimalista). NUNCA cai pra gravar em claro.
+    io.err(`login: falha ao gravar a credencial (keychain do SO indisponível): ${errMsg(err)}`);
     io.err(
-      '  (Por segurança, a credencial nunca é gravada em texto em claro. Instale/ative o Secret Service no Linux.)',
+      '  (Por segurança, a credencial nunca é gravada em texto em claro. Use uma variável de ambiente como alternativa.)',
     );
     return 1;
   }
-  io.out(`✓ API key de ${provider} guardada no keychain do SO.`);
-  // F165 — sem Secret Service, o write acima caiu no keyring do KERNEL (memória):
-  // a chave "some" no próximo reboot e o dono redescobre na pior hora. Avisa AGORA,
-  // com o caminho de correção (Secret Service ou a env que o resolvedor lê).
-  if (keychainIsVolatile({ service: LOCAL_KEYCHAIN_SERVICE, ...(deps.volatileProbe ?? {}) })) {
-    for (const line of volatileKeychainWarning(genericApiKeyEnvName(provider))) io.err(line);
+  if (result.backend === 'keychain') {
+    io.out(`✓ API key de ${provider} guardada no keychain do SO.`);
+  } else {
+    io.out(`✓ API key de ${provider} guardada no cofre local cifrado (~/.aluy/credentials.enc).`);
+    if (result.volatileKeychainBackedByFile === true) {
+      // F165, emendado — o keychain respondeu mas só tem o cofre volátil do kernel
+      // (sem Secret Service): o cofre em arquivo é quem garante persistência real.
+      // O aviso antigo ("some no reboot") deixaria de ser verdade — não o repetimos.
+      io.out(
+        '  (o keychain do SO aqui só é volátil — sem Secret Service — mas o cofre em arquivo',
+      );
+      io.out('   cifrado garante que a chave sobrevive a um reboot.)');
+    }
   }
   // DETERMINÍSTICO — configura `backend:local` + provider de uma vez. Assim
   // `aluy login --provider X --token Y` deixa TUDO pronto (a sessão já abre em local com
   // este provider), sem depender do onboard nem de editar config à mão. Best-effort: uma
-  // falha de escrita do config não derruba o login (a chave já está no keychain).
+  // falha de escrita do config não derruba o login (a chave já foi persistida acima).
   try {
     (deps.configStore ?? new UserConfigStore()).save({ backend: 'local', localProvider: provider });
     io.out(`  backend local + provider "${provider}" configurados. Rode:  aluy`);

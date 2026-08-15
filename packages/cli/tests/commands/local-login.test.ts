@@ -2,6 +2,17 @@
 // F167 — TODO teste injeta um `configStore` de tmpdir: sem isso, o save de
 // `backend/localProvider` do login batia no ~/.aluy/config.json REAL do dev/dono
 // e cada `npm test` CLOBBERAVA o provider configurado ("perdi o login").
+//
+// COFRE-EM-ARQUIVO (mesma disciplina F167, achado NA PRÓPRIA implementação desta
+// emenda) — `storeApiKey` agora decide se grava o cofre em arquivo consultando
+// `keychainIsVolatile()`, que por padrão lê o `/proc/keys` REAL. Nesta máquina
+// (dev real) há uma entrada REAL e antiga em `/proc/keys` (`openrouter:apikey@
+// aluy-cli-local`, de um `aluy login` de verdade já rodado aqui) — sem isolar,
+// os testes abaixo (mesmo com um keychain FAKE) seriam avaliados como "keychain
+// volátil" e o `storeApiKey` escreveria a chave de MENTIRA do teste no cofre em
+// arquivo REAL (`~/.aluy/credentials.enc`) do dono. Todo teste injeta
+// `volatileProbe` hermético (nunca lê `/proc/keys` de verdade) + `fileVault` num
+// tmpdir, como defesa em profundidade.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +21,8 @@ import { runLocalLogin, rejectNonGetCallback } from '../../src/commands/local-lo
 import { UserConfigStore } from '../../src/io/user-config.js';
 import type { TerminalIO } from '../../src/auth/io.js';
 import type { KeyringEntry } from '../../src/model/local/credential-resolver.js';
+import type { FileVaultOptions } from '../../src/model/local/file-vault.js';
+import type { VolatileKeychainProbeOptions } from '../../src/auth/keychain-volatility.js';
 
 // F167 — store de config isolado por teste (tmpdir), NUNCA o ~/.aluy real.
 const tmpDirs: string[] = [];
@@ -18,6 +31,20 @@ function tmpConfigStore(): UserConfigStore {
   tmpDirs.push(dir);
   return new UserConfigStore({ baseDir: join(dir, '.aluy') });
 }
+/** Cofre em arquivo isolado (tmpdir) — nunca `~/.aluy/credentials.enc` real. */
+function tmpFileVault(): FileVaultOptions {
+  const dir = mkdtempSync(join(tmpdir(), 'aluy-login-vault-'));
+  tmpDirs.push(dir);
+  return {
+    vaultPath: join(dir, 'credentials.enc'),
+    machineId: { reader: () => 'machine-de-teste-fixa' },
+    username: 'teste',
+  };
+}
+/** Sempre "não-volátil" — nunca lê o `/proc/keys` REAL desta máquina. */
+const HERMETIC_VOLATILE_PROBE: Omit<VolatileKeychainProbeOptions, 'service'> = {
+  readProcKeys: () => '',
+};
 afterEach(() => {
   for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
@@ -57,7 +84,13 @@ describe('runLocalLogin — API key', () => {
     const { io, out } = fakeIO();
     const code = await runLocalLogin(
       { provider: 'anthropic', token: 'sk-ant-123' },
-      { configStore: tmpConfigStore(), io, entryFactory: fakeKeyring(mem) },
+      {
+        configStore: tmpConfigStore(),
+        io,
+        entryFactory: fakeKeyring(mem),
+        volatileProbe: HERMETIC_VOLATILE_PROBE,
+        fileVault: tmpFileVault(),
+      },
     );
     expect(code).toBe(0);
     expect(mem['anthropic:apikey']).toBe('sk-ant-123');
@@ -69,7 +102,13 @@ describe('runLocalLogin — API key', () => {
     const store = tmpConfigStore();
     const code = await runLocalLogin(
       { provider: 'openrouter', token: 'sk-or-fake' },
-      { configStore: store, io, entryFactory: fakeKeyring({}) },
+      {
+        configStore: store,
+        io,
+        entryFactory: fakeKeyring({}),
+        volatileProbe: HERMETIC_VOLATILE_PROBE,
+        fileVault: tmpFileVault(),
+      },
     );
     expect(code).toBe(0);
     // O que o login configurou aterrissou no store isolado…
@@ -85,7 +124,13 @@ describe('runLocalLogin — API key', () => {
     const { io } = fakeIO(['sk-prompted']);
     const code = await runLocalLogin(
       { provider: 'openrouter' },
-      { configStore: tmpConfigStore(), io, entryFactory: fakeKeyring(mem) },
+      {
+        configStore: tmpConfigStore(),
+        io,
+        entryFactory: fakeKeyring(mem),
+        volatileProbe: HERMETIC_VOLATILE_PROBE,
+        fileVault: tmpFileVault(),
+      },
     );
     expect(code).toBe(0);
     expect(mem['openrouter:apikey']).toBe('sk-prompted');
@@ -108,6 +153,29 @@ describe('runLocalLogin — API key', () => {
       { configStore: tmpConfigStore(), io, entryFactory: fakeKeyring({}) },
     );
     expect(code).toBe(1);
+  });
+
+  it('COFRE-EM-ARQUIVO — keychain volátil (kernel keyring) ⇒ a chave também fica no cofre em arquivo, e o aviso de "some no reboot" NÃO aparece mais', async () => {
+    const mem: Record<string, string> = {};
+    const { io, out } = fakeIO();
+    const fileVault = tmpFileVault();
+    const code = await runLocalLogin(
+      { provider: 'anthropic', token: 'sk-vol-123' },
+      {
+        configStore: tmpConfigStore(),
+        io,
+        entryFactory: fakeKeyring(mem),
+        // simula EVIDÊNCIA de keyring do kernel (F165) — sem Secret Service.
+        volatileProbe: { readProcKeys: () => 'keyring:anthropic:apikey@aluy-cli-local' },
+        fileVault,
+      },
+    );
+    expect(code).toBe(0);
+    const texto = out.join('\n');
+    expect(texto).toMatch(/cofre local cifrado/i);
+    // o aviso ANTIGO (F165, `volatileKeychainWarning`) mentia agora — não é mais impresso.
+    expect(texto).not.toMatch(/não tem um cofre persistente/i);
+    expect(texto).not.toMatch(/NÃO sobrevive a um reboot/i);
   });
 });
 

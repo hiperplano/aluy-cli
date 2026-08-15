@@ -11,6 +11,13 @@
 //   - SEM fallback silencioso para arquivo em claro: se o keychain do SO não
 //     está disponível, lançamos `NoKeychainError` e o caller AVISA o usuário —
 //     a credencial NÃO é gravada em claro por default (CA-4).
+//
+// EMENDA (escopo LOCAL, NÃO se aplica aqui): a credencial BYO do backend LOCAL
+// (`model/local/credential-resolver.ts`) ganhou um fallback em cofre ARQUIVO
+// CIFRADO (nunca em claro — ver `model/local/file-vault.ts`) pra não exigir
+// Secret Service em servidor headless. Este `KeychainCredentialStore` (sessão do
+// broker) NÃO ganhou essa emenda — as regras acima continuam valendo sem
+// exceção: sem keychain, sem gravação, ponto.
 
 import { Entry } from '@napi-rs/keyring';
 import {
