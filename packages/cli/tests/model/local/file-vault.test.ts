@@ -3,9 +3,9 @@
 // identidade da MÁQUINA) e os TRÊS caminhos de erro exigidos: máquina diferente,
 // machine-id ilegível, permissão aberta. Usa tmpdir REAL (nunca `~/.aluy` real —
 // mesma disciplina do F167 nos testes de local-login).
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, chmodSync, statSync } from 'node:fs';
+import { mkdirSync, chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   readFileVaultAccount,
@@ -194,5 +194,51 @@ describe('readMachineId — leitor real (smoke, best-effort)', () => {
     // devolve undefined — não é uma invariante que o teste force.
     const v = readMachineId({ platform: 'linux' });
     expect(v === undefined || typeof v === 'string').toBe(true);
+  });
+});
+
+describe('cofre em arquivo — WINDOWS (modo POSIX não existe no NTFS)', () => {
+  it('modo 0666 NÃO é recusado quando a plataforma é win32', () => {
+    // O bug medido na máquina do dono (Win 11 + node v24.16): o NTFS reporta `666`
+    // porque `writeFileSync({mode})`/`chmodSync` são no-ops lá. Com a checagem
+    // incondicional, o cofre GRAVAVA e recusava LER o que ele mesmo gravou — inutilizável
+    // no Windows inteiro. Aqui simulamos o arquivo já com 0666 e exigimos que win32 leia.
+    const vaultPath = tmpVaultPath();
+    const opts = { ...MAQUINA_A, vaultPath };
+    writeFileVaultAccount('p:apikey', 'sk-teste-win', opts);
+    chmodSync(vaultPath, 0o666);
+
+    const comoWindows = readFileVaultAccount('p:apikey', { ...opts, platform: 'win32' });
+    expect(comoWindows.valor).toBe('sk-teste-win');
+    expect(comoWindows.motivo).toBeUndefined();
+
+    // e no POSIX a recusa CONTINUA valendo — a exceção é só do Windows.
+    const comoLinux = readFileVaultAccount('p:apikey', { ...opts, platform: 'linux' });
+    expect(comoLinux.valor).toBeUndefined();
+    expect(comoLinux.motivo).toBe('permissao-aberta');
+  });
+
+  it('o .tmp com o segredo cifrado NÃO fica órfão quando o rename falha', () => {
+    // No Windows o rename sobre alvo ABERTO falha com EPERM (medido: `FALHA EPERM`).
+    // O risco não é a falha em si — é o `.tmp-<pid>-<ts>` ficar no disco com a
+    // credencial cifrada dentro, sem ninguém para recolher.
+    const vaultPath = tmpVaultPath();
+    const dir = dirname(vaultPath);
+    mkdirSync(dir, { recursive: true }); // o helper só cria na 1a escrita
+    const antes = readdirSync(dir).filter((f) => f.includes('.tmp-'));
+    expect(antes).toHaveLength(0);
+
+    // Força a falha de forma determinística e na MESMA pasta (para o órfão, se
+    // houver, aparecer aqui): o alvo é um DIRETÓRIO, e rename de arquivo sobre
+    // diretório falha em qualquer plataforma. Substitui o EPERM do Windows sem
+    // precisar de Windows.
+    const alvoDir = join(dir, 'alvo-e-diretorio.enc');
+    mkdirSync(alvoDir, { recursive: true });
+    expect(() =>
+      writeFileVaultAccount('p:apikey', 'sk-x', { ...MAQUINA_A, vaultPath: alvoDir }),
+    ).toThrow();
+
+    const depois = readdirSync(dir).filter((f) => f.includes('.tmp-'));
+    expect(depois).toHaveLength(0);
   });
 });

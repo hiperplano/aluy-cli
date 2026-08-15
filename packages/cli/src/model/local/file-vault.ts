@@ -45,6 +45,7 @@ import {
   mkdirSync,
   statSync,
   chmodSync,
+  rmSync,
 } from 'node:fs';
 import { homedir, userInfo, platform as osPlatform } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -195,6 +196,8 @@ export interface FileVaultOptions {
   readonly machineId?: MachineIdOptions;
   /** Usuário do SO injetável (testes). Default: `os.userInfo().username`. */
   readonly username?: string;
+  /** Plataforma (injetável em teste). Default: `os.platform()`. */
+  readonly platform?: NodeJS.Platform;
 }
 
 export interface FileVaultReadResult {
@@ -230,8 +233,21 @@ function readVaultMap(opts: FileVaultOptions): VaultMapRead {
   // por algo fora do nosso controle. Nunca "consertamos" a permissão sozinhos
   // aqui no caminho de LEITURA (isso seria agir silenciosamente sobre algo
   // potencialmente comprometido); avisamos alto e paramos.
+  //
+  // NO WINDOWS ESTA VERIFICAÇÃO NÃO SE APLICA — e insistir nela quebrava o cofre por
+  // completo. NTFS não tem modo POSIX: `writeFileSync({mode:0o600})` e `chmodSync` são
+  // praticamente no-ops (o `chmod` do Node só alterna o atributo somente-leitura), e o
+  // `statSync().mode` reporta 0o666. Medido na máquina do dono, Windows 11 + node
+  // v24.16: modo reportado `666`. Resultado: o cofre GRAVAVA o arquivo e recusava LER
+  // o que ele mesmo tinha acabado de gravar — toda vez, para todo usuário Windows.
+  //
+  // Pular aqui não é afrouxar a regra; é parar de fingir que a verifico. Proteção real
+  // no Windows é ACL (outro mecanismo, não este). O arquivo fica sob o perfil do
+  // usuário, e a cifra — que é a defesa que de fato importa contra cópia — continua
+  // valendo igual nas três plataformas.
+  const plataforma = opts.platform ?? osPlatform();
   const mode = stat.mode & 0o777;
-  if ((mode & 0o077) !== 0) {
+  if (plataforma !== 'win32' && (mode & 0o077) !== 0) {
     return {
       erro:
         `cofre em arquivo (${path}) está com permissão ${mode.toString(8).padStart(3, '0')} ` +
@@ -340,10 +356,58 @@ export function writeFileVaultAccount(
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const tmpPath = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmpPath, sealed, { mode: 0o600 });
-  chmodSync(tmpPath, 0o600); // defesa extra: independe do umask do processo.
-  renameSync(tmpPath, path);
-  chmodSync(path, 0o600);
+  try {
+    writeFileSync(tmpPath, sealed, { mode: 0o600 });
+    // No POSIX isto blinda contra o umask. No Windows é no-op (o `chmod` do Node só
+    // alterna somente-leitura) — mantido porque não custa e vale nas outras duas.
+    chmodSync(tmpPath, 0o600);
+    renomearComRetry(tmpPath, path);
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      // no Windows pode falhar e não importa: lá o modo POSIX não significa nada.
+    }
+  } finally {
+    // O `.tmp` carrega o segredo CIFRADO. Se o rename falhou (ou explodiu no meio),
+    // ele fica no disco sem ninguém para recolher — lixo com credencial dentro, no
+    // mesmo diretório, para sempre. Limpeza no `finally` cobre os dois caminhos;
+    // depois de um rename bem-sucedido o arquivo já não existe e o unlink é no-op.
+    try {
+      rmSync(tmpPath, { force: true });
+    } catch {
+      /* melhor-esforço: nunca mascarar o erro real da escrita */
+    }
+  }
+}
+
+/**
+ * `rename` sobre alvo existente, com retry curto.
+ *
+ * No POSIX o rename sobre arquivo aberto é atômico e sempre funciona. NO WINDOWS NÃO:
+ * falha com EPERM/EBUSY se alguém mantiver o alvo aberto — antivírus varrendo, o
+ * indexador, ou outra instância do aluy lendo o cofre no mesmo instante. Medido na
+ * máquina do dono: `FALHA EPERM` com o alvo aberto para leitura.
+ *
+ * Esses bloqueios são TRANSITÓRIOS (o antivírus solta em milissegundos), então algumas
+ * tentativas espaçadas resolvem o caso real sem inventar um lock nosso. Esgotadas as
+ * tentativas, propaga o erro — o `finally` de quem chamou recolhe o `.tmp`.
+ */
+function renomearComRetry(de: string, para: string, tentativas = 5): void {
+  for (let i = 0; ; i++) {
+    try {
+      renameSync(de, para);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const transitorio = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES';
+      if (!transitorio || i >= tentativas - 1) throw err;
+      // espera curta e crescente (5ms, 10ms, 20ms, 40ms) sem depender de async.
+      const ate = Date.now() + 5 * 2 ** i;
+      while (Date.now() < ate) {
+        /* busy-wait: o caminho de escrita do cofre é síncrono por contrato */
+      }
+    }
+  }
 }
 
 function errMsg(err: unknown): string {
