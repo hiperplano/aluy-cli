@@ -2099,6 +2099,54 @@ export class SessionController {
     }
   }
 
+  /**
+   * F-RETRY-VISÍVEL — o caller AVISOU que vai re-tentar. Duas coisas acontecem aqui, e
+   * as duas faltavam:
+   *
+   * 1. DESCARTA o turno em voo que ficou vazio. O `sink.onStart` empurra um bloco `aluy`
+   *    por TENTATIVA; como a retentativa mora DENTRO do caller (`streaming-caller.ts`,
+   *    laço `decideRetry`), o controller não era avisado e os blocos ÓRFÃOS se
+   *    empilhavam — medido contra um provider que recusa: 4 blocos `Λ aluy` vazios em
+   *    24 segundos, um a cada espera de 5s, e vinte no fim do teto.
+   * 2. MOSTRA o motivo. O `onRetry` existia no `StreamingModelCallerOptions` e NINGUÉM
+   *    o ligava, então a razão da falha (`HTTP 429`, transporte, 5xx) morria no caller.
+   *    O dono via blocos vazios e NENHUMA palavra sobre o que estava acontecendo — o
+   *    defeito mais caro que existe aqui: a falha acontece e não chega a quem decide.
+   *
+   * O bloco é VIVO (`retrying: true`): a próxima chamada o SUBSTITUI (não empilha), e o
+   * `finishAluyTurn`/erro final o limpa. NEUTRO quanto a provider (HG-2) e sem token
+   * (CLI-SEC-6) — `reason` vem de `decideRetry`, que compõe literais + status numérico.
+   */
+  noteCallerRetry(n: {
+    readonly attempt: number;
+    readonly max: number;
+    readonly waitMs: number;
+    readonly reason?: string;
+  }): void {
+    // 1) fora os órfãos: turno em voo sem uma palavra + o aviso de retry anterior.
+    const limpos = this.state.blocks.filter(
+      (b) =>
+        !(b.kind === 'aluy' && b.streaming === true && b.text.trim() === '') &&
+        !(b.kind === 'broker-error' && b.retrying === true),
+    );
+    const onde = this.state.meta.backend === 'local' ? 'provider local' : 'broker';
+    const motivo = n.reason !== undefined && n.reason !== '' ? ` (${n.reason})` : '';
+    this.patch({
+      blocks: [
+        ...limpos,
+        {
+          kind: 'broker-error',
+          message: `não consegui falar com o ${onde}${motivo} — tentando de novo.`,
+          ...(this.state.meta.backend !== undefined ? { backend: this.state.meta.backend } : {}),
+          attempt: n.attempt,
+          maxAttempts: n.max,
+          retryInSeconds: Math.max(1, Math.ceil(n.waitMs / 1000)),
+          retrying: true,
+        },
+      ],
+    });
+  }
+
   /** O `StreamSink` que o StreamingModelCaller usa p/ emitir tokens ao vivo. */
   get sink(): StreamSink {
     return {

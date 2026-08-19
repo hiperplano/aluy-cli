@@ -1145,6 +1145,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // por construção, e o alvo continua sendo resolvido por chamada (o controller nasce
     // depois deste caller — era essa a razão do `controllerRef?.`).
     sink: delegatingSink(() => controllerRef?.sink),
+    // F-RETRY-VISÍVEL — o caller retenta SOZINHO (laço `decideRetry`), e este aviso era
+    // declarado e nunca ligado: a razão da falha morria ali dentro e o dono via só
+    // blocos `Λ aluy` vazios se empilhando, um por tentativa, sem uma palavra.
+    onRetry: (n) => controllerRef?.noteCallerRetry(n),
   });
 
   // EST-0973 — caller DEDICADO da compactação (`/compact`): NÃO-streaming (o resumo
