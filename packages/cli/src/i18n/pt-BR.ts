@@ -92,7 +92,11 @@ export const ptBR: FullCatalog = {
   'picker.provider.default': 'padrão',
   'picker.provider.fallback': '⚠ não foi possível listar os cadastrados — mostrando os conhecidos',
   'picker.provider.more': '… {count} providers a mais (↑↓ rola)',
-  'picker.provider.addCustom.id': 'id do provider (ex.: tokenrouter) — enter avança',
+  // Defeito 2 (relato do dono, "tokenrouter aparece na lista de instalação mas não em
+  // /provider"): não havia dessincronia — o nome era só o EXEMPLO deste campo livre,
+  // mas por ser marca REAL (e o site ter um card apontando pra tokenrouter.com) lia
+  // como opção suportada. Trocado por um placeholder obviamente genérico.
+  'picker.provider.addCustom.id': 'id do provider (ex.: meu-provider) — enter avança',
   'picker.provider.addCustom.baseUrl':
     'base URL (OpenAI-compatível, ex.: https://api.exemplo.com/v1) — enter avança',
   'picker.provider.addCustom.model':

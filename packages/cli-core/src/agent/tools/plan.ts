@@ -20,9 +20,21 @@
 
 import type { NativeTool, ToolResult, ToolPorts } from './types.js';
 import { ContextGraph, type BoxHorizon, type BoxSnapshot } from '../maestro/context-box-graph.js';
+// EST-1015-bis — a tolerância de FORMA e o "diz o que CHEGOU" nasceram AQUI e viraram
+// módulo (input-shape.ts) quando a mesma classe de bug apareceu em quase toda tool
+// nativa. Esta tool consome de lá: duas cópias divergiriam na primeira correção.
+import { listaDeChaves, descreveRecebido } from './input-shape.js';
 
 /** Nome estável da tool (FONTE ÚNICA — consumido pelos Sets do gate por-nome). */
 export const PLAN_TOOL_NAME = 'update_plan';
+
+/**
+ * Chaves-sinônimo que o modelo usa p/ a lista de passos, em ordem de precedência (a 1ª
+ * que bater vence). `plan` está aqui porque é o nome que o modelo lê na descrição da
+ * tool e repete como CHAVE — e, por ser nome de contêiner plausível, também é o caminho
+ * do aninhamento tratado em `extrairLista`.
+ */
+const CHAVES_DE_LISTA = ['steps', 'plan', 'todos', 'items'] as const;
 
 /** Estado de um passo do plano (estilo TodoWrite). */
 export type PlanStepStatus = 'pending' | 'in_progress' | 'completed';
@@ -126,11 +138,57 @@ function parseStepItem(item: unknown, allowSubsteps: boolean): PlanStep | string
  * substeps?}`. Status inválido/ausente ⇒ `pending`. Valida o teto sobre o TOTAL
  * achatado (passos + sub-passos) e exige título não-vazio.
  */
+/**
+ * Extrai a LISTA de passos de um input cru, tolerando as formas em que modelo pequeno
+ * erra. PURO. `undefined` quando não há lista reconhecível.
+ *
+ * As formas abaixo foram MEDIDAS como rejeitadas antes deste conserto, e todas são erro
+ * de FORMA, não de intenção — o modelo sabia o que queria dizer:
+ *
+ *   steps: "[{...}]"          serializou o array aninhado como TEXTO (o mais comum:
+ *                             modelos menores estruturam o objeto de fora e stringificam
+ *                             o de dentro)                          — `listaDeChaves`
+ *   steps: {"0": {...}}       objeto com chaves numéricas no lugar do array
+ *                                                                   — `listaDeChaves`
+ *   plan: { steps: [...] }    aninhou sob a própria chave que leu na descrição — o
+ *                             degrau EXTRA daqui (só o update_plan tem chave-sinônimo
+ *                             que também é nome de CONTÊINER plausível)
+ *
+ * Rejeitar isso custava caro: o modelo NÃO recebia de volta o que havia mandado, então
+ * não tinha como se corrigir — e repetia o mesmo erro. Observado com um modelo tentando
+ * quatro vezes seguidas e desistindo do plano.
+ *
+ * TEXTO SOLTO NÃO VIRA PLANO (`listaDeValor` também recusa): tentei aceitar
+ * `steps: "nope"` como plano de um passo e um teste existente pegou — com razão.
+ * Recuperar ali produziria um plano de aparência plausível com um passo lixo, que é pior
+ * que recusar: o erro some da vista e vira resultado errado. A regra que governa é
+ * recuperar quando a INTENÇÃO é inequívoca e nunca inventar quando é ambígua; para esse
+ * caso o conserto certo é o erro dizer o que chegou, e diz.
+ */
+function extrairLista(input: Readonly<Record<string, unknown>>): unknown[] | undefined {
+  const direto = listaDeChaves(input, CHAVES_DE_LISTA);
+  if (direto !== undefined) return direto;
+  // Aninhamento (`plan: { steps: [...] }`): só DEPOIS de esgotar as formas diretas, e
+  // recursando pelas MESMAS chaves — um plano de verdade nunca está a dois contêineres
+  // de distância, e parar aqui evita varrer objeto arbitrário atrás de qualquer array.
+  for (const c of CHAVES_DE_LISTA) {
+    const v = input[c];
+    if (v === null || typeof v !== 'object' || Array.isArray(v)) continue;
+    const dentro = extrairLista(v as Record<string, unknown>);
+    if (dentro !== undefined) return dentro;
+  }
+  return undefined;
+}
+
 export function normalizePlanInput(input: Readonly<Record<string, unknown>>): PlanParse {
-  const raw = input.steps ?? input.plan ?? input.todos ?? input.items;
-  if (!Array.isArray(raw)) {
+  const raw = extrairLista(input);
+  if (raw === undefined) {
+    // O ERRO DIZ O QUE CHEGOU. Sem isso o modelo não sabe o que corrigir e repete a
+    // mesma chamada — foi exatamente o que aconteceu (4 tentativas idênticas).
     return {
-      error: 'update_plan: passe "steps" como uma LISTA de passos (string ou {title,status}).',
+      error:
+        'update_plan: passe "steps" como uma LISTA de passos (string ou {title,status}). ' +
+        `Recebi: ${descreveRecebido(input)}.`,
     };
   }
   if (raw.length === 0) return { error: 'update_plan: a lista de passos está vazia.' };

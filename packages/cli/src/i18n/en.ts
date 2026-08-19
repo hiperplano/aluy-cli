@@ -91,7 +91,10 @@ export const en: PartialCatalog = {
   'picker.provider.default': 'default',
   'picker.provider.fallback': '⚠ could not list the registered ones — showing the known providers',
   'picker.provider.more': '… {count} more providers (↑↓ scroll)',
-  'picker.provider.addCustom.id': 'provider id (e.g. tokenrouter) — enter advances',
+  // Defeito 2 — see pt-BR.ts: "tokenrouter" was only a placeholder here, but being a
+  // real product name (echoed by a partner card on the site) read as a supported
+  // option. Swapped for an obviously generic placeholder.
+  'picker.provider.addCustom.id': 'provider id (e.g. my-provider) — enter advances',
   'picker.provider.addCustom.baseUrl':
     'base URL (OpenAI-compatible, e.g. https://api.example.com/v1) — enter advances',
   'picker.provider.addCustom.model':

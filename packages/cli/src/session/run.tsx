@@ -119,7 +119,7 @@ import {
   type ModelCaller,
   type LocalProviderEntry,
 } from '@hiperplano/aluy-cli-core';
-import { applyTierLiteral, modelWindowFromConfig } from '../model/catalog.js';
+import { applyTierLiteral, modelWindowFromConfig, upstreamFromConfig } from '../model/catalog.js';
 import { TerminalNotificationPort, loadNotifyConfig } from '../io/notify-port.js';
 import { attachNotifyObserver } from './notify-observer.js';
 import { UndoController, type UndoOutcome } from './undo-controller.js';
@@ -1200,12 +1200,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     });
     localProviderForMeta = localCfg.provider; // p/ o `meta`/status mostrar o provider LOCAL
     localModelForWindow = localCfg.model; // F-WIN — chave da janela declarada (contextByModel)
+    // F-UP — roteamento de UPSTREAM declarado (`providers[].upstreamByModel`). Vem do
+    // MESMO lugar e pelo MESMO casamento de provider que a janela (`contextByModel`);
+    // quem escolhe o fragmento do slug ATIVO é o `toLocalRequest`, por request.
+    const localUpstream = upstreamFromConfig(savedConfig.providers, localCfg.provider);
     localModelClient = await buildLocalModelClient({
       catalog: localCatalog,
       provider: localCfg.provider,
       model: localCfg.model,
       auth: localCfg.auth,
       ...(localCfg.baseUrl !== undefined ? { baseUrl: localCfg.baseUrl } : {}),
+      ...(localUpstream !== undefined ? { upstreamByModel: localUpstream } : {}),
       env,
       // EST-1114 — sob `auth:'oauth'`, o access token (refrescado) vem do store OAuth.
       ...(localCfg.auth === 'oauth'
@@ -1251,6 +1256,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       ...(localCfg.baseUrl !== undefined ? { bootBaseUrl: localCfg.baseUrl } : {}),
       env,
       oauthAccessTokenFor: (providerId) => createOAuthAccessTokenProvider(providerId),
+      // F-UP — o sub-agente sai pelo MESMO upstream declarado que o pai (lido por
+      // provider ATIVO, nunca congelado no boot — ver `upstreamByModelFor`).
+      upstreamByModelFor: (providerId) => upstreamFromConfig(savedConfig.providers, providerId),
     });
 
     // ADR-0153 (D2) — o conjunto de slugs REGISTRADOS NESTA SESSÃO (test-then-
@@ -1487,11 +1495,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       }
       try {
         const auth = defaultAuthFor(entry.id, freshCatalog);
+        // F-UP — o upstream declarado é POR PROVIDER: ao trocar de provider, relê o mapa
+        // do provider NOVO (o do boot não vale mais). Sem entrada p/ ele ⇒ `undefined`,
+        // e o client novo simplesmente não manda fragmento nenhum.
+        const switchUpstream = upstreamFromConfig(savedConfig.providers, entry.id);
         const client = await buildLocalModelClient({
           catalog: freshCatalog,
           provider: entry.id,
           model: entry.defaultModel,
           auth,
+          ...(switchUpstream !== undefined ? { upstreamByModel: switchUpstream } : {}),
           env,
           ...(auth === 'oauth'
             ? { oauthAccessToken: createOAuthAccessTokenProvider(entry.id) }

@@ -61,6 +61,27 @@ export interface LocalModelClientOptions {
   readonly maxTokens?: number;
 }
 
+/**
+ * Fragmento de upstream declarado p/ UM slug, casando por slug EXATO case-insensitive.
+ * `undefined` quando não há mapa, o slug não está nele, ou o valor não é um objeto
+ * (o sanitize do config já filtra, mas este ponto é fronteira com DADO do disco).
+ * PURO.
+ */
+function lookupUpstream(
+  map: Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined,
+  model: string,
+): Readonly<Record<string, unknown>> | undefined {
+  if (map === undefined) return undefined;
+  const wanted = model.trim().toLowerCase();
+  if (wanted === '') return undefined;
+  for (const [k, v] of Object.entries(map)) {
+    if (k.trim().toLowerCase() !== wanted) continue;
+    if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
+    return v;
+  }
+  return undefined;
+}
+
 /** Default seguro de `max_tokens` quando nada foi configurado (Anthropic exige). */
 const DEFAULT_MAX_TOKENS = 8192;
 
@@ -249,6 +270,16 @@ export class LocalModelClient implements ModelClient {
       messages,
       maxTokens: request.max_tokens ?? this.maxTokens,
     };
+    // FRAGMENTO DE UPSTREAM do slug ATIVO (`providers[].upstreamByModel` no config do
+    // dono → `LocalProviderConfig.upstreamByModel`). A consulta é AQUI, por request, e
+    // sobre o `model` JÁ RESOLVIDO (depois do override de tier `custom` acima): o
+    // `/model` troca o slug sem reconstruir o client, então resolver no boot grudaria o
+    // roteamento do primeiro modelo em todos os seguintes. Casa por slug EXATO,
+    // case-insensitive (os slugs vêm do provider como `vendor/modelo` e o dono os
+    // escreve à mão) — MESMA disciplina do `contextByModel`. Sem entrada p/ o slug ⇒
+    // nada é mandado (o `extraBody` fica ausente, não vazio).
+    const upstream = lookupUpstream(this.config.upstreamByModel, model);
+    if (upstream !== undefined) out.extraBody = upstream;
     if (system !== undefined) out.system = system;
     if (request.temperature !== undefined) out.temperature = request.temperature;
     if (request.reasoning_effort !== undefined) out.reasoningEffort = request.reasoning_effort;

@@ -16,11 +16,7 @@ import {
   LIST_TODOS_TOOL_NAME,
   type TodoItem,
 } from './contract.js';
-
-function str(input: Readonly<Record<string, unknown>>, key: string): string | undefined {
-  const v = input[key];
-  return typeof v === 'string' && v.length > 0 ? v : undefined;
-}
+import { strReq, descreveRecebido } from '../tools/input-shape.js';
 
 // ── Schemas (EST-0996 — nativo + tool-docs de texto) ─────────────────────────
 
@@ -81,8 +77,14 @@ export const addTodoTool: NativeTool<ToolPorts> = {
         observation: 'backlog/TODO indisponível neste contexto (sem porta de TODO).',
       };
     }
-    const item = str(input, 'item');
-    if (!item) return { ok: false, observation: 'add_todo requer "item" (string não-vazia).' };
+    // "text"/"todo" são sinônimos INEQUÍVOCOS de "item" aqui (único campo de texto).
+    const item = strReq(input, ['item', 'text', 'todo']);
+    if (!item) {
+      return {
+        ok: false,
+        observation: `add_todo requer "item" (string não-vazia). Recebi: ${descreveRecebido(input)}.`,
+      };
+    }
     if (item.length > MAX_ITEM_CHARS) {
       return {
         ok: false,
@@ -172,8 +174,14 @@ export const doneTodoTool: NativeTool<ToolPorts> = {
         observation: 'backlog/TODO indisponível neste contexto (sem porta de TODO).',
       };
     }
-    const id = str(input, 'id');
-    if (!id) return { ok: false, observation: 'done_todo requer "id" (string, do list_todos).' };
+    // "todo_id" é sinônimo INEQUÍVOCO de "id" aqui (único identificador do item).
+    const id = strReq(input, ['id', 'todo_id']);
+    if (!id) {
+      return {
+        ok: false,
+        observation: `done_todo requer "id" (string, do list_todos). Recebi: ${descreveRecebido(input)}.`,
+      };
+    }
     try {
       const ok = await todo.done(id);
       return {

@@ -56,6 +56,16 @@ export interface LocalProviderConfig {
   readonly baseUrl?: string;
   /** Via de auth (default `apikey`). */
   readonly auth?: LocalAuthKind;
+  /**
+   * Mapa SLUG → fragmento de corpo cru (ver `LocalRequest.extraBody`), vindo de
+   * `providers[].upstreamByModel` no config do dono.
+   *
+   * Fica na CONFIG (não no request) porque é declaração ESTÁVEL do dono sobre um
+   * provider; mas a consulta é POR REQUEST, no `toLocalRequest` — o `/model` troca o
+   * slug SEM reconstruir o client (o override de tier `custom`), então resolver o
+   * fragmento no boot fixaria o roteamento do PRIMEIRO modelo em todos os seguintes.
+   */
+  readonly upstreamByModel?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 /**
@@ -71,6 +81,23 @@ export interface LocalRequest {
   readonly maxTokens: number;
   readonly temperature?: number;
   readonly reasoningEffort?: string;
+  /**
+   * FRAGMENTO DE CORPO por modelo — mesclado CRU na requisição (wire `openai-compat`).
+   *
+   * Existe porque roteamento de upstream NÃO é parte do protocolo OpenAI: cada agregador
+   * inventou o seu. No OpenRouter é `provider: { only: [...], quantizations: [...] }`; no
+   * tokenrouter, no Vercel AI Gateway e nos próximos é outro nome e outro formato. Modelar
+   * um vocabulário comum aqui seria inventar um padrão que não existe — e obrigaria uma
+   * release do aluy a cada campo novo de terceiro.
+   *
+   * Então o aluy NÃO INTERPRETA: valida que é objeto e repassa. O dono escreve o dialeto
+   * do provedor que ele escolheu, e o namespace fica implícito (o fragmento mora DENTRO da
+   * entrada daquele provider no catálogo).
+   *
+   * Preço disso, e é o preço certo: erro de digitação aqui só aparece como erro do
+   * agregador, não como validação local.
+   */
+  readonly extraBody?: Readonly<Record<string, unknown>>;
   readonly tools?: readonly ToolFunctionSchema[];
   readonly toolChoice?: 'auto' | 'none' | 'required';
 }

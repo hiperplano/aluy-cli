@@ -10,7 +10,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { render, Box, useApp, useInput } from 'ink';
-import { Wordmark } from '../ui/components/Wordmark.js';
+import { MIN_WORDMARK_COLS, Wordmark } from '../ui/components/Wordmark.js';
+import { ShadowedWordmark } from '../ui/components/ShadowedWordmark.js';
 import { Role, ThemeProvider, resolveTheme } from '../ui/theme/index.js';
 import { CLI_VERSION } from '../version.js';
 import { LANGS, type Lang } from '../i18n/lang.js';
@@ -179,12 +180,19 @@ function OnboardApp(props: {
       hint: T('autentica depois com aluy login', 'authenticate later with aluy login'),
     },
   ];
+  // Espelha o `wants3d` do <SplashScreen>: terminal estreito ⇒ marca plana.
+  const temMarcaLarga = (process.stdout.columns ?? 80) >= MIN_WORDMARK_COLS;
   const providerOpts: Opt[] = [
     ...providers.map((e) => ({ value: e.id, label: e.label, hint: e.defaultModel })),
     {
       value: '__custom__',
       label: T('+ custom (OpenAI-compatível)', '+ custom (OpenAI-compatible)'),
-      hint: T('ex.: TokenRouter, vLLM…', 'e.g. TokenRouter, vLLM…'),
+      // Defeito 2 (relato do dono) — "TokenRouter" aqui era EXEMPLO, mas junto de itens
+      // REAIS da lista (deepseek/openai/…) lia como se fosse mais um provider suportado
+      // (reforçado pelo card do site apontando pra tokenrouter.com). `vLLM` some porque
+      // era o MESMO tipo de exemplo, com o mesmo risco — trocados por termos que não são
+      // nome de produto nenhum.
+      hint: T('ex.: seu endpoint OpenAI-compat', 'e.g. your OpenAI-compat endpoint'),
     },
   ];
   const sidecarOpts: Opt[] = [
@@ -569,7 +577,13 @@ function OnboardApp(props: {
 
   return (
     <Box flexDirection="column" paddingY={1}>
-      <Wordmark columns={80} />
+      {/* MESMA MARCA DO CLI — o onboarding desenhava a <Wordmark> PLANA enquanto o terminal
+          abre com a SOMBREADA. Instalar e abrir acontecem no mesmo minuto, e a marca mudava
+          de cara entre os dois. Espelha a decisão do <SplashScreen>: 3D só quando o terminal
+          comporta (Unicode + largura); senão a plana, que é o fallback fiel.
+          `animate={false}` de propósito — aqui a marca é IDENTIDADE, não animação: o brilho
+          varrendo competiria com a lista de escolha logo abaixo. */}
+      {temMarcaLarga ? <ShadowedWordmark frame={0} animate={false} /> : <Wordmark columns={80} />}
       <Box paddingTop={1}>
         {/* Mostra a VERSÃO que está sendo instalada/configurada na tela do logo (pedido do
             dono): tira a dúvida de "qual versão estou rodando" logo no 1º passo. */}
@@ -667,8 +681,13 @@ function OnboardApp(props: {
         )}
 
         {step === 'custom-id' && (
+          // Defeito 2 (relato do dono) — "tokenrouter" aqui era só EXEMPLO deste campo
+          // livre, mas por ser nome de produto REAL (e ecoado por um card do site
+          // apontando pra tokenrouter.com) lia como se fosse opção suportada no /provider.
+          // Trocado por um placeholder obviamente genérico — sem mudar a lista real
+          // (que já vem, sem dessincronia, de `loadLocalProviderCatalog().entries`).
           <TextRow
-            label={T('id do provider (ex.: tokenrouter)', 'provider id (e.g. tokenrouter)')}
+            label={T('id do provider (ex.: meu-provider)', 'provider id (e.g. my-provider)')}
             value={buf}
           />
         )}

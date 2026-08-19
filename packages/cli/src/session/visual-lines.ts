@@ -155,6 +155,58 @@ export function composerIndentCols(sessionLabel?: string): number {
 }
 
 /**
+ * GUARD DURO (crash "congela e não responde mais nada" — o dono trocou p/ `/fullscreen` e
+ * mandou uma msg) — TETO de caracteres de UMA linha-fonte (sem `\n`) ANTES de qualquer wrap.
+ *
+ * RAIZ: uma linha-fonte patológica (JSON numa linha só, base64, `cat` de um bundle
+ * minificado — dezenas/centenas de milhares de chars) faz o `wrap-ansi` (usado por
+ * `wrappedLineCount` em cockpit-conversa.ts E, mais grave, pelo PRÓPRIO Ink ao medir/quebrar
+ * `<Text wrap>` — `calculate-wrapped-text.js`) rodar por SEGUNDOS numa ÚNICA chamada (medido:
+ * ~500_000 chars ⇒ vários segundos SÓ no wrap-ansi cru). Isso trava o processo INTEIRO,
+ * SINCRONAMENTE — sem digitar, sem responder, sem sequer o watchdog de timeout de um teste
+ * disparar (o bloqueio é síncrono; um timer não dispara com o event loop preso). É
+ * exatamente "congelou e não respondeu mais nada".
+ *
+ * O gatilho real: `windowTailVisual` SÓ janelava quando `maxLines` estava definido — mas o
+ * turno CONCLUÍDO (`AluyBlock`, `streaming=false`) passa `maxLines=undefined` DE PROPÓSITO
+ * ("nada se perde": o histórico mostra o bloco INTEIRO). Sem teto NENHUM, uma linha
+ * patológica ia direto pro `<Markdown>`/`<CodeBlock>` sem jamais passar por esta função.
+ *
+ * O FIX: um piso POR-LINHA, independente de `maxLines`/`columns` — aplicado SEMPRE (mesmo
+ * no caminho "sem teto"). `MAX_SOURCE_LINE_CHARS` é generoso o bastante pra qualquer linha
+ * "real" de terminal (mesmo em 4000 chars, uma única linha já renderiza dezenas de linhas
+ * visuais — ninguém lê isso como "uma linha" de qualquer forma) e bem abaixo do patológico.
+ * Corta por CODE POINT (não parte surrogate); `…(+N chars)` marca o corte. PURO/barato: só
+ * `.length` (fast path) + um `Array.from` quando precisa cortar de fato.
+ */
+export const MAX_SOURCE_LINE_CHARS = 4000;
+
+/** Cap de UMA linha-fonte a `maxChars` (ver `MAX_SOURCE_LINE_CHARS`). PURO. */
+export function capSourceLineChars(line: string, maxChars = MAX_SOURCE_LINE_CHARS): string {
+  if (line.length <= maxChars) return line; // fast path — o caso comum (imensa maioria).
+  const chars = Array.from(line); // por code point — nunca parte um par surrogate.
+  if (chars.length <= maxChars) return line; // `.length` (UTF-16) superestimou; nada a cortar.
+  const kept = chars.slice(0, maxChars).join('');
+  return `${kept}…(+${chars.length - maxChars} chars nesta linha)`;
+}
+
+/**
+ * Aplica `capSourceLineChars` a CADA linha-fonte de `text` (split por `\n`). PURO/barato: o
+ * caso comum (nenhuma linha patológica) é só `.length` por linha — sem alocar nada novo.
+ */
+export function capLongSourceLines(text: string, maxChars = MAX_SOURCE_LINE_CHARS): string {
+  if (text.length <= maxChars) return text; // fast path — nem uma linha poderia estourar.
+  const lines = text.split('\n');
+  let changed = false;
+  const capped = lines.map((l) => {
+    const c = capSourceLineChars(l, maxChars);
+    if (c !== l) changed = true;
+    return c;
+  });
+  return changed ? capped.join('\n') : text; // sem mudança ⇒ devolve a MESMA referência.
+}
+
+/**
  * JANELA DE CAUDA por linhas VISUAIS (com WRAP). Devolve o SUFIXO de linhas-fonte de
  * `text` cuja altura visual (em `columns` colunas) cabe em `maxLines` linhas visuais,
  * e `hidden` = quantas linhas-FONTE ficaram acima (o que o marcador `…N acima`
@@ -162,7 +214,8 @@ export function composerIndentCols(sessionLabel?: string): number {
  * de fala), <ToolLine> e <BangBlock> (saída ao vivo) — todos janelavam por linhas-
  * fonte, o que subestimava a altura real quando as linhas eram largas.
  *
- *   • `maxLines` ausente/≤0 ⇒ texto inteiro, `hidden: 0` (sem teto).
+ *   • `maxLines` ausente/≤0 ⇒ texto inteiro (com o GUARD DURO por-linha abaixo já
+ *     aplicado — ver `capLongSourceLines`), `hidden: 0` (sem teto de LINHAS).
  *   • cabe inteiro (medido VISUALMENTE) ⇒ texto inteiro, `hidden: 0`.
  *   • `columns ≤ 0` (largura desconhecida) ⇒ janela por linhas-FONTE (degradação
  *     graciosa — nunca pior que o comportamento antigo).
@@ -171,6 +224,12 @@ export function composerIndentCols(sessionLabel?: string): number {
  *     JS, JSON numa linha só, log de MB), ela é CORTADA na CAUDA p/ caber em `maxLines`
  *     linhas visuais, com um `…` no início marcando o corte (ver FIX abaixo).
  *
+ * GUARD DURO (fix "congela e não responde mais nada" — ver `capLongSourceLines` acima) —
+ * TODA chamada passa primeiro pelo teto POR-LINHA, independente de `maxLines`/`columns`.
+ * Sem isso, o caminho "sem teto" (`maxLines` ausente — o turno CONCLUÍDO, "nada se perde")
+ * deixava uma linha-fonte patológica passar INTACTA pro `<Markdown>`/Ink, que trava
+ * SINCRONAMENTE ao tentar medir/quebrar `<Text wrap>` dela (o `wrap-ansi` interno do Ink).
+ *
  * PURO.
  */
 export function windowTailVisual(
@@ -178,9 +237,10 @@ export function windowTailVisual(
   maxLines: number | undefined,
   columns: number,
 ): { text: string; hidden: number } {
-  if (!maxLines || maxLines <= 0) return { text, hidden: 0 };
-  const lines = text.split('\n');
-  if (visualLines(text, columns) <= maxLines) return { text, hidden: 0 };
+  const safeText = capLongSourceLines(text);
+  if (!maxLines || maxLines <= 0) return { text: safeText, hidden: 0 };
+  const lines = safeText.split('\n');
+  if (visualLines(safeText, columns) <= maxLines) return { text: safeText, hidden: 0 };
   let used = 0;
   let start = lines.length;
   for (let i = lines.length - 1; i >= 0; i--) {

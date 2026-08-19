@@ -75,6 +75,16 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
     if (request.reasoningEffort !== undefined && request.reasoningEffort !== '') {
       body.reasoning_effort = request.reasoningEffort;
     }
+    // FRAGMENTO CRU do dono (ex.: `provider: { only: ["gmicloud"] }` no OpenRouter).
+    // Mesclado por ÚLTIMO de propósito: o dono manda mais que o default. Mas NUNCA
+    // sobrescreve `messages`/`model`/`stream` — quem mexe nesses três quebra o protocolo,
+    // não configura roteamento, e o erro apareceria longe daqui.
+    if (request.extraBody !== undefined) {
+      for (const [k, v] of Object.entries(request.extraBody)) {
+        if (k === 'messages' || k === 'model' || k === 'stream') continue;
+        body[k] = v;
+      }
+    }
     if (request.tools !== undefined && request.tools.length > 0) {
       body.tools = request.tools; // já no shape de função OpenAI.
       body.tool_choice = request.toolChoice ?? 'auto';

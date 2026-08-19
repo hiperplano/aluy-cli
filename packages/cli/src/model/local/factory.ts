@@ -91,6 +91,13 @@ export interface BuildLocalClientOptions {
    * provider (mesmo os adicionados por config) sejam respeitados.
    */
   readonly catalog?: LocalProviderCatalog;
+  /**
+   * Mapa SLUG → fragmento de corpo cru (`providers[].upstreamByModel` do config do dono),
+   * repassado à config do client. Quem consulta é o `toLocalRequest`, POR REQUEST e sobre
+   * o slug ATIVO — ver `LocalProviderConfig.upstreamByModel`. Ausente ⇒ nada muda no
+   * corpo (não-regressão para quem nunca declarou upstream).
+   */
+  readonly upstreamByModel?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 /**
@@ -153,6 +160,7 @@ export async function buildLocalModelClient(
       model: opts.model,
       auth,
       ...(opts.baseUrl ? { baseUrl } : {}),
+      ...(opts.upstreamByModel ? { upstreamByModel: opts.upstreamByModel } : {}),
     },
     baseUrl,
     getCredential,
@@ -172,8 +180,11 @@ export async function buildLocalModelClient(
  * `globalThis.fetch` cru, nunca uma credencial derivada de DADO (GS-SAM-L1/L2).
  *
  * PROIBIDO: `base` só pode conter o que o BOOT já resolveu (catálogo/provider/auth/
- * baseUrl/env/oauthAccessToken) — jamais um `provider`/`base_url`/`api_key` vindo de
- * spawn/`.md`/config (condição de segurança 1). O chamador (controller, via
+ * baseUrl/env/oauthAccessToken/upstreamByModel) — jamais um `provider`/`base_url`/
+ * `api_key` vindo de spawn/`.md`/config (condição de segurança 1). O `upstreamByModel`
+ * entra na lista PERMITIDA pelo mesmo motivo do `catalog`: é declaração do DONO em
+ * `~/.aluy/config.json`, não sai de spawn/`.md`, e não escolhe endpoint nem credencial —
+ * é fragmento de corpo que o agregador JÁ autenticado interpreta. O chamador (controller, via
  * `childCallerFor`) só passa o `slug` — um DADO de catálogo (HG-2), nunca credencial.
  *
  * MEMOIZADA por slug (client + caller): a validação anti-SSRF do `base_url` (só
@@ -232,6 +243,18 @@ export interface ProviderAwareLocalChildCallerFactoryOptions {
     provider: LocalProviderKind,
   ) => (() => Promise<string | undefined>) | undefined;
   /**
+   * F-UP — mapa de upstream declarado (`providers[].upstreamByModel`) POR PROVIDER, lido
+   * na hora (não congelado no boot): `/provider` troca o provider ativo e o mapa do
+   * ANTERIOR não vale mais. MESMO padrão do `oauthAccessTokenFor` acima.
+   *
+   * Sem isto, um sub-agente roteado ao MESMO slug do pai sairia por um upstream
+   * DIFERENTE do que o dono declarou — em silêncio, que é a classe de defeito que este
+   * conserto existe para fechar.
+   */
+  readonly upstreamByModelFor?: (
+    provider: LocalProviderKind,
+  ) => Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined;
+  /**
    * `fetch` injetável (TESTES) — repassado a toda fábrica por-provider. Produção NUNCA
    * passa isto (herda o fetch PINADO `createPinnedStreamFetch`, EST-1115, dentro de
    * `buildLocalModelClient`); existe só p/ observar requests sem tocar rede real, o
@@ -287,10 +310,12 @@ export function createProviderAwareLocalChildCallerFactory(
       ? opts.bootAuth
       : defaultAuthFor(providerId, catalog);
     const oauthAccessToken = opts.oauthAccessTokenFor?.(providerId);
+    const upstreamByModel = opts.upstreamByModelFor?.(providerId);
     const factory = createLocalChildCallerFactory({
       catalog,
       provider: providerId,
       auth,
+      ...(upstreamByModel !== undefined ? { upstreamByModel } : {}),
       ...(isBootProvider && opts.bootBaseUrl !== undefined ? { baseUrl: opts.bootBaseUrl } : {}),
       ...(opts.env !== undefined ? { env: opts.env } : {}),
       ...(auth === 'oauth' && oauthAccessToken !== undefined ? { oauthAccessToken } : {}),

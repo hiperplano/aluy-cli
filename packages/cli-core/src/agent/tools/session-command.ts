@@ -26,6 +26,7 @@
 // tool devolve erro (fail-safe — nenhum efeito).
 
 import type { NativeTool, ToolPorts, ToolResult, ToolRunContext } from './types.js';
+import { strOpt, descreveRecebido } from './input-shape.js';
 
 /** Nome estável da tool (FONTE ÚNICA — referenciado pela engine e pelos testes). */
 export const SESSION_COMMAND_TOOL_NAME = 'session_command';
@@ -82,15 +83,20 @@ export interface SessionCommandPort {
 function parseInput(
   input: Readonly<Record<string, unknown>>,
 ): { command: string; args: string } | string {
-  const rawCommand = input['command'];
-  if (typeof rawCommand !== 'string' || rawCommand.trim() === '') {
-    return 'session_command requer "command": o nome do comando de sessão SEM a barra (ex.: "doctor", "cycle").';
+  // "cmd" é sinônimo INEQUÍVOCO de "command" aqui (único campo de nome de comando).
+  const rawCommand = strOpt(input, ['command', 'cmd']);
+  if (rawCommand === undefined || rawCommand.trim() === '') {
+    return (
+      'session_command requer "command": o nome do comando de sessão SEM a barra (ex.: "doctor", "cycle"). ' +
+      `Recebi: ${descreveRecebido(input)}.`
+    );
   }
   // Normaliza: lowercase, tira a barra inicial se o modelo mandar `/doctor` por engano,
   // e trim. A "gramática de slash" (ADR-0147 §1) — o comando é sempre SEM barra aqui.
   const command = rawCommand.trim().toLowerCase().replace(/^\/+/, '');
-  const rawArgs = input['args'];
-  const args = typeof rawArgs === 'string' ? rawArgs : '';
+  // `args` tolera número (coage p/ texto — ex. um id numérico) além de string; qualquer
+  // outra forma (objeto/array/boolean) não tem representação textual óbvia ⇒ vazio.
+  const args = strOpt(input, ['args']) ?? '';
   return { command, args };
 }
 

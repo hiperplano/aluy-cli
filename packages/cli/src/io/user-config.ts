@@ -427,6 +427,27 @@ export interface UserProviderEntry {
    * Ausente p/ um slug ⇒ cai na precedência normal (config global > tier > 0).
    */
   readonly contextByModel?: Readonly<Record<string, number>>;
+  /**
+   * FRAGMENTO DE CORPO por SLUG de modelo — mesclado cru na requisição daquele modelo.
+   *
+   * O caso que motivou: "quero o modelo X servido pela gmicloud, não por outro revendedor
+   * do OpenRouter". Isso é ROTEAMENTO DE UPSTREAM, e não existe padrão — cada agregador
+   * tem o seu dialeto. Então o slug continua sendo o slug e o roteamento vira campo à
+   * parte; codificar o upstream DENTRO do nome do modelo seria esconder dado num nome,
+   * que é o defeito que nenhum código consegue ler depois.
+   *
+   *   "upstreamByModel": {
+   *     "qwen/qwen3-27b": { "provider": { "only": ["gmicloud"], "allow_fallbacks": false } }
+   *   }
+   *
+   * No OpenRouter, `only` é restrição DURA (a doc é explícita: sem fallback para outros
+   * mesmo com `allow_fallbacks: true`), enquanto `order` é só preferência — se o upstream
+   * escolhido cair, ele serve por outro e NÃO avisa. Quem declara upstream quer o primeiro.
+   *
+   * Mapa PARALELO ao `models`, como o `contextByModel` — não quebra o append idempotente
+   * do test-then-register nem os consumidores existentes.
+   */
+  readonly upstreamByModel?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 /** Formatos de fio aceitos (espelha `WireFormat` do core; gatekeeper de `sanitize`). */
@@ -729,6 +750,21 @@ function sanitizeProviderEntries(raw: unknown): readonly UserProviderEntry[] | u
       }
       return Object.keys(acc).length > 0 ? acc : undefined;
     })();
+    // Espelha o `contextByModel`: descarta o malformado em silêncio. O VALOR de cada slug
+    // é opaco de propósito — é o dialeto do agregador (`provider`, `routing`, o que for) e
+    // o aluy não conhece nenhum deles. Só exigimos que seja um OBJETO: se o dono digitar
+    // errado dentro, o erro vem do agregador, que é quem sabe o que aceita.
+    const upstreamByModel = ((): Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined => {
+      const src = o.upstreamByModel;
+      if (typeof src !== 'object' || src === null || Array.isArray(src)) return undefined;
+      const acc: Record<string, Record<string, unknown>> = {};
+      for (const [slug, v] of Object.entries(src as Record<string, unknown>)) {
+        const key = slug.trim();
+        if (key === '' || typeof v !== 'object' || v === null || Array.isArray(v)) continue;
+        acc[key] = v as Record<string, unknown>;
+      }
+      return Object.keys(acc).length > 0 ? acc : undefined;
+    })();
     const entry: UserProviderEntry = {
       id,
       wireFormat: wf as UserProviderEntry['wireFormat'],
@@ -738,6 +774,7 @@ function sanitizeProviderEntries(raw: unknown): readonly UserProviderEntry[] | u
       ...(auth ? { auth } : {}),
       ...(models ? { models } : {}),
       ...(contextByModel ? { contextByModel } : {}),
+      ...(upstreamByModel ? { upstreamByModel } : {}),
     };
     out.push(entry);
   }

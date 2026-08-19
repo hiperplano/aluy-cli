@@ -21,6 +21,7 @@ import {
 } from '../../src/ui/components/wordmark-3d.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { ToolLine } from '../../src/ui/components/ToolLine.js';
+import { BangBlock } from '../../src/ui/components/BangBlock.js';
 import { AskDialog } from '../../src/ui/components/AskDialog.js';
 import { AluyBlock, YouBlock } from '../../src/ui/components/TurnBlock.js';
 import { LoginFlow } from '../../src/ui/components/LoginFlow.js';
@@ -44,6 +45,18 @@ function wrap(
 ) {
   const theme = resolveTheme({ env });
   return render(<ThemeProvider theme={theme}>{node}</ThemeProvider>);
+}
+
+// GUARD DURO ("congela e não responde" — ver os testes de linha patológica abaixo) — o
+// PRÓPRIO Ink cacheia `wrap-ansi` por `texto+largura+tipo` (`ink/build/wrap-text.js`, um
+// objeto module-level que sobrevive entre RETRIES do vitest, `retry:2` em vitest.config.ts).
+// Uma linha REPETIDA byte-a-byte entre a tentativa 1 (falha real, lenta) e a 2 (retry) vira
+// cache-HIT instantâneo — o teste "passa" no retry e MASCARA o travamento da tentativa 1. Um
+// sufixo ÚNICO por chamada (timestamp+random) garante que CADA tentativa paga o custo real
+// (ou, com o fix, é rápida de qualquer forma) — sem isso o bug fica invisível aos olhos do CI.
+function uniqueHugeLine(char: string, len = 500_000): string {
+  const tag = `${Date.now()}-${Math.random()}`;
+  return char.repeat(len - tag.length) + tag;
 }
 
 // A suíte roda com FORCE_COLOR=3 (vitest.config.ts) p/ exercitar a SAÍDA ANSI
@@ -489,6 +502,46 @@ describe('ToolLine — sucesso e erro (§2.5/§2.6)', () => {
     expect(out).toContain('saída');
     expect(out).toContain('FAIL x');
   });
+
+  // FIX (mesma causa do freeze em fullscreen, ver TurnBlock abaixo) — o output CONCLUÍDO
+  // (`status !== 'running'`) do <ToolLine> renderiza `props.output.split('\n')` CRU, sem
+  // passar por nenhuma janela — ao contrário do `liveOutput` (que já era bounded via
+  // `clampLiveOutputChars`+`windowTailVisual`). Um erro cuja saída tem UMA linha sem `\n`
+  // patologicamente longa (stack trace de 1 linha, saída de `!comando` redigida) trava o
+  // Ink do MESMO jeito (o `wrap-ansi` interno dele, ao medir `<Text wrap>`). MEDIÇÃO DIRETA
+  // por relógio (não o timeout do `it`): o bloqueio é SÍNCRONO (o `wrap-ansi` cru trava o
+  // event loop por segundos) — o watchdog de timeout do próprio vitest usa um timer, que só
+  // dispara quando o event loop FOLGA; contra um bloqueio 100% síncrono ele nunca dispara
+  // (provado empiricamente: sem o fix este teste "passa" em ~12s mesmo com timeout=2000ms
+  // declarado). Por isso medimos o relógio nós mesmos, como nos testes puros de
+  // cockpit-conversa.test.ts — é o único jeito de PROVAR o travamento aqui.
+  it('GUARD DURO — output de ERRO concluído com uma linha de 500k chars não trava o render', () => {
+    const hugeLine = uniqueHugeLine('x');
+    const t0 = Date.now();
+    const { lastFrame } = wrap(
+      <ToolLine verb="bash" target="npm test" result="1 falha" status="err" output={hugeLine} />,
+    );
+    const elapsedMs = Date.now() - t0;
+    expect((lastFrame() ?? '').length).toBeGreaterThan(0);
+    expect(elapsedMs).toBeLessThan(2000); // ANTES do fix: ~10-13s (wrap-ansi interno do Ink).
+  });
+});
+
+describe('BangBlock — saída concluída (!comando)', () => {
+  // FIX (mesma causa do freeze em fullscreen) — diferente do <ToolLine> (que só mostra
+  // `output` no erro), o <BangBlock> mostra `output` em QUALQUER status concluído
+  // (ok/err/blocked) — `output.split('\n')` CRU, sem janela nenhuma. Um `!comando` cuja
+  // saída tem uma linha sem `\n` patologicamente longa (ex.: `!cat arquivo-minificado.js`)
+  // trava o Ink ao tentar medir/quebrar o `<Text wrap>` dessa linha. Medição por relógio —
+  // ver o comentário do <ToolLine> acima (o timeout do `it` não pega bloqueio síncrono).
+  it('GUARD DURO — saída OK com uma linha de 500k chars não trava o render', () => {
+    const hugeLine = uniqueHugeLine('y');
+    const t0 = Date.now();
+    const { lastFrame } = wrap(<BangBlock command="cat bundle.js" status="ok" output={hugeLine} />);
+    const elapsedMs = Date.now() - t0;
+    expect((lastFrame() ?? '').length).toBeGreaterThan(0);
+    expect(elapsedMs).toBeLessThan(2000);
+  });
 });
 
 // ── ToolLine × diff no histórico/scrollback (o gap que o dono apontou: o diff só
@@ -729,6 +782,28 @@ describe('TurnBlock — streaming', () => {
     const out = plain(lastFrame() ?? '');
     expect(out).toContain('<<<'); // texto legítimo do assistente preservado
     expect(out).toContain('here-strings');
+  });
+
+  // FIX (crash "congela e não responde mais nada" — o dono trocou p/ /fullscreen e mandou
+  // uma msg) — repro DIRETO no componente real: um turno CONCLUÍDO (`streaming=false`, o
+  // caminho "nada se perde" que NÃO tinha teto nenhum) com um code fence contendo UMA linha
+  // sem `\n` de 500k chars (JSON numa linha só / `cat` de um bundle minificado / base64). O
+  // Ink usa `wrap-ansi` internamente pra medir/quebrar `<Text wrap>` — pra uma linha dessas,
+  // ISSO SOZINHO já passa de vários segundos. Medição por relógio (não o timeout do `it`): o
+  // bloqueio é 100% SÍNCRONO — o watchdog de timeout do vitest usa um timer, que só dispara
+  // quando o event loop folga, e contra um bloqueio síncrono ele NUNCA dispara (provado
+  // empiricamente: sem o fix este teste "passa" em ~12s mesmo com um timeout declarado de
+  // 2000ms). Por isso medimos o relógio nós mesmos — é o único jeito de provar o travamento.
+  it('GUARD DURO — code fence com UMA linha de 500k chars NÃO trava o render (turno concluído)', () => {
+    const hugeLine = uniqueHugeLine('x');
+    const raw = '```json\n' + hugeLine + '\n```';
+    const t0 = Date.now();
+    const { lastFrame } = wrap(<AluyBlock text={raw} streaming={false} />);
+    const elapsedMs = Date.now() - t0;
+    // Só chegar aqui já ajuda — mas confirmamos que ALGO foi pintado (não ficou em branco
+    // por engano) E que o render foi RÁPIDO (a prova real do fix — ver o comentário acima).
+    expect((lastFrame() ?? '').length).toBeGreaterThan(0);
+    expect(elapsedMs).toBeLessThan(2000); // ANTES do fix: ~10-13s (wrap-ansi interno do Ink).
   });
 });
 
