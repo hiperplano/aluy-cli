@@ -125,7 +125,18 @@ export class AnthropicAdapter implements ProviderAdapter {
           if (tc !== undefined) tc.argsText += partial;
           return [];
         }
-        // thinking_delta / signature_delta: não viram conteúdo visível do turno.
+        // F-RAC — `thinking_delta` é o RACIOCÍNIO (extended thinking). Antes era
+        // descartado aqui com a justificativa de "não é conteúdo visível do turno" —
+        // verdade quanto à FALA, e por isso ele continua FORA do `content` final; mas
+        // descartar era jogar fora a única evidência de que o modelo está trabalhando.
+        // Vai no canal próprio (mesmo evento do `reasoning_content` do openai-compat).
+        if (dtype === 'thinking_delta') {
+          const thinking = str(delta, 'thinking');
+          return thinking !== undefined && thinking !== ''
+            ? [{ type: 'reasoning', content: thinking }]
+            : [];
+        }
+        // signature_delta: assinatura criptográfica do bloco de pensamento, não texto.
         return [];
       }
       case 'message_delta': {

@@ -2104,6 +2104,7 @@ export class SessionController {
     return {
       onStart: () => this.startAluyTurn(),
       onDelta: (content) => this.appendAluyDelta(content),
+      onReasoning: (content) => this.appendAluyReasoning(content),
       onUsage: (usage) => this.applyUsage(usage),
       onQuota: (quota) => this.applyQuota(quota),
       onDone: () => this.finishAluyTurn(),
@@ -5692,6 +5693,34 @@ export class SessionController {
     });
   }
 
+  /**
+   * F-RAC — anexa um chunk de RACIOCÍNIO ao turno corrente. Vai p/ o campo `reasoning`
+   * do bloco, NUNCA p/ o `text`: pensamento não é fala, e misturar os dois faria a
+   * resposta final carregar o rascunho do modelo.
+   *
+   * BOUNDED pela mesma razão do `appendToolChunk`: raciocínio é o canal mais VERBOSO
+   * desses modelos (pode passar de dezenas de milhares de chars num turno) e a região
+   * viva não pode crescer sem teto. Guardamos a CAUDA — é o fim do pensamento que
+   * explica onde ele chegou, não o começo (mesma lição da rc.133, em que a truncagem
+   * pela cabeça jogava fora o veredito).
+   *
+   * THROTTLED igual ao delta de fala (anti-flicker): o texto acumula íntegro, só a
+   * frequência de pintura é limitada.
+   */
+  private appendAluyReasoning(content: string): void {
+    const blocks = [...this.state.blocks];
+    const last = blocks[blocks.length - 1];
+    if (last && last.kind === 'aluy') {
+      const acumulado = (last.reasoning ?? '') + content;
+      const bounded =
+        acumulado.length > MAX_REASONING_CHARS
+          ? acumulado.slice(acumulado.length - MAX_REASONING_CHARS)
+          : acumulado;
+      blocks[blocks.length - 1] = { ...last, reasoning: bounded };
+      this.patchThrottled({ blocks });
+    }
+  }
+
   private appendAluyDelta(content: string): void {
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
@@ -7608,6 +7637,13 @@ function lastRunningTestRunIndex(blocks: readonly SessionBlock[]): number {
  * limite enquanto roda. Mantém a CAUDA (o mais recente é o que interessa ao vivo).
  */
 const MAX_LIVE_OUTPUT_BYTES = 64_000;
+
+/**
+ * F-RAC — teto do RACIOCÍNIO acumulado por turno (mesma disciplina do teto acima).
+ * Raciocínio é o canal mais verboso de um modelo de raciocínio e não pode inflar o
+ * estado sem limite. Mantém a CAUDA: é o fim do pensamento que diz onde ele chegou.
+ */
+const MAX_REASONING_CHARS = 16_000;
 function clipLiveTail(text: string): string {
   if (text.length <= MAX_LIVE_OUTPUT_BYTES) return text;
   return text.slice(text.length - MAX_LIVE_OUTPUT_BYTES);

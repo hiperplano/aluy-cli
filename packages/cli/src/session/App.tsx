@@ -5196,6 +5196,7 @@ export function BlockView(props: {
           <AluyBlock
             text={b.text}
             streaming={b.streaming}
+            {...(b.reasoning !== undefined ? { reasoning: b.reasoning } : {})}
             isCurrent={props.isCurrent}
             frame={props.frame}
             {...(props.maxLines !== undefined ? { maxLines: props.maxLines } : {})}

@@ -132,6 +132,20 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
       const delta = isRecord(choice.delta) ? choice.delta : undefined;
       const content = delta !== undefined ? str(delta, 'content') : undefined;
       if (content !== undefined && content !== '') out.push({ type: 'delta', content });
+      // F-RAC — RACIOCÍNIO. Dois nomes, porque não há padrão: `reasoning_content` é a
+      // convenção da DeepSeek (e a que os relays repassam quando servem o upstream
+      // nativo) e `reasoning` é como o OpenRouter a normaliza. Aceitamos os dois e
+      // NÃO inventamos um terceiro. Medido num `deepseek-v4-pro` servido por relay:
+      // 18 chunks com `content: null` + `reasoning_content` preenchido, e só o
+      // ÚLTIMO trazendo o `content` de verdade — quem lê só `content` fica cego pelo
+      // turno inteiro. Vai num evento PRÓPRIO: pensamento não é fala.
+      const reasoning =
+        delta !== undefined
+          ? (str(delta, 'reasoning_content') ?? str(delta, 'reasoning'))
+          : undefined;
+      if (reasoning !== undefined && reasoning !== '') {
+        out.push({ type: 'reasoning', content: reasoning });
+      }
       if (delta !== undefined && Array.isArray(delta.tool_calls)) {
         accumulateToolCalls(acc, delta.tool_calls);
       }
