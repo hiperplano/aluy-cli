@@ -22,6 +22,12 @@
 // o resolver concreto vivem no @hiperplano/aluy-cli; aqui é só o contrato + a tool.
 
 import type { NativeTool, ToolPorts, ToolResult, ToolRunContext } from './types.js';
+// EST-1015-bis — mesma classe de bug achada no update_plan (ver input-shape.ts):
+// `options` chegava aninhado-stringificado ou como objeto de chaves numéricas e a
+// validação antiga (`Array.isArray` cru) não reconhecia nenhuma das duas — pior, caía
+// SILENCIOSAMENTE p/ `kind:'text'` (as opções somem, sem erro — o modelo nunca fica
+// sabendo que o "single/multi" que pediu virou pergunta livre).
+import { listaDeChaves, descreveRecebido } from './input-shape.js';
 
 /** Nome estável da tool (FONTE ÚNICA — consumido pelos Sets do gate por-nome). */
 export const QUESTION_TOOL_NAME = 'perguntar';
@@ -108,7 +114,8 @@ export function normalizeQuestionInput(input: Readonly<Record<string, unknown>>)
   if (typeof questionRaw !== 'string' || questionRaw.trim() === '') {
     return {
       error:
-        'perguntar: passe "question" (a pergunta em texto). Para escolha, passe também "options".',
+        'perguntar: passe "question" (a pergunta em texto). Para escolha, passe também "options". ' +
+        `Recebi: ${descreveRecebido(input)}.`,
     };
   }
   const question = questionRaw.trim().slice(0, MAX_QUESTION_CHARS);
@@ -119,9 +126,21 @@ export function normalizeQuestionInput(input: Readonly<Record<string, unknown>>)
       ? headerRaw.trim().slice(0, MAX_HEADER_CHARS)
       : undefined;
 
-  // Opções: aceita `options` ou `choices`.
-  const optionsRaw = input.options ?? input.choices;
-  const options = Array.isArray(optionsRaw) ? parseOptions(optionsRaw) : undefined;
+  // Opções: aceita `options`/`choices`, tolerando array stringificado ou objeto de
+  // chaves numéricas ("0","1",…) — mesma classe de erro-de-forma do update_plan (ver
+  // input-shape.ts). Quando a CHAVE está presente mas não é reconhecível como lista,
+  // é ERRO visível — nunca degrada silenciosamente p/ `kind:'text'` (perderia as
+  // opções pedidas sem o modelo nunca saber que sumiram).
+  const optionsPresente = input.options !== undefined || input.choices !== undefined;
+  const optionsList = listaDeChaves(input, ['options', 'choices']);
+  if (optionsPresente && optionsList === undefined) {
+    return {
+      error:
+        `perguntar: "options" não foi reconhecido como uma LISTA de opções. ` +
+        `Recebi: ${descreveRecebido(input)}.`,
+    };
+  }
+  const options = optionsList !== undefined ? parseOptions(optionsList) : undefined;
   if (typeof options === 'string') {
     return { error: options }; // parseOptions devolve string em erro
   }
@@ -148,8 +167,16 @@ export function normalizeQuestionInput(input: Readonly<Record<string, unknown>>)
     }
   }
 
-  // allowOther: default true; só vale p/ single/multi (text já é livre).
-  const allowOther = input.allowOther === false ? false : true;
+  // allowOther: default true; só vale p/ single/multi (text já é livre). Tolera o
+  // texto "false" (mesmo padrão de boolDeChave — modelo que stringifica o objeto todo
+  // stringifica o booleano junto); só o literal exato desliga, nunca inventa a partir
+  // de texto ambíguo.
+  const allowOtherRaw = input.allowOther;
+  const allowOther =
+    allowOtherRaw === false ||
+    (typeof allowOtherRaw === 'string' && allowOtherRaw.trim().toLowerCase() === 'false')
+      ? false
+      : true;
 
   const spec: QuestionSpec = {
     kind,

@@ -224,4 +224,34 @@ describe('windowTailVisual — janela de cauda por linhas VISUAIS (com WRAP)', (
     expect(r.hidden).toBe(3);
     expect(r.text.split('\n')).toHaveLength(2);
   });
+
+  // FIX (crash "congela e não responde mais nada" — dono trocou p/ /fullscreen e mandou uma
+  // msg): `maxLines` ausente é EXATAMENTE o caminho de um turno CONCLUÍDO (AluyBlock só passa
+  // `props.maxLines` enquanto `streaming`; ao terminar vira `undefined` — "nada se perde").
+  // ANTES, esse ramo devolvia o texto CRU intacto, mesmo que uma ÚNICA linha-fonte (sem `\n`
+  // — JSON numa linha só, base64, `cat` de um bundle minificado) tivesse dezenas/centenas de
+  // milhares de caracteres. Essa linha ia direto pro `<Markdown>`/`<CodeBlock>` — e o PRÓPRIO
+  // Ink usa `wrap-ansi` (`calculate-wrapped-text.js`) pra medir/quebrar `<Text wrap>`, que é
+  // ~O(n) mas com constante alta: medido, wrap-ansi(500_000 chars) ≈ 8s NUMA ÚNICA chamada —
+  // e o cockpit MULTIPLICA isso por ~15-20× (measure→shrink-loop→re-measure de
+  // `clipConversaBlock`, ver cockpit-conversa.test.ts). Resultado: o processo trava
+  // SINCRONAMENTE (sem digitar, sem responder) assim que o turno termina de streamar — é
+  // EXATAMENTE o "congelou e não respondeu mais nada" do dono. O fix: `windowTailVisual`
+  // agora crava um TETO POR-LINHA (independente de `maxLines`/`columns`) — nenhuma linha-fonte
+  // sobrevive além de `MAX_SOURCE_LINE_CHARS` antes de qualquer wrap (nosso ou do Ink).
+  it('GUARD DURO — mesmo sem teto de linhas (bloco CONCLUÍDO), uma linha-fonte patológica é CAPADA (não trava o Ink)', () => {
+    const huge = 'x'.repeat(500_000);
+    const r = windowTailVisual(huge, undefined, 80);
+    expect(r.text.length).toBeLessThan(10_000); // MUITO abaixo do patológico — seguro p/ wrap-ansi/Ink.
+    expect(r.hidden).toBe(0); // não é uma janela por LINHAS (é o mesmo texto, só a linha capada).
+  });
+
+  it('GUARD DURO — linha patológica DENTRO de texto multi-linha normal (só ELA é capada)', () => {
+    const text = `cabeçalho normal\n${'y'.repeat(500_000)}\nrodapé normal`;
+    const r = windowTailVisual(text, undefined, 80);
+    const lines = r.text.split('\n');
+    expect(lines[0]).toBe('cabeçalho normal'); // linhas normais, intactas.
+    expect(lines[lines.length - 1]).toBe('rodapé normal');
+    expect(lines[1]!.length).toBeLessThan(10_000); // só a linha patológica foi capada.
+  });
 });

@@ -24,7 +24,7 @@
 import wrapAnsi from 'wrap-ansi';
 import { cleanAluyForDisplay } from '@hiperplano/aluy-cli-core';
 import type { SessionBlock } from './model.js';
-import { windowTailVisual, displayWidth } from './visual-lines.js';
+import { windowTailVisual, displayWidth, capSourceLineChars } from './visual-lines.js';
 import {
   clampLiveOutputChars,
   liveShellTailMaxLines,
@@ -70,14 +70,42 @@ export function streamPreviewMaxLines(room: number): number {
 }
 
 /**
+ * PISO DURO — `ctx.columns` DESCONTADO do indent (`SPEECH_INDENT`/`OUTPUT_INDENT`), NUNCA
+ * negativo. `ctx.columns` é `layout.cols` no caminho de produção (`resolveCockpitLayout`
+ * já recusa <80), mas as funções DESTE módulo são chamadas direto (medição pura, testes,
+ * e — achado do dono — uma JANELA real na TROCA de modo/resize onde `stdout.columns` chega
+ * 0/`undefined`/negativo antes do próximo layout assentar). SEM este piso, `ctx.columns -
+ * indent` vaza negativo p/ `wrappedLineCount`/`windowTailVisual`: ambos JÁ clampam
+ * internamente (`Math.max(1, width)`/`columns<=0` degrada), então não há crash HOJE — mas
+ * a proteção fica a 2-3 chamadas de distância do ponto onde o número nasce, difícil de
+ * auditar. Aqui a garantia é LOCAL: quem lê este módulo vê o piso no lugar onde a subtração
+ * acontece, não precisa rastrear 3 funções pra confiar. `Number.isFinite` cobre NaN/Infinity
+ * (mesma classe de bug do `safeDim`/`resolveCockpitLayout` — "achado do dono" de origem).
+ */
+function effectiveCols(columns: number, indent: number): number {
+  const safe = Number.isFinite(columns) ? columns : 0;
+  return Math.max(0, safe - indent);
+}
+
+/**
  * Nº de linhas VISUAIS de `text` numa coluna de `width` colunas, com o MESMO wrap do
  * Ink (<Text wrap="wrap"> = `wrap-ansi(text, w, {trim:false, hard:true})`). `''` = 1
  * linha (uma linha vazia ainda ocupa uma linha). PURO.
+ *
+ * GUARD DURO (fix "congela e não responde mais nada" — o dono trocou p/ `/fullscreen` e
+ * mandou uma msg) — `wrapAnsi` é a chamada CARA desta função (medido: ~500_000 chars ⇒
+ * vários segundos NUMA ÚNICA chamada). E o COCKPIT a chama MUITAS vezes por bloco:
+ * `clipConversaBlock` re-mede a CADA iteração do laço de encolhimento (até `room` vezes) —
+ * uma linha patológica multiplica o custo por ~15-20× em cima do que o Ink já paga sozinho
+ * (é por isso que o FULLSCREEN agrava o travamento vs. o inline). `capSourceLineChars`
+ * crava um teto ANTES do `wrapAnsi` — o mesmo piso do `windowTailVisual` (visual-lines.ts),
+ * fonte única. Sem `\n` interno relevante aqui: quem chama já entrega uma linha por vez
+ * (`sumWrapped`) ou um span de markdown sem quebra crua.
  */
 export function wrappedLineCount(text: string, width: number): number {
   const w = Math.max(1, width);
   if (text === '') return 1;
-  return wrapAnsi(text, w, { trim: false, hard: true }).split('\n').length;
+  return wrapAnsi(capSourceLineChars(text), w, { trim: false, hard: true }).split('\n').length;
 }
 
 /** Soma de `wrappedLineCount` por linha-fonte (cada linha-fonte é um <Box> próprio). */
@@ -163,7 +191,7 @@ function aluySpeech(
 ): { text: string; hidden: number } {
   const raw = b.streaming ? clampLiveOutputChars(b.text, MAX_LIVE_SPEECH_CHARS) : b.text;
   const full = cleanAluyForDisplay(raw);
-  const speechCols = ctx.columns - SPEECH_INDENT;
+  const speechCols = effectiveCols(ctx.columns, SPEECH_INDENT);
   return windowTailVisual(full, b.streaming ? ctx.streamMaxLines : undefined, speechCols);
 }
 
@@ -172,7 +200,7 @@ function liveTailLines(liveOutput: string | undefined, ctx: ConversaCtx): number
   const liveRaw = clampLiveOutputChars(liveOutput ?? '', MAX_LIVE_OUTPUT_CHARS);
   const live = liveRaw.replace(/\n+$/, '');
   if (live === '') return 0;
-  const liveCols = ctx.columns - OUTPUT_INDENT;
+  const liveCols = effectiveCols(ctx.columns, OUTPUT_INDENT);
   const maxL = liveShellTailMaxLines(ctx.rows, ctx.columns);
   const { text, hidden } = windowTailVisual(live, maxL, liveCols);
   if (text.length === 0) return 0;
@@ -183,7 +211,7 @@ function liveTailLines(liveOutput: string | undefined, ctx: ConversaCtx): number
 function outputBoxLines(output: string | undefined, ctx: ConversaCtx): number {
   const out = output ?? '';
   if (out.trim() === '') return 0;
-  const w = ctx.columns - OUTPUT_INDENT;
+  const w = effectiveCols(ctx.columns, OUTPUT_INDENT);
   // header + cada linha (prefixo `│ ` = 2 cols dentro da largura w) + rodapé.
   return (
     1 +
@@ -319,7 +347,7 @@ export function clipConversaBlock(b: SessionBlock, room: number, ctx: ConversaCt
   const clipLines = (
     lines: readonly string[],
     overhead: number,
-    width: number = ctx.columns - SPEECH_INDENT,
+    width: number = effectiveCols(ctx.columns, SPEECH_INDENT),
     prefixCols = 0,
   ): string[] => {
     // encaixa a cabeça: mantém linhas do início enquanto (overhead + altura + marcador)
@@ -382,7 +410,9 @@ export function clipConversaBlock(b: SessionBlock, room: number, ctx: ConversaCt
         // overhead: linha do ⏺ (1) + bordas da box (2). Linhas com prefixo `│ ` em c-4.
         return {
           ...b,
-          output: clipLines(b.output.split('\n'), 3, ctx.columns - OUTPUT_INDENT, 2).join('\n'),
+          output: clipLines(b.output.split('\n'), 3, effectiveCols(ctx.columns, OUTPUT_INDENT), 2).join(
+            '\n',
+          ),
         };
       }
       break;
@@ -392,7 +422,9 @@ export function clipConversaBlock(b: SessionBlock, room: number, ctx: ConversaCt
         // overhead: linha do ⏺ (1) + bordas da box (2) + paddingBottom (1).
         return {
           ...b,
-          output: clipLines(b.output.split('\n'), 4, ctx.columns - OUTPUT_INDENT, 2).join('\n'),
+          output: clipLines(b.output.split('\n'), 4, effectiveCols(ctx.columns, OUTPUT_INDENT), 2).join(
+            '\n',
+          ),
         };
       }
       break;

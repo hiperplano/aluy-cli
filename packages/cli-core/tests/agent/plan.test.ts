@@ -620,3 +620,48 @@ describe('plan — desambiguação de títulos duplicados (anti-colisão de boxI
     expect(b).toEqual(a);
   });
 });
+
+describe('normalizePlanInput — formas que o modelo pequeno erra (F-PLANO)', () => {
+  // Medidas como REJEITADAS antes do conserto. Um modelo tentou 4x seguidas e desistiu
+  // do plano: o erro dizia "passe uma LISTA" sem dizer o que ele havia mandado, então
+  // ele não tinha o que corrigir. Erro de FORMA, nunca de intenção.
+  it('aceita `steps` como STRING de JSON (o array aninhado serializado)', () => {
+    const r = normalizePlanInput({ steps: '[{"title":"a"},{"title":"b"}]' });
+    expect('error' in r).toBe(false);
+    if (!('error' in r)) expect(r.steps.map((s) => s.title)).toEqual(['a', 'b']);
+  });
+
+  it('NÃO aceita texto solto como plano — recuperar aí seria inventar', () => {
+    // Tentei aceitar (plano de um passo) e o teste `rejeita lista ausente/não-lista`
+    // pegou. Estava certo: viraria um plano plausível com um passo lixo, e o erro
+    // sumiria da vista. Recupera-se forma inequívoca; não se inventa intenção.
+    expect('error' in normalizePlanInput({ steps: 'nope' })).toBe(true);
+  });
+
+  it('aceita objeto com chaves numéricas (array perdido na serialização)', () => {
+    const r = normalizePlanInput({ steps: { '1': { title: 'b' }, '0': { title: 'a' } } });
+    expect('error' in r).toBe(false);
+    // a ORDEM vem da chave numérica, não da ordem de inserção
+    if (!('error' in r)) expect(r.steps.map((s) => s.title)).toEqual(['a', 'b']);
+  });
+
+  it('aceita `plan: { steps: [...] }` — aninhado sob a chave lida na descrição', () => {
+    const r = normalizePlanInput({ plan: { steps: [{ title: 'a' }] } });
+    expect('error' in r).toBe(false);
+  });
+
+  it('quando recusa, o erro DIZ O QUE CHEGOU — senão o modelo repete o mesmo erro', () => {
+    const r = normalizePlanInput({ passos: 'a, b' });
+    expect('error' in r).toBe(true);
+    if ('error' in r) {
+      expect(r.error).toContain('Recebi:');
+      expect(r.error).toContain('passos=string');
+    }
+  });
+
+  it('sem argumento nenhum, o erro também é explícito', () => {
+    const r = normalizePlanInput({});
+    expect('error' in r).toBe(true);
+    if ('error' in r) expect(r.error).toContain('nenhum argumento');
+  });
+});

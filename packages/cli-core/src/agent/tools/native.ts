@@ -19,6 +19,9 @@ import { GlobSyntaxError } from './glob-match.js';
 import { PLAN_TOOL } from './plan.js';
 import { QUESTION_TOOL } from './question.js';
 import { addTodoTool, listTodosTool, doneTodoTool } from '../todo/todo-tools.js';
+// EST-1015-bis — consertos de TOLERÂNCIA DE FORMA + erro ACIONÁVEL (mesma classe de bug
+// achada no update_plan, ver o cabeçalho de input-shape.ts), reusados por várias tools.
+import { strOpt, strReq, boolDeChave, descreveRecebido } from './input-shape.js';
 // ADR-0145 (frente d) — tool `capabilities` (+ sinônimo `list_tools`): o MENU VIVO
 // de auto-descoberta. Ver capabilities.ts (formatação pura + segurança anti-vazamento).
 import { capabilitiesTool, listToolsTool } from './capabilities.js';
@@ -27,17 +30,10 @@ import { capabilitiesTool, listToolsTool } from './capabilities.js';
 export { addTodoTool, listTodosTool, doneTodoTool };
 
 // ── helpers de validação de input (boundary; input do modelo = não-confiável) ─
-function reqString(input: Readonly<Record<string, unknown>>, key: string): string | undefined {
-  const v = input[key];
-  return typeof v === 'string' && v.length > 0 ? v : undefined;
-}
-function optString(input: Readonly<Record<string, unknown>>, key: string): string | undefined {
-  const v = input[key];
-  return typeof v === 'string' ? v : undefined;
-}
-function optBool(input: Readonly<Record<string, unknown>>, key: string): boolean {
-  return input[key] === true;
-}
+// EST-1015-bis — `strReq`/`strOpt`/`boolDeChave`/`descreveRecebido` (input-shape.ts)
+// substituem os antigos `reqString`/`optString`/`optBool` (só 1 chave, sem tolerância
+// de forma) — ver o cabeçalho do módulo p/ a motivação (mesma classe de bug do
+// update_plan). Os nomes de sinônimo aceitos por campo estão nos pontos de uso abaixo.
 function err(observation: string): ToolResult {
   return { ok: false, observation };
 }
@@ -200,8 +196,14 @@ export const readFileTool: NativeTool<ToolPorts> = {
   description: `Lê o conteúdo de um arquivo. Use QUANDO: ${WHEN_READ_FILE}. Input: { "path": string }.`,
   parameters: READ_FILE_SCHEMA,
   async run(input, ports): Promise<ToolResult> {
-    const path = reqString(input, 'path');
-    if (!path) return err('read_file requer "path" (string não-vazia).');
+    // Sinônimos ("file"/"filename") — nomes plausíveis p/ um modelo que não guardou o
+    // nome EXATO do campo. Único candidato de caminho na tool ⇒ sem ambiguidade.
+    const path = strReq(input, ['path', 'file', 'filename']);
+    if (!path) {
+      return err(
+        `read_file requer "path" (string não-vazia). Recebi: ${descreveRecebido(input)}.`,
+      );
+    }
     try {
       const content = await ports.fs.readFile(path);
       return { ok: true, observation: clip(content), display: `read_file ${path}` };
@@ -236,15 +238,33 @@ export const editFileTool: NativeTool<ToolPorts> = {
     '"replace_all"?: boolean }. Para CRIAR um arquivo novo, use write_file.',
   parameters: EDIT_FILE_SCHEMA,
   async run(input, ports): Promise<ToolResult> {
-    const path = reqString(input, 'path');
-    const oldString = optString(input, 'old_string');
-    const newString = optString(input, 'new_string');
-    const replaceAll = optBool(input, 'replace_all');
-    if (!path) return err('edit_file requer "path" (string não-vazia).');
-    if (oldString === undefined || oldString === '') {
-      return err('edit_file requer "old_string" (o trecho EXATO a substituir, não-vazio).');
+    // Sinônimos SÓ p/ o nome do campo, nunca p/ o SENTIDO: `old_text`/`new_text` são o
+    // MESMO campo com outro nome (inequívoco). "content" NÃO entra aqui de propósito —
+    // era o nome do campo na API antiga (full-rewrite), removida por perda de dados
+    // (ver o comentário no topo do editFileTool); aceitá-lo como sinônimo de
+    // `new_string` reviveria a AMBIGUIDADE que aquele bug-fix matou (um `content` de
+    // arquivo INTEIRO virando "só o trecho novo" apagaria o resto do arquivo).
+    const path = strReq(input, ['path', 'file', 'filename']);
+    const oldString = strReq(input, ['old_string', 'old_text']);
+    const newString = strOpt(input, ['new_string', 'new_text']); // "" é válido (remove trecho)
+    const replaceAll = boolDeChave(input, 'replace_all');
+    if (!path) {
+      return err(
+        `edit_file requer "path" (string não-vazia). Recebi: ${descreveRecebido(input)}.`,
+      );
     }
-    if (newString === undefined) return err('edit_file requer "new_string" (string).');
+    if (oldString === undefined) {
+      return err(
+        `edit_file requer "old_string" (o trecho EXATO a substituir, não-vazio). ` +
+          `Recebi: ${descreveRecebido(input)}.`,
+      );
+    }
+    if (newString === undefined) {
+      return err(
+        `edit_file requer "new_string" (string, pode ser "" p/ remover o trecho). ` +
+          `Recebi: ${descreveRecebido(input)}.`,
+      );
+    }
     if (oldString === newString) {
       return err('edit_file: old_string === new_string — nada a fazer (nenhuma mudança).');
     }
@@ -356,11 +376,19 @@ export const writeFileTool: NativeTool<ToolPorts> = {
     '"overwrite"?: boolean }.',
   parameters: WRITE_FILE_SCHEMA,
   async run(input, ports): Promise<ToolResult> {
-    const path = reqString(input, 'path');
-    const content = optString(input, 'content');
-    const overwrite = optBool(input, 'overwrite');
-    if (!path) return err('write_file requer "path" (string não-vazia).');
-    if (content === undefined) return err('write_file requer "content" (string).');
+    // "text" é sinônimo INEQUÍVOCO de `content` aqui: write_file só tem UM campo de
+    // conteúdo (não há um "old/new" para confundir, diferente do edit_file).
+    const path = strReq(input, ['path', 'file', 'filename']);
+    const content = strOpt(input, ['content', 'text']); // "" é válido (arquivo vazio)
+    const overwrite = boolDeChave(input, 'overwrite');
+    if (!path) {
+      return err(
+        `write_file requer "path" (string não-vazia). Recebi: ${descreveRecebido(input)}.`,
+      );
+    }
+    if (content === undefined) {
+      return err(`write_file requer "content" (string). Recebi: ${descreveRecebido(input)}.`);
+    }
     try {
       const existed = await ports.fs.exists(path);
       const read = existed ? await readForEdit(ports.fs, path) : { content: '', complete: true };
@@ -448,8 +476,12 @@ export const runCommandTool: NativeTool<ToolPorts> = {
   description: `Executa um comando de shell. Use QUANDO: ${WHEN_RUN_COMMAND}. Input: { "command": string }.`,
   parameters: RUN_COMMAND_SCHEMA,
   async run(input, ports, ctx): Promise<ToolResult> {
-    const command = reqString(input, 'command');
-    if (!command) return err('run_command requer "command" (string não-vazia).');
+    const command = strReq(input, ['command', 'cmd', 'bash']);
+    if (!command) {
+      return err(
+        `run_command requer "command" (string não-vazia). Recebi: ${descreveRecebido(input)}.`,
+      );
+    }
     try {
       // EST-0960a · CA-3 — marca a BARREIRA não-reversível ANTES de executar:
       // o efeito de shell é arbitrário; o journal NÃO captura snapshot e NÃO
@@ -517,8 +549,12 @@ export const changeDirTool: NativeTool<ToolPorts> = {
     `Use QUANDO: ${WHEN_CHANGE_DIR}. Input: { "path": string }.`,
   parameters: CHANGE_DIR_SCHEMA,
   async run(input, ports): Promise<ToolResult> {
-    const path = reqString(input, 'path');
-    if (!path) return err('change_dir requer "path" (string não-vazia).');
+    const path = strReq(input, ['path', 'dir', 'directory']);
+    if (!path) {
+      return err(
+        `change_dir requer "path" (string não-vazia). Recebi: ${descreveRecebido(input)}.`,
+      );
+    }
     if (!ports.cwd) {
       return err('navegação de diretório indisponível nesta sessão (sem porta de cwd).');
     }
@@ -574,9 +610,11 @@ export const grepTool: NativeTool<ToolPorts> = {
     'string (default ".") }.',
   parameters: GREP_SCHEMA,
   async run(input, ports): Promise<ToolResult> {
-    const pattern = reqString(input, 'pattern');
-    if (!pattern) return err('grep requer "pattern" (string não-vazia).');
-    const path = optString(input, 'path') ?? '.';
+    const pattern = strReq(input, ['pattern', 'query']);
+    if (!pattern) {
+      return err(`grep requer "pattern" (string não-vazia). Recebi: ${descreveRecebido(input)}.`);
+    }
+    const path = strOpt(input, ['path']) ?? '.';
     try {
       const { matches, truncated } = await ports.search.search(pattern, path);
       // EST-1016 — nota HONESTA de scan parcial: SÓ quando algum ramo do truncamento
@@ -656,9 +694,11 @@ export const globTool: NativeTool<ToolPorts> = {
     `Use QUANDO: ${WHEN_GLOB}. Input: { "pattern": string, "path"?: string (default ".") }.`,
   parameters: GLOB_SCHEMA,
   async run(input, ports): Promise<ToolResult> {
-    const pattern = reqString(input, 'pattern');
-    if (!pattern) return err('glob requer "pattern" (string não-vazia).');
-    const path = optString(input, 'path') ?? '.';
+    const pattern = strReq(input, ['pattern', 'query']);
+    if (!pattern) {
+      return err(`glob requer "pattern" (string não-vazia). Recebi: ${descreveRecebido(input)}.`);
+    }
+    const path = strOpt(input, ['path']) ?? '.';
     // `glob` é OPCIONAL na porta (aditivo). Sem ela ⇒ erro CLARO, nunca quebra.
     if (!ports.search.glob) {
       return err('busca de arquivos (glob) indisponível nesta sessão (sem porta de glob).');
@@ -733,10 +773,13 @@ export const runTestsTool: NativeTool<ToolPorts> = {
     'Formato desconhecido ⇒ stream cru + braille (degradação honesta).',
   parameters: RUN_TESTS_SCHEMA,
   async run(input, ports, ctx): Promise<ToolResult> {
-    const command =
-      typeof input.command === 'string' && input.command.length > 0 ? input.command : undefined;
-    if (!command) return err('run_tests requer "command" (string não-vazia).');
-    const label = typeof input.label === 'string' ? input.label : undefined;
+    const command = strReq(input, ['command', 'cmd']);
+    if (!command) {
+      return err(
+        `run_tests requer "command" (string não-vazia). Recebi: ${descreveRecebido(input)}.`,
+      );
+    }
+    const label = strOpt(input, ['label']);
 
     const { TestRunAccumulator, renderTestSummary } = await import('../testing/test-parse.js');
 

@@ -24,6 +24,10 @@ import type { SubAgentProfile, SubAgentOutcome } from '../subagent.js';
 // `SubAgentSpawner.spawn` (`> MAX_SUBAGENTS_PER_CALL` ⇒ "excede o teto") segue como
 // REDE de segurança, não como caminho comum.
 import { MAX_SUBAGENTS_PER_CALL } from '../subagent.js';
+// EST-1015-bis — mesma classe de bug achada no update_plan: `agents` chegava
+// stringificado ou como objeto de chaves numéricas e a validação antiga (`Array.isArray`
+// cru) rejeitava as duas sem dizer o que tinha chegado (ver input-shape.ts).
+import { listaDeChaves, descreveRecebido } from './input-shape.js';
 
 /** Nome estável da tool (referenciado pela engine — E-A1 — e pelo spawner). */
 export const SPAWN_AGENT_TOOL_NAME = 'spawn_agent';
@@ -57,9 +61,15 @@ export interface SubAgentPort {
 
 // ── validação de input (boundary; input do modelo = NÃO-confiável) ────────────
 function asProfiles(input: Readonly<Record<string, unknown>>): SubAgentProfile[] | string {
-  const raw = input['agents'] ?? input['tasks'];
-  if (!Array.isArray(raw)) {
-    return 'spawn_agent requer "agents": um array de { "label": string, "goal": string, "context"?: string }.';
+  // Tolera `agents`/`tasks` stringificado ("[{...}]") ou objeto de chaves numéricas
+  // ("0","1",…) — a mesma forma que o update_plan mediu como erro comum de modelo
+  // barato (structura o objeto de fora, stringifica o array de dentro).
+  const raw = listaDeChaves(input, ['agents', 'tasks']);
+  if (raw === undefined) {
+    return (
+      'spawn_agent requer "agents": um array de { "label": string, "goal": string, "context"?: string }. ' +
+      `Recebi: ${descreveRecebido(input)}.`
+    );
   }
   if (raw.length === 0) return 'spawn_agent: "agents" não pode ser vazio.';
   const profiles: SubAgentProfile[] = [];
@@ -88,11 +98,22 @@ function asProfiles(input: Readonly<Record<string, unknown>>): SubAgentProfile[]
   for (let i = 0; i < raw.length; i++) {
     const item = raw[i];
     if (typeof item !== 'object' || item === null) {
-      return `spawn_agent: agents[${i}] deve ser um objeto { label, goal }.`;
+      return (
+        `spawn_agent: agents[${i}] deve ser um objeto { label, goal }. ` +
+        `Recebi: ${typeof item === 'string' ? JSON.stringify(item.slice(0, 40)) : typeof item}.`
+      );
     }
     const rec = item as Record<string, unknown>;
-    const goal = typeof rec['goal'] === 'string' ? rec['goal'].trim() : '';
-    if (goal === '') return `spawn_agent: agents[${i}] requer "goal" (string não-vazia).`;
+    // "task"/"description" são sinônimos INEQUÍVOCOS de "goal" aqui (é o único campo de
+    // texto livre descrevendo o que o sub-agente deve fazer).
+    const goalRaw = rec['goal'] ?? rec['task'] ?? rec['description'];
+    const goal = typeof goalRaw === 'string' ? goalRaw.trim() : '';
+    if (goal === '') {
+      return (
+        `spawn_agent: agents[${i}] requer "goal" (string não-vazia). ` +
+        `Recebi: ${descreveRecebido(rec)}.`
+      );
+    }
     // EST-0978 — `agent` (nome do registro a invocar). Quando dado e o `label` está
     // ausente, o NOME do agente vira o rótulo de origem (CLI-SEC-9) — "o agente
     // `revisor` quer …". O perfil nomeado é RESOLVIDO pela porta (registro), não aqui.

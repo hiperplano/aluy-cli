@@ -14,7 +14,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { Working } from './Working.js';
-import { windowTailVisual } from '../../session/visual-lines.js';
+import { windowTailVisual, capLongSourceLines } from '../../session/visual-lines.js';
 import { clampLiveOutputChars, MAX_LIVE_OUTPUT_CHARS } from '../../session/live-budget.js';
 
 /**
@@ -88,7 +88,13 @@ export function BangBlock(props: BangBlockProps): React.ReactElement {
   const isBlocked = props.status === 'blocked';
   // a11y: a palavra de estado acompanha SEMPRE o glifo (nunca só cor).
   const stateWord = isBlocked ? 'bloqueado' : isErr ? 'erro' : 'ok';
-  const output = props.output ?? '';
+  // GUARD DURO (fix "congela e não responde mais nada" — dono trocou p/ /fullscreen e mandou
+  // uma msg) — ao contrário do `liveOutput` acima (já bounded via `clampLiveOutputChars` +
+  // `windowTailVisual`), a saída CONCLUÍDA renderiza `output.split('\n')` CRU logo abaixo —
+  // em QUALQUER status (ok/err/blocked, não só erro). Uma linha sem `\n` patologicamente
+  // longa (`!cat bundle-minificado.js`) trava o Ink ao medir/quebrar o `<Text wrap>` dela
+  // (mesma raiz de `windowTailVisual`/`capLongSourceLines`, visual-lines.ts — fonte única).
+  const output = capLongSourceLines(props.output ?? '');
 
   return (
     <Box flexDirection="column" paddingLeft={2}>

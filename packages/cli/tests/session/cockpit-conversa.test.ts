@@ -23,6 +23,70 @@ const you = (text: string): SessionBlock => ({ kind: 'you', text });
 const aluy = (text: string, streaming = false): SessionBlock => ({ kind: 'aluy', text, streaming });
 const note = (lines: string[]): SessionBlock => ({ kind: 'note', title: 'ajuda', lines });
 
+// GUARD DURO (crash `RangeError: Invalid array length`, colado pelo dono) — este módulo
+// subtrai o indent do `ctx.columns` em VÁRIOS pontos (`ctx.columns - SPEECH_INDENT`/
+// `OUTPUT_INDENT`) ANTES de chamar `wrappedLineCount`/`windowTailVisual`. Em produção
+// `ctx.columns` é `layout.cols` (`resolveCockpitLayout` já recusa <80 — nunca chega aqui
+// degenerado), MAS a proteção contra um `ctx.columns` inválido (0/negativo/NaN/`undefined`
+// — a troca de modo/resize é exatamente a janela onde `stdout.columns` pode chegar assim,
+// antes do próximo layout assentar) vivia TRANSITIVA: só o `Math.max(1, width)` dentro de
+// `wrappedLineCount` (2-3 chamadas de distância). `effectiveCols` torna o piso LOCAL — quem
+// lê a subtração já vê a garantia ali, sem rastrear a cadeia. Prova AQUI, sem PTY/fullscreen:
+// as funções de medição/clip NÃO lançam (não é `Array.push`/`new Array` com índice negativo
+// ou ≥2³² — o `RangeError: Invalid array length` do dono) p/ NENHUM valor degenerado de
+// `columns`, em NENHUM tipo de bloco que subtrai o indent.
+describe('GUARD DURO — dimensões degeneradas de columns NÃO lançam RangeError (sem PTY/fullscreen)', () => {
+  const degenerateColumns = [0, -1, -100, NaN, Infinity, -Infinity, undefined] as const;
+
+  const blocksExercisingIndentMath: readonly SessionBlock[] = [
+    you('oi'),
+    aluy('Oi.\n\nTchau.'),
+    aluy('prévia em stream', true),
+    { kind: 'tool', verb: 'read', target: 'a.ts', result: 'ok', status: 'running', liveOutput: 'x'.repeat(500) },
+    { kind: 'tool', verb: 'bash', target: 'npm test', result: '1 falha', status: 'err', output: 'FAIL\n'.repeat(20) },
+    { kind: 'bang', command: 'ls', status: 'running', liveOutput: 'y'.repeat(500) },
+    { kind: 'bang', command: 'cat x', status: 'ok', output: 'linha\n'.repeat(20) },
+    note(['linha 1', 'linha 2']),
+    { kind: 'broker-error', message: 'falhou', reason: 'timeout' } as SessionBlock,
+  ];
+
+  for (const columns of degenerateColumns) {
+    // `undefined`/NaN/negativo: o TIPO declara `number`, mas testamos o que a função faz
+    // se um `columns` assim chegar em runtime (JS não garante o tipo) — é exatamente a
+    // classe de bug que o `safeDim`/`resolveCockpitLayout` já existem p/ prevenir a
+    // montante; aqui provamos que, MESMO SEM essa rede, este módulo não lança.
+    const ctx = { columns: columns as unknown as number, rows: 24 } satisfies ConversaCtx;
+
+    it(`columns=${columns} — measureConversaBlock não lança p/ nenhum tipo de bloco`, () => {
+      for (const b of blocksExercisingIndentMath) {
+        let n: number | undefined;
+        expect(() => {
+          n = measureConversaBlock(b, ctx);
+        }, `bloco kind="${b.kind}" lançou com columns=${columns}`).not.toThrow();
+        expect(Number.isFinite(n), `measureConversaBlock devolveu ${n} (não-finito) p/ kind="${b.kind}"`).toBe(
+          true,
+        );
+        expect(n! >= 0, `measureConversaBlock devolveu ${n} (negativo) p/ kind="${b.kind}"`).toBe(true);
+      }
+    });
+
+    it(`columns=${columns} — clipConversaBlock não lança (room pequeno força o clip em TODOS os blocos)`, () => {
+      for (const b of blocksExercisingIndentMath) {
+        expect(() => clipConversaBlock(b, 3, ctx), `bloco kind="${b.kind}" lançou`).not.toThrow();
+      }
+    });
+
+    it(`columns=${columns} — fitConversaWindow não lança e mantém o invariante usedLines ≤ room`, () => {
+      const room = 20;
+      let win: ReturnType<typeof fitConversaWindow> | undefined;
+      expect(() => {
+        win = fitConversaWindow(blocksExercisingIndentMath, room, 0, ctx);
+      }).not.toThrow();
+      expect(win!.usedLines).toBeLessThanOrEqual(room);
+    });
+  }
+});
+
 describe('wrappedLineCount — wrap por PALAVRA (o mesmo do Ink)', () => {
   it('linha curta = 1; vazia = 1', () => {
     expect(wrappedLineCount('oi', 80)).toBe(1);
@@ -38,6 +102,35 @@ describe('wrappedLineCount — wrap por PALAVRA (o mesmo do Ink)', () => {
 
   it('palavra mais LARGA que a coluna quebra DURO (hard: true)', () => {
     expect(wrappedLineCount('x'.repeat(25), 10)).toBe(3);
+  });
+
+  // FIX (crash "congela e não responde mais nada" — dono trocou p/ /fullscreen e mandou uma
+  // msg) — RAIZ MEDIDA: `wrappedLineCount`/`markdownLines` chamam `wrap-ansi` DIRETO, sem
+  // teto de tamanho. Uma linha-fonte patológica (JSON numa linha só, base64, `cat` de bundle
+  // minificado) faz o wrap-ansi rodar por SEGUNDOS numa ÚNICA chamada — medido:
+  // wrap-ansi(500_000 chars) ≈ 8s. E o COCKPIT multiplica isso: `clipConversaBlock`'s do
+  // 'aluy' re-mede a CADA iteração do laço de encolhimento (até `room` vezes, ~15-20 no caso
+  // comum) — cada iteração chamando `markdownLines`→`wrappedLineCount`→wrap-ansi de novo. É
+  // por isso que o FULLSCREEN agrava: o inline paga o custo do Ink 1×; o cockpit paga ~15-20×
+  // A MAIS por cima. Este teste prova que a medição agora fica RÁPIDA (o teto por-linha do
+  // `windowTailVisual`/cap interno evita a chamada cara) mesmo p/ conteúdo patológico — SEM o
+  // fix, esta chamada sozinha já passa de 1s p/ 500k chars (o timeout do teste É o bug).
+  it('GUARD DURO — linha patológica (500k chars) NÃO trava wrap-ansi (mede rápido)', () => {
+    const huge = 'x'.repeat(500_000);
+    const t0 = Date.now();
+    const n = wrappedLineCount(huge, 80);
+    const elapsedMs = Date.now() - t0;
+    expect(n).toBeGreaterThan(0);
+    expect(elapsedMs).toBeLessThan(500); // ANTES do fix: ~8000ms+ (wrap-ansi cru).
+  });
+
+  it('GUARD DURO — markdownLines de um CODE FENCE com uma linha de 500k chars mede rápido', () => {
+    const huge = '```js\n' + 'x'.repeat(500_000) + '\n```';
+    const t0 = Date.now();
+    const n = markdownLines(huge, 98, false);
+    const elapsedMs = Date.now() - t0;
+    expect(n).toBeGreaterThan(0);
+    expect(elapsedMs).toBeLessThan(500);
   });
 });
 

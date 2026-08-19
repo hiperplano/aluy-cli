@@ -12,7 +12,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { Working } from './Working.js';
-import { windowTailVisual } from '../../session/visual-lines.js';
+import { windowTailVisual, capLongSourceLines } from '../../session/visual-lines.js';
 import { clampLiveOutputChars, MAX_LIVE_OUTPUT_CHARS } from '../../session/live-budget.js';
 import { DiffLine, diffLangOf, windowEffectLines } from './DiffView.js';
 
@@ -111,6 +111,12 @@ export function ToolLine(props: ToolLineProps): React.ReactElement {
   // despeja o arquivo inteiro no scrollback, só o recorte + a contagem do oculto.
   const diffWin = props.diff ? windowEffectLines(props.diff.split('\n')) : undefined;
   const diffLang = props.diff ? diffLangOf(props.target) : undefined;
+  // GUARD DURO (fix "congela e não responde mais nada" — dono trocou p/ /fullscreen e mandou
+  // uma msg) — a saída de ERRO CONCLUÍDA renderiza `output.split('\n')` CRU logo abaixo, sem
+  // nenhuma janela (ao contrário do `liveOutput`, já bounded). Uma linha sem `\n`
+  // patologicamente longa trava o Ink ao medir/quebrar o `<Text wrap>` dela (mesma raiz de
+  // `windowTailVisual`/`capLongSourceLines`, visual-lines.ts — fonte única).
+  const safeOutput = props.output !== undefined ? capLongSourceLines(props.output) : undefined;
   return (
     <Box flexDirection="column" paddingLeft={2}>
       <Box>
@@ -123,12 +129,12 @@ export function ToolLine(props: ToolLineProps): React.ReactElement {
         <Text> </Text>
         {isErr ? <Glyph name="err" role="danger" /> : <Glyph name="ok" role="success" />}
       </Box>
-      {isErr && props.output && (
+      {isErr && safeOutput && (
         <Box flexDirection="column" paddingLeft={2}>
           <Role name="fgDim">
             {theme.box.topLeft} saída {theme.box.horizontal.repeat(8)}
           </Role>
-          {props.output.split('\n').map((line, i) => (
+          {safeOutput.split('\n').map((line, i) => (
             <Box key={i}>
               <Role name="fgDim">{theme.box.vertical} </Role>
               <Role name="danger">{line}</Role>

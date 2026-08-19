@@ -201,6 +201,37 @@ export interface ProviderWindowSource {
   readonly id?: string;
   readonly label?: string;
   readonly contextByModel?: Readonly<Record<string, number>>;
+  /** Ver `upstreamFromConfig` — mapa PARALELO ao `contextByModel`, mesmo casamento. */
+  readonly upstreamByModel?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+}
+
+/**
+ * Fragmentos de UPSTREAM declarados para o provider ATIVO (`providers[].upstreamByModel`).
+ * IRMÃO do `modelWindowFromConfig`: MESMO casamento de provider (por `id` OU `label`,
+ * case-insensitive) — o config do dono usa os dois na prática.
+ *
+ * Devolve o MAPA INTEIRO, não o fragmento de um slug: quem casa o slug é o
+ * `toLocalRequest` (cli-core), POR REQUEST — o `/model` troca o modelo sem reconstruir o
+ * client, então escolher o fragmento aqui, no boot, fixaria o roteamento do PRIMEIRO
+ * modelo em todos os seguintes. Sem provider ativo casado, ou sem mapa/entradas ⇒
+ * `undefined` (nada é mandado ao provider — não-regressão). PURO.
+ */
+export function upstreamFromConfig(
+  providers: readonly ProviderWindowSource[] | undefined,
+  activeProvider: string | undefined,
+): Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined {
+  if (!providers || providers.length === 0) return undefined;
+  const pid = (activeProvider ?? '').trim().toLowerCase();
+  for (const p of providers) {
+    const matches =
+      pid === '' ||
+      (p.id ?? '').trim().toLowerCase() === pid ||
+      (p.label ?? '').trim().toLowerCase() === pid;
+    if (!matches) continue;
+    const map = p.upstreamByModel;
+    if (map && Object.keys(map).length > 0) return map;
+  }
+  return undefined;
 }
 
 /**

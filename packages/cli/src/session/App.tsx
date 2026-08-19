@@ -2152,6 +2152,105 @@ export function App(props: AppProps): React.ReactElement {
     },
     [controller, picker, syncSlashMenu],
   );
+  // Colagem em campo de UMA linha (id/URL/slug/query de um picker) — um paste
+  // multi-linha (fim de linha sobrando no clipboard) não pode virar várias linhas
+  // ESCONDIDAS num campo que só mostra uma. `appendCustom`/`appendEffortCustom`
+  // (useModelPicker/useEffortPicker) já fazem este strip sozinhos (comentário
+  // "controla colagem multi-char também"); aqui replicamos pros campos que não se
+  // sanitizam (`typeAddCustom`/`setQuery`), pra manter o mesmo comportamento em TODOS.
+  const sanitizeFieldPaste = useCallback((text: string): string => text.replace(/[\r\n\t]/g, ''), []);
+
+  // BUG (relato do dono) — em `/provider` → "+ adicionar provider custom", colar a URL
+  // caía no COMPOSER de cima, não no campo do formulário. Causa: o canal de bracketed-
+  // paste roda ANTES do Ink, direto no `stdin` (`onPasteData` abaixo) — não passava
+  // pelo MESMO switch de foco que o `useInput` usa pra rotear cada TECLA ao modal certo
+  // (o switch gigante logo adiante, `if (providerPicker.open) {...}` etc.); a colagem
+  // sempre ia parar em `insertPaste` (composer), mesmo com um campo de texto aberto por
+  // cima dele. Não é bug só do provider picker: TODO modal com campo de texto PRÓPRIO
+  // (não derivado do composer, ao contrário do `@`-mention picker — aquele lê a query
+  // DO composer via `syncPicker`, então já funcionava) tinha o mesmo furo:
+  // `localModelPicker` (slug), `palette` (query), `modelPicker` (modelo/effort custom),
+  // `effortPicker` (custom) e a pergunta livre do `/perguntar` (`qDraft`).
+  //
+  // Consertado roteando pelo MESMO critério de foco do `useInput`, na MESMA ordem de
+  // precedência (um modal por cima nunca "vaza" pro de baixo). Regra pro caso SEM campo
+  // (picker é só uma LISTA — permPanel/themePicker/langPicker/historyPicker/rewindPicker,
+  // ou um picker de campo mas na etapa de LISTA): a colagem é IGNORADA, nunca cai no
+  // composer escondido atrás — o usuário não vê pra onde foi, então sumir é pior que
+  // não fazer nada (decisão do dono, ao pedir o conserto).
+  //
+  // FORA do escopo deste conserto, DE PROPÓSITO: `asking`/`budget`/`cycle-ceiling`/
+  // `pendingUnsafeConfirm`/`stuck`(menu)/`error` e o painel de fluxos (`flowOpen`) — são
+  // decisões de UMA tecla, sem campo de texto; `asking`/`budget`/`stuck`/`error` já têm
+  // rationale PRÓPRIO e testado (EST-0982, comentário do `syncPicker` abaixo) pra deixar
+  // o texto colado cair no composer por baixo (ele resume ali quando a decisão termina)
+  // — mudar isso agora seria decisão de produto nova, não este bug. `stuck`
+  // (redirecionando) e `flowOpen` (interagir) já USAM o composer como campo de fato
+  // (leem `input` direto), então já estavam corretos.
+  const routePastedText = useCallback(
+    (text: string): void => {
+      if (palette.open) {
+        palette.setQuery(palette.query + sanitizeFieldPaste(text));
+        return;
+      }
+      if (modelPicker.open) {
+        if (modelPicker.effortStepOpen) {
+          if (modelPicker.effortCustomOpen) modelPicker.appendEffortCustom(text);
+          return; // lista de effort (sem o passo custom aberto) — sem campo, ignora.
+        }
+        if (modelPicker.customInputOpen) modelPicker.appendCustom(text);
+        return; // lista de tiers — sem campo, ignora.
+      }
+      if (localModelPicker.open) {
+        localModelPicker.setQuery(localModelPicker.query + sanitizeFieldPaste(text));
+        return;
+      }
+      if (effortPicker.open) {
+        if (effortPicker.customOpen) effortPicker.appendCustom(text);
+        return; // lista de níveis — sem campo, ignora.
+      }
+      if (
+        permPanel.open ||
+        themePicker.open ||
+        langPicker.open ||
+        historyPicker.open ||
+        rewindPicker.open
+      ) {
+        return; // listas puras, sem campo de texto algum — ignora.
+      }
+      if (providerPicker.open) {
+        if (providerPicker.addCustomStep !== null) {
+          providerPicker.typeAddCustom(sanitizeFieldPaste(text));
+        }
+        return; // fora do formulário ("+ adicionar"), é lista — sem campo, ignora.
+      }
+      // `picker` (o `@`-mention) fica de fora de propósito: não tem campo PRÓPRIO — a
+      // query dele é derivada do texto do composer (`syncPicker`, chamado dentro de
+      // `insertPaste` abaixo), então o caminho de sempre já está certo.
+      if (state.phase === 'questioning' && state.pendingQuestion) {
+        if (qEditing) setQDraft((d) => d + sanitizeFieldPaste(text));
+        return; // single/multi sem "Outro" em digitação — sem campo, ignora.
+      }
+      insertPaste(text);
+    },
+    [
+      palette,
+      modelPicker,
+      localModelPicker,
+      effortPicker,
+      permPanel,
+      themePicker,
+      langPicker,
+      historyPicker,
+      rewindPicker,
+      providerPicker,
+      state.phase,
+      state.pendingQuestion,
+      qEditing,
+      sanitizeFieldPaste,
+      insertPaste,
+    ],
+  );
   useEffect(() => {
     if (!stdin) return;
     const machine = pasteMachineRef.current!;
@@ -2164,7 +2263,7 @@ export function App(props: AppProps): React.ReactElement {
       if (!machine.isInPaste() && !s.includes('\x1b[20')) return;
       const events: PasteEvent[] = machine.feed(s);
       for (const ev of events) {
-        if (ev.kind === 'paste') insertPaste(ev.text);
+        if (ev.kind === 'paste') routePastedText(ev.text);
         // `passthrough` é tratado pelo `useInput` (canal normal) — aqui não fazemos nada.
       }
     };
@@ -2172,7 +2271,7 @@ export function App(props: AppProps): React.ReactElement {
     return () => {
       stdin.removeListener('data', onPasteData);
     };
-  }, [stdin, insertPaste]);
+  }, [stdin, routePastedText]);
 
   // EST-0982 (type-ahead) — AUTO-SUBMIT da fila. Quando o turno TERMINA (fase vira
   // `idle`/`done`) e há mensagem(ns) enfileirada(s), consome a 1ª como PRÓXIMO
