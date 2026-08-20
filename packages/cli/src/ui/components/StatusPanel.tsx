@@ -95,6 +95,18 @@ function caberSegs(segs: readonly Seg[], teto: number): readonly Seg[] {
 
 export interface StatusPanelProps extends StatusBarProps {
   readonly mode: SessionMode;
+  /**
+   * Uma linha só, em vez de três. Usado pelo cockpit em tela baixa, onde o grid não tem
+   * três linhas para dar ao status.
+   *
+   * A linha que sobra é `sessão`, e a escolha não é arbitrária: das três, é a única que
+   * responde "onde isto vai rodar" — provider, modelo e diretório. `estado` e `uso` são
+   * observabilidade e podem esperar a tela crescer.
+   *
+   * Sem esta prop, o cockpit apenas CORTAVA a altura do painel e o que sobrava na tela era
+   * a linha do meio (`estado`) — justamente a descartável.
+   */
+  readonly compact?: boolean;
 }
 
 /**
@@ -252,6 +264,19 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
           teto={tetoValor}
         />
         <Linha glyph={theme.glyph('gauge')} rotulo={t('painel.uso')} segs={uso} teto={tetoValor} />
+      </Box>
+    );
+  }
+
+  if (props.compact === true) {
+    return (
+      <Box flexDirection="column">
+        <Linha
+          glyph={theme.glyph('clock')}
+          rotulo={t('painel.sessao')}
+          segs={sessao}
+          teto={tetoValor}
+        />
       </Box>
     );
   }

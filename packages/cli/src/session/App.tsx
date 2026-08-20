@@ -1000,9 +1000,14 @@ export function App(props: AppProps): React.ReactElement {
    */
   const pedirModeloAposTroca = useCallback(
     (r: void | Promise<boolean>): void => {
-      if (r === undefined) return;
-      void r.then((ok) => {
-        if (ok) localModelPicker.openPicker();
+      // Checagem de THENABLE, não `!== undefined`: o handler tem várias implementações
+      // (backend local devolve a promessa do veredito, broker não devolve nada, e os
+      // testes injetam mocks síncronos). Qualquer retorno que não seja promessa fazia
+      // `r.then` estourar — e como isso roda ao CONFIRMAR o provider, o erro derrubava a
+      // TUI no meio de uma troca, que é o pior momento possível para ela cair.
+      if (typeof (r as { then?: unknown } | undefined)?.then !== 'function') return;
+      void (r as Promise<boolean>).then((ok) => {
+        if (ok === true) localModelPicker.openPicker();
       });
     },
     [localModelPicker],

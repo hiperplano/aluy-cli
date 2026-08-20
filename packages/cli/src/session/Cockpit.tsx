@@ -395,6 +395,7 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
       <Box height={clampH(layout.statusRows)}>
         <StatusPanel
           mode={props.state.mode}
+          compact={layout.statusRows < 3}
           cwd={props.cwd}
           tier={props.tierDisplay}
           isDefaultTier={props.isDefaultTier}
