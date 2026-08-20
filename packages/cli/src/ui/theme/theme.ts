@@ -40,6 +40,7 @@ import {
   type GlyphName,
 } from './glyphs.js';
 import { sessionColorStyle } from './session-colors.js';
+import { observedTerminalBackground, surfaceFrom } from './osc11.js';
 
 export type ColorMode = 'truecolor' | 'ansi16' | 'mono';
 export type Brightness = 'dark' | 'light';
@@ -246,6 +247,20 @@ function paletteFor(mode: ColorMode, brightness: Brightness, override?: Palette)
 export function resolveTheme(input: ResolveThemeInput = {}): Theme {
   const env = input.env ?? process.env;
   const colorMode = detectColorMode(env);
+  // F-FUNDO-DERIVADO (relato do dono, três vezes: "essa cor do background do Aluy não está
+  // legal... deveria ser uma cor próxima ao background do terminal").
+  //
+  // As tentativas anteriores foram todas o mesmo erro: escolher um hex fixo sem saber qual
+  // é o fundo do terminal do outro lado. Uma cor que fica discreta sobre preto puro destoa
+  // sobre um fundo quente, e vice-versa — não existe hex que sirva para todos.
+  //
+  // O probe OSC 11 do boot já pergunta ao terminal qual é a cor dele (era usado só para
+  // decidir claro/escuro). Reaproveitando a resposta, as superfícies passam a ser o
+  // PRÓPRIO fundo do usuário deslocado alguns pontos: mesma matiz, um degrau de
+  // luminosidade. Terminal que não responde cai nos hexes declarados abaixo.
+  const fundoTerminal = observedTerminalBackground();
+  const superficie = (passos: number): string | undefined =>
+    fundoTerminal !== null ? surfaceFrom(fundoTerminal, passos) : undefined;
   const brightness = detectBrightness(env, input.theme);
   const unicode = detectUnicode(env);
   // SAFE só faz sentido quando há Unicode (em ASCII puro o conjunto ASCII vence).
@@ -298,8 +313,18 @@ export function resolveTheme(input: ResolveThemeInput = {}): Theme {
     // o chrome é o mais ESCURO (recua), a conversa não tem fundo (plano do terminal).
     ...(colorMode === 'truecolor'
       ? brightness === 'dark'
-        ? { composerBg: '#35312B', aluyBg: '#1F232B', headerBg: '#1A1815', footerBg: '#1A1815' }
-        : { composerBg: '#FFFFFF', aluyBg: '#F0F2F6', headerBg: '#E8E2D6', footerBg: '#E8E2D6' }
+        ? {
+            composerBg: superficie(28) ?? '#35312B',
+            aluyBg: superficie(10) ?? '#1F232B',
+            headerBg: '#1A1815',
+            footerBg: '#1A1815',
+          }
+        : {
+            composerBg: superficie(28) ?? '#FFFFFF',
+            aluyBg: superficie(10) ?? '#F0F2F6',
+            headerBg: '#E8E2D6',
+            footerBg: '#E8E2D6',
+          }
       : {}),
   };
 }

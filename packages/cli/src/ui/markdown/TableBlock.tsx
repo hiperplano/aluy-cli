@@ -16,8 +16,10 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
+import stringWidth from 'string-width';
 import { Role, useTheme } from '../theme/index.js';
 import { ASCII_BOX, LIGHT_UNICODE_BOX } from '../theme/glyphs.js';
+import { vestir } from './ansi-paint.js';
 import type { TermRole } from '../theme/palette.js';
 import { Inlines } from './Markdown.js';
 import { parseInline } from './parse.js';
@@ -32,6 +34,15 @@ export interface TableBlockProps {
   readonly base?: TermRole;
   /** Largura útil (colunas). Ausente/0 ⇒ largura natural (sem truncar). */
   readonly columns?: number;
+  /**
+   * F-ECO-PINTADO (5/5) — fundo da caixa em que a tabela vive.
+   *
+   * A tabela foi o último bloco a ficar sem pintura, e era o mais visível dos buracos:
+   * cada linha dela para no fim da última célula, então o resto da largura ficava com o
+   * fundo do terminal e a caixa aparecia RASGADA na altura da tabela inteira — não um
+   * quadradinho, uma faixa.
+   */
+  readonly backgroundColor?: string;
 }
 
 /**
@@ -83,6 +94,55 @@ export function TableBlock(props: TableBlockProps): React.ReactElement {
   };
 
   const gutter = ' '.repeat(COL_GUTTER);
+
+  const bg = props.backgroundColor;
+
+  // Com fundo, a linha inteira vira UMA string ANSI. Aninhar `<Role>`/`<Text bold>` aqui
+  // reintroduziria o reset TOTAL que apaga o fundo (ver `ansi-paint.ts`) — e numa tabela
+  // isso abriria um vão depois de CADA célula, não só no fim da linha.
+  if (bg !== undefined) {
+    const estAccent = theme.role('accent');
+    const estBase = theme.role(props.base ?? 'fg');
+    const estDim = theme.role('fgDim');
+    const util = props.columns !== undefined && props.columns > 0 ? props.columns : undefined;
+    /** Uma linha da tabela, pintada e completada até a borda. */
+    const faixa = (texto: string, chave: string): React.ReactElement => (
+      <Text key={chave} backgroundColor={bg}>
+        {' ' + texto + (util !== undefined ? ' '.repeat(Math.max(0, util - 1 - stringWidth(texto))) : '')}
+      </Text>
+    );
+    const linhaCabecalho = props.header
+      .map((h, c) =>
+        vestir(
+          padCell(truncateToWidth(visibleText(h), widths[c] ?? 0), widths[c] ?? 0, props.align[c] ?? 'left'),
+          { color: estAccent.color, bold: true },
+        ),
+      )
+      .join(gutter);
+    return (
+      <Box flexDirection="column" paddingY={0}>
+        {faixa(linhaCabecalho, 'h')}
+        {faixa(vestir(rule, { color: estDim.color, dim: estDim.dimColor === true }), 'r')}
+        {props.rows.map((row, r) =>
+          faixa(
+            row
+              .map((cell, c) =>
+                vestir(
+                  padCell(
+                    truncateToWidth(visibleText(cell), widths[c] ?? 0),
+                    widths[c] ?? 0,
+                    props.align[c] ?? 'left',
+                  ),
+                  { color: estBase.color, dim: estBase.dimColor === true },
+                ),
+              )
+              .join(gutter),
+            `b${r}`,
+          ),
+        )}
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" paddingY={0}>

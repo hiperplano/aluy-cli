@@ -4881,6 +4881,20 @@ async function detectInitialTheme(
   stdout: NodeJS.WriteStream | undefined,
   config: UserConfig = {},
 ): Promise<ThemeName> {
+  // F-FUNDO-DERIVADO — o probe roda SEMPRE, antes de qualquer atalho.
+  //
+  // Ele decide o brilho, mas o efeito colateral que importa agora é outro: ao responder,
+  // o terminal informa a COR do próprio fundo, e é dela que as superfícies da conversa são
+  // derivadas (ver `surfaceFrom`). Quando o probe era pulado — e ele era pulado justamente
+  // para quem já tem tema salvo, ou seja, todo usuário que passou por aqui uma vez — a cor
+  // ficava desconhecida e as caixas caíam num hex fixo, que é o que vinha destoando.
+  //
+  // A DECISÃO de brilho não muda: os atalhos abaixo continuam vencendo o que o probe achou.
+  const detected = await queryTerminalBrightness({
+    stdout: stdout ?? process.stdout,
+    stdin: process.stdin,
+    env,
+  });
   // (1) override explícito do env: COLORFGBG declara o brilho deliberadamente.
   if (env.COLORFGBG !== undefined && env.COLORFGBG.trim() !== '') {
     return themeNameForBrightness(resolveTheme({ env }).brightness);
@@ -4890,11 +4904,6 @@ async function detectInitialTheme(
     return config.theme;
   }
   // (3) auto-detecção OSC 11 (best-effort; NO_COLOR/não-TTY ⇒ null lá dentro).
-  const detected = await queryTerminalBrightness({
-    stdout: stdout ?? process.stdout,
-    stdin: process.stdin,
-    env,
-  });
   if (detected) return themeNameForBrightness(detected);
   // (4) default dark.
   return DEFAULT_THEME;
