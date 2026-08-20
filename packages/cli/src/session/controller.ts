@@ -5956,11 +5956,27 @@ export class SessionController {
         // F-CONTA-NO-BLOCO — carimba o custo AQUI, no mesmo ponto em que o turno deixa de
         // fazer stream. Depois deste patch o bloco desce para o `<Static>` e não é mais
         // re-renderizado com estado vivo: se o número não entrar agora, não entra nunca.
-        const conta = this.state.turnAccounting;
+        // Lê da FONTE (a árvore de fluxo), não de `state.turnAccounting`.
+        //
+        // O estado é republicado por `refreshTurnAccounting`, e num turno INTERROMPIDO essa
+        // republicação acontece DEPOIS deste ponto — então o carimbo saía com o valor
+        // anterior, zerado. Na tela isso virava `✔ 0 tokens · 0s` no cabeçalho de uma
+        // resposta com vinte linhas de texto: um número errado, com um ✓ ao lado sugerindo
+        // que deu tudo certo. Pior que não mostrar nada.
+        const agg = this.flowTree?.totalAccounting();
+        const conta: TurnAccountingView | undefined =
+          agg !== undefined && agg.tokens > 0
+            ? {
+                tokens: agg.tokens,
+                toolCalls: agg.toolCalls,
+                durationMs: this.rootFlow?.accounting().durationMs ?? 0,
+                live: false,
+              }
+            : undefined;
         blocks[blocks.length - 1] = {
           ...last,
           streaming: false,
-          ...(conta !== undefined ? { accounting: { ...conta, live: false } } : {}),
+          ...(conta !== undefined ? { accounting: conta } : {}),
         };
       }
       this.patch({ blocks });
