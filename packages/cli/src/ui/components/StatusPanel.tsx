@@ -253,7 +253,11 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
     );
   }
   if (props.credit !== undefined && props.credit !== '') {
-    uso.push({ text: ' · ', role: 'fgDim' }, { text: `crédito ${props.credit}`, role: 'depth' });
+    // i18n: o rótulo era literal em PT e vazava para a UI em inglês (`0 session · crédito`).
+    uso.push(
+      { text: ' · ', role: 'fgDim' },
+      { text: `${t('painel.credito')} ${props.credit}`, role: 'depth' },
+    );
   }
 
   if (props.mode === 'unsafe') {

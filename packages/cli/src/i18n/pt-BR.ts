@@ -76,6 +76,7 @@ export const ptBR: FullCatalog = {
   'statusbar.brokerError': 'erro de broker',
   // F-PAINEL — rótulos da coluna esquerda do painel de status. Curtos de propósito:
   // é o ALINHAMENTO deles que cria a coluna, e um rótulo longo comeria a área do valor.
+  'painel.credito': 'crédito',
   'painel.sessao': 'sessão',
   'painel.estado': 'estado',
   'painel.uso': 'uso',

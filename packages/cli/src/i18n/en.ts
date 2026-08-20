@@ -74,6 +74,7 @@ export const en: PartialCatalog = {
   'statusbar.brokerError': 'broker error',
   // F-PAINEL — rótulos da coluna esquerda do painel de status. Curtos de propósito:
   // é o ALINHAMENTO deles que cria a coluna, e um rótulo longo comeria a área do valor.
+  'painel.credito': 'credit',
   'painel.sessao': 'session',
   'painel.estado': 'state',
   'painel.uso': 'usage',
