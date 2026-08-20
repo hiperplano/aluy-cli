@@ -72,6 +72,27 @@ export interface McpEntry {
  * resolução cai no default do provider ESCOLHIDO — a resposta certa para "não pedi
  * modelo nenhum".
  */
+/**
+ * BUG (relato do dono: "troquei o modelo no onboard e ele não fixou o novo") — decide o
+ * texto do campo ao digitar UMA tecla. PURO, exportado para ter teste (mesma disciplina
+ * do `mcpCatalog`/`resolveOnboardLocalModel`: a UI/Ink se verifica no TTY).
+ *
+ * O campo do modelo vem PRÉ-PREENCHIDO com o default do provider e a digitação era
+ * APENDADA: quem digitava `meu/modelo` gravava `anthropic/claude-3.5-sonnetmeu/modelo`
+ * no config. Não era "não fixa" — fixava um slug COLADO, que provider nenhum conhece.
+ *
+ * A regra: prefill é SUGESTÃO, não texto do usuário. A primeira tecla o SUBSTITUI (é o
+ * comportamento de campo com valor selecionado); daí em diante concatena normal. Enter
+ * direto continua aceitando a sugestão inteira — o caminho comum não muda.
+ */
+export function digitarNoCampo(
+  estado: { readonly buf: string; readonly ehSugestao: boolean },
+  tecla: string,
+): { readonly buf: string; readonly ehSugestao: boolean } {
+  if (estado.ehSugestao) return { buf: tecla, ehSugestao: false };
+  return { buf: estado.buf + tecla, ehSugestao: false };
+}
+
 export function resolveOnboardLocalModel(args: {
   readonly providerId: string;
   /** O que o dono digitou/confirmou no passo `model` (built-ins vêm pré-preenchidos). */
@@ -193,6 +214,11 @@ function OnboardApp(props: {
     ),
   );
   const [buf, setBuf] = useState<string>('');
+  /**
+   * O `buf` atual é uma SUGESTÃO pré-preenchida (default do provider), não algo que o
+   * usuário escreveu ⇒ a primeira tecla o substitui em vez de concatenar. Ver `gotoText`.
+   */
+  const [bufEhSugestao, setBufEhSugestao] = useState<boolean>(false);
   const [savedMsg, setSavedMsg] = useState<string[]>([]);
 
   const pt = lang === 'pt-BR';
@@ -263,6 +289,18 @@ function OnboardApp(props: {
 
   function gotoText(next: Step, prefill = ''): void {
     setBuf(prefill);
+    // BUG (relato do dono: "troquei o modelo no onboard e ele não fixou o novo") — o campo
+    // do modelo vem PRÉ-PREENCHIDO com o default do provider, e a digitação era APENDADA:
+    // quem digitava `meu/modelo` acabava gravando
+    // `anthropic/claude-3.5-sonnetmeu/modelo` no config. Não era "não fixa" — fixava um
+    // slug COLADO, que provider nenhum conhece; o dono via o modelo errado e nenhuma
+    // pista do porquê.
+    //
+    // O prefill é SUGESTÃO, não texto que o usuário escreveu: a primeira tecla o
+    // SUBSTITUI (comportamento de valor selecionado, igual a um campo de formulário com
+    // o texto já marcado). Backspace/edição seguem funcionando normalmente depois disso —
+    // e Enter direto continua aceitando a sugestão inteira, que é o caminho comum.
+    setBufEhSugestao(prefill !== '');
     setStep(next);
   }
 
@@ -516,7 +554,10 @@ function OnboardApp(props: {
       return;
     }
     if (key.backspace || key.delete) {
+      // Editar a sugestão é ACEITÁ-LA como ponto de partida: apaga UM caractere (não o
+      // campo todo) e ela deixa de ser sugestão — a partir daí digitar concatena normal.
       setBuf((b) => b.slice(0, -1));
+      setBufEhSugestao(false);
       return;
     }
     if (
@@ -528,7 +569,10 @@ function OnboardApp(props: {
       !key.leftArrow &&
       !key.rightArrow
     ) {
-      setBuf((b) => b + input);
+      // Primeira tecla sobre uma SUGESTÃO pré-preenchida: SUBSTITUI (ver `gotoText`).
+      const proximo = digitarNoCampo({ buf, ehSugestao: bufEhSugestao }, input);
+      setBuf(proximo.buf);
+      setBufEhSugestao(proximo.ehSugestao);
     }
   });
 
