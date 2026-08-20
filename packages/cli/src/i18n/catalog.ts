@@ -61,6 +61,14 @@ export interface Catalog {
   'suggest.implement': string;
   'suggest.explain': string;
   'suggest.nextStep': string;
+  // F199 (pedido do dono — autocompletar "inteligente") — variantes PARAMETRIZADAS: usadas
+  // no lugar da frase genérica acima quando o digest tem o FATO específico (arquivo/teste/
+  // comando/erro). `{files}`/`{test}`/`{command}`/`{error}` vêm de `suggestionParams`
+  // (core, já clampados/redigidos p/ 1 linha). Sem o fato ⇒ resolver usa a genérica de cima.
+  'suggest.summarizeNamed': string;
+  'suggest.fixFailingNamed': string;
+  'suggest.runTestsNamed': string;
+  'suggest.retryDifferentNamed': string;
 
   // ── Cockpit (ADR-0076) — rótulos das regiões + avisos de modo/degradação ──
   /** Rótulo da região de CONVERSA (scroll próprio). */

@@ -32,6 +32,7 @@ import { setWindowTitle } from '../ui/window-title.js';
 import { resolveHeadroomUrl } from '../maestro/sidecar-urls.js';
 import { CLI_VERSION } from '../version.js';
 import { readUpdateNote, refreshUpdateCheck } from '../io/update-check.js';
+import { readAutoUpdateNote, runAutoUpdate } from '../io/auto-update.js';
 import { ThemeRoot } from './ThemeRoot.js';
 import { buildSession, type BuildSessionOptions } from './wiring.js';
 // F-PROV-FIX — lógica PURA (sem I/O) do ato explícito `/provider save`: decide o
@@ -58,7 +59,11 @@ import {
   type ProviderDiscoveryDeps,
 } from '../model/local/context-window-discovery.js';
 import { createPinnedStreamFetch } from '../model/local/pinned-stream-fetch.js';
-import { createLocalCredentialProvider } from '../model/local/credential-resolver.js';
+import {
+  createLocalCredentialProvider,
+  hasStoredApiKey,
+  storeApiKey,
+} from '../model/local/credential-resolver.js';
 import { setupMcp, ProjectMcpConfigStore, CodexMcpConfigStore } from '../mcp/index.js';
 import { createSandbox } from '../sandbox/index.js';
 import {
@@ -91,9 +96,12 @@ import {
   runMcpSearchSlash,
   runAsyncSlash,
   runTelegramSlash,
+  runLoginSlash,
   runAddDir,
 } from '../slash/handlers.js';
 import { KeychainConnectorSecretStore } from '../auth/connector-secret-store.js';
+// F-LOGIN — I/O de terminal (entrada OCULTA) + presença/escrita da chave do provider BYO.
+import { realTerminalIO } from '../auth/io.js';
 import { activateTelegram } from '../connector/telegram-activation.js';
 import type { IngressSink, TelegramBridge } from '../connector/telegram-bridge.js';
 import type { SessionController } from './controller.js';
@@ -1168,6 +1176,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // no-op silencioso — ver o comentário completo mais abaixo, junto da implementação).
   // Hoistada pela MESMA razão das portas acima: nasce dentro do bloco `backend local`,
   // é usada DEPOIS do `buildSession` (nos props do `<App>`).
+  // F-MODELO-FICA — porta que grava o modelo ATIVO no config quando um turno confirma
+  // que ele responde. HOISTADA pela MESMA razão das outras portas locais: nasce dentro do
+  // bloco `backend local` (precisa do `activeLocalProviderId`, que só existe lá) e é usada
+  // DEPOIS, no `buildSession`.
+  let persistActiveLocalModel: ((slug: string) => void) | undefined;
+  // F-LOGIN — getter do provider LOCAL ativo AGORA. HOISTADO pela mesma razão das portas
+  // vizinhas: `activeLocalProviderId` só existe dentro do bloco `backend local`, e o
+  // roteamento do `/login` (mais abaixo) precisa lê-lo NA HORA — o `/provider` pode ter
+  // trocado nesta sessão, e gravar a chave no provider errado é pior que não gravar.
+  let activeLocalProviderIdRef: (() => string) | undefined;
   let switchLocalProvider:
     | ((name: string) => Promise<{
         readonly ok: boolean;
@@ -1493,8 +1511,24 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             'use "+ adicionar provider custom" no /provider p/ cadastrar um novo.',
         };
       }
+      // F-CRED-NO-SWITCH (relato do dono: "mudo o provider mas não fiz o login, o token é
+      // antigo") — a troca AVISA quando não há credencial para o provider NOVO.
+      //
+      // Antes, `switchLocalProvider` montava o client e devolvia `ok` sem tocar na chave:
+      // a troca PARECIA ter dado certo e o dono só descobria no primeiro turno, com
+      // "sem credencial" ou 401 — longe da ação que causou. Aqui só checamos PRESENÇA
+      // (keychain → cofre em arquivo → env), nunca o valor, e NUNCA fazemos uma chamada
+      // de rede para "testar": um provider com teto por minuto (o caso dele) teria a
+      // janela queimada por uma troca de provider, e a chave presente-porém-inválida se
+      // revela no turno de qualquer jeito.
+      //
+      // NÃO BLOQUEIA a troca. Provider keyless (Ollama) não precisa de chave, e o dono
+      // pode querer trocar ANTES de logar — recusar seria pior que avisar. É `ok:true`
+      // com o aviso no `detail`, e a ação está dita: `/login`.
+      const authNovo = defaultAuthFor(entry.id, freshCatalog);
+      const faltaChave = authNovo === 'apikey' && !hasStoredApiKey(entry.id);
       try {
-        const auth = defaultAuthFor(entry.id, freshCatalog);
+        const auth = authNovo;
         // F-UP — o upstream declarado é POR PROVIDER: ao trocar de provider, relê o mapa
         // do provider NOVO (o do boot não vale mais). Sem entrada p/ ele ⇒ `undefined`,
         // e o client novo simplesmente não manda fragmento nenhum.
@@ -1517,7 +1551,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         activeLocalProviderId = entry.id;
         return {
           ok: true,
-          detail: `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}).`,
+          detail: faltaChave
+            ? `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}). ` +
+              `ATENÇÃO: não há credencial guardada p/ "${entry.id}" — rode /login antes do ` +
+              'próximo turno, senão ele vai falhar por falta de chave.'
+            : `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}).`,
           client,
           defaultModel: entry.defaultModel,
         };
@@ -1528,6 +1566,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         };
       }
     };
+
+    // F-MODELO-FICA — grava provider+modelo JUNTOS: o modelo pertence ao provider ATIVO
+    // (que o `/provider` pode ter trocado nesta sessão), e gravar um sem o outro deixaria
+    // o par incoerente. Lê `activeLocalProviderId` na HORA (não congela o do boot).
+    persistActiveLocalModel = (slug: string): void => {
+      configStore.saveLocalProvider(activeLocalProviderId, slug);
+    };
+    activeLocalProviderIdRef = (): string => activeLocalProviderId;
 
     // F-PROV — getter do catálogo local p/ o `<ProviderPicker>` (ADR-0118). RE-LÊ a
     // cada abertura (mesma disciplina do `switchLocalProvider` acima): reflete um
@@ -1584,6 +1630,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // ADR-0153 — porta de test-then-register (ausente sob backend broker/teste com
     // `opts.brokerClient` — não-regressão).
     ...(verifyAndRegisterLocalModel !== undefined ? { verifyAndRegisterLocalModel } : {}),
+    // F-MODELO-FICA — persiste o modelo ATIVO quando um turno confirma que ele responde.
+    // Só sob backend LOCAL de verdade (é `config.localModel`, campo do BYO): sob broker o
+    // modelo vem do tier e não há o que gravar. Grava provider+modelo JUNTOS pelo
+    // `saveLocalProviderModel` — o modelo pertence ao provider ATIVO, e gravar um sem o
+    // outro deixaria o par incoerente se o `/provider` tiver trocado nesta sessão.
+    ...(persistActiveLocalModel !== undefined ? { persistActiveLocalModel } : {}),
     // F-PROV — porta de troca DE VERDADE do provider ativo local (fix do no-op
     // silencioso do /provider sob backend local). Ausente sob broker/teste com
     // `opts.brokerClient` injetado (não-regressão).
@@ -2540,6 +2592,18 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     const upd = readUpdateNote(CLI_VERSION, env);
     if (upd !== undefined) built.controller.pushNote('update', [upd]);
     void refreshUpdateCheck(CLI_VERSION, env);
+  }
+
+  // F-AUTOUPDATE (pedido do dono: "quando tiver update no npm, instalar automaticamente")
+  // — mesma disciplina do notifier acima: a NOTA é lida do cache (offline, síncrona) e a
+  // instalação corre em segundo plano, fail-soft. A versão baixada vale na PRÓXIMA
+  // abertura — trocar o binário debaixo de um processo em curso não é opção.
+  // Desligável: `ALUY_AUTO_UPDATE=0` (ou o `autoUpdate:false` no config) — quem roda
+  // serviço 24/7 não pode trocar de versão no meio de um expediente sem escolha.
+  {
+    const autoNote = readAutoUpdateNote(CLI_VERSION, env);
+    if (autoNote !== undefined) built.controller.pushNote('autoupdate', [autoNote]);
+    void runAutoUpdate(CLI_VERSION, env, savedConfig.autoUpdate, {});
   }
 
   // EST-0942 — CHECK DE CREDENCIAL no boot. Se NÃO há credencial alguma (keychain
@@ -3595,6 +3659,27 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // ADR-0154 — `/telegram` (setup do conector na sessão): async (config + keychain),
     // com `args` (subcomando + chat-id). Empurra a nota ao concluir. O token NUNCA é digitado
     // aqui — `login` aponta p/ o terminal; allow/deny/status/logout rodam in-session.
+    // F-LOGIN (relato do dono: "o /login não funciona") — roteado AQUI, ANTES do
+    // `buildSlashEffect`, pelo MESMO motivo do `/telegram` logo abaixo: precisa do
+    // provider ativo AO VIVO e de I/O de terminal, que não cabem no efeito PURO.
+    //
+    // ARMADILHA que este roteamento evita: se o efeito virasse `{kind:'async', id:'login'}`,
+    // ele cairia no dispatch genérico de async — que só distingue `whoami` e manda todo o
+    // RESTO para o ramo de `logout`. Um `/login` deslogaria a conta. Por isso o
+    // `buildSlashEffect` mantém `login` como NOTA (no-op honesto) e a via de verdade é esta.
+    if (command.id === 'login' && activeLocalProviderIdRef !== undefined) {
+      const provedorAtivo = activeLocalProviderIdRef;
+      void runLoginSlash({
+        // Provider ATIVO agora — não o do boot: o `/provider` pode ter trocado nesta sessão,
+        // e gravar a chave no provider errado é pior que não gravar.
+        provider: provedorAtivo(),
+        io: realTerminalIO(),
+        hasExistingKey: () => hasStoredApiKey(provedorAtivo()),
+        storeKey: storeApiKey,
+      }).then((note) => built.controller.pushNote(note.title, note.lines));
+      return;
+    }
+
     if (command.id === 'telegram') {
       void runTelegramSlash(args, {
         configStore,

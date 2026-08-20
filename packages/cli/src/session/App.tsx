@@ -154,6 +154,7 @@ import {
 import { isUnrecognizedEscapeTail } from './escape-leak.js';
 // F197 — sugestão de próximo prompt (ghost + Tab): blocos+i18n → texto do composer.
 import { resolveSuggestionText } from './suggest.js';
+import { buildTurnRecap } from './turn-recap.js';
 import {
   createPasteRegistry,
   shouldCollapse,
@@ -1005,6 +1006,10 @@ export function App(props: AppProps): React.ReactElement {
   // EST-0989 (i18n) — os NATIVOS LOCALIZADOS no idioma ativo (summaries traduzidos). Memo
   // pelo `t`: só re-mapeia ao trocar de idioma (em pt-BR devolve a MESMA ref ⇒ sem churn).
   const localizedNatives = useMemo(() => localizeCommands(NATIVE_COMMANDS, t), [t]);
+  // F-RECAP — resumo do que o turno FEZ, para a linha do rodapé (ver `turn-recap.ts`).
+  // Memoizado nos blocos: a função é PURA e barata, mas o rodapé re-renderiza a cada tick
+  // da região viva e não há por que refazer a varredura enquanto os blocos não mudam.
+  const turnRecap = useMemo(() => buildTurnRecap(state.blocks), [state.blocks]);
 
   // EST-0972 — seletor `/history`: lista as sessões anteriores (do SessionStore local,
   // re-lidas a cada abertura) e RETOMA a escolhida AO VIVO. Confirmar devolve o id; o
@@ -2158,7 +2163,10 @@ export function App(props: AppProps): React.ReactElement {
   // (useModelPicker/useEffortPicker) já fazem este strip sozinhos (comentário
   // "controla colagem multi-char também"); aqui replicamos pros campos que não se
   // sanitizam (`typeAddCustom`/`setQuery`), pra manter o mesmo comportamento em TODOS.
-  const sanitizeFieldPaste = useCallback((text: string): string => text.replace(/[\r\n\t]/g, ''), []);
+  const sanitizeFieldPaste = useCallback(
+    (text: string): string => text.replace(/[\r\n\t]/g, ''),
+    [],
+  );
 
   // BUG (relato do dono) — em `/provider` → "+ adicionar provider custom", colar a URL
   // caía no COMPOSER de cima, não no campo do formulário. Causa: o canal de bracketed-
@@ -4353,145 +4361,145 @@ export function App(props: AppProps): React.ReactElement {
   const renderOverlays = (pad: 'top' | 'bottom'): React.ReactElement => {
     const box = pad === 'top' ? { paddingTop: 1 } : { paddingBottom: 1 };
     return (
-    <>
-      {palette.open && (
-        <Box flexDirection="column" {...box}>
-          <CommandPalette
-            hits={palette.hits}
-            selected={palette.selected}
-            query={palette.query}
-            maxRows={Math.min(8, slashMenuRowCap)}
-          />
-        </Box>
-      )}
-      {slashOpen && (
-        <Box flexDirection="column" {...box}>
-          {/* TETO de altura: SEM `maxRows` o menu despejava a lista INTEIRA (40+ comandos) e
+      <>
+        {palette.open && (
+          <Box flexDirection="column" {...box}>
+            <CommandPalette
+              hits={palette.hits}
+              selected={palette.selected}
+              query={palette.query}
+              maxRows={Math.min(8, slashMenuRowCap)}
+            />
+          </Box>
+        )}
+        {slashOpen && (
+          <Box flexDirection="column" {...box}>
+            {/* TETO de altura: SEM `maxRows` o menu despejava a lista INTEIRA (40+ comandos) e
               "ocupava a tela toda", empurrando o histórico pro scrollback — e ao fechar (`/`
               apagado) a tela não voltava. Janela de 8 (como a <CommandPalette> irmã): o menu
               fica compacto, o histórico não é empurrado pra fora e fechar não desloca a vista. */}
-          <SlashMenu
-            commands={slashCommands}
-            selected={slashSel}
-            query={slashQuery}
-            maxRows={Math.min(8, slashMenuRowCap)}
-            columns={columns}
-          />
-        </Box>
-      )}
-      {modelPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <ModelPicker
-            tiers={modelPicker.tiers}
-            selected={modelPicker.selected}
-            currentTier={state.meta.tier}
-            loading={modelPicker.loading}
-            usingFallback={modelPicker.usingFallback}
-            customSelected={modelPicker.customSelected}
-            customInputOpen={modelPicker.customInputOpen}
-            customInput={modelPicker.customInput}
-            customSuggestions={modelPicker.customSuggestions}
-            customWarnOutOfCatalog={modelPicker.customWarnOutOfCatalog}
-            customBrowserAvailable={modelPicker.customBrowserAvailable}
-            customRows={modelPicker.customRows}
-            customFilteredCount={modelPicker.customFilteredCount}
-            customTotalCount={modelPicker.customTotalCount}
-            customHasMoreAbove={modelPicker.customHasMoreAbove}
-            customHasMoreBelow={modelPicker.customHasMoreBelow}
-            customToolsOnly={modelPicker.customToolsOnly}
-            customNoToolsWarning={modelPicker.customNoToolsWarning}
-            effortStepOpen={modelPicker.effortStepOpen}
-            effortOptions={modelPicker.effortOptions}
-            effortSelected={modelPicker.effortSelected}
-            {...(modelPicker.currentEffort !== undefined
-              ? { currentEffort: modelPicker.currentEffort }
-              : {})}
-            effortCustomOpen={modelPicker.effortCustomOpen}
-            effortCustomInput={modelPicker.effortCustomInput}
-            effortCustomWarn={modelPicker.effortCustomWarn}
-          />
-        </Box>
-      )}
-      {/* F161-FIX — seletor `/model` sob backend LOCAL (BYO): fuzzy-pick dedicado
+            <SlashMenu
+              commands={slashCommands}
+              selected={slashSel}
+              query={slashQuery}
+              maxRows={Math.min(8, slashMenuRowCap)}
+              columns={columns}
+            />
+          </Box>
+        )}
+        {modelPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <ModelPicker
+              tiers={modelPicker.tiers}
+              selected={modelPicker.selected}
+              currentTier={state.meta.tier}
+              loading={modelPicker.loading}
+              usingFallback={modelPicker.usingFallback}
+              customSelected={modelPicker.customSelected}
+              customInputOpen={modelPicker.customInputOpen}
+              customInput={modelPicker.customInput}
+              customSuggestions={modelPicker.customSuggestions}
+              customWarnOutOfCatalog={modelPicker.customWarnOutOfCatalog}
+              customBrowserAvailable={modelPicker.customBrowserAvailable}
+              customRows={modelPicker.customRows}
+              customFilteredCount={modelPicker.customFilteredCount}
+              customTotalCount={modelPicker.customTotalCount}
+              customHasMoreAbove={modelPicker.customHasMoreAbove}
+              customHasMoreBelow={modelPicker.customHasMoreBelow}
+              customToolsOnly={modelPicker.customToolsOnly}
+              customNoToolsWarning={modelPicker.customNoToolsWarning}
+              effortStepOpen={modelPicker.effortStepOpen}
+              effortOptions={modelPicker.effortOptions}
+              effortSelected={modelPicker.effortSelected}
+              {...(modelPicker.currentEffort !== undefined
+                ? { currentEffort: modelPicker.currentEffort }
+                : {})}
+              effortCustomOpen={modelPicker.effortCustomOpen}
+              effortCustomInput={modelPicker.effortCustomInput}
+              effortCustomWarn={modelPicker.effortCustomWarn}
+            />
+          </Box>
+        )}
+        {/* F161-FIX — seletor `/model` sob backend LOCAL (BYO): fuzzy-pick dedicado
           dos slugs do provider ativo (os tiers do broker acima não se aplicam). */}
-      {localModelPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <LocalModelPicker
-            hits={localModelPicker.hits}
-            selected={localModelPicker.selected}
-            query={localModelPicker.query}
-            columns={columns}
-            loading={localModelPicker.loading}
-            usingFallback={localModelPicker.usingFallback}
-            {...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {})}
-          />
-        </Box>
-      )}
-      {/* F161-FIX — seletor `/effort` STANDALONE (fora do fluxo conjugado do /model). */}
-      {effortPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <EffortPicker
-            options={effortPicker.options}
-            selected={effortPicker.selected}
-            {...(effortPicker.currentEffort !== undefined
-              ? { currentEffort: effortPicker.currentEffort }
-              : {})}
-            customOpen={effortPicker.customOpen}
-            customInput={effortPicker.customInput}
-            customWarn={effortPicker.customWarn}
-          />
-        </Box>
-      )}
-      {themePicker.open && (
-        <Box flexDirection="column" {...box}>
-          <ThemePicker
-            themes={themePicker.themes}
-            selected={themePicker.selected}
-            currentTheme={currentTheme}
-          />
-        </Box>
-      )}
-      {langPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <LangPicker
-            langs={langPicker.langs}
-            selected={langPicker.selected}
-            currentLang={currentLang}
-          />
-        </Box>
-      )}
-      {providerPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <ProviderPicker
-            providers={providerPicker.providers}
-            selected={providerPicker.selected}
-            usingFallback={providerPicker.usingFallback}
-            maxRows={slashMenuRowCap - 2}
-            columns={columns}
-            addCustomStep={providerPicker.addCustomStep}
-            addCustomDraft={providerPicker.addCustomDraft}
-            {...(currentProvider !== undefined ? { currentProvider } : {})}
-          />
-        </Box>
-      )}
-      {historyPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <HistoryPicker sessions={historyPicker.sessions} selected={historyPicker.selected} />
-        </Box>
-      )}
-      {rewindPicker.open && rewindPicker.phase !== 'closed' && (
-        <Box flexDirection="column" {...box}>
-          <RewindPicker
-            phase={rewindPicker.phase}
-            checkpoints={rewindPicker.checkpoints}
-            actions={rewindPicker.actions}
-            target={rewindPicker.target}
-            selected={rewindPicker.selected}
-            barrierWarnings={rewindBarriers}
-          />
-        </Box>
-      )}
-    </>
+        {localModelPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <LocalModelPicker
+              hits={localModelPicker.hits}
+              selected={localModelPicker.selected}
+              query={localModelPicker.query}
+              columns={columns}
+              loading={localModelPicker.loading}
+              usingFallback={localModelPicker.usingFallback}
+              {...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {})}
+            />
+          </Box>
+        )}
+        {/* F161-FIX — seletor `/effort` STANDALONE (fora do fluxo conjugado do /model). */}
+        {effortPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <EffortPicker
+              options={effortPicker.options}
+              selected={effortPicker.selected}
+              {...(effortPicker.currentEffort !== undefined
+                ? { currentEffort: effortPicker.currentEffort }
+                : {})}
+              customOpen={effortPicker.customOpen}
+              customInput={effortPicker.customInput}
+              customWarn={effortPicker.customWarn}
+            />
+          </Box>
+        )}
+        {themePicker.open && (
+          <Box flexDirection="column" {...box}>
+            <ThemePicker
+              themes={themePicker.themes}
+              selected={themePicker.selected}
+              currentTheme={currentTheme}
+            />
+          </Box>
+        )}
+        {langPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <LangPicker
+              langs={langPicker.langs}
+              selected={langPicker.selected}
+              currentLang={currentLang}
+            />
+          </Box>
+        )}
+        {providerPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <ProviderPicker
+              providers={providerPicker.providers}
+              selected={providerPicker.selected}
+              usingFallback={providerPicker.usingFallback}
+              maxRows={slashMenuRowCap - 2}
+              columns={columns}
+              addCustomStep={providerPicker.addCustomStep}
+              addCustomDraft={providerPicker.addCustomDraft}
+              {...(currentProvider !== undefined ? { currentProvider } : {})}
+            />
+          </Box>
+        )}
+        {historyPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <HistoryPicker sessions={historyPicker.sessions} selected={historyPicker.selected} />
+          </Box>
+        )}
+        {rewindPicker.open && rewindPicker.phase !== 'closed' && (
+          <Box flexDirection="column" {...box}>
+            <RewindPicker
+              phase={rewindPicker.phase}
+              checkpoints={rewindPicker.checkpoints}
+              actions={rewindPicker.actions}
+              target={rewindPicker.target}
+              selected={rewindPicker.selected}
+              barrierWarnings={rewindBarriers}
+            />
+          </Box>
+        )}
+      </>
     );
   };
 
@@ -5044,7 +5052,10 @@ export function App(props: AppProps): React.ReactElement {
           (tokens + tempo), estilo Claude Code. Aparece quando o turno terminou
           (done/budget) — leitura/display puro (não dispara efeito, não vaza segredo). */}
       {state.turnAccounting && (state.phase === 'done' || state.phase === 'budget') && (
-        <TurnFooter accounting={state.turnAccounting} />
+        <TurnFooter
+          accounting={state.turnAccounting}
+          {...(turnRecap !== undefined ? { recap: turnRecap } : {})}
+        />
       )}
 
       {/* EST-0948 · ADR-0069/APR-0074 — footer de QUOTA da PRÓPRIA conta do ator CLI/PAT.

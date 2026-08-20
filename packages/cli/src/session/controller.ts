@@ -665,6 +665,23 @@ export interface SessionControllerOptions {
     readonly registered: boolean;
   }>;
   /**
+   * F-MODELO-FICA — persiste o modelo ATIVO (`config.localModel`) do backend LOCAL.
+   *
+   * O BURACO que isto fecha: `/model` chamava `setTier('custom', slug)`, que troca a
+   * sessão e o `meta` — e NADA gravava. Na sessão seguinte o slug voltava ao do config,
+   * em silêncio; o dono escolhia o modelo e ele "não ficava". O método de persistir já
+   * existia no store (`saveLocalProviderModel`) e era CÓDIGO MORTO: nenhum chamador.
+   *
+   * QUANDO gravar é a regra do dono: "se estiver respondendo (somente se estiver
+   * funcionando)". Por isso a escrita NÃO acontece na hora da escolha — acontece quando
+   * um turno COMPLETA com aquele modelo (ver `pendingModelToPersist`). Um slug que o
+   * provider recusa nunca chega a virar padrão, e não gastamos uma chamada de teste só
+   * para descobrir isso: a prova é o turno que o dono ia fazer de qualquer jeito.
+   *
+   * Ausente ⇒ a troca vale só na sessão (comportamento anterior, sem regressão).
+   */
+  readonly persistActiveLocalModel?: (slug: string) => void;
+  /**
    * F-PROV — porta que TROCA DE VERDADE o provider ATIVO sob backend LOCAL (fix do
    * "silent no-op" achado em dogfooding: `/provider` mudava só um DADO passageiro do
    * request que o `LocalModelClient` sequer lê — o client seguia fixo no provider do
@@ -1029,6 +1046,15 @@ export class SessionController {
         slug: string,
       ) => Promise<{ readonly ok: boolean; readonly detail: string; readonly registered: boolean }>)
     | undefined;
+  /** F-MODELO-FICA — porta que grava o modelo ATIVO no config (ver doc na options). */
+  private readonly persistActiveLocalModel: ((slug: string) => void) | undefined;
+  /**
+   * F-MODELO-FICA — slug escolhido nesta sessão que AINDA NÃO foi confirmado por um turno
+   * bem-sucedido. Vira `undefined` assim que persistimos (uma vez só) ou quando outra
+   * troca o substitui. Não persiste no erro: modelo que o provider recusa nunca vira o
+   * padrão do dono.
+   */
+  private pendingModelToPersist: string | undefined;
   /** F-PROV — porta de troca DE VERDADE do provider ATIVO local (ver doc na options). */
   private readonly switchLocalProviderPort:
     | ((name: string) => Promise<{
@@ -1401,6 +1427,7 @@ export class SessionController {
     this.defaultChildModel = opts.defaultChildModel; // ADR-0146 (D4) — dial global
     this.localModelCatalog = opts.localModelCatalog; // ADR-0152 (D6c) — probe local
     this.verifyAndRegisterLocalModel = opts.verifyAndRegisterLocalModel; // ADR-0153 — TTR
+    this.persistActiveLocalModel = opts.persistActiveLocalModel; // F-MODELO-FICA
     this.switchLocalProviderPort = opts.switchLocalProvider; // F-PROV — troca de provider local
     this.clock = opts.clock ?? Date.now;
     this.isRoot =
@@ -2155,7 +2182,13 @@ export class SessionController {
       onReasoning: (content) => this.appendAluyReasoning(content),
       onUsage: (usage) => this.applyUsage(usage),
       onQuota: (quota) => this.applyQuota(quota),
-      onDone: () => this.finishAluyTurn(),
+      onDone: () => {
+        this.finishAluyTurn();
+        // F-MODELO-FICA — `onDone` é o sinal de que o stream do modelo FECHOU BEM (o
+        // caminho de erro não passa por aqui: `onError` chama `finishAluyTurn` direto).
+        // É a prova barata de "está respondendo" que a persistência espera.
+        this.confirmPendingModel();
+      },
     };
   }
 
@@ -4385,6 +4418,24 @@ export class SessionController {
    *
    * No-op (devolve `false`) quando a janela não muda — não re-renderiza nem re-arma nada.
    */
+  /**
+   * F-MODELO-FICA — CONFIRMA o modelo escolhido: um turno completou com ele, então ele
+   * "está respondendo" (a regra do dono) e vira o padrão em `config.localModel`.
+   *
+   * Chamado no fim do turno BEM-SUCEDIDO. No caminho de erro NÃO é chamado — um slug que
+   * o provider recusa (404 de modelo, 401, teto) nunca vira o padrão, que é o ponto: a
+   * confirmação custa ZERO chamada extra, porque usa o turno que o dono ia fazer mesmo.
+   *
+   * Idempotente: limpa o pendente antes de gravar, então um segundo turno com o mesmo
+   * modelo não reescreve o config à toa.
+   */
+  private confirmPendingModel(): void {
+    const slug = this.pendingModelToPersist;
+    if (slug === undefined) return;
+    this.pendingModelToPersist = undefined;
+    this.persistActiveLocalModel?.(slug);
+  }
+
   private applyContextWindow(newWindow: number): boolean {
     if (newWindow === this.contextWindow) return false;
     this.contextWindow = newWindow;
@@ -4472,6 +4523,12 @@ export class SessionController {
     const sameModel = (model ?? undefined) === (this.tierControl.model ?? undefined);
     if (sameTier && sameModel) return;
     this.tierControl.setTier(tier, model);
+    // F-MODELO-FICA — a escolha fica PENDENTE até um turno completar com ela. Só o modo
+    // Custom (BYO) tem `localModel` no config; tier canônico não persiste nada aqui.
+    // Trocar de novo antes de confirmar simplesmente substitui o pendente — persiste o
+    // que de fato funcionou, nunca um slug que o dono já abandonou.
+    this.pendingModelToPersist =
+      tier === 'custom' && model !== undefined && model.trim() !== '' ? model.trim() : undefined;
     // EST-0973 (fix) — re-resolve a janela de contexto + auto-compactação para o
     // NOVO tier. Cada tier tem sua janela real (ex.: Strata=128k, Flui=256k,
     // Cortex=200k, Custom=0/inerte). Sem isso, a troca de tier mantinha o 200k
@@ -4506,6 +4563,12 @@ export class SessionController {
       // à mão manda mais que o que o provider anunciou.
       modelWindowFromConfig(this.providerWindows, this.activeProviderId, model) ??
         this.discoveredWindowFor(model),
+      // F-WIN (embutido) — o SLUG do modelo NOVO. É o que faz a troca de modelo carregar
+      // a janela CONHECIDA sem depender de o provider informar nem de o dono declarar —
+      // o pedido literal do dono: "isso não deveria ser carregado quando mudo o modelo,
+      // independente do provider?". Sem este argumento o catálogo embutido nunca é
+      // consultado no `/model`, e o degrau fica morto onde ele mais importa.
+      model,
     );
     this.applyContextWindow(newWindow);
     // `meta.model` só existe na via Custom; fora dela o campo é REMOVIDO (não fica

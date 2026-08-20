@@ -316,6 +316,34 @@ export function storeApiKey(
   };
 }
 
+export interface HasStoredApiKeyOptions {
+  /** Fábrica de Entry do keychain injetável (testes). Default: `@napi-rs/keyring`. */
+  readonly entryFactory?: (service: string, account: string) => KeyringEntry;
+  /** Opções do cofre em arquivo cifrado injetáveis (testes). */
+  readonly fileVault?: FileVaultOptions;
+}
+
+/**
+ * ADR-0120 (retomada, `/login` da sessão) — existe uma API key JÁ PERSISTIDA (keychain
+ * OU cofre em arquivo) p/ este provider? NÃO consulta env: uma env var não foi "gravada"
+ * por nós (não há o que REUSAR — ela já funciona sozinha a cada requisição via
+ * `createLocalCredentialProvider`), e confundir as duas faria o `/login` oferecer
+ * "reusar" uma chave que na verdade não está em NENHUM cofre nosso.
+ *
+ * Só checa PRESENÇA — o valor lido é descartado na hora, nunca retornado nem logado
+ * (CLI-SEC-2/7). É o dado que falta pra decidir sem digitar de novo (`decideLocalLogin`
+ * em `slash/handlers.ts`): sem isto o `/login` sempre reexigiria colar a chave, mesmo
+ * quando ela já está guardada (de um `aluy login --provider` anterior, por exemplo).
+ */
+export function hasStoredApiKey(
+  provider: LocalProviderKind,
+  opts: HasStoredApiKeyOptions = {},
+): boolean {
+  const conta = apiKeyAccount(provider);
+  if (readKeychain(opts.entryFactory, conta).valor !== undefined) return true;
+  return readFileVaultAccount(conta, opts.fileVault).valor !== undefined;
+}
+
 /**
  * CREDENCIAL-INTERMITENTE — ESQUECE a credencial memorizada de um provider. É o ponto
  * de invalidação para um logout/revogação: sem isto, o cache anti-blip seguiria

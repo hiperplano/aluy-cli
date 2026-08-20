@@ -44,6 +44,11 @@ export const en: PartialCatalog = {
   'suggest.implement': 'implement the change we discussed',
   'suggest.explain': 'explain what you did and why',
   'suggest.nextStep': 'what should I review or do next?',
+  // F199 — variants carrying the turn's FACT (see catalog.ts).
+  'suggest.summarizeNamed': 'review the changes in {files}',
+  'suggest.fixFailingNamed': 'investigate why "{test}" failed',
+  'suggest.runTestsNamed': 'run "{command}" again',
+  'suggest.retryDifferentNamed': 'try a different approach — the error was "{error}"',
 
   // ── Cockpit (ADR-0076) ────────────────────────────────────────────────────
   'cockpit.conversa': 'conversation',

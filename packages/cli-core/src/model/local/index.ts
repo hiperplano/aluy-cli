@@ -56,3 +56,13 @@ export {
   findModelContext,
   parseModelsListSlugs,
 } from './context-discovery.js';
+// F-WIN (embutido) — catálogo ESTÁTICO de janelas de contexto PUBLICAMENTE conhecidas,
+// casado por FAMÍLIA de slug (vendor/data-suffix/case-insensitive). Degrau ABAIXO de
+// declarado/descoberto e ACIMA do fail-safe `0` na cadeia de `resolveContextWindow`
+// (`@hiperplano/aluy-cli/model/catalog.ts`). Ver o comentário de topo de
+// `known-context-windows.ts` p/ a fonte de cada valor e o porquê da posição.
+export {
+  KNOWN_MODEL_CONTEXT_WINDOWS,
+  normalizeModelFamily,
+  builtinContextWindowForSlug,
+} from './known-context-windows.js';

@@ -271,6 +271,12 @@ export interface BuildSessionOptions {
    * própria (pass-through). Ausente ⇒ o controller preserva EXATAMENTE o
    * comportamento rc.105 (fallback fail-closed/warn-but-allow) — zero regressão.
    */
+  /**
+   * F-MODELO-FICA — grava o modelo ATIVO no config quando um turno confirma que ele
+   * responde. Construída no `run.tsx`; ausente ⇒ a troca vale só na sessão (o
+   * comportamento anterior, em que `/model` nunca persistia).
+   */
+  readonly persistActiveLocalModel?: (slug: string) => void;
   readonly verifyAndRegisterLocalModel?: (slug: string) => Promise<{
     readonly ok: boolean;
     readonly detail: string;
@@ -998,6 +1004,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     undefined,
     opts.context?.window,
     modelWindowFromConfig(opts.providerWindows, opts.activeProviderId, windowSlug),
+    // F-WIN (embutido) — o SLUG, não só a janela já resolvida: é ele que o catálogo
+    // embutido consulta quando nada acima respondeu. Sem este argumento o degrau existe
+    // e NUNCA roda — a mesma ponta solta do `upstreamByModel` e do canal de raciocínio.
+    windowSlug,
   );
   // EST-0962 (--effort) — reasoning_effort PASSTHROUGH (qualquer string ≤32 chars).
   // SEM tier-gate: vale em qualquer tier. undefined ⇒ não enviado.
@@ -1501,6 +1511,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // aqui). Ausente ⇒ o controller cai no fallback rc.105 (zero regressão).
     ...(opts.verifyAndRegisterLocalModel
       ? { verifyAndRegisterLocalModel: opts.verifyAndRegisterLocalModel }
+      : {}),
+    // F-MODELO-FICA — pass-through da porta que persiste o modelo ativo.
+    ...(opts.persistActiveLocalModel
+      ? { persistActiveLocalModel: opts.persistActiveLocalModel }
       : {}),
     // F-PROV — porta de troca DE VERDADE do provider ativo local (construída pelo
     // `run.tsx`, pass-through aqui). Ausente ⇒ `setLocalProvider` do controller

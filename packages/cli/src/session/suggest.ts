@@ -12,14 +12,15 @@
 
 import type { SessionBlock } from './model.js';
 import type { NextSuggestionId } from '@hiperplano/aluy-cli-core';
-import { suggestNextPrompts } from '@hiperplano/aluy-cli-core';
+import { suggestNextPrompts, suggestionParams } from '@hiperplano/aluy-cli-core';
 import type { I18nKey, TFunction } from '../i18n/index.js';
 import { buildTurnDigest } from './suggest-digest.js';
 
 /**
- * F197 — mapa id do core → chave i18n. Fonte ÚNICA da correspondência (o core não conhece
- * chaves i18n; a TUI não conhece a heurística). `Record` COMPLETO ⇒ o compilador exige uma
- * chave p/ cada `NextSuggestionId` novo (não dá p/ esquecer a tradução).
+ * F197 — mapa id do core → chave i18n GENÉRICA (fallback, sempre disponível). Fonte ÚNICA
+ * da correspondência (o core não conhece chaves i18n; a TUI não conhece a heurística).
+ * `Record` COMPLETO ⇒ o compilador exige uma chave p/ cada `NextSuggestionId` novo (não dá
+ * p/ esquecer a tradução).
  */
 const SUGGESTION_KEY: Readonly<Record<NextSuggestionId, I18nKey>> = {
   'run-tests': 'suggest.runTests',
@@ -32,9 +33,25 @@ const SUGGESTION_KEY: Readonly<Record<NextSuggestionId, I18nKey>> = {
 };
 
 /**
- * F197 — devolve o TEXTO da sugestão de TOPO p/ os blocos dados, já localizado, ou
+ * F199 — mapa id → chave i18n PARAMETRIZADA. PARCIAL de propósito: só os ids que o core
+ * (`suggestionParams`) sabe alimentar com um FATO (arquivo/teste/comando/erro) têm uma
+ * entrada aqui; os demais (`implement`/`explain`/`next-step`) seguem só na genérica acima.
+ * Usada só quando `suggestionParams` devolve algo (senão cai na genérica — não regride).
+ */
+const SUGGESTION_KEY_NAMED: Readonly<Partial<Record<NextSuggestionId, I18nKey>>> = {
+  'run-tests': 'suggest.runTestsNamed',
+  'fix-failing': 'suggest.fixFailingNamed',
+  summarize: 'suggest.summarizeNamed',
+  'retry-different': 'suggest.retryDifferentNamed',
+};
+
+/**
+ * F197/F199 — devolve o TEXTO da sugestão de TOPO p/ os blocos dados, já localizado, ou
  * `undefined` quando não há o que sugerir (sem conversa: boot/sessão fresca). É o que a
- * App grava no composer (ghost + Tab). PURO — determinístico p/ os mesmos blocos+idioma.
+ * App grava no composer (ghost + Tab). Quando o digest tem o FATO específico do turno
+ * (arquivo editado/teste que falhou/comando/erro), o texto vem da chave PARAMETRIZADA
+ * (`suggest.*Named`) com o fato interpolado; sem fato, cai na frase genérica de sempre
+ * (comportamento de hoje — não regride). PURO — determinístico p/ os mesmos blocos+idioma.
  */
 export function resolveSuggestionText(
   blocks: readonly SessionBlock[],
@@ -44,5 +61,8 @@ export function resolveSuggestionText(
   const ids = suggestNextPrompts(digest, { max: 1 });
   const top = ids[0];
   if (top === undefined) return undefined;
+  const params = suggestionParams(top, digest);
+  const namedKey = params !== undefined ? SUGGESTION_KEY_NAMED[top] : undefined;
+  if (namedKey !== undefined) return t(namedKey, params);
   return t(SUGGESTION_KEY[top]);
 }

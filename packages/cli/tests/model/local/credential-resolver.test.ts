@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createLocalCredentialProvider,
   storeApiKey,
+  hasStoredApiKey,
   forgetCachedApiKey,
   MissingLocalCredentialError,
   type KeyringEntry,
@@ -280,5 +281,38 @@ describe('storeApiKey — keychain acelerador, cofre em arquivo é o requisito d
     expect(() =>
       storeApiKey('anthropic', 'sk-w', { entryFactory: deadKeyring, fileVault }),
     ).toThrow(MachineIdUnavailableError);
+  });
+});
+
+// ADR-0120 (retomada) — presença p/ o `/login` da sessão oferecer REUSAR em vez de
+// reexigir a digitação (`decideLocalLogin` em `slash/handlers.ts`). NUNCA consulta
+// env (não é "gravada" por nós) e NUNCA expõe o valor — só um booleano.
+describe('hasStoredApiKey — só PRESENÇA (keychain OU cofre em arquivo), nunca env', () => {
+  it('nada em lugar nenhum ⇒ false', () => {
+    const fileVault = tmpFileVault();
+    expect(hasStoredApiKey('anthropic', { entryFactory: fakeKeyring({}), fileVault })).toBe(false);
+  });
+
+  it('chave no keychain ⇒ true', () => {
+    const fileVault = tmpFileVault();
+    expect(
+      hasStoredApiKey('anthropic', {
+        entryFactory: fakeKeyring({ 'anthropic:apikey': 'sk-x' }),
+        fileVault,
+      }),
+    ).toBe(true);
+  });
+
+  it('keychain ausente, chave só no cofre em arquivo ⇒ true', () => {
+    const fileVault = tmpFileVault();
+    writeFileVaultAccount('openrouter:apikey', 'sk-do-cofre', fileVault);
+    expect(hasStoredApiKey('openrouter', { entryFactory: fakeKeyring({}), fileVault })).toBe(true);
+  });
+
+  it('só na ENV (nem keychain nem cofre) ⇒ false — env não é "gravada", não há o que reusar', () => {
+    // env não entra nos args de hasStoredApiKey (ela não a consulta) — a ausência
+    // de keychain/arquivo já basta pra provar que ela não conta como "existente" aqui.
+    const fileVault = tmpFileVault();
+    expect(hasStoredApiKey('openai', { entryFactory: fakeKeyring({}), fileVault })).toBe(false);
   });
 });

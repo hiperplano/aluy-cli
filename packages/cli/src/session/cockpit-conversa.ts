@@ -229,7 +229,19 @@ function outputBoxLines(output: string | undefined, ctx: ConversaCtx): number {
  * BangBlock/NoteBlock/SubAgents/Doctor/TestRunBlock/BrokerError/InjectAck). PURO.
  */
 export function measureConversaBlock(b: SessionBlock, ctx: ConversaCtx): number {
-  const c = ctx.columns;
+  // PISO NA ENTRADA — a rc.137 pôs `effectiveCols` na FALA, na saída viva e no CLIP, e
+  // deixou a MEDIÇÃO de fora: aqui `c` era `ctx.columns` cru, subtraído em dez pontos
+  // deste switch. Com `columns` degenerado (0/negativo/NaN — a janela real que existe na
+  // troca de modo e no resize, antes do próximo layout assentar), medição e clip passavam
+  // a DISCORDAR: medido num bloco `subagents` de 4 filhos, a altura ia de 6 para 82 —
+  // 13× errada. Altura errada no fullscreen é layout que não fecha, e o clip decide
+  // encolher (ou não) pelo número que a medição deu.
+  //
+  // `Number.isFinite` cobre NaN/Infinity (mesma classe do `safeDim`/`resolveCockpitLayout`);
+  // o `max(1,…)` garante que toda subtração abaixo tenha de onde tirar — os consumidores
+  // (`wrappedLineCount`/`markdownLines`) já clampam, mas a garantia fica LOCAL, no ponto
+  // onde o número nasce, em vez de a três chamadas de distância.
+  const c = Math.max(1, Number.isFinite(ctx.columns) ? ctx.columns : 1);
   switch (b.kind) {
     case 'you':
       // rótulo `▌ você` (1) + fala (wrap em c-2) + paddingBottom (1).
@@ -410,9 +422,12 @@ export function clipConversaBlock(b: SessionBlock, room: number, ctx: ConversaCt
         // overhead: linha do ⏺ (1) + bordas da box (2). Linhas com prefixo `│ ` em c-4.
         return {
           ...b,
-          output: clipLines(b.output.split('\n'), 3, effectiveCols(ctx.columns, OUTPUT_INDENT), 2).join(
-            '\n',
-          ),
+          output: clipLines(
+            b.output.split('\n'),
+            3,
+            effectiveCols(ctx.columns, OUTPUT_INDENT),
+            2,
+          ).join('\n'),
         };
       }
       break;
@@ -422,9 +437,12 @@ export function clipConversaBlock(b: SessionBlock, room: number, ctx: ConversaCt
         // overhead: linha do ⏺ (1) + bordas da box (2) + paddingBottom (1).
         return {
           ...b,
-          output: clipLines(b.output.split('\n'), 4, effectiveCols(ctx.columns, OUTPUT_INDENT), 2).join(
-            '\n',
-          ),
+          output: clipLines(
+            b.output.split('\n'),
+            4,
+            effectiveCols(ctx.columns, OUTPUT_INDENT),
+            2,
+          ).join('\n'),
         };
       }
       break;

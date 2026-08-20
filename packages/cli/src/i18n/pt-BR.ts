@@ -41,6 +41,12 @@ export const ptBR: FullCatalog = {
   'suggest.implement': 'implemente a mudança que discutimos',
   'suggest.explain': 'explique o que você fez e por quê',
   'suggest.nextStep': 'o que devo revisar ou fazer a seguir?',
+  // F199 — variantes com o FATO do turno (ver catalog.ts). Estilo denso, sem ponto final
+  // (mesmo registro das genéricas acima).
+  'suggest.summarizeNamed': 'revise as mudanças em {files}',
+  'suggest.fixFailingNamed': 'investigue por que "{test}" falhou',
+  'suggest.runTestsNamed': 'rode "{command}" de novo',
+  'suggest.retryDifferentNamed': 'tente outra abordagem — o erro foi "{error}"',
 
   // ── Cockpit (ADR-0076) ────────────────────────────────────────────────────
   'cockpit.conversa': 'conversa',

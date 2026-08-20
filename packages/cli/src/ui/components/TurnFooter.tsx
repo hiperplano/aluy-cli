@@ -17,6 +17,14 @@ import { abbreviateCount, formatDuration, type TurnAccountingView } from '../../
 
 export interface TurnFooterProps {
   readonly accounting: TurnAccountingView;
+  /**
+   * F-RECAP (pedido do dono: "um recap na linha inferior do que fez") — resumo do que o
+   * turno FEZ (`buildTurnRecap`). O rodapé de hoje informa CUSTO (tokens/tools/duração),
+   * que responde "quanto gastou" e não "o que aconteceu"; num turno com dez tools o dono
+   * teria de reler o histórico para saber que arquivo foi tocado. Ausente ⇒ rodapé
+   * idêntico ao de hoje (turno de conversa pura não inventa recap).
+   */
+  readonly recap?: string;
 }
 
 export function TurnFooter(props: TurnFooterProps): React.ReactElement {
@@ -24,6 +32,9 @@ export function TurnFooter(props: TurnFooterProps): React.ReactElement {
   const parts: string[] = [`${abbreviateCount(a.tokens)} tokens`];
   if (a.toolCalls > 0) parts.push(`${a.toolCalls} tools`);
   parts.push(formatDuration(a.durationMs));
+  // O recap vem DEPOIS do custo: quem varre o rodapé procura primeiro o número, e o
+  // resumo é a leitura que se faz quando o número chama atenção.
+  if (props.recap !== undefined && props.recap !== '') parts.push(props.recap);
   return (
     <Box paddingLeft={2}>
       {/* `done` (concluído) ⇒ ✓; `live` (turno correndo) ⇒ ◷ relógio. */}
