@@ -61,6 +61,12 @@ export interface StreamSink {
   onStart?(): void;
   /** Um chunk de conteúdo (a UI concatena no TurnBlock corrente). */
   onDelta(content: string): void;
+  /**
+   * F-RAC — um chunk de RACIOCÍNIO (canal separado da fala). NÃO é resposta: a UI o
+   * mostra como pensamento e ele nunca entra no texto final do turno. Opcional: um
+   * sink que não o implementa simplesmente ignora o pensamento (comportamento antigo).
+   */
+  onReasoning?(content: string): void;
   /** Trailer de uso (◷ tokens / ⛁ janela). */
   onUsage?(usage: ModelUsage): void;
   /**
@@ -71,6 +77,30 @@ export interface StreamSink {
   onQuota?(quota: Quota): void;
   /** Fim do turno do modelo. */
   onDone?(): void;
+}
+
+/**
+ * Sink que DELEGA para um alvo resolvido só na hora da chamada.
+ *
+ * Existe para matar uma CLASSE de defeito, não um caso: o wiring montava um objeto com
+ * a lista de callbacks escrita À MÃO (`onStart`/`onDelta`/`onUsage`/`onQuota`/`onDone`),
+ * e quem adicionasse um canal novo ao `StreamSink` e esquecesse de somá-lo ali via o
+ * evento nascer no adapter, atravessar o client e MORRER em silêncio no meio do caminho.
+ * Aconteceu com o canal de raciocínio (F-RAC): 15 eventos emitidos pelo client, zero
+ * chegando ao controller, sem erro em lugar nenhum.
+ *
+ * O alvo é resolvido a CADA evento (`get()`) porque o controller nasce DEPOIS do caller
+ * — era essa a razão do `controllerRef?.` no wiring. Alvo ausente ⇒ no-op.
+ */
+export function delegatingSink(get: () => StreamSink | undefined): StreamSink {
+  return {
+    onStart: () => get()?.onStart?.(),
+    onDelta: (c) => get()?.onDelta(c),
+    onReasoning: (c) => get()?.onReasoning?.(c),
+    onUsage: (u) => get()?.onUsage?.(u),
+    onQuota: (q) => get()?.onQuota?.(q),
+    onDone: () => get()?.onDone?.(),
+  };
 }
 
 /** F-RETRY — o que a UI recebe a cada retentativa (o contador `n/N` na tela). */
@@ -463,6 +493,13 @@ export class StreamingModelCaller implements ModelCaller {
           sink.onDelta(ev.content);
           guard.push(ev.content);
           if (cap.addText(ev.content)) capped = true;
+          break;
+        case 'reasoning':
+          // F-RAC — pensamento: vai p/ a UI e NÃO para o `content` do turno. De
+          // propósito fora do `guard` (degeneração) e do `cap` (teto de bytes): eles
+          // medem a FALA, e um raciocínio longo é normal nesses modelos — contá-lo ali
+          // faria o turno ser cortado por "degenerou" sem o modelo ter falado nada.
+          sink.onReasoning?.(ev.content);
           break;
         case 'tool_call':
           // EST-0996 — tool-call NATIVA agregada: acumula na ordem (1+ por turno).

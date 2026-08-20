@@ -54,6 +54,36 @@ export interface McpEntry {
   readonly command: string;
   readonly args: readonly string[];
 }
+/**
+ * BUG (relato do dono: "instalei setando outro modelo e ele forçou o mesmo") — decide o
+ * que o onboarding grava em `config.localModel`. PURO, e exportado porque é a decisão
+ * que precisa de teste: a UI/Ink em si é verificada no TTY (mesma disciplina do
+ * `mcpCatalog`).
+ *
+ * A REGRA: o onboarding DECLARA a configuração. Ele nunca deixa o campo por conta do
+ * valor anterior — ou grava o modelo escolhido, ou LIMPA (`undefined`).
+ *
+ * Por que limpar em vez de não escrever: `store.save` é MERGE. Não escrever fazia o
+ * `localModel` de uma instalação ANTERIOR sobreviver intacto — e a resolução
+ * (`model/local/config.ts`) dá precedência a `config.localModel` sobre o `defaultModel`
+ * do provider, então o modelo VELHO vencia o provider NOVO que o dono acabara de
+ * escolher. Em máquina limpa não havia valor velho e o sintoma não aparecia: só em
+ * reinstalação, que é exatamente como ele o descreveu. Com `undefined` o campo some e a
+ * resolução cai no default do provider ESCOLHIDO — a resposta certa para "não pedi
+ * modelo nenhum".
+ */
+export function resolveOnboardLocalModel(args: {
+  readonly providerId: string;
+  /** O que o dono digitou/confirmou no passo `model` (built-ins vêm pré-preenchidos). */
+  readonly model: string;
+  /** O que ele digitou no passo `custom-model` (caminho `__custom__`, aceita vazio). */
+  readonly customModel: string;
+}): string | undefined {
+  const escolhido = args.providerId === '__custom__' ? args.customModel : args.model;
+  const limpo = escolhido.trim();
+  return limpo !== '' ? limpo : undefined;
+}
+
 export function mcpCatalog(): McpEntry[] {
   return [
     {
@@ -300,8 +330,28 @@ function OnboardApp(props: {
     const patch: Record<string, unknown> = { lang, backend };
     if (backend === 'local') {
       patch.localProvider = providerId === '__custom__' ? custom.id.trim() : providerId;
-      const chosenModel = providerId === '__custom__' ? custom.model : model;
-      if (chosenModel.trim() !== '') patch.localModel = chosenModel.trim();
+      // BUG (relato do dono: "instalei setando outro modelo e ele forçou o mesmo") — o
+      // `localModel` SEMPRE é resolvido, nunca deixado por conta do valor anterior.
+      //
+      // Antes, campo vazio significava "não escreve", e `store.save` é MERGE: numa
+      // máquina que JÁ tinha instalação, o `localModel` velho sobrevivia intacto — e a
+      // resolução (`model/local/config.ts`) dá precedência a `config.localModel` sobre o
+      // `defaultModel` do provider, então o modelo ANTIGO vencia o provider NOVO que o
+      // dono acabara de escolher. Em máquina limpa não havia valor velho, então o
+      // sintoma só aparecia em reinstalação — que é exatamente como ele o descreveu.
+      //
+      // Vazio agora cai no default do PROVIDER ESCOLHIDO (a mesma fonte que a resolução
+      // usaria se o campo não existisse) — o passo `model` já vem pré-preenchido com ele
+      // nos built-ins, então isto só muda o caminho em que o passo não foi percorrido
+      // (custom sem modelo digitado). O onboarding DECLARA a configuração: sair dele com
+      // provider novo e modelo velho não é um estado que alguém pediu.
+      // `undefined` no patch SOBRESCREVE o valor do disco (mecanismo documentado em
+      // `user-config.ts:1095`) — ver `resolveOnboardLocalModel` para o porquê.
+      patch.localModel = resolveOnboardLocalModel({
+        providerId,
+        model,
+        customModel: custom.model,
+      });
     }
     patch.profile = prof;
     // Embedder do mem0 escolhido no turbo (slug do catálogo) → config.embedder. O provisioner/

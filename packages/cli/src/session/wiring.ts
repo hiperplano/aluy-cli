@@ -85,7 +85,7 @@ import {
 import { AttachReader } from '../attach/index.js';
 import { TuiAskResolver } from '../ask/ask-resolver.js';
 import { TuiQuestionResolver } from '../ask/question-resolver.js';
-import { StreamingModelCaller } from './streaming-caller.js';
+import { StreamingModelCaller, delegatingSink } from './streaming-caller.js';
 import { SessionController } from './controller.js';
 import { HooksConfigStore } from '../io/index.js';
 import { FileRoomStore } from './rooms/file-room-store.js';
@@ -1140,13 +1140,15 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // usuário configurou (`--max-output-tokens`/`ALUY_MAX_OUTPUT_TOKENS`). UNSET ⇒ o
     // request não leva `max_tokens` e o broker decide (comportamento de hoje, default).
     ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
-    sink: {
-      onStart: () => controllerRef?.sink.onStart?.(),
-      onDelta: (c) => controllerRef?.sink.onDelta(c),
-      onUsage: (u) => controllerRef?.sink.onUsage?.(u),
-      onQuota: (q) => controllerRef?.sink.onQuota?.(q),
-      onDone: () => controllerRef?.sink.onDone?.(),
-    },
+    // F-RAC — DELEGAÇÃO em vez de lista à mão. A lista antiga esquecia canais novos em
+    // SILÊNCIO (ver `delegatingSink`); agora todo canal do `StreamSink` é encaminhado
+    // por construção, e o alvo continua sendo resolvido por chamada (o controller nasce
+    // depois deste caller — era essa a razão do `controllerRef?.`).
+    sink: delegatingSink(() => controllerRef?.sink),
+    // F-RETRY-VISÍVEL — o caller retenta SOZINHO (laço `decideRetry`), e este aviso era
+    // declarado e nunca ligado: a razão da falha morria ali dentro e o dono via só
+    // blocos `Λ aluy` vazios se empilhando, um por tentativa, sem uma palavra.
+    onRetry: (n) => controllerRef?.noteCallerRetry(n),
   });
 
   // EST-0973 — caller DEDICADO da compactação (`/compact`): NÃO-streaming (o resumo

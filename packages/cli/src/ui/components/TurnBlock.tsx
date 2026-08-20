@@ -67,6 +67,16 @@ export interface AluyBlockProps {
    * conhecido: janela por linhas-FONTE (degradação graciosa, comportamento antigo).
    */
   readonly columns?: number;
+  /**
+   * F-RAC — RACIOCÍNIO do modelo neste turno (canal separado da fala). Renderiza
+   * ESMAECIDO e acima da fala, nunca como resposta.
+   *
+   * Existe porque num modelo de raciocínio o `content` fica NULO enquanto ele pensa
+   * (medido: 18 chunks só de raciocínio antes do 1º token de fala). Sem isto o bloco
+   * ficava VAZIO durante todo o trabalho e — quando o turno acabava dentro do
+   * raciocínio (`finish_reason: 'length'`) — vazio PARA SEMPRE, sem explicação.
+   */
+  readonly reasoning?: string;
 }
 
 /** Indentação (colunas) da FALA do aluy — `<Box paddingLeft={2}>`. */
@@ -80,6 +90,14 @@ const SPEECH_INDENT = 2;
  */
 const BLINK_PERIOD = 10;
 const BLINK_ON = 6;
+
+/**
+ * F-RAC — linhas VISÍVEIS da cauda do raciocínio. Ele é o canal mais verboso do
+ * modelo e NÃO é a resposta: ocupa pouco espaço e mostra a CAUDA (onde o pensamento
+ * chegou), no mesmo espírito da janela de cauda da fala ao vivo. Terminado o turno,
+ * encolhe p/ uma linha-resumo — o histórico é para a resposta, não para o rascunho.
+ */
+const REASONING_LIVE_LINES = 6;
 
 export function AluyBlock(props: AluyBlockProps): React.ReactElement {
   const theme = useTheme();
@@ -130,6 +148,24 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
   const blinkPhase = (props.frame ?? 0) % BLINK_PERIOD;
   const cursorOn = !theme.animate || blinkPhase < BLINK_ON;
 
+  // F-RAC — o que PINTAR do raciocínio, em três situações distintas:
+  //   streaming        → cauda de REASONING_LIVE_LINES linhas (o modelo trabalhando)
+  //   fim, com fala    → uma linha-resumo (o rascunho não polui o histórico)
+  //   fim, SEM fala    → a cauda fica, porque é tudo que o turno produziu; sem isto o
+  //                      bloco voltaria a ser um `Λ aluy` mudo, que é o bug de origem
+  const reasoningView = ((): string[] | undefined => {
+    const cru = (props.reasoning ?? '').trim();
+    if (cru === '') return undefined;
+    const semFala = full.trim() === '';
+    if (props.streaming || semFala) {
+      const linhas = windowTailVisual(cru, REASONING_LIVE_LINES, speechCols).text.split('\n');
+      const cabecalho = props.streaming ? '⋯ pensando' : '⋯ o modelo só produziu raciocínio';
+      return [cabecalho, ...linhas];
+    }
+    const chars = cru.length;
+    return [`⋯ pensou ${chars} caracteres antes de responder`];
+  })();
+
   return (
     <Box flexDirection="column">
       <Box>
@@ -146,6 +182,20 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
         {/* marcador da janela de cauda: o que rolou p/ cima durante o stream (some no
             fim do turno, quando o bloco inteiro desce p/ o Static / scrollback). */}
         {hiddenAbove > 0 && <Role name="fgDim">… ({hiddenAbove} linhas acima)</Role>}
+        {/* F-RAC — PENSAMENTO, esmaecido e acima da fala. Ao vivo mostra a cauda (o
+            usuário vê o modelo trabalhando em vez de encarar um bloco vazio);
+            terminado o turno vira UMA linha-resumo, salvo quando o modelo não falou
+            nada — aí o pensamento é a única coisa que existe e some-lo devolveria
+            exatamente o bloco em branco que este conserto existe p/ matar. */}
+        {reasoningView !== undefined && (
+          <Box flexDirection="column" paddingBottom={props.streaming ? 1 : 0}>
+            {reasoningView.map((linha, i) => (
+              <Role key={i} name="fgDim">
+                {linha}
+              </Role>
+            ))}
+          </Box>
+        )}
         {/* A FALA do aluy renderiza como MARKDOWN (negrito/listas/títulos/citações
             /links) + blocos ```lang realçados em papéis do DS. Aplica-se ao TEXTO
             ACUMULADO do turno (não token-a-token) — o stream segue fluido. A

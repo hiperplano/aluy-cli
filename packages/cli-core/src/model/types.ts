@@ -256,6 +256,19 @@ export interface ServerLimitsPayload {
 export type ModelStreamEvent =
   | { readonly type: 'start'; readonly request_id: string; readonly session_id?: string }
   | { readonly type: 'delta'; readonly content: string }
+  // F-RAC — RACIOCÍNIO do modelo, num canal SEPARADO da fala. Modelo de raciocínio
+  // manda o pensamento e a resposta em campos DIFERENTES (`reasoning_content` na
+  // convenção da DeepSeek, `reasoning` na do OpenRouter, `thinking_delta` na da
+  // Anthropic) — e o `content` fica NULO enquanto ele pensa. Sem este evento o
+  // pensamento era DESCARTADO no adapter, com duas consequências medidas: (1) a
+  // tela ficava vazia durante todo o raciocínio, que nesses modelos é a maior parte
+  // do tempo; (2) quando o turno acabava DENTRO do raciocínio (`finish_reason:
+  // 'length'`), o `content` nunca chegava e o bloco ficava vazio PARA SEMPRE, sem
+  // uma palavra de explicação.
+  //
+  // NÃO é fala: quem consome mostra como pensamento e NUNCA mistura no texto final
+  // do turno (o `ModelCallResult.content` segue sendo só o `content` de verdade).
+  | { readonly type: 'reasoning'; readonly content: string }
   // EST-0996 — tool-call NATIVO AGREGADO no SSE (`event: tool_call`): o broker já
   // junta os deltas de `tool_calls`/`function.arguments` e emite UMA call completa
   // por evento. O cliente as acumula no `ModelCallResult.tool_calls`. NÃO há

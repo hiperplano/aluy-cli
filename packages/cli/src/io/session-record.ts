@@ -116,7 +116,16 @@ export function sanitizeBlock(raw: unknown): SessionBlock | null {
       // lia uma frase cortada no meio como se fosse a resposta final. Round-trippa fiel;
       // a restauração continua inerte por `sanitizeOrphans` (que apaga o `streaming` na
       // fronteira de entrada do controller), não por uma mentira gravada em disco.
-      return isStr(o.text) ? { kind: 'aluy', text: o.text, streaming: o.streaming === true } : null;
+      // F-RAC — `reasoning` entra na lista: sem ele o pensamento sobrevivia só em
+      // memória e sumia no save/restore, e a sessão retomada voltava com o bloco mudo.
+      return isStr(o.text)
+        ? {
+            kind: 'aluy',
+            text: o.text,
+            streaming: o.streaming === true,
+            ...(isStr(o.reasoning) && o.reasoning !== '' ? { reasoning: o.reasoning } : {}),
+          }
+        : null;
     case 'tool': {
       if (!isStr(o.verb) || !isStr(o.target) || !isStr(o.result)) return null;
       // FALHA-FANTASMA (dogfooding real) — este `status` DEMOVIA `running`→`err`. A

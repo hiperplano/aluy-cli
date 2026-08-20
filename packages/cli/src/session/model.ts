@@ -47,6 +47,18 @@ export interface AluyTurn {
    * ACHA UM GAP e volta a AGIR (uma tool dispara) — aí o trabalho seguinte é real.
    */
   readonly selfCheck?: boolean;
+  /**
+   * F-RAC — RACIOCÍNIO do modelo neste turno, acumulado do canal SEPARADO da fala
+   * (`reasoning_content`/`reasoning`/`thinking_delta`). NUNCA entra no `text`: a fala
+   * final é só o que o modelo de fato respondeu.
+   *
+   * Existe porque num modelo de raciocínio o `content` fica NULO enquanto ele pensa —
+   * medido num `deepseek-v4-pro`: 18 chunks só de raciocínio antes do primeiro token
+   * de fala. Sem guardar isto, o bloco ficava VAZIO durante todo o pensamento, e
+   * ficava vazio PARA SEMPRE quando o turno acabava dentro dele (`finish_reason:
+   * 'length'`) — `Λ aluy` e nada, sem uma palavra de explicação.
+   */
+  readonly reasoning?: string;
 }
 
 /** Uma linha de tool (⏺ verbo alvo resultado ✓/✗ · ◌ verbo … rodando…). */
