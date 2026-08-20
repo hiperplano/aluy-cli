@@ -76,6 +76,19 @@ export interface StatusBarProps {
    * quota NÃO aparece (degrada/oculto — zero ruído; o crédito/reset ricos seguem no
    * <QuotaFooter> em repouso). O nível de cor vem de `quotaLevel`.
    */
+  /**
+   * F-SALDO-BYO (relato do dono: "está numa posição horrível, deveria ficar após o
+   * provedor") — SALDO da conta no provider BYO, já formatado (ex.: `"4.22"`).
+   *
+   * Aparece na linha PRIMÁRIA, colado no par provider·modelo, porque é informação do
+   * MESMO assunto: quem paga a chamada e quanto ainda dá. Antes vinha pelo
+   * `<QuotaFooter>`, numa LINHA PRÓPRIA acima do rodapé — órfã, sem contexto, e ocupando
+   * uma linha inteira da tela para dois números.
+   *
+   * Ausente ⇒ o campo não aparece (o provider não expôs saldo, ou é keyless). Mesma
+   * disciplina do `quotaPct`: informação, nunca motivo de ruído.
+   */
+  readonly credit?: string;
   readonly quotaPct?: number;
   readonly quotaLevel?: QuotaWarnLevel;
   /**
@@ -155,11 +168,11 @@ export interface StatusBarProps {
 
 /** Papel de cor do `⛁ janela %` por nível (§4). */
 /** LOTE-2 — soma das contagens de governança (p/ omitir o campo quando nada carregou). */
-function govTotal(g: GovernanceCounts): number {
+export function govTotal(g: GovernanceCounts): number {
   return g.agents + g.commands + g.skills + g.workflows + g.memory;
 }
 
-function windowRole(pct: number): 'fgDim' | 'accent' | 'danger' {
+export function windowRole(pct: number): 'fgDim' | 'accent' | 'danger' {
   if (pct > 90) return 'danger';
   if (pct >= 75) return 'accent';
   return 'fgDim';
@@ -216,7 +229,7 @@ const MCP_BAR_WIDTH = 6;
  * cruzar BUDGET_WARN_PCT (~70%); danger nos ≥100% (no teto/estourado). É o sinal
  * ANTECIPADO antes da pausa do gate.
  */
-function budgetRole(pct: number): 'fgDim' | 'accent' | 'danger' {
+export function budgetRole(pct: number): 'fgDim' | 'accent' | 'danger' {
   if (pct >= 100) return 'danger';
   if (pct >= BUDGET_WARN_PCT) return 'accent';
   return 'fgDim';
@@ -232,12 +245,12 @@ function budgetRole(pct: number): 'fgDim' | 'accent' | 'danger' {
  *     que exige ação (janela/quota estourada, `⚠` de broker). Quem carrega o "fora" é
  *     o `✗` colado ao código (a11y §3.3: a cor nunca decide sozinha).
  */
-function sidecarRole(state: SidecarUseState): 'fgDim' | 'accent' {
+export function sidecarRole(state: SidecarUseState): 'fgDim' | 'accent' {
   return state === 'used' ? 'accent' : 'fgDim';
 }
 
 /** Papel de cor do `◔ quota %` (#125) por nível do core (70/90%). */
-function quotaRole(level: QuotaWarnLevel): 'fgDim' | 'accent' | 'danger' {
+export function quotaRole(level: QuotaWarnLevel): 'fgDim' | 'accent' | 'danger' {
   if (level === 'crit') return 'danger';
   if (level === 'warn') return 'accent';
   return 'fgDim';
@@ -290,6 +303,86 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   // chip aparecia picado/ausente. Dropar o modelo (observabilidade) é o preço certo —
   // é a MESMA escolha que o #24 já fez, só que agora com o campo novo na conta.
   const showModel = (props.columns ?? MODEL_MIN_COLS + sidecarCols) >= MODEL_MIN_COLS + sidecarCols;
+  /**
+   * F-SALDO-BYO — colunas EXTRAS que o campo de crédito exige para entrar. `· crédito
+   * 12.34` custa ~16 colunas; o teto é folgado de propósito, porque o campo é o MENOS
+   * importante da linha: primeiro cabe quem identifica a sessão (tier, modelo, path),
+   * depois o saldo.
+   */
+  const CREDIT_EXTRA_COLS = 20;
+
+  // F-RODAPE-NAO-QUEBRA (relato do dono, e confirmado por medição: a barra enrolava em
+  // TRÊS linhas em 100, 120 e 150 colunas — com e sem o campo de crédito, então não era
+  // ele) — o `cwd` ia CRU para a tela. Um caminho de projeto fundo estoura qualquer
+  // largura, o Ink quebra a linha, e a barra inteira vira três linhas picadas: o dono viu
+  // `ortest`, `deepseek-v4-pro-081` e o path cortado ao meio.
+  //
+  // Corta pela CABEÇA, não pela cauda: numa barra de status o que importa é ONDE você
+  // está (`…/aluy-recovery/aluy-cli`), não a raiz do sistema de arquivos. Teto
+  // PROPORCIONAL à largura — a barra tem outros campos que crescem junto (modelo, tier),
+  // e um teto fixo voltaria a estourar em terminal estreito.
+  // F-RODAPE-NAO-QUEBRA (2/2) — o SLUG também tem teto. `deepseek/deepseek-v4-pro-0813`
+  // são 29 colunas; com tier, path, sidecars, janela, sessão e crédito na mesma linha, é
+  // ele que estoura assim que a largura permite exibi-lo (medido: cabia em 80, quebrava
+  // em 100+, porque em 80 o campo era dropado e em 100 entrava inteiro).
+  //
+  // Primeiro cai o VENDOR (`deepseek/`): é redundante — o provider ativo já aparece na
+  // mesma linha, logo antes. Só depois vem o corte por caractere, pela CAUDA (o começo do
+  // slug é o que identifica a família).
+  // F-RODAPE-NAO-QUEBRA (3/3) — os tetos eram INDEPENDENTES (20% p/ o modelo, 30% p/ o
+  // path) e por isso não garantiam nada: somados dão metade da barra, e a outra metade
+  // (tier, crédito, sidecars, janela, sessão) simplesmente não cabia no que sobrava. Em
+  // 140 colunas a linha estourava por UM caractere — o `i` de `aluy-cli` caía sozinho na
+  // linha de baixo. Sorte não é margem.
+  //
+  // Agora o orçamento é ACOPLADO: primeiro se reserva o que os campos fixos custam (eles
+  // são os que identificam a sessão e nunca podem ser espremidos), e só o que sobra é
+  // repartido entre os dois campos elásticos. Se não sobrar nada, ambos encolhem ao mínimo
+  // legível em vez de empurrar a barra para uma segunda linha.
+  const larguraBarra = props.columns ?? 80;
+  const temCredito =
+    props.credit !== undefined &&
+    props.credit !== '' &&
+    larguraBarra >= MODEL_MIN_COLS + sidecarCols + CREDIT_EXTRA_COLS;
+  // Custo medido dos campos fixos: tier com glifo (~10), separadores, sidecars (`sidecarCols`),
+  // janela (~12) e sessão (~14). O crédito entra só quando de fato será desenhado.
+  const RESERVA_FIXA = 10 + 12 + 14 + 4;
+  const orcamentoElastico = Math.max(
+    24,
+    larguraBarra - RESERVA_FIXA - sidecarCols - (temCredito ? CREDIT_EXTRA_COLS : 0),
+  );
+  // O modelo leva ~40% do elástico e o path o resto: o path é o campo que o dono lê para
+  // saber ONDE está, e ele degrada melhor (corta pela cabeça, mantendo as pastas finais).
+  const tetoModelo = Math.max(10, Math.floor(orcamentoElastico * 0.4));
+  const tetoCwd = Math.max(12, orcamentoElastico - tetoModelo);
+
+  // Primeiro cai o VENDOR (`deepseek/`): é redundante — o provider ativo já aparece na
+  // mesma linha, logo antes. Só depois vem o corte por caractere, pela CAUDA (o começo do
+  // slug é o que identifica a família).
+  const modeloCurto = ((): string | undefined => {
+    const cru = props.model;
+    if (cru === undefined || cru === '') return cru;
+    if (cru.length <= tetoModelo) return cru;
+    const semVendor = cru.includes('/') ? (cru.split('/').pop() ?? cru) : cru;
+    if (semVendor.length <= tetoModelo) return semVendor;
+    return `${semVendor.slice(0, Math.max(1, tetoModelo - 1))}…`;
+  })();
+
+  // Corta pela CABEÇA, não pela cauda: numa barra de status o que importa é ONDE você
+  // está (`…/aluy-recovery/aluy-cli`), não a raiz do sistema de arquivos.
+  const cwdCurto = ((): string => {
+    const cru = props.cwd;
+    if (cru.length <= tetoCwd) return cru;
+    // Corta em fronteira de PASTA quando dá — meio-nome de diretório não ajuda ninguém.
+    const partes = cru.split('/').filter((x) => x !== '');
+    let acc = '';
+    for (let i = partes.length - 1; i >= 0; i--) {
+      const proximo = `/${partes[i]}${acc}`;
+      if (proximo.length + 1 > tetoCwd) break;
+      acc = proximo;
+    }
+    return acc === '' ? `…${cru.slice(cru.length - tetoCwd + 1)}` : `…${acc}`;
+  })();
 
   // EST-0989 (#125) — o `◔ quota` só entra quando o broker reportou consumo de janela.
   const hasQuota = props.quotaPct !== undefined;
@@ -322,7 +415,21 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
           {/* `◷ <tier> · <modelo>` — Custom (slug do usuário) OU resolvido do tier (usage.model).
               Nome de modelo público, nunca credencial (HG-2). Dropado em largura apertada. */}
           <Role name="fgDim"> · </Role>
-          <Role name="depth">{props.model}</Role>
+          <Role name="depth">{modeloCurto}</Role>
+        </>
+      )}
+      {/* F-SALDO-BYO — o saldo COLADO no provider·modelo: mesmo assunto, mesma linha.
+          DROPA junto com o modelo em largura apertada, e ainda exige folga PRÓPRIA
+          (`CREDIT_EXTRA_COLS`): sem isto a linha estourava e o Ink truncava TODOS os
+          campos — o dono viu `ortest`, `deepseek-v4-pro-081` e o path picado ao meio.
+          Campo de observabilidade nunca pode espremer o que identifica a sessão. */}
+      {props.credit !== undefined &&
+        props.credit !== '' &&
+        showModel &&
+        (props.columns ?? 0) >= MODEL_MIN_COLS + sidecarCols + CREDIT_EXTRA_COLS && (
+        <>
+          <Role name="fgDim"> · </Role>
+          <Role name="depth">crédito {props.credit}</Role>
         </>
       )}
 
@@ -356,7 +463,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
               <Role name="fgDim"> {props.branch} </Role>
             </>
           )}
-          <Role name="fgDim">{props.cwd}</Role>
+          <Role name="fgDim">{cwdCurto}</Role>
         </>
       )}
 

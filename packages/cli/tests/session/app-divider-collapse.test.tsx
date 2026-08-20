@@ -9,7 +9,8 @@
 // composer sumiu"). Este arquivo trava a moldura SIMÉTRICA e o NÃO-colapso.
 //
 // Como medimos: contamos no FRAME RENDIDO (o que o usuário vê) as réguas de
-// CHROME — linhas inteiras de `─` com a LARGURA DO TERMINAL (`columns`). O traço
+// CHROME — linhas inteiras de `━` (F-GLYPH-PESO-2: borda PESADA do esquema B) com a
+// LARGURA DO TERMINAL (`columns`). O traço
 // SUTIL por-turno (`subtle`) tem largura PARCIAL (12) e é contado à parte. O
 // chrome tem 4 réguas (acima/sob o header, acima/abaixo do input); NENHUMA colapsa
 // por falta de turnos:
@@ -105,12 +106,12 @@ async function flush(): Promise<void> {
   await new Promise((r) => setTimeout(r, 0));
 }
 
-const DASH = '─';
+const DASH = '━'; // F-GLYPH-PESO-2 — Divider agora usa a borda PESADA do esquema B
 // Remove sequências ANSI (cor/papel) — o frame de teste vem colorido; a régua é
-// `─` envolto em códigos de papel DIM. Contamos o GLIFO, não a tinta.
+// `━` envolto em códigos de papel DIM. Contamos o GLIFO, não a tinta.
 // eslint-disable-next-line no-control-regex
 const ANSI = /\x1b\[[0-9;]*m/g;
-/** Linhas feitas SÓ de `─` (qualquer largura), já aparadas, com seu comprimento. */
+/** Linhas feitas SÓ de `━` (qualquer largura), já aparadas, com seu comprimento. */
 function dashLines(frame: string): number[] {
   return frame
     .split('\n')
@@ -123,12 +124,12 @@ function chromeWidth(frame: string): number {
   const lens = dashLines(frame);
   return lens.length ? Math.max(...lens) : 0;
 }
-/** Réguas de CHROME: linhas de `─` com a largura cheia (a maior do frame). */
+/** Réguas de CHROME: linhas de `━` com a largura cheia (a maior do frame). */
 function chromeDividers(frame: string): number {
   const w = chromeWidth(frame);
   return dashLines(frame).filter((len) => len === w).length;
 }
-/** Traços SUTIS por-turno: linhas de `─` mais CURTAS que a régua cheia. */
+/** Traços SUTIS por-turno: linhas de `━` mais CURTAS que a régua cheia. */
 function subtleDividers(frame: string): number {
   const w = chromeWidth(frame);
   return dashLines(frame).filter((len) => len < w).length;

@@ -7,6 +7,16 @@
 // chave/modelo e ANTES dos sidecars: faz uma chamada REAL ao provider; só prossegue se
 // o modelo responder. Se falhar, mostra o motivo EXATO (chave/baseURL/modelo) e deixa
 // corrigir — nunca entrega uma sessão quebrada nem provisiona o "restante" no escuro.
+//
+// F-ONB-LIVE (relato do dono: "ao selecionar o provedor, não deveria vir a lista de
+// modelos pra eu escolher? isso é um pau no instalador") — MEDIDO antes do conserto:
+// o passo `model` era um campo de TEXTO pré-preenchido com o `defaultModel` ESTÁTICO do
+// catálogo embutido, zero chamada de rede. Agora, DEPOIS da chave (ou direto, pro
+// provider `auth:['none']`), o onboarding CONSULTA `GET {baseUrl}/models` ao vivo
+// (`fetchModelsSlugs`, fetch PINADO anti-SSRF) e mostra um PICKER com filtro por
+// digitação + janela com rolagem. DEGRADAÇÃO HONESTA: qualquer forma de "não veio nada"
+// (rede/401/timeout/lista vazia) cai no MESMO campo de texto de sempre, com o motivo
+// explícito na tela — ver `decideOnboardModelListMode` logo abaixo.
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { render, Box, useApp, useInput } from 'ink';
@@ -21,6 +31,8 @@ import { UserConfigStore } from '../io/user-config.js';
 import { loadLocalProviderCatalog, addLocalProviderOverride } from '../io/providers-config.js';
 import { storeApiKey } from '../model/local/credential-resolver.js';
 import { checkModelConnectivity } from '../model/local/connectivity-check.js';
+import { fetchModelsSlugs } from '../model/local/context-window-discovery.js';
+import { createPinnedStreamFetch } from '../model/local/pinned-stream-fetch.js';
 import { McpConfigWriter } from '../mcp/mcp-config-writer.js';
 import { EMBEDDER_CATALOG, DEFAULT_EMBEDDER_MODEL } from '@hiperplano/aluy-cli-core';
 
@@ -32,6 +44,7 @@ type Step =
   | 'custom-url'
   | 'custom-model'
   | 'key'
+  | 'model-loading'
   | 'model'
   | 'validating'
   | 'validate-failed'
@@ -103,6 +116,61 @@ export function resolveOnboardLocalModel(args: {
   const escolhido = args.providerId === '__custom__' ? args.customModel : args.model;
   const limpo = escolhido.trim();
   return limpo !== '' ? limpo : undefined;
+}
+
+// ── F-ONB-LIVE — decisões PURAS do picker de modelos ao vivo (mesma disciplina de
+// `digitarNoCampo`/`resolveOnboardLocalModel`: a UI/Ink em si se verifica no TTY) ──────
+//
+// `fetchModelsSlugs` (`context-window-discovery.ts`) devolve `[]` p/ TODO motivo de
+// falha — rede fora, 401, timeout, corpo grande demais, wireFormat sem `/models` útil
+// (`anthropic`/`gemini`), ou o provider genuinamente sem modelo nenhum — fail-open
+// UNIFORME por decisão do próprio módulo (ver o comentário de topo daquele arquivo). Não
+// há como distinguir estes casos a partir do array puro devolvido; por isso a decisão
+// abaixo nunca finge saber QUAL foi o motivo, só que a consulta não trouxe nada — e cai
+// no MESMO campo de texto de sempre. O slug ESCOLHIDO (picker ou texto) sempre termina
+// em `model`/`resolveOnboardLocalModel` — nenhum 2º caminho de escrita pro config.
+
+/** Quantas linhas o picker de modelos mostra por vez. OpenRouter sozinho passa de 400
+ * slugs — despejar tudo estoura qualquer terminal (pedido explícito do dono). */
+export const MODEL_PICKER_WINDOW = 10;
+
+/**
+ * A lista ao vivo veio (não-vazia) ⇒ `'picker'`; qualquer forma de "não veio nada"
+ * (erro/401/timeout/lista genuinamente vazia) ⇒ `'text'` (o campo de hoje).
+ */
+export function decideOnboardModelListMode(slugs: readonly string[]): 'picker' | 'text' {
+  return slugs.length > 0 ? 'picker' : 'text';
+}
+
+/** Filtro do picker de modelos — substring, case-insensitive (o dono digita um
+ * fragmento do slug, não regex). Filtro vazio devolve a lista inteira. */
+export function filterModelSlugs(slugs: readonly string[], query: string): readonly string[] {
+  const q = query.trim().toLowerCase();
+  if (q === '') return slugs;
+  return slugs.filter((s) => s.toLowerCase().includes(q));
+}
+
+/** Cursor sempre dentro de `[0, total)`. `total === 0` (filtro sem nenhum match) ⇒ `0`
+ * — não há o que selecionar; o ENTER vira no-op no handler (nunca escolhe `undefined`). */
+export function clampModelCursor(cursor: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.min(Math.max(cursor, 0), total - 1);
+}
+
+/**
+ * Janela de rolagem do picker de modelos: no máx. `size` linhas visíveis, deslizando p/
+ * manter o `cursor` sempre dentro da janela. `total <= size` ⇒ mostra tudo (sem
+ * deslizar) — é o caso comum de provider pequeno/custom.
+ */
+export function modelPickerWindow(
+  total: number,
+  cursor: number,
+  size: number,
+): { readonly start: number; readonly end: number } {
+  if (total <= size) return { start: 0, end: total };
+  const half = Math.floor(size / 2);
+  const start = Math.min(Math.max(cursor - half, 0), total - size);
+  return { start, end: start + size };
 }
 
 export function mcpCatalog(): McpEntry[] {
@@ -199,6 +267,14 @@ function OnboardApp(props: {
   });
   const [apiKey, setApiKey] = useState<string>('');
   const [model, setModel] = useState<string>('');
+  // F-ONB-LIVE — resultado da consulta ao vivo do passo `model` (ver `decideOnboardModelListMode`
+  // acima). `modelLive` só é lido quando `modelListMode === 'picker'`; no modo `'text'` o passo
+  // se comporta EXATAMENTE como hoje (campo pré-preenchido + `digitarNoCampo`).
+  const [modelLive, setModelLive] = useState<readonly string[]>([]);
+  const [modelListMode, setModelListMode] = useState<'text' | 'picker'>('text');
+  const [modelFallbackReason, setModelFallbackReason] = useState<string>(''); // motivo da queda pro texto ('' fora do fallback)
+  const [modelFilter, setModelFilter] = useState<string>(''); // filtro digitado no picker
+  const [modelCursor, setModelCursor] = useState<number>(0); // cursor DENTRO da lista filtrada
   const [profile, setProfile] = useState<Profile>('leve'); // default LEVE (decisão do dono)
   const [embedder, setEmbedder] = useState<string>(DEFAULT_EMBEDDER_MODEL); // embedder do mem0 (turbo)
   const [vError, setVError] = useState<string>(''); // detalhe do check de conectividade falho
@@ -360,6 +436,56 @@ function OnboardApp(props: {
     };
   }, [step]);
 
+  // F-ONB-LIVE — roda a consulta AO VIVO quando entra em 'model-loading' (DEPOIS da
+  // chave, ou direto pro provider `auth:['none']`). Fetch PINADO anti-SSRF
+  // (`createPinnedStreamFetch`, EST-1115 — MESMO caminho que `run.tsx` usa pro
+  // `discoverContextWindow`/`listRemoteModelNames` da sessão já rodando), timeout e teto
+  // de corpo já embutidos em `fetchModelsSlugs`. NUNCA trava: `fetchModelsSlugs` nunca
+  // lança, e o próprio timeout (8s, default do módulo) resolve a promise mesmo se o
+  // provider nunca responder.
+  useEffect(() => {
+    if (step !== 'model-loading') return;
+    const entry = providers.find((p) => p.id === providerId);
+    const wireFormat = entry?.wireFormat ?? 'openai-compat';
+    const baseUrl = entry?.baseUrl ?? '';
+    const key = apiKey.trim();
+    const def = entry?.defaultModel ?? '';
+    let cancelled = false;
+    void fetchModelsSlugs({
+      wireFormat,
+      baseUrl,
+      key,
+      fetchImpl: createPinnedStreamFetch({}),
+    }).then((slugs) => {
+      if (cancelled) return;
+      if (decideOnboardModelListMode(slugs) === 'picker') {
+        setModelLive(slugs);
+        setModelListMode('picker');
+        setModelFallbackReason('');
+        setModelFilter('');
+        // Cursor começa no `defaultModel` do provider quando ele está na lista (é a
+        // sugestão óbvia); senão no topo — nunca `-1` (`findIndex` sem match).
+        const idx = slugs.findIndex((s) => s.toLowerCase() === def.toLowerCase());
+        setModelCursor(Math.max(0, idx));
+        setStep('model');
+      } else {
+        // DEGRADAÇÃO HONESTA (obrigatória): cai no MESMO campo de texto de hoje, com o
+        // motivo na tela — nunca finge que a lista veio, nunca trava a instalação.
+        setModelListMode('text');
+        setModelFallbackReason(
+          T(
+            'não consegui listar os modelos do provider (rede, chave, timeout, endpoint sem suporte ou lista vazia) — digite manualmente',
+            "couldn't list the provider's models (network, key, timeout, unsupported endpoint or empty list) — type it manually",
+          ),
+        );
+        gotoText('model', def);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [step]);
+
   // Recebe o profile ESCOLHIDO direto (não lê o estado `profile`): o setProfile do
   // handler é assíncrono, então ler `profile` aqui pegaria o valor VELHO (leve) — era o
   // bug "escolhi turbo e foi pra leve". `prof` é a fonte da verdade.
@@ -496,7 +622,8 @@ function OnboardApp(props: {
       }
       return;
     }
-    if (step === 'validating') return; // sem input durante o check (async)
+    // sem input durante os dois checks ASSÍNCRONOS: conectividade e lista ao vivo (F-ONB-LIVE).
+    if (step === 'validating' || step === 'model-loading') return;
 
     if (step === 'validate-failed') {
       if (key.escape) {
@@ -531,6 +658,40 @@ function OnboardApp(props: {
           return n;
         });
       else if (key.return) enterSidecars(); // confirma a seleção (mesmo vazia) e segue
+      return;
+    }
+
+    // Passo `model` em modo PICKER (lista ao vivo, F-ONB-LIVE) — cada tecla IMPRIMÍVEL
+    // entra no FILTRO (em vez de navegar), ↑↓ navega dentro da lista JÁ FILTRADA, enter
+    // escolhe. Diferente do `isPicker` genérico abaixo (que não filtra nada) — por isso
+    // tem o próprio branch, ANTES dele.
+    if (step === 'model' && modelListMode === 'picker') {
+      const filtered = filterModelSlugs(modelLive, modelFilter);
+      if (key.upArrow) setModelCursor((c) => clampModelCursor(c - 1, filtered.length));
+      else if (key.downArrow) setModelCursor((c) => clampModelCursor(c + 1, filtered.length));
+      else if (key.return) {
+        const chosen = filtered[clampModelCursor(modelCursor, filtered.length)];
+        // Filtro sem NENHUM match ⇒ `chosen` é `undefined`: ENTER vira no-op (nada pra
+        // confirmar) em vez de gravar `undefined` no config — o dono apaga o filtro.
+        if (chosen !== undefined) {
+          setModel(chosen);
+          setStep('validating');
+        }
+      } else if (key.backspace || key.delete) {
+        setModelFilter((f) => f.slice(0, -1));
+        setModelCursor(0);
+      } else if (
+        input &&
+        !key.ctrl &&
+        !key.meta &&
+        !key.upArrow &&
+        !key.downArrow &&
+        !key.leftArrow &&
+        !key.rightArrow
+      ) {
+        setModelFilter((f) => f + input);
+        setModelCursor(0);
+      }
       return;
     }
 
@@ -603,8 +764,10 @@ function OnboardApp(props: {
         const entry = providers.find((p) => p.id === v);
         const keyless = entry?.auth?.length === 1 && entry.auth[0] === 'none';
         if (keyless) {
+          // Ollama e afins não têm chave — mas RESPONDEM `/models` sem uma (ponto 5 do
+          // pedido do dono): a consulta ao vivo roda igual, só pula o passo da CHAVE.
           setApiKey('');
-          gotoText('model', entry?.defaultModel ?? '');
+          setStep('model-loading');
         } else {
           gotoText('key', '');
         }
@@ -639,12 +802,10 @@ function OnboardApp(props: {
       gotoText('key', '');
     } else if (step === 'key') {
       setApiKey(buf);
-      // builtin → pergunta modelo (prefill default); custom já tem modelo. Ambos → check.
+      // builtin → consulta o provider AO VIVO antes de perguntar o modelo (F-ONB-LIVE);
+      // custom já tem modelo (passo `custom-model`, ANTES da chave) → direto pro check.
       if (providerId === '__custom__') setStep('validating');
-      else {
-        const def = providers.find((p) => p.id === providerId)?.defaultModel ?? '';
-        gotoText('model', def);
-      }
+      else setStep('model-loading');
     } else if (step === 'model') {
       setModel(val);
       setStep('validating');
@@ -660,6 +821,7 @@ function OnboardApp(props: {
       'custom-url': '3/8',
       'custom-model': '3/8',
       key: '4/8',
+      'model-loading': '5/8',
       model: '5/8',
       validating: '6/8',
       'validate-failed': '6/8',
@@ -801,8 +963,37 @@ function OnboardApp(props: {
             mask
           />
         )}
-        {step === 'model' && (
+        {step === 'model-loading' && (
           <Box flexDirection="column">
+            <Role name="fg">
+              {T('Buscando os modelos do provider…', 'Fetching the provider’s models…')}
+            </Role>
+            <Box paddingTop={1}>
+              <Role name="fgDim">
+                {T(
+                  'consulta ao vivo (GET /models) — sem lista, cai no campo de texto',
+                  'live query (GET /models) — falls back to the text field with no list',
+                )}
+              </Role>
+            </Box>
+          </Box>
+        )}
+        {step === 'model' && modelListMode === 'picker' && (
+          <ModelListPicker
+            title={T('Modelo (lista ao vivo)', 'Model (live list)')}
+            slugs={modelLive}
+            filter={modelFilter}
+            cursor={modelCursor}
+            pt={pt}
+          />
+        )}
+        {step === 'model' && modelListMode === 'text' && (
+          <Box flexDirection="column">
+            {modelFallbackReason !== '' && (
+              <Box paddingBottom={1}>
+                <Role name="fgDim">{`⚠ ${modelFallbackReason}`}</Role>
+              </Box>
+            )}
             <TextRow label={T('modelo (enter = default)', 'model (enter = default)')} value={buf} />
             {(() => {
               const sugg = providers.find((p) => p.id === providerId)?.models ?? [];
@@ -858,19 +1049,24 @@ function OnboardApp(props: {
           </Box>
         )}
       </Box>
-      {step !== 'done' && step !== 'validating' && step !== 'validate-failed' && (
-        <Box paddingTop={1}>
-          <Role name="fgDim">
-            {step === 'lang' ||
-            step === 'backend' ||
-            step === 'provider' ||
-            step === 'sidecars' ||
-            step === 'embedder'
-              ? `↑↓ ${T('navegar', 'move')} · enter ${T('escolher', 'select')} · esc ${T('sair', 'quit')}`
-              : `${T('digite', 'type')} · enter ${T('confirmar', 'confirm')} · esc ${T('sair', 'quit')}`}
-          </Role>
-        </Box>
-      )}
+      {step !== 'done' &&
+        step !== 'validating' &&
+        step !== 'validate-failed' &&
+        step !== 'model-loading' && (
+          <Box paddingTop={1}>
+            <Role name="fgDim">
+              {step === 'model' && modelListMode === 'picker'
+                ? `${T('digite p/ filtrar', 'type to filter')} · ↑↓ ${T('navegar', 'move')} · enter ${T('escolher', 'select')} · esc ${T('sair', 'quit')}`
+                : step === 'lang' ||
+                    step === 'backend' ||
+                    step === 'provider' ||
+                    step === 'sidecars' ||
+                    step === 'embedder'
+                  ? `↑↓ ${T('navegar', 'move')} · enter ${T('escolher', 'select')} · esc ${T('sair', 'quit')}`
+                  : `${T('digite', 'type')} · enter ${T('confirmar', 'confirm')} · esc ${T('sair', 'quit')}`}
+            </Role>
+          </Box>
+        )}
     </Box>
   );
 }
@@ -897,6 +1093,62 @@ function Picker(props: {
             ) : null}
           </Box>
         ))}
+      </Box>
+    </Box>
+  );
+}
+
+/**
+ * F-ONB-LIVE — picker do passo `model` quando a consulta ao vivo trouxe lista
+ * (`modelListMode === 'picker'`): FILTRO por digitação + janela com rolagem. OpenRouter
+ * sozinho passa de 400 slugs — despejar tudo estoura qualquer terminal (pedido explícito
+ * do dono); `modelPickerWindow` mantém só `MODEL_PICKER_WINDOW` linhas visíveis,
+ * deslizando pra acompanhar o cursor.
+ */
+function ModelListPicker(props: {
+  readonly title: string;
+  readonly slugs: readonly string[];
+  readonly filter: string;
+  readonly cursor: number;
+  readonly pt: boolean;
+}): React.ReactElement {
+  const filtered = filterModelSlugs(props.slugs, props.filter);
+  const cursor = clampModelCursor(props.cursor, filtered.length);
+  const { start, end } = modelPickerWindow(filtered.length, cursor, MODEL_PICKER_WINDOW);
+  const visible = filtered.slice(start, end);
+  return (
+    <Box flexDirection="column">
+      <Role name="fg">{props.title}</Role>
+      <Box paddingTop={1}>
+        <Role name="fgDim">{props.pt ? 'filtro: ' : 'filter: '}</Role>
+        <Role name="accent">{props.filter}</Role>
+        <Role name="accent">▏</Role>
+      </Box>
+      <Box flexDirection="column" paddingTop={1}>
+        {visible.length === 0 ? (
+          <Role name="fgDim">
+            {props.pt ? '(nenhum modelo bate com o filtro)' : '(no model matches the filter)'}
+          </Role>
+        ) : (
+          visible.map((s, i) => {
+            const idx = start + i;
+            return (
+              <Box key={s}>
+                <Role name={idx === cursor ? 'accent' : 'fgDim'}>{idx === cursor ? '❯ ' : '  '}</Role>
+                <Role name={idx === cursor ? 'accent' : 'fg'}>{s}</Role>
+              </Box>
+            );
+          })
+        )}
+      </Box>
+      <Box paddingTop={1}>
+        <Role name="fgDim">
+          {filtered.length}
+          {props.pt ? ' modelo(s)' : ' model(s)'}
+          {filtered.length > MODEL_PICKER_WINDOW
+            ? ` · ${start + 1}–${end}${props.pt ? ' na tela' : ' shown'}`
+            : ''}
+        </Role>
       </Box>
     </Box>
   );

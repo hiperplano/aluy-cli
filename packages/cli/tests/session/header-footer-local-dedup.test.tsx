@@ -1,4 +1,4 @@
-// FIX (dono) — o indicador de backend "local" (`◍ local`/`◷ local · <provider> · <modelo>`)
+// FIX (dono) — o indicador de backend "local" (`◍ local`/`◕ local · <provider> · <modelo>`, F-GLYPH-PESO-2: clock ◷→◕)
 // aparecia DUPLICADO: no HEADER (fixo, topo) E no FOOTER/StatusBar (vivo, rodapé) — tanto
 // no modo INLINE quanto no modo COCKPIT (`--fullscreen`). O dono pediu que "local" apareça
 // SÓ no rodapé. Este arquivo prova, ponta-a-ponta (via <App>, não componentes isolados):
@@ -112,13 +112,13 @@ describe('Header × StatusBar — "local" NÃO duplica (dono) — modo INLINE', 
 
     // some do header (banner, default rows=24 ≥ HEADER_BANNER_MIN_ROWS ⇒ modo banner)…
     expect(countLocalWord(out)).toBe(1);
-    // …e a única ocorrência é na linha VIVA do rodapé (StatusBar abre com `◷`).
+    // …e a única ocorrência é na linha VIVA do rodapé (StatusBar abre com `◕`).
     const lines = out.split('\n');
-    const statusLine = lines.find((l) => l.includes('◷'));
+    const statusLine = lines.find((l) => l.includes('◕')); // F-GLYPH-PESO-2: clock ◷→◕
     expect(statusLine).toBeDefined();
     expect(statusLine ?? '').toMatch(/\blocal\b/);
-    // as linhas do header (produto/wordmark, ANTES da 1ª linha `◷`) não têm "local".
-    const statusIdx = lines.findIndex((l) => l.includes('◷'));
+    // as linhas do header (produto/wordmark, ANTES da 1ª linha `◕`) não têm "local".
+    const statusIdx = lines.findIndex((l) => l.includes('◕')); // F-GLYPH-PESO-2: clock ◷→◕
     const headerLines = lines.slice(0, statusIdx).join('\n');
     expect(countLocalWord(headerLines)).toBe(0);
     // o rodapé segue com o detalhe rico (provider/modelo) — não regrediu.
@@ -143,7 +143,7 @@ describe('Header × StatusBar — "local" NÃO duplica (dono) — modo INLINE', 
     // "local" segue 1x só (rodapé) mesmo no header compacto (Λ Aluy Cli · <tier> · …).
     expect(countLocalWord(out)).toBe(1);
     const lines = out.split('\n');
-    const statusIdx = lines.findIndex((l) => l.includes('◷'));
+    const statusIdx = lines.findIndex((l) => l.includes('◕')); // F-GLYPH-PESO-2: clock ◷→◕
     expect(statusIdx).toBeGreaterThanOrEqual(0);
     const headerLines = lines.slice(0, statusIdx).join('\n');
     expect(countLocalWord(headerLines)).toBe(0);
@@ -172,7 +172,7 @@ describe('Header × StatusBar — "local" NÃO duplica (dono) — modo COCKPIT (
 
     expect(countLocalWord(out)).toBe(1);
     const lines = out.split('\n');
-    const statusIdx = lines.findIndex((l) => l.includes('◷'));
+    const statusIdx = lines.findIndex((l) => l.includes('◕')); // F-GLYPH-PESO-2: clock ◷→◕
     expect(statusIdx).toBeGreaterThanOrEqual(0);
     const statusLine = lines[statusIdx] ?? '';
     expect(statusLine).toMatch(/\blocal\b/);

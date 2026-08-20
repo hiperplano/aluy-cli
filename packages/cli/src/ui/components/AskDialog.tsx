@@ -134,10 +134,11 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
         </Box>
       )}
 
-      {/* separador antes das ações */}
+      {/* separador antes das ações — F-GLYPH-PESO-2 (esquema B): junção grossa→leve
+          (┠┨), miolo com `innerHorizontal` (LEVE), não `horizontal` (a borda, grossa). */}
       <Role name="accent">
         {theme.box.teeLeft}
-        {theme.box.horizontal.repeat(40)}
+        {theme.box.innerHorizontal.repeat(40)}
         {theme.box.teeRight}
       </Role>
 

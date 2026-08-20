@@ -16,7 +16,7 @@ export { StatusBar } from './StatusBar.js';
 export type { StatusBarProps } from './StatusBar.js';
 export { BusyPulse, pulseLit, DEFAULT_PULSE_WIDTH } from './BusyPulse.js';
 export type { BusyPulseProps } from './BusyPulse.js';
-export { Composer } from './Composer.js';
+export { Composer, ComposerBox, ComposerShadow } from './Composer.js';
 export type { ComposerProps } from './Composer.js';
 export {
   QueuedInputs,
@@ -128,3 +128,4 @@ export { QuotaFooter } from './QuotaFooter.js';
 export type { QuotaFooterProps } from './QuotaFooter.js';
 export { Divider } from './Divider.js';
 export type { DividerProps } from './Divider.js';
+export { StatusPanel } from './StatusPanel.js';

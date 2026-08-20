@@ -109,6 +109,10 @@ export interface Catalog {
   /** Texto a11y do selo de erro de broker (acompanha o glifo `⚠`). */
   'statusbar.brokerError': string;
   /** Rótulo do medidor de janela de contexto (`⛁ NN% janela`). */
+  // F-PAINEL — rótulos dos três itens do painel de status.
+  'painel.sessao': string;
+  'painel.estado': string;
+  'painel.uso': string;
   'statusbar.window': string;
   /** Rótulo do medidor do teto de tokens da sessão (`◔ NN% sessão`). */
   'statusbar.session': string;
@@ -156,6 +160,12 @@ export interface Catalog {
   'picker.provider.addCustom.baseUrl': string;
   'picker.provider.addCustom.model': string;
   'picker.provider.addCustom.help': string;
+  // F-PROV-CRED — campo de credencial ("colar a API key") entre escolher o provider e
+  // aplicar: `{provider}` interpola o NOME do catálogo (nunca a chave).
+  'picker.provider.credential.label': string;
+  'picker.provider.credential.help': string;
+  /** Título mostrado só quando reabre por retry (teste de conexão reprovado). */
+  'picker.provider.credential.retryTitle': string;
 
   // ── ModelPicker (/model · EST-0962) — ajuda, estados e browser Custom ──────
   /** Linha de ajuda no topo do seletor de tier. */

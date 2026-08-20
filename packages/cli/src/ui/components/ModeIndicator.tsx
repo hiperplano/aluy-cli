@@ -31,7 +31,7 @@ export interface ModeIndicatorProps {
  * (`PLAN`/`NORMAL`/`YOLO`) é identificador de PRODUTO e NÃO se traduz; o `caption`
  * é uma CHAVE i18n (EST-0989) resolvida via `t()` no idioma ativo (fallback p/ pt-BR).
  */
-const MODE_VIEW: Readonly<
+export const MODE_VIEW: Readonly<
   Record<
     SessionMode,
     {

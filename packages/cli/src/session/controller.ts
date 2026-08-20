@@ -5953,7 +5953,15 @@ export class SessionController {
       if (last.text.trim() === '') {
         blocks.pop();
       } else {
-        blocks[blocks.length - 1] = { ...last, streaming: false };
+        // F-CONTA-NO-BLOCO — carimba o custo AQUI, no mesmo ponto em que o turno deixa de
+        // fazer stream. Depois deste patch o bloco desce para o `<Static>` e não é mais
+        // re-renderizado com estado vivo: se o número não entrar agora, não entra nunca.
+        const conta = this.state.turnAccounting;
+        blocks[blocks.length - 1] = {
+          ...last,
+          streaming: false,
+          ...(conta !== undefined ? { accounting: { ...conta, live: false } } : {}),
+        };
       }
       this.patch({ blocks });
     }

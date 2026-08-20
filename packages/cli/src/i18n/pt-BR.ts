@@ -17,7 +17,11 @@ export const ptBR: FullCatalog = {
   'composer.moreLines': 'linhas',
 
   // ── FooterHints (§4.3) ────────────────────────────────────────────────────
-  'hints.idle': 'enter envia · / comandos · ctrl-p paleta · ↑ histórico · ctrl-c×2 sair',
+  // F-DICAS (relato do dono: "o status envia deveria ser melhor") — a linha tinha
+  // CINCO itens competindo, e três deles se aprendem no primeiro uso (`ctrl-c` p/ sair,
+  // `ctrl-p` que o `/` já abre). Sobra o que o dono ainda não sabe de cor. O símbolo `⏎`
+  // no lugar da palavra "enter" é o padrão de teclado — lê-se sem traduzir.
+  'hints.idle': '⏎ enviar · / comandos · ↑ histórico',
   'hints.thinking': 'esc interromper · ctrl-c×2 sair',
   'hints.streaming': 'esc interromper · ctrl-c×2 sair',
   'hints.ask': 'a aprova · s sempre · n nega · e edita · esc cancela',
@@ -70,6 +74,11 @@ export const ptBR: FullCatalog = {
 
   // ── StatusBar ─────────────────────────────────────────────────────────────
   'statusbar.brokerError': 'erro de broker',
+  // F-PAINEL — rótulos da coluna esquerda do painel de status. Curtos de propósito:
+  // é o ALINHAMENTO deles que cria a coluna, e um rótulo longo comeria a área do valor.
+  'painel.sessao': 'sessão',
+  'painel.estado': 'estado',
+  'painel.uso': 'uso',
   'statusbar.window': 'janela',
   'statusbar.session': 'sessão',
   'statusbar.quota': 'quota',
@@ -109,6 +118,13 @@ export const ptBR: FullCatalog = {
     'modelo default (enter vazio usa o id do provider) — enter confirma',
   'picker.provider.addCustom.help':
     'esc cancela · a credencial NÃO entra aqui — depois use `aluy login --provider <id>`',
+  // F-PROV-CRED (relato do dono: "mudei o provider no picker e ele não pediu nada") —
+  // campo de chave entre escolher o provider e aplicar. NUNCA ecoado (mascarado com •).
+  'picker.provider.credential.label': 'API key de {provider} (oculta) — enter grava e aplica',
+  'picker.provider.credential.help':
+    'esc volta pra lista · a chave NUNCA aparece em claro na tela',
+  'picker.provider.credential.retryTitle':
+    '✗ a chave não passou no teste de conexão — cole outra',
 
   // ── ModelPicker (/model) ──────────────────────────────────────────────────
   'picker.model.help': 'trocar modelo · ↑↓ navega · enter seleciona · esc fecha',

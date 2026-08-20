@@ -22,7 +22,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Role, Glyph } from '../ui/theme/index.js';
 import { useI18n } from '../i18n/index.js';
-import { Header, StatusBar, Composer, ActivityLog } from '../ui/components/index.js';
+import { Header, StatusPanel, Composer, ActivityLog } from '../ui/components/index.js';
 import { FooterHints, type HintState } from '../ui/components/index.js';
 import { BlockView } from './App.js';
 import type { SessionState, SessionBlock } from './model.js';
@@ -393,7 +393,8 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
 
       {/* ── 4) STATUS (fixo, vivo) ───────────────────────────────────────────── */}
       <Box height={clampH(layout.statusRows)}>
-        <StatusBar
+        <StatusPanel
+          mode={props.state.mode}
           cwd={props.cwd}
           tier={props.tierDisplay}
           isDefaultTier={props.isDefaultTier}

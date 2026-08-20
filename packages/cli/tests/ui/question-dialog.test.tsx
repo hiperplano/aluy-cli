@@ -54,10 +54,12 @@ describe('QuestionDialog — render dos 3 formatos (a11y, tokens-only)', () => {
   it('caixa SIMÉTRICA: TOPO, separador e base fecham no MESMO codepoint (cantos alinham)', () => {
     const { lastFrame } = wrap(<QuestionDialog spec={single} cursor={0} />, UTF8);
     const lines = (lastFrame() ?? '').split('\n').map((l) => plain(l).replace(/^\s+/, ''));
-    // topo (╭…╮), separador (├…┤) e base (╰…╯) — as TRÊS bordas horizontais.
-    const top = lines.find((l) => /^[╭+].*[╮+]\s*$/.test(l.trimEnd()));
-    const sep = lines.find((l) => /^[├+].*[┤+]\s*$/.test(l.trimEnd()) && /─|-/.test(l));
-    const bottom = lines.find((l) => /^[╰+].*[╯+]\s*$/.test(l.trimEnd()));
+    // F-GLYPH-PESO-2 (esquema B): topo (┏…┓), separador (┠…┨) e base (┗…┛) — a
+    // borda EXTERNA é pesada; o separador é a junção grossa→leve, mas os EXTREMOS
+    // da linha (┠/┨) ainda são os caracteres que abrem/fecham a linha do meio.
+    const top = lines.find((l) => /^[┏+].*[┓+]\s*$/.test(l.trimEnd()));
+    const sep = lines.find((l) => /^[┠+].*[┨+]\s*$/.test(l.trimEnd()) && /─|-/.test(l));
+    const bottom = lines.find((l) => /^[┗+].*[┛+]\s*$/.test(l.trimEnd()));
     expect(top, 'topo presente').toBeDefined();
     expect(sep, 'separador presente').toBeDefined();
     expect(bottom, 'base presente').toBeDefined();

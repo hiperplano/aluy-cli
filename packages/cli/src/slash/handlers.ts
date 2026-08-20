@@ -235,6 +235,21 @@ export function buildLangEffect(args: string, currentLang: Lang): SlashEffect {
 export function buildProviderEffect(
   args: string,
   currentProvider: string | undefined,
+  /**
+   * F-PROV-LISTA-UNICA — os providers CONHECIDOS agora. Injetado porque a fonte da
+   * verdade mudou de lugar e este módulo é PURO.
+   *
+   * O BUG que isto fecha (medido no TTY): `/provider <nome>` respondia "provider
+   * desconhecido — disponíveis: openrouter, deepseek" para um provider que a PRÓPRIA
+   * sessão estava usando. A causa é a mesma doença desta série — DUAS listas: o
+   * `/provider` sem argumento abre o picker sobre o catálogo REAL (built-ins +
+   * `providers[]` do config, 9+ entradas), enquanto o `/provider <nome>` casava contra
+   * a `PROVIDERS` deste módulo: um SEED de DOIS itens herdado do broker. Provider custom
+   * — que é justamente o caso de quem usa BYO — nunca era encontrado.
+   *
+   * Ausente ⇒ cai no seed antigo (não-regressão para os callers que ainda não injetam).
+   */
+  catalogo?: readonly { readonly name: string; readonly summary?: string }[],
 ): SlashEffect {
   const arg = args.trim();
   if (arg === '') {
@@ -246,17 +261,26 @@ export function buildProviderEffect(
         title: 'provider',
         lines: [
           'providers do modo Custom (use `/provider <nome>`):',
-          ...PROVIDERS.map(
-            (p) =>
-              `${p.name === currentProvider ? '● ' : '  '}${p.name} — ${p.summary}${p.isDefault ? ' (padrão)' : ''}`,
-          ),
+          ...(catalogo ?? PROVIDERS).map((p) => {
+            const marca = p.name === currentProvider ? '● ' : '  ';
+            const desc = 'summary' in p && p.summary !== undefined ? ` — ${p.summary}` : '';
+            const padrao = 'isDefault' in p && p.isDefault === true ? ' (padrão)' : '';
+            return `${marca}${p.name}${desc}${padrao}`;
+          }),
           '◍ só o NOME vai ao broker, que resolve provider/credencial (nunca exibido)',
           'pareia com o modelo Custom (`/model` → Custom). fora de Custom, é ignorado.',
         ],
       },
     };
   }
-  const entry = resolveProviderName(arg);
+  // F-PROV-LISTA-UNICA — casa contra o catálogo INJETADO quando ele veio; só cai no
+  // `resolveProviderName` (seed de dois) quando ninguém injetou nada.
+  const doCatalogo = catalogo?.find((p) => p.name.toLowerCase() === arg.toLowerCase());
+  // `label` é só apresentação: o catálogo injetado pode não trazer, e aí o NOME serve.
+  const entry =
+    doCatalogo !== undefined
+      ? { name: doCatalogo.name, label: doCatalogo.name }
+      : resolveProviderName(arg);
   if (!entry) {
     return {
       kind: 'provider',
@@ -265,7 +289,7 @@ export function buildProviderEffect(
         title: 'provider',
         lines: [
           `provider desconhecido: "${arg}".`,
-          `disponíveis: ${PROVIDERS.map((p) => p.name).join(', ')}.`,
+          `disponíveis: ${(catalogo ?? PROVIDERS).map((p) => p.name).join(', ')}.`,
         ],
       },
     };

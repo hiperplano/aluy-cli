@@ -35,6 +35,15 @@ export interface YouTurn {
 export interface AluyTurn {
   readonly kind: 'aluy';
   readonly text: string;
+  /**
+   * F-CONTA-NO-BLOCO — o custo do turno, CARIMBADO no bloco quando ele fecha.
+   *
+   * Fica no bloco, e não numa prop passada de fora, porque o cabeçalho precisa sobreviver
+   * à migração para o `<Static>`: um turno terminado desce para o histórico e nunca mais
+   * é re-renderizado com o estado vivo. Passado por prop, o número apareceria no instante
+   * em que o turno fecha e sumiria no quadro seguinte.
+   */
+  readonly accounting?: TurnAccountingView;
   /** `true` enquanto o stream está chegando (cursor ▏ na ponta, ◇ pisca). */
   readonly streaming: boolean;
   /**

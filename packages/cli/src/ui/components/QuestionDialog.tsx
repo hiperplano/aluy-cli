@@ -107,10 +107,11 @@ export function QuestionDialog(props: QuestionDialogProps): React.ReactElement {
         <OptionList {...props} />
       )}
 
-      {/* separador antes do footer de atalhos */}
+      {/* separador antes do footer de atalhos — F-GLYPH-PESO-2 (esquema B): junção
+          grossa→leve (┠┨), miolo com `innerHorizontal` (LEVE), não a borda `horizontal`. */}
       <Role name="accent">
         {theme.box.teeLeft}
-        {theme.box.horizontal.repeat(QUESTION_BOX_W)}
+        {theme.box.innerHorizontal.repeat(QUESTION_BOX_W)}
         {theme.box.teeRight}
       </Role>
       <Box>

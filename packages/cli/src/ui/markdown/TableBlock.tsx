@@ -17,6 +17,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Role, useTheme } from '../theme/index.js';
+import { ASCII_BOX, LIGHT_UNICODE_BOX } from '../theme/glyphs.js';
 import type { TermRole } from '../theme/palette.js';
 import { Inlines } from './Markdown.js';
 import { parseInline } from './parse.js';
@@ -46,7 +47,10 @@ function visibleText(cell: string): string {
 
 export function TableBlock(props: TableBlockProps): React.ReactElement {
   const theme = useTheme();
-  const box = theme.box;
+  // F-GLYPH-PESO-2 — `theme.box` virou a moldura PESADA (esquema B) p/ diálogo/chrome;
+  // a régua da tabela é CONTEÚDO dentro da fala, fica LEVE via LIGHT_UNICODE_BOX (não
+  // regride o snapshot pinado de table-render.test.tsx, fora do escopo desta troca).
+  const box = theme.unicode ? LIGHT_UNICODE_BOX : ASCII_BOX;
   const base: TermRole = props.base ?? 'fg';
   const mono = theme.colorMode === 'mono';
 

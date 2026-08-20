@@ -349,8 +349,8 @@ describe('StatusBar — TIER 1º campo + rótulos + quota (EST-0989)', () => {
     const out = plain(lastFrame() ?? '');
     // o tier vem ANTES do cwd na linha.
     expect(out.indexOf('aluy-deep')).toBeLessThan(out.indexOf('~/proj'));
-    // o glifo ◷ (clock) abre a barra, à frente do tier.
-    expect(out).toMatch(/◷\s+aluy-deep/);
+    // o glifo ◕ (clock, F-GLYPH-PESO-2: ◷→◕) abre a barra, à frente do tier.
+    expect(out).toMatch(/◕\s+aluy-deep/);
   });
 
   it('tier ≠ default ⇒ pinta em ACCENT; tier default ⇒ neutro (fg) — atualiza ao trocar /model', () => {
@@ -382,8 +382,8 @@ describe('StatusBar — TIER 1º campo + rótulos + quota (EST-0989)', () => {
     // o glifo `◷` do tier vem pintado em accent (`[33m◷`). No default o `◷` é fg
     // (sem o `[33m` imediatamente antes). É o ganho central — "trocar e enxergar":
     // a re-renderização do rodapé reflete a troca de /model com COR distinta.
-    expect(rawAcende).toContain('[33m◷'); // glifo do tier em accent (≠ default)
-    expect(rawNeutro).not.toContain('[33m◷'); // glifo do tier em fg (default)
+    expect(rawAcende).toContain('[33m◕'); // glifo do tier em accent (≠ default) — F-GLYPH-PESO-2
+    expect(rawNeutro).not.toContain('[33m◕'); // glifo do tier em fg (default)
     expect(rawAcende).not.toBe(rawNeutro);
   });
 
@@ -471,7 +471,7 @@ describe('StatusBar — TIER 1º campo + rótulos + quota (EST-0989)', () => {
       />,
     );
     const out = plain(lastFrame() ?? '');
-    expect(out).toMatch(/◷\s+custom/);
+    expect(out).toMatch(/◕\s+custom/); // F-GLYPH-PESO-2: clock ◷→◕
     expect(out).toContain('meta-llama/llama-3.1-8b');
     expect(out).not.toMatch(/api_key|vault|bearer|sk-/i);
   });
@@ -485,7 +485,7 @@ describe('ToolLine — sucesso e erro (§2.5/§2.6)', () => {
     const out = lastFrame() ?? '';
     expect(out).toContain('read');
     expect(out).toContain('48 linhas');
-    expect(out).toContain('✓');
+    expect(out).toContain('✔'); // F-GLYPH-PESO-2: ✓→✔
   });
   it('erro ⇒ ✗ + box de saída', () => {
     const { lastFrame } = wrap(
@@ -498,7 +498,7 @@ describe('ToolLine — sucesso e erro (§2.5/§2.6)', () => {
       />,
     );
     const out = lastFrame() ?? '';
-    expect(out).toContain('✗');
+    expect(out).toContain('✘'); // F-GLYPH-PESO-2: ✗→✘
     expect(out).toContain('saída');
     expect(out).toContain('FAIL x');
   });
@@ -1178,11 +1178,11 @@ describe('ProgressBar — DETERMINADO (barra + N% + label)', () => {
     const out = plain(lastFrame() ?? '');
     expect(out).toContain('60%');
     expect(out).toContain('resumindo blocos');
-    expect(out).toContain('▰'); // célula cheia (Unicode default)
-    expect(out).toContain('▱'); // célula vazia
+    expect(out).toContain('█'); // célula cheia — F-GLYPH-PESO-2: ▰→█ (medidor contínuo)
+    expect(out).toContain('░'); // célula vazia — F-GLYPH-PESO-2: ▱→░
     // largura visual estável: 6 cheias + 4 vazias = 10 células de barra
-    expect((out.match(/▰/g) ?? []).length).toBe(6);
-    expect((out.match(/▱/g) ?? []).length).toBe(4);
+    expect((out.match(/█/g) ?? []).length).toBe(6);
+    expect((out.match(/░/g) ?? []).length).toBe(4);
   });
   it('NÃO mostra spinner/elapsed no modo determinado (não finge atividade)', () => {
     const { lastFrame } = wrap(<ProgressBar label="x" value={1} max={2} width={8} frame={3} />);
@@ -1210,14 +1210,14 @@ describe('ProgressBar — INDETERMINADO (spinner + label + elapsed, sem % falso)
     expect(f0).toContain('⠋');
     expect(f1).toContain('⠙');
   });
-  it('reduced-motion (ALUY_NO_ANIM) ⇒ glifo ◷ estático, sem braille', () => {
+  it('reduced-motion (ALUY_NO_ANIM) ⇒ glifo ◕ estático, sem braille', () => {
     const { lastFrame } = wrap(<ProgressBar label="compactando" elapsedMs={1000} frame={5} />, {
       LANG: 'en_US.UTF-8',
       TERM: 'xterm-256color',
       ALUY_NO_ANIM: '1',
     });
     const out = plain(lastFrame() ?? '');
-    expect(out).toContain('◷'); // clock estático
+    expect(out).toContain('◕'); // clock estático — F-GLYPH-PESO-2: ◷→◕
     expect(out).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
     expect(out).toContain('compactando');
   });

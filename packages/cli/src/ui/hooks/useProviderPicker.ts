@@ -26,9 +26,37 @@
 // HG-2/CLI-SEC-7: só o NOME (DADO de catálogo) atravessa — nunca credencial. O
 // formulário "+ adicionar" só coleta id/baseURL/modelo (DADO público — CLI-SEC-7); a
 // credencial continua fora daqui, resolvida via `aluy login --provider <id>`.
+//
+// F-PROV-CRED (relato do dono: "mudei o provider no picker e ele não pediu nada" — trocou
+// pra `google`/`mistral`, sem chave, e o aluy só AVISOU que faltava) — o `/provider` agora
+// tem um passo NOVO, entre escolher o provider e aplicar: se o provider exige apikey
+// (`requiresApiKey`) e NÃO há chave guardada (`needsCredentialStep`), o `confirm()` NÃO
+// fecha o picker — abre um campo MASCARADO (`credentialStep`/`credentialDraft`, MESMO
+// mecanismo Ink do formulário "+ adicionar" acima, nunca ecoado — ver `maskValue` no
+// componente) em vez de aplicar o provider sem credencial. Só DEPOIS de gravar a chave
+// (`args.storeCredential`, que o `run.tsx` liga a `storeApiKey` — ÚNICA escrita de
+// credencial do produto, não duplicada aqui) o picker fecha e devolve o nome — o
+// `switchLocalProvider` que o chamador já invoca em seguida acha a chave e TESTA a
+// conexão (fail-closed) pelo caminho que já existia.
+//
+// Se esse teste REPROVAR (chave velha/errada), o chamador (fora deste hook — a troca é
+// ASSÍNCRONA e só resolve DEPOIS do picker já ter fechado) chama `retryCredential(provider,
+// detail)`: REABRE o mesmo campo, limpo, com o motivo do teste anterior visível (nunca a
+// chave) — "colar outra key" em vez de só recusar (pedido explícito do dono). Keyless
+// (Ollama, `auth:['none']`) nunca vê nenhum destes dois caminhos (`requiresApiKey` os
+// filtra os dois).
+//
+// DI, não import direto: `hasStoredKey`/`storeCredential` são INJETADOS (mesmo padrão de
+// `providersClient`/`localCatalog` acima) — este hook nunca importa `credential-resolver.ts`
+// (keychain/cofre em arquivo) diretamente. Dois motivos: (1) a fronteira já estabelecida
+// aqui é "I/O entra por prop, o hook só orquestra estado" (nenhum outro campo deste arquivo
+// toca disco/rede direto); (2) SEM injeção, todo teste que já constrói `useProviderPicker`
+// sem estas duas props (a suíte inteira de hoje) continua se comportando EXATAMENTE como
+// antes — o passo de credencial só entra em vigor quando o `run.tsx`/`App.tsx` ligarem o
+// fio (RELATADO no PR, arquivos fora do escopo desta mudança).
 
 import { useCallback, useRef, useState } from 'react';
-import type { ProvidersClient, LocalProviderEntry } from '@hiperplano/aluy-cli-core';
+import type { ProvidersClient, LocalProviderEntry, LocalAuthMode } from '@hiperplano/aluy-cli-core';
 import {
   PROVIDERS,
   buildProviderEntries,
@@ -60,6 +88,57 @@ export interface AddCustomProviderInput {
 
 const EMPTY_DRAFT: AddCustomProviderDraft = { id: '', baseUrl: '', model: '' };
 
+/** Passo do campo de credencial ("colar a API key"). `null` fora do fluxo; `'key'` cobre
+ * as DUAS entradas (1ª vez sem chave guardada, ou retry após teste reprovado) — o que
+ * distingue as duas é só `credentialError` (vazio na 1ª vez, o `detail` do teste no retry). */
+export type CredentialStep = 'key' | null;
+
+/**
+ * DECISÃO pura — este `auth` (modos aceitos por UM provider do catálogo local) EXIGE uma
+ * credencial de API key? Espelha a MESMA regra que `defaultAuthFor` usa pra decidir
+ * 'apikey' vs 'none' (`packages/cli/src/model/local/factory.ts`, não importada aqui pra
+ * manter este hook livre de qualquer import de módulo de I/O — só a REGRA é replicada, um
+ * one-liner): só é KEYLESS quando TODOS os modos declarados são `'none'` (ex.: Ollama,
+ * `auth:['none']`) — `['apikey']`/`['apikey','oauth']`/qualquer mistura exige chave.
+ * `undefined`/vazio (provider fora do catálogo local, ou lista vinda do BROKER — que não
+ * tem este conceito) ⇒ `false`: sem o dado, não há como pedir a chave com segurança.
+ */
+export function requiresApiKey(auth: readonly LocalAuthMode[] | undefined): boolean {
+  if (auth === undefined || auth.length === 0) return false;
+  return !auth.every((m) => m === 'none');
+}
+
+/**
+ * DECISÃO pura — ao CONFIRMAR um provider no picker, é preciso abrir o passo de
+ * credencial ANTES de aplicar? Regra do dono ("mudei o provider no picker e ele não pediu
+ * nada"): só pede quando FALTA a chave — `hasStoredKey=true` (já configurado) segue
+ * DIRETO, sem incomodar; provider KEYLESS (`requiresApiKey=false`) nunca vê este passo.
+ */
+export function needsCredentialStep(
+  auth: readonly LocalAuthMode[] | undefined,
+  hasStoredKey: boolean,
+): boolean {
+  if (hasStoredKey) return false;
+  return requiresApiKey(auth);
+}
+
+/**
+ * DECISÃO pura — `switchLocalProvider` REPROVOU o teste de conexão de um provider que
+ * este picker acabou de armar. Pedido do dono: "se a credencial não funcionar ele tem que
+ * dar a opção de colocar outra key" — em vez de só uma nota de erro, REABRE o campo. Só
+ * faz sentido quando o provider EXIGE apikey (`requiresApiKey`): um KEYLESS (Ollama) que
+ * falhou é rede/serviço fora do ar, não credencial — reabrir um campo pra uma chave que
+ * não existe seria confuso. `detail` é o motivo do teste (NUNCA a chave — CLI-SEC). `null`
+ * ⇒ não reabre (a nota de erro que o chamador já empurra basta).
+ */
+export function planCredentialRetry(
+  auth: readonly LocalAuthMode[] | undefined,
+  detail: string,
+): { readonly error: string } | null {
+  if (!requiresApiKey(auth)) return null;
+  return { error: detail };
+}
+
 export interface UseProviderPickerArgs {
   /** Provider ATIVO da sessão (p/ marcar o item ● e pré-selecioná-lo). `undefined` =
    * nenhum setado ainda (o broker escolhe o default) ⇒ pré-seleciona o 1º. */
@@ -77,9 +156,27 @@ export interface UseProviderPickerArgs {
    * catálogo pode ter mudado NESTA sessão (um "+ adicionar" recém-confirmado) —
    * reconsultada a CADA abertura do picker (mesma disciplina do `useLocalModelPicker`).
    * Presente ⇒ o picker ignora `providersClient` inteiramente (fontes mutuamente
-   * exclusivas — nunca mistura BYO com o catálogo do broker).
+   * exclusivas — nunca mistura BYO com o catálogo do broker). TAMBÉM é a fonte do
+   * `auth[]` de cada entrada (usado pelo passo de credencial abaixo) — o catálogo do
+   * broker não tem esse conceito, então o passo NUNCA se aplica sem `localCatalog`.
    */
   readonly localCatalog?: () => readonly LocalProviderEntry[];
+  /**
+   * F-PROV-CRED — presença de credencial JÁ guardada p/ um provider (síncrono, LOCAL:
+   * keychain→cofre em arquivo, NUNCA rede). Decide se o passo de chave é necessário ao
+   * confirmar (regra 1: quem já configurou não é incomodado). Injetada — ver o cabeçalho
+   * do arquivo. AUSENTE ⇒ o picker aplica DIRETO, sem passo de chave (comportamento de
+   * hoje) — o passo só entra em vigor quando `run.tsx` ligar `hasStoredApiKey` aqui.
+   */
+  readonly hasStoredKey?: (providerId: string) => boolean;
+  /**
+   * F-PROV-CRED — grava a chave colada no passo de credencial. `run.tsx` liga isto a
+   * `storeApiKey` (`model/local/credential-resolver.ts`, a ÚNICA escrita de credencial do
+   * produto — este hook não duplica). PODE LANÇAR (ex.: `MachineIdUnavailableError`): o
+   * hook captura e mostra `e.message` no próprio campo — CLI-SEC: a mensagem nunca contém
+   * a chave, só o motivo do backend. AUSENTE ⇒ o passo de credencial nunca é oferecido.
+   */
+  readonly storeCredential?: (providerId: string, apiKey: string) => void;
 }
 
 export interface ProviderPickerController {
@@ -109,6 +206,11 @@ export interface ProviderPickerController {
    * Confirma o item selecionado: devolve o nome do provider (ou `null` se vazio). Pode
    * devolver `ADD_CUSTOM_PROVIDER_SENTINEL` — o chamador (App) deve checar isso ANTES de
    * tratar como um nome de provider real e chamar `startAddCustom()` em vez de aplicar.
+   *
+   * F-PROV-CRED — quando o provider escolhido EXIGE chave e não há uma guardada
+   * (`needsCredentialStep`), NÃO fecha e devolve `null`: abre `credentialStep` no lugar
+   * (ver `confirmCredential`). O chamador só recebe o nome quando não há mais nada a
+   * pedir — igual ao sentinela do "+ adicionar", reusa o MESMO picker aberto.
    */
   confirm(): string | null;
   /** Passo corrente do formulário "+ adicionar provider custom" (`null` fora do fluxo). */
@@ -130,6 +232,40 @@ export interface ProviderPickerController {
   confirmAddCustom(): AddCustomProviderInput | null;
   /** Cancela o formulário (esc) e volta pra lista, sem persistir nada. */
   cancelAddCustom(): void;
+
+  // ── F-PROV-CRED — campo de credencial ("colar a API key") ────────────────────────
+  /** Passo do campo de credencial (`null` fora do fluxo). */
+  readonly credentialStep: CredentialStep;
+  /** Provider ao qual a chave em digitação vai se aplicar (display só — CLI-SEC-7: é
+   * NOME de catálogo, nunca credencial). */
+  readonly credentialProviderId: string;
+  /** Valor em digitação (cru, em memória — o COMPONENTE nunca o renderiza cru, só
+   * mascarado). NUNCA persistido em lugar nenhum além do `storeCredential` injetado. */
+  readonly credentialDraft: string;
+  /** Motivo de uma tentativa ANTERIOR ter falhado (gravação OU teste de conexão do
+   * chamador) — vazio na 1ª vez. NUNCA contém a chave, só o `detail`/mensagem do backend. */
+  readonly credentialError: string;
+  /** Digita um caractere no campo de chave. No-op fora do fluxo. */
+  typeCredential(ch: string): void;
+  /** Apaga um caractere (backspace) do campo de chave. No-op fora do fluxo. */
+  backspaceCredential(): void;
+  /**
+   * Confirma o campo de chave: vazio ⇒ no-op (campo obrigatório, mesma UX do id/baseUrl
+   * do "+ adicionar"). Não-vazio ⇒ chama `args.storeCredential`; se ele LANÇAR, mantém o
+   * campo aberto com o erro em `credentialError` (nunca a chave) e devolve `null`; se
+   * gravar, fecha o picker e devolve o NOME do provider — o mesmo contrato de `confirm()`,
+   * pronto pro chamador aplicar (`onSelectProvider`).
+   */
+  confirmCredential(): string | null;
+  /** Cancela o campo de chave (esc) e volta pra lista, sem gravar nada. */
+  cancelCredential(): void;
+  /**
+   * REABRE o campo de chave (picker fechado ou não) depois que o chamador soube, de forma
+   * ASSÍNCRONA, que `switchLocalProvider` reprovou o teste de conexão pra este provider —
+   * ver `planCredentialRetry`. No-op p/ provider keyless (nada a pedir). `detail` nunca
+   * contém a chave.
+   */
+  retryCredential(providerId: string, detail: string): void;
 }
 
 /** Posição do provider corrente na lista (p/ pré-selecionar no item ativo). */
@@ -150,8 +286,28 @@ export function useProviderPicker(args: UseProviderPickerArgs): ProviderPickerCo
   const [addCustomStep, setAddCustomStep] = useState<AddCustomProviderStep>(null);
   const [addCustomDraft, setAddCustomDraft] = useState<AddCustomProviderDraft>(EMPTY_DRAFT);
 
+  // F-PROV-CRED — estado do campo de chave (ver os tipos/JSDoc no topo do arquivo).
+  const [credentialStep, setCredentialStep] = useState<CredentialStep>(null);
+  const [credentialProviderId, setCredentialProviderId] = useState('');
+  const [credentialDraft, setCredentialDraft] = useState('');
+  const [credentialError, setCredentialError] = useState('');
+  // `auth[]` por provider (id em minúsculas), do catálogo LOCAL cru — NUNCA passa pelo
+  // `ProviderEntry` de display (`buildLocalProviderEntries` descarta `auth`, e ele é
+  // arquivo PROIBIDO nesta mudança). Ref (não state): só é LIDO em callbacks de evento
+  // (confirm/retryCredential), nunca no render — não precisa disparar re-render.
+  const authById = useRef<Map<string, readonly LocalAuthMode[]>>(new Map());
+
+  const resetCredential = useCallback(() => {
+    setCredentialStep(null);
+    setCredentialProviderId('');
+    setCredentialDraft('');
+    setCredentialError('');
+  }, []);
+
   const loadLocalProviders = useCallback((): readonly ProviderEntry[] => {
-    const entries = buildLocalProviderEntries(args.localCatalog?.() ?? []);
+    const raw = args.localCatalog?.() ?? [];
+    authById.current = new Map(raw.map((e) => [e.id.toLowerCase(), e.auth]));
+    const entries = buildLocalProviderEntries(raw);
     return [
       ...entries,
       {
@@ -211,14 +367,16 @@ export function useProviderPicker(args: UseProviderPickerArgs): ProviderPickerCo
     setOpen(true);
     setAddCustomStep(null);
     setAddCustomDraft(EMPTY_DRAFT);
+    resetCredential();
     void loadProviders();
-  }, [args.currentProvider, providers, loadProviders]);
+  }, [args.currentProvider, providers, loadProviders, resetCredential]);
 
   const closePicker = useCallback(() => {
     setOpen(false);
     setAddCustomStep(null);
     setAddCustomDraft(EMPTY_DRAFT);
-  }, []);
+    resetCredential();
+  }, [resetCredential]);
 
   const move = useCallback(
     (delta: number) => {
@@ -232,6 +390,7 @@ export function useProviderPicker(args: UseProviderPickerArgs): ProviderPickerCo
 
   const confirm = useCallback((): string | null => {
     const entry = providers[selected];
+    if (entry === undefined) return null;
     // F-PROV — o item sentinela "+ adicionar" NÃO é uma escolha final: a App (ao ver
     // este nome de volta) chama `startAddCustom()` em seguida, reusando o MESMO picker
     // pro formulário (`open` continua controlando o render em App.tsx). Fechar aqui
@@ -239,11 +398,26 @@ export function useProviderPicker(args: UseProviderPickerArgs): ProviderPickerCo
     // — o <ProviderPicker> nunca chegava a renderizar o formulário, e o enter no item
     // "+ adicionar" virava um no-op silencioso (bug relatado: "clico e não acontece
     // nada"). Só fecha de fato quando a escolha é um provider REAL.
-    if (entry?.name !== ADD_CUSTOM_PROVIDER_SENTINEL) {
-      setOpen(false);
+    if (entry.name === ADD_CUSTOM_PROVIDER_SENTINEL) {
+      return entry.name;
     }
-    return entry ? entry.name : null;
-  }, [providers, selected]);
+    // F-PROV-CRED — antes de aplicar, decide se falta pedir a chave (regra do dono:
+    // "mudei o provider e ele não pediu nada"). Só entra em vigor quando o chamador
+    // injetou os dois fios (senão o picker segue exatamente como hoje — ver JSDoc do
+    // arquivo).
+    if (args.hasStoredKey !== undefined && args.storeCredential !== undefined) {
+      const auth = authById.current.get(entry.name.toLowerCase());
+      if (needsCredentialStep(auth, args.hasStoredKey(entry.name))) {
+        setCredentialProviderId(entry.name);
+        setCredentialDraft('');
+        setCredentialError('');
+        setCredentialStep('key');
+        return null; // fica na MESMA picker aberta — troca a vista p/ o campo de chave.
+      }
+    }
+    setOpen(false);
+    return entry.name;
+  }, [providers, selected, args.hasStoredKey, args.storeCredential]);
 
   const startAddCustom = useCallback(() => {
     setAddCustomDraft(EMPTY_DRAFT);
@@ -292,6 +466,55 @@ export function useProviderPicker(args: UseProviderPickerArgs): ProviderPickerCo
     setAddCustomDraft(EMPTY_DRAFT);
   }, []);
 
+  // ── F-PROV-CRED — campo de credencial ─────────────────────────────────────────────
+  const typeCredential = useCallback(
+    (ch: string) => {
+      if (credentialStep === null) return;
+      setCredentialDraft((d) => d + ch);
+    },
+    [credentialStep],
+  );
+
+  const backspaceCredential = useCallback(() => {
+    if (credentialStep === null) return;
+    setCredentialDraft((d) => d.slice(0, -1));
+  }, [credentialStep]);
+
+  const confirmCredential = useCallback((): string | null => {
+    if (credentialStep === null) return null;
+    const key = credentialDraft.trim();
+    if (key === '') return null; // campo obrigatório — Enter não avança vazio.
+    if (args.storeCredential === undefined) return null; // defensivo — só chega aqui injetado.
+    try {
+      args.storeCredential(credentialProviderId, key);
+    } catch (e) {
+      // CLI-SEC — a MENSAGEM nunca contém a chave (é o motivo do backend: keychain/cofre
+      // em arquivo/machine-id), só `e.message`. Limpa o rascunho: não reexibe (nem
+      // mascarado) o valor que falhou ao gravar — reforça "sempre recomeça do zero".
+      setCredentialError(e instanceof Error ? e.message : String(e));
+      setCredentialDraft('');
+      return null;
+    }
+    const id = credentialProviderId;
+    resetCredential();
+    setOpen(false);
+    return id;
+  }, [credentialStep, credentialDraft, credentialProviderId, args.storeCredential, resetCredential]);
+
+  const cancelCredential = useCallback(() => {
+    resetCredential();
+  }, [resetCredential]);
+
+  const retryCredential = useCallback((providerId: string, detail: string): void => {
+    const plan = planCredentialRetry(authById.current.get(providerId.toLowerCase()), detail);
+    if (plan === null) return; // keyless (ou provider desconhecido) — nada a pedir.
+    setCredentialProviderId(providerId);
+    setCredentialDraft('');
+    setCredentialError(plan.error);
+    setCredentialStep('key');
+    setOpen(true);
+  }, []);
+
   return {
     open,
     selected,
@@ -309,5 +532,14 @@ export function useProviderPicker(args: UseProviderPickerArgs): ProviderPickerCo
     backspaceAddCustom,
     confirmAddCustom,
     cancelAddCustom,
+    credentialStep,
+    credentialProviderId,
+    credentialDraft,
+    credentialError,
+    typeCredential,
+    backspaceCredential,
+    confirmCredential,
+    cancelCredential,
+    retryCredential,
   };
 }

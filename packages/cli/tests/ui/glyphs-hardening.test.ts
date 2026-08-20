@@ -37,7 +37,7 @@ describe('glyphs default (Unicode) — sem os chars de risco (EST-0984)', () => 
   it('as TROCAS específicas estão no lugar (antes→depois)', () => {
     expect(UNICODE_GLYPHS.wave).toBe('~'); // ～ → ~
     expect(UNICODE_GLYPHS.toolInflight).toBe('○'); // ◌ → ○
-    expect(UNICODE_GLYPHS.window).toBe('□'); // ⛁ → □
+    expect(UNICODE_GLYPHS.window).toBe('■'); // ⛁ → □ → ■ (F-GLYPH-PESO-2, preenchido)
     expect(UNICODE_GLYPHS.subagents).toBe('+'); // ⊕ → +
     expect(UNICODE_GLYPHS.broker).toBe('●'); // ◍ → ●
   });
@@ -45,8 +45,9 @@ describe('glyphs default (Unicode) — sem os chars de risco (EST-0984)', () => 
   it('a marca `aluy` agora é o Λ do logo (não o losango ◇)', () => {
     expect(UNICODE_GLYPHS.aluy).toBe('Λ');
     expect(UNICODE_GLYPHS.aluy).not.toBe('◇');
-    // o ◇ permanece SÓ no indicador de modo normal (catraca) — coerência mantida.
-    expect(UNICODE_GLYPHS.normalMode).toBe('◇');
+    // o ◇ permanecia SÓ no indicador de modo normal (catraca); F-GLYPH-PESO-2 deu
+    // mais massa também a ele (◇→◆) — a MARCA (Λ) segue distinta de qualquer um dos dois.
+    expect(UNICODE_GLYPHS.normalMode).toBe('◆');
   });
 });
 
@@ -101,7 +102,7 @@ describe('fallbacks intactos (NO_COLOR / ASCII / 16-cores) — não regredir', (
     const t = resolveTheme({ env: { NO_COLOR: '1', ...UTF8 } });
     expect(t.colorMode).toBe('mono');
     // unicode segue ligado (NO_COLOR é sobre COR, não sobre fonte): default hardened.
-    expect(t.glyph('window')).toBe('□');
+    expect(t.glyph('window')).toBe('■'); // F-GLYPH-PESO-2
   });
 
   it('16-cores (ansi16) ⇒ glifos default endurecidos, sem regressão', () => {

@@ -19,7 +19,7 @@ export const en: PartialCatalog = {
   'composer.moreLines': 'lines',
 
   // ── FooterHints ───────────────────────────────────────────────────────────
-  'hints.idle': 'enter sends · / commands · ctrl-p palette · ↑ history · ctrl-c×2 quit',
+  'hints.idle': '⏎ send · / commands · ↑ history',
   'hints.thinking': 'esc interrupt · ctrl-c×2 quit',
   'hints.streaming': 'esc interrupt · ctrl-c×2 quit',
   'hints.ask': 'a approve · s always · n deny · e edit · esc cancel',
@@ -72,6 +72,11 @@ export const en: PartialCatalog = {
 
   // ── StatusBar ─────────────────────────────────────────────────────────────
   'statusbar.brokerError': 'broker error',
+  // F-PAINEL — rótulos da coluna esquerda do painel de status. Curtos de propósito:
+  // é o ALINHAMENTO deles que cria a coluna, e um rótulo longo comeria a área do valor.
+  'painel.sessao': 'session',
+  'painel.estado': 'state',
+  'painel.uso': 'usage',
   'statusbar.window': 'window',
   'statusbar.session': 'session',
   'statusbar.quota': 'quota',
@@ -106,6 +111,11 @@ export const en: PartialCatalog = {
     'default model (empty enter uses the provider id) — enter confirms',
   'picker.provider.addCustom.help':
     'esc cancels · the credential does NOT go here — afterwards use `aluy login --provider <id>`',
+  // F-PROV-CRED — key field between picking the provider and applying it. NEVER echoed
+  // (masked with •). See pt-BR.ts for the owner-reported motivation.
+  'picker.provider.credential.label': '{provider} API key (hidden) — enter saves and applies',
+  'picker.provider.credential.help': 'esc goes back to the list · the key is NEVER shown in clear',
+  'picker.provider.credential.retryTitle': '✗ the key failed the connection test — paste another one',
 
   // ── ModelPicker (/model) ──────────────────────────────────────────────────
   'picker.model.help': 'change model · ↑↓ navigate · enter select · esc close',

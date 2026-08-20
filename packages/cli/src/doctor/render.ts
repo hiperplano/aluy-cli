@@ -10,7 +10,7 @@
 
 import { summarize, type DoctorReport, type DoctorStatus } from './checks.js';
 
-/** Glifos de status (✓/⚠/✗) — injetados pelo chamador (tema na TUI, ASCII no shell). */
+/** Glifos de status (✔/⚠/✘) — injetados pelo chamador (tema na TUI, ASCII no shell). */
 export interface DoctorGlyphs {
   readonly ok: string;
   readonly warn: string;
@@ -20,8 +20,12 @@ export interface DoctorGlyphs {
 /** Glifos ASCII-friendly p/ o `aluy doctor` (saída piped/CI sem fonte garantida). */
 export const ASCII_DOCTOR_GLYPHS: DoctorGlyphs = { ok: '[ok]', warn: '[!]', fail: '[x]' };
 
-/** Glifos Unicode p/ a nota na TUI (default de cobertura ampla, EST-0984). */
-export const UNICODE_DOCTOR_GLYPHS: DoctorGlyphs = { ok: '✓', warn: '⚠', fail: '✗' };
+/**
+ * Glifos Unicode p/ a nota na TUI (default de cobertura ampla, EST-0984).
+ * F-GLYPH-PESO-2 — SINCRONIZADO com `UNICODE_GLYPHS.ok`/`.err` do tema (✓✗→✔✘,
+ * mais peso/preenchimento); `warn` (⚠) fica intacto — fora do escopo pedido.
+ */
+export const UNICODE_DOCTOR_GLYPHS: DoctorGlyphs = { ok: '✔', warn: '⚠', fail: '✘' };
 
 function glyphFor(status: DoctorStatus, g: DoctorGlyphs): string {
   return status === 'ok' ? g.ok : status === 'warn' ? g.warn : g.fail;

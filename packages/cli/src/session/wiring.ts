@@ -12,6 +12,7 @@
 //
 // Tudo injetável (testes). NÃO toca Ink aqui — o render é em run.tsx.
 
+import type { Quota } from '@hiperplano/aluy-cli-core';
 import {
   AgentMemory,
   BrokerModelCaller,
@@ -277,6 +278,16 @@ export interface BuildSessionOptions {
    * comportamento anterior, em que `/model` nunca persistia).
    */
   readonly persistActiveLocalModel?: (slug: string) => void;
+  /**
+   * F-SALDO-BYO — fonte de quota/saldo ALTERNATIVA. Quando presente, VENCE o
+   * `quotaClient` do broker.
+   *
+   * Existe porque o rodapé só sabia falar com o broker: sob backend LOCAL o dono
+   * carregava crédito no gateway dele e a tela não mostrava NADA. O `run.tsx` monta um
+   * leitor que fala o dialeto do gateway BYO e o adapta ao MESMO `Quota` que o rodapé já
+   * pinta — daí a injeção, em vez de um segundo componente de rodapé.
+   */
+  readonly quotaFetcher?: () => Promise<Quota | undefined>;
   readonly verifyAndRegisterLocalModel?: (slug: string) => Promise<{
     readonly ok: boolean;
     readonly detail: string;
@@ -1540,7 +1551,8 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // EST-0948 · ADR-0069 — fonte da quota da PRÓPRIA conta (`GET /v1/quota`): saldo de
     // CRÉDITO (primário) + janelas, p/ o footer. Degrada silencioso (broker fora/
     // deslogado ⇒ `undefined` ⇒ footer oculto). O controller a chama no boot + refresh.
-    quotaFetcher: () => quotaClient.fetchQuota(),
+    // F-SALDO-BYO — o injetado (BYO) vence; sem ele, o broker de sempre.
+    quotaFetcher: opts.quotaFetcher ?? ((): Promise<Quota | undefined> => quotaClient.fetchQuota()),
     // EST-1012 — MONITOR DE PRESSÃO DE MEMÓRIA (backstop de OOM): repassa o heap-limit
     // (o MESMO do launcher) + o amostrador do heap. A config escalonada é resolvida no
     // controller (env `ALUY_MEM_PRESSURE_AT`/`_OFF`). A porta de encerramento-limpo é

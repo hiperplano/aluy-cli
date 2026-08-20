@@ -17,26 +17,97 @@ import { cleanAluyForDisplay } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { Markdown } from '../markdown/index.js';
 import { AluyLoader } from './AluyLoader.js';
-import { windowTailVisual } from '../../session/visual-lines.js';
+import wrapAnsi from 'wrap-ansi';
+import { windowTailVisual, capSourceLineChars, displayWidth } from '../../session/visual-lines.js';
+import { abbreviateCount, formatDuration, type TurnAccountingView } from '../../session/model.js';
 import { clampLiveOutputChars, MAX_LIVE_SPEECH_CHARS } from '../../session/live-budget.js';
 
 export interface YouBlockProps {
   readonly text: string;
   /** `false` ⇒ cronologia esmaecida (turno passado em fgDim). Default true. */
   readonly isCurrent?: boolean;
+  /**
+   * Largura do terminal. Necessária para PINTAR o bloco: sem ela não dá para saber até
+   * onde preencher cada linha, e o fundo sairia só atrás dos caracteres — um retângulo
+   * esfarrapado. Ausente ⇒ bloco sem fundo (degradação graciosa, o desenho antigo).
+   */
+  readonly columns?: number;
 }
 
+/**
+ * F-ECO-PINTADO (pedido do dono: "toda a área que ficasse logada com o que eu enviei
+ * tivesse o mesmo fundo e o acabamento lateral igual o composer") — o que VOCÊ mandou
+ * ganha a MESMA moldura do composer: barra `┃` na cor de acento à esquerda e o mesmo
+ * fundo preenchido até a borda.
+ *
+ * A razão de ser não é decoração: o composer e o eco são a MESMA voz separada pelo
+ * tempo — o que você acabou de digitar e o que você digitou antes. Dar-lhes a mesma
+ * moldura faz a coluna da esquerda virar um fio contínuo do seu lado da conversa, e a
+ * resposta do agente (sem moldura) se distingue por AUSÊNCIA, sem precisar de régua
+ * nenhuma entre as seções — que era exatamente o que o dono não queria ver.
+ *
+ * Pintar exige quebrar o texto AQUI em vez de deixar o Ink quebrar: `<Text backgroundColor>`
+ * só pinta onde há caractere, então cada linha visual precisa ser emitida já preenchida
+ * até a largura útil. O wrap usado é o MESMO do Ink (`wrap-ansi` com `trim:false,
+ * hard:true`), senão as linhas pintadas e as linhas reais divergiriam.
+ */
 export function YouBlock(props: YouBlockProps): React.ReactElement {
+  const theme = useTheme();
   const speech = props.isCurrent === false ? 'fgDim' : 'fg';
+  const fundo = theme.composerBg;
+  // `-2`: a borda esquerda come 1 coluna e o recuo da fala come outra. É a MESMA conta do
+  // `<TurnFooter>`; errá-la por 1 joga um espaço pintado para a linha seguinte (o
+  // "quadradinho cinza solto" que o dono viu embaixo do composer).
+  // `-3`: borda (1) + o espaço de recuo que cada linha pintada já embute (1) + a coluna
+  // que o Ink reserva à direita (1). Medido contra o composer no TTY: com `-4` o eco
+  // pintava 138 colunas e o composer 139, e a diferença de UMA coluna aparecia como um
+  // degrau na borda direita dos dois retângulos.
+  const util = props.columns !== undefined ? Math.max(8, props.columns - 3) : undefined;
+
+  if (fundo === undefined || util === undefined) {
+    // Terminal sem truecolor (ou largura desconhecida): sem fundo, o desenho de sempre.
+    return (
+      <Box flexDirection="column">
+        <Box>
+          <Glyph name="you" role="fg" />
+          <Role name="fg"> você</Role>
+        </Box>
+        <Box paddingLeft={2}>
+          <Role name={speech}>{props.text}</Role>
+        </Box>
+      </Box>
+    );
+  }
+
+  const linhas = props.text
+    .split('\n')
+    .flatMap((ln) =>
+      wrapAnsi(capSourceLineChars(ln), util, { trim: false, hard: true }).split('\n'),
+    );
+
   return (
-    <Box flexDirection="column">
-      <Box>
-        <Glyph name="you" role="fg" />
-        <Role name="fg"> você</Role>
-      </Box>
-      <Box paddingLeft={2}>
-        <Role name={speech}>{props.text}</Role>
-      </Box>
+    <Box
+      flexDirection="column"
+      borderStyle="bold"
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      borderColor={theme.role('accent').color}
+    >
+      <Text backgroundColor={fundo}>
+        {' '}
+        <Text {...(theme.role('fg').color !== undefined ? { color: theme.role('fg').color } : {})}>você</Text>
+        {' '.repeat(Math.max(0, util - 4))}
+      </Text>
+      {linhas.map((ln, i) => (
+        <Text
+          key={i}
+          backgroundColor={fundo}
+          {...(theme.role(speech).color !== undefined ? { color: theme.role(speech).color } : {})}
+        >
+          {` ${ln}${' '.repeat(Math.max(0, util - displayWidth(ln)))}`}
+        </Text>
+      ))}
     </Box>
   );
 }
@@ -68,6 +139,20 @@ export interface AluyBlockProps {
    */
   readonly columns?: number;
   /**
+   * F-CONTA-NO-BLOCO (pedido do dono: "ao invés dos tokens e do tempo ficar no composer,
+   * ficar do lado do aluy quando a conversa finalizar") — o custo do turno no CABEÇALHO
+   * do bloco que o produziu, e não flutuando no campo de entrada.
+   *
+   * A razão é de leitura: no composer o número falava do turno ANTERIOR enquanto você já
+   * digitava o próximo — informação certa no lugar errado, sempre um passo atrasada em
+   * relação ao que está sob o cursor. No cabeçalho do bloco ele fica preso à resposta que
+   * de fato o gastou, e o histórico passa a carregar o próprio custo linha a linha.
+   *
+   * Só aparece com o turno FINALIZADO: durante o stream os números ainda estão subindo, e
+   * um contador correndo ao lado do `Λ aluy` competiria com o cursor de trabalho.
+   */
+  readonly accounting?: TurnAccountingView;
+  /**
    * F-RAC — RACIOCÍNIO do modelo neste turno (canal separado da fala). Renderiza
    * ESMAECIDO e acima da fala, nunca como resposta.
    *
@@ -80,7 +165,6 @@ export interface AluyBlockProps {
 }
 
 /** Indentação (colunas) da FALA do aluy — `<Box paddingLeft={2}>`. */
-const SPEECH_INDENT = 2;
 
 /**
  * EST-0965 — cadência do PISCAR CALMO do cursor de trabalho (●). Com o tick central
@@ -124,7 +208,13 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
 
   // Janela de cauda (só durante o stream): limita a altura VISUAL da prévia viva.
   // A fala é indentada 2 colunas (paddingLeft), então o wrap acontece em columns-2.
-  const speechCols = props.columns && props.columns > 0 ? props.columns - SPEECH_INDENT : 0;
+  // `-2` (borda + o `paddingLeft={1}` do corpo) em vez do recuo antigo de 2 sem borda:
+  // é esta largura que o fundo preenche, e errá-la joga coluna pintada para a linha de
+  // baixo — a mesma classe de defeito do quadradinho solto sob o composer.
+  // Total da linha = borda (1) + conteúdo. O respiro de 1 coluna à esquerda agora é
+  // PINTADO por dentro do conteúdo (o `paddingLeft` do `<Box>` não era pintado e deixava
+  // uma faixa clara colada na borda), então ele já está contido em `columns - 2`.
+  const speechCols = props.columns && props.columns > 0 ? props.columns - 2 : 0;
   const { text, hidden: hiddenAbove } = windowTailVisual(
     full,
     props.streaming ? props.maxLines : undefined,
@@ -157,28 +247,89 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
     const cru = (props.reasoning ?? '').trim();
     if (cru === '') return undefined;
     const semFala = full.trim() === '';
-    if (props.streaming || semFala) {
+    // F-RAC-COLAPSA (relato do dono: "não deveria mostrar todo o pensamento, isso está
+    // poluindo — pode só mostrar os tokens do final") — o texto do raciocínio NÃO vai
+    // mais para a tela. Ele é o canal mais verboso desses modelos e empurra a conversa
+    // inteira para cima; o dono quer o SINAL de que houve pensamento, não o rascunho.
+    //
+    // A primeira versão (rc.138) mostrava a cauda ao vivo. Resolveu o bloco mudo, mas
+    // criou outro problema — poluição. O meio-termo é este: UMA linha, sempre.
+    //
+    // A ÚNICA exceção é o turno que NÃO falou: aí o pensamento é tudo o que existe, e
+    // escondê-lo devolve exatamente o `Λ aluy` vazio que este conserto nasceu para matar.
+    if (semFala && !props.streaming) {
       const linhas = windowTailVisual(cru, REASONING_LIVE_LINES, speechCols).text.split('\n');
-      const cabecalho = props.streaming ? '⋯ pensando' : '⋯ o modelo só produziu raciocínio';
-      return [cabecalho, ...linhas];
+      return ['⋯ o modelo só produziu raciocínio', ...linhas];
     }
-    const chars = cru.length;
-    return [`⋯ pensou ${chars} caracteres antes de responder`];
+    if (props.streaming) return ['⋯ pensando'];
+    return [`⋯ pensou ${cru.length} caracteres`];
   })();
 
-  return (
-    <Box flexDirection="column">
-      <Box>
-        {/* EST-0984 — a marca Λ "desenha + respira" enquanto faz stream; sólida
-            (accent) quando o turno termina ou sem animação. Largura constante. */}
+  // F-ECO-PINTADO (2/2) — a resposta ganha a MESMA moldura do eco, em cor PRÓPRIA: barra
+  // à esquerda e cabeçalho pintado. O corpo NÃO é pintado, e isso é escolha, não limitação
+  // de esforço: a fala do agente é markdown com realce de sintaxe, e um fundo atrás dele
+  // brigaria com as cores do código — o bloco ficaria menos legível justamente onde a
+  // legibilidade mais importa. A barra lateral sozinha já delimita a caixa em toda a
+  // altura; o fundo entra só no cabeçalho, que é onde as duas vozes se alternam.
+  const aluyFundo = theme.aluyBg;
+  // `-3`: a borda come 1 coluna, o espaço de recuo do cabeçalho come outra, e a última o
+  // Ink reserva. Mesma conta do `<YouBlock>` — errá-la joga um resto pintado para a linha
+  // de baixo.
+  const cabecalhoUtil = props.columns !== undefined ? Math.max(12, props.columns - 2) : undefined;
+  // O custo só entra com o turno FECHADO (ver a doc da prop): durante o stream os números
+  // ainda sobem e competiriam com o cursor de trabalho.
+  const conta = ((): string | undefined => {
+    const a = props.accounting;
+    if (a === undefined || props.streaming) return undefined;
+    const partes: string[] = [`${abbreviateCount(a.tokens)} tokens`];
+    if (a.toolCalls > 0) partes.push(`${a.toolCalls} tools`);
+    partes.push(formatDuration(a.durationMs));
+    return `${theme.glyph('ok')} ${partes.join(' · ')}`;
+  })();
+
+  const cabecalho =
+    aluyFundo !== undefined && cabecalhoUtil !== undefined ? (
+      <Text backgroundColor={aluyFundo}>
+        {' '}
         {props.streaming ? (
           <AluyLoader frame={props.frame ?? 0} />
         ) : (
           <Glyph name="aluy" role="accent" />
         )}
-        <Role name="accent"> aluy</Role>
+        <Role name="accent">luy</Role>
+        {conta !== undefined && <Role name="fgDim">{`  ${conta}`}</Role>}
+        {/* ` ` + `Λ` + `luy` = 5 colunas. A conta some com os 2 espaços que a separam.
+            Errar esta soma para MAIS pinta além do bloco e o Ink joga o excedente na
+            linha seguinte — foi assim que apareceu o `┃ ` pintado sob o cabeçalho. */}
+        {' '.repeat(
+          Math.max(0, cabecalhoUtil - 5 - (conta !== undefined ? displayWidth(conta) + 2 : 0)),
+        )}
+      </Text>
+    ) : (
+      <Box>
+        {props.streaming ? (
+          <AluyLoader frame={props.frame ?? 0} />
+        ) : (
+          <Glyph name="aluy" role="accent" />
+        )}
+        <Role name="accent">luy</Role>
+        {conta !== undefined && <Role name="fgDim">{`  ${conta}`}</Role>}
       </Box>
-      <Box paddingLeft={2} flexDirection="column">
+    );
+
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="bold"
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      // Cor FRIA na barra, contra o acento quente do lado do dono: as duas caixas se
+      // distinguem pela temperatura mesmo em terminal onde o fundo não pinta.
+      borderColor={theme.role('depth').color}
+    >
+      {cabecalho}
+      <Box flexDirection="column">
         {/* marcador da janela de cauda: o que rolou p/ cima durante o stream (some no
             fim do turno, quando o bloco inteiro desce p/ o Static / scrollback). */}
         {hiddenAbove > 0 && <Role name="fgDim">… ({hiddenAbove} linhas acima)</Role>}
@@ -189,11 +340,19 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
             exatamente o bloco em branco que este conserto existe p/ matar. */}
         {reasoningView !== undefined && (
           <Box flexDirection="column" paddingBottom={props.streaming ? 1 : 0}>
-            {reasoningView.map((linha, i) => (
-              <Role key={i} name="fgDim">
-                {linha}
-              </Role>
-            ))}
+            {reasoningView.map((linha, i) =>
+              aluyFundo !== undefined && speechCols > 0 ? (
+                <Text key={i} backgroundColor={aluyFundo}>
+                  <Role name="fgDim">
+                    {linha + ' '.repeat(Math.max(0, speechCols - displayWidth(linha)))}
+                  </Role>
+                </Text>
+              ) : (
+                <Role key={i} name="fgDim">
+                  {linha}
+                </Role>
+              ),
+            )}
           </Box>
         )}
         {/* A FALA do aluy renderiza como MARKDOWN (negrito/listas/títulos/citações
@@ -204,6 +363,7 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
           text={text}
           baseRole={speech}
           {...(speechCols > 0 ? { columns: speechCols } : {})}
+          {...(aluyFundo !== undefined ? { backgroundColor: aluyFundo } : {})}
         />
         {/* Cursor de TRABALHO (EST-0965): ● GROSSO/ARREDONDADO em AMARELO (papel
             `accent` do DS — em NO_COLOR/mono degrada p/ o glifo SEM cor, só bold).

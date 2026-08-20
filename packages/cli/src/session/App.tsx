@@ -14,7 +14,7 @@ import React, { useEffect, useState, useReducer, useCallback, useMemo, useRef } 
 import { Box, Static, Text, useApp, useInput, useStdin, useStdout } from 'ink';
 import {
   Header,
-  StatusBar,
+  StatusPanel,
   Composer,
   QueuedInputs,
   PendingInjects,
@@ -22,6 +22,7 @@ import {
   queuedInputsLines,
   YouBlock,
   AluyBlock,
+  ComposerBox,
   ToolLine,
   TestRunBlock,
   AskDialog,
@@ -194,6 +195,17 @@ export interface AppProps {
   readonly controller: SessionController;
   /** Comandos do usuário (DADO de ~/.aluy/commands/). */
   readonly userCommands?: readonly SlashCommand[];
+  /**
+   * F-PROV-CRED — o provider JÁ tem chave guardada? Só a PRESENÇA (keychain → cofre),
+   * nunca o valor. Decide se o `/provider` pede a credencial ou segue direto.
+   */
+  readonly hasStoredKey?: (providerId: string) => boolean;
+  /**
+   * F-PROV-CRED — grava a chave colada no campo mascarado do picker. Liga em
+   * `storeApiKey` (a ÚNICA escrita de credencial do produto). Ausente ⇒ o passo nunca é
+   * oferecido.
+   */
+  readonly storeCredential?: (providerId: string, apiKey: string) => void;
   /** Allowlist de egress p/ enriquecer o AskDialog de rede (CLI-SEC-5). */
   readonly egress?: EgressAllowlist;
   /** Nome do usuário (onboarding). */
@@ -274,6 +286,14 @@ export interface AppProps {
    * `state.meta.model` (prioridade sobre esta prop — mesmo padrão do `currentProvider`).
    */
   readonly currentLocalModel?: string;
+  /**
+   * F-PROVIDER-NAO-SOME — provider LOCAL ativo, para o rodapé quando o `meta` ainda não o
+   * traz. O `meta.provider` é preenchido pela RESPOSTA, e num turno via modelo Custom ele
+   * volta vazio: o rodapé, que mostrava `local · openrouter · <modelo>`, passava a mostrar
+   * só `local · <modelo>` justamente depois de trocar de provider — o momento em que saber
+   * onde a chamada vai cair importa mais.
+   */
+  readonly currentLocalProvider?: string;
   /**
    * EST-0962 — troca o tier da sessão (o controller aplica no caller). Chamado pelo
    * seletor `/model` ao confirmar. Sem ele, o picker não troca (degradação segura).
@@ -370,7 +390,12 @@ export interface AppProps {
    * `/provider` ao confirmar. Sem ele, o picker não troca (degradação segura). HG-2: só
    * o NOME — o broker resolve `(provider, model)` server-side.
    */
-  readonly onSelectProvider?: (provider: string) => void;
+  /**
+   * Aplica a troca de provider. Devolve `true` quando ela de fato passou — o App usa isso
+   * para, aí sim, pedir o modelo do provider novo. `void` (backend broker) ⇒ sem passo de
+   * modelo, que é o comportamento de lá.
+   */
+  readonly onSelectProvider?: (provider: string) => void | Promise<boolean>;
   /**
    * F-PROV-FIX — o dono confirmou o VERBO explícito `/provider save`: fixa o
    * provider (e modelo) ATIVOS desta sessão como o PADRÃO da PRÓXIMA (o wiring grava
@@ -964,6 +989,25 @@ export function App(props: AppProps): React.ReactElement {
     ...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {}),
   });
 
+  /**
+   * F-PROV-PEDE-MODELO (regra do dono: "quando eu trocar o provider ele sempre tem que
+   * pedir o modelo") — encadeia o picker de modelo DEPOIS de uma troca que passou.
+   *
+   * Só abre no `true`: numa troca recusada (fail-closed) o provider ativo é o de antes, e
+   * abrir o picker ali ofereceria os modelos de um provider que não está em uso — pior que
+   * não abrir nada. O `void` do backend broker também não abre: lá o provider pareia com o
+   * modelo Custom por outro caminho.
+   */
+  const pedirModeloAposTroca = useCallback(
+    (r: void | Promise<boolean>): void => {
+      if (r === undefined) return;
+      void r.then((ok) => {
+        if (ok) localModelPicker.openPicker();
+      });
+    },
+    [localModelPicker],
+  );
+
   // F161-FIX · /effort STANDALONE — seletor do `reasoning_effort` fora do fluxo
   // conjugado do `/model` (EST-1117): reusa as MESMAS opções puras do core. O ativo
   // é cosmético (mesma fonte do passo conjugado — `props.currentEffort`, o valor do
@@ -1001,6 +1045,13 @@ export function App(props: AppProps): React.ReactElement {
     // F-PROV — sob backend LOCAL, ignora `providersClient` acima por completo (a
     // presença de `localCatalog` é o que decide a fonte, ver o hook).
     ...(props.localProviderCatalog ? { localCatalog: props.localProviderCatalog } : {}),
+    // F-PROV-CRED (relato do dono: "mudei o provider no picker e ele não pediu nada") —
+    // as duas peças que fazem o picker PEDIR a chave quando falta. Injetadas pelo wiring
+    // (não import direto): o hook é apresentação, a credencial é I/O do locus.
+    // AUSENTES ⇒ o passo de credencial nunca aparece (comportamento anterior, sem
+    // regressão para broker/teste).
+    ...(props.hasStoredKey ? { hasStoredKey: props.hasStoredKey } : {}),
+    ...(props.storeCredential ? { storeCredential: props.storeCredential } : {}),
   });
 
   // EST-0989 (i18n) — os NATIVOS LOCALIZADOS no idioma ativo (summaries traduzidos). Memo
@@ -1858,7 +1909,7 @@ export function App(props: AppProps): React.ReactElement {
         // seed. Nome inválido ⇒ cai p/ o onCommand (nota honesta de "desconhecido").
         const entry = resolveProviderName(arg, providerPicker.providers);
         if (entry) {
-          props.onSelectProvider(entry.name);
+          pedirModeloAposTroca(props.onSelectProvider(entry.name));
           return;
         }
         // nome inválido ⇒ deixa o wiring empurrar a nota honesta.
@@ -2227,6 +2278,12 @@ export function App(props: AppProps): React.ReactElement {
         return; // listas puras, sem campo de texto algum — ignora.
       }
       if (providerPicker.open) {
+        // F-PROV-CRED — colar a API key é o caso NORMAL (ninguém digita 50 chars à mão).
+        // O campo mascarado precisa receber a colagem como recebe a tecla.
+        if (providerPicker.credentialStep !== null) {
+          providerPicker.typeCredential(sanitizeFieldPaste(text));
+          return;
+        }
         if (providerPicker.addCustomStep !== null) {
           providerPicker.typeAddCustom(sanitizeFieldPaste(text));
         }
@@ -2377,6 +2434,21 @@ export function App(props: AppProps): React.ReactElement {
     // DIGITADO sozinho (len 1, sem byte final) NÃO casa ⇒ a digitação normal segue intacta.
     // Roda DEPOIS do gate de paste (que já trata os marcadores `[200~`/`[201~`).
     if (isUnrecognizedEscapeTail(char)) return;
+
+    // ── ALT+TAB / TAB CRU — controle não é texto (relato do dono: "dou alt+tab no
+    // composer e, em vez de ir para outra janela, ele cria uns espaçamentos pretos") ──
+    //
+    // Quando o gerenciador de janelas NÃO captura o alt+tab (acontece em xrdp, tmux e
+    // alguns terminais), a combinação chega à aplicação como ESC seguido de TAB. O Ink
+    // engole o ESC e entrega o TAB como `char`, que caía na digitação normal e era
+    // inserido no composer — daí os "espaçamentos": tabulações literais no meio do texto,
+    // que sob o fundo pintado aparecem como buracos escuros.
+    //
+    // O TAB tem função PRÓPRIA nesta TUI (aceitar sugestão, alternar foco), tratada mais
+    // abaixo via `key.tab`. Como texto ele nunca serve — nem sozinho, nem com alt. O mesmo
+    // vale para os demais caracteres de controle que sobrevivem até aqui: se o `char` só
+    // tem controle, não há nada para digitar.
+    if (char !== '' && /^[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\t]+$/.test(char)) return;
 
     // ── splash de boot: QUALQUER tecla dispensa (a sessão começou) ───────────
     if (state.phase === 'boot') {
@@ -3529,6 +3601,32 @@ export function App(props: AppProps): React.ReactElement {
     // Espelha o /theme//lang: ↑↓ navega, enter seta o provider do modo Custom da sessão
     // (a próxima chamada o envia em par com o slug), esc fecha. Modal.
     if (providerPicker.open) {
+      // F-PROV-CRED — o campo da API key tem PRECEDÊNCIA sobre tudo no picker: quando ele
+      // está aberto, o dono está colando uma credencial, e qualquer outra leitura de tecla
+      // roubaria o caractere (foi assim que a versão readline deixou a chave VAZAR p/ o
+      // composer). Mesma mecânica de texto do formulário "+ adicionar" logo abaixo — só
+      // que o componente MASCARA o valor ao desenhar.
+      if (providerPicker.credentialStep !== null) {
+        if (key.escape) {
+          providerPicker.cancelCredential();
+          return;
+        }
+        if (key.return) {
+          const name = providerPicker.confirmCredential();
+          // `null` ⇒ campo vazio ou a gravação falhou: o hook mantém o campo aberto com o
+          // motivo (nunca a chave). Só aplicamos quando ele devolve o provider.
+          if (name) pedirModeloAposTroca(props.onSelectProvider?.(name));
+          return;
+        }
+        if (key.backspace || key.delete) {
+          providerPicker.backspaceCredential();
+          return;
+        }
+        if (char && !key.ctrl && !key.meta) {
+          providerPicker.typeCredential(char);
+        }
+        return;
+      }
       // F-PROV — dentro do formulário "+ adicionar provider custom" (3 passos: id/
       // baseURL/modelo), o foco é de TEXTO (mesma mecânica do <LocalModelPicker>/
       // <QuestionDialog kind:'text'>), não de navegação de lista.
@@ -3567,7 +3665,7 @@ export function App(props: AppProps): React.ReactElement {
           providerPicker.startAddCustom();
           return;
         }
-        if (name) props.onSelectProvider?.(name);
+        if (name) pedirModeloAposTroca(props.onSelectProvider?.(name));
         return;
       }
       if (key.escape) {
@@ -4275,7 +4373,9 @@ export function App(props: AppProps): React.ReactElement {
   // no boot, das envs do backend local (`ALUY_LOCAL_PROVIDER`/`ALUY_LOCAL_MODEL`).
   const localByModel = state.meta.backend === 'local';
   const localProviderName =
-    state.meta.provider ?? (process.env.ALUY_LOCAL_PROVIDER?.trim() || undefined);
+    state.meta.provider ??
+    props.currentLocalProvider ??
+    (process.env.ALUY_LOCAL_PROVIDER?.trim() || undefined);
   const localModelName =
     state.meta.model ??
     state.meta.activeModel ??
@@ -4358,6 +4458,40 @@ export function App(props: AppProps): React.ReactElement {
   // Por isso a função recebe o lado: unifica o CONJUNTO sem mexer no layout de nenhum
   // dos dois (a região viva tem orçamento de linhas apertado — trocar padding aqui
   // mexeria na altura e é justamente a área que já custou caro estabilizar).
+  // F-COCKPIT-DECISAO — os DIÁLOGOS DE DECISÃO (permissão, pergunta, budget, teto de
+  // ciclo, travado) precisam aparecer TAMBÉM no cockpit.
+  //
+  // O BUG que isto fecha, medido em QA no TTY: o cockpit é um `return` ANTECIPADO
+  // (`if (cockpitActive …) return <Cockpit/>`), e todos esses diálogos moram DEPOIS dele,
+  // no caminho inline. Em fullscreen eles simplesmente NÃO ERAM DESENHADOS — o
+  // `spawn_agent` pedia permissão, a fase virava `asking`, e a tela ficava parada sem uma
+  // palavra: o dono relatou isso como "disparei agentes no fullscreen e ele crashou". Não
+  // havia crash — havia uma pergunta invisível, e a sessão esperando uma resposta que
+  // ninguém podia ver que fora pedida.
+  //
+  // É a MESMA classe que o comentário do `F-OVERLAY-UNICO` (logo acima) já descreve: dois
+  // caminhos de render com listas paralelas mantidas à mão. Aquele fix unificou os
+  // PICKERS e deixou os diálogos de fora — este fecha o resto.
+  //
+  // `null` quando não há decisão pendente ⇒ o cockpit segue exatamente como hoje.
+  const renderDecisionDialog = (): React.ReactElement | null => {
+    if (state.phase === 'asking' && state.pendingAsk) {
+      return <AskDialog request={state.pendingAsk.request} {...askEgress} />;
+    }
+    if (state.phase === 'questioning' && state.pendingQuestion) {
+      return (
+        <QuestionDialog
+          spec={state.pendingQuestion.spec}
+          cursor={qCursor}
+          selected={qSelected}
+          editing={qEditing}
+          draft={qDraft}
+        />
+      );
+    }
+    return null;
+  };
+
   const renderOverlays = (pad: 'top' | 'bottom'): React.ReactElement => {
     const box = pad === 'top' ? { paddingTop: 1 } : { paddingBottom: 1 };
     return (
@@ -4431,6 +4565,7 @@ export function App(props: AppProps): React.ReactElement {
               columns={columns}
               loading={localModelPicker.loading}
               usingFallback={localModelPicker.usingFallback}
+              rows={rows}
               {...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {})}
             />
           </Box>
@@ -4478,6 +4613,14 @@ export function App(props: AppProps): React.ReactElement {
               columns={columns}
               addCustomStep={providerPicker.addCustomStep}
               addCustomDraft={providerPicker.addCustomDraft}
+              // F-PROV-CRED — o campo da API key. O componente já sabia desenhá-lo
+              // (mascarado); faltava o App PASSAR o estado — sem estas quatro props o
+              // hook abria o passo e a tela continuava mostrando a lista, que é
+              // exatamente o "mudei o provider e ele não pediu nada" do relato.
+              credentialStep={providerPicker.credentialStep}
+              credentialProviderId={providerPicker.credentialProviderId}
+              credentialDraft={providerPicker.credentialDraft}
+              credentialError={providerPicker.credentialError}
               {...(currentProvider !== undefined ? { currentProvider } : {})}
             />
           </Box>
@@ -4533,7 +4676,11 @@ export function App(props: AppProps): React.ReactElement {
         columns={columns}
         frame={frame}
         cwd={state.meta.cwd}
-        overlay={overlayOpen ? renderOverlays('bottom') : null}
+        // F-COCKPIT-DECISAO — a decisão pendente tem PRECEDÊNCIA sobre o overlay de `/`:
+        // se há permissão/pergunta esperando, é ELA que precisa da tela. Sem isto o
+        // fullscreen escondia o pedido e a sessão parecia travada (ver
+        // `renderDecisionDialog`).
+        overlay={renderDecisionDialog() ?? (overlayOpen ? renderOverlays('bottom') : null)}
         {...(props.version !== undefined ? { version: props.version } : {})}
       />
     );
@@ -5001,8 +5148,12 @@ export function App(props: AppProps): React.ReactElement {
           só DESMOLDURAVA o composer em sessão fresca / pós-`/clear` (sumia a de cima,
           ficava a de baixo). A do HEADER segue gated por densidade (`showHeaderDivider`);
           esta — que emoldura o composer — é sempre visível. */}
-      <Divider columns={columns} />
-
+      {/* F-COMPOSER-BARRA — o campo é marcado por uma BARRA à esquerda, não por moldura.
+          As duas réguas que o cercavam saíram: a de cima virou este contêiner (altura 0 —
+          a barra vive na MESMA linha do input) e a de baixo saiu de vez. Isso devolveu ao
+          orçamento as 2 linhas que elas gastavam — o "escapa uma área pra baixo" que o
+          dono viu era justamente elas, agora vazias em vez de riscadas. */}
+      <ComposerBox columns={columns}>
       <Composer
         value={input}
         cursorPos={cursorPos}
@@ -5018,7 +5169,23 @@ export function App(props: AppProps): React.ReactElement {
         {...(composerHint !== undefined ? { hint: composerHint } : {})}
         {...(state.meta.label !== undefined ? { sessionLabel: state.meta.label } : {})}
         {...(state.meta.labelColor !== undefined ? { sessionColor: state.meta.labelColor } : {})}
+        // F-COMPOSER-FUNDO — a cor vem do tema e some sozinha sem truecolor.
+        {...(theme.composerBg !== undefined ? { backgroundColor: theme.composerBg } : {})}
       />
+        {state.turnAccounting && (state.phase === 'done' || state.phase === 'budget') && (
+          <TurnFooter
+            accounting={state.turnAccounting}
+            columns={columns}
+            showCost={false}
+            {...(turnRecap !== undefined ? { recap: turnRecap } : {})}
+          />
+        )}
+      </ComposerBox>
+      {/* F-COMPOSER-SOMBRA — TIRADA a pedido do dono ("achei que a sombra não ficou
+          legal"). A técnica (meio-bloco deslocado, a mesma da marca 3D) funciona numa
+          FIGURA, que tem contorno fechado; sob uma faixa de largura total ela vira só
+          mais uma linha atravessando a tela — exatamente a régua que acabamos de tirar.
+          O componente segue exportado e testado, caso a decisão mude. */}
 
       {/* ── MENU/PICKERS DE `/` ABAIXO DO COMPOSER (EST-0974) ────────────────────
           O <SlashMenu> e os pickers abertos POR `/` (model/theme/history) renderizam
@@ -5046,17 +5213,18 @@ export function App(props: AppProps): React.ReactElement {
           baixo (status / hints / sub-agentes). Com a (2/3), EMOLDURA o input.
           EST-0974 — quando o menu/picker de `/` está aberto, a divisória vem DEPOIS
           dele (separa o menu do rodapé), preservando a moldura do input. */}
-      <Divider columns={columns} />
+      {/* F-COMPOSER-CAIXA — a régua de baixo saiu: a BASE da caixa já fecha o campo.
+          Sem isto haveria duas separações seguidas (borda + régua), que é o empilhamento
+          de linhas que o dono pediu para acabar. */}
 
       {/* EST-0982 · ADR-0063 (CONTABILIDADE) — rodapé do TURNO do agente PRINCIPAL
           (tokens + tempo), estilo Claude Code. Aparece quando o turno terminou
           (done/budget) — leitura/display puro (não dispara efeito, não vaza segredo). */}
-      {state.turnAccounting && (state.phase === 'done' || state.phase === 'budget') && (
-        <TurnFooter
-          accounting={state.turnAccounting}
-          {...(turnRecap !== undefined ? { recap: turnRecap } : {})}
-        />
-      )}
+      {/* F-TOKENS-NO-COMPOSER (pedido do dono: "a quantidade de tokens deveria ficar
+          dentro da área do composer cinza") — o <TurnFooter> subiu para DENTRO do bloco
+          do composer (ver o `<ComposerBox>` acima). Ele fala do turno que acabou de
+          rodar, e ali fica colado no campo onde o próximo começa — em vez de flutuar
+          solto entre o composer e o rodapé. */}
 
       {/* EST-0948 · ADR-0069/APR-0074 — footer de QUOTA da PRÓPRIA conta do ator CLI/PAT.
           FONTE REAL (broker#59): `meta.quota` = saldo de CRÉDITO (dimensão PRIMÁRIA do CLI
@@ -5071,12 +5239,18 @@ export function App(props: AppProps): React.ReactElement {
           (distinta do budget LOCAL anti-runaway do <StatusBar>). Mostrado FORA do stream
           (em repouso) p/ NÃO inflar o chrome vivo (anti-flicker: `LIVE_CHROME_ROWS` conta o
           stream; este só aparece em done/budget/idle/error). */}
-      {(state.phase === 'done' ||
-        state.phase === 'budget' ||
-        state.phase === 'idle' ||
-        state.phase === 'error') && (
-        <QuotaFooter quota={state.meta.quota} serverLimits={state.meta.serverLimits} />
-      )}
+      {/* F-SALDO-BYO — sob backend LOCAL o saldo já vai na linha PRIMÁRIA do <StatusBar>
+          (colado no provider·modelo, onde o dono pediu). Renderizar o <QuotaFooter> aqui
+          também DUPLICAVA o número numa linha órfã logo acima do rodapé — foi o que ele
+          viu na tela. No BROKER nada muda: lá o footer carrega janela + reset, que a
+          linha primária não comporta. */}
+      {state.meta.backend !== 'local' &&
+        (state.phase === 'done' ||
+          state.phase === 'budget' ||
+          state.phase === 'idle' ||
+          state.phase === 'error') && (
+          <QuotaFooter quota={state.meta.quota} serverLimits={state.meta.serverLimits} />
+        )}
 
       {/* EST-0989 (Variação B) — RESPIRO: 1 LINHA EM BRANCO entre o TurnFooter
           (`◷ tokens · tools · Xs`) / o footer de quota e o <StatusBar> (antes colavam).
@@ -5088,9 +5262,25 @@ export function App(props: AppProps): React.ReactElement {
           CONDICIONAL: só em telas LARGAS (≥60 col) e ALTAS (≥RESPIRO_MIN_ROWS linhas) — em
           terminais apertados a linha em branco some (anti-flicker antes de estética; o
           orçamento `respiroOverhead` espelha exatamente este gate). */}
-      {columns >= 60 && rows >= RESPIRO_MIN_ROWS && <Box height={1} />}
+      {/* F-COMPOSER-BARRA (relato do dono: "escapa pra baixo uma pequena área do
+          composer, mesmo sem uso") — este respiro separa o RODAPÉ DE TURNO do
+          <StatusBar>. Sem turno na tela não há o que separar, e ele virava uma linha
+          morta colada embaixo do campo — a "área que escapa". Passa a exigir que o
+          footer de turno EXISTA. O orçamento anti-flicker não muda: `respiroOverhead`
+          continua reservando a linha (over-reserva é sempre segura; o que não pode é
+          faltar). */}
+      {columns >= 60 &&
+        rows >= RESPIRO_MIN_ROWS &&
+        state.turnAccounting !== undefined &&
+        (state.phase === 'done' || state.phase === 'budget') && <Box height={1} />}
 
-      <StatusBar
+      {/* F-RECUO (pedido do dono: "a mesma afastadinha que você deu na lateral do
+          composer para todas as outras linhas") — o bloco do composer tem a barra `┃` +
+          1 coluna, então o texto dele começa na coluna 2. O rodapé começava na 0 e ficava
+          desalinhado com o campo logo acima. `paddingLeft={2}` alinha os dois. */}
+      <Box paddingLeft={2} flexDirection="column">
+      <StatusPanel
+        mode={state.mode}
         {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
         cwd={state.meta.cwd}
         tier={tierDisplay}
@@ -5109,7 +5299,16 @@ export function App(props: AppProps): React.ReactElement {
         {...(dominantQuota !== undefined
           ? { quotaPct: dominantQuota.pct, quotaLevel: dominantQuota.level }
           : {})}
-        columns={columns}
+        // F-SALDO-BYO — saldo do provider BYO na linha PRIMÁRIA, colado no par
+        // provider·modelo (pedido do dono: "deveria ficar após o provedor"). Antes caía
+        // no <QuotaFooter>, numa linha própria e órfã acima do rodapé.
+        {...(state.meta.quota?.credit?.balance !== undefined
+          ? { credit: state.meta.quota.credit.balance }
+          : {})}
+        // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
+        // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
+        // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
+        columns={Math.max(20, columns - 2)}
         error={state.phase === 'error'}
         {...(state.governance !== undefined ? { governance: state.governance } : {})}
         {...(!cycleUiOff && state.cycleProgress !== undefined
@@ -5143,7 +5342,11 @@ export function App(props: AppProps): React.ReactElement {
           </Text>
         </Box>
       )}
-      <ModeIndicator mode={state.mode} columns={columns} />
+      {/* F-PAINEL — o <ModeIndicator> foi ABSORVIDO: modo e catraca são a linha `estado`
+          do painel. Manter os dois desenharia a mesma informação duas vezes, uma dentro da
+          caixa e outra fora. O banner do modo `unsafe` continua existindo — o próprio
+          <StatusPanel> o emite, porque um aviso de modo perigoso não pode virar linha de
+          tabela cinza. */}
       {/* fix(footer-bleed) — durante uma APROVAÇÃO ATIVA (`asking`) o <AskDialog> JÁ
           renderiza seu PRÓPRIO footer de atalhos (`a aprova · s sempre · …`), em
           contexto, colado ao diálogo (AskDialog.footerOf, mesmas strings de
@@ -5163,6 +5366,7 @@ export function App(props: AppProps): React.ReactElement {
           {...(showSuggestion ? { suggesting: true } : {})}
         />
       )}
+      </Box>
     </Box>
   );
 }
@@ -5173,6 +5377,7 @@ export function App(props: AppProps): React.ReactElement {
 export function BlockView(props: {
   readonly block: SessionState['blocks'][number];
   readonly isCurrent: boolean;
+
   readonly frame: number;
   /** Anti-flicker — teto de altura da prévia viva (só p/ o aluy streaming). */
   readonly maxLines?: number;
@@ -5198,7 +5403,11 @@ export function BlockView(props: {
     case 'you':
       return (
         <Box paddingBottom={1}>
-          <YouBlock text={b.text} isCurrent={props.isCurrent} />
+          <YouBlock
+            text={b.text}
+            isCurrent={props.isCurrent}
+            {...(props.columns !== undefined ? { columns: props.columns } : {})}
+          />
         </Box>
       );
     case 'aluy':
@@ -5212,6 +5421,7 @@ export function BlockView(props: {
             frame={props.frame}
             {...(props.maxLines !== undefined ? { maxLines: props.maxLines } : {})}
             {...(props.columns !== undefined ? { columns: props.columns } : {})}
+            {...(b.accounting !== undefined ? { accounting: b.accounting } : {})}
           />
         </Box>
       );

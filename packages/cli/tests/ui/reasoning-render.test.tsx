@@ -10,12 +10,14 @@ const pinta = (node: React.ReactElement): string =>
   render(<ThemeProvider theme={theme}>{node}</ThemeProvider>).lastFrame() ?? '';
 
 describe('AluyBlock — o raciocínio na tela', () => {
-  it('AO VIVO mostra o pensamento (em vez de um bloco vazio enquanto o modelo trabalha)', () => {
+  it('AO VIVO mostra que PENSA, sem despejar o pensamento (relato: "está poluindo")', () => {
     const out = pinta(
       <AluyBlock text="" streaming reasoning="estou analisando o pedido" columns={80} />,
     );
     expect(out).toContain('pensando');
-    expect(out).toContain('estou analisando o pedido');
+    // O TEXTO do raciocínio NÃO entra: é o canal mais verboso do modelo e empurrava a
+    // conversa inteira para cima. O dono quer o SINAL, não o rascunho.
+    expect(out).not.toContain('estou analisando o pedido');
   });
 
   it('TERMINADO com fala, o rascunho vira UMA linha-resumo (não polui o histórico)', () => {

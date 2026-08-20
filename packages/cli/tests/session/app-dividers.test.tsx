@@ -109,18 +109,18 @@ async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
   }
 }
 
-/** Linhas de régua de CHROME (largura cheia: só `─`, comprimento ≥ 20). */
+/** Linhas de régua de CHROME (largura cheia: só `━`, F-GLYPH-PESO-2, comprimento ≥ 20). */
 function chromeDividers(frame: string): string[] {
   return plain(frame)
     .split('\n')
-    .filter((ln) => /^─{20,}$/.test(ln));
+    .filter((ln) => /^━{20,}$/.test(ln));
 }
 
-/** Linhas de divisória SUTIL (traço curto, ≤ 16 células `─` e ≥ 4). */
+/** Linhas de divisória SUTIL (traço curto, ≤ 16 células `━`, F-GLYPH-PESO-2, e ≥ 4). */
 function subtleDividers(frame: string): string[] {
   return plain(frame)
     .split('\n')
-    .filter((ln) => /^─{4,16}$/.test(ln.trim()) && ln.trim() === ln.trimEnd());
+    .filter((ln) => /^━{4,16}$/.test(ln.trim()) && ln.trim() === ln.trimEnd());
 }
 
 async function renderEmptyApp(density: Density) {
@@ -164,7 +164,7 @@ describe('App — chrome: emoldura header + input, respeita densidade (EST-0985/
     // o header mostra o tier "aluy-flux"; a régua de cima vem antes dessa linha.
     const headerRow = rows.findIndex((ln) => /aluy-flux|aluy/i.test(ln));
     expect(headerRow).toBeGreaterThan(-1);
-    const dividerRows = rows.map((ln, i) => (/^─{20,}$/.test(ln) ? i : -1)).filter((i) => i >= 0);
+    const dividerRows = rows.map((ln, i) => (/^━{20,}$/.test(ln) ? i : -1)).filter((i) => i >= 0); // F-GLYPH-PESO-2
     expect(dividerRows.some((i) => i < headerRow)).toBe(true);
   });
 });

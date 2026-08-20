@@ -29,7 +29,12 @@ export const COCKPIT_MIN_COLS = 80;
 
 /** Alturas FIXAS das 4 regiões de chrome (linhas). Somadas com as 2 geridas == rows. */
 export const HEADER_ROWS = 1; // header compacto de 1 linha (o banner não cabe no grid fixo).
-export const STATUS_ROWS = 1; // status bar (tier/budget/modo) — 1 linha viva.
+// F-PAINEL — 3 linhas: o status virou um PAINEL de três itens (sessão/estado/uso), e o
+// grid do cockpit fecha por SOMA de alturas. Deixar 1 aqui faria o painel transbordar a
+// região e empurrar tudo abaixo dele — o mesmo modo de falha que a régua fixa já causou.
+// O custo são 2 linhas a menos de conversa; a alternativa (barra de 1 linha só no
+// cockpit) faria os dois modos divergirem visualmente sem nenhum ganho.
+export const STATUS_ROWS = 3; // painel de status (sessão/estado/uso) — 3 linhas vivas.
 export const COMPOSER_ROWS = 1; // input — 1 linha (PISO; cresce p/ multi-linha, ver abaixo).
 export const HINTS_ROWS = 1; // atalhos contextuais — 1 linha.
 

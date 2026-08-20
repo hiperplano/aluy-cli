@@ -169,7 +169,21 @@ function readKeychain(
   try {
     const entry = makeEntry(factory, LOCAL_KEYCHAIN_SERVICE, account);
     const v = entry.getPassword();
-    return v !== '' ? { valor: v } : {};
+    // AUSÊNCIA tem DUAS formas, e só uma era tratada. O código assumia que uma conta
+    // inexistente sempre LANÇA (o `catch` abaixo cobre isso) — mas o `@napi-rs/keyring`
+    // sobre o Secret Service do Linux devolve `null` SEM lançar. Como o teste era
+    // `v !== ''`, `null` passava como "achei": `{valor: null}`.
+    //
+    // MEDIDO pelo QA num HOME limpo, sem credencial em lugar nenhum: `hasStoredApiKey`
+    // devolvia `true` para TODO provider. Dois estragos em cima disso — o aviso de
+    // credencial faltando no `/provider` nunca aparecia, e o `/login` afirmava "já existe
+    // uma chave guardada — reusar?" para um provider que nunca teve chave. Pior ainda no
+    // resolvedor: `secret` podia sair `null` e viajar como credencial.
+    //
+    // Agora só string NÃO-VAZIA conta como presença. `null`/`undefined`/`''` são a MESMA
+    // coisa aqui — ausência — e a distinção que importa (ausência × avaria) continua
+    // sendo feita pelo `catch`.
+    return typeof v === 'string' && v !== '' ? { valor: v } : {};
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // "no entry"/"not found" é AUSÊNCIA legítima (nunca foi configurada), não avaria.
