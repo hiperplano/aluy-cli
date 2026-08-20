@@ -216,7 +216,14 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
     </>
   );
   if (props.error === true) {
-    estado.push({ text: ' · ', role: 'fgDim' }, { text: `${theme.glyph('ask')} broker`, role: 'danger' });
+    // "broker" era enganoso sob backend LOCAL, que é o caso de quem traz o próprio provider:
+    // o usuário lê que o BROKER falhou quando o broker nem está em uso, e vai procurar
+    // problema no lugar errado. O rótulo segue quem de fato atendeu a chamada.
+    const quem = props.model !== undefined || props.credit !== undefined ? 'provider' : 'broker';
+    estado.push(
+      { text: ' · ', role: 'fgDim' },
+      { text: `${theme.glyph('ask')} ${quem}`, role: 'danger' },
+    );
   }
 
   // ── linha 3 · USO — quanto já se gastou ──────────────────────────────────────────
