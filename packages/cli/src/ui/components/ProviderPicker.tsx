@@ -12,6 +12,7 @@
 import React from 'react';
 import { Box } from 'ink';
 import { Role, useTheme } from '../theme/index.js';
+import { PickerFrame, alturaDeLista } from './PickerFrame.js';
 import { useI18n } from '../../i18n/index.js';
 import type { ProviderEntry } from '../../model/providers.js';
 import type {
@@ -41,6 +42,8 @@ export interface ProviderPickerProps {
    * Windows. MESMO padrão do <HistoryPicker>. Default 10 (auto-seguro).
    */
   readonly maxRows?: number;
+  /** Altura do terminal — a janela da lista é derivada dela (ver `alturaDeLista`). */
+  readonly rows?: number;
   /** F89 (wrap-aware) — largura do terminal; janela por LINHAS VISUAIS em cols estreito. */
   readonly columns?: number;
   /**
@@ -96,7 +99,7 @@ function CredentialField(props: {
   const { t } = useI18n();
   const theme = useTheme();
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       {props.error !== '' && (
         <Box flexDirection="column">
           <Box>
@@ -120,7 +123,7 @@ function CredentialField(props: {
       <Box>
         <Role name="fgDim">{t('picker.provider.credential.help')}</Role>
       </Box>
-    </Box>
+    </PickerFrame>
   );
 }
 
@@ -135,7 +138,7 @@ function AddCustomProviderField(props: {
   const label = t(`picker.provider.addCustom.${props.step}`);
   const value = props.draft[props.step];
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{label}</Role>
       </Box>
@@ -147,7 +150,7 @@ function AddCustomProviderField(props: {
       <Box>
         <Role name="fgDim">{t('picker.provider.addCustom.help')}</Role>
       </Box>
-    </Box>
+    </PickerFrame>
   );
 }
 
@@ -172,7 +175,7 @@ export function ProviderPicker(props: ProviderPickerProps): React.ReactElement {
       />
     );
   }
-  const maxRows = Math.max(1, props.maxRows ?? 10);
+  const maxRows = Math.max(1, props.maxRows ?? alturaDeLista(props.rows));
   // F89 — altura visual por provider: prefixo (2) + `● ` (2) + `label · summary` (+ dica
   // "padrão"); quebra em `ceil(largura / columns)`. Sem `columns`, janela por item.
   const cols = props.columns;
@@ -188,7 +191,7 @@ export function ProviderPicker(props: ProviderPickerProps): React.ReactElement {
       : undefined;
   const { start, slice } = windowAround(props.providers, props.selected, maxRows, rowHeight);
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.provider.help')}</Role>
       </Box>
@@ -221,6 +224,6 @@ export function ProviderPicker(props: ProviderPickerProps): React.ReactElement {
           </Role>
         </Box>
       )}
-    </Box>
+    </PickerFrame>
   );
 }

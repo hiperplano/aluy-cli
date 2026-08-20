@@ -13,6 +13,7 @@
 import React from 'react';
 import { Box } from 'ink';
 import { Role } from '../theme/index.js';
+import { PickerFrame, alturaDeLista } from './PickerFrame.js';
 import { useI18n } from '../../i18n/index.js';
 import type { FuzzyHit } from '../../attach/index.js';
 
@@ -26,6 +27,8 @@ export interface FilePickerProps {
   readonly columns?: number;
   /** Máx. de linhas visíveis do picker (janela). Default 8. */
   readonly maxRows?: number;
+  /** Altura do terminal — a janela da lista é derivada dela (ver `alturaDeLista`). */
+  readonly rows?: number;
 }
 
 /** Elide um caminho no MEIO p/ caber em `width`, preservando início e basename. */
@@ -90,13 +93,13 @@ function windowOf(
 export function FilePicker(props: FilePickerProps): React.ReactElement {
   const { t } = useI18n();
   const columns = props.columns ?? 80;
-  const maxRows = props.maxRows ?? 8;
+  const maxRows = props.maxRows ?? alturaDeLista(props.rows);
   // largura útil p/ o caminho: tira o prefixo `› ` (2) e uma folga.
   const pathWidth = Math.max(8, columns - 4);
   const { start, slice } = windowOf(props.hits, props.selected, maxRows);
 
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.file.help')}</Role>
       </Box>
@@ -133,6 +136,6 @@ export function FilePicker(props: FilePickerProps): React.ReactElement {
           </Role>
         </Box>
       )}
-    </Box>
+    </PickerFrame>
   );
 }

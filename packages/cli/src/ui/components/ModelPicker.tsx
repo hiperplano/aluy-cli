@@ -19,6 +19,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Role } from '../theme/index.js';
+import { PickerFrame } from './PickerFrame.js';
 import { useI18n } from '../../i18n/index.js';
 import type { TierCatalogEntry, EffortOption } from '@hiperplano/aluy-cli-core';
 import { principalModel, costLabel } from '../../model/catalog.js';
@@ -103,7 +104,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
   }
   const customIdx = props.tiers.length;
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.model.help')}</Role>
       </Box>
@@ -155,7 +156,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
           </Role>
         </Box>
       )}
-    </Box>
+    </PickerFrame>
   );
 }
 
@@ -215,7 +216,7 @@ function CustomBrowser(props: ModelPickerProps): React.ReactElement {
   const toolsOnly = props.customToolsOnly === true;
   const noTools = props.customNoToolsWarning ?? null;
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.model.browseHelp')}</Role>
       </Box>
@@ -270,7 +271,7 @@ function CustomBrowser(props: ModelPickerProps): React.ReactElement {
           </Role>
         </Box>
       )}
-    </Box>
+    </PickerFrame>
   );
 }
 
@@ -289,7 +290,7 @@ function EffortStep(props: ModelPickerProps): React.ReactElement {
   const sel = props.effortSelected ?? 0;
   const current = props.currentEffort;
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.effort.help')}</Role>
       </Box>
@@ -310,7 +311,7 @@ function EffortStep(props: ModelPickerProps): React.ReactElement {
           </Box>
         );
       })}
-    </Box>
+    </PickerFrame>
   );
 }
 
@@ -320,7 +321,7 @@ function EffortCustomInput(props: ModelPickerProps): React.ReactElement {
   const value = props.effortCustomInput ?? '';
   const warn = props.effortCustomWarn ?? null;
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.effort.customHelp')}</Role>
       </Box>
@@ -337,7 +338,7 @@ function EffortCustomInput(props: ModelPickerProps): React.ReactElement {
           </Role>
         </Box>
       )}
-    </Box>
+    </PickerFrame>
   );
 }
 
@@ -348,7 +349,7 @@ function FreeTextInput(props: ModelPickerProps): React.ReactElement {
   const suggestions = props.customSuggestions ?? [];
   const warn = props.customWarnOutOfCatalog === true;
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.model.freeHelp')}</Role>
       </Box>
@@ -377,6 +378,6 @@ function FreeTextInput(props: ModelPickerProps): React.ReactElement {
           </Role>
         </Box>
       )}
-    </Box>
+    </PickerFrame>
   );
 }

@@ -315,13 +315,13 @@ export function resolveTheme(input: ResolveThemeInput = {}): Theme {
       ? brightness === 'dark'
         ? {
             composerBg: superficie(28) ?? '#35312B',
-            aluyBg: superficie(10) ?? '#1F232B',
+            aluyBg: superficie(18) ?? '#282D37',
             headerBg: '#1A1815',
             footerBg: '#1A1815',
           }
         : {
             composerBg: superficie(28) ?? '#FFFFFF',
-            aluyBg: superficie(10) ?? '#F0F2F6',
+            aluyBg: superficie(18) ?? '#E9ECF2',
             headerBg: '#E8E2D6',
             footerBg: '#E8E2D6',
           }

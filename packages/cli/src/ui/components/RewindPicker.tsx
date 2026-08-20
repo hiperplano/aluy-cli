@@ -13,6 +13,7 @@
 import React from 'react';
 import { Box } from 'ink';
 import { Role } from '../theme/index.js';
+import { PickerFrame, alturaDeLista } from './PickerFrame.js';
 import { useI18n } from '../../i18n/index.js';
 import type { I18nKey } from '../../i18n/index.js';
 import type { Checkpoint } from '@hiperplano/aluy-cli-core';
@@ -44,6 +45,8 @@ export interface RewindPickerProps {
    * <HistoryPicker>/<CommandPalette>. Default 10 (auto-seguro sem o cap do caller).
    */
   readonly maxRows?: number;
+  /** Altura do terminal — a janela da lista é derivada dela (ver `alturaDeLista`). */
+  readonly rows?: number;
   /** F89 (wrap-aware) — largura do terminal; janela por LINHAS VISUAIS em cols estreito. */
   readonly columns?: number;
 }
@@ -64,7 +67,7 @@ export function RewindPicker(props: RewindPickerProps): React.ReactElement {
   const { t } = useI18n();
 
   if (props.phase === 'list') {
-    const maxRows = Math.max(1, props.maxRows ?? 10);
+    const maxRows = Math.max(1, props.maxRows ?? alturaDeLista(props.rows));
     // F89 — altura visual por checkpoint: prefixo (2) + a entrada formatada, quebrando em
     // `ceil(largura / columns)`. Sem `columns`, janela por item (tela larga, inalterado).
     const cols = props.columns;
@@ -108,7 +111,7 @@ export function RewindPicker(props: RewindPickerProps): React.ReactElement {
 
   // etapa `action`
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.rewind.action.help')}</Role>
       </Box>
@@ -138,6 +141,6 @@ export function RewindPicker(props: RewindPickerProps): React.ReactElement {
           ))}
         </Box>
       )}
-    </Box>
+    </PickerFrame>
   );
 }

@@ -13,6 +13,7 @@
 import React from 'react';
 import { Box } from 'ink';
 import { Role } from '../theme/index.js';
+import { PickerFrame } from './PickerFrame.js';
 import { useI18n, type LangEntry, type Lang } from '../../i18n/index.js';
 
 export interface LangPickerProps {
@@ -26,7 +27,7 @@ export interface LangPickerProps {
 export function LangPicker(props: LangPickerProps): React.ReactElement {
   const { t } = useI18n();
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.lang.help')}</Role>
       </Box>
@@ -43,6 +44,6 @@ export function LangPicker(props: LangPickerProps): React.ReactElement {
           </Box>
         );
       })}
-    </Box>
+    </PickerFrame>
   );
 }

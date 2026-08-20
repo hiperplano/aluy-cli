@@ -9,7 +9,8 @@
 
 import React from 'react';
 import { Box } from 'ink';
-import { Role, useTheme } from '../theme/index.js';
+import { Role } from '../theme/index.js';
+import { PickerFrame, alturaDeLista } from './PickerFrame.js';
 import { useI18n } from '../../i18n/index.js';
 import type { FuzzyHit } from '../../attach/index.js';
 
@@ -92,13 +93,11 @@ function windowOf(
 
 export function LocalModelPicker(props: LocalModelPickerProps): React.ReactElement {
   const { t } = useI18n();
-  const theme = useTheme();
   // O picker convive na tela com o header, a conversa, o composer e o painel de status.
   // ~14 linhas é o que sobra num terminal de 40 sem espremer o resto; o piso de 8 preserva
   // o comportamento antigo em terminal baixo, e o teto de 20 evita que uma tela muito alta
   // vire uma parede de slugs que ninguém lê.
-  const alturaLista = Math.max(8, Math.min(20, (props.rows ?? 24) - 20));
-  const maxRows = props.maxRows ?? alturaLista;
+  const maxRows = props.maxRows ?? alturaDeLista(props.rows);
   const { start, slice } = windowOf(props.hits, props.selected, maxRows);
 
   // F-PICKER-PAINEL — moldura. No modo inline o Ink escreve linha a linha no scrollback:
@@ -107,12 +106,7 @@ export function LocalModelPicker(props: LocalModelPickerProps): React.ReactEleme
   // MOLDURA — com ela a lista para de se confundir com a conversa logo acima e lê como um
   // painel próprio, que era o efeito que o dono queria do popup.
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={theme.role('accent').color}
-      paddingX={1}
-    >
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.localModel.help')}</Role>
       </Box>
@@ -168,6 +162,6 @@ export function LocalModelPicker(props: LocalModelPickerProps): React.ReactEleme
       <Box>
         <Role name="fgDim"> {t('picker.localModel.customHint')}</Role>
       </Box>
-    </Box>
+    </PickerFrame>
   );
 }

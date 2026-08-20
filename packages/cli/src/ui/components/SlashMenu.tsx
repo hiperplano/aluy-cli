@@ -14,6 +14,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Role } from '../theme/index.js';
+import { PickerFrame } from './PickerFrame.js';
 import {
   entryPath,
   entrySection,
@@ -83,7 +84,7 @@ export function SlashMenu(props: SlashMenuProps): React.ReactElement {
   // cabeçalho de seção quando a seção muda em relação ao item anterior.
   let lastSection: SlashSection | null = null;
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">/ para comandos · ↑↓ navega · enter executa · esc fecha</Role>
       </Box>
@@ -103,9 +104,16 @@ export function SlashMenu(props: SlashMenuProps): React.ReactElement {
         const indent = isSel ? '› ' : isSub ? '    ' : '  ';
         return (
           <React.Fragment key={`${section}:${path}`}>
+            {/* F-MENU-SECAO (relato do dono: "por que mostra `conta` quebrando a linha?") —
+                o nome da seção era desenhado como texto solto, na MESMA cor e no MESMO
+                recuo dos comandos logo abaixo. Sem nada que o marcasse como cabeçalho, ele
+                lia como uma linha órfã no meio da lista — parecia quebra, não título.
+                O traço à esquerda e o papel `depth` resolvem: seção vira seção. */}
             {header && (
               <Box>
-                <Role name="fgDim">{header === 'usuário' ? '─── seus comandos' : header}</Role>
+                <Role name="depth">
+                  ── {header === 'usuário' ? 'seus comandos' : header}
+                </Role>
               </Box>
             )}
             <Box>
@@ -123,6 +131,6 @@ export function SlashMenu(props: SlashMenuProps): React.ReactElement {
           <Role name="fgDim"> ↓ {win.hiddenBelow} mais (refine a busca)</Role>
         </Box>
       )}
-    </Box>
+    </PickerFrame>
   );
 }
