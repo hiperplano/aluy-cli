@@ -73,11 +73,14 @@ function plain(s: string): string {
 describe('Header — tier, nunca provider (HG-2)', () => {
   // EST-0988 — terminal BAIXO (rows<18) ⇒ header COMPACTO de 1 linha (Λ + info),
   // sem banner. É o caminho que preserva as garantias do EST-0986.
-  it('compacto: mostra `Aluy Cli` + tier, nunca um provider', () => {
+  it('compacto: mostra `Λluy Cli` + tier, nunca um provider', () => {
     const { lastFrame } = wrap(<Header tier="turbo" columns={100} rows={15} />);
     const out = lastFrame() ?? '';
     // EST-0989 — o compacto inclui o NOME de produto e o tier.
-    expect(out).toContain('Aluy Cli');
+    // F-MARCA-LAMBDA (pedido do dono) — o nome de produto passou a se escrever com o Λ NO
+    // LUGAR do A (`Λluy Cli`): "a marca é a primeira letra do nome, não um ícone ao lado
+    // dele". Em perfil ASCII ele degrada p/ `Aluy Cli` (coberto no teste de fallback).
+    expect(out).toContain('Λluy Cli');
     expect(out).toContain('turbo');
     expect(out.toLowerCase()).not.toMatch(/openai|anthropic|gpt|gemini/);
   });
@@ -103,18 +106,23 @@ describe('Header — tier, nunca provider (HG-2)', () => {
     expect(out).toContain('v1.2.3');
   });
 
-  // EST-0986/0989 — no COMPACTO a MARCA Λ abre o header (splash Λ → header Λ), à
-  // frente do nome de produto `Aluy Cli`.
-  it('compacto: abre com a MARCA Λ em accent, ANTES de `Aluy Cli` (UTF-8)', () => {
+  // EST-0986/0989 — no COMPACTO a MARCA Λ ABRE o header (splash Λ → header Λ).
+  // F-MARCA-LAMBDA (pedido do dono) — mudou COMO ela abre: era um ÍCONE separado à frente
+  // do nome (`Λ Aluy Cli`) e virou a PRIMEIRA LETRA do próprio nome (`Λluy Cli`) — "a marca
+  // é a primeira letra do nome, não um ícone ao lado dele". Manter os dois escreveria
+  // `Λ Λluy Cli`. A intenção do teste é a mesma (o header ABRE pela marca, e ela vem antes
+  // de tudo); o que deixa de valer é o ESPAÇO entre o Λ e o nome.
+  it('compacto: abre pela MARCA Λ — primeira letra de `Λluy Cli`, não ícone ao lado (UTF-8)', () => {
     const { lastFrame } = wrap(<Header tier="turbo" columns={100} rows={15} />);
     const out = plain(lastFrame() ?? '');
-    // Λ presente e POSICIONADO à frente do nome de produto.
+    // Λ presente e ABRINDO a linha — colado ao nome, não separado por espaço.
     expect(out).toContain('Λ');
-    expect(out.indexOf('Λ')).toBeLessThan(out.indexOf('Aluy Cli'));
-    expect(out).toMatch(/Λ\s+Aluy Cli/);
+    expect(out).toMatch(/Λluy Cli/);
+    expect(out).not.toMatch(/Λ\s+Aluy Cli/); // o ícone-ao-lado NÃO voltou
+    expect(out.indexOf('Λ')).toBe(out.indexOf('Λluy Cli')); // o Λ é o começo do nome
     // 1 linha só — sem o wordmark grande.
     expect(out).not.toContain('██');
-    // a marca é pintada por um papel (accent) — frame cru carrega ANSI da cor.
+    // a marca é pintada por um papel do tema — frame cru carrega ANSI de cor.
     const raw = lastFrame() ?? '';
     expect(raw).toContain('Λ');
     expect(raw).toMatch(new RegExp(String.fromCharCode(27) + '\\['));
@@ -130,11 +138,12 @@ describe('Header — tier, nunca provider (HG-2)', () => {
     expect(out.indexOf('/\\')).toBeLessThan(out.indexOf('Aluy Cli'));
   });
 
-  it('narrow (<60 col): cai no compacto — Λ + `Aluy Cli` + tier; broker e versão somem', () => {
+  it('narrow (<60 col): cai no compacto — `Λluy Cli` + tier; broker e versão somem', () => {
     const { lastFrame } = wrap(<Header tier="turbo" columns={50} rows={40} version="1.2.3" />);
     const out = plain(lastFrame() ?? '');
     expect(out).toContain('Λ');
-    expect(out).toContain('Aluy Cli');
+    // F-MARCA-LAMBDA — o nome de produto virou `Λluy Cli` (a marca é a 1ª letra do nome).
+    expect(out).toContain('Λluy Cli');
     expect(out).toContain('turbo');
     expect(out).not.toContain('broker'); // narrow esconde o broker
     expect(out).not.toContain('v1.2.3'); // narrow esconde a versão (cabe na largura)
@@ -152,13 +161,13 @@ describe('Header — tier, nunca provider (HG-2)', () => {
 
 describe('Header — BANNER persistente do wordmark (EST-0988)', () => {
   // BANNER aparece com espaço: confortável, largo (≥60 col) e terminal alto (≥18).
-  it('terminal alto+largo: WORDMARK grande █ + subtítulo `Aluy Cli · Terminal v<versão>` — SEM tier NEM backend (Variação B / FIX dono)', () => {
+  it('terminal alto+largo: WORDMARK grande █ + subtítulo `Λluy Cli · Terminal v<versão>` — SEM tier NEM backend (Variação B / FIX dono)', () => {
     const { lastFrame } = wrap(<Header tier="turbo" columns={100} rows={40} version="1.2.3" />);
     const out = plain(lastFrame() ?? '');
     // wordmark de meio-bloco (a MESMA marca da splash)
     expect(out).toContain('██');
-    // subtítulo abaixo: `Aluy Cli · Terminal v<versão>`
-    expect(out).toContain('Aluy Cli');
+    // subtítulo abaixo: `Λluy Cli · Terminal v<versão>` (F-MARCA-LAMBDA: o A virou Λ).
+    expect(out).toContain('Λluy Cli');
     expect(out).toContain('Terminal');
     expect(out).toContain('v1.2.3');
     // EST-0989 (Variação B) — o TIER NÃO fica no banner (o header é estático/pinado;
@@ -167,10 +176,13 @@ describe('Header — BANNER persistente do wordmark (EST-0988)', () => {
     // FIX (dono) — o indicador de backend (`● local`/`● broker`, ADR-0120) foi REMOVIDO
     // do banner: duplicava o que já mora, vivo, no rodapé (<StatusBar>).
     expect(out).not.toContain('broker');
-    // o wordmark JÁ é a marca ⇒ o Λ compacto NÃO se repete no banner
-    expect(out).not.toContain('Λ');
+    // o wordmark JÁ é a marca ⇒ o Λ compacto (ÍCONE solto) NÃO se repete no banner.
+    // F-MARCA-LAMBDA — o Λ ainda aparece, mas como a PRIMEIRA LETRA do nome de produto
+    // no subtítulo (`Λluy Cli`), que é a grafia nova do produto — não como o ícone
+    // separado que o compacto usava (`Λ Aluy Cli`). É esse ícone que não pode voltar.
+    expect(out).not.toMatch(/Λ(?!luy)/);
     // subtítulo DEPOIS do wordmark (a marca grande abre; o subtítulo fecha)
-    expect(out.indexOf('██')).toBeLessThan(out.indexOf('Aluy Cli'));
+    expect(out.indexOf('██')).toBeLessThan(out.indexOf('Λluy Cli'));
     expect(out.toLowerCase()).not.toMatch(/openai|anthropic|gpt|gemini/);
   });
 
@@ -1036,17 +1048,19 @@ describe('SlashMenu — lista filtrável (CA-3)', () => {
       <SlashMenu commands={filterCommands('mcp')} selected={0} query="mcp" />,
     );
     expect(plain(lastFrame() ?? '')).toMatchInlineSnapshot(`
-      "/ para comandos · ↑↓ navega · enter executa · esc fecha
-      workspace
-      › /mcp               lista/gerencia servers MCP (add/remove/disable/enable · search <termo>)
-          /mcp search        busca no registro oficial aberto
-          /mcp add           adiciona um server local (stdio)
-          /mcp list          lista os servers de todas as fontes
-          /mcp remove        remove um server gerenciado pelo aluy
-          /mcp disable       desativa um server sem desinstalar
-          /mcp enable        reativa um server desativado
-          /mcp reconnect     re-sobe + re-handshake os servers (recupera "Not connected")
-          /mcp reload        re-lê o ~/.aluy/mcp.json + reconecta (aplica edições da config)"
+      "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+      │ / para comandos · ↑↓ navega · enter executa · esc fecha                                          │
+      │ ── workspace                                                                                     │
+      │ › /mcp               lista/gerencia servers MCP (add/remove/disable/enable · search <termo>)     │
+      │     /mcp search        busca no registro oficial aberto                                          │
+      │     /mcp add           adiciona um server local (stdio)                                          │
+      │     /mcp list          lista os servers de todas as fontes                                       │
+      │     /mcp remove        remove um server gerenciado pelo aluy                                     │
+      │     /mcp disable       desativa um server sem desinstalar                                        │
+      │     /mcp enable        reativa um server desativado                                              │
+      │     /mcp reconnect     re-sobe + re-handshake os servers (recupera "Not connected")              │
+      │     /mcp reload        re-lê o ~/.aluy/mcp.json + reconecta (aplica edições da config)           │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
     `);
   });
 });
@@ -1067,7 +1081,9 @@ describe('Boot — splash bloco (bold): wordmark, tier real, versão, fallback',
     // wordmark de meio-bloco (direção "bloco bold")
     expect(out).toContain('██');
     // subtítulo + status do splch
-    expect(out).toContain('Aluy Cli · agente de terminal');
+    // F-MARCA-LAMBDA — a tagline do boot também assina `Λluy Cli` (mesma grafia do header,
+    // do splash e do bloco de resposta). O fallback ASCII vive no teste de TERM=linux abaixo.
+    expect(out).toContain('Λluy Cli · agente de terminal');
     expect(out).toContain('assinatura');
     expect(out).toContain('aluy-flux'); // tier REAL, não literal "turbo"
     expect(out).toContain('broker');
@@ -1096,7 +1112,11 @@ describe('Boot — splash bloco (bold): wordmark, tier real, versão, fallback',
     expect(out).not.toContain('～'); // onda Unicode também degrada
     expect(out).toContain('#'); // wordmark ASCII legível
     expect(out).toContain('~'); // onda ASCII
+    // F-ASCII-DE-VERDADE — no perfil ASCII a marca DEGRADA: `Λluy Cli` volta a ser
+    // `Aluy Cli`. O Λ é grego (U+039B) e viraria caixa vazia em TERM=linux, que é
+    // exatamente o que este perfil existe para evitar.
     expect(out).toContain('Aluy Cli · agente de terminal');
+    expect(out).not.toContain('Λ');
     expect(out).toContain('v1.4.2');
   });
 
@@ -1107,7 +1127,8 @@ describe('Boot — splash bloco (bold): wordmark, tier real, versão, fallback',
       TERM: 'xterm-256color',
     });
     const out = lastFrame() ?? '';
-    expect(out).toContain('Aluy Cli · agente de terminal');
+    // F-MARCA-LAMBDA — NO_COLOR mexe na COR, não no perfil de glifos: a marca segue `Λluy`.
+    expect(out).toContain('Λluy Cli · agente de terminal');
     expect(out).toContain('aluy-flux');
     expect(out).toContain('broker');
     expect(out).toContain('v1.4.2');

@@ -154,7 +154,14 @@ describe('App — resposta LONGA em regime clearTerminal re-emite o histórico l
     const bigText = Array.from({ length: 40 }, (_, i) => `linha de fala ${i + 1}`).join('\n');
     const controller = buildController(bigText, gate);
 
-    const fake = new FakeStdout(80, 12);
+    // F-PAINEL (pedido do dono) — a barra de status de UMA linha virou um PAINEL de três
+    // itens rotulados (sessão/estado/uso). O chrome VIVO do rodapé cresceu 2 linhas, e com
+    // uma tela de 12 linhas a região viva NÃO volta a caber depois que o turno termina:
+    // o app fica preso no regime `clearTerminal` e a BORDA de saída — que é exatamente o
+    // que este teste existe para provar — nunca acontece. A tela sobe para 20 linhas p/ o
+    // CENÁRIO continuar existindo: a fala de 40 linhas segue estourando (entra no regime)
+    // e, ao fim do turno, o rodapé volta a caber (sai do regime ⇒ clearScreen).
+    const fake = new FakeStdout(80, 20);
     // F198 — mesma composição do wiring (run.tsx): o wrapper detecta a borda clearTerminal→
     // eraseLines e chama o clearScreen que a App registrar. `overwrite: false` p/ o `clearTerminal`
     // e o `clearScreen` passarem CRUS aos bytes capturados (com o overwrite ON o transform os

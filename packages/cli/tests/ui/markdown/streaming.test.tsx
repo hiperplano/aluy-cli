@@ -20,7 +20,10 @@ function frame(node: React.ReactElement, env = TRUECOLOR): string {
 describe('AluyBlock — markdown no acumulado, stream fluido', () => {
   it('streaming mostra o cursor de trabalho ● na ponta da fala já renderizada', () => {
     const out = frame(<AluyBlock text={'pensando em **isto**'} streaming frame={0} />);
-    expect(out).toContain('aluy');
+    // F-MARCA-LAMBDA (pedido do dono) — o bloco do agente deixou de ser rotulado `Λ aluy`
+    // (marca + palavra ao lado) e passou a ASSINAR `Λluy`: "a marca é a primeira letra do
+    // nome, não um ícone ao lado dele". O que o teste prova é o mesmo (o bloco é do aluy).
+    expect(out).toContain('Λluy');
     expect(out).toContain('isto'); // markdown aplicado mesmo durante o stream
     expect(out).toContain('●'); // cursor de trabalho presente (EST-0965)
   });

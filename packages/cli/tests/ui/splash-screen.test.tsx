@@ -107,18 +107,31 @@ describe('SplashScreen — tela profissional: tagline + versão + card (F195)', 
     expect(out).not.toContain(DEFAULT_TAGLINE);
   });
 
-  it('mostra a VERSÃO discreta quando passada (`Aluy CLI · v<versão>`)', () => {
+  // F-MARCA-LAMBDA (pedido do dono) — o nome de produto passou a se escrever com o Λ NO
+  // LUGAR do A (`Λluy CLI`), a mesma grafia do header e do bloco de resposta: "a marca é a
+  // primeira letra do nome, não um ícone ao lado dele". Em perfil ASCII degrada p/ `Aluy
+  // CLI` (o Λ é grego e viraria caixa vazia) — coberto no caso de TERM=linux abaixo.
+  it('mostra a VERSÃO discreta quando passada (`Λluy CLI · v<versão>`)', () => {
     const { lastFrame } = wrap(
       <SplashScreen columns={80} rows={22} frame={0} version="1.2.3-rc.4" />,
     );
     const out = plain(lastFrame() ?? '');
-    expect(out).toContain('Aluy CLI');
+    expect(out).toContain('Λluy CLI');
     expect(out).toContain('v1.2.3-rc.4');
+  });
+
+  it('perfil ASCII (TERM=linux): a marca DEGRADA p/ `Aluy CLI` (nada de Λ virando tofu)', () => {
+    const { lastFrame } = wrap(<SplashScreen columns={80} rows={22} frame={0} version="9.9.9" />, {
+      TERM: 'linux',
+    });
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('Aluy CLI');
+    expect(out).not.toContain('Λ');
   });
 
   it('SEM versão: a linha de versão some (degradação graciosa, tela mais limpa)', () => {
     const { lastFrame } = wrap(<SplashScreen columns={80} rows={22} frame={0} />);
-    expect(plain(lastFrame() ?? '')).not.toContain('Aluy CLI ·');
+    expect(plain(lastFrame() ?? '')).not.toContain('Λluy CLI ·');
   });
 
   it('SEM BORDA/moldura na tela de carga (feedback do dono): nenhum box-drawing', () => {

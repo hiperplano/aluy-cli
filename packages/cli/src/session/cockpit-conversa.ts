@@ -32,6 +32,10 @@ import {
   MAX_LIVE_SPEECH_CHARS,
 } from './live-budget.js';
 import { parseMarkdown, type Inline } from '../ui/markdown/parse.js';
+// F-HEADER-HARMONIA — a MESMA coluna de rótulo que o `<NoteBlock>` usa p/ desenhar. A
+// medição precisa vir da mesma fonte: duplicar o número aqui reabriria justamente a
+// divergência medida×render que este módulo existe p/ evitar (ADR-0076 §5).
+import { ROTULO_COLS } from '../ui/components/StatusPanel.js';
 
 /** Contexto de medição — o que o render usa e a medição precisa espelhar. */
 export interface ConversaCtx {
@@ -262,9 +266,25 @@ export function measureConversaBlock(b: SessionBlock, ctx: ConversaCtx): number 
       const head = wrappedLineCount(`x ${verb} ${b.target} ${b.result} x`, c - SPEECH_INDENT);
       return head + (b.status === 'err' ? outputBoxLines(b.output, ctx) : 0);
     }
-    case 'note':
-      // `◷ título` (1) + linhas (wrap em c-2) + paddingBottom (1).
-      return 1 + sumWrapped([...b.lines], c - SPEECH_INDENT) + 1;
+    case 'note': {
+      // F-HEADER-HARMONIA (reforma de UI pedida pelo dono: "o topo e o rodapé têm de ler
+      // como um sistema só") — o `<NoteBlock>` mudou de forma e a MEDIÇÃO estava velha,
+      // contando UMA LINHA A MAIS por nota. Numa região de altura cravada, medir a mais é
+      // o defeito que este módulo existe p/ não ter: sobra buraco (ou o grid reflui, que é
+      // o jitter que o ADR-0076 §5 mata).
+      //
+      // Como o bloco desenha HOJE: a PRIMEIRA linha da nota sobe p/ o LADO do rótulo
+      // (`◕ ajuda   linha 1`) e só as demais descem, alinhadas SOB o valor (recuo
+      // `ROTULO_COLS + 1`). Quando o título NÃO cabe na coluna de rótulo, o valor INTEIRO
+      // desce (todas as linhas abaixo) p/ não desalinhar a coluna.
+      const cabeNaColuna = b.title.length <= ROTULO_COLS - 1;
+      const larguraValor = Math.max(1, c - SPEECH_INDENT - (ROTULO_COLS + 1));
+      const primeira = cabeNaColuna ? b.lines[0] : undefined;
+      const abaixo = cabeNaColuna ? b.lines.slice(1) : [...b.lines];
+      // cabeçalho (≥1 linha, com a 1ª da nota junto) + demais linhas + paddingBottom (1).
+      const cabecalho = primeira === undefined ? 1 : wrappedLineCount(primeira, larguraValor);
+      return cabecalho + sumWrapped([...abaixo], larguraValor) + 1;
+    }
     case 'bang': {
       if (b.status === 'running') {
         const head = wrappedLineCount(

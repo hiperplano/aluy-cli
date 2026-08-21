@@ -11,13 +11,18 @@ import type { Catalog, I18nKey } from '../../src/i18n/catalog.js';
 describe('i18n · t() — resolução pt-BR e en', () => {
   it('resolve uma chave no idioma pt-BR (default)', () => {
     expect(t('pt-BR', 'composer.placeholder')).toBe('digite um objetivo ou /comando…');
-    expect(t('pt-BR', 'hints.idle')).toContain('enter envia');
+    // F-DICAS (pedido do dono: "o status envia deveria ser melhor") — a linha de idle
+    // encolheu de cinco itens para três, e os SÍMBOLOS de tecla saíram do catálogo para
+    // marcadores (`{enter}`/`{up}`) resolvidos pelo perfil de glifos do tema (F-HINTS-GLIFO):
+    // num terminal sem unicode o `⏎` viraria caixa vazia. Aqui olhamos o catálogo CRU, então
+    // o marcador é o que se vê; a resolução é coberta em `ui/footer-hints.test.tsx`.
+    expect(t('pt-BR', 'hints.idle')).toContain('{enter} enviar');
     expect(t('pt-BR', 'cmd.quit')).toBe('sair do aluy');
   });
 
   it('resolve a MESMA chave em en (texto diferente, estrutura igual)', () => {
     expect(t('en', 'composer.placeholder')).toBe('type a goal or /command…');
-    expect(t('en', 'hints.idle')).toContain('enter sends');
+    expect(t('en', 'hints.idle')).toContain('{enter} send');
     expect(t('en', 'cmd.quit')).toBe('quit aluy');
   });
 

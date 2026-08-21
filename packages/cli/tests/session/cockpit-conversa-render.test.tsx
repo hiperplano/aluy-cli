@@ -86,15 +86,25 @@ describe('cockpit conversa — janela por LINHAS VISUAIS (anti-mesclagem)', () =
     const lines = frame.split('\n');
     // (b) o frame cabe em rows (o grid não reflui — §5).
     expect(lines.length).toBeLessThanOrEqual(24);
-    // (a) TODO rótulo de turno é uma linha "pura": `▌ você` (nada colado depois) e
-    // `Λ aluy`. Com o bug, apareciam `▌ objetivo 3: …` / `Λ Gerado o …` (mesclados).
+    // (a) TODO rótulo de turno é uma linha "pura": `▌ você` (nada colado depois) e o
+    // rótulo do agente. Com o bug, apareciam `▌ objetivo 3: …` / `Λ Gerado o …`.
+    //
+    // F-MARCA-LAMBDA (pedido do dono) — o rótulo do agente deixou de ser `Λ aluy` (marca +
+    // palavra ao lado) e virou a ASSINATURA `Λluy`: "a marca é a primeira letra do nome,
+    // não um ícone ao lado dele". F-BLOCOS-PINTADOS — o bloco do agente ganhou moldura: a
+    // barra `┃` abre TODA linha dele. Sem descascar a moldura e sem casar a grafia nova, o
+    // ramo do agente simplesmente não casava nada — a asserção passava sem provar NADA,
+    // que é pior do que falhar.
+    const unframe = (l: string): string => l.replace(/^[┃│|]/, '');
     for (const ln of lines) {
       const t = ln.trimEnd();
+      const u = unframe(t).trimEnd();
       if (t.startsWith('▌') && !t.startsWith('▌ conversa')) {
         expect(t).toBe('▌ você');
       }
-      if (/^Λ /.test(t) && !t.startsWith('Λ Aluy Cli')) {
-        expect(t).toBe('Λ aluy');
+      // exclui o chrome do cockpit (título/marca de produto), que não é rótulo de turno.
+      if (/^Λ/.test(u) && !/Cli|cockpit/.test(u)) {
+        expect(u).toBe('Λluy');
       }
     }
     // a fala em si está visível (indentada, não mesclada) — a cauda é o turno 11.

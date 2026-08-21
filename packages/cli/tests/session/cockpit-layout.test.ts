@@ -11,6 +11,7 @@ import {
   COCKPIT_LOG_RATIO,
   COCKPIT_LOG_MIN_ROWS,
   COCKPIT_CHROME_ROWS,
+  statusRowsFor,
   COMPOSER_ROWS,
   COMPOSER_MAX_ROWS,
 } from '../../src/session/cockpit-layout.js';
@@ -292,7 +293,15 @@ describe('resolveCockpitLayout — log ADAPTATIVO (logHint)', () => {
 
   it('sem hint ⇒ razão fixa preservada (back-compat)', () => {
     const semHint = resolveCockpitLayout(ROWS, 120, 1);
-    const proporcional = Math.round((ROWS - COCKPIT_CHROME_ROWS) * COCKPIT_LOG_RATIO);
+    // F-PAINEL (pedido do dono) — a barra de status de UMA linha virou um PAINEL de três
+    // itens (sessão/estado/uso) e o grid do cockpit fecha por SOMA de alturas, então o
+    // painel custa 2 linhas A MAIS de chrome quando a tela é alta o bastante p/ abri-lo
+    // inteiro (`statusRowsFor`). `COCKPIT_CHROME_ROWS` continua contando o painel no PISO
+    // (1 linha), de propósito — é ele que define `COCKPIT_MIN_ROWS`. O que este teste
+    // prova é a RAZÃO (30% do que sobra p/ o log), não o tamanho absoluto: o espelho da
+    // conta é que estava velho, porque não descontava o painel.
+    const geridas = ROWS - COCKPIT_CHROME_ROWS - (statusRowsFor(ROWS) - 1);
+    const proporcional = Math.round(geridas * COCKPIT_LOG_RATIO);
     if (semHint.kind !== 'cockpit') throw new Error('cockpit');
     expect(semHint.regions.logRows).toBe(proporcional);
   });

@@ -51,7 +51,11 @@ describe('FooterHints — indicador de atividade (elapsed) EST-0965', () => {
     const { lastFrame } = wrap(<FooterHints state="idle" elapsed="0:42" />);
     const f = plain(lastFrame());
     expect(f).not.toContain('0:42');
-    expect(f).toContain('enter envia');
+    // F-DICAS (relato do dono: "o status envia deveria ser melhor") — a linha de idle
+    // encolheu de cinco itens para três e a palavra `enter` virou o SÍMBOLO de teclado:
+    // hoje é `⏎ enviar · / comandos · ↑ histórico`. A afirmação continua a mesma (o idle
+    // mostra a dica de ENVIAR); só o texto que a carrega mudou.
+    expect(f).toContain('⏎ enviar');
   });
 
   it('estado de decisão (ask) NÃO ganha relógio (a decisão tem o foco)', () => {
@@ -86,18 +90,30 @@ describe('FooterHints — duplo Ctrl+C p/ sair (EST-1015)', () => {
     const { lastFrame } = wrap(<FooterHints state="idle" armedExit />);
     const f = plain(lastFrame());
     expect(f).toContain('ctrl-c de novo'); // pressione ctrl-c de novo para sair
-    expect(f).not.toContain('enter envia'); // a dica de idle some enquanto armado
+    // F-DICAS — a dica de idle hoje é `⏎ enviar · …` (a palavra `enter` virou o glifo).
+    expect(f).not.toContain('⏎ enviar'); // a dica de idle some enquanto armado
   });
 
   it('armedExit ausente/false ⇒ dica normal do estado', () => {
     const { lastFrame } = wrap(<FooterHints state="idle" />);
     const f = plain(lastFrame());
-    expect(f).toContain('enter envia');
+    expect(f).toContain('⏎ enviar'); // F-DICAS: `enter envia` → `⏎ enviar`
     expect(f).not.toContain('de novo');
   });
 
-  it('a dica de idle anuncia ctrl-c×2 (não 1× — coerente com o duplo toque)', () => {
-    const { lastFrame } = wrap(<FooterHints state="idle" />);
-    expect(plain(lastFrame())).toContain('ctrl-c×2');
+  it('onde a dica ANUNCIA o ctrl-c, ela anuncia ×2 (não 1× — coerente com o duplo toque)', () => {
+    // F-DICAS (pedido do dono) — o `ctrl-c` SAIU da linha de idle: ela "tinha CINCO itens
+    // competindo, e três deles se aprendem no primeiro uso". Então checar o idle deixou de
+    // dizer alguma coisa. A INTENÇÃO original — a dica nunca prometer um toque só quando o
+    // app exige DOIS — vale igual, e passa a ser verificada nos estados que ainda falam do
+    // ctrl-c (trabalho e repouso com sub-agentes).
+    for (const state of ['thinking', 'streaming', 'work-subagents', 'idle-subagents'] as const) {
+      const { lastFrame } = wrap(<FooterHints state={state} />);
+      const f = plain(lastFrame());
+      expect(f).toContain('ctrl-c×2');
+      expect(f).not.toMatch(/ctrl-c(?!×2)/); // nenhum `ctrl-c` solto prometendo 1 toque
+    }
+    // E o idle, hoje enxuto, de fato não fala mais de ctrl-c (é o que o dono pediu).
+    expect(plain(wrap(<FooterHints state="idle" />).lastFrame())).not.toContain('ctrl-c');
   });
 });

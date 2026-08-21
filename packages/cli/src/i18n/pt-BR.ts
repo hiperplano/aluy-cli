@@ -99,7 +99,11 @@ export const ptBR: FullCatalog = {
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': 'broker',
-  'boot.tagline': 'Λluy Cli · agente de terminal',
+  // F-ASCII-DE-VERDADE — o `Λ` NÃO pode ficar cravado no catálogo: em perfil ASCII
+  // (TERM=linux / locale não-UTF-8 / `--ascii`) ele vira caixa vazia, que é justamente
+  // o que esse perfil existe para evitar. Texto de UI passa pelo catálogo; a MARCA passa
+  // pelo tema — `{brand}` é o que liga um ao outro (mesmo padrão do `{enter}`/`{up}`).
+  'boot.tagline': '{brand} · agente de terminal',
   'boot.connecting': 'conectando',
   'boot.entering': 'entrando',
 

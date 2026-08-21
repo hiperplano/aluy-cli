@@ -71,15 +71,29 @@ describe('UNICODE_GLYPHS — as 7 trocas de peso (F-GLYPH-PESO-2)', () => {
     expect(UNICODE_GLYPHS.gauge).toBe('◉');
   });
 
-  it('NÃO tocadas: ask/branch/prompt/broker/tool/you/aluy/cursor seguem iguais', () => {
+  // O `prompt` SAIU desta lista: na rodada seguinte de peso (reforma de UI pedida pelo dono)
+  // ele foi de `›` (SINGLE RIGHT-POINTING ANGLE QUOTATION MARK, U+203A) para `❯` (HEAVY
+  // RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT, U+276F) — o chevron GROSSO, pela mesma
+  // razão dos outros sete: massa visual. A troca também DESAMBIGUOU a tela, porque o `›`
+  // continua sendo o marcador de SELEÇÃO do slash-menu: antes o input digitado e o item
+  // selecionado abriam com o MESMO caractere. Ele ganhou teste próprio logo abaixo.
+  it('NÃO tocadas: ask/branch/broker/tool/you/aluy/cursor seguem iguais', () => {
     expect(UNICODE_GLYPHS.ask).toBe('⚠');
     expect(UNICODE_GLYPHS.branch).toBe('⎇');
-    expect(UNICODE_GLYPHS.prompt).toBe('›');
     expect(UNICODE_GLYPHS.broker).toBe('●');
     expect(UNICODE_GLYPHS.tool).toBe('⏺');
     expect(UNICODE_GLYPHS.you).toBe('▌');
     expect(UNICODE_GLYPHS.aluy).toBe('Λ');
     expect(UNICODE_GLYPHS.cursor).toBe('●');
+  });
+
+  it('prompt: › → ❯ (276F, chevron GROSSO — e deixa o `›` só p/ a seleção do menu)', () => {
+    expect(UNICODE_GLYPHS.prompt).toBe('❯');
+    expect(UNICODE_GLYPHS.prompt).not.toBe('›');
+    expect(UNICODE_GLYPHS.prompt.codePointAt(0)).toBe(0x276f);
+    // 1 código-ponto, 1 célula — como os outros do peso (nada wide/ambíguo no composer).
+    expect([...UNICODE_GLYPHS.prompt]).toHaveLength(1);
+    expect(displayWidth(UNICODE_GLYPHS.prompt)).toBe(1);
   });
 
   it('resolveTheme default (UTF-8, sem overrides) já entrega os 7 glifos com peso', () => {

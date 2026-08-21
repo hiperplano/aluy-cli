@@ -94,12 +94,21 @@ function approveHintLines(frame: string): string[] {
     .filter((ln) => /a aprova/.test(ln) && /n nega/.test(ln) && /esc cancela/.test(ln));
 }
 
-/** Conta as linhas com a dica de IDLE (`enter sends · … history …`) — o rodapé "normal". */
+/** Conta as linhas com a dica de IDLE — o rodapé "normal".
+ *
+ * F-DICAS (relato do dono: "o status envia deveria ser melhor") — a linha de idle encolheu
+ * de cinco itens para três ("três deles se aprendem no primeiro uso") e a PALAVRA `enter`
+ * virou o SÍMBOLO de teclado, resolvido pelo tema (`⏎` em unicode, `enter` em ASCII). Hoje
+ * ela é `⏎ enviar · / comandos · ↑ histórico`. Casar por `/enter/` deixou de achar a linha;
+ * o que a identifica de forma estável é o par ENVIAR + HISTÓRICO (os dois idiomas), que é
+ * exatamente o que este helper sempre quis dizer: "o rodapé normal voltou". */
 function idleHintLines(frame: string): string[] {
   return plain(frame)
     .split('\n')
     .map((ln) => ln.trim())
-    .filter((ln) => /enter/i.test(ln) && /(history|histórico|palette|paleta)/i.test(ln));
+    .filter(
+      (ln) => /(envia|enviar|sends?)\b/i.test(ln) && /(history|histórico|palette|paleta)/i.test(ln),
+    );
 }
 
 describe('App — footer de aprovação NÃO vaza no composer durante o ask (fix-footer-bleed)', () => {

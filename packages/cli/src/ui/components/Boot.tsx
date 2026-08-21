@@ -60,7 +60,14 @@ export function Boot(props: BootProps): React.ReactElement {
       <Wordmark columns={columns} />
 
       <Box paddingTop={1} paddingLeft={2}>
-        <Role name="fgDim">{t('boot.tagline')}</Role>
+        {/* F-MARCA-LAMBDA + F-ASCII-DE-VERDADE — a marca escrita com o Λ no lugar do A
+            (`Λluy Cli`), a mesma grafia do header, do splash e do bloco de resposta. Em
+            perfil sem Unicode cai para `Aluy Cli`: o Λ é grego (U+039B) e tem cobertura
+            larga, mas o modo ASCII existe para quem não pode contar com isso — e um nome
+            de produto virando caixa vazia é pior que um nome sem estilo. */}
+        <Role name="fgDim">
+          {t('boot.tagline').replace('{brand}', theme.unicode ? 'Λluy Cli' : 'Aluy Cli')}
+        </Role>
       </Box>
 
       <Box paddingLeft={2}>

@@ -149,17 +149,28 @@ const ARROW_DOWN = ESC + '[B';
 const ARROW_UP = ESC + '[A';
 const TAB = '\t';
 
-// A LINHA do composer começa com o prompt `›`. EST-0974 — o <SlashMenu> agora renderiza
-// ABAIXO do composer (composer ANCORADO), e o item SELECIONADO também começa com `›`
-// (`› /cmd`). Então o composer é a ÚLTIMA linha com `›` ANTES do cabeçalho do menu
-// (`/ para comandos`); fatiamos o frame nesse cabeçalho e pegamos o último `›` da parte
-// de CIMA (onde mora o input). Menu fechado ⇒ não há cabeçalho ⇒ usa o frame inteiro.
+// F-COMPOSER-CAIXA / F-PICKER-PAINEL (reforma de UI pedida pelo dono) — o DESENHO do
+// composer mudou; a INTENÇÃO deste helper não: achar a LINHA do input no frame.
+//   • o campo virou uma CAIXA (`<ComposerBox>`): o Ink desenha a barra `┃` (borderLeft)
+//     no INÍCIO de toda linha do bloco, então a linha do input não começa mais no prompt;
+//   • o prompt deixou de ser `›` e passou a ser `❯` (U+276F, o chevron do DS).
+// Por isso descascamos a moldura antes de procurar o prompt — e é o `❯` que marca o input.
+// O item SELECIONADO do menu segue com `› ` (glifo DIFERENTE do prompt), mas mantemos o
+// corte no cabeçalho do menu porque o <SlashMenu> continua ABAIXO do composer (EST-0974)
+// e o corte é o que garante que só olhamos a parte de CIMA (onde mora o input).
+const PROMPT = '❯';
+/** Descasca a moldura à esquerda (barra `┃` do composer / `│` do <PickerFrame>) + espaços. */
+function unframe(line: string): string {
+  return line.replace(/^[\s┃│|]+/, '');
+}
 function composerLine(s: { lastFrame: () => string }): string {
   const frame = plain(s.lastFrame());
   const above = frame.split(MENU_HEADER)[0] ?? frame;
-  const rows = above.split('\n').filter((l) => l.trimStart().startsWith('›'));
+  const rows = above.split('\n').filter((l) => unframe(l).startsWith(PROMPT));
   const row = rows[rows.length - 1];
-  const text = (row ?? '').replace(/^\s*›\s?/, '').trim();
+  const text = unframe(row ?? '')
+    .replace(/^❯\s?/, '')
+    .trim();
   return text.startsWith('digite um objetivo') ? '' : text;
 }
 
@@ -191,9 +202,12 @@ function selectedCommand(s: { lastFrame: () => string }): string | null {
   const frame = plain(s.lastFrame());
   const idx = frame.indexOf(MENU_HEADER);
   const below = idx >= 0 ? frame.slice(idx) : frame;
-  const row = below.split('\n').find((l) => l.trimStart().startsWith('› /'));
+  // F-PICKER-PAINEL — o menu ganhou moldura arredondada (<PickerFrame>): toda linha da
+  // lista nasce com a borda `│`. `trimStart()` sozinho já não chega no `›` do selecionado;
+  // `unframe` descasca a borda antes de procurar o marcador de seleção.
+  const row = below.split('\n').find((l) => unframe(l).startsWith('› /'));
   if (!row) return null;
-  const m = row.trim().match(/›\s+\/(\S+)/);
+  const m = unframe(row).match(/›\s+\/(\S+)/);
   return m ? m[1]! : null;
 }
 
@@ -333,14 +347,14 @@ describe('App — SLASH-MENU durante o trabalho (EST-0982)', () => {
     expect(interruptSpy).not.toHaveBeenCalled();
     expect(s.controller.current.phase).toBe('streaming');
     // O `/` SOBROU no composer (pendência) ⇒ o composer NÃO está vazio.
-    expect(composerLine(s).replace(/^›\s*/, '').trim()).toBe('/');
+    expect(composerLine(s).trim()).toBe('/');
 
     // (b) o freio AINDA é alcançável (NÃO trivial): com o `/` no composer, o ESC ACELERA
     //     (não para). Esvazio o composer (apago o `/`) e SÓ então, com TUDO vazio (fila vazia,
     //     sem injects, composer vazio), o ESC volta a ser o freio (interrompe).
     await pressUntil(
       () => s.stdin.write(BACKSPACE),
-      () => composerLine(s).replace(/^›\s*/, '').trim() === '',
+      () => composerLine(s).trim() === '',
     );
     expect(interruptSpy).not.toHaveBeenCalled(); // até aqui NADA parou (só fechou o menu + editou)
     await pressUntil(

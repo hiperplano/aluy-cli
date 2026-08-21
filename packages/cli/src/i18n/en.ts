@@ -93,7 +93,8 @@ export const en: PartialCatalog = {
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': 'broker',
-  'boot.tagline': 'Λluy Cli · terminal agent',
+  // F-ASCII-DE-VERDADE — ver a nota em pt-BR.ts: `{brand}` é resolvido pelo tema.
+  'boot.tagline': '{brand} · terminal agent',
   'boot.connecting': 'connecting',
   'boot.entering': 'signing in',
 

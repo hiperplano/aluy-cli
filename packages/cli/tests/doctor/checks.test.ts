@@ -291,7 +291,11 @@ describe('doctor/checks — mapeamento de fatos → ✓/⚠/✗', () => {
       'config',
     );
     expect(c.status).toBe('ok');
-    expect(c.detail).toContain('max-tokens 1000000');
+    // O relatório passou a abreviar os números grandes: "`10000000` obriga a contar zeros
+    // para saber que são 10 milhões; num relatório que se lê de relance, isso é atrito
+    // puro". O que o teste prova é o mesmo — o check de config REPORTA os limites; só a
+    // grafia do número mudou (1000000 → 1M).
+    expect(c.detail).toContain('max-tokens 1M');
     expect(c.detail).toContain('--yolo');
   });
 

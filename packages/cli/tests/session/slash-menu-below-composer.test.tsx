@@ -95,16 +95,24 @@ function lines(lastFrame: () => string | undefined): string[] {
   return plain(lastFrame() ?? '').split('\n');
 }
 
-/** Índice (0-based) da linha do COMPOSER no frame: a do prompt `›` ANTES do cabeçalho do
- * menu (quando aberto). O input vazio mostra o placeholder `digite um objetivo`. */
+/** Descasca a moldura à esquerda (barra `┃` do composer / `│` do <PickerFrame>) + espaços.
+ * F-COMPOSER-CAIXA / F-PICKER-PAINEL — depois da reforma de UI pedida pelo dono, tanto a
+ * linha do input quanto as do menu nascem com uma borda desenhada pelo Ink. */
+function unframe(line: string): string {
+  return line.replace(/^[\s┃│|]+/, '');
+}
+
+/** Índice (0-based) da linha do COMPOSER no frame: a do prompt ANTES do cabeçalho do
+ * menu (quando aberto). O input vazio mostra o placeholder `digite um objetivo`.
+ * F-COMPOSER-CAIXA — o prompt passou de `›` para `❯` e ganhou a barra `┃` na frente. */
 function composerLineIndex(lastFrame: () => string | undefined): number {
   const ls = lines(lastFrame);
   const menuIdx = ls.findIndex((l) => l.includes(MENU_HEADER));
   const ceiling = menuIdx >= 0 ? menuIdx : ls.length;
-  // O ÚLTIMO prompt `›` ANTES do menu é o composer (acima dele só blocos/queue, que aqui
+  // O ÚLTIMO prompt ANTES do menu é o composer (acima dele só blocos/queue, que aqui
   // não existem na sessão idle vazia).
   for (let i = ceiling - 1; i >= 0; i--) {
-    if (ls[i]!.trimStart().startsWith('›')) return i;
+    if (unframe(ls[i]!).startsWith('❯')) return i;
   }
   return -1;
 }
@@ -118,7 +126,8 @@ async function warmup(
 ): Promise<void> {
   const deadline = Date.now() + 2000;
   // Escreve `x` até ecoar na linha do composer (listener do Ink anexou), depois apaga.
-  while (!plain(lastFrame() ?? '').includes('› x')) {
+  // F-COMPOSER-CAIXA — o eco agora é `❯ x` (prompt novo), não `› x`.
+  while (!plain(lastFrame() ?? '').includes('❯ x')) {
     if (Date.now() > deadline) throw new Error('warmup: stdin do Ink não anexou no prazo');
     stdin.write('x');
     await sleep(20);

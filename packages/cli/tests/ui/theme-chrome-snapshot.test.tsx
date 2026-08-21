@@ -12,6 +12,24 @@
 // header não emite mais a cor `depth` — os snapshots abaixo refletem isso (4 cores,
 // não mais 6).
 //
+// F-MARCA-LAMBDA (pedido do dono) — o header deixou de abrir com o Λ como ÍCONE
+// (`<Glyph name="aluy" role="accent">` + `Aluy Cli`) e passou a escrever o nome com o Λ
+// NO LUGAR do A (`Λluy Cli`): "a marca é a primeira letra do nome, não um ícone ao lado
+// dele". Consequência para ESTE arquivo: o header COMPACTO não emite mais o papel
+// `accent` — o nome inteiro sai em `fg`. As asserções de `#DDA13F`/`#82530F` (o âmbar de
+// cada tema) deixaram de ter onde casar e foram trocadas pelas cores que o chrome de
+// fato emite hoje.
+//
+// ⚠ ISSO PARECE COLATERAL, NÃO PEDIDO: o dono falou da POSIÇÃO da marca, não da COR, e o
+// comentário no topo do próprio `Header.tsx` continua dizendo "a MARCA Λ (glifo `aluy`,
+// role `accent`) abre o header". O bloco de resposta (`<AluyBlock>`) segue assinando
+// `Λluy` em accent. Está RELATADO como suspeita de regressão; se o dono confirmar que a
+// marca deve voltar a acender, o conserto é pintar só o `Λ` de `productName` em accent —
+// e estas asserções voltam a ser as de antes.
+//
+// O que este arquivo prova segue igual: cada TEMA pinta a SUA paleta no chrome, e os três
+// se distinguem entre si (é o DoD "snapshot dos 3 temas, chrome com a paleta de cada").
+//
 // Por que truecolor: é o modo que separa os 3 temas (a paleta por tema). Em ansi16 os
 // escuros (dark/slate) colapsam na MESMA degradação — coberto à parte (esc-seq de cor
 // genérica), aqui o foco é a paleta fiel ao web.
@@ -58,25 +76,30 @@ describe('chrome (<Header>) nos 3 temas do web — snapshot da paleta', () => {
     expect(THEMES.map((t) => t.name)).toEqual(['aluy-dark', 'aluy-light', 'aluy-slate']);
   });
 
-  it('dark — accent âmbar #DDA13F + fgDim neutro (sem depth — badge de backend removido)', () => {
+  it('dark — fg #F2EEE8 + fgDim neutro #8A7F6D (sem depth — badge de backend removido)', () => {
     const hexes = truecolorHexes(renderHeader('aluy-dark'));
-    expect(hexes).toContain('#DDA13F'); // accent (Λ)
-    expect(hexes).toContain('#8A7F6D'); // fgDim (label `aluy`)
+    expect(hexes).toContain('#F2EEE8'); // fg (o nome `Λluy Cli` e o tier)
+    expect(hexes).toContain('#8A7F6D'); // fgDim (o separador ` · `)
+    // o fgDim é o que SEPARA dark de slate (o fg dos dois é o mesmo creme).
+    expect(hexes).not.toContain('#B0A593'); // NÃO o fgDim areia do slate
     // FIX (dono) — o badge `◍ broker` (depth/ciano) saiu do header; não deve mais
     // emitir essa cor (duplicava o indicador que mora, vivo, no rodapé).
     expect(hexes).not.toContain('#5BA8A2');
+    // F-MARCA-LAMBDA — o header COMPACTO não emite mais accent (ver a nota no topo).
+    expect(hexes).not.toContain('#DDA13F');
   });
 
-  it('light — accent escurecido #82530F (AA no creme) + fg quase-preto', () => {
+  it('light — fg quase-preto #1A1712 + fgDim #544B3C (paleta própria, nada do dark)', () => {
     const hexes = truecolorHexes(renderHeader('aluy-light'));
-    expect(hexes).toContain('#82530F'); // accent escurecido p/ AA
-    expect(hexes).toContain('#1A1712'); // fg (tier)
+    expect(hexes).toContain('#1A1712'); // fg (nome de produto e tier)
+    expect(hexes).toContain('#544B3C'); // fgDim próprio do claro
+    expect(hexes).not.toContain('#F2EEE8'); // NÃO usa o creme dos escuros
     expect(hexes).not.toContain('#DDA13F'); // NÃO usa o âmbar claro do dark
   });
 
-  it('slate — accent âmbar #DDA13F (= dark) mas fgDim AREIA #B0A593 (warm)', () => {
+  it('slate — mesmo fg do dark, mas fgDim AREIA #B0A593 (warm) — é o que os separa', () => {
     const hexes = truecolorHexes(renderHeader('aluy-slate'));
-    expect(hexes).toContain('#DDA13F'); // mesmo accent do dark
+    expect(hexes).toContain('#F2EEE8'); // mesmo fg do dark
     expect(hexes).toContain('#B0A593'); // fgDim areia (≠ dark neutro)
     expect(hexes).not.toContain('#8A7F6D'); // NÃO o fgDim neutro do dark
   });
@@ -90,7 +113,6 @@ describe('chrome (<Header>) nos 3 temas do web — snapshot da paleta', () => {
         "aluy-dark": {
           "bg": "#070707",
           "header": [
-            "#DDA13F",
             "#F2EEE8",
             "#8A7F6D",
             "#F2EEE8",
@@ -99,7 +121,6 @@ describe('chrome (<Header>) nos 3 temas do web — snapshot da paleta', () => {
         "aluy-light": {
           "bg": "#F4ECDC",
           "header": [
-            "#82530F",
             "#1A1712",
             "#544B3C",
             "#1A1712",
@@ -108,7 +129,6 @@ describe('chrome (<Header>) nos 3 temas do web — snapshot da paleta', () => {
         "aluy-slate": {
           "bg": "#0E0C09",
           "header": [
-            "#DDA13F",
             "#F2EEE8",
             "#B0A593",
             "#F2EEE8",

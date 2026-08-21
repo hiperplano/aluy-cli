@@ -1,6 +1,6 @@
-// EST-0985 (polish) — a divisória ACIMA do composer é INCONDICIONAL: emoldura o
-// composer SEMPRE (régua acima + régua abaixo), inclusive em sessão FRESCA e
-// pós-`/clear` (sem turnos). Antes (EST-0987) ela COLAPSAVA quando a conversa
+// EST-0985 (polish) — a MOLDURA do composer é INCONDICIONAL: emoldura o composer
+// SEMPRE (na época, régua acima + régua abaixo; hoje a barra `┃` — ver a nota de
+// desenho abaixo), inclusive em sessão FRESCA e pós-`/clear` (sem turnos). Antes (EST-0987) ela COLAPSAVA quando a conversa
 // estava vazia — herança do layout ANTIGO, em que a "sob o header" e a "acima do
 // input" ficavam coladas. Hoje o header vive no <Static> no TOPO e o composer no
 // rodapé da região viva, SEMPRE separados pelo corpo (Onboarding/histórico) — as
@@ -8,14 +8,25 @@
 // de cima, ficava a de baixo). Bug reportado pelo Tiago ("a linha de cima do
 // composer sumiu"). Este arquivo trava a moldura SIMÉTRICA e o NÃO-colapso.
 //
-// Como medimos: contamos no FRAME RENDIDO (o que o usuário vê) as réguas de
-// CHROME — linhas inteiras de `━` (F-GLYPH-PESO-2: borda PESADA do esquema B) com a
-// LARGURA DO TERMINAL (`columns`). O traço
-// SUTIL por-turno (`subtle`) tem largura PARCIAL (12) e é contado à parte. O
-// chrome tem 4 réguas (acima/sob o header, acima/abaixo do input); NENHUMA colapsa
-// por falta de turnos:
-//   idle / só-sistema ⇒ 4 réguas de chrome   (2 entre header e input)
-//   1+ turno real      ⇒ 4 réguas de chrome   (inalterado — só entra o traço sutil)
+// ─────────────────────────────────────────────────────────────────────────────────
+// O QUE MUDOU NO DESENHO (reforma de UI pedida pelo dono) — a INTENÇÃO deste arquivo
+// é a mesma; o que ele MEDE trocou junto com o desenho:
+//
+//   • F-SEM-REGUA ("as linhas no CLI deixam uma cara muito ruim… em vez de linhas
+//     separando as seções, alguma outra coisa") — o `<Divider>` não desenha mais nada:
+//     devolve uma linha VAZIA, preservando a ALTURA (o cockpit soma altura de região p/
+//     fechar o grid sem tremer, ADR-0076 §5). Contar réguas viraria contar um desenho
+//     que o dono mandou tirar.
+//   • F-COMPOSER-CAIXA ("não sei se daria para deixar o composer com cara de uma caixa
+//     de texto") — as DUAS réguas que cercavam o input viraram a MOLDURA do
+//     `<ComposerBox>`: a barra `┃` (borderLeft do Ink) que abre a linha do input.
+//
+// Então o NÃO-COLAPSO — que é o bug do Tiago que este arquivo trava ("a linha de cima do
+// composer sumiu" em sessão fresca) — passa a ser medido na MOLDURA de hoje: a barra `┃`
+// abrindo a linha do prompt, presente em TODOS os estados:
+//   idle / só-sistema ⇒ composer emoldurado, zero réguas
+//   pós-`/clear`      ⇒ composer emoldurado, zero réguas
+//   1+ turno real     ⇒ composer emoldurado, zero réguas (só entra o respiro por-turno)
 
 import React from 'react';
 import { describe, expect, it } from 'vitest';
@@ -106,47 +117,48 @@ async function flush(): Promise<void> {
   await new Promise((r) => setTimeout(r, 0));
 }
 
-const DASH = '━'; // F-GLYPH-PESO-2 — Divider agora usa a borda PESADA do esquema B
-// Remove sequências ANSI (cor/papel) — o frame de teste vem colorido; a régua é
-// `━` envolto em códigos de papel DIM. Contamos o GLIFO, não a tinta.
+// Remove sequências ANSI (cor/papel) — o frame de teste vem colorido.
 // eslint-disable-next-line no-control-regex
 const ANSI = /\x1b\[[0-9;]*m/g;
-/** Linhas feitas SÓ de `━` (qualquer largura), já aparadas, com seu comprimento. */
-function dashLines(frame: string): number[] {
-  return frame
-    .split('\n')
-    .map((l) => l.replace(ANSI, '').trim())
-    .filter((l) => l.length > 0 && [...l].every((c) => c === DASH))
-    .map((l) => [...l].length);
+/** Linhas do frame, em texto puro. */
+function rows(frame: string): string[] {
+  return frame.split('\n').map((l) => l.replace(ANSI, ''));
 }
-/** A largura de CHROME = a régua MAIS LARGA (largura cheia do terminal). */
-function chromeWidth(frame: string): number {
-  const lens = dashLines(frame);
-  return lens.length ? Math.max(...lens) : 0;
+/** RÉGUAS de largura total — o desenho ANTIGO. F-SEM-REGUA: hoje tem de ser ZERO. */
+function chromeRules(frame: string): number {
+  return rows(frame).filter((l) => /^[━─-]{20,}$/.test(l.trim())).length;
 }
-/** Réguas de CHROME: linhas de `━` com a largura cheia (a maior do frame). */
-function chromeDividers(frame: string): number {
-  const w = chromeWidth(frame);
-  return dashLines(frame).filter((len) => len === w).length;
+/** Traços SUTIS por-turno — também saíram (o respiro virou espaço). */
+function subtleRules(frame: string): number {
+  return rows(frame).filter((l) => /^[━─-]{4,16}$/.test(l.trim())).length;
 }
-/** Traços SUTIS por-turno: linhas de `━` mais CURTAS que a régua cheia. */
-function subtleDividers(frame: string): number {
-  const w = chromeWidth(frame);
-  return dashLines(frame).filter((len) => len < w).length;
+/** A MOLDURA do composer HOJE: a barra `┃` do <ComposerBox> abrindo a linha do prompt
+ * (`❯` em unicode, `>` em ASCII). É ela que não pode COLAPSAR em sessão fresca. */
+function composerFramed(frame: string): boolean {
+  return rows(frame).some((l) => /^[┃|]\s*[❯>]/.test(l));
+}
+/** Índice da linha do composer (a do prompt emoldurado). */
+function composerRow(frame: string): number {
+  return rows(frame).findIndex((l) => /^[┃|]\s*[❯>]/.test(l));
+}
+/** Índice da ÚLTIMA linha do bloco do header (a linha da marca). */
+function headerRow(frame: string): number {
+  return rows(frame).findIndex((l) => /Λluy Cli|Aluy Cli/.test(l));
+}
+/** O chrome do header e a moldura do composer NÃO se encostam (era a "régua dupla"):
+ * entre os dois há o CORPO (Onboarding/histórico) — pelo menos uma linha de folga. */
+function chromeColado(frame: string): boolean {
+  const h = headerRow(frame);
+  const c = composerRow(frame);
+  if (h < 0 || c < 0) return false;
+  return c - h <= 1;
 }
 
-/** Há uma régua de chrome IMEDIATAMENTE seguida por outra (dupla colada)? */
-function hasAdjacentChromeDividers(frame: string): boolean {
-  const w = chromeWidth(frame);
-  const isChrome = (l: string): boolean => {
-    const t = l.replace(ANSI, '').trim();
-    return t.length === w && [...t].every((c) => c === DASH);
-  };
-  const lines = frame.split('\n');
-  for (let i = 1; i < lines.length; i++) {
-    if (isChrome(lines[i - 1]!) && isChrome(lines[i]!)) return true;
-  }
-  return false;
+/** Quantas linhas VAZIAS contíguas existem imediatamente ACIMA de `i`. */
+function blankRunAbove(rs: readonly string[], i: number): number {
+  let n = 0;
+  while (i - 1 - n >= 0 && rs[i - 1 - n]!.trim() === '') n += 1;
+  return n;
 }
 
 function renderApp(controller: SessionController) {
@@ -158,8 +170,8 @@ function renderApp(controller: SessionController) {
   );
 }
 
-describe('App — a moldura do composer é SIMÉTRICA e NÃO colapsa em sessão vazia (EST-0985)', () => {
-  it('idle (só a placa de boas-vindas) ⇒ 4 réguas de chrome (composer EMOLDURADO acima E abaixo)', async () => {
+describe('App — a moldura do composer NÃO colapsa em sessão vazia (EST-0985)', () => {
+  it('idle (sessão fresca) ⇒ composer EMOLDURADO pela barra `┃`, e nenhuma régua', async () => {
     const controller = buildController('irrelevante');
     const { lastFrame, unmount } = renderApp(controller);
     controller.dismissBoot(); // boot → idle (Onboarding no corpo)
@@ -168,17 +180,18 @@ describe('App — a moldura do composer é SIMÉTRICA e NÃO colapsa em sessão 
 
     expect(controller.current.blocks).toHaveLength(0);
     const frame = lastFrame() ?? '';
-    // 2 do header (acima/sob) + 2 do composer (acima/abaixo) — a de ACIMA do
-    // composer NÃO some mais em sessão fresca (era o bug do Tiago).
-    expect(chromeDividers(frame)).toBe(4);
-    expect(subtleDividers(frame)).toBe(0); // sem histórico ⇒ sem traço por-turno
-    // e NENHUMA régua de chrome fica colada com outra (o header e o composer estão
-    // separados pelo corpo Onboarding) — sem "régua dupla" visual.
-    expect(hasAdjacentChromeDividers(frame)).toBe(false);
+    // A moldura do composer NÃO some em sessão fresca (era o bug do Tiago) — hoje ela é
+    // a barra `┃` do <ComposerBox>, não mais duas réguas.
+    expect(composerFramed(frame)).toBe(true);
+    expect(chromeRules(frame)).toBe(0); // F-SEM-REGUA: o chrome não risca mais a tela
+    expect(subtleRules(frame)).toBe(0); // sem histórico ⇒ sem respiro por-turno
+    // e o chrome do header não encosta na moldura do composer (era a "régua dupla"):
+    // o corpo fica entre os dois.
+    expect(chromeColado(frame)).toBe(false);
     unmount();
   });
 
-  it('estado só com bloco de SISTEMA (note de /help) ⇒ AINDA 4 réguas (moldura intacta)', async () => {
+  it('estado só com bloco de SISTEMA (note de /help) ⇒ moldura do composer INTACTA', async () => {
     const controller = buildController('irrelevante');
     const { lastFrame, unmount } = renderApp(controller);
     controller.dismissBoot();
@@ -188,13 +201,14 @@ describe('App — a moldura do composer é SIMÉTRICA e NÃO colapsa em sessão 
     await flush();
 
     expect(controller.current.blocks.every((b) => b.kind === 'note')).toBe(true);
-    // a moldura do composer não depende de turno real ⇒ segue 4, sem dupla colada.
-    expect(chromeDividers(lastFrame() ?? '')).toBe(4);
-    expect(hasAdjacentChromeDividers(lastFrame() ?? '')).toBe(false);
+    // a moldura do composer não depende de turno real ⇒ segue lá, sem colar no header.
+    expect(composerFramed(lastFrame() ?? '')).toBe(true);
+    expect(chromeRules(lastFrame() ?? '')).toBe(0);
+    expect(chromeColado(lastFrame() ?? '')).toBe(false);
     unmount();
   });
 
-  it('pós-`/clear` (volta a 0 turnos) ⇒ a moldura do composer VOLTA inteira: 4 réguas, sem dupla', async () => {
+  it('pós-`/clear` (volta a 0 turnos) ⇒ a moldura do composer VOLTA inteira, sem colar', async () => {
     const controller = buildController('pronto.');
     const { lastFrame, unmount } = renderApp(controller);
     controller.dismissBoot();
@@ -207,13 +221,14 @@ describe('App — a moldura do composer é SIMÉTRICA e NÃO colapsa em sessão 
 
     expect(controller.current.blocks).toHaveLength(0); // estado fresco de novo
     const frame = lastFrame() ?? '';
-    // a régua acima do composer NÃO some pós-clear (era o bug do Tiago em sessão fresca).
-    expect(chromeDividers(frame)).toBe(4);
-    expect(hasAdjacentChromeDividers(frame)).toBe(false);
+    // a moldura do composer NÃO some pós-clear (era o bug do Tiago em sessão fresca).
+    expect(composerFramed(frame)).toBe(true);
+    expect(chromeRules(frame)).toBe(0);
+    expect(chromeColado(frame)).toBe(false);
     unmount();
   });
 
-  it('com 2 turnos REAIS (você↔aluy) ⇒ 4 réguas de chrome (INALTERADO) + traço sutil por-turno', async () => {
+  it('com 2 turnos REAIS (você↔aluy) ⇒ moldura INALTERADA + respiro por-turno', async () => {
     const controller = buildController('pronto.');
     const { lastFrame, unmount } = renderApp(controller);
     controller.dismissBoot();
@@ -225,10 +240,17 @@ describe('App — a moldura do composer é SIMÉTRICA e NÃO colapsa em sessão 
 
     const frame = lastFrame() ?? '';
     expect(controller.current.blocks.some((b) => b.kind === 'you' || b.kind === 'aluy')).toBe(true);
-    // com turnos ⇒ 4 réguas de chrome (IGUAL ao vazio: a moldura é estável).
-    expect(chromeDividers(frame)).toBe(4);
-    // o traço SUTIL por-turno (antes do 2º `you`) NÃO regrediu.
-    expect(subtleDividers(frame)).toBeGreaterThanOrEqual(1);
+    // com turnos ⇒ moldura do composer IGUAL à do vazio (ela é estável).
+    expect(composerFramed(frame)).toBe(true);
+    expect(chromeRules(frame)).toBe(0);
+    // o RESPIRO por-turno (antes do 2º `you`) NÃO regrediu — mudou de traço p/ espaço:
+    // "a separação de turno já é dada pelo próprio rótulo e pelo espaço; um traço solto
+    // no meio da conversa é ruído com aparência de conteúdo" (decisão do dono).
+    const rs = rows(frame);
+    const yous = rs.map((l, i) => (/^▌ você$/.test(l.trimEnd()) ? i : -1)).filter((i) => i >= 0);
+    expect(yous).toHaveLength(2);
+    expect(blankRunAbove(rs, yous[1]!)).toBeGreaterThan(blankRunAbove(rs, yous[0]!));
+    expect(subtleRules(frame)).toBe(0);
     unmount();
   });
 });

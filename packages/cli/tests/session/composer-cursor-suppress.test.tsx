@@ -135,12 +135,21 @@ function buildSession() {
   return { controller, resolveGate: (i: number) => gates[i]!.resolve(), ...r };
 }
 
-// A última linha que começa com `›` é o COMPOSER (o input fica no rodapé). Devolve o
+// F-COMPOSER-CAIXA / F-BLOCOS-PINTADOS (reforma de UI pedida pelo dono) — tanto o
+// composer quanto os blocos de fala viraram CAIXAS: o Ink desenha a barra `┃`
+// (borderLeft) no início de TODA linha do bloco. Descascar a moldura é o que devolve
+// aos helpers abaixo o mesmo alcance que `trimStart()` tinha antes.
+function unframe(line: string): string {
+  return line.replace(/^[\s┃│|]+/, '');
+}
+
+// A última linha que começa com o prompt é o COMPOSER (o input fica no rodapé). Devolve o
 // texto digitado (ou '' no placeholder).
+// F-COMPOSER-CAIXA — o prompt passou de `›` para `❯` e ganhou a barra `┃` na frente.
 function composerLine(s: { lastFrame: () => string | undefined }): string {
   const rows = plain(s.lastFrame() ?? '')
     .split('\n')
-    .filter((l) => l.trimStart().startsWith('›'));
+    .filter((l) => unframe(l).startsWith('❯'));
   const row = rows[rows.length - 1] ?? '';
   return row;
 }
@@ -163,16 +172,26 @@ async function tap(s: { stdin: { write: (x: string) => void } }, seq: string) {
   await new Promise((r) => setTimeout(r, 30));
 }
 
-// O `●` é reusado no header (`● broker`) — então uma busca frame-wide por `●` é
-// confundida. Esta helper isola a REGIÃO DE FALA viva do aluy (linhas DEPOIS do
-// rótulo `Λ aluy`/`/\ aluy`, até a divisória do composer) onde o cursor de trabalho
-// mora. Assim provamos a PRESENÇA/AUSÊNCIA do ● de trabalho sem o ruído do header.
+// O `●` é reusado noutros pontos da tela — então uma busca frame-wide por `●` é
+// confundida. Esta helper isola a REGIÃO DE FALA viva do aluy (linhas DEPOIS do rótulo
+// do bloco do agente, até o composer) onde o cursor de trabalho mora. Assim provamos a
+// PRESENÇA/AUSÊNCIA do ● de trabalho sem o ruído do resto do chrome.
+//
+// O que mudou no desenho (pedido do dono) e por quê a busca mudou junto:
+//   • o rótulo do bloco do agente deixou de ser `Λ aluy` (marca + palavra ao lado) e
+//     passou a ser a ASSINATURA `Λluy` — "a marca é a primeira letra do nome, não um
+//     ícone ao lado dele". Logo o `/ aluy$/` de antes não casa mais com nada;
+//   • o bloco ganhou moldura: a barra `┃` abre TODA linha dele (daí o `unframe`);
+//   • a RÉGUA que fechava a região saiu ("as linhas no CLI deixam uma cara muito ruim"):
+//     o <Divider> devolve linha VAZIA. O fim da região passa a ser a linha do COMPOSER
+//     (hoje `❯`), que é o que a régua marcava na prática.
 function aluySpeechRegion(s: { lastFrame: () => string | undefined }): string {
   const lines = plain(s.lastFrame() ?? '').split('\n');
-  const start = lines.findIndex((l) => / aluy$/.test(l.trimEnd()));
+  // `Λluy` (unicode) ou `/\luy` (fallback ASCII) — a assinatura do bloco do agente.
+  const start = lines.findIndex((l) => /^(?:Λ|\/\\)luy\b/.test(unframe(l)));
   if (start < 0) return '';
   const rest = lines.slice(start + 1);
-  const end = rest.findIndex((l) => /^─+$/.test(l.trim()) || l.trimStart().startsWith('›'));
+  const end = rest.findIndex((l) => unframe(l).startsWith('❯'));
   return (end < 0 ? rest : rest.slice(0, end)).join('\n');
 }
 
