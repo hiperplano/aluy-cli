@@ -366,6 +366,34 @@ export function Composer(props: ComposerProps): React.ReactElement {
       houveQuebra: quebrado.length > 1,
     };
   })();
+  // F-COMPOSER-WRAP (2/2) — as linhas INTERMEDIÁRIAS também precisam alcançar a borda.
+  //
+  // O `fillCols` abaixo completa só a ÚLTIMA linha; as do meio ficavam com o resto do wrap —
+  // medido: 95 colunas num bloco de 119 quando a quebra cai numa palavra longa, um buraco de
+  // 24 colunas no meio da caixa. Como `<Text backgroundColor>` só pinta onde há caractere, a
+  // única forma de preenchê-las é o texto TER os espaços.
+  //
+  // Por isso o texto é quebrado aqui e cada linha (menos a última) é completada até a
+  // largura útil. Com as linhas já do tamanho exato, o wrap do Ink cai nos mesmos pontos —
+  // o que se vê é idêntico, só que com fundo até o fim.
+  //
+  // SÓ com o cursor no FIM. `<TextWithCursor>` posiciona o cursor por ÍNDICE no texto, e os
+  // espaços inseridos deslocariam esse índice: o cursor pousaria no lugar errado ao editar no
+  // meio. Editar no meio de um texto que já quebrou é raro; digitar até quebrar é o caso de
+  // todo dia — e é esse que fica certo. No outro, o comportamento é o de antes.
+  const cursorNoFim = win.cursor >= win.text.length;
+  const textoJustificado = ((): string | undefined => {
+    if (!houveQuebra || !cursorNoFim || larguraUtil === undefined) return undefined;
+    const disponivel = Math.max(1, larguraUtil - indentCols);
+    const linhas = wrapAnsi(win.text, disponivel, { trim: false, hard: true }).split('\n');
+    if (linhas.length < 2) return undefined;
+    return linhas
+      .map((ln, i) =>
+        i === linhas.length - 1 ? ln : ln + ' '.repeat(Math.max(0, disponivel - displayWidth(ln))),
+      )
+      .join('\n');
+  })();
+
   // O recuo do prompt (`❯ `) só existe na PRIMEIRA linha visual: quando o texto quebra, a
   // continuação começa na margem. Somá-lo sempre encurtava o preenchimento em duas colunas
   // exatas nas linhas de continuação.
@@ -404,8 +432,8 @@ export function Composer(props: ComposerProps): React.ReactElement {
           // (meio ou fim) — EST-0948. No meio, o char sob o cursor é realçado (sem coluna
           // extra); no fim, a barra segue o texto (1 coluna). Largura constante (anti-jitter).
           <TextWithCursor
-            text={win.text}
-            pos={win.cursor}
+            text={textoJustificado ?? win.text}
+            pos={textoJustificado !== undefined ? textoJustificado.length : win.cursor}
             showCursor={showCursor}
             active={props.active}
             cursorGlyph={cursorGlyph}
