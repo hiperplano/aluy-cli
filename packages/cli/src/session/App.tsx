@@ -4481,7 +4481,7 @@ export function App(props: AppProps): React.ReactElement {
   // `null` quando não há decisão pendente ⇒ o cockpit segue exatamente como hoje.
   const renderDecisionDialog = (): React.ReactElement | null => {
     if (state.phase === 'asking' && state.pendingAsk) {
-      return <AskDialog request={state.pendingAsk.request} {...askEgress} />;
+      return <AskDialog request={state.pendingAsk.request} columns={columns} {...askEgress} />;
     }
     if (state.phase === 'questioning' && state.pendingQuestion) {
       return (
@@ -4779,7 +4779,7 @@ export function App(props: AppProps): React.ReactElement {
 
       {state.phase === 'asking' && state.pendingAsk && (
         <Box paddingTop={1}>
-          <AskDialog request={state.pendingAsk.request} {...askEgress} />
+          <AskDialog request={state.pendingAsk.request} columns={columns} {...askEgress} />
         </Box>
       )}
 
@@ -4798,7 +4798,7 @@ export function App(props: AppProps): React.ReactElement {
 
       {state.phase === 'budget' && state.pendingBudget && (
         <Box paddingTop={1}>
-          <BudgetGate {...state.pendingBudget} canCompact={controller.canCompact} />
+          <BudgetGate {...state.pendingBudget} columns={columns} canCompact={controller.canCompact} />
         </Box>
       )}
 
@@ -4807,7 +4807,7 @@ export function App(props: AppProps): React.ReactElement {
           (DADO rotulado, 1 linha). Default seguro = encerrar (n/timeout/esc). */}
       {state.phase === 'cycle-ceiling' && state.pendingCycleCeiling && (
         <Box paddingTop={1}>
-          <CycleCeilingGate {...state.pendingCycleCeiling} />
+          <CycleCeilingGate {...state.pendingCycleCeiling} columns={columns} />
         </Box>
       )}
 
@@ -4828,7 +4828,7 @@ export function App(props: AppProps): React.ReactElement {
           que travou e oferece [r] redirecionar / [c] continuar / [n] encerrar. */}
       {state.phase === 'stuck' && state.pendingStuck && (
         <Box paddingTop={1}>
-          <StuckGate {...state.pendingStuck} redirecting={stuckRedirecting} />
+          <StuckGate {...state.pendingStuck} columns={columns} redirecting={stuckRedirecting} />
         </Box>
       )}
     </>
@@ -5502,6 +5502,7 @@ export function BlockView(props: {
     case 'broker-error':
       return (
         <BrokerError
+          columns={props.columns ?? 80}
           message={b.message}
           {...(b.headline !== undefined ? { headline: b.headline } : {})}
           {...(b.status !== undefined ? { status: b.status } : {})}

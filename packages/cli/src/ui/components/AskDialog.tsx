@@ -22,6 +22,7 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
+import { displayWidth } from '../../session/visual-lines.js';
 import type { AskRequest } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { resolveLanguage } from '../markdown/index.js';
@@ -46,6 +47,16 @@ export interface AskDialogProps {
   readonly egressOutsideAllowlist?: boolean;
   /** Destino exato de rede (host/URL) a exibir (CLI-SEC-5/9). */
   readonly egressTarget?: string;
+  /**
+   * F-MOLDURA-FECHA — largura do terminal.
+   *
+   * As três linhas da moldura tinham comprimentos CRAVADOS e diferentes entre si (`repeat(2)`
+   * no topo, `repeat(40)` na régua, `repeat(42)` na base). Medido na tela: 31, 42 e 44
+   * colunas na MESMA caixa — o topo terminava antes, a régua no meio e a base depois, e o
+   * conjunto lia como três traços soltos em vez de um retângulo. Com a largura conhecida, as
+   * três passam a derivar da mesma medida.
+   */
+  readonly columns?: number;
 }
 
 /** `true` p/ categorias que elevam fricção (destrutivo) — ordem invertida (§2.10). */
@@ -85,6 +96,14 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
 
   const tag = destructive ? 'destrutivo · ask' : 'ask';
 
+  // Teto de 72 para a caixa não virar uma faixa gigante em terminal largo (a decisão é
+  // curta; uma moldura de 200 colunas afasta o olho do que importa). `-4`: o recuo de 2 do
+  // bloco mais os dois cantos.
+  const larguraCaixa = Math.max(24, Math.min(72, (props.columns ?? 80) - 4));
+  /** Traço que completa uma linha da moldura até fechar na largura única. */
+  const preencher = (usado: number, glifo: string): string =>
+    glifo.repeat(Math.max(1, larguraCaixa - usado));
+
   return (
     <Box flexDirection="column" paddingLeft={2}>
       {/* topo do box: a TAG de estado vem PRIMEIRO/à esquerda (§3.4 title-tag):
@@ -94,7 +113,19 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
         <Glyph name="ask" role="accent" />
         <Role name="accent">
           {' '}
-          {tag} ─ {titleSuffixOf(req)} {theme.box.horizontal.repeat(2)}
+          {tag} ─ {titleSuffixOf(req)}{' '}
+          {preencher(
+            // Conta explícita do que ocupa a linha antes do traço:
+            //   `┏` (1) + espaço (1) + glifo + espaço (1) + título + espaço (1) + `┓` (1).
+            // O glifo de aviso é largo (2 células na maioria dos terminais), e ignorar isso
+            // — junto com o canto direito — era o que fazia o topo passar 3 colunas da
+            // régua e da base.
+            // O `+1` extra é o glifo de aviso: `⚠` é medido como 1 por `string-width` mas
+            // ocupa 2 células na maioria dos terminais (variation selector ausente). Medido
+            // em PTY: sem ele o topo fecha uma coluna depois da régua e da base.
+            6 + displayWidth(theme.glyph('ask')) + displayWidth(`${tag} ─ ${titleSuffixOf(req)}`),
+            theme.box.horizontal,
+          )}
           {theme.box.topRight}
         </Role>
       </Box>
@@ -138,7 +169,7 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
           (┠┨), miolo com `innerHorizontal` (LEVE), não `horizontal` (a borda, grossa). */}
       <Role name="accent">
         {theme.box.teeLeft}
-        {theme.box.innerHorizontal.repeat(40)}
+        {preencher(2, theme.box.innerHorizontal)}
         {theme.box.teeRight}
       </Role>
 
@@ -182,7 +213,7 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
 
       <Role name="accent">
         {theme.box.bottomLeft}
-        {theme.box.horizontal.repeat(42)}
+        {preencher(2, theme.box.horizontal)}
         {theme.box.bottomRight}
       </Role>
 

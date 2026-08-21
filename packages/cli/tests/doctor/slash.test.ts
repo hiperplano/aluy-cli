@@ -110,7 +110,7 @@ describe('/doctor — runner de sessão (ticks ao vivo)', () => {
     );
 
     expect(final.checks.some((c) => c.id === 'tier')).toBe(false);
-    expect(final.checks).toHaveLength(10);
+    expect(final.checks).toHaveLength(11) // F-DOCTOR-BYO: + `provider (BYO)` sob backend local;
   });
 
   it('COM --deep (tierTester injetado): adiciona o check de tier e o testa', async () => {

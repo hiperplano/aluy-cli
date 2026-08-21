@@ -15,6 +15,11 @@ import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 
 export interface BudgetGateProps {
+  /**
+   * F-MOLDURA-FECHA — largura do terminal. Topo e base usavam traços de comprimentos
+   * diferentes e cravados, então a caixa abria numa largura e fechava em outra.
+   */
+  readonly columns?: number;
   readonly reason: string;
   readonly toolCalls: number;
   readonly tokens: number;
@@ -39,12 +44,17 @@ function abbreviateCeiling(n: number): string {
 
 export function BudgetGate(props: BudgetGateProps): React.ReactElement {
   const theme = useTheme();
+  // Mesma medida do `<AskDialog>`: teto de 72, menos os cantos e o recuo do bloco.
+  const larguraCaixa = Math.max(24, Math.min(72, (props.columns ?? 80) - 4));
+  const preencher = (usado: number): string =>
+    theme.box.horizontal.repeat(Math.max(1, larguraCaixa - usado));
+
   return (
     <Box flexDirection="column" paddingLeft={2}>
       <Box>
         <Role name="accent">{theme.box.topLeft} </Role>
         <Glyph name="clock" role="accent" />
-        <Role name="accent"> teto da sessão {theme.box.horizontal.repeat(6)} pausado</Role>
+        <Role name="accent"> teto da sessão {preencher(17 + 7)} pausado</Role>
       </Box>
       <Box>
         <Role name="accent">{theme.box.vertical} </Role>
@@ -86,7 +96,7 @@ export function BudgetGate(props: BudgetGateProps): React.ReactElement {
       </Box>
       <Role name="accent">
         {theme.box.bottomLeft}
-        {theme.box.horizontal.repeat(42)}
+        {preencher(2)}
       </Role>
     </Box>
   );

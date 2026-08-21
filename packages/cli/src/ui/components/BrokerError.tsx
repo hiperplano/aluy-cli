@@ -7,9 +7,16 @@
 
 import React from 'react';
 import { Box } from 'ink';
+import { displayWidth } from '../../session/visual-lines.js';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 
 export interface BrokerErrorProps {
+  /**
+   * F-MOLDURA-FECHA — largura do terminal. Topo e base tinham traços de comprimentos
+   * diferentes (4 e 40), então a caixa do erro nunca fechava: começava estreita e terminava
+   * larga. Com a largura conhecida as duas derivam da mesma medida.
+   */
+  readonly columns?: number;
   readonly status?: number;
   readonly message: string;
   /**
@@ -52,6 +59,12 @@ export function BrokerError(props: BrokerErrorProps): React.ReactElement {
     props.backend === 'local' ? 'provider local indisponível' : 'broker indisponível';
   const headline = props.retrying ? 'tentando de novo' : (props.headline ?? defaultHeadline);
   const affordance = props.retrying ? 'esc cancelar' : 'r tentar agora · esc cancelar';
+  // `-6`: o recuo de 4 do bloco mais os dois cantos. Teto de 72 pelo mesmo motivo do
+  // `<AskDialog>`: uma moldura larga demais espalha a mensagem em vez de emoldurá-la.
+  const larguraCaixa = Math.max(24, Math.min(72, (props.columns ?? 80) - 6));
+  const preencher = (usado: number): string =>
+    theme.box.horizontal.repeat(Math.max(1, larguraCaixa - usado));
+
   return (
     <Box flexDirection="column" paddingLeft={4}>
       <Box>
@@ -59,7 +72,7 @@ export function BrokerError(props: BrokerErrorProps): React.ReactElement {
         <Glyph name="broker" role="depth" />
         <Role name="danger">
           {' '}
-          {headline} {theme.box.horizontal.repeat(4)}{' '}
+          {headline} {preencher(6 + displayWidth(headline))}{' '}
         </Role>
         <Glyph name="err" role="danger" />
       </Box>
@@ -89,7 +102,7 @@ export function BrokerError(props: BrokerErrorProps): React.ReactElement {
       </Box>
       <Role name="danger">
         {theme.box.bottomLeft}
-        {theme.box.horizontal.repeat(40)}
+        {preencher(1)}
       </Role>
     </Box>
   );

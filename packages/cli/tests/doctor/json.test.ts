@@ -72,7 +72,7 @@ describe('aluy doctor --json', () => {
 
     const parsed = JSON.parse(lines[0]!);
     expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed).toHaveLength(10);
+    expect(parsed).toHaveLength(11) // F-DOCTOR-BYO: + `provider (BYO)` sob backend local;
 
     for (const item of parsed) {
       expect(item).toHaveProperty('id');
