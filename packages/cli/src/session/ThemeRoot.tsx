@@ -31,6 +31,8 @@ export interface ThemeRootProps extends Omit<
    * ao trocar de tema (a capacidade da fonte não muda com a paleta).
    */
   readonly safeGlyphs?: boolean;
+  /** F-ASCII-DE-VERDADE — `--ascii` força o conjunto ASCII puro (ver `asciiOnly` no tema). */
+  readonly asciiOnly?: boolean;
   /** Notifica o wiring quando o tema muda (ex.: empurrar a nota). Opcional. */
   readonly onThemeChanged?: (theme: ThemeName) => void;
   /**
@@ -48,6 +50,7 @@ export function ThemeRoot(props: ThemeRootProps): React.ReactElement {
     env,
     density,
     safeGlyphs,
+    asciiOnly,
     onThemeChanged,
     initialLang,
     onLangChanged,
@@ -64,8 +67,9 @@ export function ThemeRoot(props: ThemeRootProps): React.ReactElement {
         ...(env !== undefined ? { env } : {}),
         ...(density !== undefined ? { density } : {}),
         ...(safeGlyphs !== undefined ? { safeGlyphs } : {}),
+        ...(asciiOnly !== undefined ? { asciiOnly } : {}),
       }),
-    [active, env, density, safeGlyphs],
+    [active, env, density, safeGlyphs, asciiOnly],
   );
 
   // EST-0989 — o `I18n` (lang + `t`) memo pelo idioma ativo: troca de ref só ao mudar

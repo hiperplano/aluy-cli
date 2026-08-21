@@ -154,6 +154,15 @@ export interface ResolveThemeInput {
    */
   readonly safeGlyphs?: boolean;
   /**
+   * F-ASCII-DE-VERDADE — força o conjunto ASCII PURO, mesmo em terminal com Unicode.
+   *
+   * A flag `--ascii` marcava apenas o perfil SAFE (unicode conservador), então símbolos
+   * como `⏎` e `↑` continuavam saindo — justamente num modo que alguém liga porque o
+   * terminal NÃO renderiza esses caracteres. Quem pede ASCII quer ASCII; o perfil
+   * conservador segue disponível por `ALUY_SAFE_GLYPHS`.
+   */
+  readonly asciiOnly?: boolean;
+  /**
    * F-NERD-GLYPHS — override do perfil NERD FONT (`ALUY_NERD_GLYPHS` / config
    * `nerdGlyphs`). `true` ⇒ usa NERD_GLYPHS mesmo sem o env (ex.: config
    * persistida). Sem efeito quando ASCII puro ou `safeGlyphs` vencem (opt-in
@@ -262,7 +271,7 @@ export function resolveTheme(input: ResolveThemeInput = {}): Theme {
   const superficie = (passos: number): string | undefined =>
     fundoTerminal !== null ? surfaceFrom(fundoTerminal, passos) : undefined;
   const brightness = detectBrightness(env, input.theme);
-  const unicode = detectUnicode(env);
+  const unicode = input.asciiOnly === true ? false : detectUnicode(env);
   // SAFE só faz sentido quando há Unicode (em ASCII puro o conjunto ASCII vence).
   const safeGlyphs = unicode && detectSafeGlyphs(env, input.safeGlyphs);
   // F-NERD-GLYPHS — NERD só faz sentido com Unicode E sem SAFE já vencendo:

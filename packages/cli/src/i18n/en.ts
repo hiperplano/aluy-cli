@@ -19,7 +19,7 @@ export const en: PartialCatalog = {
   'composer.moreLines': 'lines',
 
   // ── FooterHints ───────────────────────────────────────────────────────────
-  'hints.idle': '⏎ send · / commands · ↑ history',
+  'hints.idle': '{enter} send · / commands · {up} history',
   'hints.thinking': 'esc interrupt · ctrl-c×2 quit',
   'hints.streaming': 'esc interrupt · ctrl-c×2 quit',
   'hints.ask': 'a approve · s always · n deny · e edit · esc cancel',
@@ -74,6 +74,7 @@ export const en: PartialCatalog = {
   'statusbar.brokerError': 'broker error',
   // F-PAINEL — rótulos da coluna esquerda do painel de status. Curtos de propósito:
   // é o ALINHAMENTO deles que cria a coluna, e um rótulo longo comeria a área do valor.
+  'boot.instructions': 'instructions',
   'painel.credito': 'credit',
   'painel.sessao': 'session',
   'painel.estado': 'state',

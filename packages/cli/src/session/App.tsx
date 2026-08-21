@@ -3765,7 +3765,10 @@ export function App(props: AppProps): React.ReactElement {
             setText('');
             setSlashOpen(false);
             setSlashSel(0);
-            controller.replaceNote('slash-unknown', [
+            // O rótulo da nota é EXIBIDO (`◕ <rótulo>`), então precisa ser palavra de UI e
+            // não identificador interno: `slash-unknown` aparecia cru no meio de uma tela
+            // em português.
+            controller.replaceNote('comando', [
               `comando desconhecido: ${typed || '/'} — veja /help para a lista.`,
             ]);
           }

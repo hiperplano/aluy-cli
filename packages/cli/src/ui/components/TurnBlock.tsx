@@ -88,7 +88,9 @@ export function YouBlock(props: YouBlockProps): React.ReactElement {
   return (
     <Box
       flexDirection="column"
-      borderStyle="bold"
+      // F-ASCII-DE-VERDADE — a borda do Ink não passa pelo tema: em perfil ASCII o
+      // `bold` desenha `┃`, que é justamente o que esse modo existe para evitar.
+      borderStyle={theme.unicode ? 'bold' : 'classic'}
       borderTop={false}
       borderRight={false}
       borderBottom={false}
@@ -320,7 +322,9 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
   return (
     <Box
       flexDirection="column"
-      borderStyle="bold"
+      // F-ASCII-DE-VERDADE — a borda do Ink não passa pelo tema: em perfil ASCII o
+      // `bold` desenha `┃`, que é justamente o que esse modo existe para evitar.
+      borderStyle={theme.unicode ? 'bold' : 'classic'}
       borderTop={false}
       borderRight={false}
       borderBottom={false}

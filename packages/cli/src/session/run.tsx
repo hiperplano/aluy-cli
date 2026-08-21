@@ -2620,7 +2620,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // do `initialTheme` ao montar e a cada troca do `/theme` — esta é a fotografia 1.
   // EST-0984 — o `--ascii` (opts.safeGlyphs) entra como override do perfil seguro
   // em TODA resolução de tema (fotografia 1 e re-resoluções do <ThemeRoot>).
-  const safeGlyphsOverride = opts.safeGlyphs ? { safeGlyphs: true as const } : {};
+  // `--ascii` pede ASCII PURO (ver `asciiOnly` no tema); o perfil conservador continua
+  // acessível por `ALUY_SAFE_GLYPHS`.
+  const safeGlyphsOverride = opts.safeGlyphs
+    ? { safeGlyphs: true as const, asciiOnly: true as const }
+    : {};
   const denseOverride = opts.dense ? { density: 'compact' as const } : {};
   const theme = resolveThemeName(initialTheme)
     ? resolveTheme({
@@ -2693,6 +2697,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // indicar (sem fontes ⇒ silêncio, prompt baseline). Não muda comportamento.
   {
     const lines = describeConfigSources({
+      t: makeI18n(initialLang).t,
       instructionSources,
       globalCommands: globalUserCommands.length,
       projectCommands: projectUserCommands.length,
@@ -5000,6 +5005,11 @@ export function resolveWindowSources(input: {
  * carregou (sem fontes ⇒ a nota nem aparece). Exportado p/ teste.
  */
 export function describeConfigSources(input: {
+  /**
+   * Tradutor injetado: a função é PURA (exportada p/ teste) e não alcança o contexto de
+   * i18n. Ausente ⇒ rótulo em PT, que era o comportamento de sempre.
+   */
+  readonly t?: (key: 'boot.instructions') => string;
   readonly instructionSources: readonly string[];
   readonly globalCommands: number;
   readonly projectCommands: number;
@@ -5010,7 +5020,8 @@ export function describeConfigSources(input: {
 }): readonly string[] {
   const lines: string[] = [];
   if (input.instructionSources.length > 0) {
-    lines.push(`instruções: ${input.instructionSources.join(' + ')}`);
+    // i18n: o rótulo estava cravado em PT e ficava em português na UI em inglês.
+    lines.push(`${input.t?.('boot.instructions') ?? 'instruções'}: ${input.instructionSources.join(' + ')}`);
   }
   const cmdParts: string[] = [];
   if (input.globalCommands > 0) cmdParts.push(`~/.aluy/commands (${input.globalCommands})`);
