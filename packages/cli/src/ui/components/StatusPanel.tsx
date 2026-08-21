@@ -56,11 +56,13 @@ interface Seg {
 }
 
 /**
- * Largura da coluna de rótulos. Cabe o maior deles (`sessão`, `estado`, `uso` ⇒ 6) mais
+ * Largura da coluna de rótulos. EXPORTADA porque o `<NoteBlock>` (as notas de boot, no topo
+ * da tela) usa a mesma: é ela que faz o topo e o rodapé lerem como um sistema só, e mudar
+ * um sem o outro reabre a divergência que a harmonização veio fechar. Cabe o maior deles (`sessão`, `estado`, `uso` ⇒ 6) mais
  * dois espaços de respiro — é o alinhamento dessa coluna que faz os três itens lerem como
  * uma tabela em vez de três parágrafos.
  */
-const ROTULO_COLS = 8;
+export const ROTULO_COLS = 8;
 
 /** Largura visual total de uma sequência de segmentos. */
 function larguraSegs(segs: readonly Seg[]): number {

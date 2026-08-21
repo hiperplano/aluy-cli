@@ -4898,7 +4898,11 @@ export function App(props: AppProps): React.ReactElement {
           if (item === HEADER_ITEM) {
             // Item 0 — HEADER no TOPO, emoldurado pelas divisórias (EST-0987/0985).
             return (
-              <Box key="header" flexDirection="column">
+              // F-HEADER-HARMONIA (C) — o header (logo, identidade) passa a ancorar na
+              // MESMA coluna do painel de status e das notas. Antes o topo começava na
+              // margem e o rodapé duas colunas adiante: duas margens esquerdas na mesma
+              // tela, que é o que fazia o conjunto não fechar.
+              <Box key="header" flexDirection="column" paddingLeft={2}>
                 {/* EST-0987 (1/3) — divisória ACIMA do header. */}
                 {showHeaderDivider && <Divider columns={columns} />}
                 <Header
@@ -5469,7 +5473,10 @@ export function BlockView(props: {
       );
     case 'note':
       return (
-        <Box paddingBottom={1}>
+        // F-HEADER-HARMONIA (C) — mesma margem esquerda do painel de status. A tela tinha
+        // DUAS margens: o topo ancorava na coluna 0 e o rodapé na 2, e o olho percebia o
+        // desencontro mesmo sem saber nomeá-lo.
+        <Box paddingBottom={1} paddingLeft={2}>
           <NoteBlock title={b.title} lines={b.lines} />
         </Box>
       );
