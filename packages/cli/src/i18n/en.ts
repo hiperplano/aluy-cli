@@ -93,7 +93,7 @@ export const en: PartialCatalog = {
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': 'broker',
-  'boot.tagline': 'Aluy Cli · terminal agent',
+  'boot.tagline': 'Λluy Cli · terminal agent',
   'boot.connecting': 'connecting',
   'boot.entering': 'signing in',
 

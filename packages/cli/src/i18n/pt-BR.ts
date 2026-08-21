@@ -99,7 +99,7 @@ export const ptBR: FullCatalog = {
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': 'broker',
-  'boot.tagline': 'Aluy Cli · agente de terminal',
+  'boot.tagline': 'Λluy Cli · agente de terminal',
   'boot.connecting': 'conectando',
   'boot.entering': 'entrando',
 

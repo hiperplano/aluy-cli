@@ -65,21 +65,6 @@ export interface HeaderProps {
    */
   readonly rows?: number;
   /**
-   * F-HEADER-CARTAO (pedido do dono: "consegue ter uma pequena paisagem na área do aluy no
-   * header que não está útil?") — linhas de identidade desenhadas AO LADO do wordmark.
-   *
-   * A marca ocupa ~7 linhas e ~35 colunas; o resto da faixa fica vazio em qualquer terminal
-   * de largura razoável. Era a maior área ociosa da tela, e o preço dela é alto: o topo
-   * inteiro existia só para enfeitar.
-   *
-   * O que entra aqui é o que MUDA POUCO — provider, modelo, o que a config carregou. O
-   * header vive no `<Static>`: é desenhado uma vez e rola para fora com o histórico, então
-   * dado vivo congelaria aqui. Os medidores (janela, sessão, crédito) ficam no rodapé, que
-   * é redesenhado a cada turno. A divisão não é estética: é onde cada informação pode ser
-   * verdadeira.
-   */
-  readonly card?: readonly string[];
-  /**
    * EST-0989 — versão do binário (`CLI_VERSION`), passada pela App. Renderizada como
    * `v<versão>` (depth/mono) no subtítulo `Aluy CLI · Terminal v<versão>`. Ausente ⇒
    * o subtítulo cai p/ `Aluy CLI · Terminal` (sem a versão; degradação graciosa).
@@ -105,7 +90,18 @@ export const HEADER_BANNER_MIN_ROWS = WORDMARK_ROWS + 13;
 export const HEADER_WORDMARK_3D_MIN_ROWS = HEADER_BANNER_MIN_ROWS + 1;
 
 /** Nome de PRODUTO no header (mesma string no banner e no compacto). */
-const PRODUCT_NAME = 'Aluy Cli';
+/**
+ * F-MARCA-LAMBDA (pedido do dono) — a marca escrita com o Λ no lugar do A, como já assina o
+ * bloco de resposta (`Λluy`). O símbolo deixa de ser um ícone ao lado do nome e passa a ser
+ * a primeira letra dele, e o produto se escreve do mesmo jeito em toda a tela.
+ *
+ * Em perfil sem Unicode cai para `Aluy Cli`: o Λ é grego (U+039B) e tem cobertura larga, mas
+ * o modo ASCII existe justamente para quem não pode contar com isso — e um nome de produto
+ * virando caixa vazia é pior que um nome sem estilo.
+ */
+function productName(unicode: boolean): string {
+  return unicode ? 'Λluy Cli' : 'Aluy Cli';
+}
 
 /**
  * Subtítulo do BANNER (EST-0989) — `Aluy CLI · Terminal v<versão>`.
@@ -124,9 +120,10 @@ function BannerSubtitle(props: {
   readonly narrow: boolean;
   readonly error: boolean | undefined;
 }): React.ReactElement {
+  const theme = useTheme();
   return (
     <Box>
-      <Role name="fg">{PRODUCT_NAME}</Role>
+      <Role name="fg">{productName(theme.unicode)}</Role>
       {props.sub !== undefined && props.sub !== '' ? (
         // Subcontexto (entrar/comandos): `Aluy CLI · <sub>` em vez de `· Terminal`.
         <>
@@ -170,12 +167,19 @@ function CompactLine(props: {
   readonly narrow: boolean;
   readonly error: boolean | undefined;
 }): React.ReactElement {
+  const theme = useTheme();
   return (
     <Box>
-      {/* A marca Λ (mesma do loader/thinking) abre o compacto. */}
-      <Glyph name="aluy" role="accent" />
-      <Text> </Text>
-      <Role name="fg">{PRODUCT_NAME}</Role>
+      {/* O glifo Λ separado saiu: o nome já começa com ele (`Λluy Cli`), e manter os dois
+          escrevia `Λ Λluy Cli`. Em ASCII o nome perde o Λ e o glifo volta a fazer falta —
+          por isso ele reaparece só nesse perfil. */}
+      {!theme.unicode && (
+        <>
+          <Glyph name="aluy" role="accent" />
+          <Text> </Text>
+        </>
+      )}
+      <Role name="fg">{productName(theme.unicode)}</Role>
       {/* Subcontexto (entrar/comandos): `Aluy CLI · <sub>` antes do tier. */}
       {props.sub !== undefined && props.sub !== '' && (
         <>
@@ -231,11 +235,7 @@ export function Header(props: HeaderProps): React.ReactElement {
   const wants3d = theme.unicode && rows >= HEADER_WORDMARK_3D_MIN_ROWS;
 
   // Banner: WORDMARK grande (marca) + subtítulo ABAIXO.
-  const card = props.card ?? [];
-  // O cartão só entra quando há largura para ele não espremer a marca.
-  const cabeCartao = card.length > 0 && columns >= 96;
-
-  const marca = (
+  return (
     <Box flexDirection="column">
       {wants3d ? <ShadowedWordmark frame={0} animate={false} /> : <Wordmark columns={columns} />}
       <BannerSubtitle
@@ -244,20 +244,6 @@ export function Header(props: HeaderProps): React.ReactElement {
         narrow={narrow}
         error={props.error}
       />
-    </Box>
-  );
-
-  if (!cabeCartao) return marca;
-  return (
-    <Box>
-      {marca}
-      <Box flexDirection="column" paddingLeft={3} paddingTop={2}>
-        {card.map((linha, i) => (
-          <Role key={i} name="fgDim">
-            {linha}
-          </Role>
-        ))}
-      </Box>
     </Box>
   );
 }

@@ -4911,13 +4911,6 @@ export function App(props: AppProps): React.ReactElement {
                   // modelo e o que a config carregou. Os medidores ficam no rodapé, que é
                   // redesenhado a cada turno; aqui congelariam, porque o header vive no
                   // `<Static>`.
-                  // Só o que SAI do rodapé — nada aparece nos dois lugares. O `config` é o
-                  // candidato natural: é o mais estável dos quatro itens do painel e o menos
-                  // consultado no meio do trabalho, então perde pouco ao rolar para fora com
-                  // o header, e devolve uma linha ao rodapé.
-                  card={(state.configSources ?? []).map(
-                    (f) => `${theme.unicode ? '▤' : '#'} ${f}`,
-                  )}
                   tier={headerTierDisplay}
                   columns={columns}
                   rows={rows}
@@ -5318,12 +5311,7 @@ export function App(props: AppProps): React.ReactElement {
       <Box paddingLeft={2} flexDirection="column">
       <StatusPanel
         mode={state.mode}
-        // F-HEADER-CARTAO — o `config` vive no cartão do header; repeti-lo aqui seria a
-        // mesma informação duas vezes na mesma tela. Volta ao rodapé quando o header não
-        // cabe (terminal estreito) — ver `cabeCartao` no <Header>.
-        {...(state.configSources !== undefined && columns < 96
-          ? { configSources: state.configSources }
-          : {})}
+        {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
         {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
         cwd={state.meta.cwd}
         tier={tierDisplay}
