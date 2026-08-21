@@ -28,6 +28,16 @@ export interface ExportHeader {
   readonly label?: string;
   /** Tier em uso (HG-2: só o tier, nunca o provider/modelo de roteamento). */
   readonly tier?: string;
+  /**
+   * F-EXPORT-MODELO — provider e modelo que de fato geraram as respostas.
+   *
+   * O cabeçalho registrava só o `tier` (`aluy-flux`), que sob backend próprio é um rótulo
+   * interno sem significado do lado de fora. Quem abre o `.md` depois — para revisar, para
+   * auditar, para comparar duas execuções — não tinha como saber qual modelo respondeu, que
+   * é justamente a variável que explica a diferença entre um transcript e outro.
+   */
+  readonly provider?: string;
+  readonly model?: string;
   /** Timestamp ISO do export (injetável p/ teste determinístico). */
   readonly exportedAt?: string;
 }
@@ -139,6 +149,10 @@ export function buildTranscript(
     metaParts.push(`id: ${header.sessionId}`);
   if (header.tier !== undefined && header.tier !== '')
     metaParts.push(`tier: ${redact(header.tier)}`);
+  if (header.provider !== undefined && header.provider !== '')
+    metaParts.push(`provider: ${redact(header.provider)}`);
+  if (header.model !== undefined && header.model !== '')
+    metaParts.push(`modelo: ${redact(header.model)}`);
   metaParts.push(`exportado: ${when}`);
   lines.push(`> ${metaParts.join(' · ')}`, '');
   lines.push(

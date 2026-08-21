@@ -2887,11 +2887,35 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // TTY / atalho). Sem arg, o seletor (picker) é aberto pela App; cair aqui com
     // arg vazio só acontece quando não há catálogo injetado ⇒ a nota informativa.
     if (command.id === 'model' && args.trim() !== '') {
+      // F-MODEL-TESTA (gap #3, regra do dono: o teste do par provider+modelo acontece no
+      // MOMENTO DA TROCA, não no turno seguinte) — sob backend local, `/model <slug>`
+      // literal gravava direto, sem provar nada. As outras rotas já provam: o picker manda
+      // slug desconhecido pelo test-then-register. Esta era a porta que faltava fechar, e é
+      // a mais usada por quem sabe o slug de cor.
+      const alvo = args.trim();
+      if (resolvedBackend === 'local' && verifyAndRegisterLocalModel !== undefined) {
+        void verifyAndRegisterLocalModel(alvo).then((r) => {
+          if (!r.ok) {
+            built.controller.pushNote('model', [
+              `o modelo "${alvo}" não respondeu no provider ativo: ${r.detail}`,
+              'nada mudou (fail-closed) — o modelo anterior continua em uso.',
+            ]);
+            return;
+          }
+          const note = applyTierLiteral((t, m) => {
+            built.controller.setTier(t, m);
+            configStore.saveTier(t, m);
+            if (m !== undefined && m !== '') persistActiveLocalModel?.(m);
+          }, alvo);
+          built.controller.pushNote(note.title, note.lines);
+        });
+        return;
+      }
       const note = applyTierLiteral((t, m) => {
         built.controller.setTier(t, m);
         // EST-0969 — persiste o tier p/ a próxima sessão (best-effort; não bloqueia).
         configStore.saveTier(t, m);
-      }, args.trim());
+      }, alvo);
       built.controller.pushNote(note.title, note.lines);
       return;
     }
@@ -4044,6 +4068,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       sessionId: activeSession.id,
       ...(built.controller.label !== undefined ? { label: built.controller.label } : {}),
       tier: built.controller.tier,
+      // F-EXPORT-MODELO — provider e modelo REAIS do turno, não só o tier interno. É o que
+      // permite comparar dois transcripts e saber por que diferem.
+      ...(built.controller.current.meta.provider !== undefined
+        ? { provider: built.controller.current.meta.provider }
+        : {}),
+      ...(built.controller.current.meta.model !== undefined
+        ? { model: built.controller.current.meta.model }
+        : {}),
     });
     return exportStore.write(body, {
       sessionId: activeSession.id,
