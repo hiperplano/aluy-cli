@@ -496,6 +496,22 @@ export function preflightCycleCeiling(
 }
 
 /**
+ * Há credencial USÁVEL para este provider — keychain, cofre em arquivo OU env var.
+ *
+ * Distinta de `hasStoredApiKey`, que responde só por keychain/cofre: aquela é a pergunta do
+ * picker ("há chave gravada a reusar antes de pedir outra?"); esta é a pergunta de quem vai
+ * CHAMAR o provider ("dá para falar com ele agora?"). Confundir as duas fazia quem exporta a
+ * chave no shell receber "não há credencial guardada — rode /login" com tudo funcionando.
+ */
+function temCredencialUsavel(providerId: string, env: NodeJS.ProcessEnv): boolean {
+  const generica = genericApiKeyEnvName(providerId);
+  const especifica = `${providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+  if ((env[generica] ?? '').trim() !== '') return true;
+  if ((env[especifica] ?? '').trim() !== '') return true;
+  return hasStoredApiKey(providerId);
+}
+
+/**
  * Renderiza a TUI interativa (ou roda linear se não há TTY). Resolve quando o app
  * sai. É o que o binário `aluy` chama na invocação default/com objetivo.
  */
@@ -1533,7 +1549,13 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       // pode querer trocar ANTES de logar — recusar seria pior que avisar. É `ok:true`
       // com o aviso no `detail`, e a ação está dita: `/login`.
       const authNovo = defaultAuthFor(entry.id, freshCatalog);
-      const faltaChave = authNovo === 'apikey' && !hasStoredApiKey(entry.id);
+      // A env var conta como credencial. `hasStoredApiKey` responde só por keychain e
+      // cofre — é a pergunta certa para "há chave GRAVADA a reusar?", que é o que o picker
+      // precisa saber antes de pedir uma nova. Mas aqui a pergunta é outra: "dá para falar
+      // com este provider?", e quem exportou a chave no shell tem a resposta sim. Sem esta
+      // distinção, quem usa env recebia "não há credencial guardada — rode /login" com a
+      // chave funcionando, e pior: o teste de conexão era PULADO justamente para ele.
+      const faltaChave = authNovo === 'apikey' && !temCredencialUsavel(entry.id, env);
       // F-PROV-TESTA (regra do dono: "tem que pedir a chave e TESTAR a conexão") — a
       // troca de provider passa a PROVAR que o par (provider, credencial, modelo) fala,
       // em vez de só montar o client e torcer. O `/model` já fazia isso
@@ -1544,6 +1566,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       // provar, e gastar uma chamada para ouvir 401 é ruído. Aí o aviso de credencial
       // (abaixo) é a resposta certa.
       const podeTestar = !faltaChave;
+      // F-DEFAULT-MORTO (gap #7) — a lista que a prova de credencial já devolveu. Serve
+      // para não fixar como padrão um modelo que o provider não anuncia mais.
+      let slugsDoProvider: readonly string[] = [];
       try {
         const auth = authNovo;
         // F-UP — o upstream declarado é POR PROVIDER: ao trocar de provider, relê o mapa
@@ -1587,12 +1612,13 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // `GET /models` prova exatamente o que a troca precisa saber — que o provider
           // atende com esta chave — e nada além disso. Que modelo usar é a pergunta
           // SEGUINTE, e quem responde é o dono, no picker que abre logo depois.
-          const slugs = await fetchModelsSlugs({
+          slugsDoProvider = await fetchModelsSlugs({
             wireFormat: entry.wireFormat ?? 'openai-compat',
             baseUrl: entry.baseUrl ?? '',
             key: credencial?.secret ?? '',
             fetchImpl: createPinnedStreamFetch({}) as never,
           }).catch(() => [] as readonly string[]);
+          const slugs = slugsDoProvider;
 
           if (slugs.length === 0) {
             // Sem listagem não dá para provar a credencial por este caminho — pode ser
@@ -1640,14 +1666,27 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         // Quando o teste foi PULADO (provider sem credencial), não persistimos: fixar
         // como padrão um provider que ninguém conseguiu usar é assinar um problema para
         // a próxima abertura.
-        if (podeTestar) configStore.saveLocalProvider(entry.id, entry.defaultModel);
+        // O `defaultModel` do catálogo é um palpite NOSSO, e catálogo envelhece: foi assim
+        // que o `anthropic/claude-3.5-sonnet` aposentado virou o modelo ativo de uma troca
+        // bem-sucedida. Se a listagem do provider não o anuncia, gravamos só o PROVIDER — o
+        // picker que abre em seguida grava o modelo que o dono escolher.
+        const defaultVivo =
+          slugsDoProvider.length === 0 ||
+          slugsDoProvider.some(
+            (sl) => sl.trim().toLowerCase() === entry.defaultModel.trim().toLowerCase(),
+          );
+        if (podeTestar && defaultVivo) configStore.saveLocalProvider(entry.id, entry.defaultModel);
         return {
           ok: true,
           detail: faltaChave
             ? `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}). ` +
               `ATENÇÃO: não há credencial guardada p/ "${entry.id}" — rode /login antes do ` +
               'próximo turno, senão ele vai falhar por falta de chave.'
-            : `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}).`,
+            : defaultVivo
+              ? `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}).`
+              : `provider ativo agora: ${entry.id}. o modelo default do catálogo ` +
+                `("${entry.defaultModel}") não consta nos ${slugsDoProvider.length} que ele ` +
+                'anuncia — escolha um na lista a seguir.',
           client,
           defaultModel: entry.defaultModel,
         };
@@ -2756,7 +2795,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     ]);
   }
 
-  // F-PRIMEIRO-BOOT (gap #8) — sob backend local, avisar no BOOT quando não há chave.
+  // (ver `temCredencialUsavel` acima)
+// F-PRIMEIRO-BOOT (gap #8) — sob backend local, avisar no BOOT quando não há chave.
   //
   // O comentário acima está certo sobre não mentir "rode aluy login (broker)" num setup
   // local que funciona — mas a conclusão de então (deixar a falta de chave aparecer só na
@@ -2770,13 +2810,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   if (resolvedBackend === 'local') {
     const provAtivo = activeLocalProviderIdRef?.() ?? '';
     if (provAtivo !== '') {
-      // Env genérica (`ALUY_<PROVIDER>_API_KEY`) mais as específicas conhecidas: quem
-      // exportou a chave no shell está configurado, e avisá-lo seria ruído.
-      const envGenerica = genericApiKeyEnvName(provAtivo);
-      const temEnv =
-        (env[envGenerica] ?? '').trim() !== '' ||
-        (env[`${provAtivo.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`] ?? '').trim() !== '';
-      if (!temEnv && !hasStoredApiKey(provAtivo)) {
+      if (!temCredencialUsavel(provAtivo, env)) {
         built.controller.pushNote('provider', [
           `sem credencial para "${provAtivo}" — as chamadas vão falhar até configurar.`,
           `grave a chave com \`aluy login --provider ${provAtivo}\`, ou exporte a env var do provider.`,
