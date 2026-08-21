@@ -284,6 +284,19 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
     // ela. `sessão` some junto era regressão: no YOLO, saber em que provider, modelo e
     // diretório o agente vai rodar QUALQUER comando sem perguntar é mais importante que
     // no modo normal, não menos.
+    // A linha `estado` PERMANECE, sem o modo (o banner já grita qual é): ela carrega os
+    // sidecars, o progresso do MCP e o pulso de trabalho. Suprimi-la inteira — como a
+    // primeira versão fazia — apagava o progresso do MCP justamente em YOLO, onde saber o
+    // que a máquina está fazendo importa mais, não menos.
+    // Tirar os dois primeiros segmentos (palavra do modo + legenda) deixa o separador ` · `
+    // que os seguia órfão na frente da linha — `⚠ estado  · ◈ sidecars`. Descarta-se também
+    // qualquer separador que tenha ficado na cabeça.
+    // O separador ` · ` vem EMBUTIDO no texto de cada segmento (não é segmento próprio),
+    // então tirar os dois primeiros deixa a linha começando por ` · ` — `⚠ estado  · ◈`.
+    // O primeiro sobrevivente perde esse prefixo.
+    const estadoSemModo = estado.slice(2).map((seg, i) =>
+      i === 0 ? { ...seg, text: seg.text.replace(/^\s*·\s*/, '') } : seg,
+    );
     return (
       <Box flexDirection="column">
         <UnsafeBanner columns={cols} />
@@ -293,7 +306,24 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
           segs={sessao}
           teto={tetoValor}
         />
+        {(estadoSemModo.length > 0 || props.mcpProgress !== undefined || props.busy === true) && (
+          <Linha
+            glyph={theme.glyph(v.glyph)}
+            rotulo={t('painel.estado')}
+            segs={estadoSemModo}
+            teto={tetoValor}
+            extra={extraEstado}
+          />
+        )}
         <Linha glyph={theme.glyph('gauge')} rotulo={t('painel.uso')} segs={uso} teto={tetoValor} />
+        {config.length > 0 && (
+          <Linha
+            glyph={theme.unicode ? '▤' : '#'}
+            rotulo={t('painel.config')}
+            segs={config}
+            teto={tetoValor}
+          />
+        )}
       </Box>
     );
   }

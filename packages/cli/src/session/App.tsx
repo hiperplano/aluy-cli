@@ -44,7 +44,6 @@ import {
   HistoryPicker,
   RewindPicker,
   AttachChips,
-  Onboarding,
   Boot,
   Working,
   ProgressBar,
@@ -4735,9 +4734,11 @@ export function App(props: AppProps): React.ReactElement {
   // colunas em side/tabs), mantendo a região viva em `rows-1` (anti-flicker).
   const liveChatColumn = (
     <>
-      {state.blocks.length === 0 && state.phase === 'idle' ? (
-        <Onboarding {...(props.userName !== undefined ? { name: props.userName } : {})} />
-      ) : (
+      {/* F-SEM-SAUDACAO (decisão do dono: "eu não pedi essas msgs") — a tela de sessão
+          vazia abria com uma saudação e três sugestões de exemplo. Fora: quem abre um
+          terminal já sabe o que quer fazer, e o espaço vale mais para o trabalho. O
+          `/help` continua listando os comandos para quem precisar. */}
+      {state.blocks.length === 0 && state.phase === 'idle' ? null : (
         // Só os blocos VIVOS (sufixo). `isCurrent` só p/ o ÚLTIMO bloco da sessão.
         live.map((b, i) => (
           <BlockView
