@@ -18,6 +18,16 @@ import {
   type FileVaultOptions,
 } from '../../../src/model/local/file-vault.js';
 
+// F-COFRE-ISOLADO — TODA construção do provider neste arquivo aponta para um cofre em
+// tmpdir, nunca para `~/.aluy/credentials.enc`.
+//
+// Sem isso o resolvedor caía no cofre REAL da máquina de quem roda os testes: a asserção
+// comparava a chave esperada com a chave de verdade do usuário e, ao falhar, o vitest
+// imprimia a credencial INTEIRA em texto claro no relatório — que vai para o terminal, para
+// o log da CI e para qualquer captura de tela. Um teste nunca pode ser o caminho pelo qual
+// um segredo sai da máquina.
+const COFRE_ISOLADO = { vaultPath: join(mkdtempSync(join(tmpdir(), 'aluy-cred-iso-')), 'credentials.enc') };
+
 /** Fake de keychain em memória (account → senha). */
 function fakeKeyring(store: Record<string, string>) {
   return (_service: string, account: string): KeyringEntry => ({
@@ -41,6 +51,7 @@ describe('createLocalCredentialProvider — apikey: keychain → env', () => {
   it('prefere o keychain quando há chave guardada', async () => {
     const factory = fakeKeyring({ 'anthropic:apikey': 'sk-keychain' });
     const provider = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'anthropic',
       entryFactory: factory,
       env: { ANTHROPIC_API_KEY: 'sk-env' },
@@ -51,6 +62,7 @@ describe('createLocalCredentialProvider — apikey: keychain → env', () => {
   it('cai p/ a env var quando o keychain está vazio', async () => {
     const factory = fakeKeyring({});
     const provider = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'openrouter',
       entryFactory: factory,
       env: { OPENROUTER_API_KEY: 'sk-or-env' },
@@ -60,6 +72,7 @@ describe('createLocalCredentialProvider — apikey: keychain → env', () => {
 
   it('sem keychain nem env ⇒ MissingLocalCredentialError (mensagem acionável)', async () => {
     const provider = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'openai',
       entryFactory: fakeKeyring({}),
       env: {},
@@ -69,6 +82,7 @@ describe('createLocalCredentialProvider — apikey: keychain → env', () => {
 
   it('auth `none` (Ollama local) ⇒ credencial vazia, NÃO lança (sem exigir chave)', async () => {
     const provider = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'ollama',
       auth: 'none',
       entryFactory: fakeKeyring({}),
@@ -79,6 +93,7 @@ describe('createLocalCredentialProvider — apikey: keychain → env', () => {
 
   it('a env var é a do provider certo (não cruza providers)', async () => {
     const provider = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'anthropic',
       entryFactory: fakeKeyring({}),
       env: { OPENAI_API_KEY: 'sk-openai' }, // var do OUTRO provider
@@ -90,6 +105,7 @@ describe('createLocalCredentialProvider — apikey: keychain → env', () => {
 describe('createLocalCredentialProvider — oauth: usa o provedor de token', () => {
   it('devolve o access token do provedor OAuth', async () => {
     const provider = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'anthropic',
       auth: 'oauth',
       oauthAccessToken: async () => 'oat-fresh',
@@ -99,6 +115,7 @@ describe('createLocalCredentialProvider — oauth: usa o provedor de token', () 
 
   it('sem token (não logado) ⇒ MissingLocalCredentialError', async () => {
     const provider = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'anthropic',
       auth: 'oauth',
       oauthAccessToken: async () => undefined,
@@ -109,6 +126,7 @@ describe('createLocalCredentialProvider — oauth: usa o provedor de token', () 
   it('resolve a CADA chamada (pega rotação de chave sem reiniciar)', async () => {
     const getter = vi.fn().mockResolvedValueOnce('t1').mockResolvedValueOnce('t2');
     const provider = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'anthropic',
       auth: 'oauth',
       oauthAccessToken: getter,

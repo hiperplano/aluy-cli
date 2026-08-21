@@ -54,6 +54,14 @@ import { CodexMcpConfigStore } from '../mcp/codex-mcp-config.js';
 import { PROJECT_MCP_CONFIG_FILENAME } from '../mcp/project-mcp-config.js';
 import { UserAgentsLoader } from '../io/user-agents.js';
 import { CONFIG_FILENAME, UserConfigStore, type UserServicesConfig } from '../io/user-config.js';
+// F-DOCTOR-BYO — o check do provider local usa a MESMA resolução do boot (catálogo,
+// credencial, listagem e fetch pinado); nenhum caminho paralelo de rede é criado aqui.
+import { findProvider } from '@hiperplano/aluy-cli-core';
+import { loadLocalProviderCatalog } from '../io/providers-config.js';
+import { createLocalCredentialProvider } from '../model/local/credential-resolver.js';
+import { fetchModelsSlugs } from '../model/local/context-window-discovery.js';
+import { createPinnedStreamFetch } from '../model/local/pinned-stream-fetch.js';
+import type { LocalProviderFact } from './checks.js';
 import { CLI_VERSION } from '../version.js';
 import type {
   AuthFact,
@@ -301,6 +309,60 @@ function isLocalBackend(deps: DoctorProbeDeps): boolean {
     /* config ausente/corrompido ⇒ ignora (cai no default do resolveBackend). */
   }
   return resolveBackend({ env: env.ALUY_BACKEND, config: configBackend }) === 'local';
+}
+
+// ── F-DOCTOR-BYO — o provider LOCAL: credencial, alcance e modelo ativo ──────
+//
+// É o único check que fala do que realmente atende as chamadas sob backend próprio. Prova
+// por `GET /models`, a mesma prova que a troca de provider usa: não depende de um modelo
+// específico estar vivo (um catálogo envelhecido não pode reprovar um provider saudável) e
+// ainda devolve a lista, que serve para dizer se o modelo ATIVO ainda existe do outro lado.
+async function gatherLocalProvider(
+  deps: DoctorProbeDeps,
+): Promise<LocalProviderFact | undefined> {
+  if (!isLocalBackend(deps)) return undefined;
+  const env = deps.env ?? process.env;
+  const cfg = new UserConfigStore({ baseDir: aluyHomeOf(deps) }).load();
+  const providerId = (cfg.localProvider ?? '').trim() || 'anthropic';
+  const entry = findProvider(loadLocalProviderCatalog(), providerId);
+  const model = (cfg.localModel ?? entry?.defaultModel ?? '').trim() || undefined;
+  const base: { providerId: string; model?: string } = {
+    providerId,
+    ...(model !== undefined ? { model } : {}),
+  };
+
+  const cred = await createLocalCredentialProvider({
+    provider: providerId,
+    auth: Array.isArray(entry?.auth) ? (entry.auth[0] ?? 'apikey') : (entry?.auth ?? 'apikey'),
+    env,
+  })().catch(() => undefined);
+  const segredo = cred?.secret ?? '';
+  if (segredo === '') return { ...base, hasCredential: false };
+
+  const baseUrl = entry?.baseUrl ?? '';
+  if (baseUrl === '') return { ...base, hasCredential: true };
+  const slugs = await fetchModelsSlugs({
+    wireFormat: entry?.wireFormat ?? 'openai-compat',
+    baseUrl,
+    key: segredo,
+    fetchImpl: createPinnedStreamFetch({}) as never,
+  }).catch(() => undefined);
+  if (slugs === undefined || slugs.length === 0) {
+    // Sem listagem não dá para afirmar que está fora: há provider que não expõe `/models`.
+    // Dizemos o que se sabe — credencial presente, alcance não confirmado — em vez de
+    // inventar uma falha.
+    return { ...base, hasCredential: true };
+  }
+  const alvo = (model ?? '').trim().toLowerCase();
+  return {
+    ...base,
+    hasCredential: true,
+    reachable: true,
+    modelCount: slugs.length,
+    ...(alvo !== ''
+      ? { modelListed: slugs.some((sl) => sl.trim().toLowerCase() === alvo) }
+      : {}),
+  };
 }
 
 // ── #2 broker — ping leve em /healthz (sem auth, sem gasto de modelo) ─────────
@@ -761,6 +823,22 @@ export async function gatherDoctorFacts(deps: DoctorProbeDeps = {}): Promise<Doc
   // Os 4 I/O independentes correm em PARALELO; cada um acende seu tick ao resolver.
   await Promise.all([
     settle('auth', (deps.gatherAuth ?? (() => gatherAuth(deps)))(), 'auth'),
+    // Fora do `settle` porque o fato é OPCIONAL (ausente sob broker) e o helper é tipado
+    // por chave obrigatória. Nunca rejeita: falha vira ausência, e o check some.
+    gatherLocalProvider(deps)
+      .then((f) => {
+        if (f !== undefined) acc.localProvider = f;
+      })
+      .catch((e: unknown) => {
+        // Falha aqui não pode derrubar o diagnóstico inteiro — mas também não pode sumir
+        // sem deixar rastro: um check que desaparece em silêncio é indistinguível de um
+        // check que passou. Com `ALUY_DEBUG` o motivo aparece.
+        if ((deps.env ?? process.env).ALUY_DEBUG !== undefined) {
+          process.stderr.write(
+            `[doctor] provider local: ${e instanceof Error ? e.message : String(e)}\n`,
+          );
+        }
+      }),
     settle('broker', (deps.gatherBroker ?? (() => gatherBroker(deps)))(), 'broker'),
     settle('catalog', (deps.gatherCatalog ?? (() => gatherCatalog(deps)))(), 'catalog'),
     settle('memory', (deps.gatherMemory ?? (() => gatherMemory(deps)))(), 'memory'),
@@ -809,6 +887,10 @@ export async function gatherDoctorFacts(deps: DoctorProbeDeps = {}): Promise<Doc
     memory: acc.memory!,
     sidecars: acc.sidecars!,
     maestro: acc.maestro!,
+    // F-DOCTOR-BYO — a projeção final é EXPLÍCITA campo a campo: um fato coletado que não
+    // apareça aqui é silenciosamente descartado, e o check correspondente some do relatório
+    // sem erro nenhum. Foi o que aconteceu na primeira versão deste check.
+    ...(acc.localProvider !== undefined ? { localProvider: acc.localProvider } : {}),
     ...(acc.tier !== undefined ? { tier: acc.tier } : {}),
   };
 }
