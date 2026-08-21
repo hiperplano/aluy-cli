@@ -13,6 +13,7 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
+import wrapAnsi from 'wrap-ansi';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { useI18n } from '../../i18n/index.js';
 import { windowComposerVisual } from '../../session/composer-edit.js';
@@ -330,7 +331,6 @@ export function Composer(props: ComposerProps): React.ReactElement {
   // F-COMPOSER-FUNDO — quantos espaços faltam p/ o fundo alcançar o fim da linha. Mede a
   // ÚLTIMA linha visual (é ela que fica "curta"); com wrap, as anteriores já estão cheias.
   const textoVisivel = win.text === '' ? placeholder : win.text;
-  const ultimaLinha = textoVisivel.split('\n').pop() ?? '';
   // A coluna extra é do CURSOR, então ela só existe quando o cursor é de fato desenhado —
   // e ele é suprimido enquanto o agente trabalha (para não haver dois cursores na tela ao
   // mesmo tempo). Contando por `active`, a conta reservava uma coluna que ninguém ocupava:
@@ -338,12 +338,39 @@ export function Composer(props: ComposerProps): React.ReactElement {
   // fim da linha do composer — visível justamente DURANTE o processamento, e some quando
   // ele acaba e o cursor volta. Era esse o "quadradinho quando está pensando".
   const cursorVisivel = props.active && props.showCursor !== false;
-  const usado = indentCols + displayWidth(ultimaLinha) + (cursorVisivel ? 1 : 0);
   // A largura ÚTIL é a do bloco (`columns - 2`: uma coluna da barra `┃`, outra de folga),
   // a MESMA das faixas vazias de cima e de baixo. Usar `columns` aqui fazia a linha do
   // texto ficar UMA coluna mais larga que o bloco — e a sobra vazava como um quadradinho
   // de fundo solto no fim (o "espaçou no final um quadradinho cinza" do relato).
   const larguraUtil = props.columns !== undefined ? props.columns - 2 : undefined;
+  // F-COMPOSER-WRAP (relato do dono: "preencha mais de uma linha e veja que a área do
+  // composer não é respeitada") — a ÚLTIMA linha visual é a que o WRAP produz, não a que o
+  // `\n` separa.
+  //
+  // O cálculo anterior fazia `split('\n').pop()`, e um texto longo sem quebra manual é UMA
+  // linha-fonte só: media-se a string inteira, concluía-se que não sobrava espaço, e a
+  // continuação do wrap ficava sem preenchimento — 67 colunas pintadas num bloco de 119, um
+  // degrau enorme no meio da caixa. Aqui o texto é quebrado com o MESMO wrap do Ink
+  // (`wrap-ansi`, `trim:false, hard:true`), então a última linha medida é a que de fato
+  // aparece embaixo.
+  const { ultimaLinha, houveQuebra } = ((): { ultimaLinha: string; houveQuebra: boolean } => {
+    const primeiraFonte = textoVisivel.split('\n').pop() ?? '';
+    const disponivel =
+      larguraUtil !== undefined ? Math.max(1, larguraUtil - indentCols) : undefined;
+    if (disponivel === undefined || primeiraFonte === '') {
+      return { ultimaLinha: primeiraFonte, houveQuebra: false };
+    }
+    const quebrado = wrapAnsi(primeiraFonte, disponivel, { trim: false, hard: true }).split('\n');
+    return {
+      ultimaLinha: quebrado[quebrado.length - 1] ?? primeiraFonte,
+      houveQuebra: quebrado.length > 1,
+    };
+  })();
+  // O recuo do prompt (`❯ `) só existe na PRIMEIRA linha visual: quando o texto quebra, a
+  // continuação começa na margem. Somá-lo sempre encurtava o preenchimento em duas colunas
+  // exatas nas linhas de continuação.
+  const usado =
+    (houveQuebra ? 0 : indentCols) + displayWidth(ultimaLinha) + (cursorVisivel ? 1 : 0);
   const fillCols =
     larguraUtil !== undefined && larguraUtil > usado ? larguraUtil - usado : 0;
   return (
