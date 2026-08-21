@@ -389,8 +389,28 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
             (desligado), num pisca CALMO (~1.2s). A célula nunca colapsa p/ 0 ⇒ a
             altura da região viva não oscila ⇒ o composer não pula (sem `\x1b[2K`
             novo, sem redesenho de região — não regride #95/#118). */}
+        {/* F-CURSOR-PINTADO (relato do dono: "quando está processando, no composer fica uma
+            pequena caixinha preta, depois ela some") — o cursor de trabalho ficava FORA do
+            fundo da caixa: uma linha de dois caracteres sem pintura no meio de linhas
+            pintadas, que aparecia como um retângulo escuro enquanto o stream corria e sumia
+            quando ele acabava. Agora a linha do cursor é pintada e preenchida como as
+            outras — o cursor pisca, a superfície fica parada. */}
         {props.streaming &&
-          (cursorOn ? <Role name="accent">{theme.glyph('thinkingCursor')}</Role> : <Text> </Text>)}
+          (aluyFundo !== undefined && speechCols > 0 ? (
+            <Text backgroundColor={aluyFundo}>
+              {' '}
+              {cursorOn ? (
+                <Role name="accent">{theme.glyph('thinkingCursor')}</Role>
+              ) : (
+                <Text> </Text>
+              )}
+              {' '.repeat(Math.max(0, speechCols - 2))}
+            </Text>
+          ) : cursorOn ? (
+            <Role name="accent">{theme.glyph('thinkingCursor')}</Role>
+          ) : (
+            <Text> </Text>
+          ))}
       </Box>
     </Box>
   );

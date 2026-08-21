@@ -40,7 +40,7 @@ import {
   type GlyphName,
 } from './glyphs.js';
 import { sessionColorStyle } from './session-colors.js';
-import { observedTerminalBackground, surfaceFrom } from './osc11.js';
+import { observedTerminalBackground, surfaceFrom, relativeLuminance } from './osc11.js';
 
 export type ColorMode = 'truecolor' | 'ansi16' | 'mono';
 export type Brightness = 'dark' | 'light';
@@ -268,8 +268,18 @@ export function resolveTheme(input: ResolveThemeInput = {}): Theme {
   // PRÓPRIO fundo do usuário deslocado alguns pontos: mesma matiz, um degrau de
   // luminosidade. Terminal que não responde cai nos hexes declarados abaixo.
   const fundoTerminal = observedTerminalBackground();
-  const superficie = (passos: number): string | undefined =>
-    fundoTerminal !== null ? surfaceFrom(fundoTerminal, passos) : undefined;
+  const superficie = (passos: number): string | undefined => {
+    if (fundoTerminal === null) return undefined;
+    // Só deriva quando o fundo do terminal CONCORDA com o brilho do tema.
+    //
+    // Quem força `/theme claro` num terminal de fundo escuro (ou o contrário) receberia
+    // superfícies derivadas do fundo REAL — escuras — sob um tema de texto claro: as caixas
+    // ficavam escuras num tema claro, e o conjunto não fechava. Nesse caso os hexes
+    // declarados do tema valem mais que a cor observada, porque o tema é uma ESCOLHA
+    // explícita e o fundo observado é só uma pista.
+    const brilhoDoTerminal = relativeLuminance(fundoTerminal) < 0.5 ? 'dark' : 'light';
+    return brilhoDoTerminal === brightness ? surfaceFrom(fundoTerminal, passos) : undefined;
+  };
   const brightness = detectBrightness(env, input.theme);
   const unicode = input.asciiOnly === true ? false : detectUnicode(env);
   // SAFE só faz sentido quando há Unicode (em ASCII puro o conjunto ASCII vence).
@@ -329,8 +339,16 @@ export function resolveTheme(input: ResolveThemeInput = {}): Theme {
             footerBg: '#1A1815',
           }
         : {
-            composerBg: superficie(28) ?? '#FFFFFF',
-            aluyBg: superficie(18) ?? '#E9ECF2',
+            // F-LIGHT-SUAVE (relato do dono: "o tema light não está funcionando bem, a cor
+            // dos elementos não é agradável, principalmente o fundo das seções").
+            //
+            // Os mesmos 28/18 pontos que são discretos sobre um fundo escuro ficam pesados
+            // sobre um claro: a percepção de contraste NÃO é simétrica — no escuro o olho
+            // precisa de um degrau maior para notar a superfície, no claro um degrau muito
+            // menor já a separa, e o excesso vira um cinza sujo em vez de uma superfície.
+            // Aqui os passos são ~⅓ dos do escuro.
+            composerBg: superficie(10) ?? '#F2F0EB',
+            aluyBg: superficie(6) ?? '#F7F6F3',
             headerBg: '#E8E2D6',
             footerBg: '#E8E2D6',
           }

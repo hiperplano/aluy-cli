@@ -151,17 +151,22 @@ function SessionTag(props: {
   const theme = useTheme();
   const label = (props.label ?? '').trim();
   if (label === '') return null;
-  const dot = theme.glyph('sessionDot');
-  // resolve o estilo da cor da sessão pela paleta do DS (mono ⇒ sem cor, só bold).
+  // F-LABEL-SEM-BOLINHA (relato do dono: "quando uso o rename ficam duas bolinhas no
+  // composer") — `sessionDot` e o cursor do composer são o MESMO glifo (`●`), então uma
+  // sessão nomeada exibia `● TESTE ❯ ●texto`: dois círculos idênticos lado a lado
+  // significando coisas diferentes (identidade e posição do cursor).
+  //
+  // Em vez de inventar um terceiro glifo, a bolinha sai: quem carrega a cor da sessão passa
+  // a ser o PRÓPRIO NOME. A informação é a mesma — o nome já estava ali, só pintado de
+  // cinza — e some a ambiguidade. Em mono a cor degrada para bold, como antes.
   const style = theme.sessionColor(props.color ?? label);
-  const dotProps: { color?: string; bold?: boolean } = {};
-  if (style.color !== undefined) dotProps.color = style.color;
-  if (style.bold !== undefined) dotProps.bold = style.bold;
+  const labelProps: { color?: string; bold?: boolean } = {};
+  if (style.color !== undefined) labelProps.color = style.color;
+  if (style.bold !== undefined) labelProps.bold = style.bold;
   return (
     <>
-      <Text {...dotProps}>{dot}</Text>
       <Text> </Text>
-      <Role name="fg">{label}</Role>
+      <Text {...labelProps}>{label}</Text>
       <Text> </Text>
     </>
   );
