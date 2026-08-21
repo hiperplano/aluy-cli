@@ -1147,7 +1147,9 @@ function ModelListPicker(props: {
             const idx = start + i;
             return (
               <Box key={s}>
-                <Role name={idx === cursor ? 'accent' : 'fgDim'}>{idx === cursor ? '❯ ' : '  '}</Role>
+                <Role name={idx === cursor ? 'accent' : 'fgDim'}>
+                  {idx === cursor ? '❯ ' : '  '}
+                </Role>
                 <Role name={idx === cursor ? 'accent' : 'fg'}>{s}</Role>
               </Box>
             );

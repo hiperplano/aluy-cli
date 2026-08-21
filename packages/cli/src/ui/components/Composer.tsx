@@ -399,8 +399,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
   // exatas nas linhas de continuação.
   const usado =
     (houveQuebra ? 0 : indentCols) + displayWidth(ultimaLinha) + (cursorVisivel ? 1 : 0);
-  const fillCols =
-    larguraUtil !== undefined && larguraUtil > usado ? larguraUtil - usado : 0;
+  const fillCols = larguraUtil !== undefined && larguraUtil > usado ? larguraUtil - usado : 0;
   return (
     <Box flexDirection="column">
       {/* FIX (cockpit multi-linha, achado do dono) — a linha do input é UM único <Text>
@@ -411,9 +410,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
           <Text wrap>, o wrap flui e o cursor assenta certo. Prova: tests/.../composer. */}
       <Text
         wrap="wrap"
-        {...(props.backgroundColor !== undefined
-          ? { backgroundColor: props.backgroundColor }
-          : {})}
+        {...(props.backgroundColor !== undefined ? { backgroundColor: props.backgroundColor } : {})}
       >
         <SessionTag
           {...(props.sessionLabel !== undefined ? { label: props.sessionLabel } : {})}
