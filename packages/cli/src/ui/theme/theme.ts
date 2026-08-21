@@ -18,6 +18,8 @@
 import {
   ANSI16_DARK,
   ANSI16_LIGHT,
+  BG_DARK,
+  BG_LIGHT,
   MONO,
   TRUECOLOR_DARK,
   TRUECOLOR_LIGHT,
@@ -40,7 +42,14 @@ import {
   type GlyphName,
 } from './glyphs.js';
 import { sessionColorStyle } from './session-colors.js';
-import { observedTerminalBackground, surfaceFrom, relativeLuminance } from './osc11.js';
+import {
+  backgroundControlEnabled,
+  observedTerminalBackground,
+  parseOsc11,
+  relativeLuminance,
+  surfaceFrom,
+  type Rgb,
+} from './osc11.js';
 
 export type ColorMode = 'truecolor' | 'ansi16' | 'mono';
 export type Brightness = 'dark' | 'light';
@@ -143,6 +152,14 @@ export interface ResolveThemeInput {
    * trocar de tema nunca inventa cor onde o terminal não tem). Default: pelo brilho.
    */
   readonly truecolorPalette?: Palette;
+  /**
+   * O FUNDO declarado do tema nomeado ativo (`#RRGGBB`) — a cor que o `/theme` manda o
+   * terminal vestir (EST-1010) e, portanto, a PÁGINA sobre a qual as caixas são
+   * desenhadas. É a régua das superfícies (`composerBg`/`aluyBg`/chrome): sem ela, o
+   * cálculo do degrau só tinha o fundo ANTIGO do terminal para se apoiar — uma cor que a
+   * tela já não tem. Ausente ⇒ o fundo canônico do brilho (`BG_LIGHT`/`BG_DARK`).
+   */
+  readonly bg?: string;
   /** Override de densidade (`--dense`). */
   readonly density?: Density;
   /** Override de animação (`--no-anim`). */
@@ -256,31 +273,40 @@ function paletteFor(mode: ColorMode, brightness: Brightness, override?: Palette)
 export function resolveTheme(input: ResolveThemeInput = {}): Theme {
   const env = input.env ?? process.env;
   const colorMode = detectColorMode(env);
+  const brightness = detectBrightness(env, input.theme);
   // F-FUNDO-DERIVADO (relato do dono, três vezes: "essa cor do background do Aluy não está
   // legal... deveria ser uma cor próxima ao background do terminal").
   //
   // As tentativas anteriores foram todas o mesmo erro: escolher um hex fixo sem saber qual
   // é o fundo do terminal do outro lado. Uma cor que fica discreta sobre preto puro destoa
-  // sobre um fundo quente, e vice-versa — não existe hex que sirva para todos.
+  // sobre um fundo quente, e vice-versa — não existe hex que sirva para todos. A saída é
+  // não escolher: a superfície é o PRÓPRIO fundo da página deslocado alguns pontos —
+  // mesma matiz, um degrau de luminosidade.
   //
-  // O probe OSC 11 do boot já pergunta ao terminal qual é a cor dele (era usado só para
-  // decidir claro/escuro). Reaproveitando a resposta, as superfícies passam a ser o
-  // PRÓPRIO fundo do usuário deslocado alguns pontos: mesma matiz, um degrau de
-  // luminosidade. Terminal que não responde cai nos hexes declarados abaixo.
-  const fundoTerminal = observedTerminalBackground();
-  const superficie = (passos: number): string | undefined => {
-    if (fundoTerminal === null) return undefined;
-    // Só deriva quando o fundo do terminal CONCORDA com o brilho do tema.
-    //
-    // Quem força `/theme claro` num terminal de fundo escuro (ou o contrário) receberia
-    // superfícies derivadas do fundo REAL — escuras — sob um tema de texto claro: as caixas
-    // ficavam escuras num tema claro, e o conjunto não fechava. Nesse caso os hexes
-    // declarados do tema valem mais que a cor observada, porque o tema é uma ESCOLHA
-    // explícita e o fundo observado é só uma pista.
-    const brilhoDoTerminal = relativeLuminance(fundoTerminal) < 0.5 ? 'dark' : 'light';
-    return brilhoDoTerminal === brightness ? surfaceFrom(fundoTerminal, passos) : undefined;
-  };
-  const brightness = detectBrightness(env, input.theme);
+  // O que faltava era saber QUAL fundo é a página. O probe OSC 11 do boot devolve o fundo
+  // que o terminal tinha ANTES de nós, mas logo em seguida o `/theme` veste o terminal com
+  // o `bg` do tema (EST-1010) — e é essa cor que fica atrás de tudo. Medir o degrau contra
+  // a cor antiga foi o que produziu o tema claro que o dono recusou: sobre a página creme
+  // (#F4ECDC) as caixas saíam de um cinza neutro, deslocadas em MATIZ e não em luz, e o
+  // olho lia mancha em vez de relevo.
+  //
+  // Então a régua é a página que vamos de fato pintar; o fundo observado só volta a valer
+  // quando NÃO vamos pintar nada (`ALUY_SET_BG=0`, NO_COLOR) — aí a página continua sendo
+  // a do usuário. Mesmo nesse caso ele só serve se CONCORDAR com o brilho do tema: quem
+  // força `/theme claro` num terminal escuro pediu um tema, e um tema é uma escolha
+  // explícita; o fundo observado é só uma pista.
+  const fundoDaPagina: Rgb = ((): Rgb => {
+    const canonico = brightness === 'light' ? BG_LIGHT : BG_DARK;
+    // `parseOsc11` também lê `#RRGGBB` (é a outra forma que os terminais respondem),
+    // então serve de conversor sem precisar de um segundo parser de hex no módulo.
+    const declarado = parseOsc11(input.bg ?? canonico) ?? parseOsc11(canonico)!;
+    if (backgroundControlEnabled(env)) return declarado;
+    const observado = observedTerminalBackground();
+    if (observado === null) return declarado;
+    const brilhoDoTerminal = relativeLuminance(observado) < 0.5 ? 'dark' : 'light';
+    return brilhoDoTerminal === brightness ? observado : declarado;
+  })();
+  const superficie = (passos: number): string => surfaceFrom(fundoDaPagina, passos);
   const unicode = input.asciiOnly === true ? false : detectUnicode(env);
   // SAFE só faz sentido quando há Unicode (em ASCII puro o conjunto ASCII vence).
   const safeGlyphs = unicode && detectSafeGlyphs(env, input.safeGlyphs);
@@ -333,24 +359,30 @@ export function resolveTheme(input: ResolveThemeInput = {}): Theme {
     ...(colorMode === 'truecolor'
       ? brightness === 'dark'
         ? {
-            composerBg: superficie(28) ?? '#35312B',
-            aluyBg: superficie(18) ?? '#282D37',
-            headerBg: '#1A1815',
-            footerBg: '#1A1815',
+            composerBg: superficie(28),
+            aluyBg: superficie(18),
+            headerBg: superficie(18),
+            footerBg: superficie(18),
           }
         : {
             // F-LIGHT-SUAVE (relato do dono: "o tema light não está funcionando bem, a cor
             // dos elementos não é agradável, principalmente o fundo das seções").
             //
-            // Os mesmos 28/18 pontos que são discretos sobre um fundo escuro ficam pesados
-            // sobre um claro: a percepção de contraste NÃO é simétrica — no escuro o olho
-            // precisa de um degrau maior para notar a superfície, no claro um degrau muito
-            // menor já a separa, e o excesso vira um cinza sujo em vez de uma superfície.
-            // Aqui os passos são ~⅓ dos do escuro.
-            composerBg: superficie(10) ?? '#F2F0EB',
-            aluyBg: superficie(6) ?? '#F7F6F3',
-            headerBg: '#E8E2D6',
-            footerBg: '#E8E2D6',
+            // Os passos são menores que os do escuro porque o mesmo salto em RGB rende mais
+            // diferença PERCEBIDA perto do branco, e porque no claro cada degrau CONSOME
+            // contraste: a superfície escurece, o texto continua escuro, e a distância entre
+            // os dois encolhe. O `11` é o degrau mais fundo em que TODOS os papéis coloridos
+            // ainda passam AA (4,5:1) sobre a própria superfície — o pior deles, o teal do
+            // `depth`, fica em 4,55:1; um passo além e ele cai. Em L* isso são ~4 pontos,
+            // bem acima do limiar do perceptível (~2,3) e longe do bloco pintado.
+            //
+            // O chrome divide o plano do composer em vez de ganhar um terceiro, mais fundo,
+            // pela mesma razão: o terceiro degrau existiria à custa da legibilidade do que
+            // está escrito nele.
+            composerBg: superficie(11),
+            aluyBg: superficie(8),
+            headerBg: superficie(11),
+            footerBg: superficie(11),
           }
       : {}),
   };

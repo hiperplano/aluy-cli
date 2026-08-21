@@ -20,7 +20,15 @@
 // sobre o `bg` declarado aqui (sem mágica espalhada).
 
 import { resolveTheme, type Brightness, type ResolveThemeInput, type Theme } from './theme.js';
-import { TRUECOLOR_DARK, TRUECOLOR_LIGHT, TRUECOLOR_SLATE, type Palette } from './palette.js';
+import {
+  BG_DARK,
+  BG_LIGHT,
+  BG_SLATE,
+  TRUECOLOR_DARK,
+  TRUECOLOR_LIGHT,
+  TRUECOLOR_SLATE,
+  type Palette,
+} from './palette.js';
 
 /** Nome canônico de um tema (o que o usuário digita em `/theme <nome>`). */
 export type ThemeName = 'aluy-dark' | 'aluy-light' | 'aluy-slate';
@@ -63,7 +71,7 @@ export const THEMES: readonly ThemeEntry[] = [
     brightness: 'dark',
     summary: 'escuro neutro (default) — fundo quase-preto, accent âmbar',
     // Fundo do web dark (#070707): quase-preto neutro (≠ o terra do slate).
-    bg: '#070707',
+    bg: BG_DARK,
     palette: TRUECOLOR_DARK,
   },
   {
@@ -73,7 +81,7 @@ export const THEMES: readonly ThemeEntry[] = [
     summary: 'claro creme — fundo --stone-50, accent âmbar escurecido (AA)',
     // Fundo creme (mais quente que o --stone-50 #FAF8F5 do web; no terminal o stone-50
     // "lava" — Tiago pediu mais creme). Contraste AA preservado (fg #1A1712 sobre creme).
-    bg: '#F4ECDC',
+    bg: BG_LIGHT,
     palette: TRUECOLOR_LIGHT,
   },
   {
@@ -82,7 +90,7 @@ export const THEMES: readonly ThemeEntry[] = [
     brightness: 'dark',
     summary: 'terra escura WARM — fundo --stone-950, accent âmbar',
     // Fundo do web slate: --stone-950 (#0E0C09), a terra escura do DS.
-    bg: '#0E0C09',
+    bg: BG_SLATE,
     palette: TRUECOLOR_SLATE,
   },
 ];
@@ -131,12 +139,17 @@ export function themeNameForBrightness(brightness: Brightness): ThemeName {
  */
 export function resolveThemeByName(
   name: string,
-  input: Omit<ResolveThemeInput, 'theme' | 'truecolorPalette'> = {},
+  input: Omit<ResolveThemeInput, 'theme' | 'truecolorPalette' | 'bg'> = {},
 ): Theme {
   const entry = themeByName(name) ?? themeByName(DEFAULT_THEME)!;
   return resolveTheme({
     ...input,
     theme: entry.brightness,
     truecolorPalette: entry.palette,
+    // O `bg` do tema é a PÁGINA que o terminal vai vestir, e é dela que as superfícies
+    // (caixa do composer, caixa da fala) tiram o seu degrau. Sem passá-lo, o cálculo cai
+    // no fundo canônico do brilho — correto p/ light/dark, mas cego ao slate, cuja terra
+    // (#0E0C09) é morna e daria caixas de outra família.
+    bg: entry.bg,
   });
 }

@@ -21,6 +21,7 @@ import {
   queryTerminalBrightness,
   themeNameForBrightness,
   resolveThemeName,
+  resolveThemeByName,
   themeByName,
   BackgroundController,
   DEFAULT_THEME,
@@ -579,6 +580,29 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const baseStdout = opts.stdout ?? process.stdout;
   const altScreen = registerRestoreHandlers(baseStdout, process);
 
+  // EST-0969 — CONFIG PERSISTENTE de preferências de UI (tema/tier). Lida no startup
+  // (fail-safe: ausente/corrompido ⇒ {} ⇒ defaults, nunca quebra). Precedência do
+  // TIER: `--tier` (flag, opts.tier) > config salva > DEFAULT_TIER. O TEMA aplica a
+  // config DENTRO do `detectInitialTheme` (override de env/flag ainda vence). A troca
+  // em sessão (`/model`/`/theme`) grava de volta aqui p/ a próxima sessão reabrir nela.
+  const configStore = opts.configStore ?? new UserConfigStore();
+  const savedConfig: UserConfig = configStore.load();
+
+  // ── EST-1010 · F-SPLASH-NO-TEMA: o fundo do tema entra ANTES do splash ───────────
+  // O tema salvo já era respeitado pela App, mas o splash — a primeira tela, e a que faz
+  // a pergunta de retomar sessão — nascia da fotografia do ENV, que sem COLORFGBG é
+  // sempre `dark`. Quem escolheu o tema claro abria o `aluy` num quadro âmbar-sobre-preto
+  // e só depois via tudo virar creme; e quem já usa um terminal de fundo claro recebia a
+  // pior versão disso, texto quase-branco sobre branco, ilegível até a App montar.
+  //
+  // O fundo é vestido aqui junto com a paleta porque um sem o outro é pior que os dois
+  // errados: a paleta clara sobre o fundo escuro do usuário some, e vice-versa. Só
+  // acontece quando há tema SALVO — sem ele o brilho ainda é uma pergunta em aberto (o
+  // probe OSC 11 roda mais adiante), e adiantar uma resposta estragaria a detecção.
+  const bgController = new BackgroundController({ stdout: opts.stdout ?? process.stdout, env });
+  const temaSalvo = savedConfig.theme !== undefined ? themeByName(savedConfig.theme) : undefined;
+  if (temaSalvo !== undefined && isTty) bgController.apply(temaSalvo.bg);
+
   // EST-0989 — SPLASH de boot (TTY-only). Mostra o wordmark `Λluy` centralizado + um
   // "carregando…" calmo ENQUANTO o boot trabalha (config/MCP/recall/sessão/perfis), e
   // apresenta as perguntas de boot (retomar `[S/n]`, confirmar YOLO) numa CAIXA
@@ -587,20 +611,24 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   //   · há TTY (sem TTY/linear/CI ⇒ comportamento intacto, sem splash, sem clear); E
   //   · o caller NÃO injetou `promptYesNo` (testes/headless dirigem o prompt direto —
   //     não montamos o Ink do splash, que penduraria em waitUntilExit num headless).
-  // A 1ª coisa é o BOOT-CLEAR (tela limpa); então montamos o splash sobre ela. O tema
-  // do splash é a fotografia ENV (resolveTheme): suficiente p/ a marca; a auto-detecção
-  // OSC 11 completa (detectInitialTheme) roda depois, p/ a App — sem competir com o
-  // stdin do prompt do splash aqui.
+  // A 1ª coisa é o BOOT-CLEAR (tela limpa); então montamos o splash sobre ela. O tema do
+  // splash é o SALVO quando existe (junto com o fundo aplicado acima) e, sem ele, a
+  // fotografia do ENV; a auto-detecção OSC 11 completa (detectInitialTheme) roda depois,
+  // p/ a App — sem competir com o stdin do prompt do splash aqui.
   const useSplash = isTty && opts.promptYesNo === undefined;
   let splash: BootSplash | undefined;
   if (useSplash) {
     const splashOut = opts.stdout ?? process.stdout;
     emitBootClear(splashOut, true);
-    const splashTheme = resolveTheme({
+    const capacidades = {
       env,
       ...(opts.dense ? { density: 'compact' as const } : {}),
       ...(opts.safeGlyphs ? { safeGlyphs: true as const } : {}),
-    });
+    };
+    const splashTheme =
+      temaSalvo !== undefined
+        ? resolveThemeByName(temaSalvo.name, capacidades)
+        : resolveTheme(capacidades);
     splash = createBootSplash({ theme: splashTheme, stdout: splashOut });
     // Piso de exibição (feedback Tiago): segura o quip do splash por >= minMs antes
     // do prompt/cockpit (o Ink anima durante o await). Override ALUY_SPLASH_MIN_MS.
@@ -666,13 +694,6 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const projectInstructions = instructionsLoad.instructions;
   const instructionSources = instructionsLoad.sources;
 
-  // EST-0969 — CONFIG PERSISTENTE de preferências de UI (tema/tier). Lida no startup
-  // (fail-safe: ausente/corrompido ⇒ {} ⇒ defaults, nunca quebra). Precedência do
-  // TIER: `--tier` (flag, opts.tier) > config salva > DEFAULT_TIER. O TEMA aplica a
-  // config DENTRO do `detectInitialTheme` (override de env/flag ainda vence). A troca
-  // em sessão (`/model`/`/theme`) grava de volta aqui p/ a próxima sessão reabrir nela.
-  const configStore = opts.configStore ?? new UserConfigStore();
-  const savedConfig: UserConfig = configStore.load();
   // Piso de recall do mem0 CONFIG-DRIVEN: o loop lê `ALUY_MEM_MIN_SCORE` do env da sessão.
   // Expõe o `config.recallMinScore` nessa env — SÓ se a env não fixa já (precedência env >
   // config > default 0.6). Assim o dono calibra no config.json sem precisar exportar env.
@@ -2693,9 +2714,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // usuário bagunçado. Best-effort: só TTY, opt-out `ALUY_SET_BG=0`, NO_COLOR
   // respeitado, terminal sem suporte ignora (degrada em silêncio). UMA sequência no
   // apply/troca e UMA no reset — nunca por frame (não regride o flicker #95/#118).
-  const bgController = new BackgroundController({ stdout: opts.stdout ?? process.stdout, env });
-  // Aplica o fundo do tema INICIAL (boot). A troca em runtime (`/theme`) reaplica no
-  // `onThemeChanged`. O reset vai no `finally`/sinal (junto do cleanup do sync).
+  // O controller foi construído lá em cima (F-SPLASH-NO-TEMA) para o splash já nascer no
+  // tema salvo. Aqui só confirmamos o fundo do tema INICIAL de verdade — que pode diferir
+  // do salvo quando o COLORFGBG do terminal declara outro brilho, e nesse caso esta
+  // segunda aplicação corrige o que o splash adiantou. A troca em runtime (`/theme`)
+  // reaplica no `onThemeChanged`. O reset vai no `finally`/sinal (com o cleanup do sync).
   {
     const initialEntry = themeByName(initialTheme);
     if (initialEntry) bgController.apply(initialEntry.bg);
