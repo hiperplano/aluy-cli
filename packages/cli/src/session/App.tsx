@@ -2440,6 +2440,20 @@ export function App(props: AppProps): React.ReactElement {
     // Roda DEPOIS do gate de paste (que já trata os marcadores `[200~`/`[201~`).
     if (isUnrecognizedEscapeTail(char)) return;
 
+    // O TAB LEGÍTIMO é preservado: ele tem função própria nesta TUI (aceitar sugestão,
+    // completar comando, alternar foco) e chega com `key.tab`. O que se descarta aqui é o
+    // controle que veio SEM esse significado — alt+tab não capturado pelo WM chega como
+    // ESC+TAB, o Ink engole o ESC e entrega o TAB solto, que ia parar no composer como
+    // tabulação literal. Filtrar por caractere sem olhar `key` desligava o Tab inteiro.
+    if (
+      char !== '' &&
+      !key.tab &&
+      // eslint-disable-next-line no-control-regex
+      /^[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\t]+$/.test(char)
+    ) {
+      return;
+    }
+
     // ── ALT+TAB / TAB CRU — controle não é texto (relato do dono: "dou alt+tab no
     // composer e, em vez de ir para outra janela, ele cria uns espaçamentos pretos") ──
     //
@@ -2453,7 +2467,6 @@ export function App(props: AppProps): React.ReactElement {
     // abaixo via `key.tab`. Como texto ele nunca serve — nem sozinho, nem com alt. O mesmo
     // vale para os demais caracteres de controle que sobrevivem até aqui: se o `char` só
     // tem controle, não há nada para digitar.
-    if (char !== '' && /^[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\t]+$/.test(char)) return;
 
     // ── splash de boot: QUALQUER tecla dispensa (a sessão começou) ───────────
     if (state.phase === 'boot') {

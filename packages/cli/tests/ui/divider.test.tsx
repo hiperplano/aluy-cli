@@ -1,146 +1,55 @@
-// EST-0985 · polish de TUI — <Divider>: régua horizontal de largura total p/ dar
-// hierarquia (emoldura o input). Estes testes travam:
-//   1. largura = `columns` (régua de largura total), Unicode `━` (F-GLYPH-PESO-2:
-//      borda PESADA do esquema B) e ASCII `-`;
-//   2. papel DIM (fgDim default / depth), nunca cor crua — NO_COLOR intacto;
-//   3. ESTÁVEL entre frames (chrome estático — não depende de tick/animação);
-//   4. piso de 1 célula em terminal minúsculo (sem crash em columns<=0).
+// F-PROFUNDIDADE — o contrato ATUAL do `<Divider>`: ele não desenha mais régua nenhuma,
+// mas continua ocupando UMA linha.
+//
+// Este arquivo travava o desenho anterior (régua de largura total no chrome e traço curto
+// entre turnos). O dono pediu os dois fora — "as linhas no CLI deixam uma cara muito ruim",
+// e depois "um ____________ não está legal separando as seções de conversa" — e a separação
+// passou a vir da moldura das caixas e do espaço em volta dos rótulos.
+//
+// O que segue sendo INVARIANTE, e é o que este arquivo protege agora: a ALTURA. O cockpit
+// soma a altura de cada região para fechar o grid sem tremer (ADR-0076 §5); um `<Divider>`
+// que devolvesse zero linha faria o layout refluir e traria de volta o jitter que aquele
+// desenho existe para matar. É por isso que ele devolve uma linha VAZIA em vez de nada.
 
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
-import { ThemeProvider } from '../../src/ui/theme/context.js';
-import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { Divider } from '../../src/ui/components/Divider.js';
+import { ThemeProvider, resolveTheme } from '../../src/ui/theme/index.js';
 
-const ESC = String.fromCharCode(27);
-const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');
-function plain(s: string): string {
-  return s.replace(ANSI, '');
+/** Renderiza o divisor e devolve o frame já sem códigos de cor. */
+function frameDe(node: React.ReactElement): string {
+  const { lastFrame } = render(<ThemeProvider theme={resolveTheme('escuro')}>{node}</ThemeProvider>);
+  // eslint-disable-next-line no-control-regex
+  return (lastFrame() ?? '').replace(/\[[0-9;]*m/g, '');
 }
 
-function wrap(node: React.ReactElement, env: NodeJS.ProcessEnv) {
-  const theme = resolveTheme({ env });
-  return render(<ThemeProvider theme={theme}>{node}</ThemeProvider>);
-}
-
-// Unicode pleno (truecolor) vs ASCII puro (TERM=linux) vs sem cor (NO_COLOR).
-const UTF8 = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color', COLORTERM: 'truecolor' };
-const ASCII = { TERM: 'linux' }; // sem Unicode ⇒ box ASCII (`-`)
-const NOCOLOR = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color', NO_COLOR: '1' };
-const SAFE = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color', ALUY_SAFE_GLYPHS: '1' };
-
-describe('Divider — régua de largura total (EST-0985)', () => {
-  it('Unicode: a linha é `━` repetido EXATAMENTE `columns` vezes', () => {
-    const { lastFrame } = wrap(<Divider columns={40} />, UTF8);
-    const out = plain(lastFrame() ?? '').replace(/\n+$/, '');
-    expect(out).toBe('━'.repeat(40));
-    expect(out.length).toBe(40);
+describe('<Divider> — sem régua, com altura', () => {
+  it('não desenha traço algum', () => {
+    expect(frameDe(<Divider columns={80} />).trim()).toBe('');
   });
 
-  it('ASCII (TERM=linux): cai no `-` (endurecimento EST-0984), mesma largura', () => {
-    const { lastFrame } = wrap(<Divider columns={24} />, ASCII);
-    const out = plain(lastFrame() ?? '').replace(/\n+$/, '');
-    expect(out).toBe('-'.repeat(24));
-    expect(out).not.toContain('━'); // sem Unicode no perfil ASCII
+  it('ocupa exatamente UMA linha — o cockpit soma alturas para fechar o grid', () => {
+    expect(frameDe(<Divider columns={80} />).split('\n')).toHaveLength(1);
   });
 
-  it('perfil SEGURO (ALUY_SAFE_GLYPHS) mantém o box Unicode `━` (cobertura ampla)', () => {
-    // EST-0984: o SAFE endurece os glifos de PAPEL, mas box-drawing (agora ┏┓━┃, F-
-    // GLYPH-PESO-2) tem cobertura ampla e fica no conjunto Unicode — a régua segue `━`.
-    const { lastFrame } = wrap(<Divider columns={16} />, SAFE);
-    const out = plain(lastFrame() ?? '').replace(/\n+$/, '');
-    expect(out).toBe('━'.repeat(16));
-  });
-
-  it('largura segue `columns` (responsivo): 80 default, 120 explícito', () => {
-    // Conta os glifos `━` (não o length da string): em terminal de teste estreito
-    // o Ink pode SOFT-WRAP a régua larga numa quebra interna — o que importa é o
-    // nº de células `━` emitidas = `columns`.
-    const count = (frame: string): number => (plain(frame).match(/━/g) ?? []).length;
-    expect(count(wrap(<Divider />, UTF8).lastFrame() ?? '')).toBe(80);
-    expect(count(wrap(<Divider columns={120} />, UTF8).lastFrame() ?? '')).toBe(120);
-  });
-
-  it('piso de 1 célula em terminal minúsculo (columns 0/negativo não quebra)', () => {
-    for (const c of [0, -5]) {
-      const { lastFrame } = wrap(<Divider columns={c} />, UTF8);
-      const out = plain(lastFrame() ?? '').replace(/\n+$/, '');
-      expect(out.length).toBe(1);
-      expect(out).toBe('━');
+  it('a altura não depende da largura (nem em terminal estreito ou largo)', () => {
+    for (const columns of [1, 20, 80, 200]) {
+      expect(frameDe(<Divider columns={columns} />).split('\n')).toHaveLength(1);
     }
   });
-});
 
-describe('Divider — papel DIM por TOKEN (EST-0985)', () => {
-  it('default fgDim ⇒ emite SGR de cor dim (papel, não cor crua)', () => {
-    const { lastFrame } = wrap(<Divider columns={10} />, UTF8);
-    const raw = lastFrame() ?? '';
-    // fgDim no truecolor dark = #8A7F6D + dimColor ⇒ há sequência ANSI de cor.
-    expect(raw).toMatch(ANSI);
-    // e o conteúdo visível segue sendo a régua.
-    expect(plain(raw).replace(/\n+$/, '')).toBe('━'.repeat(10));
+  it('a variante `subtle` também saiu — mesma linha vazia, mesma altura', () => {
+    expect(frameDe(<Divider columns={80} subtle />).trim()).toBe('');
+    expect(frameDe(<Divider columns={80} subtle />).split('\n')).toHaveLength(1);
   });
 
-  it('role="depth" também é aceito (papel discreto alternativo)', () => {
-    const { lastFrame } = wrap(<Divider columns={10} role="depth" />, UTF8);
-    expect(plain(lastFrame() ?? '').replace(/\n+$/, '')).toBe('━'.repeat(10));
+  it('sem `columns` (não-TTY) não quebra e mantém a linha', () => {
+    expect(frameDe(<Divider />).split('\n')).toHaveLength(1);
   });
 
-  it('a11y NO_COLOR: a régua sobrevive sem cor (não depende de cor)', () => {
-    const { lastFrame } = wrap(<Divider columns={12} />, NOCOLOR);
-    expect(plain(lastFrame() ?? '').replace(/\n+$/, '')).toBe('━'.repeat(12));
-  });
-});
-
-describe('Divider — variante SUTIL entre turnos (EST-0987)', () => {
-  it('subtle: traço CURTO (largura parcial), NÃO a régua cheia', () => {
-    const { lastFrame } = wrap(<Divider columns={80} subtle />, UTF8);
-    const out = plain(lastFrame() ?? '').replace(/\n+$/, '');
-    // largura parcial fixa (12), bem menor que os 80 da régua cheia.
-    expect(out.length).toBeLessThan(80);
-    expect(out).toBe('━'.repeat(12));
-  });
-
-  it('subtle nunca estoura a largura do terminal (clamp ao columns minúsculo)', () => {
-    const { lastFrame } = wrap(<Divider columns={6} subtle />, UTF8);
-    const out = plain(lastFrame() ?? '').replace(/\n+$/, '');
-    expect(out).toBe('━'.repeat(6)); // min(12, 6) = 6
-  });
-
-  it('subtle usa o papel mais APAGADO (fgDim) e ignora `role`', () => {
-    // mesmo passando role="depth", o subtle força fgDim (o mais discreto).
-    const { lastFrame } = wrap(<Divider columns={40} subtle role="depth" />, UTF8);
-    const out = plain(lastFrame() ?? '').replace(/\n+$/, '');
-    expect(out).toBe('━'.repeat(12));
-  });
-
-  it('subtle ASCII (TERM=linux): cai no `-` curto (a11y/ascii intacto)', () => {
-    const { lastFrame } = wrap(<Divider columns={40} subtle />, ASCII);
-    const out = plain(lastFrame() ?? '').replace(/\n+$/, '');
-    expect(out).toBe('-'.repeat(12));
-  });
-
-  it('subtle NO_COLOR: o traço sobrevive sem cor', () => {
-    const { lastFrame } = wrap(<Divider columns={40} subtle />, NOCOLOR);
-    expect(plain(lastFrame() ?? '').replace(/\n+$/, '')).toBe('━'.repeat(12));
-  });
-});
-
-describe('Divider — estável entre frames (chrome estático, anti-flicker)', () => {
-  it('re-render não muda a linha (constante; nada vivo dentro)', () => {
-    const theme = resolveTheme({ env: UTF8 });
-    const { lastFrame, rerender } = render(
-      <ThemeProvider theme={theme}>
-        <Divider columns={30} />
-      </ThemeProvider>,
-    );
-    const first = lastFrame();
-    rerender(
-      <ThemeProvider theme={theme}>
-        <Divider columns={30} />
-      </ThemeProvider>,
-    );
-    expect(lastFrame()).toBe(first);
+  it('o papel não reintroduz desenho — `depth` e `fgDim` saem iguais', () => {
+    expect(frameDe(<Divider columns={80} role="depth" />).trim()).toBe('');
+    expect(frameDe(<Divider columns={80} role="fgDim" />).trim()).toBe('');
   });
 });
