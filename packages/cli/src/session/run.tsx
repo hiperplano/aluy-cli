@@ -67,6 +67,7 @@ import type { Quota } from '@hiperplano/aluy-cli-core';
 import {
   createLocalCredentialProvider,
   hasStoredApiKey,
+  genericApiKeyEnvName,
   storeApiKey,
 } from '../model/local/credential-resolver.js';
 import { setupMcp, ProjectMcpConfigStore, CodexMcpConfigStore } from '../mcp/index.js';
@@ -2753,6 +2754,36 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     built.controller.pushNote('login', [
       'sem credencial — rode `aluy login` (ou defina ALUY_TOKEN).',
     ]);
+  }
+
+  // F-PRIMEIRO-BOOT (gap #8) — sob backend local, avisar no BOOT quando não há chave.
+  //
+  // O comentário acima está certo sobre não mentir "rode aluy login (broker)" num setup
+  // local que funciona — mas a conclusão de então (deixar a falta de chave aparecer só na
+  // 1ª chamada) criou um problema pior para quem acaba de instalar: a tela abre mostrando
+  // `local · anthropic` com o rodapé completo, como se estivesse tudo pronto, e o usuário
+  // só descobre que falta configurar DEPOIS de escrever a primeira mensagem e recebê-la de
+  // volta como erro. A tela afirmava um estado que não existia.
+  //
+  // O aviso é de PRESENÇA, não de rede: nada de probe no boot. E some sozinho assim que
+  // houver chave — quem já configurou nunca o vê.
+  if (resolvedBackend === 'local') {
+    const provAtivo = activeLocalProviderIdRef?.() ?? '';
+    if (provAtivo !== '') {
+      // Env genérica (`ALUY_<PROVIDER>_API_KEY`) mais as específicas conhecidas: quem
+      // exportou a chave no shell está configurado, e avisá-lo seria ruído.
+      const envGenerica = genericApiKeyEnvName(provAtivo);
+      const temEnv =
+        (env[envGenerica] ?? '').trim() !== '' ||
+        (env[`${provAtivo.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`] ?? '').trim() !== '';
+      if (!temEnv && !hasStoredApiKey(provAtivo)) {
+        built.controller.pushNote('provider', [
+          `sem credencial para "${provAtivo}" — as chamadas vão falhar até configurar.`,
+          `grave a chave com \`aluy login --provider ${provAtivo}\`, ou exporte a env var do provider.`,
+          'para trocar de provider, use `/provider`.',
+        ]);
+      }
+    }
   }
 
   // EST-0977 — NOTA dos agentes-`.md` descobertos + erros de carga (RES-MD-3, FALHA
