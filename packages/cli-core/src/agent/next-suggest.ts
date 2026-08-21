@@ -19,6 +19,18 @@
 // IDENTIFICADORES semânticos (`NextSuggestionId`). Quem tem o i18n (a TUI) mapeia o id p/
 // a frase localizada que vira o texto do composer ao aceitar. Assim o core fica sem string
 // de idioma e a TUI escolhe pt-BR/en. (Mesma disciplina do resto do i18n do CLI.)
+//
+// F199 (pedido do dono — "quero que o autocompletar seja inteligente, hoje me parece que
+// são frases padrão") — ele tinha razão: as 7 frases eram FIXAS, a sugestão nunca sabia
+// QUAIS arquivos foram tocados, QUAL teste falhou nem QUAL erro aconteceu. `TurnDigest`
+// ganha FATOS opcionais (nomes de arquivo, comando, nome do teste, texto curto do erro) e
+// `suggestionParams` (abaixo) extrai deles um mapa id→params PARA INTERPOLAR na frase i18n
+// (`t(key, params)` já existe — `{test}`/`{command}`/`{files}`/`{error}`). O contrato acima
+// SEGUE de pé: `suggestionParams` devolve DADO (nomes/comandos, já clampados/redigidos —
+// nunca gramática de idioma tipo "e"/"and"), não frase. Sem o fato específico ⇒ `undefined`
+// ⇒ o resolver (packages/cli) cai na frase genérica de sempre (não regride).
+
+import { redactOutputSecrets } from './journal/redact.js';
 
 /**
  * F197 — DIGEST do turno recém-terminado: os poucos FATOS de que a heurística precisa,
@@ -40,6 +52,26 @@ export interface TurnDigest {
   readonly hadError?: boolean;
   /** Só EXPLOROU (leu/buscou) sem editar nada — read/grep/glob/list e nada de escrita? */
   readonly explorationOnly?: boolean;
+
+  // ── F199 — FATOS do turno (o QUÊ, não só o SE). Todos opcionais/livres p/ o chamador
+  //    montar o que souber; ausentes ⇒ a sugestão correspondente cai no genérico. O
+  //    chamador (buildTurnDigest, packages/cli) já deve entregar STRINGS CURTAS e SANEADAS
+  //    (sem quebra de linha, sem segredo) — `suggestionParams` ainda assim reclampa/redige
+  //    em profundidade (defesa em camada, mesma filosofia de CLI-SEC-6 no resto do repo). ──
+
+  /** Nomes dos arquivos EDITADOS/criados neste turno, na ordem em que apareceram, sem
+   *  repetir. Alimenta "revise as mudanças em `<arquivo>`". */
+  readonly editedFileNames?: readonly string[];
+  /** Nome do teste/suite que FALHOU (a 1ª falha do placar). Alimenta "investigue por que
+   *  `<teste>` falhou". */
+  readonly failingTestName?: string;
+  /** O comando que RODOU os testes neste turno (só existe quando `ranTests`). Alimenta
+   *  "rode `<comando>` de novo". */
+  readonly testCommand?: string;
+  /** Texto CURTO do erro do turno (quando `hadError` sem edição) — já truncado pelo
+   *  chamador; NUNCA a saída crua/inteira de um comando. Alimenta "tente outra abordagem
+   *  — o erro foi `<erro>`". */
+  readonly errorSummary?: string;
 }
 
 /**
@@ -125,4 +157,89 @@ export function suggestNextPrompts(
     if (out.length >= max) break;
   }
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F199 — PARAMETRIZAÇÃO: id + digest → params p/ interpolar na frase i18n (`t(key,
+// params)`, que já resolve `{nome}` — ver packages/cli/src/i18n/translate.ts). O core
+// devolve DADO (nomes/comandos já clampados p/ 1 linha, nunca frase/gramática de
+// idioma); quem escolhe a chave i18n "nomeada" vs. a genérica é o resolver (packages/
+// cli/src/session/suggest.ts), que só tem a chave nomeada p/ os 4 ids abaixo — os
+// demais (`explain`/`implement`/`next-step`) seguem 100% genéricos.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Params prontos p/ `t(key, params)` — sempre string (mesmo tipo de `I18nParams`). */
+export type SuggestionParams = Readonly<Record<string, string>>;
+
+/** Teto de caracteres de UM fato interpolado (nome/comando/erro) — o composer é UMA
+ *  linha; um fato longo não pode estourar a frase inteira. */
+const MAX_FACT_CHARS = 40;
+/** Teto por NOME de arquivo quando há mais de um (a frase soma vários fatos). */
+const MAX_FILE_CHARS = 24;
+/** Quantos nomes de arquivo entram por extenso antes de parar de listar (sem "e mais
+ *  N" — isso seria gramática/idioma; silenciosamente não enumera o resto). */
+const MAX_FILES_SHOWN = 2;
+
+/**
+ * Sane um FATO livre (nome/comando/texto de erro) antes de virar param: colapsa
+ * quebras de linha (o composer é 1 linha), redige segredo (`redactOutputSecrets`,
+ * CLI-SEC-6 — defesa EM CAMADA: o produtor da saída já redige, mas um fato pode vir
+ * de um chamador que não passou por lá) e trunca em `max` chars com reticências.
+ * Pura, determinística, idempotente (chamar 2× não muda o resultado).
+ */
+function clampFact(raw: string, max: number = MAX_FACT_CHARS): string {
+  const oneLine = redactOutputSecrets(raw).replace(/\s+/g, ' ').trim();
+  if (oneLine.length <= max) return oneLine;
+  return `${oneLine.slice(0, Math.max(0, max - 1))}…`;
+}
+
+/**
+ * Junta nomes de arquivo p/ a frase de review: até `MAX_FILES_SHOWN` por extenso,
+ * separados por ", " (separador NEUTRO de lista, não palavra de idioma — por isso
+ * pode viver aqui no core). Cada nome é clampado antes. Vazio ⇒ `undefined` (sem
+ * fato, quem chama cai no genérico).
+ */
+function joinFileNames(names: readonly string[]): string | undefined {
+  const nonEmpty = names.map((n) => n.trim()).filter((n) => n.length > 0);
+  if (nonEmpty.length === 0) return undefined;
+  return nonEmpty
+    .slice(0, MAX_FILES_SHOWN)
+    .map((n) => clampFact(n, MAX_FILE_CHARS))
+    .join(', ');
+}
+
+/**
+ * F199 — deriva os PARAMS de interpolação p/ a sugestão de TOPO `id`, a partir dos
+ * FATOS do `digest`. `undefined` quando não há fato específico p/ aquele id (id sem
+ * parametrização, ou fato ausente) — o resolver então usa a frase genérica de sempre
+ * (não regride). PURA/determinística; não lança.
+ */
+export function suggestionParams(
+  id: NextSuggestionId,
+  digest: TurnDigest,
+): SuggestionParams | undefined {
+  switch (id) {
+    case 'fix-failing': {
+      const test = digest.failingTestName;
+      return test !== undefined && test.trim() !== '' ? { test: clampFact(test) } : undefined;
+    }
+    case 'run-tests': {
+      const command = digest.testCommand;
+      return command !== undefined && command.trim() !== ''
+        ? { command: clampFact(command) }
+        : undefined;
+    }
+    case 'summarize': {
+      const files = digest.editedFileNames;
+      if (files === undefined) return undefined;
+      const joined = joinFileNames(files);
+      return joined !== undefined ? { files: joined } : undefined;
+    }
+    case 'retry-different': {
+      const error = digest.errorSummary;
+      return error !== undefined && error.trim() !== '' ? { error: clampFact(error) } : undefined;
+    }
+    default:
+      return undefined;
+  }
 }

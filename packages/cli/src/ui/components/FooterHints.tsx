@@ -6,7 +6,7 @@
 // compacto). O texto por estado é DADO (tabela §4.3), não espalhado.
 
 import React from 'react';
-import { Role } from '../theme/index.js';
+import { Role, useTheme } from '../theme/index.js';
 import { useI18n, type I18nKey } from '../../i18n/index.js';
 
 /** Estados que mudam o footer (§4.3). */
@@ -80,11 +80,25 @@ export interface FooterHintsProps {
 
 export function FooterHints(props: FooterHintsProps): React.ReactElement {
   const { t } = useI18n();
+  const theme = useTheme();
+  /**
+   * F-HINTS-GLIFO — resolve os marcadores `{enter}`/`{up}` pelo PERFIL de glifos ativo.
+   *
+   * Os símbolos estavam cravados no catálogo de tradução (`⏎ enviar · … · ↑ histórico`), o
+   * que os punha fora do alcance do tema: num terminal sem cobertura unicode — exatamente
+   * o caso que o perfil seguro existe para atender — a linha de atalhos virava duas caixas
+   * vazias. Texto de UI passa pelo catálogo; SÍMBOLO passa pelo tema, e o marcador é o que
+   * liga um ao outro.
+   */
+  const comGlifos = (texto: string): string =>
+    texto
+      .replace('{enter}', theme.unicode ? '⏎' : 'enter')
+      .replace('{up}', theme.unicode ? '↑' : 'up');
   // ARMADO p/ sair (1º Ctrl+C): a dica de confirmação VENCE a do estado, em destaque.
   if (props.armedExit === true) {
     return <Role name="accent">{t('hints.ctrlcAgain')}</Role>;
   }
-  const base = t(HINT_KEYS[props.state]);
+  const base = comGlifos(t(HINT_KEYS[props.state]));
   const showElapsed =
     props.elapsed !== undefined && props.elapsed !== '' && BUSY_HINTS.has(props.state);
   // F197 — no idle com sugestão pendente, anexa a afordância do Tab (`tab aceita a

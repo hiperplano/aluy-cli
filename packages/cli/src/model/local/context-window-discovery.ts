@@ -126,8 +126,30 @@ async function fetchModelsBody(args: FetchModelsContextsArgs): Promise<unknown> 
       // SEM `body`: GET com body (mesmo `''`) faz o fetch do Node LANÇAR antes da rede
       // (mesma armadilha documentada no `custom-models-client` do core).
     });
-    if (!res.ok) return undefined; // 401/404/5xx ⇒ não descobrimos. Sem nota, sem erro (fail-open).
-    const text = await res.text();
+    // BUG (relato do dono: "só o tokenrouter não traz a lista de modelos") — MEDIDO no
+    // gateway dele: `GET {base}/models` responde **400**, e `GET {base}/models?` — a MESMA
+    // URL com uma query string VAZIA — responde **200** com os 127 modelos. É defeito do
+    // roteador daquele gateway, não nosso; mas o efeito aqui era o dono achar que o aluy
+    // não listava os modelos DELE, enquanto listava os de todo mundo.
+    //
+    // Uma 2ª tentativa com `?` é BARATA (só quando a 1ª falha), INÓCUA para quem já
+    // funciona (nunca chega a rodar) e não muda o alvo: mesmo host, mesmo path, mesma
+    // credencial — nada aqui vira vetor novo de egress. Só o 400/404 justificam a
+    // repetição: 401 é credencial (repetir não conserta e gasta tentativa num provider
+    // que pode contar falha no rate limit) e 5xx é falha do servidor.
+    let resposta = res;
+    if (!resposta.ok && (resposta.status === 400 || resposta.status === 404)) {
+      resposta = await args.fetchImpl(`${base}/models?`, {
+        method: 'GET',
+        signal: ctrl.signal,
+        headers: {
+          accept: 'application/json',
+          ...(args.key !== '' ? { authorization: `Bearer ${args.key}` } : {}),
+        },
+      });
+    }
+    if (!resposta.ok) return undefined; // 401/404/5xx ⇒ não descobrimos. Sem nota, sem erro (fail-open).
+    const text = await resposta.text();
     if (text.length > MAX_MODELS_BODY_CHARS) return undefined;
     return JSON.parse(text) as unknown;
   } catch {

@@ -19,7 +19,13 @@ const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');
 const plain = (s: string): string => s.replace(ANSI, '');
 
 describe('StatusBar — via Custom (EST-0962)', () => {
-  it('com model ⇒ mostra `tier · <slug>`', () => {
+  it('com model ⇒ mostra `tier · <slug>` INTEIRO quando a largura permite', () => {
+    // F-RODAPE-NAO-QUEBRA (pedido do dono: a barra não pode quebrar em duas linhas) — o
+    // rodapé passou a ter um ORÇAMENTO acoplado: os campos fixos (tier, medidores) são
+    // reservados primeiro e o que sobra é repartido entre os dois campos ELÁSTICOS
+    // (modelo e path). Por isso o slug inteiro só sai quando cabe: com a largura DEFAULT
+    // (80) ele é encurtado (caso logo abaixo). A afirmação original — `tier · <slug>` —
+    // continua valendo; só passou a depender da largura, que agora é explícita.
     const { lastFrame } = wrap(
       <StatusBar
         cwd="/proj"
@@ -27,12 +33,34 @@ describe('StatusBar — via Custom (EST-0962)', () => {
         model="meta-llama/llama-3.1-8b-instruct"
         tokens={0}
         windowPct={0}
+        columns={140}
       />,
     );
     const out = plain(lastFrame() ?? '');
     expect(out).toContain('custom');
     expect(out).toContain('meta-llama/llama-3.1-8b-instruct');
     expect(out).toContain('·');
+  });
+
+  it('slug que não cabe no orçamento ⇒ ENCURTA (some o vendor, corta pela cauda) — não some', () => {
+    // A degradação é deliberada e em duas etapas: primeiro cai o VENDOR (`meta-llama/`),
+    // que é redundante com o provider já exibido na linha; só depois vem o corte por
+    // caractere, pela CAUDA — o COMEÇO do slug é o que identifica a família do modelo.
+    const { lastFrame } = wrap(
+      <StatusBar
+        cwd="/proj"
+        tier="custom"
+        model="meta-llama/llama-3.1-8b-instruct-variante-bem-comprida"
+        tokens={0}
+        windowPct={0}
+        columns={100}
+      />,
+    );
+    const out = plain(lastFrame() ?? '');
+    expect(out).toContain('custom');
+    expect(out).toContain('llama-3.1-8b'); // a cabeça do slug (a família) sobrevive
+    expect(out).toContain('…'); // e o corte é ANUNCIADO, não silencioso
+    expect(out).not.toContain('meta-llama/'); // o vendor caiu primeiro (é redundante)
   });
 
   it('sem model (tier canônico) ⇒ NÃO mostra slug (compat — só o tier)', () => {

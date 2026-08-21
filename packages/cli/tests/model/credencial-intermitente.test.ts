@@ -28,6 +28,14 @@ import {
   type KeyringEntry,
 } from '../../src/model/local/credential-resolver.js';
 
+// F-COFRE-ISOLADO — cofre em tmpdir, nunca o `~/.aluy/credentials.enc` da máquina.
+// Sem isso a asserção comparava a chave esperada com a credencial REAL de quem roda os
+// testes e, ao falhar, o vitest imprimia o segredo inteiro no relatório.
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const COFRE_ISOLADO = { vaultPath: join(mkdtempSync(join(tmpdir(), 'aluy-cred-iso2-')), 'credentials.enc') };
+
 /** Entry de keychain controlável: valor corrente + erro programável na leitura. */
 function entradaFake(estado: { valor?: string; erro?: Error }): {
   factory: (s: string, a: string) => KeyringEntry;
@@ -58,6 +66,7 @@ describe('credencial local — um blip do keychain NÃO derruba a sessão', () =
     const estado: { valor?: string; erro?: Error } = { valor: 'sk-real-123' };
     const { factory } = entradaFake(estado);
     const resolver = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'openrouter',
       entryFactory: factory,
       env: {},
@@ -74,6 +83,7 @@ describe('credencial local — um blip do keychain NÃO derruba a sessão', () =
   it('blip SEM nenhuma leitura boa antes ⇒ ERRO que aponta o keychain, não "configure a chave"', async () => {
     const { factory } = entradaFake({ erro: new Error('keyring is locked') });
     const resolver = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'openrouter',
       entryFactory: factory,
       env: {},
@@ -90,6 +100,7 @@ describe('credencial local — um blip do keychain NÃO derruba a sessão', () =
     // Ausência legítima não pode virar "o keychain falhou": aqui o conselho está CERTO.
     const { factory } = entradaFake({ erro: new Error('No entry found in keyring') });
     const resolver = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'openrouter',
       entryFactory: factory,
       env: {},
@@ -105,6 +116,7 @@ describe('credencial local — um blip do keychain NÃO derruba a sessão', () =
     const estado: { valor?: string; erro?: Error } = { valor: 'sk-velha' };
     const { factory } = entradaFake(estado);
     const resolver = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'openrouter',
       entryFactory: factory,
       env: {},
@@ -118,6 +130,7 @@ describe('credencial local — um blip do keychain NÃO derruba a sessão', () =
     const estado: { valor?: string; erro?: Error } = { valor: 'sk-a' };
     const { factory, leituras } = entradaFake(estado);
     const resolver = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'openrouter',
       entryFactory: factory,
       env: {},
@@ -132,6 +145,7 @@ describe('credencial local — um blip do keychain NÃO derruba a sessão', () =
     const estado: { valor?: string; erro?: Error } = { valor: 'sk-do-keychain' };
     const { factory } = entradaFake(estado);
     const resolver = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'openrouter',
       entryFactory: factory,
       env: { OPENROUTER_API_KEY: 'sk-do-env' },
@@ -145,6 +159,7 @@ describe('credencial local — um blip do keychain NÃO derruba a sessão', () =
     const estado: { valor?: string; erro?: Error } = { valor: 'sk-revogada' };
     const { factory } = entradaFake(estado);
     const resolver = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'openrouter',
       entryFactory: factory,
       env: {},
@@ -159,6 +174,7 @@ describe('credencial local — um blip do keychain NÃO derruba a sessão', () =
   it('o cache é POR PROVIDER — o blip de um não empresta a chave do outro', async () => {
     const estadoA: { valor?: string; erro?: Error } = { valor: 'sk-openrouter' };
     const rA = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'openrouter',
       entryFactory: entradaFake(estadoA).factory,
       env: {},
@@ -166,6 +182,7 @@ describe('credencial local — um blip do keychain NÃO derruba a sessão', () =
     await rA();
     const estadoB: { valor?: string; erro?: Error } = { erro: new Error('dbus caiu') };
     const rB = createLocalCredentialProvider({
+      fileVault: COFRE_ISOLADO,
       provider: 'anthropic',
       entryFactory: entradaFake(estadoB).factory,
       env: {},

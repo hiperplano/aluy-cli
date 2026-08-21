@@ -99,6 +99,16 @@ export interface UserConfig {
    */
   readonly suggestions?: boolean;
   /**
+   * F-AUTOUPDATE (pedido do dono: "quando tiver update no npm, instalar automaticamente")
+   * — liga/desliga a atualização automática. Ausente ⇒ LIGADO (a decisão dele).
+   *
+   * A chave existe porque quem roda serviço 24/7 não pode ter troca de versão embaixo de
+   * um expediente sem opção: `ALUY_AUTO_UPDATE=0` no ambiente do serviço desliga sem
+   * mexer no config global. A precedência inteira vive em `autoUpdateEnabled`
+   * (io/auto-update.ts), não aqui — aqui é só o campo persistido.
+   */
+  readonly autoUpdate?: boolean;
+  /**
    * ADR-0120 / EST-1113 — BACKEND de modelo salvo: `broker` (default) | `local`
    * (BYO). Preferência de roteamento (NÃO credencial — CLI-SEC-7): diz por QUAL
    * caminho o modelo é chamado, não COM qual segredo. Precedência: `--backend`
@@ -754,7 +764,9 @@ function sanitizeProviderEntries(raw: unknown): readonly UserProviderEntry[] | u
     // é opaco de propósito — é o dialeto do agregador (`provider`, `routing`, o que for) e
     // o aluy não conhece nenhum deles. Só exigimos que seja um OBJETO: se o dono digitar
     // errado dentro, o erro vem do agregador, que é quem sabe o que aceita.
-    const upstreamByModel = ((): Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined => {
+    const upstreamByModel = (():
+      | Readonly<Record<string, Readonly<Record<string, unknown>>>>
+      | undefined => {
       const src = o.upstreamByModel;
       if (typeof src !== 'object' || src === null || Array.isArray(src)) return undefined;
       const acc: Record<string, Record<string, unknown>> = {};
@@ -831,6 +843,7 @@ function sanitize(raw: unknown): UserConfig {
     lang?: Lang;
     fullscreen?: boolean;
     suggestions?: boolean;
+    autoUpdate?: boolean;
     backend?: 'broker' | 'local';
     localProvider?: string;
     localModel?: string;
@@ -884,6 +897,9 @@ function sanitize(raw: unknown): UserConfig {
   // fullscreen. Só sobrevive como boolean genuíno; lixo/ausente ⇒ default ON (resolvido
   // em `resolveInitialSuggestions`, não aqui — aqui só preservamos o que foi salvo). NUNCA lança.
   if (typeof obj.suggestions === 'boolean') out.suggestions = obj.suggestions;
+  // F-AUTOUPDATE — booleano de comportamento, MESMA disciplina dos de UI acima: só
+  // boolean genuíno entra (string "true" do disco não vira `true` por acidente).
+  if (typeof obj.autoUpdate === 'boolean') out.autoUpdate = obj.autoUpdate;
   // ADR-0120 — backend: só `broker`|`local` (lixo ⇒ descartado ⇒ default broker).
   if (obj.backend === 'broker' || obj.backend === 'local') out.backend = obj.backend;
   // ADR-0120 / ADR-0118 — localProvider: SLUG opaco razoável (ABERTO/config-driven).
@@ -1127,6 +1143,11 @@ export class UserConfigStore {
    * preservando as demais. `true` ⇒ a próxima sessão reabre com sugestões; `false` ⇒ off.
    * Só pref de UI (booleano) — jamais segredo (CLI-SEC-7).
    */
+  /** F-AUTOUPDATE — açúcar: persiste só o liga/desliga da atualização automática. */
+  saveAutoUpdate(autoUpdate: boolean): boolean {
+    return this.save({ autoUpdate });
+  }
+
   saveSuggestions(suggestions: boolean): boolean {
     return this.save({ suggestions });
   }
@@ -1157,7 +1178,10 @@ export class UserConfigStore {
     const p = provider.trim();
     if (p === '') return false;
     const m = model?.trim();
-    return this.save({ localProvider: p, ...(m !== undefined && m !== '' ? { localModel: m } : {}) });
+    return this.save({
+      localProvider: p,
+      ...(m !== undefined && m !== '' ? { localModel: m } : {}),
+    });
   }
 
   /**

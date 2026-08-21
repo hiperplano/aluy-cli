@@ -37,6 +37,8 @@ import { THEMES, resolveThemeName, type ThemeName } from '../ui/theme/themes.js'
 import { boxTable } from '../ui/table-lines.js';
 import { LANGS, resolveLang, t as translate, type Lang } from '../i18n/index.js';
 import { PROVIDERS, resolveProviderName } from '../model/providers.js';
+import { PromptInterruptedError, type TerminalIO } from '../auth/io.js';
+import type { StoreApiKeyResult } from '../model/local/credential-resolver.js';
 
 /** Uma nota a empurrar na conversa (título + linhas). */
 export interface SlashNote {
@@ -233,6 +235,21 @@ export function buildLangEffect(args: string, currentLang: Lang): SlashEffect {
 export function buildProviderEffect(
   args: string,
   currentProvider: string | undefined,
+  /**
+   * F-PROV-LISTA-UNICA — os providers CONHECIDOS agora. Injetado porque a fonte da
+   * verdade mudou de lugar e este módulo é PURO.
+   *
+   * O BUG que isto fecha (medido no TTY): `/provider <nome>` respondia "provider
+   * desconhecido — disponíveis: openrouter, deepseek" para um provider que a PRÓPRIA
+   * sessão estava usando. A causa é a mesma doença desta série — DUAS listas: o
+   * `/provider` sem argumento abre o picker sobre o catálogo REAL (built-ins +
+   * `providers[]` do config, 9+ entradas), enquanto o `/provider <nome>` casava contra
+   * a `PROVIDERS` deste módulo: um SEED de DOIS itens herdado do broker. Provider custom
+   * — que é justamente o caso de quem usa BYO — nunca era encontrado.
+   *
+   * Ausente ⇒ cai no seed antigo (não-regressão para os callers que ainda não injetam).
+   */
+  catalogo?: readonly { readonly name: string; readonly summary?: string }[],
 ): SlashEffect {
   const arg = args.trim();
   if (arg === '') {
@@ -244,17 +261,26 @@ export function buildProviderEffect(
         title: 'provider',
         lines: [
           'providers do modo Custom (use `/provider <nome>`):',
-          ...PROVIDERS.map(
-            (p) =>
-              `${p.name === currentProvider ? '● ' : '  '}${p.name} — ${p.summary}${p.isDefault ? ' (padrão)' : ''}`,
-          ),
+          ...(catalogo ?? PROVIDERS).map((p) => {
+            const marca = p.name === currentProvider ? '● ' : '  ';
+            const desc = 'summary' in p && p.summary !== undefined ? ` — ${p.summary}` : '';
+            const padrao = 'isDefault' in p && p.isDefault === true ? ' (padrão)' : '';
+            return `${marca}${p.name}${desc}${padrao}`;
+          }),
           '◍ só o NOME vai ao broker, que resolve provider/credencial (nunca exibido)',
           'pareia com o modelo Custom (`/model` → Custom). fora de Custom, é ignorado.',
         ],
       },
     };
   }
-  const entry = resolveProviderName(arg);
+  // F-PROV-LISTA-UNICA — casa contra o catálogo INJETADO quando ele veio; só cai no
+  // `resolveProviderName` (seed de dois) quando ninguém injetou nada.
+  const doCatalogo = catalogo?.find((p) => p.name.toLowerCase() === arg.toLowerCase());
+  // `label` é só apresentação: o catálogo injetado pode não trazer, e aí o NOME serve.
+  const entry =
+    doCatalogo !== undefined
+      ? { name: doCatalogo.name, label: doCatalogo.name }
+      : resolveProviderName(arg);
   if (!entry) {
     return {
       kind: 'provider',
@@ -263,7 +289,7 @@ export function buildProviderEffect(
         title: 'provider',
         lines: [
           `provider desconhecido: "${arg}".`,
-          `disponíveis: ${PROVIDERS.map((p) => p.name).join(', ')}.`,
+          `disponíveis: ${(catalogo ?? PROVIDERS).map((p) => p.name).join(', ')}.`,
         ],
       },
     };
@@ -393,14 +419,26 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
         },
       };
     case 'login':
+      // Achado do dono ("o /login não funciona") — isto aqui SEMPRE citava o device-flow
+      // do BROKER, mesmo quando a sessão está no backend LOCAL (BYO) — que é o único que
+      // este `/login` executa DE VERDADE hoje (`runLoginSlash`, roteado ANTES em run.tsx,
+      // espelha `/telegram`: precisa do provider ATIVO + I/O de prompt, fora do alcance
+      // de `buildSlashEffect`). Cair AQUI só acontece sem esse roteamento (não-TTY/testes/
+      // sem wiring) ⇒ nota HONESTA cobrindo os dois backends, sem fingir ter rodado nada:
+      //   - local (BYO): o `/login` guarda a chave do provider ativo, e reusa a já
+      //     guardada em vez de reexigir digitar — mas só quando roteado de verdade.
+      //   - broker (conta): login de CONTA não roda dentro da sessão (decisão do dono —
+      //     "ainda não temos os modelos do aluy"); `aluy login` no terminal é o caminho
+      //     real (o MESMO que o aviso de boot já usa) — sem prometer uma versão futura.
       return {
         kind: 'note',
         note: {
           title: 'login',
           lines: [
-            'para entrar, rode `aluy login` num terminal (device-flow RFC 8628)',
-            'ou `aluy login --token <PAT>` em CI/headless.',
-            'o fluxo device-flow dentro da TUI é a evolução natural.',
+            'sob backend local (BYO): grava a API key do provider ativo — se já houver uma',
+            'guardada, oferece REUSAR em vez de pedir pra digitar de novo.',
+            'sob backend broker (conta): ainda não roda dentro da sessão — rode `aluy login`',
+            'num terminal (ou defina ALUY_TOKEN).',
           ],
         },
       };
@@ -1267,6 +1305,141 @@ export async function runAsyncSlash(
     };
   } catch {
     return { title: 'logout', lines: ['não foi possível concluir o logout — tente de novo.'] };
+  }
+}
+
+/**
+ * ADR-0120 (retomada) — a DECISÃO do `/login` da sessão, extraída PURA (sem I/O) do
+ * runner assíncrono (`runLoginSlash`) — mesma disciplina de `mcpCatalog`: a mecânica de
+ * terminal/keychain não se testa aqui, só o RAMO escolhido. Responde exatamente as três
+ * perguntas do escopo: o backend é local? qual o provider ativo? já existe chave (ela
+ * pode ser REUSADA) ou falta pedir uma nova?
+ *
+ * Escopo do dono (relato "o /login não funciona", "ainda não temos os modelos do aluy"):
+ * SÓ o backend local (BYO — a chave do próprio provider do usuário) grava credencial
+ * aqui. `broker-unsupported`/`no-active-provider` NUNCA chegam ao runner de verdade
+ * (o caller — `runLoginSlash` — só é invocado sob backend local com provider já
+ * resolvido por `resolveLocalProviderConfig`, que sempre resolve um); ficam só como
+ * ramos DEFENSIVOS (fail-safe: nunca inventa provider, nunca assume backend).
+ */
+export interface LocalLoginDecisionInput {
+  readonly backend: 'local' | 'broker';
+  /** Provider LOCAL ativo AGORA (não o do boot — a sessão pode ter trocado via /model). */
+  readonly localProvider: string | undefined;
+  /** Já existe uma API key persistida (keychain OU cofre em arquivo) p/ este provider? */
+  readonly hasExistingKey: boolean;
+}
+
+export type LocalLoginDecision =
+  | { readonly kind: 'broker-unsupported' }
+  | { readonly kind: 'no-active-provider' }
+  | { readonly kind: 'ask-reuse'; readonly provider: string }
+  | { readonly kind: 'prompt-new'; readonly provider: string };
+
+export function decideLocalLogin(input: LocalLoginDecisionInput): LocalLoginDecision {
+  if (input.backend !== 'local') return { kind: 'broker-unsupported' };
+  if (input.localProvider === undefined || input.localProvider === '') {
+    return { kind: 'no-active-provider' };
+  }
+  return input.hasExistingKey
+    ? { kind: 'ask-reuse', provider: input.localProvider }
+    : { kind: 'prompt-new', provider: input.localProvider };
+}
+
+/**
+ * Interpreta a resposta do prompt "já existe uma chave — reusar? [S/n]". VAZIO/ENTER
+ * (o caminho de MENOR esforço — literalmente "sem digitar de novo", o pedido do dono) e
+ * s/sim/y/yes ⇒ reusa. Qualquer outra coisa (incl. lixo/começo de colagem por engano)
+ * ⇒ NÃO reusa — cai no prompt de chave nova, que é sempre reversível (nunca sobrescreve
+ * nem apaga a chave existente por engano; só troca se uma chave NOVA de fato for colada).
+ */
+export function parseReuseAnswer(raw: string): boolean {
+  const v = raw.trim().toLowerCase();
+  if (v === '') return true;
+  return v === 's' || v === 'sim' || v === 'y' || v === 'yes';
+}
+
+/** Dependências de I/O do `/login` local — mesma fronteira de `runTelegramSlash`. */
+export interface LoginSlashDeps {
+  /** Provider LOCAL ativo AGORA (lido pelo caller na hora — não congelado no boot). */
+  readonly provider: string;
+  readonly io: TerminalIO;
+  /** Presença JÁ resolvida (I/O) — tipicamente `hasStoredApiKey` do credential-resolver. */
+  readonly hasExistingKey: () => boolean;
+  /** Grava a chave — REUSA `storeApiKey` do credential-resolver (não duplica a escrita). */
+  readonly storeKey: (provider: string, key: string) => StoreApiKeyResult;
+}
+
+/**
+ * ADR-0120 (retomada) — runner ASSÍNCRONO do `/login` sob backend LOCAL (BYO). Roteado
+ * ANTES em run.tsx (precisa do provider ativo AO VIVO + I/O de terminal — fora do
+ * `buildSlashEffect` puro, mesmo padrão de `runTelegramSlash`). Fluxo:
+ *   1. já existe chave p/ o provider? pergunta se REUSA (Enter = reusa, sem digitar de
+ *      novo) — reusou ⇒ pronto, NADA mudou;
+ *   2. senão (ou respondeu "não" ao reuso): prompt OCULTO (`secret:true`) pela chave
+ *      nova e grava com `storeKey` (o MESMO `storeApiKey` do `aluy login --provider`:
+ *      keychain → cofre em arquivo cifrado, nunca em claro — CLI-SEC-2).
+ * CLI-SEC — a chave NUNCA aparece em `io.out`/`io.err`/na nota devolvida: só o BACKEND
+ * que a guardou ("keychain do SO" / "cofre local cifrado") é reportado, nunca o valor.
+ * Ctrl-C (`PromptInterruptedError`) durante qualquer prompt ⇒ nota de cancelado, sem
+ * lançar — mesmo invariante de `runAsyncSlash`/`runTelegramSlash` (o `.then()` do
+ * caller em run.tsx não tem `.catch()`; deixar rejeitar aqui derrubaria a sessão viva).
+ */
+export async function runLoginSlash(deps: LoginSlashDeps): Promise<SlashNote> {
+  try {
+    const decision = decideLocalLogin({
+      backend: 'local',
+      localProvider: deps.provider,
+      hasExistingKey: deps.hasExistingKey(),
+    });
+    if (decision.kind === 'broker-unsupported' || decision.kind === 'no-active-provider') {
+      // Defensivo — o caller só chama isto sob backend local com provider já resolvido
+      // (`resolveLocalProviderConfig` sempre resolve um). Nunca deveria cair aqui.
+      return {
+        title: 'login',
+        lines: ['login indisponível neste contexto (sem provider local ativo) — nada mudou.'],
+      };
+    }
+    if (decision.kind === 'ask-reuse') {
+      const answer = await deps.io.prompt(
+        `já existe uma chave de ${decision.provider} guardada — reusar? [S/n] `,
+      );
+      if (parseReuseAnswer(answer)) {
+        return {
+          title: 'login',
+          lines: [`✓ mantida a chave já guardada de ${decision.provider} — nada mudou.`],
+        };
+      }
+    }
+    const key = (
+      await deps.io.prompt(`cole a API key de ${decision.provider}: `, { secret: true })
+    ).trim();
+    if (key === '') {
+      return { title: 'login', lines: ['nenhuma chave informada — nada mudou.'] };
+    }
+    const result = deps.storeKey(decision.provider, key);
+    return {
+      title: 'login',
+      lines: [
+        result.backend === 'keychain'
+          ? `✓ API key de ${decision.provider} guardada no keychain do SO.`
+          : `✓ API key de ${decision.provider} guardada no cofre local cifrado (~/.aluy/credentials.enc).`,
+      ],
+    };
+  } catch (err) {
+    if (err instanceof PromptInterruptedError) {
+      return { title: 'login', lines: ['login cancelado (Ctrl-C) — nada mudou.'] };
+    }
+    // Nem keychain nem cofre em arquivo funcionaram (ex.: sem Secret Service E
+    // machine-id ilegível). NUNCA cai pra gravar em claro — mesma mensagem de
+    // `runApiKeyLogin` (commands/local-login.ts): a causa vem do BACKEND, nunca da chave.
+    return {
+      title: 'login',
+      lines: [
+        `não foi possível gravar a chave (keychain do SO indisponível): ${err instanceof Error ? err.message : String(err)}`,
+        '(a credencial nunca é gravada em texto em claro — use uma variável de ambiente como alternativa.)',
+      ],
+    };
   }
 }
 

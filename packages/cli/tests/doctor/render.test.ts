@@ -52,6 +52,6 @@ describe('doctor/render', () => {
 
   it('glifos Unicode na superfície da TUI', () => {
     const lines = renderDoctor(buildDoctorReport(facts()), UNICODE_DOCTOR_GLYPHS);
-    expect(lines.some((l) => l.startsWith('✓'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('✔'))).toBe(true); // F-GLYPH-PESO-2: ✓→✔
   });
 });

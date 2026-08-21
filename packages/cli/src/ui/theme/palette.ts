@@ -17,7 +17,7 @@ export type TermRole =
   | 'success' // ✓, linha + do diff, "0 erros"
   | 'depth' // ◍ broker, /model, URLs, meta estrutural (teal)
   | 'shadowAmber' // âmbar ESCURO — tom LIT (pico+halo) do shimmer da sombra 3D (F200c: sombra âmbar, não teal, sincronizada c/ a marca)
-  | 'shadowAmberDim'; // âmbar ESCURO+ — tom DIM/repouso da sombra 3D (mais escuro que a marca ⇒ lê como sombra)
+  | 'shadowAmberDim'; // tom DIM/repouso da sombra 3D — sempre com MENOS contraste que a marca (é isso que a faz ler como sombra; no escuro isso é ser mais escura, no claro é ser mais clara)
 
 /**
  * Estilo resolvido de um papel: cor (hex truecolor OU nome de cor do Ink p/ 16),
@@ -34,6 +34,20 @@ export interface RoleStyle {
 
 /** Mapa completo de papéis → estilo, para um dado modo de cor. */
 export type Palette = Readonly<Record<TermRole, RoleStyle>>;
+
+// ── O FUNDO de cada tema (`--bg`) ────────────────────────────────────────────
+// Estas três cores moram aqui, junto dos papéis, porque não são detalhe do catálogo:
+// são a PÁGINA sobre a qual todo o resto é medido. Quem calcula uma superfície (o
+// degrau de fundo das caixas, em theme.ts) e quem monta o catálogo (themes.ts) têm de
+// falar da MESMA cor — quando as duas pontas guardavam cópias próprias, as caixas do
+// tema claro acabaram desenhadas contra um fundo que a tela não tinha, e o resultado
+// foi um cinza frio boiando sobre creme.
+/** Fundo do tema CLARO: creme quente (o `--stone-50` do web "lava" no terminal). */
+export const BG_LIGHT = '#F4ECDC';
+/** Fundo do tema ESCURO neutro: quase-preto. */
+export const BG_DARK = '#070707';
+/** Fundo do tema SLATE: `--stone-950`, a terra escura WARM do DS. */
+export const BG_SLATE = '#0E0C09';
 
 // ── Truecolor (24-bit) — tema DARK (default) ─────────────────────────────────
 // Cores do tema dark do DS (spec §3.1). Pisos ≥ AA sobre fundo escuro.
@@ -66,20 +80,27 @@ export const TRUECOLOR_LIGHT: Palette = {
   // (#544B3C ≈ 6.9:1 sobre o fundo claro) — legível, ainda hierarquicamente abaixo do fg.
   fgDim: { color: '#544B3C' },
   accent: { color: '#82530F', bold: true },
-  accentMid: { color: '#82530F', bold: true }, // light colapsa os tons de âmbar (fundo claro)
-  accentDim: { color: '#82530F', bold: true },
+  // O degradê do âmbar existe para o pulso da marca ter PARA ONDE ir. Colapsar os três
+  // tons num só (como estava) apagava o shimmer inteiro no claro: o Λluy do boot virava
+  // um borrão marrom parado, e o mesmo acontecia com todo realce que anima. A escala aqui
+  // é curta de propósito — no fundo creme sobra pouca margem antes de bater no piso AA
+  // (4,5:1) —, mas curta ainda é movimento; nenhuma é ausência dele.
+  accentMid: { color: '#8B5A11', bold: true }, // 5,01:1 sobre o creme
+  accentDim: { color: '#946113', bold: true }, // 4,49:1 — realce calmo (piso AA-large)
   danger: { color: '#B23A2A', bold: true },
   // EST-0966: escurecido de #2E7D4F (4.37:1, abaixo de AA) p/ #1F6B3A (5.64:1) —
   // sucesso é texto normal (✓/contagens), exige AA pleno sobre o fundo claro.
   success: { color: '#1F6B3A' },
   depth: { color: '#2E6E69' }, // teal (broker/URLs/meta)
-  // F200c — no LIGHT a marca é âmbar-700 (#82530F, tudo colapsado). A sombra tem de ser
-  // MAIS ESCURA que a marca ⇒ âmbar-800 (#5E3B0B, no fundo claro = MAIS contraste, lê como
-  // sombra). Os 2 tons COLAPSAM no mesmo valor (como o âmbar da marca colapsa no light): a
-  // sombra fica num âmbar escuro FIXO — o shimmer da sombra já é imperceptível no light,
-  // igual ao da própria marca (accent/accentMid/accentDim colapsados).
-  shadowAmber: { color: '#5E3B0B' },
-  shadowAmberDim: { color: '#5E3B0B' },
+  // F200c — o que faz uma sombra parecer sombra não é ser mais escura: é ter MENOS
+  // contraste que a coisa que a projeta. No fundo escuro as duas descrições coincidem, e
+  // por isso a regra "sombra = mais escura que a marca" funcionou lá e foi copiada para
+  // cá — onde ela se inverte. Sobre creme, o âmbar-800 que estava aqui (#5E3B0B, 8,5:1)
+  // pesava MAIS que a própria marca (#82530F, 5,6:1): o desenho lia como um objeto escuro
+  // com um reflexo claro por cima, não como um relevo. Agora a sombra é âmbar CLARO —
+  // menos contraste que a marca em ambos os tons, mantendo o piso decorativo de 3:1.
+  shadowAmber: { color: '#9C7228' }, // 3,69:1 — o tom LIT (pico + halo)
+  shadowAmberDim: { color: '#A67A2E' }, // 3,28:1 — o repouso, ainda mais recuado
 };
 
 // ── 16-cores (fallback) — nomes de cor do Ink/ANSI (spec §3.1 col "16-cores") ──

@@ -1,6 +1,7 @@
 // EST-MCP-STATUSBAR (pedido do dono) — o progresso da conexão MCP em background vive
-// SÓ na StatusBar (nunca como nota na conversa): uma barrinha `MCP ▰▰▱ 2/3` enquanto
-// conecta, e um ✓/aviso rápido quando `done`. Espelha o estilo de `status-bar-cycle.test.tsx`.
+// SÓ na StatusBar (nunca como nota na conversa): uma barrinha `MCP ██░ 2/3` (F-GLYPH-
+// PESO-2: ▰▰▱→██░) enquanto conecta, e um ✔ (F-GLYPH-PESO-2: ✓→✔)/aviso rápido quando
+// `done`. Espelha o estilo de `status-bar-cycle.test.tsx`.
 
 import React from 'react';
 import { describe, expect, it } from 'vitest';
@@ -41,11 +42,11 @@ describe('StatusBar — progresso de conexão MCP (EST-MCP-STATUSBAR)', () => {
     const out = plain(lastFrame() ?? '');
     expect(out).toContain('MCP');
     expect(out).toContain('1/3');
-    // NÃO é o ✓ de concluído ainda.
-    expect(out).not.toContain('✓ MCP');
+    // NÃO é o ✔ de concluído ainda.
+    expect(out).not.toContain('✔ MCP'); // F-GLYPH-PESO-2: ✓→✔
   });
 
-  it('concluído sem falha (done:true, failed:0) ⇒ mostra ✓ MCP N/N', () => {
+  it('concluído sem falha (done:true, failed:0) ⇒ mostra ✔ MCP N/N', () => {
     const { lastFrame } = wrap(
       <StatusBar
         cwd="/proj"
@@ -57,7 +58,7 @@ describe('StatusBar — progresso de conexão MCP (EST-MCP-STATUSBAR)', () => {
       />,
     );
     const out = plain(lastFrame() ?? '');
-    expect(out).toContain('✓');
+    expect(out).toContain('✔'); // F-GLYPH-PESO-2: ✓→✔
     expect(out).toContain('MCP 3/3');
     expect(out).not.toContain('falhou');
   });

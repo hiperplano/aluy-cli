@@ -548,6 +548,12 @@ export interface AgentLoopOptions {
    */
   readonly tierProvider?: () => string | undefined;
   /**
+   * F-SABER-O-MODELO — provider/modelo em uso, resolvido a cada chamada (o `/model` e o
+   * `/provider` trocam no meio da sessão). Ausente sob broker: lá o mapa tier→provider é
+   * segredo do produto e não pode vazar pelo system prompt.
+   */
+  readonly runtimeInfoProvider?: () => { readonly provider?: string; readonly model?: string };
+  /**
    * EST-0969 · ADR-0057 (E-A2) — CONTADOR INJETADO. Default: o loop cria um
    * `SessionBudget` PRÓPRIO por execução (mono-loop, idêntico ao baseline). Mas
    * um SUB-AGENTE recebe aqui o `SharedBudget` COMPARTILHADO do pai — assim a
@@ -694,6 +700,10 @@ export class AgentLoop {
   // ADR-0145 (frente c) — thunk do tier corrente (gateia o few-shot no `system`).
   // undefined ⇒ sem few-shot (baseline).
   private readonly tierProvider?: () => string | undefined;
+  private readonly runtimeInfoProvider?: () => {
+    readonly provider?: string;
+    readonly model?: string;
+  };
   // EST-0969 (E-A2) — budget COMPARTILHADO injetado (sub-agente). undefined ⇒
   // o loop cria um SessionBudget próprio por execução (mono-loop).
   private readonly sharedBudget?: BudgetGate;
@@ -748,6 +758,7 @@ export class AgentLoop {
     if (opts.availableAgents !== undefined) this.availableAgents = opts.availableAgents;
     if (opts.sessionCommands !== undefined) this.sessionCommands = opts.sessionCommands;
     if (opts.tierProvider) this.tierProvider = opts.tierProvider;
+    if (opts.runtimeInfoProvider) this.runtimeInfoProvider = opts.runtimeInfoProvider;
     if (opts.budget) this.sharedBudget = opts.budget;
     if (opts.pollInjected) this.pollInjected = opts.pollInjected;
     if (opts.expedite) this.expedite = opts.expedite;
@@ -1216,6 +1227,10 @@ export class AgentLoop {
         this.availableAgents,
         this.sessionCommands,
         this.tierProvider?.(),
+        // F-SABER-O-MODELO — quem atende esta sessão. Resolvido a CADA chamada (o `/model` e
+        // o `/provider` trocam no meio da sessão), e ausente sob broker, onde o mapa
+        // tier→provider é segredo do produto.
+        this.runtimeInfoProvider?.(),
       );
       // F191 — EXPEDITE ("acelerar o encaixe"): subscreve um ouvinte SÓ pela duração
       // desta chamada de modelo. Ao disparar (o dono aperta ESC com um `user_inject`

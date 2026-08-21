@@ -88,12 +88,21 @@ async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
   }
 }
 
+/** Descasca a moldura à esquerda (barra `┃` do composer / `│` do <PickerFrame>) + espaços.
+ * F-COMPOSER-CAIXA / F-PICKER-PAINEL — na reforma de UI pedida pelo dono o campo de entrada
+ * virou uma CAIXA e os seletores ganharam moldura arredondada: hoje o Ink desenha uma borda
+ * no INÍCIO de cada linha, então `trimStart()` sozinho não alcança mais o prompt. */
+function unframe(line: string): string {
+  return line.replace(/^[\s┃│|]+/, '');
+}
+
 function composerText(lastFrame: () => string | undefined): string {
   const frame = plain(lastFrame() ?? '');
   const above = frame.split(MENU_HINT)[0] ?? frame;
-  const rows = above.split('\n').filter((l) => l.trimStart().startsWith('›'));
+  // F-COMPOSER-CAIXA — o prompt passou de `›` para `❯`.
+  const rows = above.split('\n').filter((l) => unframe(l).startsWith('❯'));
   const row = rows[rows.length - 1] ?? '';
-  const text = row.replace(/^\s*›\s?/, '').trim();
+  const text = unframe(row).replace(/^❯\s?/, '').trim();
   return text.startsWith('digite um objetivo') ? '' : text;
 }
 

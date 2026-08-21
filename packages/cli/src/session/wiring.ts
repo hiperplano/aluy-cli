@@ -12,6 +12,7 @@
 //
 // Tudo injetável (testes). NÃO toca Ink aqui — o render é em run.tsx.
 
+import type { Quota } from '@hiperplano/aluy-cli-core';
 import {
   AgentMemory,
   BrokerModelCaller,
@@ -271,6 +272,22 @@ export interface BuildSessionOptions {
    * própria (pass-through). Ausente ⇒ o controller preserva EXATAMENTE o
    * comportamento rc.105 (fallback fail-closed/warn-but-allow) — zero regressão.
    */
+  /**
+   * F-MODELO-FICA — grava o modelo ATIVO no config quando um turno confirma que ele
+   * responde. Construída no `run.tsx`; ausente ⇒ a troca vale só na sessão (o
+   * comportamento anterior, em que `/model` nunca persistia).
+   */
+  readonly persistActiveLocalModel?: (slug: string) => void;
+  /**
+   * F-SALDO-BYO — fonte de quota/saldo ALTERNATIVA. Quando presente, VENCE o
+   * `quotaClient` do broker.
+   *
+   * Existe porque o rodapé só sabia falar com o broker: sob backend LOCAL o dono
+   * carregava crédito no gateway dele e a tela não mostrava NADA. O `run.tsx` monta um
+   * leitor que fala o dialeto do gateway BYO e o adapta ao MESMO `Quota` que o rodapé já
+   * pinta — daí a injeção, em vez de um segundo componente de rodapé.
+   */
+  readonly quotaFetcher?: () => Promise<Quota | undefined>;
   readonly verifyAndRegisterLocalModel?: (slug: string) => Promise<{
     readonly ok: boolean;
     readonly detail: string;
@@ -998,6 +1015,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     undefined,
     opts.context?.window,
     modelWindowFromConfig(opts.providerWindows, opts.activeProviderId, windowSlug),
+    // F-WIN (embutido) — o SLUG, não só a janela já resolvida: é ele que o catálogo
+    // embutido consulta quando nada acima respondeu. Sem este argumento o degrau existe
+    // e NUNCA roda — a mesma ponta solta do `upstreamByModel` e do canal de raciocínio.
+    windowSlug,
   );
   // EST-0962 (--effort) — reasoning_effort PASSTHROUGH (qualquer string ≤32 chars).
   // SEM tier-gate: vale em qualquer tier. undefined ⇒ não enviado.
@@ -1502,6 +1523,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     ...(opts.verifyAndRegisterLocalModel
       ? { verifyAndRegisterLocalModel: opts.verifyAndRegisterLocalModel }
       : {}),
+    // F-MODELO-FICA — pass-through da porta que persiste o modelo ativo.
+    ...(opts.persistActiveLocalModel
+      ? { persistActiveLocalModel: opts.persistActiveLocalModel }
+      : {}),
     // F-PROV — porta de troca DE VERDADE do provider ativo local (construída pelo
     // `run.tsx`, pass-through aqui). Ausente ⇒ `setLocalProvider` do controller
     // devolve `ok:false` explícito (broker, ou teste sem esta porta montada).
@@ -1526,7 +1551,8 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // EST-0948 · ADR-0069 — fonte da quota da PRÓPRIA conta (`GET /v1/quota`): saldo de
     // CRÉDITO (primário) + janelas, p/ o footer. Degrada silencioso (broker fora/
     // deslogado ⇒ `undefined` ⇒ footer oculto). O controller a chama no boot + refresh.
-    quotaFetcher: () => quotaClient.fetchQuota(),
+    // F-SALDO-BYO — o injetado (BYO) vence; sem ele, o broker de sempre.
+    quotaFetcher: opts.quotaFetcher ?? ((): Promise<Quota | undefined> => quotaClient.fetchQuota()),
     // EST-1012 — MONITOR DE PRESSÃO DE MEMÓRIA (backstop de OOM): repassa o heap-limit
     // (o MESMO do launcher) + o amostrador do heap. A config escalonada é resolvida no
     // controller (env `ALUY_MEM_PRESSURE_AT`/`_OFF`). A porta de encerramento-limpo é

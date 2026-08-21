@@ -29,7 +29,27 @@ export const COCKPIT_MIN_COLS = 80;
 
 /** Alturas FIXAS das 4 regiões de chrome (linhas). Somadas com as 2 geridas == rows. */
 export const HEADER_ROWS = 1; // header compacto de 1 linha (o banner não cabe no grid fixo).
-export const STATUS_ROWS = 1; // status bar (tier/budget/modo) — 1 linha viva.
+// F-PAINEL — 3 linhas: o status virou um PAINEL de três itens (sessão/estado/uso), e o
+// grid do cockpit fecha por SOMA de alturas. Deixar 1 aqui faria o painel transbordar a
+// região e empurrar tudo abaixo dele — o mesmo modo de falha que a régua fixa já causou.
+// O custo são 2 linhas a menos de conversa; a alternativa (barra de 1 linha só no
+// cockpit) faria os dois modos divergirem visualmente sem nenhum ganho.
+export const STATUS_ROWS = 3; // painel de status (sessão/estado/uso) — 3 linhas vivas.
+/**
+ * Altura de tela a partir da qual o painel de status entra INTEIRO no cockpit.
+ *
+ * Abaixo disso ele encolhe para uma linha (só `sessão`, que é a que identifica onde a
+ * chamada vai cair). Fixar 3 linhas custava caro justamente onde não havia o que gastar:
+ * num terminal de 13 linhas o chrome comia tanto que a conversa ficava com UMA linha e o
+ * log com três — invertendo a prioridade da tela, já que a conversa é o foco e o log é
+ * apoio.
+ */
+export const COCKPIT_PANEL_MIN_ROWS = 24;
+
+/** Quantas linhas o painel de status ocupa no cockpit, dada a altura da tela. */
+export function statusRowsFor(rows: number): number {
+  return rows >= COCKPIT_PANEL_MIN_ROWS ? STATUS_ROWS : 1;
+}
 export const COMPOSER_ROWS = 1; // input — 1 linha (PISO; cresce p/ multi-linha, ver abaixo).
 export const HINTS_ROWS = 1; // atalhos contextuais — 1 linha.
 
@@ -38,7 +58,11 @@ export const HINTS_ROWS = 1; // atalhos contextuais — 1 linha.
  * (vive no scrollback); no cockpit cada região é um <Box> de altura cravada e a soma ==
  * rows (§5), então o composer NÃO pode crescer sem limite. O composer cresce de
  * `COMPOSER_ROWS` (=1) até este teto conforme o input multi-linha (bracketed-paste/`\n`),
- * descontando as linhas extras da CONVERSA (a maior região gerida) p/ a soma seguir ==
+ * descontando as linhas extras primeiro do LOG (até o piso de legibilidade) e só então da
+ * CONVERSA — decisão do dono. O contrato anterior mandava a conversa ceder por ser "a maior
+ * região gerida", o que invertia a prioridade da tela: a conversa é o FOCO e o log é apoio,
+ * e encolher o foco para preservar o apoio é o avesso do que o cockpit existe para fazer.
+ * A soma segue ==
  * rows. Acima do teto o <Composer> cuida do scroll interno (cauda visível) — mas o usuário
  * já vê várias linhas (paridade prática com o inline) em vez de ter o conteúdo SUMIDO.
  */
@@ -49,7 +73,7 @@ export const SEPARATOR_ROWS = 3; // header│conversa, conversa│log, log│sta
 
 /** Altura total de chrome FIXO (regiões + separadores). O resto vai p/ conversa+log. */
 export const COCKPIT_CHROME_ROWS =
-  HEADER_ROWS + STATUS_ROWS + COMPOSER_ROWS + HINTS_ROWS + SEPARATOR_ROWS;
+  HEADER_ROWS + 1 + COMPOSER_ROWS + HINTS_ROWS + SEPARATOR_ROWS;
 
 /**
  * ADR-0076 §6 — piso de LINHAS: o chrome fixo + ≥1 linha útil de conversa E ≥1 de log.
@@ -200,7 +224,10 @@ export function resolveCockpitLayout(
   // área gerida — e essa precisa manter ≥2 (1 conversa + 1 log). Clampamos o extra a esse
   // teto; o resto do input rola DENTRO do composer (cauda visível). Caso comum (1 linha):
   // `extra=0` ⇒ partição idêntica à de antes.
-  const baseManaged = rows - COCKPIT_CHROME_ROWS; // com composer=1 (piso garantido por MIN_ROWS).
+  // `COCKPIT_CHROME_ROWS` conta o painel de status no PISO (1 linha). Quando a tela é alta
+  // o bastante para ele abrir inteiro, as 2 linhas extras saem daqui — senão a soma das
+  // regiões estouraria `rows` e o grid deixaria de fechar (invariante §5).
+  const baseManaged = rows - COCKPIT_CHROME_ROWS - (statusRowsFor(rows) - 1);
   const wantExtra = composerRowsForLines(composerLines) - COMPOSER_ROWS;
   const extra = Math.max(0, Math.min(wantExtra, baseManaged - 2));
   const composerRows = COMPOSER_ROWS + extra;
@@ -217,7 +244,7 @@ export function resolveCockpitLayout(
     rows,
     cols,
     headerRows: HEADER_ROWS,
-    statusRows: STATUS_ROWS,
+    statusRows: statusRowsFor(rows),
     composerRows,
     hintsRows: HINTS_ROWS,
     regions: { conversaRows, logRows },

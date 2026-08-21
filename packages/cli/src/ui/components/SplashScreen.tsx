@@ -193,9 +193,13 @@ function Tagline(props: { readonly text: string }): React.ReactElement {
  * hardcode: a versão chega por prop (`CLI_VERSION`, sincronizada do package.json).
  */
 function VersionLine(props: { readonly version: string }): React.ReactElement {
+  const theme = useTheme();
   return (
     <Box>
-      <Role name="fgDim">Aluy CLI · </Role>
+      {/* F-MARCA-LAMBDA — mesma grafia do header e do bloco de resposta (`Λluy`). Em ASCII
+          cai para `Aluy CLI`: o Λ é grego e tem cobertura larga, mas o modo ASCII existe
+          justamente para quem não pode contar com isso. */}
+      <Role name="fgDim">{theme.unicode ? 'Λluy CLI · ' : 'Aluy CLI · '}</Role>
       <Role name="depth">v{props.version}</Role>
     </Box>
   );

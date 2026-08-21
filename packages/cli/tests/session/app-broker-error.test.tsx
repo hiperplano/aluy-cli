@@ -235,11 +235,28 @@ describe('App — MODO no RODAPÉ: o banner UNSAFE renderiza embaixo (EST-0989)'
     const idxComposer = lines.findIndex((l) => l.includes('digite um objetivo'));
     // EST-0962 — o footer mostra o NOME DE EXIBIÇÃO do tier (`Flui`), não a key crua
     // (`aluy-flux`): o tier default `aluy-flux` aparece como `Flui` no rodapé.
-    const idxStatus = lines.findIndex((l) => l.includes('Flui') && l.includes('%'));
+    //
+    // F-PAINEL-DE-STATUS (pedido do dono: "as três frases do rodapé viram três itens
+    // rotulados — sessão/estado/uso — reagrupados por assunto; a barra antiga misturava
+    // identidade, saúde e consumo numa linha só"). Logo o tier (`◕ sessão`) e o medidor
+    // de janela (`◉ uso`) NÃO estão mais na MESMA linha, e casar os dois juntos não acha
+    // nada. A ordem que este teste prova é a mesma — o banner vem DEPOIS do rodapé —, só
+    // que medida contra a ÚLTIMA linha do painel.
+    const idxTier = lines.findIndex((l) => l.includes('Flui'));
+    const idxUso = lines.findIndex((l) => l.includes('%'));
     expect(idxComposer).toBeGreaterThanOrEqual(0);
-    expect(idxStatus).toBeGreaterThanOrEqual(0);
+    expect(idxTier).toBeGreaterThanOrEqual(0);
+    expect(idxUso).toBeGreaterThanOrEqual(0);
+    // O QUE ESTE TESTE TRAVA (e segue valendo): o aviso loud mora no RODAPÉ — DEPOIS do
+    // composer. Antes da mudança ele morava ACIMA do input (idxBanner < idxComposer).
     expect(idxBanner).toBeGreaterThan(idxComposer);
-    expect(idxBanner).toBeGreaterThan(idxStatus);
+    // F-PAINEL (pedido do dono) — o rodapé virou um PAINEL de itens rotulados e o banner
+    // do modo unsafe passou a ser emitido pelo PRÓPRIO <StatusPanel>, no TOPO dele:
+    // "um aviso de modo perigoso não pode virar linha de tabela cinza". Logo ele não vem
+    // mais DEPOIS da barra de status — vem ABRINDO o painel, ainda dentro do rodapé. Essa
+    // é a ordem que provamos agora.
+    expect(idxTier).toBeGreaterThan(idxBanner);
+    expect(idxUso).toBeGreaterThan(idxBanner);
     unmount();
   });
 });

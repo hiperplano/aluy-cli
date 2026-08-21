@@ -13,7 +13,8 @@
 // (fica fora da região viva). Piso de 1 célula p/ terminais minúsculos.
 
 import React from 'react';
-import { Role, useTheme } from '../theme/index.js';
+import { Text } from 'ink';
+import { useTheme } from '../theme/index.js';
 
 export interface DividerProps {
   /** Largura do terminal (régua de largura total). Default 80 (não-TTY/teste). */
@@ -36,18 +37,35 @@ export interface DividerProps {
 // EST-0987 — largura do traço SUTIL (entre turnos): curto e estável, NÃO a régua
 // cheia. Limitado pela largura do terminal (piso 1) p/ não estourar em telas
 // minúsculas. Valor pequeno e constante ⇒ sem jitter, anti-flicker intacto.
-const SUBTLE_WIDTH = 12;
 
 export function Divider(props: DividerProps): React.ReactElement {
   const theme = useTheme();
   // `box.horizontal`: `─` (UNICODE_BOX) ou `-` (ASCII_BOX) — já resolvido pela
   // capacidade do terminal (EST-0984). Régua = o glifo repetido `columns` vezes.
-  const ch = theme.box.horizontal;
-  const full = Math.max(1, props.columns ?? 80);
-  // EST-0987 — `subtle`: traço CURTO (largura parcial) no papel mais apagado
-  // (`fgDim`). A chrome usa a régua cheia; aqui um respiro discreto entre turnos.
-  const width = props.subtle ? Math.min(SUBTLE_WIDTH, full) : full;
-  const role = props.subtle ? 'fgDim' : (props.role ?? 'fgDim');
-  const line = ch.repeat(width);
-  return <Role name={role}>{line}</Role>;
+  // F-SEM-REGUA (decisão do dono, olhando o opencode lado a lado: "as linhas no CLI
+  // deixam uma cara muito ruim... em vez de linhas separando as seções, alguma outra
+  // coisa") — a RÉGUA DE LARGURA TOTAL sai. Ela existia para "emoldurar o input", mas
+  // uma linha de ponta a ponta compete com o conteúdo em vez de organizá-lo, e ficou
+  // gritante quando o `box.horizontal` engrossou para `━` (moldura pesada das CAIXAS).
+  //
+  // A separação passa a ser ESPAÇO — o recurso que o opencode usa e que não disputa
+  // atenção com nada. O peso fica reservado para onde CERCA algo de verdade (diálogos,
+  // diff, composer): aí a borda é informação, não enfeite.
+  //
+  // A ALTURA é preservada de propósito (uma linha, agora vazia): o cockpit soma a altura
+  // de cada região para fechar o grid sem tremer (ADR-0076 §5). Devolver zero linha aqui
+  // faria o layout refluir e trazer de volta o jitter que aquele desenho existe p/ matar.
+  //
+  // `subtle` (o respiro CURTO entre turnos) sobrevive: ali o traço é pequeno, não corta a
+  // tela, e é o que dá ritmo ao histórico — é régua de chrome que incomodava, não ele.
+  // F-PROFUNDIDADE (relato do dono: "acho que um ____________ não está legal separando as
+  // seções de conversa") — o traço CURTO entre turnos também sai. A separação de turno já
+  // é dada pelo próprio rótulo (`▌ você` / `Λ aluy`) e pelo espaço; um traço solto no meio
+  // da conversa é ruído com aparência de conteúdo.
+  //
+  // Continua devolvendo UMA linha (vazia) para não mexer no orçamento anti-flicker do
+  // cockpit, que soma alturas de região para fechar o grid sem tremer.
+  void theme;
+  void props;
+  return <Text> </Text>;
 }

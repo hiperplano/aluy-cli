@@ -138,12 +138,25 @@ function humanizeProvider(name: string): string {
 export function buildLocalProviderEntries(
   entries: readonly import('@hiperplano/aluy-cli-core').LocalProviderEntry[],
 ): readonly ProviderEntry[] {
+  // F-PROV-CONTAGEM (relato do dono: "essa lista com quantidade de modelos não está
+  // correta") — o número que aparecia era o tamanho de `models[]`, que é a lista
+  // DECLARADA no catálogo/config: um punhado de slugs de exemplo. O provider real tem
+  // outra ordem de grandeza — MEDIDO: o OpenRouter anuncia 414 modelos e aparecia como
+  // "5"; o gateway do dono anuncia 127 e aparecia como "1 modelo".
+  //
+  // Contar ao vivo aqui é inviável: o picker lista TODOS os providers de uma vez, e isso
+  // viraria N chamadas de rede na abertura de um menu — em provider com teto por minuto
+  // (o caso dele), queimaria a janela só para desenhar uma lista.
+  //
+  // Então paramos de afirmar o que não sabemos: o rótulo passa a dizer o que o número
+  // É — slugs DECLARADOS, o atalho que o `/model` oferece antes de consultar. Quem quer
+  // o catálogo de verdade abre o `/model`, que consulta o provider ao vivo.
   return entries.map((e) => ({
     name: e.id,
     label: e.label,
     summary:
       e.models.length > 0
-        ? `${e.wireFormat} · ${e.models.length} modelo${e.models.length === 1 ? '' : 's'}`
+        ? `${e.wireFormat} · ${e.models.length} declarado${e.models.length === 1 ? '' : 's'}`
         : e.wireFormat,
   }));
 }

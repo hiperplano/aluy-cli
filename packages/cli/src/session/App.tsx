@@ -14,7 +14,7 @@ import React, { useEffect, useState, useReducer, useCallback, useMemo, useRef } 
 import { Box, Static, Text, useApp, useInput, useStdin, useStdout } from 'ink';
 import {
   Header,
-  StatusBar,
+  StatusPanel,
   Composer,
   QueuedInputs,
   PendingInjects,
@@ -22,6 +22,7 @@ import {
   queuedInputsLines,
   YouBlock,
   AluyBlock,
+  ComposerBox,
   ToolLine,
   TestRunBlock,
   AskDialog,
@@ -43,7 +44,6 @@ import {
   HistoryPicker,
   RewindPicker,
   AttachChips,
-  Onboarding,
   Boot,
   Working,
   ProgressBar,
@@ -154,6 +154,7 @@ import {
 import { isUnrecognizedEscapeTail } from './escape-leak.js';
 // F197 — sugestão de próximo prompt (ghost + Tab): blocos+i18n → texto do composer.
 import { resolveSuggestionText } from './suggest.js';
+import { buildTurnRecap } from './turn-recap.js';
 import {
   createPasteRegistry,
   shouldCollapse,
@@ -193,6 +194,17 @@ export interface AppProps {
   readonly controller: SessionController;
   /** Comandos do usuário (DADO de ~/.aluy/commands/). */
   readonly userCommands?: readonly SlashCommand[];
+  /**
+   * F-PROV-CRED — o provider JÁ tem chave guardada? Só a PRESENÇA (keychain → cofre),
+   * nunca o valor. Decide se o `/provider` pede a credencial ou segue direto.
+   */
+  readonly hasStoredKey?: (providerId: string) => boolean;
+  /**
+   * F-PROV-CRED — grava a chave colada no campo mascarado do picker. Liga em
+   * `storeApiKey` (a ÚNICA escrita de credencial do produto). Ausente ⇒ o passo nunca é
+   * oferecido.
+   */
+  readonly storeCredential?: (providerId: string, apiKey: string) => void;
   /** Allowlist de egress p/ enriquecer o AskDialog de rede (CLI-SEC-5). */
   readonly egress?: EgressAllowlist;
   /** Nome do usuário (onboarding). */
@@ -273,6 +285,14 @@ export interface AppProps {
    * `state.meta.model` (prioridade sobre esta prop — mesmo padrão do `currentProvider`).
    */
   readonly currentLocalModel?: string;
+  /**
+   * F-PROVIDER-NAO-SOME — provider LOCAL ativo, para o rodapé quando o `meta` ainda não o
+   * traz. O `meta.provider` é preenchido pela RESPOSTA, e num turno via modelo Custom ele
+   * volta vazio: o rodapé, que mostrava `local · openrouter · <modelo>`, passava a mostrar
+   * só `local · <modelo>` justamente depois de trocar de provider — o momento em que saber
+   * onde a chamada vai cair importa mais.
+   */
+  readonly currentLocalProvider?: string;
   /**
    * EST-0962 — troca o tier da sessão (o controller aplica no caller). Chamado pelo
    * seletor `/model` ao confirmar. Sem ele, o picker não troca (degradação segura).
@@ -369,7 +389,12 @@ export interface AppProps {
    * `/provider` ao confirmar. Sem ele, o picker não troca (degradação segura). HG-2: só
    * o NOME — o broker resolve `(provider, model)` server-side.
    */
-  readonly onSelectProvider?: (provider: string) => void;
+  /**
+   * Aplica a troca de provider. Devolve `true` quando ela de fato passou — o App usa isso
+   * para, aí sim, pedir o modelo do provider novo. `void` (backend broker) ⇒ sem passo de
+   * modelo, que é o comportamento de lá.
+   */
+  readonly onSelectProvider?: (provider: string) => void | Promise<boolean>;
   /**
    * F-PROV-FIX — o dono confirmou o VERBO explícito `/provider save`: fixa o
    * provider (e modelo) ATIVOS desta sessão como o PADRÃO da PRÓXIMA (o wiring grava
@@ -963,6 +988,30 @@ export function App(props: AppProps): React.ReactElement {
     ...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {}),
   });
 
+  /**
+   * F-PROV-PEDE-MODELO (regra do dono: "quando eu trocar o provider ele sempre tem que
+   * pedir o modelo") — encadeia o picker de modelo DEPOIS de uma troca que passou.
+   *
+   * Só abre no `true`: numa troca recusada (fail-closed) o provider ativo é o de antes, e
+   * abrir o picker ali ofereceria os modelos de um provider que não está em uso — pior que
+   * não abrir nada. O `void` do backend broker também não abre: lá o provider pareia com o
+   * modelo Custom por outro caminho.
+   */
+  const pedirModeloAposTroca = useCallback(
+    (r: void | Promise<boolean>): void => {
+      // Checagem de THENABLE, não `!== undefined`: o handler tem várias implementações
+      // (backend local devolve a promessa do veredito, broker não devolve nada, e os
+      // testes injetam mocks síncronos). Qualquer retorno que não seja promessa fazia
+      // `r.then` estourar — e como isso roda ao CONFIRMAR o provider, o erro derrubava a
+      // TUI no meio de uma troca, que é o pior momento possível para ela cair.
+      if (typeof (r as { then?: unknown } | undefined)?.then !== 'function') return;
+      void (r as Promise<boolean>).then((ok) => {
+        if (ok === true) localModelPicker.openPicker();
+      });
+    },
+    [localModelPicker],
+  );
+
   // F161-FIX · /effort STANDALONE — seletor do `reasoning_effort` fora do fluxo
   // conjugado do `/model` (EST-1117): reusa as MESMAS opções puras do core. O ativo
   // é cosmético (mesma fonte do passo conjugado — `props.currentEffort`, o valor do
@@ -1000,11 +1049,22 @@ export function App(props: AppProps): React.ReactElement {
     // F-PROV — sob backend LOCAL, ignora `providersClient` acima por completo (a
     // presença de `localCatalog` é o que decide a fonte, ver o hook).
     ...(props.localProviderCatalog ? { localCatalog: props.localProviderCatalog } : {}),
+    // F-PROV-CRED (relato do dono: "mudei o provider no picker e ele não pediu nada") —
+    // as duas peças que fazem o picker PEDIR a chave quando falta. Injetadas pelo wiring
+    // (não import direto): o hook é apresentação, a credencial é I/O do locus.
+    // AUSENTES ⇒ o passo de credencial nunca aparece (comportamento anterior, sem
+    // regressão para broker/teste).
+    ...(props.hasStoredKey ? { hasStoredKey: props.hasStoredKey } : {}),
+    ...(props.storeCredential ? { storeCredential: props.storeCredential } : {}),
   });
 
   // EST-0989 (i18n) — os NATIVOS LOCALIZADOS no idioma ativo (summaries traduzidos). Memo
   // pelo `t`: só re-mapeia ao trocar de idioma (em pt-BR devolve a MESMA ref ⇒ sem churn).
   const localizedNatives = useMemo(() => localizeCommands(NATIVE_COMMANDS, t), [t]);
+  // F-RECAP — resumo do que o turno FEZ, para a linha do rodapé (ver `turn-recap.ts`).
+  // Memoizado nos blocos: a função é PURA e barata, mas o rodapé re-renderiza a cada tick
+  // da região viva e não há por que refazer a varredura enquanto os blocos não mudam.
+  const turnRecap = useMemo(() => buildTurnRecap(state.blocks), [state.blocks]);
 
   // EST-0972 — seletor `/history`: lista as sessões anteriores (do SessionStore local,
   // re-lidas a cada abertura) e RETOMA a escolhida AO VIVO. Confirmar devolve o id; o
@@ -1853,7 +1913,7 @@ export function App(props: AppProps): React.ReactElement {
         // seed. Nome inválido ⇒ cai p/ o onCommand (nota honesta de "desconhecido").
         const entry = resolveProviderName(arg, providerPicker.providers);
         if (entry) {
-          props.onSelectProvider(entry.name);
+          pedirModeloAposTroca(props.onSelectProvider(entry.name));
           return;
         }
         // nome inválido ⇒ deixa o wiring empurrar a nota honesta.
@@ -2158,7 +2218,10 @@ export function App(props: AppProps): React.ReactElement {
   // (useModelPicker/useEffortPicker) já fazem este strip sozinhos (comentário
   // "controla colagem multi-char também"); aqui replicamos pros campos que não se
   // sanitizam (`typeAddCustom`/`setQuery`), pra manter o mesmo comportamento em TODOS.
-  const sanitizeFieldPaste = useCallback((text: string): string => text.replace(/[\r\n\t]/g, ''), []);
+  const sanitizeFieldPaste = useCallback(
+    (text: string): string => text.replace(/[\r\n\t]/g, ''),
+    [],
+  );
 
   // BUG (relato do dono) — em `/provider` → "+ adicionar provider custom", colar a URL
   // caía no COMPOSER de cima, não no campo do formulário. Causa: o canal de bracketed-
@@ -2219,6 +2282,12 @@ export function App(props: AppProps): React.ReactElement {
         return; // listas puras, sem campo de texto algum — ignora.
       }
       if (providerPicker.open) {
+        // F-PROV-CRED — colar a API key é o caso NORMAL (ninguém digita 50 chars à mão).
+        // O campo mascarado precisa receber a colagem como recebe a tecla.
+        if (providerPicker.credentialStep !== null) {
+          providerPicker.typeCredential(sanitizeFieldPaste(text));
+          return;
+        }
         if (providerPicker.addCustomStep !== null) {
           providerPicker.typeAddCustom(sanitizeFieldPaste(text));
         }
@@ -2369,6 +2438,34 @@ export function App(props: AppProps): React.ReactElement {
     // DIGITADO sozinho (len 1, sem byte final) NÃO casa ⇒ a digitação normal segue intacta.
     // Roda DEPOIS do gate de paste (que já trata os marcadores `[200~`/`[201~`).
     if (isUnrecognizedEscapeTail(char)) return;
+
+    // O TAB LEGÍTIMO é preservado: ele tem função própria nesta TUI (aceitar sugestão,
+    // completar comando, alternar foco) e chega com `key.tab`. O que se descarta aqui é o
+    // controle que veio SEM esse significado — alt+tab não capturado pelo WM chega como
+    // ESC+TAB, o Ink engole o ESC e entrega o TAB solto, que ia parar no composer como
+    // tabulação literal. Filtrar por caractere sem olhar `key` desligava o Tab inteiro.
+    if (
+      char !== '' &&
+      !key.tab &&
+      // eslint-disable-next-line no-control-regex
+      /^[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\t]+$/.test(char)
+    ) {
+      return;
+    }
+
+    // ── ALT+TAB / TAB CRU — controle não é texto (relato do dono: "dou alt+tab no
+    // composer e, em vez de ir para outra janela, ele cria uns espaçamentos pretos") ──
+    //
+    // Quando o gerenciador de janelas NÃO captura o alt+tab (acontece em xrdp, tmux e
+    // alguns terminais), a combinação chega à aplicação como ESC seguido de TAB. O Ink
+    // engole o ESC e entrega o TAB como `char`, que caía na digitação normal e era
+    // inserido no composer — daí os "espaçamentos": tabulações literais no meio do texto,
+    // que sob o fundo pintado aparecem como buracos escuros.
+    //
+    // O TAB tem função PRÓPRIA nesta TUI (aceitar sugestão, alternar foco), tratada mais
+    // abaixo via `key.tab`. Como texto ele nunca serve — nem sozinho, nem com alt. O mesmo
+    // vale para os demais caracteres de controle que sobrevivem até aqui: se o `char` só
+    // tem controle, não há nada para digitar.
 
     // ── splash de boot: QUALQUER tecla dispensa (a sessão começou) ───────────
     if (state.phase === 'boot') {
@@ -3521,6 +3618,32 @@ export function App(props: AppProps): React.ReactElement {
     // Espelha o /theme//lang: ↑↓ navega, enter seta o provider do modo Custom da sessão
     // (a próxima chamada o envia em par com o slug), esc fecha. Modal.
     if (providerPicker.open) {
+      // F-PROV-CRED — o campo da API key tem PRECEDÊNCIA sobre tudo no picker: quando ele
+      // está aberto, o dono está colando uma credencial, e qualquer outra leitura de tecla
+      // roubaria o caractere (foi assim que a versão readline deixou a chave VAZAR p/ o
+      // composer). Mesma mecânica de texto do formulário "+ adicionar" logo abaixo — só
+      // que o componente MASCARA o valor ao desenhar.
+      if (providerPicker.credentialStep !== null) {
+        if (key.escape) {
+          providerPicker.cancelCredential();
+          return;
+        }
+        if (key.return) {
+          const name = providerPicker.confirmCredential();
+          // `null` ⇒ campo vazio ou a gravação falhou: o hook mantém o campo aberto com o
+          // motivo (nunca a chave). Só aplicamos quando ele devolve o provider.
+          if (name) pedirModeloAposTroca(props.onSelectProvider?.(name));
+          return;
+        }
+        if (key.backspace || key.delete) {
+          providerPicker.backspaceCredential();
+          return;
+        }
+        if (char && !key.ctrl && !key.meta) {
+          providerPicker.typeCredential(char);
+        }
+        return;
+      }
       // F-PROV — dentro do formulário "+ adicionar provider custom" (3 passos: id/
       // baseURL/modelo), o foco é de TEXTO (mesma mecânica do <LocalModelPicker>/
       // <QuestionDialog kind:'text'>), não de navegação de lista.
@@ -3559,7 +3682,7 @@ export function App(props: AppProps): React.ReactElement {
           providerPicker.startAddCustom();
           return;
         }
-        if (name) props.onSelectProvider?.(name);
+        if (name) pedirModeloAposTroca(props.onSelectProvider?.(name));
         return;
       }
       if (key.escape) {
@@ -3654,7 +3777,10 @@ export function App(props: AppProps): React.ReactElement {
             setText('');
             setSlashOpen(false);
             setSlashSel(0);
-            controller.replaceNote('slash-unknown', [
+            // O rótulo da nota é EXIBIDO (`◕ <rótulo>`), então precisa ser palavra de UI e
+            // não identificador interno: `slash-unknown` aparecia cru no meio de uma tela
+            // em português.
+            controller.replaceNote('comando', [
               `comando desconhecido: ${typed || '/'} — veja /help para a lista.`,
             ]);
           }
@@ -4267,7 +4393,9 @@ export function App(props: AppProps): React.ReactElement {
   // no boot, das envs do backend local (`ALUY_LOCAL_PROVIDER`/`ALUY_LOCAL_MODEL`).
   const localByModel = state.meta.backend === 'local';
   const localProviderName =
-    state.meta.provider ?? (process.env.ALUY_LOCAL_PROVIDER?.trim() || undefined);
+    state.meta.provider ??
+    props.currentLocalProvider ??
+    (process.env.ALUY_LOCAL_PROVIDER?.trim() || undefined);
   const localModelName =
     state.meta.model ??
     state.meta.activeModel ??
@@ -4350,148 +4478,191 @@ export function App(props: AppProps): React.ReactElement {
   // Por isso a função recebe o lado: unifica o CONJUNTO sem mexer no layout de nenhum
   // dos dois (a região viva tem orçamento de linhas apertado — trocar padding aqui
   // mexeria na altura e é justamente a área que já custou caro estabilizar).
+  // F-COCKPIT-DECISAO — os DIÁLOGOS DE DECISÃO (permissão, pergunta, budget, teto de
+  // ciclo, travado) precisam aparecer TAMBÉM no cockpit.
+  //
+  // O BUG que isto fecha, medido em QA no TTY: o cockpit é um `return` ANTECIPADO
+  // (`if (cockpitActive …) return <Cockpit/>`), e todos esses diálogos moram DEPOIS dele,
+  // no caminho inline. Em fullscreen eles simplesmente NÃO ERAM DESENHADOS — o
+  // `spawn_agent` pedia permissão, a fase virava `asking`, e a tela ficava parada sem uma
+  // palavra: o dono relatou isso como "disparei agentes no fullscreen e ele crashou". Não
+  // havia crash — havia uma pergunta invisível, e a sessão esperando uma resposta que
+  // ninguém podia ver que fora pedida.
+  //
+  // É a MESMA classe que o comentário do `F-OVERLAY-UNICO` (logo acima) já descreve: dois
+  // caminhos de render com listas paralelas mantidas à mão. Aquele fix unificou os
+  // PICKERS e deixou os diálogos de fora — este fecha o resto.
+  //
+  // `null` quando não há decisão pendente ⇒ o cockpit segue exatamente como hoje.
+  const renderDecisionDialog = (): React.ReactElement | null => {
+    if (state.phase === 'asking' && state.pendingAsk) {
+      return <AskDialog request={state.pendingAsk.request} columns={columns} {...askEgress} />;
+    }
+    if (state.phase === 'questioning' && state.pendingQuestion) {
+      return (
+        <QuestionDialog
+          spec={state.pendingQuestion.spec}
+          cursor={qCursor}
+          selected={qSelected}
+          editing={qEditing}
+          draft={qDraft}
+        />
+      );
+    }
+    return null;
+  };
+
   const renderOverlays = (pad: 'top' | 'bottom'): React.ReactElement => {
     const box = pad === 'top' ? { paddingTop: 1 } : { paddingBottom: 1 };
     return (
-    <>
-      {palette.open && (
-        <Box flexDirection="column" {...box}>
-          <CommandPalette
-            hits={palette.hits}
-            selected={palette.selected}
-            query={palette.query}
-            maxRows={Math.min(8, slashMenuRowCap)}
-          />
-        </Box>
-      )}
-      {slashOpen && (
-        <Box flexDirection="column" {...box}>
-          {/* TETO de altura: SEM `maxRows` o menu despejava a lista INTEIRA (40+ comandos) e
+      <>
+        {palette.open && (
+          <Box flexDirection="column" {...box}>
+            <CommandPalette
+              hits={palette.hits}
+              selected={palette.selected}
+              query={palette.query}
+              maxRows={Math.min(8, slashMenuRowCap)}
+            />
+          </Box>
+        )}
+        {slashOpen && (
+          <Box flexDirection="column" {...box}>
+            {/* TETO de altura: SEM `maxRows` o menu despejava a lista INTEIRA (40+ comandos) e
               "ocupava a tela toda", empurrando o histórico pro scrollback — e ao fechar (`/`
               apagado) a tela não voltava. Janela de 8 (como a <CommandPalette> irmã): o menu
               fica compacto, o histórico não é empurrado pra fora e fechar não desloca a vista. */}
-          <SlashMenu
-            commands={slashCommands}
-            selected={slashSel}
-            query={slashQuery}
-            maxRows={Math.min(8, slashMenuRowCap)}
-            columns={columns}
-          />
-        </Box>
-      )}
-      {modelPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <ModelPicker
-            tiers={modelPicker.tiers}
-            selected={modelPicker.selected}
-            currentTier={state.meta.tier}
-            loading={modelPicker.loading}
-            usingFallback={modelPicker.usingFallback}
-            customSelected={modelPicker.customSelected}
-            customInputOpen={modelPicker.customInputOpen}
-            customInput={modelPicker.customInput}
-            customSuggestions={modelPicker.customSuggestions}
-            customWarnOutOfCatalog={modelPicker.customWarnOutOfCatalog}
-            customBrowserAvailable={modelPicker.customBrowserAvailable}
-            customRows={modelPicker.customRows}
-            customFilteredCount={modelPicker.customFilteredCount}
-            customTotalCount={modelPicker.customTotalCount}
-            customHasMoreAbove={modelPicker.customHasMoreAbove}
-            customHasMoreBelow={modelPicker.customHasMoreBelow}
-            customToolsOnly={modelPicker.customToolsOnly}
-            customNoToolsWarning={modelPicker.customNoToolsWarning}
-            effortStepOpen={modelPicker.effortStepOpen}
-            effortOptions={modelPicker.effortOptions}
-            effortSelected={modelPicker.effortSelected}
-            {...(modelPicker.currentEffort !== undefined
-              ? { currentEffort: modelPicker.currentEffort }
-              : {})}
-            effortCustomOpen={modelPicker.effortCustomOpen}
-            effortCustomInput={modelPicker.effortCustomInput}
-            effortCustomWarn={modelPicker.effortCustomWarn}
-          />
-        </Box>
-      )}
-      {/* F161-FIX — seletor `/model` sob backend LOCAL (BYO): fuzzy-pick dedicado
+            <SlashMenu
+              commands={slashCommands}
+              selected={slashSel}
+              query={slashQuery}
+              maxRows={Math.min(8, slashMenuRowCap)}
+              columns={columns}
+            />
+          </Box>
+        )}
+        {modelPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <ModelPicker
+              tiers={modelPicker.tiers}
+              selected={modelPicker.selected}
+              currentTier={state.meta.tier}
+              loading={modelPicker.loading}
+              usingFallback={modelPicker.usingFallback}
+              customSelected={modelPicker.customSelected}
+              customInputOpen={modelPicker.customInputOpen}
+              customInput={modelPicker.customInput}
+              customSuggestions={modelPicker.customSuggestions}
+              customWarnOutOfCatalog={modelPicker.customWarnOutOfCatalog}
+              customBrowserAvailable={modelPicker.customBrowserAvailable}
+              customRows={modelPicker.customRows}
+              customFilteredCount={modelPicker.customFilteredCount}
+              customTotalCount={modelPicker.customTotalCount}
+              customHasMoreAbove={modelPicker.customHasMoreAbove}
+              customHasMoreBelow={modelPicker.customHasMoreBelow}
+              customToolsOnly={modelPicker.customToolsOnly}
+              customNoToolsWarning={modelPicker.customNoToolsWarning}
+              effortStepOpen={modelPicker.effortStepOpen}
+              effortOptions={modelPicker.effortOptions}
+              effortSelected={modelPicker.effortSelected}
+              {...(modelPicker.currentEffort !== undefined
+                ? { currentEffort: modelPicker.currentEffort }
+                : {})}
+              effortCustomOpen={modelPicker.effortCustomOpen}
+              effortCustomInput={modelPicker.effortCustomInput}
+              effortCustomWarn={modelPicker.effortCustomWarn}
+            />
+          </Box>
+        )}
+        {/* F161-FIX — seletor `/model` sob backend LOCAL (BYO): fuzzy-pick dedicado
           dos slugs do provider ativo (os tiers do broker acima não se aplicam). */}
-      {localModelPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <LocalModelPicker
-            hits={localModelPicker.hits}
-            selected={localModelPicker.selected}
-            query={localModelPicker.query}
-            columns={columns}
-            loading={localModelPicker.loading}
-            usingFallback={localModelPicker.usingFallback}
-            {...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {})}
-          />
-        </Box>
-      )}
-      {/* F161-FIX — seletor `/effort` STANDALONE (fora do fluxo conjugado do /model). */}
-      {effortPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <EffortPicker
-            options={effortPicker.options}
-            selected={effortPicker.selected}
-            {...(effortPicker.currentEffort !== undefined
-              ? { currentEffort: effortPicker.currentEffort }
-              : {})}
-            customOpen={effortPicker.customOpen}
-            customInput={effortPicker.customInput}
-            customWarn={effortPicker.customWarn}
-          />
-        </Box>
-      )}
-      {themePicker.open && (
-        <Box flexDirection="column" {...box}>
-          <ThemePicker
-            themes={themePicker.themes}
-            selected={themePicker.selected}
-            currentTheme={currentTheme}
-          />
-        </Box>
-      )}
-      {langPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <LangPicker
-            langs={langPicker.langs}
-            selected={langPicker.selected}
-            currentLang={currentLang}
-          />
-        </Box>
-      )}
-      {providerPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <ProviderPicker
-            providers={providerPicker.providers}
-            selected={providerPicker.selected}
-            usingFallback={providerPicker.usingFallback}
-            maxRows={slashMenuRowCap - 2}
-            columns={columns}
-            addCustomStep={providerPicker.addCustomStep}
-            addCustomDraft={providerPicker.addCustomDraft}
-            {...(currentProvider !== undefined ? { currentProvider } : {})}
-          />
-        </Box>
-      )}
-      {historyPicker.open && (
-        <Box flexDirection="column" {...box}>
-          <HistoryPicker sessions={historyPicker.sessions} selected={historyPicker.selected} />
-        </Box>
-      )}
-      {rewindPicker.open && rewindPicker.phase !== 'closed' && (
-        <Box flexDirection="column" {...box}>
-          <RewindPicker
-            phase={rewindPicker.phase}
-            checkpoints={rewindPicker.checkpoints}
-            actions={rewindPicker.actions}
-            target={rewindPicker.target}
-            selected={rewindPicker.selected}
-            barrierWarnings={rewindBarriers}
-          />
-        </Box>
-      )}
-    </>
+        {localModelPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <LocalModelPicker
+              hits={localModelPicker.hits}
+              selected={localModelPicker.selected}
+              query={localModelPicker.query}
+              columns={columns}
+              loading={localModelPicker.loading}
+              usingFallback={localModelPicker.usingFallback}
+              rows={rows}
+              {...(currentLocalModel !== undefined ? { currentModel: currentLocalModel } : {})}
+            />
+          </Box>
+        )}
+        {/* F161-FIX — seletor `/effort` STANDALONE (fora do fluxo conjugado do /model). */}
+        {effortPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <EffortPicker
+              options={effortPicker.options}
+              selected={effortPicker.selected}
+              {...(effortPicker.currentEffort !== undefined
+                ? { currentEffort: effortPicker.currentEffort }
+                : {})}
+              customOpen={effortPicker.customOpen}
+              customInput={effortPicker.customInput}
+              customWarn={effortPicker.customWarn}
+            />
+          </Box>
+        )}
+        {themePicker.open && (
+          <Box flexDirection="column" {...box}>
+            <ThemePicker
+              themes={themePicker.themes}
+              selected={themePicker.selected}
+              currentTheme={currentTheme}
+            />
+          </Box>
+        )}
+        {langPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <LangPicker
+              langs={langPicker.langs}
+              selected={langPicker.selected}
+              currentLang={currentLang}
+            />
+          </Box>
+        )}
+        {providerPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <ProviderPicker
+              providers={providerPicker.providers}
+              selected={providerPicker.selected}
+              usingFallback={providerPicker.usingFallback}
+              maxRows={slashMenuRowCap - 2}
+              columns={columns}
+              addCustomStep={providerPicker.addCustomStep}
+              addCustomDraft={providerPicker.addCustomDraft}
+              // F-PROV-CRED — o campo da API key. O componente já sabia desenhá-lo
+              // (mascarado); faltava o App PASSAR o estado — sem estas quatro props o
+              // hook abria o passo e a tela continuava mostrando a lista, que é
+              // exatamente o "mudei o provider e ele não pediu nada" do relato.
+              credentialStep={providerPicker.credentialStep}
+              credentialProviderId={providerPicker.credentialProviderId}
+              credentialDraft={providerPicker.credentialDraft}
+              credentialError={providerPicker.credentialError}
+              {...(currentProvider !== undefined ? { currentProvider } : {})}
+            />
+          </Box>
+        )}
+        {historyPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <HistoryPicker sessions={historyPicker.sessions} selected={historyPicker.selected} />
+          </Box>
+        )}
+        {rewindPicker.open && rewindPicker.phase !== 'closed' && (
+          <Box flexDirection="column" {...box}>
+            <RewindPicker
+              phase={rewindPicker.phase}
+              checkpoints={rewindPicker.checkpoints}
+              actions={rewindPicker.actions}
+              target={rewindPicker.target}
+              selected={rewindPicker.selected}
+              barrierWarnings={rewindBarriers}
+            />
+          </Box>
+        )}
+      </>
     );
   };
 
@@ -4525,7 +4696,11 @@ export function App(props: AppProps): React.ReactElement {
         columns={columns}
         frame={frame}
         cwd={state.meta.cwd}
-        overlay={overlayOpen ? renderOverlays('bottom') : null}
+        // F-COCKPIT-DECISAO — a decisão pendente tem PRECEDÊNCIA sobre o overlay de `/`:
+        // se há permissão/pergunta esperando, é ELA que precisa da tela. Sem isto o
+        // fullscreen escondia o pedido e a sessão parecia travada (ver
+        // `renderDecisionDialog`).
+        overlay={renderDecisionDialog() ?? (overlayOpen ? renderOverlays('bottom') : null)}
         {...(props.version !== undefined ? { version: props.version } : {})}
       />
     );
@@ -4559,9 +4734,11 @@ export function App(props: AppProps): React.ReactElement {
   // colunas em side/tabs), mantendo a região viva em `rows-1` (anti-flicker).
   const liveChatColumn = (
     <>
-      {state.blocks.length === 0 && state.phase === 'idle' ? (
-        <Onboarding {...(props.userName !== undefined ? { name: props.userName } : {})} />
-      ) : (
+      {/* F-SEM-SAUDACAO (decisão do dono: "eu não pedi essas msgs") — a tela de sessão
+          vazia abria com uma saudação e três sugestões de exemplo. Fora: quem abre um
+          terminal já sabe o que quer fazer, e o espaço vale mais para o trabalho. O
+          `/help` continua listando os comandos para quem precisar. */}
+      {state.blocks.length === 0 && state.phase === 'idle' ? null : (
         // Só os blocos VIVOS (sufixo). `isCurrent` só p/ o ÚLTIMO bloco da sessão.
         live.map((b, i) => (
           <BlockView
@@ -4619,7 +4796,7 @@ export function App(props: AppProps): React.ReactElement {
 
       {state.phase === 'asking' && state.pendingAsk && (
         <Box paddingTop={1}>
-          <AskDialog request={state.pendingAsk.request} {...askEgress} />
+          <AskDialog request={state.pendingAsk.request} columns={columns} {...askEgress} />
         </Box>
       )}
 
@@ -4638,7 +4815,7 @@ export function App(props: AppProps): React.ReactElement {
 
       {state.phase === 'budget' && state.pendingBudget && (
         <Box paddingTop={1}>
-          <BudgetGate {...state.pendingBudget} canCompact={controller.canCompact} />
+          <BudgetGate {...state.pendingBudget} columns={columns} canCompact={controller.canCompact} />
         </Box>
       )}
 
@@ -4647,7 +4824,7 @@ export function App(props: AppProps): React.ReactElement {
           (DADO rotulado, 1 linha). Default seguro = encerrar (n/timeout/esc). */}
       {state.phase === 'cycle-ceiling' && state.pendingCycleCeiling && (
         <Box paddingTop={1}>
-          <CycleCeilingGate {...state.pendingCycleCeiling} />
+          <CycleCeilingGate {...state.pendingCycleCeiling} columns={columns} />
         </Box>
       )}
 
@@ -4668,7 +4845,7 @@ export function App(props: AppProps): React.ReactElement {
           que travou e oferece [r] redirecionar / [c] continuar / [n] encerrar. */}
       {state.phase === 'stuck' && state.pendingStuck && (
         <Box paddingTop={1}>
-          <StuckGate {...state.pendingStuck} redirecting={stuckRedirecting} />
+          <StuckGate {...state.pendingStuck} columns={columns} redirecting={stuckRedirecting} />
         </Box>
       )}
     </>
@@ -4722,10 +4899,18 @@ export function App(props: AppProps): React.ReactElement {
           if (item === HEADER_ITEM) {
             // Item 0 — HEADER no TOPO, emoldurado pelas divisórias (EST-0987/0985).
             return (
-              <Box key="header" flexDirection="column">
+              // F-HEADER-HARMONIA (C) — o header (logo, identidade) passa a ancorar na
+              // MESMA coluna do painel de status e das notas. Antes o topo começava na
+              // margem e o rodapé duas colunas adiante: duas margens esquerdas na mesma
+              // tela, que é o que fazia o conjunto não fechar.
+              <Box key="header" flexDirection="column" paddingLeft={2}>
                 {/* EST-0987 (1/3) — divisória ACIMA do header. */}
                 {showHeaderDivider && <Divider columns={columns} />}
                 <Header
+                  // F-HEADER-CARTAO — o que muda POUCO sobe para o lado da marca: provider,
+                  // modelo e o que a config carregou. Os medidores ficam no rodapé, que é
+                  // redesenhado a cada turno; aqui congelariam, porque o header vive no
+                  // `<Static>`.
                   tier={headerTierDisplay}
                   columns={columns}
                   rows={rows}
@@ -4993,8 +5178,12 @@ export function App(props: AppProps): React.ReactElement {
           só DESMOLDURAVA o composer em sessão fresca / pós-`/clear` (sumia a de cima,
           ficava a de baixo). A do HEADER segue gated por densidade (`showHeaderDivider`);
           esta — que emoldura o composer — é sempre visível. */}
-      <Divider columns={columns} />
-
+      {/* F-COMPOSER-BARRA — o campo é marcado por uma BARRA à esquerda, não por moldura.
+          As duas réguas que o cercavam saíram: a de cima virou este contêiner (altura 0 —
+          a barra vive na MESMA linha do input) e a de baixo saiu de vez. Isso devolveu ao
+          orçamento as 2 linhas que elas gastavam — o "escapa uma área pra baixo" que o
+          dono viu era justamente elas, agora vazias em vez de riscadas. */}
+      <ComposerBox columns={columns}>
       <Composer
         value={input}
         cursorPos={cursorPos}
@@ -5010,7 +5199,23 @@ export function App(props: AppProps): React.ReactElement {
         {...(composerHint !== undefined ? { hint: composerHint } : {})}
         {...(state.meta.label !== undefined ? { sessionLabel: state.meta.label } : {})}
         {...(state.meta.labelColor !== undefined ? { sessionColor: state.meta.labelColor } : {})}
+        // F-COMPOSER-FUNDO — a cor vem do tema e some sozinha sem truecolor.
+        {...(theme.composerBg !== undefined ? { backgroundColor: theme.composerBg } : {})}
       />
+        {state.turnAccounting && (state.phase === 'done' || state.phase === 'budget') && (
+          <TurnFooter
+            accounting={state.turnAccounting}
+            columns={columns}
+            showCost={false}
+            {...(turnRecap !== undefined ? { recap: turnRecap } : {})}
+          />
+        )}
+      </ComposerBox>
+      {/* F-COMPOSER-SOMBRA — TIRADA a pedido do dono ("achei que a sombra não ficou
+          legal"). A técnica (meio-bloco deslocado, a mesma da marca 3D) funciona numa
+          FIGURA, que tem contorno fechado; sob uma faixa de largura total ela vira só
+          mais uma linha atravessando a tela — exatamente a régua que acabamos de tirar.
+          O componente segue exportado e testado, caso a decisão mude. */}
 
       {/* ── MENU/PICKERS DE `/` ABAIXO DO COMPOSER (EST-0974) ────────────────────
           O <SlashMenu> e os pickers abertos POR `/` (model/theme/history) renderizam
@@ -5038,14 +5243,18 @@ export function App(props: AppProps): React.ReactElement {
           baixo (status / hints / sub-agentes). Com a (2/3), EMOLDURA o input.
           EST-0974 — quando o menu/picker de `/` está aberto, a divisória vem DEPOIS
           dele (separa o menu do rodapé), preservando a moldura do input. */}
-      <Divider columns={columns} />
+      {/* F-COMPOSER-CAIXA — a régua de baixo saiu: a BASE da caixa já fecha o campo.
+          Sem isto haveria duas separações seguidas (borda + régua), que é o empilhamento
+          de linhas que o dono pediu para acabar. */}
 
       {/* EST-0982 · ADR-0063 (CONTABILIDADE) — rodapé do TURNO do agente PRINCIPAL
           (tokens + tempo), estilo Claude Code. Aparece quando o turno terminou
           (done/budget) — leitura/display puro (não dispara efeito, não vaza segredo). */}
-      {state.turnAccounting && (state.phase === 'done' || state.phase === 'budget') && (
-        <TurnFooter accounting={state.turnAccounting} />
-      )}
+      {/* F-TOKENS-NO-COMPOSER (pedido do dono: "a quantidade de tokens deveria ficar
+          dentro da área do composer cinza") — o <TurnFooter> subiu para DENTRO do bloco
+          do composer (ver o `<ComposerBox>` acima). Ele fala do turno que acabou de
+          rodar, e ali fica colado no campo onde o próximo começa — em vez de flutuar
+          solto entre o composer e o rodapé. */}
 
       {/* EST-0948 · ADR-0069/APR-0074 — footer de QUOTA da PRÓPRIA conta do ator CLI/PAT.
           FONTE REAL (broker#59): `meta.quota` = saldo de CRÉDITO (dimensão PRIMÁRIA do CLI
@@ -5060,12 +5269,18 @@ export function App(props: AppProps): React.ReactElement {
           (distinta do budget LOCAL anti-runaway do <StatusBar>). Mostrado FORA do stream
           (em repouso) p/ NÃO inflar o chrome vivo (anti-flicker: `LIVE_CHROME_ROWS` conta o
           stream; este só aparece em done/budget/idle/error). */}
-      {(state.phase === 'done' ||
-        state.phase === 'budget' ||
-        state.phase === 'idle' ||
-        state.phase === 'error') && (
-        <QuotaFooter quota={state.meta.quota} serverLimits={state.meta.serverLimits} />
-      )}
+      {/* F-SALDO-BYO — sob backend LOCAL o saldo já vai na linha PRIMÁRIA do <StatusBar>
+          (colado no provider·modelo, onde o dono pediu). Renderizar o <QuotaFooter> aqui
+          também DUPLICAVA o número numa linha órfã logo acima do rodapé — foi o que ele
+          viu na tela. No BROKER nada muda: lá o footer carrega janela + reset, que a
+          linha primária não comporta. */}
+      {state.meta.backend !== 'local' &&
+        (state.phase === 'done' ||
+          state.phase === 'budget' ||
+          state.phase === 'idle' ||
+          state.phase === 'error') && (
+          <QuotaFooter quota={state.meta.quota} serverLimits={state.meta.serverLimits} />
+        )}
 
       {/* EST-0989 (Variação B) — RESPIRO: 1 LINHA EM BRANCO entre o TurnFooter
           (`◷ tokens · tools · Xs`) / o footer de quota e o <StatusBar> (antes colavam).
@@ -5077,9 +5292,26 @@ export function App(props: AppProps): React.ReactElement {
           CONDICIONAL: só em telas LARGAS (≥60 col) e ALTAS (≥RESPIRO_MIN_ROWS linhas) — em
           terminais apertados a linha em branco some (anti-flicker antes de estética; o
           orçamento `respiroOverhead` espelha exatamente este gate). */}
-      {columns >= 60 && rows >= RESPIRO_MIN_ROWS && <Box height={1} />}
+      {/* F-COMPOSER-BARRA (relato do dono: "escapa pra baixo uma pequena área do
+          composer, mesmo sem uso") — este respiro separa o RODAPÉ DE TURNO do
+          <StatusBar>. Sem turno na tela não há o que separar, e ele virava uma linha
+          morta colada embaixo do campo — a "área que escapa". Passa a exigir que o
+          footer de turno EXISTA. O orçamento anti-flicker não muda: `respiroOverhead`
+          continua reservando a linha (over-reserva é sempre segura; o que não pode é
+          faltar). */}
+      {columns >= 60 &&
+        rows >= RESPIRO_MIN_ROWS &&
+        state.turnAccounting !== undefined &&
+        (state.phase === 'done' || state.phase === 'budget') && <Box height={1} />}
 
-      <StatusBar
+      {/* F-RECUO (pedido do dono: "a mesma afastadinha que você deu na lateral do
+          composer para todas as outras linhas") — o bloco do composer tem a barra `┃` +
+          1 coluna, então o texto dele começa na coluna 2. O rodapé começava na 0 e ficava
+          desalinhado com o campo logo acima. `paddingLeft={2}` alinha os dois. */}
+      <Box paddingLeft={2} flexDirection="column">
+      <StatusPanel
+        mode={state.mode}
+        {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
         {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
         cwd={state.meta.cwd}
         tier={tierDisplay}
@@ -5098,7 +5330,16 @@ export function App(props: AppProps): React.ReactElement {
         {...(dominantQuota !== undefined
           ? { quotaPct: dominantQuota.pct, quotaLevel: dominantQuota.level }
           : {})}
-        columns={columns}
+        // F-SALDO-BYO — saldo do provider BYO na linha PRIMÁRIA, colado no par
+        // provider·modelo (pedido do dono: "deveria ficar após o provedor"). Antes caía
+        // no <QuotaFooter>, numa linha própria e órfã acima do rodapé.
+        {...(state.meta.quota?.credit?.balance !== undefined
+          ? { credit: state.meta.quota.credit.balance }
+          : {})}
+        // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
+        // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
+        // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
+        columns={Math.max(20, columns - 2)}
         error={state.phase === 'error'}
         {...(state.governance !== undefined ? { governance: state.governance } : {})}
         {...(!cycleUiOff && state.cycleProgress !== undefined
@@ -5132,7 +5373,11 @@ export function App(props: AppProps): React.ReactElement {
           </Text>
         </Box>
       )}
-      <ModeIndicator mode={state.mode} columns={columns} />
+      {/* F-PAINEL — o <ModeIndicator> foi ABSORVIDO: modo e catraca são a linha `estado`
+          do painel. Manter os dois desenharia a mesma informação duas vezes, uma dentro da
+          caixa e outra fora. O banner do modo `unsafe` continua existindo — o próprio
+          <StatusPanel> o emite, porque um aviso de modo perigoso não pode virar linha de
+          tabela cinza. */}
       {/* fix(footer-bleed) — durante uma APROVAÇÃO ATIVA (`asking`) o <AskDialog> JÁ
           renderiza seu PRÓPRIO footer de atalhos (`a aprova · s sempre · …`), em
           contexto, colado ao diálogo (AskDialog.footerOf, mesmas strings de
@@ -5152,6 +5397,7 @@ export function App(props: AppProps): React.ReactElement {
           {...(showSuggestion ? { suggesting: true } : {})}
         />
       )}
+      </Box>
     </Box>
   );
 }
@@ -5162,6 +5408,7 @@ export function App(props: AppProps): React.ReactElement {
 export function BlockView(props: {
   readonly block: SessionState['blocks'][number];
   readonly isCurrent: boolean;
+
   readonly frame: number;
   /** Anti-flicker — teto de altura da prévia viva (só p/ o aluy streaming). */
   readonly maxLines?: number;
@@ -5187,7 +5434,11 @@ export function BlockView(props: {
     case 'you':
       return (
         <Box paddingBottom={1}>
-          <YouBlock text={b.text} isCurrent={props.isCurrent} />
+          <YouBlock
+            text={b.text}
+            isCurrent={props.isCurrent}
+            {...(props.columns !== undefined ? { columns: props.columns } : {})}
+          />
         </Box>
       );
     case 'aluy':
@@ -5201,6 +5452,8 @@ export function BlockView(props: {
             frame={props.frame}
             {...(props.maxLines !== undefined ? { maxLines: props.maxLines } : {})}
             {...(props.columns !== undefined ? { columns: props.columns } : {})}
+            {...(b.accounting !== undefined ? { accounting: b.accounting } : {})}
+            {...(b.interrupted === true ? { interrupted: true } : {})}
           />
         </Box>
       );
@@ -5226,7 +5479,10 @@ export function BlockView(props: {
       );
     case 'note':
       return (
-        <Box paddingBottom={1}>
+        // F-HEADER-HARMONIA (C) — mesma margem esquerda do painel de status. A tela tinha
+        // DUAS margens: o topo ancorava na coluna 0 e o rodapé na 2, e o olho percebia o
+        // desencontro mesmo sem saber nomeá-lo.
+        <Box paddingBottom={1} paddingLeft={2}>
           <NoteBlock title={b.title} lines={b.lines} />
         </Box>
       );
@@ -5276,6 +5532,7 @@ export function BlockView(props: {
     case 'broker-error':
       return (
         <BrokerError
+          columns={props.columns ?? 80}
           message={b.message}
           {...(b.headline !== undefined ? { headline: b.headline } : {})}
           {...(b.status !== undefined ? { status: b.status } : {})}

@@ -470,14 +470,21 @@ describe('App — TYPE-AHEAD: digitar enquanto o agente trabalha (EST-0982)', ()
     s.unmount();
   });
 
-  // A LINHA do composer é a que começa com o prompt `›` (sem o `…` de placeholder).
-  // Extrai só o texto digitado, pra asserções precisas (sem colidir com o histórico
-  // `go`/`w` ou o footer `esc interromper`).
+  // A LINHA do composer é a do prompt (sem o `…` de placeholder). Extrai só o texto
+  // digitado, pra asserções precisas (sem colidir com o histórico `go`/`w` ou o footer
+  // `esc interromper`).
+  //
+  // F-COMPOSER-CAIXA (reforma de UI pedida pelo dono) — o campo virou uma CAIXA: o Ink
+  // desenha a barra `┃` (borderLeft) no início de TODA linha do bloco, e o prompt passou
+  // de `›` para `❯`. A intenção do helper é a mesma; só descasca a moldura antes.
   function composerLine(s: { lastFrame: () => string }): string {
+    const unframe = (l: string): string => l.replace(/^[\s┃│|]+/, '');
     const row = plain(s.lastFrame())
       .split('\n')
-      .find((l) => l.trimStart().startsWith('›'));
-    const text = (row ?? '').replace(/^\s*›\s?/, '').trim();
+      .find((l) => unframe(l).startsWith('❯'));
+    const text = unframe(row ?? '')
+      .replace(/^❯\s?/, '')
+      .trim();
     // Composer VAZIO mostra o placeholder dim — p/ as asserções de edição, vazio é ''.
     return text.startsWith('digite um objetivo') ? '' : text;
   }

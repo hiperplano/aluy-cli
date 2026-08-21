@@ -18,6 +18,8 @@
 import {
   ANSI16_DARK,
   ANSI16_LIGHT,
+  BG_DARK,
+  BG_LIGHT,
   MONO,
   TRUECOLOR_DARK,
   TRUECOLOR_LIGHT,
@@ -32,6 +34,7 @@ import {
   ASCII_GLYPHS,
   ASCII_SPINNER_FRAMES,
   BRAILLE_FRAMES,
+  NERD_GLYPHS,
   SAFE_GLYPHS,
   UNICODE_BOX,
   UNICODE_GLYPHS,
@@ -39,6 +42,14 @@ import {
   type GlyphName,
 } from './glyphs.js';
 import { sessionColorStyle } from './session-colors.js';
+import {
+  backgroundControlEnabled,
+  observedTerminalBackground,
+  parseOsc11,
+  relativeLuminance,
+  surfaceFrom,
+  type Rgb,
+} from './osc11.js';
 
 export type ColorMode = 'truecolor' | 'ansi16' | 'mono';
 export type Brightness = 'dark' | 'light';
@@ -55,6 +66,14 @@ export interface Theme {
    * cobertura quase universal — sem ir até o ASCII cru. Implica `unicode=true`.
    */
   readonly safeGlyphs: boolean;
+  /**
+   * F-NERD-GLYPHS — perfil NERD FONT ligado: `ALUY_NERD_GLYPHS=1` / config
+   * `nerdGlyphs`. Pede ícones/separadores da Private Use Area de uma Nerd Font
+   * PATCHEADA (ver NERD_GLYPHS em glyphs.ts). Implica `unicode=true`. NUNCA true
+   * quando `safeGlyphs` também está — SAFE vence (precedência ASCII > SAFE >
+   * NERD > normal, resolvida abaixo em `resolveTheme`).
+   */
+  readonly nerdGlyphs: boolean;
   readonly density: Density;
   readonly animate: boolean;
   /** Estilo de um papel semântico (cor + ênfase) — nunca cor crua no componente. */
@@ -67,7 +86,7 @@ export interface Theme {
    * paleta CURADA do DS aplicada ao eixo de rotulagem.
    */
   sessionColor(name: string): RoleStyle;
-  /** Glifo resolvido (Unicode / SAFE / ASCII). */
+  /** Glifo resolvido (Unicode / SAFE / NERD / ASCII). */
   glyph(name: GlyphName): string;
   /**
    * A MARCA do Aluy (Λ) resolvida p/ a capacidade do terminal: `Λ` (Unicode/SAFE)
@@ -79,6 +98,43 @@ export interface Theme {
   readonly spinnerFrames: readonly string[];
   /** Caracteres de box (arredondado ou ASCII). */
   readonly box: BoxChars;
+  /**
+   * F-COMPOSER-FUNDO (pedido do dono: "um fundo no composer, acho que ficaria top") —
+   * cor de FUNDO da faixa do campo de entrada. `undefined` em modo sem cor (NO_COLOR,
+   * 16-cores, ASCII): fundo é REALCE, e realce que não pode ser fiel some em vez de
+   * chutar uma cor errada — a mesma disciplina do resto da paleta.
+   *
+   * Tom escolhido para ficar ACIMA do fundo do terminal sem virar bloco: o campo precisa
+   * se destacar do histórico, não competir com ele.
+   */
+  readonly composerBg?: string;
+  /**
+   * F-ECO-PINTADO (2/2) — fundo do bloco de RESPOSTA do agente. Deliberadamente DIFERENTE
+   * do `composerBg`, e MUITO mais discreto que ele (pedido do dono: "próxima à cor do
+   * background do tema, mas com uma leve diferença").
+   *
+   * A assimetria é proposital. O composer é onde você AGE, e some no meio da tela se não
+   * se destacar; a resposta é onde você LÊ, e ocupa a maior parte da tela — um fundo forte
+   * atrás dela cansaria a leitura e faria a conversa inteira parecer um bloco pintado. Aqui
+   * o fundo só precisa dizer "esta região é uma unidade", e para isso basta um degrau
+   * quase imperceptível acima do fundo do terminal.
+   */
+  readonly aluyBg?: string;
+  /**
+   * F-PROFUNDIDADE (pedido do dono: "fazer a tela parecer um pouco mais profunda... toda
+   * a área do header ser de um outro fundo... os itens abaixo do composer poderiam ficar
+   * numa caixa cinza") — fundos por CAMADA.
+   *
+   * A ideia que organiza: profundidade em terminal não vem de linha, vem de SUPERFÍCIE.
+   * Regiões de chrome (header, rodapé) recuam para um plano de fundo; a CONVERSA fica no
+   * plano do terminal (sem fundo — é o conteúdo, tem de respirar); o COMPOSER avança um
+   * plano (é onde a atenção está). Três níveis bastam: mais que isso vira listrado.
+   *
+   * Todos `undefined` fora de truecolor — cor aproximada em 16 cores vira bloco berrante.
+   */
+  readonly headerBg?: string;
+  /** Ver `headerBg` — o plano do rodapé (status, modo, dicas). */
+  readonly footerBg?: string;
 }
 
 export interface ResolveThemeInput {
@@ -96,6 +152,14 @@ export interface ResolveThemeInput {
    * trocar de tema nunca inventa cor onde o terminal não tem). Default: pelo brilho.
    */
   readonly truecolorPalette?: Palette;
+  /**
+   * O FUNDO declarado do tema nomeado ativo (`#RRGGBB`) — a cor que o `/theme` manda o
+   * terminal vestir (EST-1010) e, portanto, a PÁGINA sobre a qual as caixas são
+   * desenhadas. É a régua das superfícies (`composerBg`/`aluyBg`/chrome): sem ela, o
+   * cálculo do degrau só tinha o fundo ANTIGO do terminal para se apoiar — uma cor que a
+   * tela já não tem. Ausente ⇒ o fundo canônico do brilho (`BG_LIGHT`/`BG_DARK`).
+   */
+  readonly bg?: string;
   /** Override de densidade (`--dense`). */
   readonly density?: Density;
   /** Override de animação (`--no-anim`). */
@@ -106,6 +170,22 @@ export interface ResolveThemeInput {
    * é ASCII puro (TERM=linux / locale não-UTF-8), que sempre vence. 〔EST-0984〕
    */
   readonly safeGlyphs?: boolean;
+  /**
+   * F-ASCII-DE-VERDADE — força o conjunto ASCII PURO, mesmo em terminal com Unicode.
+   *
+   * A flag `--ascii` marcava apenas o perfil SAFE (unicode conservador), então símbolos
+   * como `⏎` e `↑` continuavam saindo — justamente num modo que alguém liga porque o
+   * terminal NÃO renderiza esses caracteres. Quem pede ASCII quer ASCII; o perfil
+   * conservador segue disponível por `ALUY_SAFE_GLYPHS`.
+   */
+  readonly asciiOnly?: boolean;
+  /**
+   * F-NERD-GLYPHS — override do perfil NERD FONT (`ALUY_NERD_GLYPHS` / config
+   * `nerdGlyphs`). `true` ⇒ usa NERD_GLYPHS mesmo sem o env (ex.: config
+   * persistida). Sem efeito quando ASCII puro ou `safeGlyphs` vencem (opt-in
+   * explícito, nunca sobrepõe terminal incapaz nem o perfil SEGURO).
+   */
+  readonly nerdGlyphs?: boolean;
 }
 
 function truthy(v: string | undefined): boolean {
@@ -161,6 +241,19 @@ export function detectSafeGlyphs(env: NodeJS.ProcessEnv, override?: boolean): bo
   return truthy(env.ALUY_SAFE_GLYPHS);
 }
 
+/**
+ * F-NERD-GLYPHS — decide o perfil NERD FONT. Opt-in EXPLÍCITO (MESMA disciplina
+ * do `detectSafeGlyphs` acima): `ALUY_NERD_GLYPHS=1` no env, ou o override
+ * (alimentado pela config `nerdGlyphs`/flag, resolvida por quem chama
+ * `resolveTheme`). NÃO liga sozinho por heurística — exige fonte Nerd Font
+ * PATCHEADA instalada; sem ela, os glifos da PUA viram tofu (▯). Quem decide se
+ * isto REALMENTE vira o perfil ativo é `resolveTheme` (SAFE/ASCII podem vencer).
+ */
+export function detectNerdGlyphs(env: NodeJS.ProcessEnv, override?: boolean): boolean {
+  if (override !== undefined) return override;
+  return truthy(env.ALUY_NERD_GLYPHS);
+}
+
 function paletteFor(mode: ColorMode, brightness: Brightness, override?: Palette): Palette {
   if (mode === 'mono') return MONO;
   // EST-1010 — em truecolor o tema NOMEADO pode trazer a sua paleta própria (slate
@@ -181,17 +274,61 @@ export function resolveTheme(input: ResolveThemeInput = {}): Theme {
   const env = input.env ?? process.env;
   const colorMode = detectColorMode(env);
   const brightness = detectBrightness(env, input.theme);
-  const unicode = detectUnicode(env);
+  // F-FUNDO-DERIVADO (relato do dono, três vezes: "essa cor do background do Aluy não está
+  // legal... deveria ser uma cor próxima ao background do terminal").
+  //
+  // As tentativas anteriores foram todas o mesmo erro: escolher um hex fixo sem saber qual
+  // é o fundo do terminal do outro lado. Uma cor que fica discreta sobre preto puro destoa
+  // sobre um fundo quente, e vice-versa — não existe hex que sirva para todos. A saída é
+  // não escolher: a superfície é o PRÓPRIO fundo da página deslocado alguns pontos —
+  // mesma matiz, um degrau de luminosidade.
+  //
+  // O que faltava era saber QUAL fundo é a página. O probe OSC 11 do boot devolve o fundo
+  // que o terminal tinha ANTES de nós, mas logo em seguida o `/theme` veste o terminal com
+  // o `bg` do tema (EST-1010) — e é essa cor que fica atrás de tudo. Medir o degrau contra
+  // a cor antiga foi o que produziu o tema claro que o dono recusou: sobre a página creme
+  // (#F4ECDC) as caixas saíam de um cinza neutro, deslocadas em MATIZ e não em luz, e o
+  // olho lia mancha em vez de relevo.
+  //
+  // Então a régua é a página que vamos de fato pintar; o fundo observado só volta a valer
+  // quando NÃO vamos pintar nada (`ALUY_SET_BG=0`, NO_COLOR) — aí a página continua sendo
+  // a do usuário. Mesmo nesse caso ele só serve se CONCORDAR com o brilho do tema: quem
+  // força `/theme claro` num terminal escuro pediu um tema, e um tema é uma escolha
+  // explícita; o fundo observado é só uma pista.
+  const fundoDaPagina: Rgb = ((): Rgb => {
+    const canonico = brightness === 'light' ? BG_LIGHT : BG_DARK;
+    // `parseOsc11` também lê `#RRGGBB` (é a outra forma que os terminais respondem),
+    // então serve de conversor sem precisar de um segundo parser de hex no módulo.
+    const declarado = parseOsc11(input.bg ?? canonico) ?? parseOsc11(canonico)!;
+    if (backgroundControlEnabled(env)) return declarado;
+    const observado = observedTerminalBackground();
+    if (observado === null) return declarado;
+    const brilhoDoTerminal = relativeLuminance(observado) < 0.5 ? 'dark' : 'light';
+    return brilhoDoTerminal === brightness ? observado : declarado;
+  })();
+  const superficie = (passos: number): string => surfaceFrom(fundoDaPagina, passos);
+  const unicode = input.asciiOnly === true ? false : detectUnicode(env);
   // SAFE só faz sentido quando há Unicode (em ASCII puro o conjunto ASCII vence).
   const safeGlyphs = unicode && detectSafeGlyphs(env, input.safeGlyphs);
+  // F-NERD-GLYPHS — NERD só faz sentido com Unicode E sem SAFE já vencendo:
+  // precedência ASCII (!unicode) > SAFE > NERD > normal. Quem pediu terminal
+  // SEGURO (SAFE) quer cobertura garantida, não um ícone que pode faltar.
+  const nerdGlyphs = unicode && !safeGlyphs && detectNerdGlyphs(env, input.nerdGlyphs);
   const density: Density =
     input.density ??
     (truthy(env.ALUY_DENSITY) && env.ALUY_DENSITY === 'compact' ? 'compact' : 'comfortable');
   const animate = input.animate ?? !truthy(env.ALUY_NO_ANIM);
 
   const palette = paletteFor(colorMode, brightness, input.truecolorPalette);
-  // Três níveis (EST-0984): ASCII puro (sem Unicode) > SAFE (opt-in) > Unicode.
-  const glyphs = !unicode ? ASCII_GLYPHS : safeGlyphs ? SAFE_GLYPHS : UNICODE_GLYPHS;
+  // Quatro níveis (EST-0984/F-NERD-GLYPHS): ASCII puro (sem Unicode) > SAFE
+  // (opt-in) > NERD (opt-in) > Unicode (default).
+  const glyphs = !unicode
+    ? ASCII_GLYPHS
+    : safeGlyphs
+      ? SAFE_GLYPHS
+      : nerdGlyphs
+        ? NERD_GLYPHS
+        : UNICODE_GLYPHS;
   const box = unicode ? UNICODE_BOX : ASCII_BOX;
   // Braille (U+28xx) tem cobertura irregular em fonte limitada ⇒ no SAFE cai nos
   // frames ASCII (`- \ | /`), que nunca viram tofu.
@@ -203,6 +340,7 @@ export function resolveTheme(input: ResolveThemeInput = {}): Theme {
     brightness,
     unicode,
     safeGlyphs,
+    nerdGlyphs,
     density,
     animate,
     role: (name) => palette[name],
@@ -213,5 +351,39 @@ export function resolveTheme(input: ResolveThemeInput = {}): Theme {
     aluyMark,
     spinnerFrames,
     box,
+    // F-COMPOSER-FUNDO — só em TRUECOLOR: em 16-cores o tom exato não existe e o
+    // aproximado vira um bloco berrante; em mono/NO_COLOR fundo não é opção. Ausente ⇒ o
+    // <ComposerBox> desenha sem fundo (a barra da esquerda sozinha já marca o campo).
+    // F-PROFUNDIDADE — três planos. O composer é o mais CLARO no tema escuro (avança),
+    // o chrome é o mais ESCURO (recua), a conversa não tem fundo (plano do terminal).
+    ...(colorMode === 'truecolor'
+      ? brightness === 'dark'
+        ? {
+            composerBg: superficie(28),
+            aluyBg: superficie(18),
+            headerBg: superficie(18),
+            footerBg: superficie(18),
+          }
+        : {
+            // F-LIGHT-SUAVE (relato do dono: "o tema light não está funcionando bem, a cor
+            // dos elementos não é agradável, principalmente o fundo das seções").
+            //
+            // Os passos são menores que os do escuro porque o mesmo salto em RGB rende mais
+            // diferença PERCEBIDA perto do branco, e porque no claro cada degrau CONSOME
+            // contraste: a superfície escurece, o texto continua escuro, e a distância entre
+            // os dois encolhe. O `11` é o degrau mais fundo em que TODOS os papéis coloridos
+            // ainda passam AA (4,5:1) sobre a própria superfície — o pior deles, o teal do
+            // `depth`, fica em 4,55:1; um passo além e ele cai. Em L* isso são ~4 pontos,
+            // bem acima do limiar do perceptível (~2,3) e longe do bloco pintado.
+            //
+            // O chrome divide o plano do composer em vez de ganhar um terceiro, mais fundo,
+            // pela mesma razão: o terceiro degrau existiria à custa da legibilidade do que
+            // está escrito nele.
+            composerBg: superficie(11),
+            aluyBg: superficie(8),
+            headerBg: superficie(11),
+            footerBg: superficie(11),
+          }
+      : {}),
   };
 }

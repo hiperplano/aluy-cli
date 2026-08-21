@@ -7,6 +7,7 @@
 import React from 'react';
 import { Box } from 'ink';
 import { Role } from '../theme/index.js';
+import { PickerFrame } from './PickerFrame.js';
 import { useI18n } from '../../i18n/index.js';
 import type { EffortOption } from '@hiperplano/aluy-cli-core';
 import type { I18nKey } from '../../i18n/index.js';
@@ -45,7 +46,7 @@ function OptionsList(props: EffortPickerProps): React.ReactElement {
   const { t } = useI18n();
   const current = props.currentEffort;
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.effort.standaloneHelp')}</Role>
       </Box>
@@ -66,7 +67,7 @@ function OptionsList(props: EffortPickerProps): React.ReactElement {
           </Box>
         );
       })}
-    </Box>
+    </PickerFrame>
   );
 }
 
@@ -76,7 +77,7 @@ function CustomInput(props: EffortPickerProps): React.ReactElement {
   const value = props.customInput ?? '';
   const warn = props.customWarn ?? null;
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.effort.customHelp')}</Role>
       </Box>
@@ -93,6 +94,6 @@ function CustomInput(props: EffortPickerProps): React.ReactElement {
           </Role>
         </Box>
       )}
-    </Box>
+    </PickerFrame>
   );
 }

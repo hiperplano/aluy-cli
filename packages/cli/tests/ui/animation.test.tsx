@@ -73,9 +73,9 @@ describe('<Spinner> — braille (§3.6)', () => {
     expect(f0).not.toBe(f1);
   });
 
-  it('sem animação: cai p/ ◷ estático (não gira)', () => {
+  it('sem animação: cai p/ ◕ estático (não gira)', () => {
     const out = wrap(<Spinner frame={5} />, { ALUY_NO_ANIM: '1' }).lastFrame() ?? '';
-    expect(out).toContain('◷');
+    expect(out).toContain('◕'); // F-GLYPH-PESO-2: clock ◷→◕
   });
 
   it('fallback ASCII: usa - \\ | / em vez de braille', () => {
@@ -102,21 +102,21 @@ describe('<ToolLine> — in-flight ○ → ⏺ (§2.6; EST-0984 endureceu ◌→
     expect(out).toContain('npm run typecheck');
   });
 
-  it('concluída ok: ⏺ + resultado quantificado + ✓', () => {
+  it('concluída ok: ⏺ + resultado quantificado + ✔', () => {
     const out =
       wrap(<ToolLine verb="bash" target="npm test" result="0 erros" status="ok" />).lastFrame() ??
       '';
     expect(out).toContain('⏺');
     expect(out).toContain('0 erros');
-    expect(out).toContain('✓');
+    expect(out).toContain('✔'); // F-GLYPH-PESO-2: ✓→✔
   });
 
-  it('erro: ✗ + box de saída com rodapé-resumo na borda inferior (§2.8)', () => {
+  it('erro: ✘ + box de saída com rodapé-resumo na borda inferior (§2.8)', () => {
     const out =
       wrap(
         <ToolLine verb="bash" target="npm test" result="2 falhas" status="err" output="FAIL x" />,
       ).lastFrame() ?? '';
-    expect(out).toContain('✗');
+    expect(out).toContain('✘'); // F-GLYPH-PESO-2: ✗→✘
     expect(out).toContain('saída');
     expect(out).toContain('2 falhas'); // o resultado vai no rodapé da borda
   });

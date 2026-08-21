@@ -251,8 +251,36 @@ export interface TierFact {
 }
 
 /** Todos os fatos coletados pelo probe — entrada da camada de checks. */
+/**
+ * F-DOCTOR-BYO — o provider LOCAL de fato em uso.
+ *
+ * Sob backend próprio, três dos checks históricos (credencial, broker, catálogo) viram
+ * `N/A` porque falam do broker — e o relatório fechava com "10 ok · 0 falha" sem nunca ter
+ * olhado o provider que atende as chamadas. Um diagnóstico que aprova sem diagnosticar é
+ * pior que nenhum: é para o `/doctor` que se corre quando algo está errado, e ele mandava
+ * o usuário embora tranquilo. Este fato é o que faltava olhar.
+ */
+export interface LocalProviderFact {
+  /** Provider ativo (id do catálogo/config). */
+  readonly providerId: string;
+  /** Slug do modelo ativo, quando conhecido. */
+  readonly model?: string;
+  /** Há credencial resolvível (keychain, cofre ou env)? */
+  readonly hasCredential: boolean;
+  /** O provider respondeu à listagem `/models`? `undefined` ⇒ não foi testado. */
+  readonly reachable?: boolean;
+  /** Quantos modelos a listagem anunciou (quando testada). */
+  readonly modelCount?: number;
+  /** O modelo ATIVO consta na listagem? `undefined` ⇒ não deu para saber. */
+  readonly modelListed?: boolean;
+  /** Detalhe do erro, quando a prova falhou. */
+  readonly error?: string;
+}
+
 export interface DoctorFacts {
   readonly auth: AuthFact;
+  /** F-DOCTOR-BYO — presente só sob backend local. */
+  readonly localProvider?: LocalProviderFact;
   readonly broker: BrokerFact;
   readonly catalog: CatalogFact;
   readonly mcp: McpFact;
@@ -277,6 +305,61 @@ export interface DoctorReport {
 }
 
 // ── builders por check (puros) ───────────────────────────────────────────────
+
+/**
+ * F-DOCTOR-BYO — o provider local: tem credencial? responde? o modelo ativo existe lá?
+ *
+ * As três perguntas em ordem de dependência — sem credencial não adianta perguntar se
+ * responde, e sem responder não dá para saber se o modelo existe. Cada uma falha com o
+ * conserto correspondente, em vez de um `N/A` verde.
+ */
+function checkLocalProvider(f: LocalProviderFact): DoctorCheck {
+  const alvo = f.model !== undefined && f.model !== '' ? `${f.providerId} · ${f.model}` : f.providerId;
+  if (!f.hasCredential) {
+    return {
+      id: 'provider-local',
+      label: 'provider (BYO)',
+      status: 'fail',
+      detail: `${alvo} — sem credencial`,
+      fix: `grave a chave com \`aluy login --provider ${f.providerId}\` ou exporte a env var do provider.`,
+    };
+  }
+  if (f.reachable === false) {
+    return {
+      id: 'provider-local',
+      label: 'provider (BYO)',
+      status: 'fail',
+      detail: `${alvo} — não respondeu${f.error !== undefined ? `: ${f.error}` : ''}`,
+      fix: 'confira `baseUrl` no `~/.aluy/config.json` e se a chave ainda é válida.',
+    };
+  }
+  if (f.reachable === undefined) {
+    return {
+      id: 'provider-local',
+      label: 'provider (BYO)',
+      status: 'ok',
+      detail: `${alvo} — credencial presente (não testado)`,
+    };
+  }
+  // Responde, mas o modelo ativo não está na lista: a próxima chamada vai falhar com 404 e
+  // o usuário não teria como adivinhar. É AVISO, não falha — provider que não lista tudo
+  // em `/models` existe, e derrubar o diagnóstico por isso seria falso-positivo.
+  if (f.modelListed === false) {
+    return {
+      id: 'provider-local',
+      label: 'provider (BYO)',
+      status: 'warn',
+      detail: `${alvo} — o provider responde (${f.modelCount ?? 0} modelos), mas o modelo ativo não consta na lista`,
+      fix: 'troque com `/model <slug>` — um modelo aposentado devolve 404 na próxima chamada.',
+    };
+  }
+  return {
+    id: 'provider-local',
+    label: 'provider (BYO)',
+    status: 'ok',
+    detail: `${alvo} — responde${f.modelCount !== undefined ? ` (${f.modelCount} modelos)` : ''}`,
+  };
+}
 
 function checkAuth(f: AuthFact): DoctorCheck {
   // F182 — backend local (BYO): a credencial do broker não se aplica ⇒ N/A (ok),
@@ -520,7 +603,15 @@ function checkAgents(f: AgentsFact): DoctorCheck {
 }
 
 function checkConfig(f: ConfigFact): DoctorCheck {
-  const limits = `max-tokens ${f.maxTokens} · max-iterations ${f.maxIterations}`;
+  // `10000000` obriga a contar zeros para saber que são 10 milhões; num relatório que se
+  // lê de relance, isso é atrito puro.
+  const legivel = (n: number): string =>
+    n >= 1_000_000
+      ? `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`
+      : n >= 1_000
+        ? `${(n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1)}k`
+        : String(n);
+  const limits = `max-tokens ${legivel(f.maxTokens)} · max-iterations ${legivel(f.maxIterations)}`;
   const flags = f.flags.length > 0 ? ` · flags: ${f.flags.join(', ')}` : '';
   if (f.corrupted) {
     return {
@@ -701,6 +792,9 @@ function checkMaestro(f: MaestroFact): DoctorCheck {
  */
 export function buildDoctorReport(facts: DoctorFacts): DoctorReport {
   const checks: DoctorCheck[] = [
+    // F-DOCTOR-BYO — PRIMEIRO da lista sob backend local: é o que de fato atende as
+    // chamadas, então é a primeira coisa que alguém com problema precisa ver.
+    ...(facts.localProvider !== undefined ? [checkLocalProvider(facts.localProvider)] : []),
     checkAuth(facts.auth),
     checkBroker(facts.broker),
     checkCatalog(facts.catalog),

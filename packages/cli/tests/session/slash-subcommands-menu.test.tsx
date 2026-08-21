@@ -94,15 +94,26 @@ async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
   }
 }
 
-/** A linha do composer (a com o prompt `›`). EST-0974 — o menu agora vem ABAIXO do
- * composer (composer ANCORADO) e o selecionado também usa `›`; o input fica ANTES do
- * cabeçalho do menu (`MENU_HINT`). Fatiamos no cabeçalho e pegamos o último `›` de CIMA. */
+/** A linha do composer (a do prompt). EST-0974 — o menu vem ABAIXO do composer
+ * (composer ANCORADO), então o input fica ANTES do cabeçalho do menu (`MENU_HINT`):
+ * fatiamos no cabeçalho e pegamos a última linha de prompt da parte de CIMA.
+ *
+ * F-COMPOSER-CAIXA / F-PICKER-PAINEL (reforma de UI pedida pelo dono) — o DESENHO mudou,
+ * a intenção do helper não. O campo virou uma CAIXA: o Ink desenha a barra `┃` no início
+ * de TODA linha do bloco, e o prompt deixou de ser `›` para ser `❯`. Descascamos a moldura
+ * antes de procurar o prompt. (O `›` sobrevive só como marcador de SELEÇÃO no menu — hoje
+ * são glifos distintos, o que aliás elimina a antiga ambiguidade.) */
+const PROMPT = '❯';
+/** Descasca a moldura à esquerda (barra `┃` do composer / `│` do <PickerFrame>) + espaços. */
+function unframe(line: string): string {
+  return line.replace(/^[\s┃│|]+/, '');
+}
 function composerText(lastFrame: () => string | undefined): string {
   const frame = plain(lastFrame() ?? '');
   const above = frame.split(MENU_HINT)[0] ?? frame;
-  const rows = above.split('\n').filter((l) => l.trimStart().startsWith('›'));
+  const rows = above.split('\n').filter((l) => unframe(l).startsWith(PROMPT));
   const row = rows[rows.length - 1] ?? '';
-  const text = row.replace(/^\s*›\s?/, '').trim();
+  const text = unframe(row).replace(/^❯\s?/, '').trim();
   return text.startsWith('digite um objetivo') ? '' : text;
 }
 
@@ -162,11 +173,15 @@ function selectedPath(lastFrame: () => string | undefined): string | null {
   const frame = plain(lastFrame() ?? '');
   const idx = frame.indexOf(MENU_HINT);
   const below = idx >= 0 ? frame.slice(idx) : frame;
-  const row = below.split('\n').find((l) => l.trimStart().startsWith('› /'));
+  // F-PICKER-PAINEL — o menu ganhou moldura arredondada (<PickerFrame>): cada linha da
+  // lista nasce com a borda `│`, então `trimStart()` já não alcança o `›` da seleção.
+  const row = below.split('\n').find((l) => unframe(l).startsWith('› /'));
   if (!row) return null;
   // O caminho usa UM espaço entre pai e sub; o summary vem após ≥2 espaços (a coluna).
   // Captura `/<caminho>` até o gap de 2+ espaços, e tira a barra.
-  const m = row.replace(/^\s*›\s+/, '').match(/^\/(\S+(?: \S+)?)(?:\s{2,}|$)/);
+  const m = unframe(row)
+    .replace(/^›\s+/, '')
+    .match(/^\/(\S+(?: \S+)?)(?:\s{2,}|$)/);
   return m ? m[1]! : null;
 }
 

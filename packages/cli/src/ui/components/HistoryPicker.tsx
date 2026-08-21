@@ -14,6 +14,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Role, useTheme } from '../theme/index.js';
+import { PickerFrame, alturaDeLista } from './PickerFrame.js';
 import { useI18n } from '../../i18n/index.js';
 import type { SessionSummary } from '../../io/index.js';
 import { formatHistoryEntry } from '../../session/history.js';
@@ -35,6 +36,8 @@ export interface HistoryPickerProps {
    * cap do caller); a App passa o cap DINÂMICO (`slashMenuRowCap`) em telas altas.
    */
   readonly maxRows?: number;
+  /** Altura do terminal — a janela da lista é derivada dela (ver `alturaDeLista`). */
+  readonly rows?: number;
   /**
    * F89 (wrap-aware) — largura do terminal. Quando presente, o janelamento conta LINHAS
    * VISUAIS (cada entrada longa QUEBRA em ≥2 linhas num terminal estreito) em vez de itens,
@@ -48,7 +51,7 @@ export function HistoryPicker(props: HistoryPickerProps): React.ReactElement {
   const theme = useTheme();
   const { t } = useI18n();
   const dot = theme.glyph('sessionDot');
-  const maxRows = Math.max(1, props.maxRows ?? 10);
+  const maxRows = Math.max(1, props.maxRows ?? alturaDeLista(props.rows));
   // F89 — altura VISUAL de cada linha de sessão: prefixo `› `/`  ` (2) + `● ` quando há
   // rótulo (2) + a entrada formatada; quebra em `ceil(largura / columns)`. Sem `columns`,
   // cai no janelamento por item (telas largas).
@@ -62,7 +65,7 @@ export function HistoryPicker(props: HistoryPickerProps): React.ReactElement {
       : undefined;
   const { start, slice } = windowAround(props.sessions, props.selected, maxRows, rowHeight);
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.history.help')}</Role>
       </Box>
@@ -105,6 +108,6 @@ export function HistoryPicker(props: HistoryPickerProps): React.ReactElement {
           </Role>
         </Box>
       )}
-    </Box>
+    </PickerFrame>
   );
 }

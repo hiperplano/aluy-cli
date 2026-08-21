@@ -13,10 +13,11 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
+import wrapAnsi from 'wrap-ansi';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { useI18n } from '../../i18n/index.js';
 import { windowComposerVisual } from '../../session/composer-edit.js';
-import { composerIndentCols, visualLines } from '../../session/visual-lines.js';
+import { composerIndentCols, visualLines, displayWidth } from '../../session/visual-lines.js';
 
 export interface ComposerProps {
   readonly value: string;
@@ -54,6 +55,17 @@ export interface ComposerProps {
    * determinística do próprio nome (o resolver trata o fail-safe).
    */
   readonly sessionColor?: string;
+  /**
+   * F-COMPOSER-FUNDO (pedido do dono) — cor de FUNDO da linha do input.
+   *
+   * Aplicada AQUI, no `<Text wrap>` interno, porque é o único lugar que funciona: o Ink
+   * não pinta `backgroundColor` em `<Box>` (medido), e envolver o Composer num `<Text>`
+   * por fora LANÇA ("`<Box>` can't be nested inside `<Text>`") — foi assim que a primeira
+   * tentativa derrubou o app do dono no boot.
+   *
+   * Ausente ⇒ sem fundo (terminal sem truecolor, onde o tom exato não existe).
+   */
+  readonly backgroundColor?: string;
   /**
    * BUG P2-C — TETO de linhas visíveis do composer (cockpit). No inline o composer cresce
    * sem teto (ausente ⇒ ilimitado, comportamento INALTERADO). No cockpit a região tem
@@ -140,19 +152,108 @@ function SessionTag(props: {
   const theme = useTheme();
   const label = (props.label ?? '').trim();
   if (label === '') return null;
-  const dot = theme.glyph('sessionDot');
-  // resolve o estilo da cor da sessão pela paleta do DS (mono ⇒ sem cor, só bold).
+  // F-LABEL-SEM-BOLINHA (relato do dono: "quando uso o rename ficam duas bolinhas no
+  // composer") — `sessionDot` e o cursor do composer são o MESMO glifo (`●`), então uma
+  // sessão nomeada exibia `● TESTE ❯ ●texto`: dois círculos idênticos lado a lado
+  // significando coisas diferentes (identidade e posição do cursor).
+  //
+  // Em vez de inventar um terceiro glifo, a bolinha sai: quem carrega a cor da sessão passa
+  // a ser o PRÓPRIO NOME. A informação é a mesma — o nome já estava ali, só pintado de
+  // cinza — e some a ambiguidade. Em mono a cor degrada para bold, como antes.
   const style = theme.sessionColor(props.color ?? label);
-  const dotProps: { color?: string; bold?: boolean } = {};
-  if (style.color !== undefined) dotProps.color = style.color;
-  if (style.bold !== undefined) dotProps.bold = style.bold;
+  const labelProps: { color?: string; bold?: boolean } = {};
+  if (style.color !== undefined) labelProps.color = style.color;
+  if (style.bold !== undefined) labelProps.bold = style.bold;
   return (
     <>
-      <Text {...dotProps}>{dot}</Text>
       <Text> </Text>
-      <Role name="fg">{label}</Role>
+      <Text {...labelProps}>{label}</Text>
       <Text> </Text>
     </>
+  );
+}
+
+/**
+ * F-COMPOSER-CAIXA (pedido do dono, olhando o opencode: "não sei se daria para deixar o
+ * composer com cara de uma caixa de texto") — a MOLDURA do campo de entrada.
+ *
+ * O que havia antes eram duas RÉGUAS de largura total, uma acima e outra abaixo (o
+ * comentário do App dizia, com todas as letras, "emoldura o input"). Elas cortavam a tela
+ * inteira para cercar uma linha — e foi delas que veio o "as linhas no CLI deixam uma cara
+ * muito ruim". Uma caixa cerca de verdade: as mesmas DUAS linhas de altura, mas fechando o
+ * campo em vez de riscar a tela.
+ *
+ * ALTURA IDÊNTICA à das réguas (2 linhas: topo + base), de propósito — o orçamento de
+ * linhas do inline e do cockpit é apertado e já custou caro estabilizar (o gap que o Ink
+ * acumula quando o frame cruza `rows`). Trocar régua por borda é neutro nessa conta.
+ *
+ * Usa a moldura PESADA (`box.*`), a mesma dos diálogos: aqui ela cerca algo de verdade,
+ * que é exatamente onde o peso é informação e não enfeite.
+ */
+export function ComposerBox(props: {
+  readonly columns?: number;
+  readonly children: React.ReactNode;
+}): React.ReactElement {
+  const theme = useTheme();
+  const w = Math.max(4, props.columns ?? 80);
+  const faixa = theme.composerBg;
+  // BORDA LATERAL NATIVA do Ink (`borderLeft` só) — ela se repete por TODAS as linhas do
+  // bloco sozinha, inclusive quando o conteúdo cresce (input multi-linha, rodapé de turno
+  // dentro do bloco). A versão anterior desenhava a barra à mão, linha a linha: funcionava
+  // com UM filho de UMA linha e quebrava assim que o bloco ganhou altura.
+  return (
+    <Box
+      flexDirection="column"
+      width={w}
+      // F-ASCII-DE-VERDADE — a borda do Ink não passa pelo tema: em perfil ASCII o
+      // `bold` desenha `┃`, que é justamente o que esse modo existe para evitar.
+      borderStyle={theme.unicode ? 'bold' : 'classic'}
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      borderColor={theme.role('accent').color}
+    >
+      {/* F-PROFUNDIDADE — uma linha de fundo ACIMA e outra ABAIXO do conteúdo: o campo
+          deixa de ser uma régua de texto e vira um BLOCO com altura ("respirar um pouco
+          mais"). Custa as mesmas 2 linhas que as réguas antigas gastavam.
+
+          A de baixo chegou a ser removida quando um quadradinho cinza apareceu solto sob o
+          composer — mas ela era inocente: o culpado era o `<TurnFooter>` pintando uma
+          coluna a mais do que o bloco tem. Com aquilo corrigido a faixa volta, e com ela a
+          altura que o bloco tinha.
+
+          `w - 2`, não `w - 1`: a borda esquerda já consome uma coluna do `width={w}`, e
+          pedir `w - 1` espaços de fundo em cima disso passa da largura do bloco. */}
+      {faixa !== undefined && <Text backgroundColor={faixa}>{' '.repeat(Math.max(0, w - 2))}</Text>}
+      {props.children}
+      {faixa !== undefined && <Text backgroundColor={faixa}>{' '.repeat(Math.max(0, w - 2))}</Text>}
+    </Box>
+  );
+}
+
+/**
+ * F-COMPOSER-SOMBRA (pedido do dono: "colocar uma sombra pra dar um efeito de saliência")
+ * — a linha de SOMBRA sob o campo.
+ *
+ * Técnica que este DS já usa na marca 3D (`ShadowedWordmark`): meio-bloco superior (`▀`)
+ * num tom ESCURO da paleta, DESLOCADO um caractere à direita. O olho lê o deslocamento
+ * como profundidade — o campo "sai" da tela em vez de ficar rente a ela.
+ *
+ * Custa UMA linha, e ela vem do orçamento que a régua de baixo liberou (a antiga moldura
+ * eram DUAS réguas; hoje é barra + sombra). Sem truecolor não há tom de sombra fiel ⇒ a
+ * linha some inteira, em vez de virar um traço cinza sem sentido.
+ */
+export function ComposerShadow(props: { readonly columns?: number }): React.ReactElement | null {
+  const theme = useTheme();
+  if (theme.composerBg === undefined) return null;
+  const w = Math.max(4, props.columns ?? 80);
+  return (
+    <Box>
+      {/* o deslocamento de 1 col é o que cria a saliência: a sombra nasce à DIREITA do
+          início do campo, como se a luz viesse de cima-à-esquerda. */}
+      <Text> </Text>
+      <Role name="shadowAmberDim">{'▀'.repeat(Math.max(0, w - 2))}</Role>
+    </Box>
   );
 }
 
@@ -227,6 +328,51 @@ export function Composer(props: ComposerProps): React.ReactElement {
   const win = overflowing
     ? windowComposerVisual(props.value, pos, textRows, effCols)
     : { text: props.value, cursor: pos, hiddenAbove: 0, hiddenBelow: 0 };
+  // F-COMPOSER-FUNDO — quantos espaços faltam p/ o fundo alcançar o fim da linha. Mede a
+  // ÚLTIMA linha visual (é ela que fica "curta"); com wrap, as anteriores já estão cheias.
+  const textoVisivel = win.text === '' ? placeholder : win.text;
+  // A coluna extra é do CURSOR, então ela só existe quando o cursor é de fato desenhado —
+  // e ele é suprimido enquanto o agente trabalha (para não haver dois cursores na tela ao
+  // mesmo tempo). Contando por `active`, a conta reservava uma coluna que ninguém ocupava:
+  // o preenchimento parava um caractere antes da borda e sobrava um quadradinho escuro no
+  // fim da linha do composer — visível justamente DURANTE o processamento, e some quando
+  // ele acaba e o cursor volta. Era esse o "quadradinho quando está pensando".
+  const cursorVisivel = props.active && props.showCursor !== false;
+  // A largura ÚTIL é a do bloco (`columns - 2`: uma coluna da barra `┃`, outra de folga),
+  // a MESMA das faixas vazias de cima e de baixo. Usar `columns` aqui fazia a linha do
+  // texto ficar UMA coluna mais larga que o bloco — e a sobra vazava como um quadradinho
+  // de fundo solto no fim (o "espaçou no final um quadradinho cinza" do relato).
+  const larguraUtil = props.columns !== undefined ? props.columns - 2 : undefined;
+  // F-COMPOSER-WRAP (relato do dono: "preencha mais de uma linha e veja que a área do
+  // composer não é respeitada") — a ÚLTIMA linha visual é a que o WRAP produz, não a que o
+  // `\n` separa.
+  //
+  // O cálculo anterior fazia `split('\n').pop()`, e um texto longo sem quebra manual é UMA
+  // linha-fonte só: media-se a string inteira, concluía-se que não sobrava espaço, e a
+  // continuação do wrap ficava sem preenchimento — 67 colunas pintadas num bloco de 119, um
+  // degrau enorme no meio da caixa. Aqui o texto é quebrado com o MESMO wrap do Ink
+  // (`wrap-ansi`, `trim:false, hard:true`), então a última linha medida é a que de fato
+  // aparece embaixo.
+  const { ultimaLinha, houveQuebra } = ((): { ultimaLinha: string; houveQuebra: boolean } => {
+    const primeiraFonte = textoVisivel.split('\n').pop() ?? '';
+    const disponivel =
+      larguraUtil !== undefined ? Math.max(1, larguraUtil - indentCols) : undefined;
+    if (disponivel === undefined || primeiraFonte === '') {
+      return { ultimaLinha: primeiraFonte, houveQuebra: false };
+    }
+    const quebrado = wrapAnsi(primeiraFonte, disponivel, { trim: false, hard: true }).split('\n');
+    return {
+      ultimaLinha: quebrado[quebrado.length - 1] ?? primeiraFonte,
+      houveQuebra: quebrado.length > 1,
+    };
+  })();
+  // O recuo do prompt (`❯ `) só existe na PRIMEIRA linha visual: quando o texto quebra, a
+  // continuação começa na margem. Somá-lo sempre encurtava o preenchimento em duas colunas
+  // exatas nas linhas de continuação.
+  const usado =
+    (houveQuebra ? 0 : indentCols) + displayWidth(ultimaLinha) + (cursorVisivel ? 1 : 0);
+  const fillCols =
+    larguraUtil !== undefined && larguraUtil > usado ? larguraUtil - usado : 0;
   return (
     <Box flexDirection="column">
       {/* FIX (cockpit multi-linha, achado do dono) — a linha do input é UM único <Text>
@@ -235,7 +381,12 @@ export function Composer(props: ComposerProps): React.ReactElement {
           quebra de wrap do texto — não no fim — jogando o miolo p/ a 2ª linha e o cursor
           no lugar errado (input longo no fullscreen "se desconstruía"). Aninhados num só
           <Text wrap>, o wrap flui e o cursor assenta certo. Prova: tests/.../composer. */}
-      <Text wrap="wrap">
+      <Text
+        wrap="wrap"
+        {...(props.backgroundColor !== undefined
+          ? { backgroundColor: props.backgroundColor }
+          : {})}
+      >
         <SessionTag
           {...(props.sessionLabel !== undefined ? { label: props.sessionLabel } : {})}
           {...(props.sessionColor !== undefined ? { color: props.sessionColor } : {})}
@@ -266,6 +417,16 @@ export function Composer(props: ComposerProps): React.ReactElement {
             <Role name="fgDim">{props.hint}</Role>
           </>
         )}
+        {/* F-COMPOSER-FUNDO — PREENCHIMENTO até o fim da linha (pedido do dono: "se o
+            fundo ocupasse toda a área do composer ficaria melhor").
+            No Ink o fundo só pinta ONDE HÁ CARACTERE — `<Box backgroundColor>` não pinta
+            nada (medido). Para a faixa cobrir a linha inteira, ela precisa TER caractere:
+            espaços até a largura.
+            A conta usa `indentCols` (a MESMA fonte do wrap e do orçamento do App) mais a
+            largura VISUAL do que está escrito. Só preenche quando o texto NÃO chegou ao
+            fim — se já chegou, um espaço a mais forçaria wrap e criaria uma segunda linha
+            de fundo, que é o jitter que este componente inteiro existe p/ evitar. */}
+        {fillCols > 0 && <Text>{' '.repeat(fillCols)}</Text>}
       </Text>
       {/* Marcador de linhas escondidas (cockpit, input multi-linha que estoura a região).
           a11y: os números `↑N`/`↓M` carregam o sentido (há mais acima/abaixo) — nunca só

@@ -17,7 +17,11 @@ export const ptBR: FullCatalog = {
   'composer.moreLines': 'linhas',
 
   // ── FooterHints (§4.3) ────────────────────────────────────────────────────
-  'hints.idle': 'enter envia · / comandos · ctrl-p paleta · ↑ histórico · ctrl-c×2 sair',
+  // F-DICAS (relato do dono: "o status envia deveria ser melhor") — a linha tinha
+  // CINCO itens competindo, e três deles se aprendem no primeiro uso (`ctrl-c` p/ sair,
+  // `ctrl-p` que o `/` já abre). Sobra o que o dono ainda não sabe de cor. O símbolo `⏎`
+  // no lugar da palavra "enter" é o padrão de teclado — lê-se sem traduzir.
+  'hints.idle': '{enter} enviar · / comandos · {up} histórico',
   'hints.thinking': 'esc interromper · ctrl-c×2 sair',
   'hints.streaming': 'esc interromper · ctrl-c×2 sair',
   'hints.ask': 'a aprova · s sempre · n nega · e edita · esc cancela',
@@ -41,6 +45,12 @@ export const ptBR: FullCatalog = {
   'suggest.implement': 'implemente a mudança que discutimos',
   'suggest.explain': 'explique o que você fez e por quê',
   'suggest.nextStep': 'o que devo revisar ou fazer a seguir?',
+  // F199 — variantes com o FATO do turno (ver catalog.ts). Estilo denso, sem ponto final
+  // (mesmo registro das genéricas acima).
+  'suggest.summarizeNamed': 'revise as mudanças em {files}',
+  'suggest.fixFailingNamed': 'investigue por que "{test}" falhou',
+  'suggest.runTestsNamed': 'rode "{command}" de novo',
+  'suggest.retryDifferentNamed': 'tente outra abordagem — o erro foi "{error}"',
 
   // ── Cockpit (ADR-0076) ────────────────────────────────────────────────────
   'cockpit.conversa': 'conversa',
@@ -64,6 +74,14 @@ export const ptBR: FullCatalog = {
 
   // ── StatusBar ─────────────────────────────────────────────────────────────
   'statusbar.brokerError': 'erro de broker',
+  // F-PAINEL — rótulos da coluna esquerda do painel de status. Curtos de propósito:
+  // é o ALINHAMENTO deles que cria a coluna, e um rótulo longo comeria a área do valor.
+  'boot.instructions': 'instruções',
+  'painel.config': 'config',
+  'painel.credito': 'crédito',
+  'painel.sessao': 'sessão',
+  'painel.estado': 'estado',
+  'painel.uso': 'uso',
   'statusbar.window': 'janela',
   'statusbar.session': 'sessão',
   'statusbar.quota': 'quota',
@@ -81,7 +99,11 @@ export const ptBR: FullCatalog = {
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': 'broker',
-  'boot.tagline': 'Aluy Cli · agente de terminal',
+  // F-ASCII-DE-VERDADE — o `Λ` NÃO pode ficar cravado no catálogo: em perfil ASCII
+  // (TERM=linux / locale não-UTF-8 / `--ascii`) ele vira caixa vazia, que é justamente
+  // o que esse perfil existe para evitar. Texto de UI passa pelo catálogo; a MARCA passa
+  // pelo tema — `{brand}` é o que liga um ao outro (mesmo padrão do `{enter}`/`{up}`).
+  'boot.tagline': '{brand} · agente de terminal',
   'boot.connecting': 'conectando',
   'boot.entering': 'entrando',
 
@@ -103,6 +125,13 @@ export const ptBR: FullCatalog = {
     'modelo default (enter vazio usa o id do provider) — enter confirma',
   'picker.provider.addCustom.help':
     'esc cancela · a credencial NÃO entra aqui — depois use `aluy login --provider <id>`',
+  // F-PROV-CRED (relato do dono: "mudei o provider no picker e ele não pediu nada") —
+  // campo de chave entre escolher o provider e aplicar. NUNCA ecoado (mascarado com •).
+  'picker.provider.credential.label': 'API key de {provider} (oculta) — enter grava e aplica',
+  'picker.provider.credential.help':
+    'esc volta pra lista · a chave NUNCA aparece em claro na tela',
+  'picker.provider.credential.retryTitle':
+    '✗ a chave não passou no teste de conexão — cole outra',
 
   // ── ModelPicker (/model) ──────────────────────────────────────────────────
   'picker.model.help': 'trocar modelo · ↑↓ navega · enter seleciona · esc fecha',

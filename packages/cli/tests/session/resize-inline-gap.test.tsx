@@ -51,7 +51,11 @@ import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
 
 const ENV = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' };
-const HEADER = 'Aluy Cli'; // item 0 do <Static> (header pinado, EST-0989)
+// F-MARCA-LAMBDA (pedido do dono) — o nome de produto no header passou a se escrever com
+// o Λ NO LUGAR do A (`Λluy Cli`): "a marca é a primeira letra do nome, não um ícone ao
+// lado dele". O papel deste marcador é o mesmo: reconhecer o item 0 do <Static> (o header
+// pinado) dentro dos writes do terminal, p/ contar quantas vezes ele é reemitido.
+const HEADER = 'Λluy Cli'; // item 0 do <Static> (header pinado, EST-0989)
 
 // stdout FAKE: EventEmitter com columns/rows mutáveis + captura CRUA de cada write.
 class FakeStdout extends EventEmitter {

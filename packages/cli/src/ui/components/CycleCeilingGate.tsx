@@ -14,9 +14,15 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
+import { displayWidth } from '../../session/visual-lines.js';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 
 export interface CycleCeilingGateProps {
+  /**
+   * F-MOLDURA-FECHA — largura do terminal. Topo e base usavam traços de comprimentos
+   * diferentes e cravados, então a caixa abria numa largura e fechava em outra.
+   */
+  readonly columns?: number;
   /** Qual teto duro bateu (texto legível: "teto de iterações (200 ciclos)"). */
   readonly ceilingLabel: string;
   /**
@@ -43,6 +49,11 @@ export function CycleCeilingGate(props: CycleCeilingGateProps): React.ReactEleme
   const theme = useTheme();
   const reason = clampDisplay(props.reason);
   const pct = Math.round(Math.max(0, Math.min(1, props.confidence)) * 100);
+  // Mesma medida do `<AskDialog>`: teto de 72, menos os cantos e o recuo do bloco.
+  const larguraCaixa = Math.max(24, Math.min(72, (props.columns ?? 80) - 4));
+  const preencher = (usado: number): string =>
+    theme.box.horizontal.repeat(Math.max(1, larguraCaixa - usado));
+
   return (
     <Box flexDirection="column" paddingLeft={2}>
       <Box>
@@ -50,7 +61,7 @@ export function CycleCeilingGate(props: CycleCeilingGateProps): React.ReactEleme
         <Glyph name="clock" role="accent" />
         <Role name="accent">
           {' '}
-          {props.ceilingLabel} atingido {theme.box.horizontal.repeat(4)} pausado
+          {props.ceilingLabel} atingido {preencher(11 + displayWidth(props.ceilingLabel) + 7)} pausado
         </Role>
       </Box>
       <Box>
@@ -85,7 +96,7 @@ export function CycleCeilingGate(props: CycleCeilingGateProps): React.ReactEleme
       </Box>
       <Role name="accent">
         {theme.box.bottomLeft}
-        {theme.box.horizontal.repeat(42)}
+        {preencher(2)}
       </Role>
     </Box>
   );

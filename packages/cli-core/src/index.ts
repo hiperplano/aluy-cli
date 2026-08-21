@@ -63,6 +63,11 @@ export * from './util/box-table.js';
 export { parseVersion, compareVersions, isNewer } from './version-compare.js';
 export type { ParsedVersion } from './version-compare.js';
 
+// Autoupdate — dist-tag do canal (rc/latest) + decisão "devo instalar?" (mesmo canal,
+// estritamente mais nova). O I/O (fetch ao registry, spawn do `npm install -g`, cache
+// em ~/.aluy/) vive no @hiperplano/aluy-cli; aqui só a regra pura, testável sem rede/fs.
+export { distTagFor, shouldAutoUpdate } from './version-compare.js';
+
 // Padrão de conectores (ADR-0154) — porta `Connector` portável + a MALHA genérica (a
 // fronteira de confiança, single-source). PURO e INERTE (ainda não ligado a `--connector`/
 // `--telegram`/boot); o I/O concreto vive no @hiperplano/aluy-cli.

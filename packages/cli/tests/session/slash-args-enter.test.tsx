@@ -114,12 +114,17 @@ async function pressEnterUntil(
   }
 }
 
-/** A linha do composer (a que tem o prompt `›`). */
+/** A linha do composer (a que tem o prompt).
+ *
+ * F-COMPOSER-CAIXA (reforma de UI pedida pelo dono) — o prompt deixou de ser `›` e passou
+ * a ser `❯` (U+276F). A busca continua sendo "a linha que tem o prompt"; só o glifo mudou.
+ * De quebra o `›` sobrou como marcador de SELEÇÃO do menu, então casar por `❯` deixa de
+ * confundir o input com um item da lista. */
 function composerLine(lastFrame: () => string | undefined): string {
   return (
     plain(lastFrame() ?? '')
       .split('\n')
-      .find((l) => l.includes('›')) ?? ''
+      .find((l) => l.includes('❯')) ?? ''
   );
 }
 

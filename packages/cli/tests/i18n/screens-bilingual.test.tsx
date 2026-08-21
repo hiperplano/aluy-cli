@@ -64,11 +64,16 @@ describe('i18n · FooterHints nos 2 idiomas', () => {
   it('estado idle em pt-BR e en (atalhos de tecla preservados)', () => {
     const pt = renderInLang(<FooterHints state="idle" />, 'pt-BR');
     const en = renderInLang(<FooterHints state="idle" />, 'en');
-    expect(pt).toContain('enter envia');
-    expect(en).toContain('enter sends');
-    // os atalhos de TECLA não se traduzem (enter/ctrl-c continuam literais nos dois)
-    expect(pt).toContain('ctrl-c');
-    expect(en).toContain('ctrl-c');
+    // F-DICAS (pedido do dono) — a linha de idle encolheu (`ctrl-c` e `ctrl-p` saíram: "três
+    // deles se aprendem no primeiro uso") e o `enter` virou o SÍMBOLO de teclado `⏎`, que o
+    // tema resolve (F-HINTS-GLIFO). O que este teste prova segue igual: o VERBO se traduz…
+    expect(pt).toContain('enviar');
+    expect(en).toContain('send');
+    // …e o ATALHO não: o mesmo símbolo de tecla nos dois idiomas (nunca "enviar" virar tecla).
+    expect(pt).toContain('⏎');
+    expect(en).toContain('⏎');
+    expect(pt).toContain('↑');
+    expect(en).toContain('↑');
   });
 
   it('estado ask em pt-BR e en', () => {

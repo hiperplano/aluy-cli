@@ -236,6 +236,25 @@ export function defaultOsc11TimeoutMs(env: NodeJS.ProcessEnv = process.env): num
   return ssh ? 1000 : 500;
 }
 
+/**
+ * F-FUNDO-DERIVADO — último RGB de fundo que o terminal reportou nesta execução.
+ *
+ * O probe já pergunta ao terminal qual é a cor de fundo dele, mas só usava a resposta para
+ * decidir claro/escuro e jogava o RGB fora. A cor em si é o que faltava para parar de
+ * CHUTAR o tom das caixas da conversa: em vez de uma cor fixa que fica boa num terminal e
+ * destoa em outro, as superfícies passam a ser o próprio fundo do usuário deslocado alguns
+ * pontos — mesma matiz, um degrau de luminosidade.
+ *
+ * `null` enquanto o probe não rodou ou não obteve resposta (terminal mudo, NO_COLOR, sem
+ * TTY): aí valem as cores declaradas no tema, como antes.
+ */
+let ultimoFundo: Rgb | null = null;
+
+/** O fundo observado do terminal, ou `null` se o probe não obteve resposta. */
+export function observedTerminalBackground(): Rgb | null {
+  return ultimoFundo;
+}
+
 export async function queryTerminalBrightness(probe: Osc11Probe): Promise<Brightness | null> {
   const env = probe.env ?? process.env;
   // NO_COLOR (https://no-color.org/): respeita a preferência — nem pergunta.
@@ -275,6 +294,8 @@ export async function queryTerminalBrightness(probe: Osc11Probe): Promise<Bright
     const onData = (chunk: Buffer | string): void => {
       buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
       // Tenta o parse a cada pedaço; o terminador (BEL/ST) chega no fim.
+      const rgb = parseOsc11(buf);
+      if (rgb !== null) ultimoFundo = rgb;
       const brightness = brightnessFromOsc11(buf);
       if (brightness !== null) finish(brightness);
     };
@@ -296,4 +317,24 @@ export async function queryTerminalBrightness(probe: Osc11Probe): Promise<Bright
     // chegar em terminal remoto/lento, e os bytes do OSC 11 vazavam no shell.
     timerRef.id = setTimeout(() => finish(null), timeoutMs);
   });
+}
+
+/**
+ * F-FUNDO-DERIVADO — uma SUPERFÍCIE a partir do fundo do terminal: mesma matiz, alguns
+ * pontos de luminosidade de diferença.
+ *
+ * A direção segue o brilho do fundo (sobe no escuro, desce no claro), então a caixa fica
+ * sempre um degrau ACIMA do plano de fundo, nunca abaixo — é o que faz uma região parecer
+ * "próxima" e ainda assim distinta. `passos` é a intensidade: poucos para a fala (que
+ * ocupa a maior parte da tela e não pode cansar a leitura), mais para o campo de entrada
+ * (que precisa se achar no meio do texto).
+ */
+export function surfaceFrom(bg: Rgb, passos: number): string {
+  const sobe = relativeLuminance(bg) < 0.5;
+  const d = sobe ? passos : -passos;
+  const c = (v: number): string =>
+    Math.max(0, Math.min(255, Math.round(v + d)))
+      .toString(16)
+      .padStart(2, '0');
+  return `#${c(bg.r)}${c(bg.g)}${c(bg.b)}`.toUpperCase();
 }

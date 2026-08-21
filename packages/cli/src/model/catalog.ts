@@ -16,6 +16,7 @@
 // server-only, intocada.
 
 import type { TierCatalogEntry, CostSignal } from '@hiperplano/aluy-cli-core';
+import { builtinContextWindowForSlug } from '@hiperplano/aluy-cli-core';
 
 /**
  * Tiers CONHECIDOS do FALLBACK — usados SÓ quando o catálogo do broker não responde
@@ -242,13 +243,32 @@ export function upstreamFromConfig(
  * sessão longa não tinha rede de segurança. Sem o env ⇒ 0 (comportamento atual,
  * SEM regressão: inerte, fail-safe). O env nunca SOBREPÕE uma janela de tier
  * conhecida (o broker é a fonte da verdade). PURO/testável.
+ *
+ * F-WIN (embutido) — degrau NOVO: quando NADA acima resolveu (env, `config.context.
+ * window` e a janela do modelo — declarada OU descoberta ao vivo — todos ausentes),
+ * consultamos o CATÁLOGO EMBUTIDO (`builtinContextWindowForSlug`, `@hiperplano/aluy-cli-core`)
+ * por `modelSlug`. Cobre o buraco medido em campo: gateways que respondem `/models`
+ * com 200 mas SEM `context_length` nenhum (TokenRouter, 127 modelos, zero campo de
+ * janela) — a descoberta ao vivo faz tudo certo e devolve "nada" p/ um modelo cuja
+ * janela é, na verdade, DADO PÚBLICO conhecido (doc do fabricante).
+ *
+ * Fica DELIBERADAMENTE no ÚLTIMO degrau antes do `0`, abaixo de TUDO que o dono
+ * declarou (env, `configWindow`, `modelWindow`) — inclusive abaixo do `fromEnv`, que
+ * já vencia o `modelWindow` antes deste degrau existir (ver o teste "ALUY_CONTEXT_
+ * WINDOW segue vencendo a janela do modelo (precedência intacta)" em
+ * `context-window-byo-wiring.test.ts`, que este degrau NÃO pode quebrar). Regra única:
+ * o que o dono declarou à mão NUNCA perde p/ um chute embutido — ele pode ter um
+ * motivo (provider que corta a janela, proxy que trunca). Slug fora do catálogo ⇒
+ * `undefined` ⇒ segue pro `0`/inerte — o F134 (janela desconhecida desliga o
+ * size-aware do Compactor, nunca chuta 200k) permanece intocado para o DESCONHECIDO.
  */
 export function resolveContextWindow(
   tierKey: string,
   env: Record<string, string | undefined> = {},
   catalog?: readonly TierCatalogEntry[],
   configWindow?: number | undefined, // ADR-0150 balde(a): config.context.window (custom only)
-  modelWindow?: number | undefined, // F-WIN: janela do MODELO concreto (BYO)
+  modelWindow?: number | undefined, // F-WIN: janela do MODELO concreto (BYO), declarada ou descoberta
+  modelSlug?: string | undefined, // F-WIN (embutido): slug p/ consultar o catálogo embutido (último recurso)
 ): number {
   const fromTier = contextWindowForTier(tierKey, catalog);
   if (fromTier > 0) return fromTier; // tier conhecido manda
@@ -264,11 +284,18 @@ export function resolveContextWindow(
   // construção significa "não uso broker" — e era tratado como "janela imprevisível".
   // Mas o dono declarou um modelo CONCRETO; imprevisível ela não é. Fica ABAIXO do
   // `configWindow` de propósito: um override explícito do usuário vence um dado do
-  // catálogo. Ausente ⇒ 0 (inerte), preservando o fail-safe de quem não declarou nada —
-  // é isto que mantém o F134 (`custom` sem janela ⇒ size-aware do Compactor OFF) válido.
+  // catálogo. Ausente ⇒ tenta o embutido abaixo, preservando o fail-safe de quem não
+  // declarou NADA — é isto que mantém o F134 (`custom` sem janela conhecida ⇒
+  // size-aware do Compactor OFF) válido para o slug genuinamente DESCONHECIDO.
   if (modelWindow !== undefined && Number.isInteger(modelWindow) && modelWindow > 0) {
     return modelWindow;
   }
+  // F-WIN (embutido) — ÚLTIMO recurso antes do `0`: a família do slug é PUBLICAMENTE
+  // conhecida? Só entra aqui quando NINGUÉM acima respondeu (nem override, nem config,
+  // nem declarado/descoberto) — nunca sobrepõe nada que o dono ou a descoberta ao vivo
+  // já resolveram.
+  const builtin = builtinContextWindowForSlug(modelSlug);
+  if (builtin !== undefined) return builtin;
   return 0;
 }
 

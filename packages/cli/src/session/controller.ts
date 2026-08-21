@@ -665,6 +665,23 @@ export interface SessionControllerOptions {
     readonly registered: boolean;
   }>;
   /**
+   * F-MODELO-FICA — persiste o modelo ATIVO (`config.localModel`) do backend LOCAL.
+   *
+   * O BURACO que isto fecha: `/model` chamava `setTier('custom', slug)`, que troca a
+   * sessão e o `meta` — e NADA gravava. Na sessão seguinte o slug voltava ao do config,
+   * em silêncio; o dono escolhia o modelo e ele "não ficava". O método de persistir já
+   * existia no store (`saveLocalProviderModel`) e era CÓDIGO MORTO: nenhum chamador.
+   *
+   * QUANDO gravar é a regra do dono: "se estiver respondendo (somente se estiver
+   * funcionando)". Por isso a escrita NÃO acontece na hora da escolha — acontece quando
+   * um turno COMPLETA com aquele modelo (ver `pendingModelToPersist`). Um slug que o
+   * provider recusa nunca chega a virar padrão, e não gastamos uma chamada de teste só
+   * para descobrir isso: a prova é o turno que o dono ia fazer de qualquer jeito.
+   *
+   * Ausente ⇒ a troca vale só na sessão (comportamento anterior, sem regressão).
+   */
+  readonly persistActiveLocalModel?: (slug: string) => void;
+  /**
    * F-PROV — porta que TROCA DE VERDADE o provider ATIVO sob backend LOCAL (fix do
    * "silent no-op" achado em dogfooding: `/provider` mudava só um DADO passageiro do
    * request que o `LocalModelClient` sequer lê — o client seguia fixo no provider do
@@ -681,6 +698,8 @@ export interface SessionControllerOptions {
     readonly detail: string;
     readonly client?: ModelClient;
     readonly defaultModel?: string;
+    /** F-PROV-PERSISTE — a troca virou padrão para as próximas sessões (ver `run.tsx`). */
+    readonly persisted?: boolean;
   }>;
   /**
    * ADR-0146 (D2/L2) — PORTA do PROBE de nome de modelo: nomes disponíveis no CATÁLOGO
@@ -967,6 +986,27 @@ export const DEFAULT_MAX_ATTEMPTS = 3;
 const CONTINUE_EXTRA_ITERATIONS = 50;
 
 /**
+ * F-SALDO-VIVO (relato do dono: "a atualização dos créditos deveria aparecer de tempos
+ * em tempos") — INTERVALO MÍNIMO entre duas buscas de quota/saldo disparadas pelo
+ * ASSENTAMENTO da sessão (fim de turno).
+ *
+ * POR QUE EXISTE: o `quotaFetcher` do broker só era re-chamado quando o evento `usage`
+ * do stream trazia `quota` (path A ⇒ `applyQuota` ⇒ `refreshQuota`). Sob backend LOCAL
+ * (BYO) esse evento NUNCA vem — o gateway não fala o dialeto do broker —, então o saldo
+ * era lido UMA vez, no boot, e congelava na tela pelo resto da sessão: o dono gastava
+ * crédito e o rodapé continuava mostrando o número do arranque.
+ *
+ * POR QUE 60s: cada busca é uma (ou duas) chamadas HTTP ao gateway BYO só p/ pintar um
+ * enfeite de rodapé. Sem freio, uma conversa de perguntas curtas bateria no provider a
+ * cada mensagem — dezenas de requisições por minuto por causa de um número na barra.
+ * 60s é a menor janela em que o dono ainda percebe o saldo "andando" durante o trabalho
+ * (um turno agêntico raramente dura menos que isso) e o provider não sente. NÃO é um
+ * timer: nada roda com a sessão parada — o refresh só é CONSIDERADO quando um turno
+ * assenta, e aí o relógio decide se já pode.
+ */
+const QUOTA_REFRESH_MIN_INTERVAL_MS = 60_000;
+
+/**
  * Controla UMA sessão da TUI. `submit(goal)` roda o loop; o estado evolui via
  * eventos e é publicado aos observadores. O `StreamSink`/`ToolReporter` daqui
  * alimentam os blocos ao vivo.
@@ -1029,6 +1069,15 @@ export class SessionController {
         slug: string,
       ) => Promise<{ readonly ok: boolean; readonly detail: string; readonly registered: boolean }>)
     | undefined;
+  /** F-MODELO-FICA — porta que grava o modelo ATIVO no config (ver doc na options). */
+  private readonly persistActiveLocalModel: ((slug: string) => void) | undefined;
+  /**
+   * F-MODELO-FICA — slug escolhido nesta sessão que AINDA NÃO foi confirmado por um turno
+   * bem-sucedido. Vira `undefined` assim que persistimos (uma vez só) ou quando outra
+   * troca o substitui. Não persiste no erro: modelo que o provider recusa nunca vira o
+   * padrão do dono.
+   */
+  private pendingModelToPersist: string | undefined;
   /** F-PROV — porta de troca DE VERDADE do provider ATIVO local (ver doc na options). */
   private readonly switchLocalProviderPort:
     | ((name: string) => Promise<{
@@ -1036,6 +1085,8 @@ export class SessionController {
         readonly detail: string;
         readonly client?: ModelClient;
         readonly defaultModel?: string;
+    /** F-PROV-PERSISTE — a troca virou padrão para as próximas sessões (ver `run.tsx`). */
+    readonly persisted?: boolean;
       }>)
     | undefined;
   // EST-0948 — os tetos EFETIVOS da sessão (CLI-SEC-8), já resolvidos (flag>env>default,
@@ -1063,6 +1114,11 @@ export class SessionController {
   // EST-0948 · ADR-0069 — busca a quota da PRÓPRIA conta (`GET /v1/quota`): CRÉDITO
   // (primário) + janelas. Ausente ⇒ footer só com as janelas do `usage`. Não-crítico.
   private readonly quotaFetcher?: () => Promise<Quota | undefined>;
+  // F-SALDO-VIVO — instante (ms do `clock` da sessão) da ÚLTIMA busca de quota/saldo
+  // DISPARADA, carimbado no início de `refreshQuota` (não no fim): duas assentadas em
+  // sequência não podem abrir duas chamadas concorrentes enquanto a 1ª ainda voa.
+  // `0` = nunca buscou ⇒ a 1ª oportunidade passa direto.
+  private lastQuotaRefreshAt = 0;
   // EST-0958 — executor do `!comando`: reusa a MESMA catraca (engine) + shell
   // confinado (ports) + ask (resolver) do loop. NÃO é um caminho de shell paralelo.
   private readonly bang: BangExecutor;
@@ -1401,6 +1457,7 @@ export class SessionController {
     this.defaultChildModel = opts.defaultChildModel; // ADR-0146 (D4) — dial global
     this.localModelCatalog = opts.localModelCatalog; // ADR-0152 (D6c) — probe local
     this.verifyAndRegisterLocalModel = opts.verifyAndRegisterLocalModel; // ADR-0153 — TTR
+    this.persistActiveLocalModel = opts.persistActiveLocalModel; // F-MODELO-FICA
     this.switchLocalProviderPort = opts.switchLocalProvider; // F-PROV — troca de provider local
     this.clock = opts.clock ?? Date.now;
     this.isRoot =
@@ -2006,6 +2063,18 @@ export class SessionController {
         // `weakYoloGuardrail.tier()` acima): gateia o bloco de FEW-SHOT do tier fraco
         // no `system`. Só afeta o prompt — não toca a catraca/budget.
         tierProvider: () => this.tierControl?.tier ?? this.state.meta.tier,
+        // F-SABER-O-MODELO — quem atende a sessão, resolvido a CADA chamada (o `/model` e o
+        // `/provider` trocam no meio dela). SÓ sob backend local: no broker o mapa
+        // tier→provider é segredo do produto e não pode vazar pelo system prompt.
+        runtimeInfoProvider: () =>
+          this.state.meta.backend === 'local'
+            ? {
+                ...(this.state.meta.provider !== undefined
+                  ? { provider: this.state.meta.provider }
+                  : {}),
+                ...(this.state.meta.model !== undefined ? { model: this.state.meta.model } : {}),
+              }
+            : {},
         // EST-0973 — AUTO-COMPACTAÇÃO da JANELA: quando o prompt cruza ~85% da janela,
         // o loop COMPACTA sozinho (via a porta abaixo, que reusa o Compactor/`/compact`)
         // e CONTINUA — sem pausar/pedir confirmação. Só repassa a config quando LIGADA
@@ -2155,7 +2224,13 @@ export class SessionController {
       onReasoning: (content) => this.appendAluyReasoning(content),
       onUsage: (usage) => this.applyUsage(usage),
       onQuota: (quota) => this.applyQuota(quota),
-      onDone: () => this.finishAluyTurn(),
+      onDone: () => {
+        this.finishAluyTurn();
+        // F-MODELO-FICA — `onDone` é o sinal de que o stream do modelo FECHOU BEM (o
+        // caminho de erro não passa por aqui: `onError` chama `finishAluyTurn` direto).
+        // É a prova barata de "está respondendo" que a persistência espera.
+        this.confirmPendingModel();
+      },
     };
   }
 
@@ -3658,6 +3733,8 @@ export class SessionController {
         ]);
       }
     }
+    // F-TURNO-CORTADO — registra que ESTE turno terminou por interrupção; o cabeçalho do
+    // bloco usa a marca `⋯` em vez do `✔`, que afirmaria conclusão.
     this.abort?.abort();
     // EST-0969 (watchdog) — se há uma PAUSA-PEDE-DIREÇÃO pendente, esc/Ctrl-C a
     // resolve como `end` (fail-safe: o loop não fica pendurado esperando a tecla).
@@ -3762,6 +3839,8 @@ export class SessionController {
     // turno já tenha recriado a árvore corrente) — sem órfão fora do alcance do freio.
     for (const tree of this.detachedTrees) tree.cancelAll();
     if (hasLive) this.hardStopped = true;
+    // F-TURNO-CORTADO — registra que ESTE turno terminou por interrupção; o cabeçalho do
+    // bloco usa a marca `⋯` em vez do `✔`, que afirmaria conclusão.
     this.abort?.abort();
     this.retryAbort?.abort();
   }
@@ -4385,6 +4464,24 @@ export class SessionController {
    *
    * No-op (devolve `false`) quando a janela não muda — não re-renderiza nem re-arma nada.
    */
+  /**
+   * F-MODELO-FICA — CONFIRMA o modelo escolhido: um turno completou com ele, então ele
+   * "está respondendo" (a regra do dono) e vira o padrão em `config.localModel`.
+   *
+   * Chamado no fim do turno BEM-SUCEDIDO. No caminho de erro NÃO é chamado — um slug que
+   * o provider recusa (404 de modelo, 401, teto) nunca vira o padrão, que é o ponto: a
+   * confirmação custa ZERO chamada extra, porque usa o turno que o dono ia fazer mesmo.
+   *
+   * Idempotente: limpa o pendente antes de gravar, então um segundo turno com o mesmo
+   * modelo não reescreve o config à toa.
+   */
+  private confirmPendingModel(): void {
+    const slug = this.pendingModelToPersist;
+    if (slug === undefined) return;
+    this.pendingModelToPersist = undefined;
+    this.persistActiveLocalModel?.(slug);
+  }
+
   private applyContextWindow(newWindow: number): boolean {
     if (newWindow === this.contextWindow) return false;
     this.contextWindow = newWindow;
@@ -4472,6 +4569,12 @@ export class SessionController {
     const sameModel = (model ?? undefined) === (this.tierControl.model ?? undefined);
     if (sameTier && sameModel) return;
     this.tierControl.setTier(tier, model);
+    // F-MODELO-FICA — a escolha fica PENDENTE até um turno completar com ela. Só o modo
+    // Custom (BYO) tem `localModel` no config; tier canônico não persiste nada aqui.
+    // Trocar de novo antes de confirmar simplesmente substitui o pendente — persiste o
+    // que de fato funcionou, nunca um slug que o dono já abandonou.
+    this.pendingModelToPersist =
+      tier === 'custom' && model !== undefined && model.trim() !== '' ? model.trim() : undefined;
     // EST-0973 (fix) — re-resolve a janela de contexto + auto-compactação para o
     // NOVO tier. Cada tier tem sua janela real (ex.: Strata=128k, Flui=256k,
     // Cortex=200k, Custom=0/inerte). Sem isso, a troca de tier mantinha o 200k
@@ -4506,6 +4609,12 @@ export class SessionController {
       // à mão manda mais que o que o provider anunciou.
       modelWindowFromConfig(this.providerWindows, this.activeProviderId, model) ??
         this.discoveredWindowFor(model),
+      // F-WIN (embutido) — o SLUG do modelo NOVO. É o que faz a troca de modelo carregar
+      // a janela CONHECIDA sem depender de o provider informar nem de o dono declarar —
+      // o pedido literal do dono: "isso não deveria ser carregado quando mudo o modelo,
+      // independente do provider?". Sem este argumento o catálogo embutido nunca é
+      // consultado no `/model`, e o degrau fica morto onde ele mais importa.
+      model,
     );
     this.applyContextWindow(newWindow);
     // `meta.model` só existe na via Custom; fora dela o campo é REMOVIDO (não fica
@@ -4575,7 +4684,9 @@ export class SessionController {
    * client) ⇒ NADA muda (fail-closed — nunca troca pela metade); `detail` explica o
    * motivo, honesto, p/ a nota que o chamador (run.tsx) empurra.
    */
-  async setLocalProvider(name: string): Promise<{ readonly ok: boolean; readonly detail: string }> {
+  async setLocalProvider(
+    name: string,
+  ): Promise<{ readonly ok: boolean; readonly detail: string; readonly persisted?: boolean }> {
     if (this.state.meta.backend !== 'local') {
       return {
         ok: false,
@@ -4607,7 +4718,12 @@ export class SessionController {
         provider: name,
       },
     });
-    return { ok: true, detail: result.detail };
+    // F-PROV-PERSISTE — repassa se a troca virou padrão; a nota precisa contar a verdade.
+    return {
+      ok: true,
+      detail: result.detail,
+      ...(result.persisted !== undefined ? { persisted: result.persisted } : {}),
+    };
   }
 
   /**
@@ -4700,6 +4816,14 @@ export class SessionController {
    */
   setGovernanceCounts(counts: GovernanceCounts): void {
     this.patch({ governance: counts });
+  }
+
+  /**
+   * F-CONFIG-NO-RODAPE — espelha no estado as FONTES de config carregadas, para o painel de
+   * status mostrá-las como estado permanente da sessão em vez de nota de boot.
+   */
+  setConfigSources(sources: readonly string[]): void {
+    this.patch({ configSources: sources });
   }
 
   /**
@@ -5858,7 +5982,17 @@ export class SessionController {
     this.patch({ blocks });
   }
 
-  private finishAluyTurn(): void {
+  /**
+   * @param motivo Como o turno terminou. `cancelled` vem do caminho de interrupção (o mesmo
+   * que faz `rootFlow.finish('cancelled')`) e é o que permite ao cabeçalho do bloco dizer
+   * "interrompido" em vez de estampar um `✔` sobre uma resposta cortada no meio.
+   *
+   * O motivo é PASSADO em vez de descoberto aqui: as tentativas anteriores (flag de
+   * instância, `AbortSignal.aborted`, marcar o bloco depois) falharam todas pela mesma
+   * razão — neste ponto o estado ainda não reflete a interrupção, e depois dele o bloco já
+   * migrou para o `<Static>` e não é mais redesenhado. Quem chama sabe; basta dizer.
+   */
+  private finishAluyTurn(motivo: 'done' | 'cancelled' | 'error' = 'done'): void {
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
     if (last && last.kind === 'aluy') {
@@ -5890,7 +6024,32 @@ export class SessionController {
       if (last.text.trim() === '') {
         blocks.pop();
       } else {
-        blocks[blocks.length - 1] = { ...last, streaming: false };
+        // F-CONTA-NO-BLOCO — carimba o custo AQUI, no mesmo ponto em que o turno deixa de
+        // fazer stream. Depois deste patch o bloco desce para o `<Static>` e não é mais
+        // re-renderizado com estado vivo: se o número não entrar agora, não entra nunca.
+        // Lê da FONTE (a árvore de fluxo), não de `state.turnAccounting`.
+        //
+        // O estado é republicado por `refreshTurnAccounting`, e num turno INTERROMPIDO essa
+        // republicação acontece DEPOIS deste ponto — então o carimbo saía com o valor
+        // anterior, zerado. Na tela isso virava `✔ 0 tokens · 0s` no cabeçalho de uma
+        // resposta com vinte linhas de texto: um número errado, com um ✓ ao lado sugerindo
+        // que deu tudo certo. Pior que não mostrar nada.
+        const agg = this.flowTree?.totalAccounting();
+        const conta: TurnAccountingView | undefined =
+          agg !== undefined && agg.tokens > 0
+            ? {
+                tokens: agg.tokens,
+                toolCalls: agg.toolCalls,
+                durationMs: this.rootFlow?.accounting().durationMs ?? 0,
+                live: false,
+              }
+            : undefined;
+        blocks[blocks.length - 1] = {
+          ...last,
+          streaming: false,
+          ...(conta !== undefined ? { accounting: conta } : {}),
+          ...(motivo === 'cancelled' ? { interrupted: true } : {}),
+        };
       }
       this.patch({ blocks });
     }
@@ -6049,6 +6208,12 @@ export class SessionController {
    */
   private async refreshQuota(): Promise<void> {
     if (this.quotaFetcher === undefined) return;
+    // F-SALDO-VIVO — carimba ANTES do `await`: o freio do `maybeRefreshQuota` conta a
+    // partir do DISPARO, não da resposta. Assim uma busca lenta (gateway BYO fora do ar
+    // esperando o timeout) não deixa a porta aberta p/ uma segunda chamada em cima dela.
+    // Vale p/ TODO caminho (boot, `applyQuota` do broker, assentamento): quem já buscou
+    // agora não é re-buscado pelo freio logo em seguida.
+    this.lastQuotaRefreshAt = this.clock();
     let fetched: Quota | undefined;
     try {
       fetched = await this.quotaFetcher();
@@ -6068,6 +6233,25 @@ export class SessionController {
     this.patch({ meta: { ...this.state.meta, quota: merged } });
   }
 
+  /**
+   * F-SALDO-VIVO — REFRESCA a quota/saldo *se* já passou o intervalo mínimo desde a
+   * última busca. Chamado a cada ASSENTAMENTO da sessão (`setPhase` → `idle`/`done`, ou
+   * seja: fim de turno, fim de workflow, interrupção, fim de `!comando`).
+   *
+   * REUSA o `refreshQuota` de sempre (EST-0948/ADR-0069) — não há um segundo caminho de
+   * busca nem um segundo merge: só um GATILHO a mais, sob freio de relógio.
+   *
+   * NÃO BLOQUEIA NADA: dispara `void` (fire-and-forget) numa fase em que o turno JÁ
+   * terminou, e o `refreshQuota` engole toda falha (`quotaFetcher` degrada a `undefined`
+   * ⇒ mantém o último valor conhecido, em silêncio). Uma rede lenta atrasa, no máximo, a
+   * troca de um número no rodapé — nunca o próximo prompt do dono.
+   */
+  private maybeRefreshQuota(): void {
+    if (this.quotaFetcher === undefined) return;
+    if (this.clock() - this.lastQuotaRefreshAt < QUOTA_REFRESH_MIN_INTERVAL_MS) return;
+    void this.refreshQuota();
+  }
+
   // ── EST-0982 · ADR-0063 — CONTABILIDADE do turno (tokens + TEMPO, estilo Claude Code) ─
 
   /** Abre a contabilidade do turno: zera o rodapé `live` (o tempo corre na raiz). */
@@ -6081,6 +6265,9 @@ export class SessionController {
    * dobra), não mais da raiz (que agora carrega só o uso PRÓPRIO do pai). A DURAÇÃO
    * segue da raiz (o relógio de parede do turno do agente principal). Leitura pura.
    */
+
+
+
   private refreshTurnAccounting(): void {
     if (!this.rootFlow || !this.flowTree) return;
     const agg = this.flowTree.totalAccounting();
@@ -6177,7 +6364,7 @@ export class SessionController {
       // DUPLICADA + 2 cursores `▏` + a região viva nunca assenta (flicker volta). O esc é
       // o MESMO desfecho de `onDone` (finishAluyTurn): congela o parcial (ou descarta o
       // vazio) p/ ele virar histórico imutável. Idempotente (sem aluy aberto ⇒ no-op).
-      this.finishAluyTurn();
+      this.finishAluyTurn('cancelled');
       // EST-0982 (mid-turn UX) — turno interrompido: fecha o indicador "encaixando…"
       // (re-semeia o não-drenado; sem ghost após o abort).
       this.endTurnInjects();
@@ -6189,7 +6376,7 @@ export class SessionController {
     // EST-0965 — SELA o `aluy` parcial também no erro real: um corte mid-stream (5xx/
     // transporte) deixava o bloco `streaming:true` na região viva ao lado do broker-error.
     // O RETRY re-abre OUTRO aluy ⇒ a mesma duplicação. Congela/descarta o parcial primeiro.
-    this.finishAluyTurn();
+    this.finishAluyTurn('error');
     // EST-0942 — CLASSIFICA a causa em vez de "broker indisponível" pra tudo. A
     // mensagem é NEUTRA (HG-2) e SEM TOKEN (CLI-SEC-6): `classifyBrokerError` só
     // compõe literais + o status numérico — nunca ecoa credencial/headers/corpo cru.
@@ -7241,6 +7428,12 @@ export class SessionController {
     // queueMicrotask: deixa a finalização síncrona do turno terminar antes do wake.
     if (phase === 'idle' || phase === 'done') {
       queueMicrotask(() => this.maybeWakeForMonitor());
+      // F-SALDO-VIVO — o saldo/quota do rodapé envelhecia a sessão inteira sob backend
+      // LOCAL (o refresh de sempre pendurava no evento `quota` do broker, que o gateway
+      // BYO nunca manda). A assentada em idle/done é o momento CERTO de reler: o turno
+      // acabou (nada a atrasar) e é exatamente quando o dono olha o rodapé. O freio de
+      // ~60s mora no `maybeRefreshQuota` — aqui só oferecemos a oportunidade.
+      this.maybeRefreshQuota();
     }
   }
 

@@ -283,6 +283,19 @@ export function buildSystemPrompt(
   availableAgents?: string,
   sessionCommands?: string,
   tier?: string,
+  /**
+   * F-SABER-O-MODELO (relato do dono: "ele não deveria saber o modelo? por que não tem essas
+   * infos básicas?") — provider e modelo em uso, quando o USUÁRIO os escolheu.
+   *
+   * O agente respondia "não tenho acesso a essa informação — posso ser GPT, Claude, Llama ou
+   * outro" a uma pergunta cuja resposta estava no `config.json` do próprio usuário. Não é
+   * introspecção: é um dado da sessão que ninguém tinha passado adiante.
+   *
+   * SÓ sob backend local (BYO). Sob broker o mapa tier→provider é segredo do produto
+   * (CLI-SEC-7/HG-2) e não pode vazar pelo prompt — lá o agente segue sem saber, e isso é
+   * deliberado, não esquecimento.
+   */
+  runtime?: { readonly provider?: string; readonly model?: string },
 ): string {
   const toolDocs = tools.map((t) => renderOneToolDoc(t)).join('\n');
   const project = clampProjectInstructions(projectInstructions);
@@ -406,6 +419,18 @@ export function buildSystemPrompt(
     // em vez de dizer "não consigo". NÃO mexe na fronteira de segurança: a lista é
     // informativa; quem barra é o confinamento duro (resolveInside) + a catraca, e
     // a AMPLIAÇÃO é ato exclusivo do usuário (slash, sem tool — sem auto-ampliação).
+    // F-SABER-O-MODELO — quem está atendendo esta sessão.
+    ...(runtime !== undefined && (runtime.provider ?? runtime.model) !== undefined
+      ? [
+          `Você está rodando via ${runtime.provider ?? 'provider local'}` +
+            (runtime.model !== undefined && runtime.model !== ''
+              ? `, no modelo ${runtime.model}`
+              : '') +
+            '. O usuário configurou isso; se ele perguntar qual modelo você é, responda com',
+          'esse dado em vez de dizer que não sabe.',
+          '',
+        ]
+      : []),
     ...(workspaceRoots && workspaceRoots.length > 0
       ? [
           `Raízes AUTORIZADAS do workspace (você só lê/edita/navega DENTRO delas): ${workspaceRoots.join(' · ')}.`,
@@ -556,6 +581,8 @@ export function buildMessages(
   availableAgents?: string,
   sessionCommands?: string,
   tier?: string,
+  /** F-SABER-O-MODELO — provider/modelo em uso (só BYO); ver `buildSystemPrompt`. */
+  runtime?: { readonly provider?: string; readonly model?: string },
 ): ChatMessage[] {
   const messages: ChatMessage[] = [
     {
@@ -567,6 +594,7 @@ export function buildMessages(
         availableAgents,
         sessionCommands,
         tier,
+        runtime,
       ),
     },
   ];

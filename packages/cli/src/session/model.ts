@@ -35,6 +35,22 @@ export interface YouTurn {
 export interface AluyTurn {
   readonly kind: 'aluy';
   readonly text: string;
+  /**
+   * F-CONTA-NO-BLOCO — o custo do turno, CARIMBADO no bloco quando ele fecha.
+   *
+   * Fica no bloco, e não numa prop passada de fora, porque o cabeçalho precisa sobreviver
+   * à migração para o `<Static>`: um turno terminado desce para o histórico e nunca mais
+   * é re-renderizado com o estado vivo. Passado por prop, o número apareceria no instante
+   * em que o turno fecha e sumiria no quadro seguinte.
+   */
+  readonly accounting?: TurnAccountingView;
+  /**
+   * F-TURNO-CORTADO — o turno terminou por INTERRUPÇÃO (esc), não por conclusão.
+   *
+   * Muda só a marca do cabeçalho: um `✔` ao lado de uma resposta cortada no meio afirma que
+   * deu tudo certo, e quem relê o histórico depois não tem como saber que faltou pedaço.
+   */
+  readonly interrupted?: boolean;
   /** `true` enquanto o stream está chegando (cursor ▏ na ponta, ◇ pisca). */
   readonly streaming: boolean;
   /**
@@ -683,6 +699,17 @@ export interface SessionState {
    * Ausente = ainda não computado (boot) ou nada carregado.
    */
   readonly governance?: GovernanceCounts | undefined;
+  /**
+   * F-CONFIG-NO-RODAPE (pedido do dono: "acho que isso deveria ficar no footer") — as FONTES
+   * de config carregadas (instruções, comandos, servers MCP).
+   *
+   * Era uma nota de boot no topo, e nota de boot é registro de EVENTO — algo que aconteceu
+   * uma vez e rola para fora da tela. Só que isto não é evento: é estado permanente da
+   * sessão, da mesma natureza de provider, modelo e diretório, que já vivem no painel. No
+   * topo respondia "o que carregou quando abri"; no rodapé responde "o que está valendo
+   * agora", que é a pergunta que se faz no meio do trabalho.
+   */
+  readonly configSources?: readonly string[] | undefined;
   /**
    * EST-1106 — UM `/workflows run` está ATIVO (espelha `cycleActive`). Usado pela
    * TUI p/ segurar a fila do type-ahead (`queueAtRest`).

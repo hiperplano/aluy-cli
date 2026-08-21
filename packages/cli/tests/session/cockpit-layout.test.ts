@@ -11,6 +11,7 @@ import {
   COCKPIT_LOG_RATIO,
   COCKPIT_LOG_MIN_ROWS,
   COCKPIT_CHROME_ROWS,
+  statusRowsFor,
   COMPOSER_ROWS,
   COMPOSER_MAX_ROWS,
 } from '../../src/session/cockpit-layout.js';
@@ -190,17 +191,36 @@ describe('resolveCockpitLayout — composer multi-linha (BUG P2-C, paridade inli
     expect(base.composerRows).toBe(COMPOSER_ROWS);
   });
 
-  it('com 3 linhas o composer cresce p/ 3 e a CONVERSA cede as 2 extras (soma == rows)', () => {
-    const one = resolveCockpitLayout(24, 100, 1);
-    const three = resolveCockpitLayout(24, 100, 3);
-    expect(three.kind).toBe('cockpit');
-    if (three.kind !== 'cockpit' || one.kind !== 'cockpit') return;
-    expect(three.composerRows).toBe(3);
-    // a soma segue EXATA == rows (invariante §5) — o ponto central do fix.
-    expect(cockpitRegionSum(three)).toBe(24);
-    // as 2 linhas extras saíram da CONVERSA (a maior), não do LOG.
-    expect(three.regions.logRows).toBe(one.regions.logRows);
-    expect(three.regions.conversaRows).toBe(one.regions.conversaRows - 2);
+  // DECISÃO DO DONO — quando o composer cresce, quem cede é o LOG, não a conversa.
+  //
+  // O contrato anterior mandava a conversa ceder por ser "a maior região gerida". Na prática
+  // isso invertia a prioridade da tela: a conversa é o FOCO e o log é apoio, e encolher o
+  // foco para preservar o apoio é o avesso do que o cockpit existe para fazer. Com o painel
+  // de status a 3 linhas os arredondamentos deixaram de coincidir e a divergência entre o
+  // contrato escrito e o comportamento real ficou visível — o dono arbitrou pelo
+  // comportamento.
+  //
+  // O que segue INVARIANTE, e é o que este teste protege: a soma exata == rows (ADR-0076 §5,
+  // o grid fecha sem refluir) e a conversa nunca ficar menor que o log.
+  it('o composer crescendo tira do LOG primeiro, e da conversa só depois do piso', () => {
+    const um = resolveCockpitLayout(24, 100, 1);
+    const dois = resolveCockpitLayout(24, 100, 2);
+    const tres = resolveCockpitLayout(24, 100, 3);
+    if (um.kind !== 'cockpit' || dois.kind !== 'cockpit' || tres.kind !== 'cockpit') return;
+
+    // 1ª linha extra: sai do LOG, a conversa não sente.
+    expect(dois.regions.logRows).toBe(um.regions.logRows - 1);
+    expect(dois.regions.conversaRows).toBe(um.regions.conversaRows);
+
+    // 2ª: o log já está no piso de legibilidade e para de ceder; agora a conversa cede.
+    expect(tres.regions.logRows).toBe(dois.regions.logRows);
+    expect(tres.regions.conversaRows).toBe(dois.regions.conversaRows - 1);
+
+    // Em qualquer caso: a soma fecha exata (§5) e o foco nunca fica menor que o apoio.
+    for (const l of [um, dois, tres]) {
+      expect(cockpitRegionSum(l)).toBe(24);
+      expect(l.regions.conversaRows).toBeGreaterThanOrEqual(l.regions.logRows);
+    }
   });
 
   it('acima do teto o composer satura em COMPOSER_MAX_ROWS (não cresce sem fim)', () => {
@@ -292,7 +312,15 @@ describe('resolveCockpitLayout — log ADAPTATIVO (logHint)', () => {
 
   it('sem hint ⇒ razão fixa preservada (back-compat)', () => {
     const semHint = resolveCockpitLayout(ROWS, 120, 1);
-    const proporcional = Math.round((ROWS - COCKPIT_CHROME_ROWS) * COCKPIT_LOG_RATIO);
+    // F-PAINEL (pedido do dono) — a barra de status de UMA linha virou um PAINEL de três
+    // itens (sessão/estado/uso) e o grid do cockpit fecha por SOMA de alturas, então o
+    // painel custa 2 linhas A MAIS de chrome quando a tela é alta o bastante p/ abri-lo
+    // inteiro (`statusRowsFor`). `COCKPIT_CHROME_ROWS` continua contando o painel no PISO
+    // (1 linha), de propósito — é ele que define `COCKPIT_MIN_ROWS`. O que este teste
+    // prova é a RAZÃO (30% do que sobra p/ o log), não o tamanho absoluto: o espelho da
+    // conta é que estava velho, porque não descontava o painel.
+    const geridas = ROWS - COCKPIT_CHROME_ROWS - (statusRowsFor(ROWS) - 1);
+    const proporcional = Math.round(geridas * COCKPIT_LOG_RATIO);
     if (semHint.kind !== 'cockpit') throw new Error('cockpit');
     expect(semHint.regions.logRows).toBe(proporcional);
   });

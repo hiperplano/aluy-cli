@@ -63,9 +63,9 @@ describe('Doctor — checklist progressiva (ticks ao vivo)', () => {
     );
     const out = plain(lastFrame() ?? '');
     expect(out).toContain('u · autenticado');
-    expect(out).toContain('✓');
+    expect(out).toContain('✔'); // F-GLYPH-PESO-2: ✓→✔
     expect(out).toContain('⚠');
-    expect(out).toContain('✗');
+    expect(out).toContain('✘'); // F-GLYPH-PESO-2: ✗→✘
     expect(out).toContain('→ rode /theme');
     expect(out).toContain('→ cheque o command');
     expect(out).toContain('resumo: 1 ok · 1 aviso · 1 falha');

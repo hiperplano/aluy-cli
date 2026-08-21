@@ -169,7 +169,21 @@ function readKeychain(
   try {
     const entry = makeEntry(factory, LOCAL_KEYCHAIN_SERVICE, account);
     const v = entry.getPassword();
-    return v !== '' ? { valor: v } : {};
+    // AUSÊNCIA tem DUAS formas, e só uma era tratada. O código assumia que uma conta
+    // inexistente sempre LANÇA (o `catch` abaixo cobre isso) — mas o `@napi-rs/keyring`
+    // sobre o Secret Service do Linux devolve `null` SEM lançar. Como o teste era
+    // `v !== ''`, `null` passava como "achei": `{valor: null}`.
+    //
+    // MEDIDO pelo QA num HOME limpo, sem credencial em lugar nenhum: `hasStoredApiKey`
+    // devolvia `true` para TODO provider. Dois estragos em cima disso — o aviso de
+    // credencial faltando no `/provider` nunca aparecia, e o `/login` afirmava "já existe
+    // uma chave guardada — reusar?" para um provider que nunca teve chave. Pior ainda no
+    // resolvedor: `secret` podia sair `null` e viajar como credencial.
+    //
+    // Agora só string NÃO-VAZIA conta como presença. `null`/`undefined`/`''` são a MESMA
+    // coisa aqui — ausência — e a distinção que importa (ausência × avaria) continua
+    // sendo feita pelo `catch`.
+    return typeof v === 'string' && v !== '' ? { valor: v } : {};
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // "no entry"/"not found" é AUSÊNCIA legítima (nunca foi configurada), não avaria.
@@ -314,6 +328,34 @@ export function storeApiKey(
     backend: 'file-vault',
     ...(keychainOk && keychainVolatile ? { volatileKeychainBackedByFile: true } : {}),
   };
+}
+
+export interface HasStoredApiKeyOptions {
+  /** Fábrica de Entry do keychain injetável (testes). Default: `@napi-rs/keyring`. */
+  readonly entryFactory?: (service: string, account: string) => KeyringEntry;
+  /** Opções do cofre em arquivo cifrado injetáveis (testes). */
+  readonly fileVault?: FileVaultOptions;
+}
+
+/**
+ * ADR-0120 (retomada, `/login` da sessão) — existe uma API key JÁ PERSISTIDA (keychain
+ * OU cofre em arquivo) p/ este provider? NÃO consulta env: uma env var não foi "gravada"
+ * por nós (não há o que REUSAR — ela já funciona sozinha a cada requisição via
+ * `createLocalCredentialProvider`), e confundir as duas faria o `/login` oferecer
+ * "reusar" uma chave que na verdade não está em NENHUM cofre nosso.
+ *
+ * Só checa PRESENÇA — o valor lido é descartado na hora, nunca retornado nem logado
+ * (CLI-SEC-2/7). É o dado que falta pra decidir sem digitar de novo (`decideLocalLogin`
+ * em `slash/handlers.ts`): sem isto o `/login` sempre reexigiria colar a chave, mesmo
+ * quando ela já está guardada (de um `aluy login --provider` anterior, por exemplo).
+ */
+export function hasStoredApiKey(
+  provider: LocalProviderKind,
+  opts: HasStoredApiKeyOptions = {},
+): boolean {
+  const conta = apiKeyAccount(provider);
+  if (readKeychain(opts.entryFactory, conta).valor !== undefined) return true;
+  return readFileVaultAccount(conta, opts.fileVault).valor !== undefined;
 }
 
 /**

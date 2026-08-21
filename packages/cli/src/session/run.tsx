@@ -21,6 +21,7 @@ import {
   queryTerminalBrightness,
   themeNameForBrightness,
   resolveThemeName,
+  resolveThemeByName,
   themeByName,
   BackgroundController,
   DEFAULT_THEME,
@@ -32,6 +33,7 @@ import { setWindowTitle } from '../ui/window-title.js';
 import { resolveHeadroomUrl } from '../maestro/sidecar-urls.js';
 import { CLI_VERSION } from '../version.js';
 import { readUpdateNote, refreshUpdateCheck } from '../io/update-check.js';
+import { readAutoUpdateNote, runAutoUpdate } from '../io/auto-update.js';
 import { ThemeRoot } from './ThemeRoot.js';
 import { buildSession, type BuildSessionOptions } from './wiring.js';
 // F-PROV-FIX — lógica PURA (sem I/O) do ato explícito `/provider save`: decide o
@@ -52,13 +54,23 @@ import { createOAuthAccessTokenProvider } from '../model/local/oauth-store.js';
 import { createVerifyAndRegisterLocalModelPort } from '../model/local/test-then-register.js';
 // F-WIN (descoberta) — porta que PERGUNTA a janela de contexto ao próprio provider BYO
 // (`GET {baseUrl}/models`), p/ o usuário nunca precisar digitar o número à mão.
-import {
+import { fetchModelsSlugs,
   createProviderAwareDiscoverContextWindowPort,
   createProviderAwareListModelNamesPort,
   type ProviderDiscoveryDeps,
 } from '../model/local/context-window-discovery.js';
 import { createPinnedStreamFetch } from '../model/local/pinned-stream-fetch.js';
-import { createLocalCredentialProvider } from '../model/local/credential-resolver.js';
+// F-PROV-TESTA — a prova de conectividade do par (provider, credencial, modelo) na troca.
+import { checkModelConnectivity } from '../model/local/connectivity-check.js';
+// F-SALDO-BYO — leitura do saldo da conta no gateway BYO (dialetos conhecidos, fail-open).
+import { discoverBalance } from '../model/local/balance-discovery.js';
+import type { Quota } from '@hiperplano/aluy-cli-core';
+import {
+  createLocalCredentialProvider,
+  hasStoredApiKey,
+  genericApiKeyEnvName,
+  storeApiKey,
+} from '../model/local/credential-resolver.js';
 import { setupMcp, ProjectMcpConfigStore, CodexMcpConfigStore } from '../mcp/index.js';
 import { createSandbox } from '../sandbox/index.js';
 import {
@@ -485,6 +497,22 @@ export function preflightCycleCeiling(
 }
 
 /**
+ * Há credencial USÁVEL para este provider — keychain, cofre em arquivo OU env var.
+ *
+ * Distinta de `hasStoredApiKey`, que responde só por keychain/cofre: aquela é a pergunta do
+ * picker ("há chave gravada a reusar antes de pedir outra?"); esta é a pergunta de quem vai
+ * CHAMAR o provider ("dá para falar com ele agora?"). Confundir as duas fazia quem exporta a
+ * chave no shell receber "não há credencial guardada — rode /login" com tudo funcionando.
+ */
+function temCredencialUsavel(providerId: string, env: NodeJS.ProcessEnv): boolean {
+  const generica = genericApiKeyEnvName(providerId);
+  const especifica = `${providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+  if ((env[generica] ?? '').trim() !== '') return true;
+  if ((env[especifica] ?? '').trim() !== '') return true;
+  return hasStoredApiKey(providerId);
+}
+
+/**
  * Renderiza a TUI interativa (ou roda linear se não há TTY). Resolve quando o app
  * sai. É o que o binário `aluy` chama na invocação default/com objetivo.
  */
@@ -552,6 +580,29 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const baseStdout = opts.stdout ?? process.stdout;
   const altScreen = registerRestoreHandlers(baseStdout, process);
 
+  // EST-0969 — CONFIG PERSISTENTE de preferências de UI (tema/tier). Lida no startup
+  // (fail-safe: ausente/corrompido ⇒ {} ⇒ defaults, nunca quebra). Precedência do
+  // TIER: `--tier` (flag, opts.tier) > config salva > DEFAULT_TIER. O TEMA aplica a
+  // config DENTRO do `detectInitialTheme` (override de env/flag ainda vence). A troca
+  // em sessão (`/model`/`/theme`) grava de volta aqui p/ a próxima sessão reabrir nela.
+  const configStore = opts.configStore ?? new UserConfigStore();
+  const savedConfig: UserConfig = configStore.load();
+
+  // ── EST-1010 · F-SPLASH-NO-TEMA: o fundo do tema entra ANTES do splash ───────────
+  // O tema salvo já era respeitado pela App, mas o splash — a primeira tela, e a que faz
+  // a pergunta de retomar sessão — nascia da fotografia do ENV, que sem COLORFGBG é
+  // sempre `dark`. Quem escolheu o tema claro abria o `aluy` num quadro âmbar-sobre-preto
+  // e só depois via tudo virar creme; e quem já usa um terminal de fundo claro recebia a
+  // pior versão disso, texto quase-branco sobre branco, ilegível até a App montar.
+  //
+  // O fundo é vestido aqui junto com a paleta porque um sem o outro é pior que os dois
+  // errados: a paleta clara sobre o fundo escuro do usuário some, e vice-versa. Só
+  // acontece quando há tema SALVO — sem ele o brilho ainda é uma pergunta em aberto (o
+  // probe OSC 11 roda mais adiante), e adiantar uma resposta estragaria a detecção.
+  const bgController = new BackgroundController({ stdout: opts.stdout ?? process.stdout, env });
+  const temaSalvo = savedConfig.theme !== undefined ? themeByName(savedConfig.theme) : undefined;
+  if (temaSalvo !== undefined && isTty) bgController.apply(temaSalvo.bg);
+
   // EST-0989 — SPLASH de boot (TTY-only). Mostra o wordmark `Λluy` centralizado + um
   // "carregando…" calmo ENQUANTO o boot trabalha (config/MCP/recall/sessão/perfis), e
   // apresenta as perguntas de boot (retomar `[S/n]`, confirmar YOLO) numa CAIXA
@@ -560,20 +611,24 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   //   · há TTY (sem TTY/linear/CI ⇒ comportamento intacto, sem splash, sem clear); E
   //   · o caller NÃO injetou `promptYesNo` (testes/headless dirigem o prompt direto —
   //     não montamos o Ink do splash, que penduraria em waitUntilExit num headless).
-  // A 1ª coisa é o BOOT-CLEAR (tela limpa); então montamos o splash sobre ela. O tema
-  // do splash é a fotografia ENV (resolveTheme): suficiente p/ a marca; a auto-detecção
-  // OSC 11 completa (detectInitialTheme) roda depois, p/ a App — sem competir com o
-  // stdin do prompt do splash aqui.
+  // A 1ª coisa é o BOOT-CLEAR (tela limpa); então montamos o splash sobre ela. O tema do
+  // splash é o SALVO quando existe (junto com o fundo aplicado acima) e, sem ele, a
+  // fotografia do ENV; a auto-detecção OSC 11 completa (detectInitialTheme) roda depois,
+  // p/ a App — sem competir com o stdin do prompt do splash aqui.
   const useSplash = isTty && opts.promptYesNo === undefined;
   let splash: BootSplash | undefined;
   if (useSplash) {
     const splashOut = opts.stdout ?? process.stdout;
     emitBootClear(splashOut, true);
-    const splashTheme = resolveTheme({
+    const capacidades = {
       env,
       ...(opts.dense ? { density: 'compact' as const } : {}),
       ...(opts.safeGlyphs ? { safeGlyphs: true as const } : {}),
-    });
+    };
+    const splashTheme =
+      temaSalvo !== undefined
+        ? resolveThemeByName(temaSalvo.name, capacidades)
+        : resolveTheme(capacidades);
     splash = createBootSplash({ theme: splashTheme, stdout: splashOut });
     // Piso de exibição (feedback Tiago): segura o quip do splash por >= minMs antes
     // do prompt/cockpit (o Ink anima durante o await). Override ALUY_SPLASH_MIN_MS.
@@ -639,13 +694,6 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const projectInstructions = instructionsLoad.instructions;
   const instructionSources = instructionsLoad.sources;
 
-  // EST-0969 — CONFIG PERSISTENTE de preferências de UI (tema/tier). Lida no startup
-  // (fail-safe: ausente/corrompido ⇒ {} ⇒ defaults, nunca quebra). Precedência do
-  // TIER: `--tier` (flag, opts.tier) > config salva > DEFAULT_TIER. O TEMA aplica a
-  // config DENTRO do `detectInitialTheme` (override de env/flag ainda vence). A troca
-  // em sessão (`/model`/`/theme`) grava de volta aqui p/ a próxima sessão reabrir nela.
-  const configStore = opts.configStore ?? new UserConfigStore();
-  const savedConfig: UserConfig = configStore.load();
   // Piso de recall do mem0 CONFIG-DRIVEN: o loop lê `ALUY_MEM_MIN_SCORE` do env da sessão.
   // Expõe o `config.recallMinScore` nessa env — SÓ se a env não fixa já (precedência env >
   // config > default 0.6). Assim o dono calibra no config.json sem precisar exportar env.
@@ -1168,12 +1216,35 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // no-op silencioso — ver o comentário completo mais abaixo, junto da implementação).
   // Hoistada pela MESMA razão das portas acima: nasce dentro do bloco `backend local`,
   // é usada DEPOIS do `buildSession` (nos props do `<App>`).
+  // F-MODELO-FICA — porta que grava o modelo ATIVO no config quando um turno confirma
+  // que ele responde. HOISTADA pela MESMA razão das outras portas locais: nasce dentro do
+  // bloco `backend local` (precisa do `activeLocalProviderId`, que só existe lá) e é usada
+  // DEPOIS, no `buildSession`.
+  let persistActiveLocalModel: ((slug: string) => void) | undefined;
+  // F-LOGIN — getter do provider LOCAL ativo AGORA. HOISTADO pela mesma razão das portas
+  // vizinhas: `activeLocalProviderId` só existe dentro do bloco `backend local`, e o
+  // roteamento do `/login` (mais abaixo) precisa lê-lo NA HORA — o `/provider` pode ter
+  // trocado nesta sessão, e gravar a chave no provider errado é pior que não gravar.
+  let activeLocalProviderIdRef: (() => string) | undefined;
+  // F-SALDO-BYO — leitor do SALDO da conta no gateway BYO, p/ o rodapé. HOISTADO pela
+  // mesma razão das portas vizinhas: precisa do provider/base_url/credencial que só
+  // existem dentro do bloco `backend local`, e é consumido DEPOIS, no `buildSession`.
+  let localBalanceFetcher: (() => Promise<Quota | undefined>) | undefined;
   let switchLocalProvider:
     | ((name: string) => Promise<{
         readonly ok: boolean;
         readonly detail: string;
         readonly client?: import('@hiperplano/aluy-cli-core').ModelClient;
         readonly defaultModel?: string;
+        /**
+         * F-PROV-PERSISTE — a troca virou padrão para as PRÓXIMAS sessões?
+         *
+         * A nota dizia sempre "vale só nesta sessão (não persiste)", enquanto o código
+         * gravava `saveLocalProvider` toda vez que o teste passava — e o `/model` logo
+         * abaixo anunciava "gravado para o próximo boot". O dono lia as duas frases juntas
+         * e não tinha como saber qual valia. Agora quem sabe o que aconteceu é quem conta.
+         */
+        readonly persisted?: boolean;
       }>)
     | undefined;
   // F-PROV — getter do catálogo LOCAL p/ o `<ProviderPicker>` (ADR-0118): reconsultado a
@@ -1482,6 +1553,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       readonly detail: string;
       readonly client?: import('@hiperplano/aluy-cli-core').ModelClient;
       readonly defaultModel?: string;
+      readonly persisted?: boolean;
     }> => {
       const freshCatalog = loadLocalProviderCatalog();
       const entry = findProvider(freshCatalog, name);
@@ -1493,8 +1565,43 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             'use "+ adicionar provider custom" no /provider p/ cadastrar um novo.',
         };
       }
+      // F-CRED-NO-SWITCH (relato do dono: "mudo o provider mas não fiz o login, o token é
+      // antigo") — a troca AVISA quando não há credencial para o provider NOVO.
+      //
+      // Antes, `switchLocalProvider` montava o client e devolvia `ok` sem tocar na chave:
+      // a troca PARECIA ter dado certo e o dono só descobria no primeiro turno, com
+      // "sem credencial" ou 401 — longe da ação que causou. Aqui só checamos PRESENÇA
+      // (keychain → cofre em arquivo → env), nunca o valor, e NUNCA fazemos uma chamada
+      // de rede para "testar": um provider com teto por minuto (o caso dele) teria a
+      // janela queimada por uma troca de provider, e a chave presente-porém-inválida se
+      // revela no turno de qualquer jeito.
+      //
+      // NÃO BLOQUEIA a troca. Provider keyless (Ollama) não precisa de chave, e o dono
+      // pode querer trocar ANTES de logar — recusar seria pior que avisar. É `ok:true`
+      // com o aviso no `detail`, e a ação está dita: `/login`.
+      const authNovo = defaultAuthFor(entry.id, freshCatalog);
+      // A env var conta como credencial. `hasStoredApiKey` responde só por keychain e
+      // cofre — é a pergunta certa para "há chave GRAVADA a reusar?", que é o que o picker
+      // precisa saber antes de pedir uma nova. Mas aqui a pergunta é outra: "dá para falar
+      // com este provider?", e quem exportou a chave no shell tem a resposta sim. Sem esta
+      // distinção, quem usa env recebia "não há credencial guardada — rode /login" com a
+      // chave funcionando, e pior: o teste de conexão era PULADO justamente para ele.
+      const faltaChave = authNovo === 'apikey' && !temCredencialUsavel(entry.id, env);
+      // F-PROV-TESTA (regra do dono: "tem que pedir a chave e TESTAR a conexão") — a
+      // troca de provider passa a PROVAR que o par (provider, credencial, modelo) fala,
+      // em vez de só montar o client e torcer. O `/model` já fazia isso
+      // (test-then-register, ADR-0153); o `/provider` não, e por isso o dono só descobria
+      // no primeiro turno — com 401 ou "sem credencial", longe da ação que causou.
+      //
+      // O teste é PULADO quando falta chave num provider que exige chave: não há o que
+      // provar, e gastar uma chamada para ouvir 401 é ruído. Aí o aviso de credencial
+      // (abaixo) é a resposta certa.
+      const podeTestar = !faltaChave;
+      // F-DEFAULT-MORTO (gap #7) — a lista que a prova de credencial já devolveu. Serve
+      // para não fixar como padrão um modelo que o provider não anuncia mais.
+      let slugsDoProvider: readonly string[] = [];
       try {
-        const auth = defaultAuthFor(entry.id, freshCatalog);
+        const auth = authNovo;
         // F-UP — o upstream declarado é POR PROVIDER: ao trocar de provider, relê o mapa
         // do provider NOVO (o do boot não vale mais). Sem entrada p/ ele ⇒ `undefined`,
         // e o client novo simplesmente não manda fragmento nenhum.
@@ -1510,14 +1617,109 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             ? { oauthAccessToken: createOAuthAccessTokenProvider(entry.id) }
             : {}),
         });
+        // F-PROV-TESTA — a PROVA de que o par fala, ANTES de aplicar. Fail-closed: teste
+        // reprovado ⇒ NADA muda (nem provider ativo, nem client, nem config), igual ao
+        // fail-closed que o `/model` já pratica. É melhor recusar a troca do que deixar
+        // o dono num provider que só vai falhar no próximo turno.
+        //
+        // Usa o fetch PINADO anti-SSRF (COND-S1) — o mesmo do test-then-register; nunca
+        // o `fetch` global neste caminho.
+        if (podeTestar) {
+          const credencial = await createLocalCredentialProvider({
+            provider: entry.id,
+            auth,
+            ...(env ? { env } : {}),
+          })().catch(() => undefined);
+          // F-PROV-TESTA (3/3) — o que se prova aqui é a CREDENCIAL, não um modelo.
+          //
+          // As duas versões anteriores testavam o par provider+`defaultModel` do catálogo,
+          // e o dono apontou o absurdo: "como ele já testa o modelo se eu nem setei o
+          // modelo?". O modelo do catálogo é um palpite nosso, não uma escolha dele — e
+          // quando o OpenRouter aposentou `anthropic/claude-3.5-sonnet`, esse palpite
+          // passou a reprovar um provider que respondia normalmente, com a chave certa,
+          // anunciando 418 modelos. Pior: a recusa acontecia ANTES do passo que pediria o
+          // modelo, então não havia como sair do buraco por dentro do fluxo.
+          //
+          // `GET /models` prova exatamente o que a troca precisa saber — que o provider
+          // atende com esta chave — e nada além disso. Que modelo usar é a pergunta
+          // SEGUINTE, e quem responde é o dono, no picker que abre logo depois.
+          slugsDoProvider = await fetchModelsSlugs({
+            wireFormat: entry.wireFormat ?? 'openai-compat',
+            baseUrl: entry.baseUrl ?? '',
+            key: credencial?.secret ?? '',
+            fetchImpl: createPinnedStreamFetch({}) as never,
+          }).catch(() => [] as readonly string[]);
+          const slugs = slugsDoProvider;
+
+          if (slugs.length === 0) {
+            // Sem listagem não dá para provar a credencial por este caminho — pode ser
+            // provider que não expõe `/models` (o dialeto `anthropic`, por exemplo), pode
+            // ser chave inválida, pode ser rede. Aí, e SÓ aí, vale o teste antigo com o
+            // modelo do catálogo: é um palpite, mas é o único sinal disponível.
+            const prova = await checkModelConnectivity({
+              wireFormat: entry.wireFormat ?? 'openai-compat',
+              baseUrl: entry.baseUrl ?? '',
+              model: entry.defaultModel,
+              key: credencial?.secret ?? '',
+              fetchImpl: createPinnedStreamFetch({}) as never,
+            }).catch((e: unknown) => ({
+              ok: false as const,
+              detail: e instanceof Error ? e.message : String(e),
+            }));
+            if (!prova.ok) {
+              return {
+                ok: false,
+                detail:
+                  `provider "${entry.id}" NÃO respondeu ao teste: ${prova.detail}. ` +
+                  'nada mudou — o provider ativo continua o mesmo (fail-closed). ' +
+                  (hasStoredApiKey(entry.id)
+                    ? 'se a chave está velha, rode `aluy login --provider ' + entry.id + '`.'
+                    : 'grave a chave com `aluy login --provider ' + entry.id + '`.'),
+              };
+            }
+          }
+        }
         // Só ATUALIZA o estado compartilhado (catálogo de modelos do /model, test-
         // then-register por-provider) DEPOIS do client montar com sucesso — fail-
         // closed de verdade, nunca um estado "trocado pela metade".
         activeLocalCatalog = freshCatalog;
         activeLocalProviderId = entry.id;
+        // F-PROV-FICA (regra do dono) — o provider vira PADRÃO aqui, e não no fim do
+        // turno como o `/model`: neste ponto o teste de conectividade ACIMA já PROVOU
+        // que o par (provider, credencial, modelo) responde. Esperar o turno seria
+        // guardar uma prova mais fraca do que a que já temos na mão.
+        //
+        // Grava provider E modelo default juntos: o modelo pertence ao provider, e
+        // gravar um sem o outro deixa o par incoerente na próxima abertura. Fail-safe —
+        // `save()` nunca lança; se a escrita falhar, a troca DESTA sessão continua
+        // valendo, só não vira padrão.
+        //
+        // Quando o teste foi PULADO (provider sem credencial), não persistimos: fixar
+        // como padrão um provider que ninguém conseguiu usar é assinar um problema para
+        // a próxima abertura.
+        // O `defaultModel` do catálogo é um palpite NOSSO, e catálogo envelhece: foi assim
+        // que o `anthropic/claude-3.5-sonnet` aposentado virou o modelo ativo de uma troca
+        // bem-sucedida. Se a listagem do provider não o anuncia, gravamos só o PROVIDER — o
+        // picker que abre em seguida grava o modelo que o dono escolher.
+        const defaultVivo =
+          slugsDoProvider.length === 0 ||
+          slugsDoProvider.some(
+            (sl) => sl.trim().toLowerCase() === entry.defaultModel.trim().toLowerCase(),
+          );
+        const persistiu = podeTestar && defaultVivo;
+        if (persistiu) configStore.saveLocalProvider(entry.id, entry.defaultModel);
         return {
           ok: true,
-          detail: `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}).`,
+          persisted: persistiu,
+          detail: faltaChave
+            ? `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}). ` +
+              `ATENÇÃO: não há credencial guardada p/ "${entry.id}" — rode /login antes do ` +
+              'próximo turno, senão ele vai falhar por falta de chave.'
+            : defaultVivo
+              ? `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}).`
+              : `provider ativo agora: ${entry.id}. o modelo default do catálogo ` +
+                `("${entry.defaultModel}") não consta nos ${slugsDoProvider.length} que ele ` +
+                'anuncia — escolha um na lista a seguir.',
           client,
           defaultModel: entry.defaultModel,
         };
@@ -1526,6 +1728,47 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           ok: false,
           detail: `falha ao trocar p/ "${entry.id}": ${e instanceof Error ? e.message : String(e)}`,
         };
+      }
+    };
+
+    // F-MODELO-FICA — grava provider+modelo JUNTOS: o modelo pertence ao provider ATIVO
+    // (que o `/provider` pode ter trocado nesta sessão), e gravar um sem o outro deixaria
+    // o par incoerente. Lê `activeLocalProviderId` na HORA (não congela o do boot).
+    persistActiveLocalModel = (slug: string): void => {
+      configStore.saveLocalProvider(activeLocalProviderId, slug);
+    };
+    activeLocalProviderIdRef = (): string => activeLocalProviderId;
+    // F-SALDO-BYO (relato do dono: "não esqueça do defeito da quota do modelo de
+    // consumo") — ele carregou crédito no gateway e o aluy não mostrava NADA, porque o
+    // `quotaFetcher` do rodapé é do BROKER e sob backend local não há essa fonte.
+    //
+    // Em vez de uma segunda UI, ADAPTAMOS o saldo ao `Quota` que o rodapé já pinta: o
+    // campo `credit.balance` é exatamente "saldo como string", que é o que o gateway
+    // devolve. Zero componente novo, zero divergência entre dois rodapés.
+    //
+    // Degrada em SILÊNCIO: gateway que não expõe saldo (ou expõe só via token de
+    // sessão, como o `/api/user/self` da família one-api — MEDIDO: 401 com API key)
+    // devolve `undefined` e o rodapé simplesmente não mostra o campo, igual a quando o
+    // broker não reporta quota. Nunca inventa número, nunca erra a tela.
+    localBalanceFetcher = async (): Promise<Quota | undefined> => {
+      try {
+        const entry = findProvider(activeLocalCatalog, activeLocalProviderId);
+        if (entry === undefined) return undefined;
+        const cred = await createLocalCredentialProvider({
+          provider: activeLocalProviderId,
+          auth: defaultAuthFor(activeLocalProviderId, activeLocalCatalog),
+          ...(env ? { env } : {}),
+        })().catch(() => undefined);
+        const saldo = await discoverBalance({
+          wireFormat: entry.wireFormat ?? 'openai-compat',
+          baseUrl: entry.baseUrl ?? '',
+          key: cred?.secret ?? '',
+          fetchImpl: createPinnedStreamFetch({}) as never,
+        });
+        if (saldo === undefined) return undefined;
+        return { windows: {}, credit: { balance: saldo.remaining } };
+      } catch {
+        return undefined; // fail-open: saldo é informação, nunca motivo de erro na tela.
       }
     };
 
@@ -1584,6 +1827,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // ADR-0153 — porta de test-then-register (ausente sob backend broker/teste com
     // `opts.brokerClient` — não-regressão).
     ...(verifyAndRegisterLocalModel !== undefined ? { verifyAndRegisterLocalModel } : {}),
+    // F-MODELO-FICA — persiste o modelo ATIVO quando um turno confirma que ele responde.
+    // Só sob backend LOCAL de verdade (é `config.localModel`, campo do BYO): sob broker o
+    // modelo vem do tier e não há o que gravar. Grava provider+modelo JUNTOS pelo
+    // `saveLocalProviderModel` — o modelo pertence ao provider ATIVO, e gravar um sem o
+    // outro deixaria o par incoerente se o `/provider` tiver trocado nesta sessão.
+    ...(persistActiveLocalModel !== undefined ? { persistActiveLocalModel } : {}),
+    // F-SALDO-BYO — sob backend local, o saldo do gateway ALIMENTA o MESMO `quotaFetcher`
+    // que o rodapé já consome (adaptado a `Quota.credit.balance`). Ausente sob broker,
+    // onde o `quotaClient` de verdade já responde.
+    ...(localBalanceFetcher !== undefined ? { quotaFetcher: localBalanceFetcher } : {}),
     // F-PROV — porta de troca DE VERDADE do provider ativo local (fix do no-op
     // silencioso do /provider sob backend local). Ausente sob broker/teste com
     // `opts.brokerClient` injetado (não-regressão).
@@ -2440,7 +2693,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // do `initialTheme` ao montar e a cada troca do `/theme` — esta é a fotografia 1.
   // EST-0984 — o `--ascii` (opts.safeGlyphs) entra como override do perfil seguro
   // em TODA resolução de tema (fotografia 1 e re-resoluções do <ThemeRoot>).
-  const safeGlyphsOverride = opts.safeGlyphs ? { safeGlyphs: true as const } : {};
+  // `--ascii` pede ASCII PURO (ver `asciiOnly` no tema); o perfil conservador continua
+  // acessível por `ALUY_SAFE_GLYPHS`.
+  const safeGlyphsOverride = opts.safeGlyphs
+    ? { safeGlyphs: true as const, asciiOnly: true as const }
+    : {};
   const denseOverride = opts.dense ? { density: 'compact' as const } : {};
   const theme = resolveThemeName(initialTheme)
     ? resolveTheme({
@@ -2457,9 +2714,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // usuário bagunçado. Best-effort: só TTY, opt-out `ALUY_SET_BG=0`, NO_COLOR
   // respeitado, terminal sem suporte ignora (degrada em silêncio). UMA sequência no
   // apply/troca e UMA no reset — nunca por frame (não regride o flicker #95/#118).
-  const bgController = new BackgroundController({ stdout: opts.stdout ?? process.stdout, env });
-  // Aplica o fundo do tema INICIAL (boot). A troca em runtime (`/theme`) reaplica no
-  // `onThemeChanged`. O reset vai no `finally`/sinal (junto do cleanup do sync).
+  // O controller foi construído lá em cima (F-SPLASH-NO-TEMA) para o splash já nascer no
+  // tema salvo. Aqui só confirmamos o fundo do tema INICIAL de verdade — que pode diferir
+  // do salvo quando o COLORFGBG do terminal declara outro brilho, e nesse caso esta
+  // segunda aplicação corrige o que o splash adiantou. A troca em runtime (`/theme`)
+  // reaplica no `onThemeChanged`. O reset vai no `finally`/sinal (com o cleanup do sync).
   {
     const initialEntry = themeByName(initialTheme);
     if (initialEntry) bgController.apply(initialEntry.bg);
@@ -2513,6 +2772,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // indicar (sem fontes ⇒ silêncio, prompt baseline). Não muda comportamento.
   {
     const lines = describeConfigSources({
+      t: makeI18n(initialLang).t,
       instructionSources,
       globalCommands: globalUserCommands.length,
       projectCommands: projectUserCommands.length,
@@ -2525,7 +2785,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       projectMcp: projectMcpHadServers,
       codexMcp: codexMcpHadServers,
     });
-    if (lines.length > 0) built.controller.pushNote('config', lines);
+    // F-CONFIG-NO-RODAPE — vai para o ESTADO (painel), não para uma nota de boot: é estado
+    // permanente da sessão, não evento que aconteceu uma vez e rola para fora da tela.
+    if (lines.length > 0) built.controller.setConfigSources(lines);
   }
 
   // EST-BOOT-DECOUPLE/EST-MCP-STATUSBAR — o progresso da conexão MCP já foi fiado logo
@@ -2542,6 +2804,18 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     void refreshUpdateCheck(CLI_VERSION, env);
   }
 
+  // F-AUTOUPDATE (pedido do dono: "quando tiver update no npm, instalar automaticamente")
+  // — mesma disciplina do notifier acima: a NOTA é lida do cache (offline, síncrona) e a
+  // instalação corre em segundo plano, fail-soft. A versão baixada vale na PRÓXIMA
+  // abertura — trocar o binário debaixo de um processo em curso não é opção.
+  // Desligável: `ALUY_AUTO_UPDATE=0` (ou o `autoUpdate:false` no config) — quem roda
+  // serviço 24/7 não pode trocar de versão no meio de um expediente sem escolha.
+  {
+    const autoNote = readAutoUpdateNote(CLI_VERSION, env);
+    if (autoNote !== undefined) built.controller.pushNote('autoupdate', [autoNote]);
+    void runAutoUpdate(CLI_VERSION, env, savedConfig.autoUpdate, {});
+  }
+
   // EST-0942 — CHECK DE CREDENCIAL no boot. Se NÃO há credencial alguma (keychain
   // vazio E sem ALUY_TOKEN no ambiente), AVISA AGORA com a ação clara — sem esperar
   // a 1ª chamada virar um "broker indisponível" genérico (o bug que enganou o Tiago).
@@ -2556,6 +2830,31 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     built.controller.pushNote('login', [
       'sem credencial — rode `aluy login` (ou defina ALUY_TOKEN).',
     ]);
+  }
+
+  // (ver `temCredencialUsavel` acima)
+// F-PRIMEIRO-BOOT (gap #8) — sob backend local, avisar no BOOT quando não há chave.
+  //
+  // O comentário acima está certo sobre não mentir "rode aluy login (broker)" num setup
+  // local que funciona — mas a conclusão de então (deixar a falta de chave aparecer só na
+  // 1ª chamada) criou um problema pior para quem acaba de instalar: a tela abre mostrando
+  // `local · anthropic` com o rodapé completo, como se estivesse tudo pronto, e o usuário
+  // só descobre que falta configurar DEPOIS de escrever a primeira mensagem e recebê-la de
+  // volta como erro. A tela afirmava um estado que não existia.
+  //
+  // O aviso é de PRESENÇA, não de rede: nada de probe no boot. E some sozinho assim que
+  // houver chave — quem já configurou nunca o vê.
+  if (resolvedBackend === 'local') {
+    const provAtivo = activeLocalProviderIdRef?.() ?? '';
+    if (provAtivo !== '') {
+      if (!temCredencialUsavel(provAtivo, env)) {
+        built.controller.pushNote('provider', [
+          `sem credencial para "${provAtivo}" — as chamadas vão falhar até configurar.`,
+          `grave a chave com \`aluy login --provider ${provAtivo}\`, ou exporte a env var do provider.`,
+          'para trocar de provider, use `/provider`.',
+        ]);
+      }
+    }
   }
 
   // EST-0977 — NOTA dos agentes-`.md` descobertos + erros de carga (RES-MD-3, FALHA
@@ -2690,11 +2989,35 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // TTY / atalho). Sem arg, o seletor (picker) é aberto pela App; cair aqui com
     // arg vazio só acontece quando não há catálogo injetado ⇒ a nota informativa.
     if (command.id === 'model' && args.trim() !== '') {
+      // F-MODEL-TESTA (gap #3, regra do dono: o teste do par provider+modelo acontece no
+      // MOMENTO DA TROCA, não no turno seguinte) — sob backend local, `/model <slug>`
+      // literal gravava direto, sem provar nada. As outras rotas já provam: o picker manda
+      // slug desconhecido pelo test-then-register. Esta era a porta que faltava fechar, e é
+      // a mais usada por quem sabe o slug de cor.
+      const alvo = args.trim();
+      if (resolvedBackend === 'local' && verifyAndRegisterLocalModel !== undefined) {
+        void verifyAndRegisterLocalModel(alvo).then((r) => {
+          if (!r.ok) {
+            built.controller.pushNote('model', [
+              `o modelo "${alvo}" não respondeu no provider ativo: ${r.detail}`,
+              'nada mudou (fail-closed) — o modelo anterior continua em uso.',
+            ]);
+            return;
+          }
+          const note = applyTierLiteral((t, m) => {
+            built.controller.setTier(t, m);
+            configStore.saveTier(t, m);
+            if (m !== undefined && m !== '') persistActiveLocalModel?.(m);
+          }, alvo);
+          built.controller.pushNote(note.title, note.lines);
+        });
+        return;
+      }
       const note = applyTierLiteral((t, m) => {
         built.controller.setTier(t, m);
         // EST-0969 — persiste o tier p/ a próxima sessão (best-effort; não bloqueia).
         configStore.saveTier(t, m);
-      }, args.trim());
+      }, alvo);
       built.controller.pushNote(note.title, note.lines);
       return;
     }
@@ -2711,7 +3034,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // o vazio sem handler). `buildProviderEffect` emite a nota honesta (lista + "desconhecido")
     // e, quando válido (caminho do não-TTY/sem-App), SETA o provider. Espelha o /theme.
     if (command.id === 'provider') {
-      const effect = buildProviderEffect(args, built.controller.provider);
+      // F-PROV-LISTA-UNICA — o MESMO catálogo que o picker do `/provider` usa (built-ins
+      // + `providers[]` do config). Sem isto, `/provider <nome>` casava contra um seed de
+      // DOIS providers e dizia "desconhecido" para o provider que a sessão estava usando.
+      const effect = buildProviderEffect(
+        args,
+        built.controller.provider,
+        localProviderCatalogGetter?.().map((e) => ({
+          name: e.id,
+          ...(e.label !== undefined ? { summary: e.label } : {}),
+        })),
+      );
       if (effect.kind === 'provider') {
         if (effect.provider !== undefined) built.controller.setProvider(effect.provider);
         built.controller.pushNote(effect.note.title, effect.note.lines);
@@ -3595,6 +3928,43 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // ADR-0154 — `/telegram` (setup do conector na sessão): async (config + keychain),
     // com `args` (subcomando + chat-id). Empurra a nota ao concluir. O token NUNCA é digitado
     // aqui — `login` aponta p/ o terminal; allow/deny/status/logout rodam in-session.
+    // F-LOGIN (relato do dono: "o /login não funciona") — roteado AQUI, ANTES do
+    // `buildSlashEffect`, pelo MESMO motivo do `/telegram` logo abaixo: precisa do
+    // provider ativo AO VIVO e de I/O de terminal, que não cabem no efeito PURO.
+    //
+    // ARMADILHA que este roteamento evita: se o efeito virasse `{kind:'async', id:'login'}`,
+    // ele cairia no dispatch genérico de async — que só distingue `whoami` e manda todo o
+    // RESTO para o ramo de `logout`. Um `/login` deslogaria a conta. Por isso o
+    // `buildSlashEffect` mantém `login` como NOTA (no-op honesto) e a via de verdade é esta.
+    // F-LOGIN — a via INTERATIVA está DESLIGADA de propósito. Ver o porquê abaixo.
+    if (command.id === 'login' && activeLocalProviderIdRef !== undefined) {
+      const prov = activeLocalProviderIdRef();
+      // VAZAMENTO DE CREDENCIAL (medido em QA no TTY) — a primeira versão desta rota
+      // chamava `runLoginSlash` com `realTerminalIO()`, que oculta a digitação via
+      // readline. Isso funciona num terminal LIVRE (`aluy login` no shell, onde o
+      // readline é dono do stdin), mas NÃO por baixo da TUI: o Ink mantém o stdin em RAW
+      // MODE e segue processando teclas. Resultado observado: a tecla vazou p/ o composer
+      // E DISPAROU UM TURNO, o prompt travou por ~10s, e a API KEY APARECEU EM TEXTO
+      // CLARO na tela. É a MESMA classe do vazamento que a rc.135 consertou — e ali o
+      // dono teve de rotacionar uma chave real.
+      //
+      // O conserto de verdade é um CAMPO INK (como o passo de chave do onboarding, que
+      // desenha o campo dentro do React e nunca disputa o stdin), e ele vem junto do
+      // picker encadeado (provider → credencial → modelo). Até lá, esta rota NÃO pede
+      // chave: aponta o caminho SEGURO e diz qual provider está ativo — o `aluy login`
+      // no shell tem o terminal só para ele e oculta de verdade.
+      built.controller.pushNote('login', [
+        `provider local ativo: ${prov}`,
+        `para gravar a chave: rode \`aluy login --provider ${prov}\` num terminal.`,
+        hasStoredApiKey(prov)
+          ? 'já existe uma credencial guardada para ele — rodar o comando SUBSTITUI.'
+          : 'não há credencial guardada para ele — sem ela o próximo turno falha.',
+        'o campo de chave DENTRO da sessão está desligado: por baixo da TUI a digitação',
+        'não fica oculta de verdade (a tecla vaza p/ o composer e a chave aparece na tela).',
+      ]);
+      return;
+    }
+
     if (command.id === 'telegram') {
       void runTelegramSlash(args, {
         configStore,
@@ -3800,6 +4170,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       sessionId: activeSession.id,
       ...(built.controller.label !== undefined ? { label: built.controller.label } : {}),
       tier: built.controller.tier,
+      // F-EXPORT-MODELO — provider e modelo REAIS do turno, não só o tier interno. É o que
+      // permite comparar dois transcripts e saber por que diferem.
+      ...(built.controller.current.meta.provider !== undefined
+        ? { provider: built.controller.current.meta.provider }
+        : {}),
+      ...(built.controller.current.meta.model !== undefined
+        ? { model: built.controller.current.meta.model }
+        : {}),
     });
     return exportStore.write(body, {
       sessionId: activeSession.id,
@@ -3953,6 +4331,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           ? { localRemoteModelNames: listRemoteModelNames }
           : {})}
         {...(localModelForWindow !== undefined ? { currentLocalModel: localModelForWindow } : {})}
+        {...(activeLocalProviderIdRef !== undefined
+          ? { currentLocalProvider: activeLocalProviderIdRef() }
+          : {})}
         providersClient={built.providersClient}
         // F-PROV — `/provider` sob backend LOCAL (BYO): a fonte da lista é o catálogo
         // LOCAL do usuário (built-ins + `~/.aluy/config.json`), NUNCA o broker — antes
@@ -3960,7 +4341,27 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         // tem nada a ver com os providers que ele de fato configurou. Presente ⇒
         // `useProviderPicker` ignora `providersClient` por completo.
         {...(localProviderCatalogGetter !== undefined
-          ? { localProviderCatalog: localProviderCatalogGetter }
+          ? {
+              localProviderCatalog: localProviderCatalogGetter,
+              // F-PROV-CRED — o picker PEDE a chave quando falta, num campo MASCARADO do
+              // próprio Ink. Não pode ser readline: por baixo da TUI o stdin está em RAW
+              // MODE, a tecla vaza p/ o composer e a chave APARECE em texto claro (medido
+              // em QA — mesma classe do vazamento que a rc.135 consertou).
+              // F-PICKER-ENV (relato do dono: "mudei o provider e ele não altera embaixo")
+              // — a pergunta aqui é "dá para falar com este provider sem pedir nada?", e
+              // `hasStoredApiKey` responde só por keychain/cofre. Quem exporta a chave no
+              // shell caía no formulário de credencial, digitava de novo (ou apertava esc) e
+              // a troca simplesmente NÃO acontecia — sem erro, sem nota, o rodapé intacto.
+              // Mesma distinção já aplicada ao `faltaChave` da troca.
+              hasStoredKey: (providerId: string): boolean =>
+                temCredencialUsavel(providerId, env),
+              storeCredential: (providerId: string, apiKey: string): void => {
+                // `storeApiKey` é a ÚNICA escrita de credencial do produto — o picker não
+                // duplica nada. Lança em falha de backend; o hook mostra o motivo (nunca
+                // a chave) e mantém o campo aberto p/ o dono tentar outra.
+                storeApiKey(providerId, apiKey);
+              },
+            }
           : {})}
         // F-PROV — "+ adicionar provider custom" no `/provider`: reusa a MESMA escrita
         // do `aluy onboard`/`aluy provider add` (`addLocalProviderOverride`) — nenhum 2º
@@ -4087,10 +4488,28 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // BUG Custom: quando Custom, persiste TAMBÉM o slug ⇒ a sessão NOVA reabre no
           // mesmo Custom sem re-input. Trocar p/ um canônico ⇒ saveTier LIMPA o slug salvo.
           configStore.saveTier(tier, model);
+          // F-MODELO-UMA-VERDADE (relato do dono: "ele tá falando de outro modelo,
+          // diferente do que tá no footer") — sob backend LOCAL o slug precisa ir para
+          // `providers[].localModel` TAMBÉM, não só para o par tier+model.
+          //
+          // Havia duas gravações e duas leituras diferentes: o picker guardava o escolhido
+          // em `saveTier` (a via do BROKER, que é quem entende "tier custom"), enquanto o
+          // motor BYO lê `config.localModel` no boot. O resultado era uma sessão em que o
+          // rodapé mostrava o modelo novo e as chamadas saíam no ANTIGO — inclusive o
+          // aviso de janela de contexto, que citava um modelo que o dono nunca escolheu.
+          // E como o modelo antigo era o `defaultModel` do provider (que podia estar
+          // morto), a resposta simplesmente não vinha: silêncio, sem erro na tela.
+          if (resolvedBackend === 'local' && tier === 'custom' && model) {
+            persistActiveLocalModel?.(model);
+          }
           if (tier === 'custom' && model) {
             built.controller.pushNote('model', [
               `modelo Custom: ${model}`,
-              '◍ slug enviado ao broker, que revalida e resolve o provider/credencial (nunca exibido)',
+              ...(resolvedBackend === 'local'
+                ? ['◍ aplicado no provider local ativo e gravado para o próximo boot']
+                : [
+                    '◍ slug enviado ao broker, que revalida e resolve o provider/credencial (nunca exibido)',
+                  ]),
               '⚠ warn-but-allow — fora do catálogo curado pode ter custo/qualidade variável',
               ...(opts?.supportsTools === false
                 ? [
@@ -4181,15 +4600,30 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // `setProvider` de baixo (via EST-0962) era um NO-OP SILENCIOSO sob backend
           // local — o `LocalModelClient` ignora o `provider` do request; nada trocava.
           if (resolvedBackend === 'local') {
-            void built.controller.setLocalProvider(provider).then((r) => {
+            // Devolve o VEREDITO da troca: o App abre o picker de modelo quando ela passa
+            // (regra do dono: "quando eu trocar o provider ele sempre tem que pedir o
+            // modelo"). Cada provider tem o próprio catálogo, e herdar em silêncio o slug
+            // do provider anterior é como a troca ia parar num modelo que não existe do
+            // outro lado — o erro só aparecia no turno seguinte, longe da causa.
+            return built.controller.setLocalProvider(provider).then((r) => {
               built.controller.pushNote(
                 'provider',
                 r.ok
-                  ? [r.detail, 'vale só nesta sessão (não persiste — reaplique no próximo boot).']
+                  ? [
+                      r.detail,
+                      'escolha agora o modelo deste provider.',
+                      // A frase era CRAVADA em "não persiste", enquanto o código gravava
+                      // sempre que o teste passava — e o `/model` logo abaixo anunciava
+                      // "gravado para o próximo boot". Duas frases contraditórias na mesma
+                      // tela, sem como saber qual valia.
+                      r.persisted === true
+                        ? 'gravado como padrão para as próximas sessões.'
+                        : 'vale só nesta sessão — no próximo boot volta o provider anterior.',
+                    ]
                   : [`falha ao trocar p/ "${provider}": ${r.detail}`, 'nada mudou (fail-closed).'],
               );
+              return r.ok;
             });
-            return;
           }
           // EST-0962 (/provider) — BROKER: o seletor confirmou: SETA o provider do modo
           // Custom (caller → próxima chamada, em par com o slug) e registra uma nota
@@ -4599,6 +5033,20 @@ async function detectInitialTheme(
   stdout: NodeJS.WriteStream | undefined,
   config: UserConfig = {},
 ): Promise<ThemeName> {
+  // F-FUNDO-DERIVADO — o probe roda SEMPRE, antes de qualquer atalho.
+  //
+  // Ele decide o brilho, mas o efeito colateral que importa agora é outro: ao responder,
+  // o terminal informa a COR do próprio fundo, e é dela que as superfícies da conversa são
+  // derivadas (ver `surfaceFrom`). Quando o probe era pulado — e ele era pulado justamente
+  // para quem já tem tema salvo, ou seja, todo usuário que passou por aqui uma vez — a cor
+  // ficava desconhecida e as caixas caíam num hex fixo, que é o que vinha destoando.
+  //
+  // A DECISÃO de brilho não muda: os atalhos abaixo continuam vencendo o que o probe achou.
+  const detected = await queryTerminalBrightness({
+    stdout: stdout ?? process.stdout,
+    stdin: process.stdin,
+    env,
+  });
   // (1) override explícito do env: COLORFGBG declara o brilho deliberadamente.
   if (env.COLORFGBG !== undefined && env.COLORFGBG.trim() !== '') {
     return themeNameForBrightness(resolveTheme({ env }).brightness);
@@ -4608,11 +5056,6 @@ async function detectInitialTheme(
     return config.theme;
   }
   // (3) auto-detecção OSC 11 (best-effort; NO_COLOR/não-TTY ⇒ null lá dentro).
-  const detected = await queryTerminalBrightness({
-    stdout: stdout ?? process.stdout,
-    stdin: process.stdin,
-    env,
-  });
   if (detected) return themeNameForBrightness(detected);
   // (4) default dark.
   return DEFAULT_THEME;
@@ -4709,6 +5152,11 @@ export function resolveWindowSources(input: {
  * carregou (sem fontes ⇒ a nota nem aparece). Exportado p/ teste.
  */
 export function describeConfigSources(input: {
+  /**
+   * Tradutor injetado: a função é PURA (exportada p/ teste) e não alcança o contexto de
+   * i18n. Ausente ⇒ rótulo em PT, que era o comportamento de sempre.
+   */
+  readonly t?: (key: 'boot.instructions') => string;
   readonly instructionSources: readonly string[];
   readonly globalCommands: number;
   readonly projectCommands: number;
@@ -4719,7 +5167,8 @@ export function describeConfigSources(input: {
 }): readonly string[] {
   const lines: string[] = [];
   if (input.instructionSources.length > 0) {
-    lines.push(`instruções: ${input.instructionSources.join(' + ')}`);
+    // i18n: o rótulo estava cravado em PT e ficava em português na UI em inglês.
+    lines.push(`${input.t?.('boot.instructions') ?? 'instruções'}: ${input.instructionSources.join(' + ')}`);
   }
   const cmdParts: string[] = [];
   if (input.globalCommands > 0) cmdParts.push(`~/.aluy/commands (${input.globalCommands})`);

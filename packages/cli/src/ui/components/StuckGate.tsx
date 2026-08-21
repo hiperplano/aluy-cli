@@ -11,6 +11,11 @@ import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 
 export interface StuckGateProps {
+  /**
+   * F-MOLDURA-FECHA — largura do terminal. Topo e base usavam traços de comprimentos
+   * diferentes e cravados, então a caixa abria numa largura e fechava em outra.
+   */
+  readonly columns?: number;
   /** Qual padrão de travamento disparou (define a frase do "parece travado em X"). */
   readonly kind: 'same-tool-call' | 'same-tool-error' | 'empty-turns' | 'no-progress';
   /** Quantas repetições/voltas estéreis ao disparar (o "4×" do aviso). */
@@ -41,12 +46,17 @@ function describe(kind: StuckGateProps['kind'], count: number, sample: string): 
 export function StuckGate(props: StuckGateProps): React.ReactElement {
   const theme = useTheme();
   const what = describe(props.kind, props.count, props.sample);
+  // Mesma medida do `<AskDialog>`: teto de 72, menos os cantos e o recuo do bloco.
+  const larguraCaixa = Math.max(24, Math.min(72, (props.columns ?? 80) - 4));
+  const preencher = (usado: number): string =>
+    theme.box.horizontal.repeat(Math.max(1, larguraCaixa - usado));
+
   return (
     <Box flexDirection="column" paddingLeft={2}>
       <Box>
         <Role name="accent">{theme.box.topLeft} </Role>
         <Glyph name="clock" role="accent" />
-        <Role name="accent"> parece travado {theme.box.horizontal.repeat(6)} pausado</Role>
+        <Role name="accent"> parece travado {preencher(17 + 7)} pausado</Role>
       </Box>
       <Box>
         <Role name="accent">{theme.box.vertical} </Role>
@@ -79,7 +89,7 @@ export function StuckGate(props: StuckGateProps): React.ReactElement {
       )}
       <Role name="accent">
         {theme.box.bottomLeft}
-        {theme.box.horizontal.repeat(42)}
+        {preencher(2)}
       </Role>
     </Box>
   );

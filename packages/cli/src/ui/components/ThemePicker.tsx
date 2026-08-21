@@ -9,6 +9,7 @@
 import React from 'react';
 import { Box } from 'ink';
 import { Role } from '../theme/index.js';
+import { PickerFrame } from './PickerFrame.js';
 import { useI18n } from '../../i18n/index.js';
 import type { ThemeEntry, ThemeName } from '../theme/themes.js';
 
@@ -27,7 +28,7 @@ export interface ThemePickerProps {
 export function ThemePicker(props: ThemePickerProps): React.ReactElement {
   const { t } = useI18n();
   return (
-    <Box flexDirection="column">
+    <PickerFrame>
       <Box>
         <Role name="fgDim">{t('picker.theme.help')}</Role>
       </Box>
@@ -44,6 +45,6 @@ export function ThemePicker(props: ThemePickerProps): React.ReactElement {
           </Box>
         );
       })}
-    </Box>
+    </PickerFrame>
   );
 }

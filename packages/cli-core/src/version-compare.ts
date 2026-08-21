@@ -54,3 +54,35 @@ export function compareVersions(a: string, b: string): number | null {
 export function isNewer(candidate: string, current: string): boolean {
   return compareVersions(candidate, current) === 1;
 }
+
+// ── Autoupdate: dist-tag + decisão ──────────────────────────────────────────
+// O pacote sai como prerelease `rc` (`1.0.0-rc.138`) OU estável (`1.0.0`), publicados
+// no npm sob dist-tags DISTINTAS (`rc` / `latest`). SemVer puro não conhece canal:
+// `isNewer('1.0.0', '1.0.0-rc.138')` dá `true` (estável > prerelease pela regra §11),
+// mas uma instalação `rc` NUNCA deve saltar sozinha p/ `latest` estável nem o
+// contrário — só quem decide isso é o dono, trocando de canal manualmente. Por isso
+// a decisão de autoupdate não é só "isNewer": tem que ser MESMO CANAL.
+
+/** Dist-tag do npm correspondente a esta versão: `'latest'` se estável (sem
+ * prerelease), senão o PRIMEIRO identificador do prerelease (`'1.0.0-rc.138'` →
+ * `'rc'`) — é assim que o `gen-version`/publish nomeia a tag no registry. Versão
+ * ilegível ⇒ `'latest'` (mesmo default conservador do resto do módulo). */
+export function distTagFor(version: string): string {
+  const p = parseVersion(version);
+  if (!p || p.pre.length === 0) return 'latest';
+  const first = p.pre[0];
+  return String(first);
+}
+
+/**
+ * Decide se o autoupdate deve baixar `candidate` por cima de `installed`. Precisa
+ * ser MAIS NOVA (nunca downgrade, nunca "igual") E do MESMO dist-tag — `rc` só
+ * atualiza p/ `rc` mais novo, `latest` só p/ `latest` mais novo; um `rc` nunca pula
+ * p/ `latest` estável nem o inverso, mesmo que `isNewer` diga que sim (semver não
+ * conhece canal). Versão ilegível em qualquer lado ⇒ `false` (nunca instala às cegas).
+ */
+export function shouldAutoUpdate(installed: string, candidate: string): boolean {
+  if (!parseVersion(installed) || !parseVersion(candidate)) return false;
+  if (distTagFor(installed) !== distTagFor(candidate)) return false;
+  return isNewer(candidate, installed);
+}

@@ -19,7 +19,7 @@ export const en: PartialCatalog = {
   'composer.moreLines': 'lines',
 
   // ── FooterHints ───────────────────────────────────────────────────────────
-  'hints.idle': 'enter sends · / commands · ctrl-p palette · ↑ history · ctrl-c×2 quit',
+  'hints.idle': '{enter} send · / commands · {up} history',
   'hints.thinking': 'esc interrupt · ctrl-c×2 quit',
   'hints.streaming': 'esc interrupt · ctrl-c×2 quit',
   'hints.ask': 'a approve · s always · n deny · e edit · esc cancel',
@@ -44,6 +44,11 @@ export const en: PartialCatalog = {
   'suggest.implement': 'implement the change we discussed',
   'suggest.explain': 'explain what you did and why',
   'suggest.nextStep': 'what should I review or do next?',
+  // F199 — variants carrying the turn's FACT (see catalog.ts).
+  'suggest.summarizeNamed': 'review the changes in {files}',
+  'suggest.fixFailingNamed': 'investigate why "{test}" failed',
+  'suggest.runTestsNamed': 'run "{command}" again',
+  'suggest.retryDifferentNamed': 'try a different approach — the error was "{error}"',
 
   // ── Cockpit (ADR-0076) ────────────────────────────────────────────────────
   'cockpit.conversa': 'conversation',
@@ -67,6 +72,14 @@ export const en: PartialCatalog = {
 
   // ── StatusBar ─────────────────────────────────────────────────────────────
   'statusbar.brokerError': 'broker error',
+  // F-PAINEL — rótulos da coluna esquerda do painel de status. Curtos de propósito:
+  // é o ALINHAMENTO deles que cria a coluna, e um rótulo longo comeria a área do valor.
+  'boot.instructions': 'instructions',
+  'painel.config': 'config',
+  'painel.credito': 'credit',
+  'painel.sessao': 'session',
+  'painel.estado': 'state',
+  'painel.uso': 'usage',
   'statusbar.window': 'window',
   'statusbar.session': 'session',
   'statusbar.quota': 'quota',
@@ -80,7 +93,8 @@ export const en: PartialCatalog = {
 
   // ── Boot / splash ─────────────────────────────────────────────────────────
   'boot.broker': 'broker',
-  'boot.tagline': 'Aluy Cli · terminal agent',
+  // F-ASCII-DE-VERDADE — ver a nota em pt-BR.ts: `{brand}` é resolvido pelo tema.
+  'boot.tagline': '{brand} · terminal agent',
   'boot.connecting': 'connecting',
   'boot.entering': 'signing in',
 
@@ -101,6 +115,11 @@ export const en: PartialCatalog = {
     'default model (empty enter uses the provider id) — enter confirms',
   'picker.provider.addCustom.help':
     'esc cancels · the credential does NOT go here — afterwards use `aluy login --provider <id>`',
+  // F-PROV-CRED — key field between picking the provider and applying it. NEVER echoed
+  // (masked with •). See pt-BR.ts for the owner-reported motivation.
+  'picker.provider.credential.label': '{provider} API key (hidden) — enter saves and applies',
+  'picker.provider.credential.help': 'esc goes back to the list · the key is NEVER shown in clear',
+  'picker.provider.credential.retryTitle': '✗ the key failed the connection test — paste another one',
 
   // ── ModelPicker (/model) ──────────────────────────────────────────────────
   'picker.model.help': 'change model · ↑↓ navigate · enter select · esc close',
