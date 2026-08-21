@@ -986,6 +986,27 @@ export const DEFAULT_MAX_ATTEMPTS = 3;
 const CONTINUE_EXTRA_ITERATIONS = 50;
 
 /**
+ * F-SALDO-VIVO (relato do dono: "a atualização dos créditos deveria aparecer de tempos
+ * em tempos") — INTERVALO MÍNIMO entre duas buscas de quota/saldo disparadas pelo
+ * ASSENTAMENTO da sessão (fim de turno).
+ *
+ * POR QUE EXISTE: o `quotaFetcher` do broker só era re-chamado quando o evento `usage`
+ * do stream trazia `quota` (path A ⇒ `applyQuota` ⇒ `refreshQuota`). Sob backend LOCAL
+ * (BYO) esse evento NUNCA vem — o gateway não fala o dialeto do broker —, então o saldo
+ * era lido UMA vez, no boot, e congelava na tela pelo resto da sessão: o dono gastava
+ * crédito e o rodapé continuava mostrando o número do arranque.
+ *
+ * POR QUE 60s: cada busca é uma (ou duas) chamadas HTTP ao gateway BYO só p/ pintar um
+ * enfeite de rodapé. Sem freio, uma conversa de perguntas curtas bateria no provider a
+ * cada mensagem — dezenas de requisições por minuto por causa de um número na barra.
+ * 60s é a menor janela em que o dono ainda percebe o saldo "andando" durante o trabalho
+ * (um turno agêntico raramente dura menos que isso) e o provider não sente. NÃO é um
+ * timer: nada roda com a sessão parada — o refresh só é CONSIDERADO quando um turno
+ * assenta, e aí o relógio decide se já pode.
+ */
+const QUOTA_REFRESH_MIN_INTERVAL_MS = 60_000;
+
+/**
  * Controla UMA sessão da TUI. `submit(goal)` roda o loop; o estado evolui via
  * eventos e é publicado aos observadores. O `StreamSink`/`ToolReporter` daqui
  * alimentam os blocos ao vivo.
@@ -1093,6 +1114,11 @@ export class SessionController {
   // EST-0948 · ADR-0069 — busca a quota da PRÓPRIA conta (`GET /v1/quota`): CRÉDITO
   // (primário) + janelas. Ausente ⇒ footer só com as janelas do `usage`. Não-crítico.
   private readonly quotaFetcher?: () => Promise<Quota | undefined>;
+  // F-SALDO-VIVO — instante (ms do `clock` da sessão) da ÚLTIMA busca de quota/saldo
+  // DISPARADA, carimbado no início de `refreshQuota` (não no fim): duas assentadas em
+  // sequência não podem abrir duas chamadas concorrentes enquanto a 1ª ainda voa.
+  // `0` = nunca buscou ⇒ a 1ª oportunidade passa direto.
+  private lastQuotaRefreshAt = 0;
   // EST-0958 — executor do `!comando`: reusa a MESMA catraca (engine) + shell
   // confinado (ports) + ask (resolver) do loop. NÃO é um caminho de shell paralelo.
   private readonly bang: BangExecutor;
@@ -2037,6 +2063,18 @@ export class SessionController {
         // `weakYoloGuardrail.tier()` acima): gateia o bloco de FEW-SHOT do tier fraco
         // no `system`. Só afeta o prompt — não toca a catraca/budget.
         tierProvider: () => this.tierControl?.tier ?? this.state.meta.tier,
+        // F-SABER-O-MODELO — quem atende a sessão, resolvido a CADA chamada (o `/model` e o
+        // `/provider` trocam no meio dela). SÓ sob backend local: no broker o mapa
+        // tier→provider é segredo do produto e não pode vazar pelo system prompt.
+        runtimeInfoProvider: () =>
+          this.state.meta.backend === 'local'
+            ? {
+                ...(this.state.meta.provider !== undefined
+                  ? { provider: this.state.meta.provider }
+                  : {}),
+                ...(this.state.meta.model !== undefined ? { model: this.state.meta.model } : {}),
+              }
+            : {},
         // EST-0973 — AUTO-COMPACTAÇÃO da JANELA: quando o prompt cruza ~85% da janela,
         // o loop COMPACTA sozinho (via a porta abaixo, que reusa o Compactor/`/compact`)
         // e CONTINUA — sem pausar/pedir confirmação. Só repassa a config quando LIGADA
@@ -6170,6 +6208,12 @@ export class SessionController {
    */
   private async refreshQuota(): Promise<void> {
     if (this.quotaFetcher === undefined) return;
+    // F-SALDO-VIVO — carimba ANTES do `await`: o freio do `maybeRefreshQuota` conta a
+    // partir do DISPARO, não da resposta. Assim uma busca lenta (gateway BYO fora do ar
+    // esperando o timeout) não deixa a porta aberta p/ uma segunda chamada em cima dela.
+    // Vale p/ TODO caminho (boot, `applyQuota` do broker, assentamento): quem já buscou
+    // agora não é re-buscado pelo freio logo em seguida.
+    this.lastQuotaRefreshAt = this.clock();
     let fetched: Quota | undefined;
     try {
       fetched = await this.quotaFetcher();
@@ -6187,6 +6231,25 @@ export class SessionController {
       ...(fetched.credit !== undefined ? { credit: fetched.credit } : {}),
     };
     this.patch({ meta: { ...this.state.meta, quota: merged } });
+  }
+
+  /**
+   * F-SALDO-VIVO — REFRESCA a quota/saldo *se* já passou o intervalo mínimo desde a
+   * última busca. Chamado a cada ASSENTAMENTO da sessão (`setPhase` → `idle`/`done`, ou
+   * seja: fim de turno, fim de workflow, interrupção, fim de `!comando`).
+   *
+   * REUSA o `refreshQuota` de sempre (EST-0948/ADR-0069) — não há um segundo caminho de
+   * busca nem um segundo merge: só um GATILHO a mais, sob freio de relógio.
+   *
+   * NÃO BLOQUEIA NADA: dispara `void` (fire-and-forget) numa fase em que o turno JÁ
+   * terminou, e o `refreshQuota` engole toda falha (`quotaFetcher` degrada a `undefined`
+   * ⇒ mantém o último valor conhecido, em silêncio). Uma rede lenta atrasa, no máximo, a
+   * troca de um número no rodapé — nunca o próximo prompt do dono.
+   */
+  private maybeRefreshQuota(): void {
+    if (this.quotaFetcher === undefined) return;
+    if (this.clock() - this.lastQuotaRefreshAt < QUOTA_REFRESH_MIN_INTERVAL_MS) return;
+    void this.refreshQuota();
   }
 
   // ── EST-0982 · ADR-0063 — CONTABILIDADE do turno (tokens + TEMPO, estilo Claude Code) ─
@@ -7365,6 +7428,12 @@ export class SessionController {
     // queueMicrotask: deixa a finalização síncrona do turno terminar antes do wake.
     if (phase === 'idle' || phase === 'done') {
       queueMicrotask(() => this.maybeWakeForMonitor());
+      // F-SALDO-VIVO — o saldo/quota do rodapé envelhecia a sessão inteira sob backend
+      // LOCAL (o refresh de sempre pendurava no evento `quota` do broker, que o gateway
+      // BYO nunca manda). A assentada em idle/done é o momento CERTO de reler: o turno
+      // acabou (nada a atrasar) e é exatamente quando o dono olha o rodapé. O freio de
+      // ~60s mora no `maybeRefreshQuota` — aqui só oferecemos a oportunidade.
+      this.maybeRefreshQuota();
     }
   }
 

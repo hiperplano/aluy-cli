@@ -4324,7 +4324,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               // próprio Ink. Não pode ser readline: por baixo da TUI o stdin está em RAW
               // MODE, a tecla vaza p/ o composer e a chave APARECE em texto claro (medido
               // em QA — mesma classe do vazamento que a rc.135 consertou).
-              hasStoredKey: (providerId: string): boolean => hasStoredApiKey(providerId),
+              // F-PICKER-ENV (relato do dono: "mudei o provider e ele não altera embaixo")
+              // — a pergunta aqui é "dá para falar com este provider sem pedir nada?", e
+              // `hasStoredApiKey` responde só por keychain/cofre. Quem exporta a chave no
+              // shell caía no formulário de credencial, digitava de novo (ou apertava esc) e
+              // a troca simplesmente NÃO acontecia — sem erro, sem nota, o rodapé intacto.
+              // Mesma distinção já aplicada ao `faltaChave` da troca.
+              hasStoredKey: (providerId: string): boolean =>
+                temCredencialUsavel(providerId, env),
               storeCredential: (providerId: string, apiKey: string): void => {
                 // `storeApiKey` é a ÚNICA escrita de credencial do produto — o picker não
                 // duplica nada. Lança em falha de backend; o hook mostra o motivo (nunca
