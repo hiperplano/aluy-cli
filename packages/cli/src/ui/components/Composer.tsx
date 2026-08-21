@@ -331,7 +331,14 @@ export function Composer(props: ComposerProps): React.ReactElement {
   // ÚLTIMA linha visual (é ela que fica "curta"); com wrap, as anteriores já estão cheias.
   const textoVisivel = win.text === '' ? placeholder : win.text;
   const ultimaLinha = textoVisivel.split('\n').pop() ?? '';
-  const usado = indentCols + displayWidth(ultimaLinha) + (props.active ? 1 : 0);
+  // A coluna extra é do CURSOR, então ela só existe quando o cursor é de fato desenhado —
+  // e ele é suprimido enquanto o agente trabalha (para não haver dois cursores na tela ao
+  // mesmo tempo). Contando por `active`, a conta reservava uma coluna que ninguém ocupava:
+  // o preenchimento parava um caractere antes da borda e sobrava um quadradinho escuro no
+  // fim da linha do composer — visível justamente DURANTE o processamento, e some quando
+  // ele acaba e o cursor volta. Era esse o "quadradinho quando está pensando".
+  const cursorVisivel = props.active && props.showCursor !== false;
+  const usado = indentCols + displayWidth(ultimaLinha) + (cursorVisivel ? 1 : 0);
   // A largura ÚTIL é a do bloco (`columns - 2`: uma coluna da barra `┃`, outra de folga),
   // a MESMA das faixas vazias de cima e de baixo. Usar `columns` aqui fazia a linha do
   // texto ficar UMA coluna mais larga que o bloco — e a sobra vazava como um quadradinho
