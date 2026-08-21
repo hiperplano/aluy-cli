@@ -139,6 +139,11 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
   const util = Math.max(20, cols - 1);
   // A área dos VALORES: o que sobra depois do glifo, do espaço e da coluna de rótulos.
   const tetoValor = Math.max(10, util - 2 - ROTULO_COLS - 1);
+  // Duas colunas só quando há largura para as duas serem legíveis — espremê-las num terminal
+  // estreito trunca as duas e não sobra nenhuma inteira.
+  const duasColunas = cols >= LARGURA_MINIMA_2COL;
+  const larguraColuna = Math.floor(util / 2);
+  const tetoCol = duasColunas ? Math.max(10, larguraColuna - 2 - ROTULO_COLS - 1) : tetoValor;
 
   // ── linha 1 · SESSÃO — quem você é nesta conversa ────────────────────────────────
   const sessao: Seg[] = [{ text: props.tier, role: props.isDefaultTier === false ? 'accent' : 'fgDim' }];
@@ -280,88 +285,107 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
   }
 
   if (props.mode === 'unsafe') {
-    // O banner substitui a linha `estado` (ele JÁ diz qual é o modo, gritando) — mas só
-    // ela. `sessão` some junto era regressão: no YOLO, saber em que provider, modelo e
-    // diretório o agente vai rodar QUALQUER comando sem perguntar é mais importante que
-    // no modo normal, não menos.
     // A linha `estado` PERMANECE, sem o modo (o banner já grita qual é): ela carrega os
-    // sidecars, o progresso do MCP e o pulso de trabalho. Suprimi-la inteira — como a
-    // primeira versão fazia — apagava o progresso do MCP justamente em YOLO, onde saber o
-    // que a máquina está fazendo importa mais, não menos.
-    // Tirar os dois primeiros segmentos (palavra do modo + legenda) deixa o separador ` · `
-    // que os seguia órfão na frente da linha — `⚠ estado  · ◈ sidecars`. Descarta-se também
-    // qualquer separador que tenha ficado na cabeça.
-    // O separador ` · ` vem EMBUTIDO no texto de cada segmento (não é segmento próprio),
-    // então tirar os dois primeiros deixa a linha começando por ` · ` — `⚠ estado  · ◈`.
-    // O primeiro sobrevivente perde esse prefixo.
-    const estadoSemModo = estado.slice(2).map((seg, i) =>
-      i === 0 ? { ...seg, text: seg.text.replace(/^\s*·\s*/, '') } : seg,
+    // sidecars, o progresso do MCP e o pulso de trabalho. Suprimi-la inteira apagava o
+    // progresso do MCP justamente em YOLO, onde saber o que a máquina está fazendo importa
+    // mais, não menos.
+    //
+    // O separador ` · ` vem EMBUTIDO no texto de cada segmento, então tirar os dois
+    // primeiros deixava a linha começando por ` · ` — o primeiro sobrevivente perde o prefixo.
+    const estadoSemModo = estado
+      .slice(2)
+      .map((seg, k) => (k === 0 ? { ...seg, text: seg.text.replace(/^\s*·\s*/, '') } : seg));
+    const itemSessaoU = (
+      <Linha glyph={theme.glyph('clock')} rotulo={t('painel.sessao')} segs={sessao} teto={tetoCol} />
     );
+    const itemEstadoU = (
+      <Linha
+        glyph={theme.glyph(v.glyph)}
+        rotulo={t('painel.estado')}
+        segs={estadoSemModo}
+        teto={tetoCol}
+        extra={extraEstado}
+      />
+    );
+    const itemUsoU = (
+      <Linha glyph={theme.glyph('gauge')} rotulo={t('painel.uso')} segs={uso} teto={tetoCol} />
+    );
+    const itemConfigU =
+      config.length > 0 ? (
+        <Linha
+          glyph={theme.unicode ? '▤' : '#'}
+          rotulo={t('painel.config')}
+          segs={config}
+          teto={tetoCol}
+        />
+      ) : undefined;
     return (
       <Box flexDirection="column">
         <UnsafeBanner columns={cols} />
-        <Linha
-          glyph={theme.glyph('clock')}
-          rotulo={t('painel.sessao')}
-          segs={sessao}
-          teto={tetoValor}
-        />
-        {(estadoSemModo.length > 0 || props.mcpProgress !== undefined || props.busy === true) && (
-          <Linha
-            glyph={theme.glyph(v.glyph)}
-            rotulo={t('painel.estado')}
-            segs={estadoSemModo}
-            teto={tetoValor}
-            extra={extraEstado}
-          />
-        )}
-        <Linha glyph={theme.glyph('gauge')} rotulo={t('painel.uso')} segs={uso} teto={tetoValor} />
-        {config.length > 0 && (
-          <Linha
-            glyph={theme.unicode ? '▤' : '#'}
-            rotulo={t('painel.config')}
-            segs={config}
-            teto={tetoValor}
-          />
+        {duasColunas ? (
+          <>
+            <LinhaDupla
+              esquerda={itemSessaoU}
+              direita={itemEstadoU}
+              larguraColuna={larguraColuna}
+            />
+            <LinhaDupla esquerda={itemUsoU} direita={itemConfigU} larguraColuna={larguraColuna} />
+          </>
+        ) : (
+          <>
+            {itemSessaoU}
+            {itemEstadoU}
+            {itemUsoU}
+            {itemConfigU}
+          </>
         )}
       </Box>
     );
   }
 
-  if (props.compact === true) {
+  // Cada item vira um elemento; o layout decide se vão em uma ou duas colunas.
+  const itemSessao = (
+    <Linha glyph={theme.glyph('clock')} rotulo={t('painel.sessao')} segs={sessao} teto={tetoCol} />
+  );
+  const itemEstado = (
+    <Linha
+      glyph={theme.glyph(v.glyph)}
+      rotulo={t('painel.estado')}
+      segs={estado}
+      teto={tetoCol}
+      extra={extraEstado}
+    />
+  );
+  const itemUso = (
+    <Linha glyph={theme.glyph('gauge')} rotulo={t('painel.uso')} segs={uso} teto={tetoCol} />
+  );
+  const itemConfig =
+    config.length > 0 ? (
+      <Linha
+        // Glifo próprio: `clock` já abre a linha `sessão`, e dois símbolos iguais no mesmo
+        // painel desfazem a leitura de relance que a tabela existe para dar.
+        glyph={theme.unicode ? '▤' : '#'}
+        rotulo={t('painel.config')}
+        segs={config}
+        teto={tetoCol}
+      />
+    ) : undefined;
+
+  if (!duasColunas) {
     return (
       <Box flexDirection="column">
-        <Linha
-          glyph={theme.glyph('clock')}
-          rotulo={t('painel.sessao')}
-          segs={sessao}
-          teto={tetoValor}
-        />
+        {itemSessao}
+        {itemEstado}
+        {itemUso}
+        {itemConfig}
       </Box>
     );
   }
 
   return (
     <Box flexDirection="column">
-      <Linha glyph={theme.glyph('clock')} rotulo={t('painel.sessao')} segs={sessao} teto={tetoValor} />
-      <Linha
-        glyph={theme.glyph(v.glyph)}
-        rotulo={t('painel.estado')}
-        segs={estado}
-        teto={tetoValor}
-        extra={extraEstado}
-      />
-      <Linha glyph={theme.glyph('gauge')} rotulo={t('painel.uso')} segs={uso} teto={tetoValor} />
-      {config.length > 0 && (
-        <Linha
-          // Glifo próprio: `clock` já abre a linha `sessão`, e duas linhas do mesmo painel
-          // com o mesmo símbolo desfazem a leitura de relance que a tabela existe para dar.
-          glyph={theme.unicode ? '▤' : '#'}
-          rotulo={t('painel.config')}
-          segs={config}
-          teto={tetoValor}
-        />
-      )}
+      <LinhaDupla esquerda={itemSessao} direita={itemEstado} larguraColuna={larguraColuna} />
+      <LinhaDupla esquerda={itemUso} direita={itemConfig} larguraColuna={larguraColuna} />
     </Box>
   );
 }
@@ -373,6 +397,33 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
  * o painel degrada para três linhas rotuladas, que continuam sendo três itens legíveis.
  * O rótulo nunca é truncado: é ele que dá sentido à linha inteira.
  */
+/**
+ * F-PAINEL-2COL (pedido do dono: "o header ficou muito alto, é possível consolidar em 2
+ * linhas? … 2 ou 3 linhas e 2 colunas").
+ *
+ * O painel cresceu de três itens para quatro (config) e, em YOLO, ainda ganha o banner: seis
+ * linhas de rodapé numa tela de 30 é um quinto do espaço gasto com o que NÃO é a conversa.
+ * Emparelhar dois a dois devolve metade dessas linhas sem tirar informação nenhuma.
+ *
+ * O pareamento não é arbitrário: à esquerda o que identifica (sessão) e o que se consome
+ * (uso) — as duas que se varre para saber "onde estou e quanto gastei"; à direita o que
+ * descreve a máquina (estado, config), consultado com menos frequência.
+ */
+const LARGURA_MINIMA_2COL = 100;
+
+function LinhaDupla(props: {
+  readonly esquerda: React.ReactElement;
+  readonly direita?: React.ReactElement | undefined;
+  readonly larguraColuna: number;
+}): React.ReactElement {
+  return (
+    <Box>
+      <Box width={props.larguraColuna}>{props.esquerda}</Box>
+      {props.direita !== undefined && <Box>{props.direita}</Box>}
+    </Box>
+  );
+}
+
 function Linha(props: {
   readonly glyph: string;
   readonly rotulo: string;
