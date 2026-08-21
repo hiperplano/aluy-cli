@@ -58,7 +58,11 @@ export const HINTS_ROWS = 1; // atalhos contextuais — 1 linha.
  * (vive no scrollback); no cockpit cada região é um <Box> de altura cravada e a soma ==
  * rows (§5), então o composer NÃO pode crescer sem limite. O composer cresce de
  * `COMPOSER_ROWS` (=1) até este teto conforme o input multi-linha (bracketed-paste/`\n`),
- * descontando as linhas extras da CONVERSA (a maior região gerida) p/ a soma seguir ==
+ * descontando as linhas extras primeiro do LOG (até o piso de legibilidade) e só então da
+ * CONVERSA — decisão do dono. O contrato anterior mandava a conversa ceder por ser "a maior
+ * região gerida", o que invertia a prioridade da tela: a conversa é o FOCO e o log é apoio,
+ * e encolher o foco para preservar o apoio é o avesso do que o cockpit existe para fazer.
+ * A soma segue ==
  * rows. Acima do teto o <Composer> cuida do scroll interno (cauda visível) — mas o usuário
  * já vê várias linhas (paridade prática com o inline) em vez de ter o conteúdo SUMIDO.
  */
