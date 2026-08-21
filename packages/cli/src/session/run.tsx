@@ -1215,6 +1215,15 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         readonly detail: string;
         readonly client?: import('@hiperplano/aluy-cli-core').ModelClient;
         readonly defaultModel?: string;
+        /**
+         * F-PROV-PERSISTE — a troca virou padrão para as PRÓXIMAS sessões?
+         *
+         * A nota dizia sempre "vale só nesta sessão (não persiste)", enquanto o código
+         * gravava `saveLocalProvider` toda vez que o teste passava — e o `/model` logo
+         * abaixo anunciava "gravado para o próximo boot". O dono lia as duas frases juntas
+         * e não tinha como saber qual valia. Agora quem sabe o que aconteceu é quem conta.
+         */
+        readonly persisted?: boolean;
       }>)
     | undefined;
   // F-PROV — getter do catálogo LOCAL p/ o `<ProviderPicker>` (ADR-0118): reconsultado a
@@ -1523,6 +1532,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       readonly detail: string;
       readonly client?: import('@hiperplano/aluy-cli-core').ModelClient;
       readonly defaultModel?: string;
+      readonly persisted?: boolean;
     }> => {
       const freshCatalog = loadLocalProviderCatalog();
       const entry = findProvider(freshCatalog, name);
@@ -1675,9 +1685,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           slugsDoProvider.some(
             (sl) => sl.trim().toLowerCase() === entry.defaultModel.trim().toLowerCase(),
           );
-        if (podeTestar && defaultVivo) configStore.saveLocalProvider(entry.id, entry.defaultModel);
+        const persistiu = podeTestar && defaultVivo;
+        if (persistiu) configStore.saveLocalProvider(entry.id, entry.defaultModel);
         return {
           ok: true,
+          persisted: persistiu,
           detail: faltaChave
             ? `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}). ` +
               `ATENÇÃO: não há credencial guardada p/ "${entry.id}" — rode /login antes do ` +
@@ -4570,7 +4582,13 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                   ? [
                       r.detail,
                       'escolha agora o modelo deste provider.',
-                      'vale só nesta sessão (não persiste — reaplique no próximo boot).',
+                      // A frase era CRAVADA em "não persiste", enquanto o código gravava
+                      // sempre que o teste passava — e o `/model` logo abaixo anunciava
+                      // "gravado para o próximo boot". Duas frases contraditórias na mesma
+                      // tela, sem como saber qual valia.
+                      r.persisted === true
+                        ? 'gravado como padrão para as próximas sessões.'
+                        : 'vale só nesta sessão — no próximo boot volta o provider anterior.',
                     ]
                   : [`falha ao trocar p/ "${provider}": ${r.detail}`, 'nada mudou (fail-closed).'],
               );

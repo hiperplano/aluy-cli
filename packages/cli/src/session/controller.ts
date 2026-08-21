@@ -698,6 +698,8 @@ export interface SessionControllerOptions {
     readonly detail: string;
     readonly client?: ModelClient;
     readonly defaultModel?: string;
+    /** F-PROV-PERSISTE — a troca virou padrão para as próximas sessões (ver `run.tsx`). */
+    readonly persisted?: boolean;
   }>;
   /**
    * ADR-0146 (D2/L2) — PORTA do PROBE de nome de modelo: nomes disponíveis no CATÁLOGO
@@ -1062,6 +1064,8 @@ export class SessionController {
         readonly detail: string;
         readonly client?: ModelClient;
         readonly defaultModel?: string;
+    /** F-PROV-PERSISTE — a troca virou padrão para as próximas sessões (ver `run.tsx`). */
+    readonly persisted?: boolean;
       }>)
     | undefined;
   // EST-0948 — os tetos EFETIVOS da sessão (CLI-SEC-8), já resolvidos (flag>env>default,
@@ -4642,7 +4646,9 @@ export class SessionController {
    * client) ⇒ NADA muda (fail-closed — nunca troca pela metade); `detail` explica o
    * motivo, honesto, p/ a nota que o chamador (run.tsx) empurra.
    */
-  async setLocalProvider(name: string): Promise<{ readonly ok: boolean; readonly detail: string }> {
+  async setLocalProvider(
+    name: string,
+  ): Promise<{ readonly ok: boolean; readonly detail: string; readonly persisted?: boolean }> {
     if (this.state.meta.backend !== 'local') {
       return {
         ok: false,
@@ -4674,7 +4680,12 @@ export class SessionController {
         provider: name,
       },
     });
-    return { ok: true, detail: result.detail };
+    // F-PROV-PERSISTE — repassa se a troca virou padrão; a nota precisa contar a verdade.
+    return {
+      ok: true,
+      detail: result.detail,
+      ...(result.persisted !== undefined ? { persisted: result.persisted } : {}),
+    };
   }
 
   /**

@@ -251,7 +251,18 @@ export function sanitizeEntry(raw: unknown): LocalProviderEntry | undefined {
   const wireFormat = o.wireFormat.trim().toLowerCase();
   if (!(WIRE_FORMATS as readonly string[]).includes(wireFormat)) return undefined;
   if (!okStr(o.baseUrl)) return undefined;
-  const auth = parseAuth(o.auth);
+  // F-AUTH-OPCIONAL — `auth` ausente assume `apikey` em vez de DESCARTAR a entrada.
+  //
+  // O campo era obrigatório, e a entrada sem ele sumia em silêncio: o dono declarava o
+  // provider no `config.json`, ele não aparecia em lugar nenhum e nada dizia por quê — a
+  // CLI seguia usando o catálogo embutido como se a declaração não existisse. `apikey` é o
+  // caso dominante entre providers OpenAI-compatíveis (é o que todos usam, salvo Ollama, que
+  // já vem no embutido com `none`), então o default acerta quase sempre e o erro que resta é
+  // visível: a chamada falha dizendo que falta credencial, em vez de a config ser ignorada.
+  //
+  // `auth` DECLARADO e inválido continua descartando: aí houve intenção, e adivinhar por
+  // cima dela seria pior.
+  const auth = o.auth === undefined ? (['apikey'] as readonly LocalAuthMode[]) : parseAuth(o.auth);
   if (auth === undefined) return undefined;
   if (!okStr(o.defaultModel)) return undefined;
 
