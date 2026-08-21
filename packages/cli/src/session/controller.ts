@@ -5925,7 +5925,17 @@ export class SessionController {
     this.patch({ blocks });
   }
 
-  private finishAluyTurn(): void {
+  /**
+   * @param motivo Como o turno terminou. `cancelled` vem do caminho de interrupção (o mesmo
+   * que faz `rootFlow.finish('cancelled')`) e é o que permite ao cabeçalho do bloco dizer
+   * "interrompido" em vez de estampar um `✔` sobre uma resposta cortada no meio.
+   *
+   * O motivo é PASSADO em vez de descoberto aqui: as tentativas anteriores (flag de
+   * instância, `AbortSignal.aborted`, marcar o bloco depois) falharam todas pela mesma
+   * razão — neste ponto o estado ainda não reflete a interrupção, e depois dele o bloco já
+   * migrou para o `<Static>` e não é mais redesenhado. Quem chama sabe; basta dizer.
+   */
+  private finishAluyTurn(motivo: 'done' | 'cancelled' | 'error' = 'done'): void {
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
     if (last && last.kind === 'aluy') {
@@ -5981,16 +5991,7 @@ export class SessionController {
           ...last,
           streaming: false,
           ...(conta !== undefined ? { accounting: conta } : {}),
-          // PENDENTE (gap #13) — a marca de turno cortado ainda NÃO acende.
-          //
-          // O consumidor está pronto: `<AluyBlock>` já troca o `✔` por `⋯` e escreve
-          // "interrompido" quando recebe `interrupted`. O que falta é a ORIGEM do sinal
-          // neste ponto: uma flag de instância setada pelo handler de `esc` é lida antes de
-          // ser escrita, marcar o bloco depois não adianta (ele já migrou para o `<Static>`
-          // e não é mais redesenhado), e `this.abort` aqui também não reflete o abort do
-          // turno. Achar de onde o fechamento enxerga a interrupção é o que resta — a
-          // ligação é de uma linha quando a fonte certa aparecer.
-          ...(this.abort?.signal.aborted === true ? { interrupted: true } : {}),
+          ...(motivo === 'cancelled' ? { interrupted: true } : {}),
         };
       }
       this.patch({ blocks });
@@ -6281,7 +6282,7 @@ export class SessionController {
       // DUPLICADA + 2 cursores `▏` + a região viva nunca assenta (flicker volta). O esc é
       // o MESMO desfecho de `onDone` (finishAluyTurn): congela o parcial (ou descarta o
       // vazio) p/ ele virar histórico imutável. Idempotente (sem aluy aberto ⇒ no-op).
-      this.finishAluyTurn();
+      this.finishAluyTurn('cancelled');
       // EST-0982 (mid-turn UX) — turno interrompido: fecha o indicador "encaixando…"
       // (re-semeia o não-drenado; sem ghost após o abort).
       this.endTurnInjects();
@@ -6293,7 +6294,7 @@ export class SessionController {
     // EST-0965 — SELA o `aluy` parcial também no erro real: um corte mid-stream (5xx/
     // transporte) deixava o bloco `streaming:true` na região viva ao lado do broker-error.
     // O RETRY re-abre OUTRO aluy ⇒ a mesma duplicação. Congela/descarta o parcial primeiro.
-    this.finishAluyTurn();
+    this.finishAluyTurn('error');
     // EST-0942 — CLASSIFICA a causa em vez de "broker indisponível" pra tudo. A
     // mensagem é NEUTRA (HG-2) e SEM TOKEN (CLI-SEC-6): `classifyBrokerError` só
     // compõe literais + o status numérico — nunca ecoa credencial/headers/corpo cru.
