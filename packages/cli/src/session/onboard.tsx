@@ -315,7 +315,20 @@ function OnboardApp(props: {
   // Espelha o `wants3d` do <SplashScreen>: terminal estreito ⇒ marca plana.
   const temMarcaLarga = (process.stdout.columns ?? 80) >= MIN_WORDMARK_COLS;
   const providerOpts: Opt[] = [
-    ...providers.map((e) => ({ value: e.id, label: e.label, hint: e.defaultModel })),
+    // F-ONBOARD-SEM-DEFAULT (relato do dono: "em vez de aparecer os modelos padrões,
+    // aparecer os modelos carregados de cada provider") — a dica ao lado de cada provider
+    // era o `defaultModel` do catálogo EMBUTIDO. Catálogo envelhece: o do OpenRouter
+    // anunciava `anthropic/claude-3.5-sonnet`, aposentado — a primeira tela da instalação
+    // prometia um modelo que devolve 404.
+    //
+    // Buscar a lista real aqui não é opção: são nove providers e ainda não há credencial
+    // nenhuma. Mas o modelo NEM PRECISA aparecer neste passo — o passo seguinte já mostra a
+    // lista AO VIVO do provider escolhido (422 modelos, com filtro).
+    //
+    // Sem dica nenhuma: `wireFormat` seria verdade, mas sete dos nove dizem `openai-compat` —
+    // repetir isso em cada linha é ruído com aparência de informação. O que se escolhe aqui é
+    // o PROVIDER; o modelo é a próxima pergunta.
+    ...providers.map((e) => ({ value: e.id, label: e.label })),
     {
       value: '__custom__',
       label: T('+ custom (OpenAI-compatível)', '+ custom (OpenAI-compatible)'),
@@ -1134,7 +1147,9 @@ function ModelListPicker(props: {
             const idx = start + i;
             return (
               <Box key={s}>
-                <Role name={idx === cursor ? 'accent' : 'fgDim'}>{idx === cursor ? '❯ ' : '  '}</Role>
+                <Role name={idx === cursor ? 'accent' : 'fgDim'}>
+                  {idx === cursor ? '❯ ' : '  '}
+                </Role>
                 <Role name={idx === cursor ? 'accent' : 'fg'}>{s}</Role>
               </Box>
             );

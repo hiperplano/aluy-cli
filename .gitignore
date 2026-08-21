@@ -36,3 +36,7 @@ packages/cli/README.md
 packages/cli/LICENSE
 __pycache__/
 .pytest_cache/
+
+# Credencial do npm: o `npm config set` grava o token AQUI quando rodado dentro do repo,
+# e um token de publicação no working tree é um segredo a uma distração de virar commit.
+.npmrc
