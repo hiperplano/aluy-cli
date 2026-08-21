@@ -44,6 +44,13 @@ export interface AluyTurn {
    * em que o turno fecha e sumiria no quadro seguinte.
    */
   readonly accounting?: TurnAccountingView;
+  /**
+   * F-TURNO-CORTADO — o turno terminou por INTERRUPÇÃO (esc), não por conclusão.
+   *
+   * Muda só a marca do cabeçalho: um `✔` ao lado de uma resposta cortada no meio afirma que
+   * deu tudo certo, e quem relê o histórico depois não tem como saber que faltou pedaço.
+   */
+  readonly interrupted?: boolean;
   /** `true` enquanto o stream está chegando (cursor ▏ na ponta, ◇ pisca). */
   readonly streaming: boolean;
   /**

@@ -154,6 +154,8 @@ export interface AluyBlockProps {
    * um contador correndo ao lado do `Λ aluy` competiria com o cursor de trabalho.
    */
   readonly accounting?: TurnAccountingView;
+  /** F-TURNO-CORTADO — o turno terminou por interrupção, não por conclusão. */
+  readonly interrupted?: boolean;
   /**
    * F-RAC — RACIOCÍNIO do modelo neste turno (canal separado da fala). Renderiza
    * ESMAECIDO e acima da fala, nunca como resposta.
@@ -282,11 +284,22 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
   // ainda sobem e competiriam com o cursor de trabalho.
   const conta = ((): string | undefined => {
     const a = props.accounting;
-    if (a === undefined || props.streaming) return undefined;
+    if (props.streaming) return undefined;
+    const cortado = props.interrupted === true;
+    // Sem glifo próprio no tema: o símbolo é resolvido aqui pelo perfil ativo, que é o
+    // suficiente para um caso único e evita inflar os três conjuntos por causa dele.
+    const marca = cortado ? (theme.unicode ? '⋯' : '...') : theme.glyph('ok');
+    if (a === undefined) {
+      // Turno CORTADO costuma fechar sem conta: o `usage` do provider vem no último chunk
+      // do SSE e abortar o perde. Dizer "interrompido" é o que falta — antes o cabeçalho
+      // ficava mudo, indistinguível de um turno normal, e o consumo sumia sem explicação.
+      return cortado ? `${marca} interrompido · consumo não contabilizado` : undefined;
+    }
     const partes: string[] = [`${abbreviateCount(a.tokens)} tokens`];
     if (a.toolCalls > 0) partes.push(`${a.toolCalls} tools`);
     partes.push(formatDuration(a.durationMs));
-    return `${theme.glyph('ok')} ${partes.join(' · ')}`;
+    if (cortado) partes.push('interrompido');
+    return `${marca} ${partes.join(' · ')}`;
   })();
 
   const cabecalho =

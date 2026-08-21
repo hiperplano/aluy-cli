@@ -93,7 +93,8 @@ export async function runDoctor(deps: DoctorCommandDeps = {}): Promise<number> {
 
     const facts = await gatherDoctorFacts(probeDeps);
     const report = buildDoctorReport(facts);
-    const lines = renderDoctor(report, ASCII_DOCTOR_GLYPHS);
+    // Largura real do terminal: sem ela o detalhe longo quebra onde o terminal decidir.
+    const lines = renderDoctor(report, ASCII_DOCTOR_GLYPHS, process.stdout.columns);
     io.out('');
     io.out(lines[lines.length - 1] ?? '');
 

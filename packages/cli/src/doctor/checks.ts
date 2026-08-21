@@ -603,7 +603,15 @@ function checkAgents(f: AgentsFact): DoctorCheck {
 }
 
 function checkConfig(f: ConfigFact): DoctorCheck {
-  const limits = `max-tokens ${f.maxTokens} · max-iterations ${f.maxIterations}`;
+  // `10000000` obriga a contar zeros para saber que são 10 milhões; num relatório que se
+  // lê de relance, isso é atrito puro.
+  const legivel = (n: number): string =>
+    n >= 1_000_000
+      ? `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`
+      : n >= 1_000
+        ? `${(n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1)}k`
+        : String(n);
+  const limits = `max-tokens ${legivel(f.maxTokens)} · max-iterations ${legivel(f.maxIterations)}`;
   const flags = f.flags.length > 0 ? ` · flags: ${f.flags.join(', ')}` : '';
   if (f.corrupted) {
     return {

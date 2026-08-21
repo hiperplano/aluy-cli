@@ -3691,6 +3691,8 @@ export class SessionController {
         ]);
       }
     }
+    // F-TURNO-CORTADO — registra que ESTE turno terminou por interrupção; o cabeçalho do
+    // bloco usa a marca `⋯` em vez do `✔`, que afirmaria conclusão.
     this.abort?.abort();
     // EST-0969 (watchdog) — se há uma PAUSA-PEDE-DIREÇÃO pendente, esc/Ctrl-C a
     // resolve como `end` (fail-safe: o loop não fica pendurado esperando a tecla).
@@ -3795,6 +3797,8 @@ export class SessionController {
     // turno já tenha recriado a árvore corrente) — sem órfão fora do alcance do freio.
     for (const tree of this.detachedTrees) tree.cancelAll();
     if (hasLive) this.hardStopped = true;
+    // F-TURNO-CORTADO — registra que ESTE turno terminou por interrupção; o cabeçalho do
+    // bloco usa a marca `⋯` em vez do `✔`, que afirmaria conclusão.
     this.abort?.abort();
     this.retryAbort?.abort();
   }
@@ -5977,6 +5981,16 @@ export class SessionController {
           ...last,
           streaming: false,
           ...(conta !== undefined ? { accounting: conta } : {}),
+          // PENDENTE (gap #13) — a marca de turno cortado ainda NÃO acende.
+          //
+          // O consumidor está pronto: `<AluyBlock>` já troca o `✔` por `⋯` e escreve
+          // "interrompido" quando recebe `interrupted`. O que falta é a ORIGEM do sinal
+          // neste ponto: uma flag de instância setada pelo handler de `esc` é lida antes de
+          // ser escrita, marcar o bloco depois não adianta (ele já migrou para o `<Static>`
+          // e não é mais redesenhado), e `this.abort` aqui também não reflete o abort do
+          // turno. Achar de onde o fechamento enxerga a interrupção é o que resta — a
+          // ligação é de uma linha quando a fonte certa aparecer.
+          ...(this.abort?.signal.aborted === true ? { interrupted: true } : {}),
         };
       }
       this.patch({ blocks });
@@ -6168,6 +6182,9 @@ export class SessionController {
    * dobra), não mais da raiz (que agora carrega só o uso PRÓPRIO do pai). A DURAÇÃO
    * segue da raiz (o relógio de parede do turno do agente principal). Leitura pura.
    */
+
+
+
   private refreshTurnAccounting(): void {
     if (!this.rootFlow || !this.flowTree) return;
     const agg = this.flowTree.totalAccounting();

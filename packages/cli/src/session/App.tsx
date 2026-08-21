@@ -5430,6 +5430,7 @@ export function BlockView(props: {
             {...(props.maxLines !== undefined ? { maxLines: props.maxLines } : {})}
             {...(props.columns !== undefined ? { columns: props.columns } : {})}
             {...(b.accounting !== undefined ? { accounting: b.accounting } : {})}
+            {...(b.interrupted === true ? { interrupted: true } : {})}
           />
         </Box>
       );

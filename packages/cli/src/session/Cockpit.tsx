@@ -399,6 +399,11 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
           cwd={props.cwd}
           tier={props.tierDisplay}
           isDefaultTier={props.isDefaultTier}
+          {...(props.state.meta.quota?.credit?.balance !== undefined
+            ? // F-CREDITO-COCKPIT — o saldo aparecia só no inline. Quem passa o dia em
+              // `/fullscreen` ficava sem a informação mais volátil da sessão.
+              { credit: props.state.meta.quota.credit.balance }
+            : {})}
           {...(props.state.meta.model !== undefined
             ? // HG-2/CLI-SEC-7: só o `model` da via Custom (slug do usuário); NÃO exibir
               // `activeModel` (=usage.model = modelo de roteamento upstream cru) — revelaria
