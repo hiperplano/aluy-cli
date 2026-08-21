@@ -5306,6 +5306,7 @@ export function App(props: AppProps): React.ReactElement {
       <Box paddingLeft={2} flexDirection="column">
       <StatusPanel
         mode={state.mode}
+        {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
         {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
         cwd={state.meta.cwd}
         tier={tierDisplay}

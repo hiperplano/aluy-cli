@@ -700,6 +700,17 @@ export interface SessionState {
    */
   readonly governance?: GovernanceCounts | undefined;
   /**
+   * F-CONFIG-NO-RODAPE (pedido do dono: "acho que isso deveria ficar no footer") — as FONTES
+   * de config carregadas (instruções, comandos, servers MCP).
+   *
+   * Era uma nota de boot no topo, e nota de boot é registro de EVENTO — algo que aconteceu
+   * uma vez e rola para fora da tela. Só que isto não é evento: é estado permanente da
+   * sessão, da mesma natureza de provider, modelo e diretório, que já vivem no painel. No
+   * topo respondia "o que carregou quando abri"; no rodapé responde "o que está valendo
+   * agora", que é a pergunta que se faz no meio do trabalho.
+   */
+  readonly configSources?: readonly string[] | undefined;
+  /**
    * EST-1106 — UM `/workflows run` está ATIVO (espelha `cycleActive`). Usado pela
    * TUI p/ segurar a fila do type-ahead (`queueAtRest`).
    */

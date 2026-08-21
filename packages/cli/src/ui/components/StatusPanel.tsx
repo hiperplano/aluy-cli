@@ -98,6 +98,16 @@ function caberSegs(segs: readonly Seg[], teto: number): readonly Seg[] {
 export interface StatusPanelProps extends StatusBarProps {
   readonly mode: SessionMode;
   /**
+   * F-CONFIG-NO-RODAPE — fontes de config carregadas (instruções, comandos, MCP).
+   *
+   * Entram como uma 4ª linha do painel, e não como nota de boot no topo: é estado
+   * permanente da sessão, da mesma natureza de provider e diretório. No topo respondia "o
+   * que carregou quando abri"; aqui responde "o que está valendo agora".
+   *
+   * Some quando não há nada carregado — projeto sem `.aluy/` não ganha linha vazia.
+   */
+  readonly configSources?: readonly string[];
+  /**
    * Uma linha só, em vez de três. Usado pelo cockpit em tela baixa, onde o grid não tem
    * três linhas para dar ao status.
    *
@@ -262,6 +272,13 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
     );
   }
 
+  // ── linha 4 · CONFIG — o que está carregado ────────────────────────────────────
+  const config: Seg[] = [];
+  for (const fonte of props.configSources ?? []) {
+    if (config.length > 0) config.push({ text: ' · ', role: 'fgDim' });
+    config.push({ text: fonte, role: 'fgDim' });
+  }
+
   if (props.mode === 'unsafe') {
     // O banner substitui a linha `estado` (ele JÁ diz qual é o modo, gritando) — mas só
     // ela. `sessão` some junto era regressão: no YOLO, saber em que provider, modelo e
@@ -305,6 +322,16 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
         extra={extraEstado}
       />
       <Linha glyph={theme.glyph('gauge')} rotulo={t('painel.uso')} segs={uso} teto={tetoValor} />
+      {config.length > 0 && (
+        <Linha
+          // Glifo próprio: `clock` já abre a linha `sessão`, e duas linhas do mesmo painel
+          // com o mesmo símbolo desfazem a leitura de relance que a tabela existe para dar.
+          glyph={theme.unicode ? '▤' : '#'}
+          rotulo={t('painel.config')}
+          segs={config}
+          teto={tetoValor}
+        />
+      )}
     </Box>
   );
 }

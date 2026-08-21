@@ -2750,7 +2750,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       projectMcp: projectMcpHadServers,
       codexMcp: codexMcpHadServers,
     });
-    if (lines.length > 0) built.controller.pushNote('config', lines);
+    // F-CONFIG-NO-RODAPE — vai para o ESTADO (painel), não para uma nota de boot: é estado
+    // permanente da sessão, não evento que aconteceu uma vez e rola para fora da tela.
+    if (lines.length > 0) built.controller.setConfigSources(lines);
   }
 
   // EST-BOOT-DECOUPLE/EST-MCP-STATUSBAR — o progresso da conexão MCP já foi fiado logo

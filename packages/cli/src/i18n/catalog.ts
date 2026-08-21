@@ -111,6 +111,7 @@ export interface Catalog {
   /** Rótulo do medidor de janela de contexto (`⛁ NN% janela`). */
   // F-PAINEL — rótulos dos três itens do painel de status.
   'boot.instructions': string;
+  'painel.config': string;
   'painel.credito': string;
   'painel.sessao': string;
   'painel.estado': string;

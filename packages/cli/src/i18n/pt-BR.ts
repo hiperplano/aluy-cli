@@ -77,6 +77,7 @@ export const ptBR: FullCatalog = {
   // F-PAINEL — rótulos da coluna esquerda do painel de status. Curtos de propósito:
   // é o ALINHAMENTO deles que cria a coluna, e um rótulo longo comeria a área do valor.
   'boot.instructions': 'instruções',
+  'painel.config': 'config',
   'painel.credito': 'crédito',
   'painel.sessao': 'sessão',
   'painel.estado': 'estado',

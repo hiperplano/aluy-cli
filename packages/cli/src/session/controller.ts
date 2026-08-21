@@ -4770,6 +4770,14 @@ export class SessionController {
   }
 
   /**
+   * F-CONFIG-NO-RODAPE — espelha no estado as FONTES de config carregadas, para o painel de
+   * status mostrá-las como estado permanente da sessão em vez de nota de boot.
+   */
+  setConfigSources(sources: readonly string[]): void {
+    this.patch({ configSources: sources });
+  }
+
+  /**
    * F-SIDECAR-USO (pedido do dono) — ARMA o indicador de USO dos sidecars.
    *
    * `presence` é a parte ESTÁTICA da sessão (perfil turbo/leve + quais dos três o
