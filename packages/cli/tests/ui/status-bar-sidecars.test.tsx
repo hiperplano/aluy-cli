@@ -78,13 +78,18 @@ describe('StatusBar — chip de USO dos sidecars (F-SIDECAR-USO)', () => {
     expect(out).toContain('mem·41');
   });
 
-  it('FORA (desligado no fio) ⇒ `✗` colado ao código — o glifo carrega o sentido', () => {
+  it('DESLIGADO no fio ⇒ `−` colado ao código — distinto do `✗` de caído', () => {
     const out = plain(
       wrap(
         bar({ sidecarUsage: usoView({ enabled: { ...TODOS_LIGADOS, headroom: false } }) }),
       ).lastFrame() ?? '',
     );
-    expect(out).toContain('hdr✗');
+    // `−`, não `✗`: este caso é "a sessão NÃO ligou o headroom", que não é defeito.
+    // Os dois dividiam o `✗` e o dono não distinguia "quebrou" de "não pedi" — foi o
+    // que o levou a reportar o `/doctor` e a barra "discordando" estando ambos certos.
+    // O `✗` ficou reservado ao sidecar que LIGOU e CAIU (caso logo abaixo).
+    expect(out).toContain('hdr−');
+    expect(out).not.toContain('hdr✗');
     expect(out).toContain('oll'); // os outros seguem de pé
   });
 
@@ -133,7 +138,7 @@ describe('StatusBar — chip de USO dos sidecars (F-SIDECAR-USO)', () => {
     expect(out).toContain('aluy-strata'); // o tier segue, como sempre
   });
 
-  it('ASCII (TERM=linux) — glifo vira rótulo `sc:` e o `✗` vira `x`', () => {
+  it('ASCII (TERM=linux) — glifo vira rótulo `sc:`; desligado vira `-`', () => {
     const out = plain(
       wrap(bar({ sidecarUsage: usoView({ enabled: { ...TODOS_LIGADOS, mem0: false } }) }), {
         TERM: 'linux',
@@ -141,7 +146,8 @@ describe('StatusBar — chip de USO dos sidecars (F-SIDECAR-USO)', () => {
       }).lastFrame() ?? '',
     );
     expect(out).toContain('sc:');
-    expect(out).toContain('memx');
+    // Desligado em ASCII é `-`; o `x` ficou para o CAÍDO, espelhando ✗/− do unicode.
+    expect(out).toContain('mem-');
     expect(out).not.toContain('◈');
     expect(out).not.toContain('✗');
   });

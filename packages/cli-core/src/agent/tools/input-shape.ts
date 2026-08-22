@@ -125,3 +125,48 @@ export function descreveRecebido(input: Readonly<Record<string, unknown>>): stri
   });
   return partes.join(', ');
 }
+
+/** Chaves que provedores/modelos usam para EMBRULHAR o input real numa string. */
+const CHAVES_ENVELOPE = ['input', 'arguments', 'args', 'params', 'parameters', 'body', 'payload'];
+
+/**
+ * DESEMBRULHA um input que chegou EMPACOTADO — `{ "input": "{\"agents\":[…]}" }` em vez
+ * de `{ "agents": [ … ] }`.
+ *
+ * Medido em campo (dono, com `hy3`): o modelo montou o JSON CERTO e a camada de
+ * tool-call o entregou como STRING dentro de uma chave `input`. A validação via
+ * `listaDeChaves` já tolerava o CAMPO stringificado (`{"agents": "[…]"}`), mas não o
+ * input INTEIRO — então a chamada morria com "requer agents" logo depois de o modelo
+ * ter acertado a estrutura. Do lado dele não havia o que corrigir: a segunda tentativa
+ * repetiu a mesma coisa.
+ *
+ * Só desembrulha quando o resultado é um OBJETO: uma string que decodifica para array ou
+ * número não é um input de tool, e aceitar isso trocaria um erro claro por um confuso.
+ *
+ * PURO. Input não-embrulhado atravessa inalterado (zero regressão).
+ */
+export function desembrulhaInput(
+  input: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  for (const chave of CHAVES_ENVELOPE) {
+    const v = input[chave];
+    // Já veio como objeto embrulhado (alguns provedores fazem isso sem stringificar).
+    if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+      return v as Record<string, unknown>;
+    }
+    if (typeof v !== 'string') continue;
+    const t = v.trim();
+    if (t === '' || !t.startsWith('{')) continue;
+    try {
+      const p: unknown = JSON.parse(t);
+      if (typeof p === 'object' && p !== null && !Array.isArray(p)) {
+        return p as Record<string, unknown>;
+      }
+    } catch {
+      // JSON truncado/inválido: devolve o original p/ o erro de validação citar o que
+      // CHEGOU (o `descreveRecebido` já mostra o começo da string) em vez de mentir
+      // dizendo que faltou o campo.
+    }
+  }
+  return input;
+}

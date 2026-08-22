@@ -245,8 +245,13 @@ export function budgetRole(pct: number): 'fgDim' | 'accent' | 'danger' {
  *     que exige ação (janela/quota estourada, `⚠` de broker). Quem carrega o "fora" é
  *     o `✗` colado ao código (a11y §3.3: a cor nunca decide sozinha).
  */
-export function sidecarRole(state: SidecarUseState): 'fgDim' | 'accent' {
-  return state === 'used' ? 'accent' : 'fgDim';
+export function sidecarRole(state: SidecarUseState): 'fgDim' | 'accent' | 'danger' {
+  if (state === 'used') return 'accent';
+  // `down` é DEFEITO (ligou e caiu) — merece destaque. `off` (não ligado) e `idle`
+  // ficam apagados: nenhum dos dois é problema, e pintar "não pedi" de vermelho seria
+  // o alarme falso que o dono já cansou de caçar.
+  if (state === 'down') return 'danger';
+  return 'fgDim';
 }
 
 /** Papel de cor do `◔ quota %` (#125) por nível do core (70/90%). */
@@ -427,11 +432,11 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
         props.credit !== '' &&
         showModel &&
         (props.columns ?? 0) >= MODEL_MIN_COLS + sidecarCols + CREDIT_EXTRA_COLS && (
-        <>
-          <Role name="fgDim"> · </Role>
-          <Role name="depth">crédito {props.credit}</Role>
-        </>
-      )}
+          <>
+            <Role name="fgDim"> · </Role>
+            <Role name="depth">crédito {props.credit}</Role>
+          </>
+        )}
 
       {/* ADR-0126(A) — chip de FOCO 1:1 (`/subagent`): você fala SÓ com este sub-agente. Em
           `accent` (acende como o tier ≠ default); NUNCA dropa no narrow (estado de roteamento

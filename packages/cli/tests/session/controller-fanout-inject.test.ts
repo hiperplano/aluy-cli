@@ -171,7 +171,11 @@ function buildController(
 describe('FANOUT-17 (Fatia 1, SEM flag) — inject DURANTE fan-out drena sem esperar tudo', () => {
   it('a injeção do dono cai em pendingInjected enquanto o fan-out segue vivo (não espera o fan-out inteiro)', async () => {
     const { model, release } = buildScenario();
-    const controller = buildController(model); // flag DEFAULT OFF
+    // O default VIROU ligado (decisão do dono: "o aluy deve responder à medida do
+    // possível quando os agentes estão trabalhando"). Este caso testa o comportamento
+    // DESLIGADO, então ele passa a pedi-lo explicitamente — a intenção do teste é a
+    // mesma; o que mudou foi de quem é o default.
+    const controller = buildController(model, { ALUY_FANOUT_DETACH_ON_INJECT: '0' });
 
     const done = controller.submit('delegue a e b');
     await waitFor(
@@ -266,7 +270,8 @@ describe('FANOUT-17 (Fatia 2, flag ON) — inject DESACOPLA o fan-out e o pai re
 describe('FANOUT-17 — DEFAULT OFF é bit-a-bit o comportamento atual (zero regressão)', () => {
   it('sem a flag, injetar durante o fan-out NÃO desacopla: o fan-out termina normal e devolve ao pai', async () => {
     const { model, release, captured, parentCalls } = buildScenario();
-    const controller = buildController(model); // flag OFF
+    // Default virou LIGADO; este caso prova o ramo DESLIGADO, então pede explicitamente.
+    const controller = buildController(model, { ALUY_FANOUT_DETACH_ON_INJECT: '0' });
 
     const done = controller.submit('delegue a e b');
     await waitFor(

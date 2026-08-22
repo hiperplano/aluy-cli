@@ -406,9 +406,7 @@ export interface AppProps {
    * para, aí sim, pedir o modelo do provider novo. `void` (backend broker) ⇒ sem passo de
    * modelo, que é o comportamento de lá.
    */
-  readonly onSelectProvider?: (
-    provider: string,
-  ) => void | Promise<boolean | ProviderSwitchFailure>;
+  readonly onSelectProvider?: (provider: string) => void | Promise<boolean | ProviderSwitchFailure>;
   /**
    * F-PROV-FIX — o dono confirmou o VERBO explícito `/provider save`: fixa o
    * provider (e modelo) ATIVOS desta sessão como o PADRÃO da PRÓXIMA (o wiring grava
@@ -757,6 +755,14 @@ export function App(props: AppProps): React.ReactElement {
   // o React re-renderizar com o `queue` novo. O ref é a verdade-do-instante; o `setQueue`
   // (updater funcional) segue sendo a fonte do estado renderizado. Mantidos em sincronia.
   const queueRef = useRef<readonly string[]>([]);
+  // ESC-SECO — quantos ESC seguidos o dono deu SEM nada novo a encaixar (composer e fila
+  // vazios), com o turno vivo. O desenho já previa "freio em 2 ESC": o 1º acelera, o 2º
+  // (com tudo vazio) para. O furo: `pendingInjects` podia NUNCA esvaziar — durante um
+  // fan-out o pai fica preso e não drena —, então todo ESC via pendência e nenhum parava.
+  // O dono relatou como "ele não obedece o esc para parar, só funciona com ctrl-c".
+  // Ligar o desacople-por-injeção ataca a CAUSA; este contador é a ESCOTILHA para quando
+  // ela empacar mesmo assim: dois ESC secos param, ponto.
+  const escSecoRef = useRef(0);
   // F57 — rastreia timestamp do último ESC p/ detecção de duplo-ESC (500ms).
   // Duplo-ESC sempre aborta, mesmo com fila não-vazia; ESC simples com fila enfileira.
   const lastEscRef = useRef(0);
@@ -3174,6 +3180,21 @@ export function App(props: AppProps): React.ReactElement {
           //     No-op quando não há chamada de modelo em voo (ex.: durante uma tool longa).
           //     Só ACELERA; nunca PARA (o freio total segue sendo o ESC-com-tudo-vazio).
           if (injectedSomething) controller.expedite();
+          // ESC-SECO — o dono não trouxe nada novo (composer e fila vazios) e ainda assim não
+          // paramos, porque sobrou `pendingInjects`. Se ele insistir, é porque quer PARAR: o
+          // SEGUNDO ESC seco interrompe. Digitar qualquer coisa zera a contagem — aí o ESC
+          // volta a significar "encaixa isto".
+          if (!hasComposer && !hasQueue) {
+            escSecoRef.current += 1;
+            if (escSecoRef.current >= 2) {
+              escSecoRef.current = 0;
+              controller.interrupt();
+              clearQueue();
+              return;
+            }
+          } else {
+            escSecoRef.current = 0;
+          }
           return; // NÃO interrompe — havendo pendência, o ESC só acelera o encaixe.
         }
 
@@ -4770,30 +4791,30 @@ export function App(props: AppProps): React.ReactElement {
           vazia abria com uma saudação e três sugestões de exemplo. Fora: quem abre um
           terminal já sabe o que quer fazer, e o espaço vale mais para o trabalho. O
           `/help` continua listando os comandos para quem precisar. */}
-      {state.blocks.length === 0 && state.phase === 'idle' ? null : (
-        // Só os blocos VIVOS (sufixo). `isCurrent` só p/ o ÚLTIMO bloco da sessão.
-        live.map((b, i) => (
-          <BlockView
-            key={liveStart + i}
-            block={b}
-            isCurrent={liveStart + i === state.blocks.length - 1}
-            frame={frame}
-            maxLines={splitMaxLines}
-            columns={splitLayout === 'side' ? splitRes.chatCols : columns}
-            rows={rows}
-            // RESPIRO (achado do dono) — só o vizinho DENTRO do sufixo vivo. No 1º item
-            // (`i === 0`) o anterior já migrou p/ o `<Static>`, e a fronteira Static×vivo
-            // JÁ tem sua linha em branco: o contêiner da região viva é um
-            // `<Box paddingY={1}>` (contado em `LIVE_CHROME_BASE_ROWS`). Passar o vizinho
-            // absoluto aqui daria DUAS linhas em branco — provado em PTY. Deixando `i===0`
-            // sem contexto, o par `⏺ tool → Λ aluy` fica com 1 linha ANTES do commit (o
-            // pad do contêiner) e 1 DEPOIS (o paddingTop do próprio aluy, no Static): a
-            // altura não pula no instante em que o bloco desce p/ o scrollback — que é
-            // onde este repo já teve o "buraco no meio da tela".
-            prevKind={i > 0 ? live[i - 1]?.kind : undefined}
-          />
-        ))
-      )}
+      {state.blocks.length === 0 && state.phase === 'idle'
+        ? null
+        : // Só os blocos VIVOS (sufixo). `isCurrent` só p/ o ÚLTIMO bloco da sessão.
+          live.map((b, i) => (
+            <BlockView
+              key={liveStart + i}
+              block={b}
+              isCurrent={liveStart + i === state.blocks.length - 1}
+              frame={frame}
+              maxLines={splitMaxLines}
+              columns={splitLayout === 'side' ? splitRes.chatCols : columns}
+              rows={rows}
+              // RESPIRO (achado do dono) — só o vizinho DENTRO do sufixo vivo. No 1º item
+              // (`i === 0`) o anterior já migrou p/ o `<Static>`, e a fronteira Static×vivo
+              // JÁ tem sua linha em branco: o contêiner da região viva é um
+              // `<Box paddingY={1}>` (contado em `LIVE_CHROME_BASE_ROWS`). Passar o vizinho
+              // absoluto aqui daria DUAS linhas em branco — provado em PTY. Deixando `i===0`
+              // sem contexto, o par `⏺ tool → Λ aluy` fica com 1 linha ANTES do commit (o
+              // pad do contêiner) e 1 DEPOIS (o paddingTop do próprio aluy, no Static): a
+              // altura não pula no instante em que o bloco desce p/ o scrollback — que é
+              // onde este repo já teve o "buraco no meio da tela".
+              prevKind={i > 0 ? live[i - 1]?.kind : undefined}
+            />
+          ))}
 
       {/* pensando pré-stream (§2.4): a "vau" âmbar enche o vácuo até o 1º token */}
       {/* F55 — Λ aluy visível quando NADA mais se move: `thinking` (vácuo pré-1º-token)
@@ -4847,7 +4868,11 @@ export function App(props: AppProps): React.ReactElement {
 
       {state.phase === 'budget' && state.pendingBudget && (
         <Box paddingTop={1}>
-          <BudgetGate {...state.pendingBudget} columns={columns} canCompact={controller.canCompact} />
+          <BudgetGate
+            {...state.pendingBudget}
+            columns={columns}
+            canCompact={controller.canCompact}
+          />
         </Box>
       )}
 
@@ -5216,24 +5241,24 @@ export function App(props: AppProps): React.ReactElement {
           orçamento as 2 linhas que elas gastavam — o "escapa uma área pra baixo" que o
           dono viu era justamente elas, agora vazias em vez de riscadas. */}
       <ComposerBox columns={columns}>
-      <Composer
-        value={input}
-        cursorPos={cursorPos}
-        active={composerActive}
-        showCursor={composerShowCursor}
-        maxRows={inlineComposerMaxRows}
-        columns={columns}
-        shellMode={input.startsWith('!')}
-        // F197 — sugestão de próximo prompt como placeholder FANTASMA (ghost dim). Só quando
-        // pendente+repouso (showSuggestion); senão o <Composer> usa seu placeholder padrão.
-        // Tab (composer vazio) aceita.
-        {...(ghostSuggestion !== undefined ? { placeholder: ghostSuggestion } : {})}
-        {...(composerHint !== undefined ? { hint: composerHint } : {})}
-        {...(state.meta.label !== undefined ? { sessionLabel: state.meta.label } : {})}
-        {...(state.meta.labelColor !== undefined ? { sessionColor: state.meta.labelColor } : {})}
-        // F-COMPOSER-FUNDO — a cor vem do tema e some sozinha sem truecolor.
-        {...(theme.composerBg !== undefined ? { backgroundColor: theme.composerBg } : {})}
-      />
+        <Composer
+          value={input}
+          cursorPos={cursorPos}
+          active={composerActive}
+          showCursor={composerShowCursor}
+          maxRows={inlineComposerMaxRows}
+          columns={columns}
+          shellMode={input.startsWith('!')}
+          // F197 — sugestão de próximo prompt como placeholder FANTASMA (ghost dim). Só quando
+          // pendente+repouso (showSuggestion); senão o <Composer> usa seu placeholder padrão.
+          // Tab (composer vazio) aceita.
+          {...(ghostSuggestion !== undefined ? { placeholder: ghostSuggestion } : {})}
+          {...(composerHint !== undefined ? { hint: composerHint } : {})}
+          {...(state.meta.label !== undefined ? { sessionLabel: state.meta.label } : {})}
+          {...(state.meta.labelColor !== undefined ? { sessionColor: state.meta.labelColor } : {})}
+          // F-COMPOSER-FUNDO — a cor vem do tema e some sozinha sem truecolor.
+          {...(theme.composerBg !== undefined ? { backgroundColor: theme.composerBg } : {})}
+        />
         {state.turnAccounting && (state.phase === 'done' || state.phase === 'budget') && (
           <TurnFooter
             accounting={state.turnAccounting}
@@ -5341,76 +5366,76 @@ export function App(props: AppProps): React.ReactElement {
           1 coluna, então o texto dele começa na coluna 2. O rodapé começava na 0 e ficava
           desalinhado com o campo logo acima. `paddingLeft={2}` alinha os dois. */}
       <Box paddingLeft={2} flexDirection="column">
-      <StatusPanel
-        mode={state.mode}
-        {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
-        {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
-        cwd={state.meta.cwd}
-        tier={tierDisplay}
-        isDefaultTier={isDefaultTier}
-        {...(displayModel !== undefined
-          ? // HG-2/CLI-SEC-7: o `model` da via Custom (slug que o USUÁRIO escolheu) SEMPRE
-            // exibe. O `activeModel` (=usage.model resolvido do tier) só entra com o OPT-IN
-            // `ALUY_SHOW_MODEL` (default OFF — o binário público NÃO revela o mapa tier→
-            // provider; gate AG-0008). `displayModel` já aplicou essa regra acima. A redação
-            // server-side do trailer (broker) segue como o caminho p/ expor por default.
-            { model: displayModel }
-          : {})}
-        tokens={state.meta.tokens}
-        {...(state.meta.budgetPct !== undefined ? { budgetPct: state.meta.budgetPct } : {})}
-        windowPct={state.meta.windowPct}
-        {...(dominantQuota !== undefined
-          ? { quotaPct: dominantQuota.pct, quotaLevel: dominantQuota.level }
-          : {})}
-        // F-SALDO-BYO — saldo do provider BYO na linha PRIMÁRIA, colado no par
-        // provider·modelo (pedido do dono: "deveria ficar após o provedor"). Antes caía
-        // no <QuotaFooter>, numa linha própria e órfã acima do rodapé.
-        {...(state.meta.quota?.credit?.balance !== undefined
-          ? { credit: state.meta.quota.credit.balance }
-          : {})}
-        // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
-        // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
-        // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
-        columns={Math.max(20, columns - 2)}
-        error={state.phase === 'error'}
-        {...(state.governance !== undefined ? { governance: state.governance } : {})}
-        {...(!cycleUiOff && state.cycleProgress !== undefined
-          ? { cycleProgress: state.cycleProgress }
-          : {})}
-        {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
-        {...(state.sidecarUsage !== undefined
-          ? // F-SIDECAR-USO — USO REAL dos sidecars (headroom/ollama/mem0). O wiring arma
-            // o medidor e o controller espelha as contagens aqui; o chip só aparece no
-            // perfil TURBO (em leve o `buildSidecarChip` devolve `undefined` e a barra
-            // nem ganha o campo). Responde "estão sendo USADOS?", não "estão de pé?".
-            { sidecarUsage: state.sidecarUsage }
-          : {})}
-        busy={busy}
-        frame={frame}
-      />
-      {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
+        <StatusPanel
+          mode={state.mode}
+          {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
+          {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
+          cwd={state.meta.cwd}
+          tier={tierDisplay}
+          isDefaultTier={isDefaultTier}
+          {...(displayModel !== undefined
+            ? // HG-2/CLI-SEC-7: o `model` da via Custom (slug que o USUÁRIO escolheu) SEMPRE
+              // exibe. O `activeModel` (=usage.model resolvido do tier) só entra com o OPT-IN
+              // `ALUY_SHOW_MODEL` (default OFF — o binário público NÃO revela o mapa tier→
+              // provider; gate AG-0008). `displayModel` já aplicou essa regra acima. A redação
+              // server-side do trailer (broker) segue como o caminho p/ expor por default.
+              { model: displayModel }
+            : {})}
+          tokens={state.meta.tokens}
+          {...(state.meta.budgetPct !== undefined ? { budgetPct: state.meta.budgetPct } : {})}
+          windowPct={state.meta.windowPct}
+          {...(dominantQuota !== undefined
+            ? { quotaPct: dominantQuota.pct, quotaLevel: dominantQuota.level }
+            : {})}
+          // F-SALDO-BYO — saldo do provider BYO na linha PRIMÁRIA, colado no par
+          // provider·modelo (pedido do dono: "deveria ficar após o provedor"). Antes caía
+          // no <QuotaFooter>, numa linha própria e órfã acima do rodapé.
+          {...(state.meta.quota?.credit?.balance !== undefined
+            ? { credit: state.meta.quota.credit.balance }
+            : {})}
+          // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
+          // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
+          // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
+          columns={Math.max(20, columns - 2)}
+          error={state.phase === 'error'}
+          {...(state.governance !== undefined ? { governance: state.governance } : {})}
+          {...(!cycleUiOff && state.cycleProgress !== undefined
+            ? { cycleProgress: state.cycleProgress }
+            : {})}
+          {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
+          {...(state.sidecarUsage !== undefined
+            ? // F-SIDECAR-USO — USO REAL dos sidecars (headroom/ollama/mem0). O wiring arma
+              // o medidor e o controller espelha as contagens aqui; o chip só aparece no
+              // perfil TURBO (em leve o `buildSidecarChip` devolve `undefined` e a barra
+              // nem ganha o campo). Responde "estão sendo USADOS?", não "estão de pé?".
+              { sidecarUsage: state.sidecarUsage }
+            : {})}
+          busy={busy}
+          frame={frame}
+        />
+        {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
           descansa). Sempre visível (glifo+palavra, a11y): plan=read-only (petrol),
           normal=catraca (neutro), unsafe=BANNER gritante e persistente (CLI-SEC-3 —
           o aviso loud NÃO regride; o usuário PRECISA ver que a catraca está
           desligada). Reativo: o Tab cicla `normal→plan→unsafe` (invertido) — fica VIVO (fora do
           Static, na região viva do rodapé, já dentro do LIVE_CHROME_ROWS), só mudou
           de lugar (topo→rodapé), sem flicker. */}
-      {/* DETACH-FIX (item 4) — AVISO PERSISTENTE de sub-agentes desacoplados vivos (esc). Com o
+        {/* DETACH-FIX (item 4) — AVISO PERSISTENTE de sub-agentes desacoplados vivos (esc). Com o
           teto de relógio em "nunca" (decisão do dono), F8 é o único stop ⇒ o dono PRECISA ver
           que há trabalho órfão rodando. Só quando há ⇒ não infla o frame no caso comum. */}
-      {state.detachedSubagents !== undefined && state.detachedSubagents > 0 && (
-        <Box>
-          <Text color="yellow">
-            ⚠ {state.detachedSubagents} sub-agente(s) em segundo plano (esc) — F8 para parar.
-          </Text>
-        </Box>
-      )}
-      {/* F-PAINEL — o <ModeIndicator> foi ABSORVIDO: modo e catraca são a linha `estado`
+        {state.detachedSubagents !== undefined && state.detachedSubagents > 0 && (
+          <Box>
+            <Text color="yellow">
+              ⚠ {state.detachedSubagents} sub-agente(s) em segundo plano (esc) — F8 para parar.
+            </Text>
+          </Box>
+        )}
+        {/* F-PAINEL — o <ModeIndicator> foi ABSORVIDO: modo e catraca são a linha `estado`
           do painel. Manter os dois desenharia a mesma informação duas vezes, uma dentro da
           caixa e outra fora. O banner do modo `unsafe` continua existindo — o próprio
           <StatusPanel> o emite, porque um aviso de modo perigoso não pode virar linha de
           tabela cinza. */}
-      {/* fix(footer-bleed) — durante uma APROVAÇÃO ATIVA (`asking`) o <AskDialog> JÁ
+        {/* fix(footer-bleed) — durante uma APROVAÇÃO ATIVA (`asking`) o <AskDialog> JÁ
           renderiza seu PRÓPRIO footer de atalhos (`a aprova · s sempre · …`), em
           contexto, colado ao diálogo (AskDialog.footerOf, mesmas strings de
           `hints.ask`/`hints.askDestructive`). Repetir o footer AQUI no rodapé —
@@ -5421,14 +5446,14 @@ export function App(props: AppProps): React.ReactElement {
           o rodapé NÃO deve duplicar a dica de ask. Suprimimos os estados de ask aqui; o
           AskDialog é a única fonte da dica durante a catraca. Ao resolver, `hintState`
           volta a `idle`/etc. e o rodapé reaparece — transição limpa ask→composer. */}
-      {showHints && hintState && hintState !== 'ask' && hintState !== 'ask-destructive' && (
-        <FooterHints
-          state={hintState}
-          {...(elapsed !== undefined ? { elapsed } : {})}
-          {...(ctrlCArmed ? { armedExit: true } : {})}
-          {...(showSuggestion ? { suggesting: true } : {})}
-        />
-      )}
+        {showHints && hintState && hintState !== 'ask' && hintState !== 'ask-destructive' && (
+          <FooterHints
+            state={hintState}
+            {...(elapsed !== undefined ? { elapsed } : {})}
+            {...(ctrlCArmed ? { armedExit: true } : {})}
+            {...(showSuggestion ? { suggesting: true } : {})}
+          />
+        )}
       </Box>
     </Box>
   );

@@ -242,6 +242,39 @@ export function idiomaExplicitoDoAmbiente(env: NodeJS.ProcessEnv): Lang | undefi
   return resolveLang(env.ALUY_LANG ?? '')?.code;
 }
 
+/**
+ * ONBOARD-PERSIST — os campos de MODELO que o onboarding grava sob backend LOCAL.
+ *
+ * Existem DOIS no config, escritos por fluxos diferentes e lidos por caminhos diferentes:
+ *   · `localModel`   — lido por `resolveLocalProviderConfig` (monta o cliente BYO);
+ *   · `model`+`tier` — lidos no boot por `resolvePreferredModel`, que sob `tier:'custom'`
+ *                      resolve o SLUG ATIVO da sessão.
+ *
+ * O onboarding gravava só o primeiro. Numa REINSTALAÇÃO o `model` velho sobrevivia
+ * (`save` é MERGE) e o boot voltava ao slug ANTIGO — o dono escolhia um modelo no
+ * instalador e a sessão abria no anterior ("já falei 300x sobre isso"). Em máquina limpa
+ * não havia valor velho, e por isso o sintoma só aparecia reinstalando.
+ *
+ * PURO: (provider, modelo escolhido) → os três campos, sempre COERENTES entre si.
+ */
+export function onboardLocalModelPatch(args: {
+  readonly providerId: string;
+  readonly model: string;
+  readonly customModel: string;
+}): {
+  readonly localModel: string | undefined;
+  readonly model: string | undefined;
+  readonly tier: string;
+} {
+  const escolhido = resolveOnboardLocalModel({
+    providerId: args.providerId,
+    model: args.model,
+    customModel: args.customModel,
+  });
+  // BYO é sempre `custom` — é o tier que o boot espera para LER o slug do `model`.
+  return { localModel: escolhido, model: escolhido, tier: 'custom' };
+}
+
 export function decideOnboardModelListMode(slugs: readonly string[]): 'picker' | 'text' {
   return slugs.length > 0 ? 'picker' : 'text';
 }
@@ -639,11 +672,30 @@ function OnboardApp(props: {
       // provider novo e modelo velho não é um estado que alguém pediu.
       // `undefined` no patch SOBRESCREVE o valor do disco (mecanismo documentado em
       // `user-config.ts:1095`) — ver `resolveOnboardLocalModel` para o porquê.
-      patch.localModel = resolveOnboardLocalModel({
-        providerId,
-        model,
-        customModel: custom.model,
-      });
+      const mp = onboardLocalModelPatch({ providerId, model, customModel: custom.model });
+      patch.localModel = mp.localModel;
+      // BUG ANTIGO (dono: "mesmo instalando por cima e selecionando outro modelo, a
+      // informação do instalador não é persistida — já falei 300x").
+      //
+      // Existem DOIS campos de modelo no config, escritos por fluxos diferentes e lidos
+      // por caminhos diferentes:
+      //   · `localModel`  — escrito AQUI; lido por `resolveLocalProviderConfig`, que monta
+      //                     o cliente BYO. Este já estava certo.
+      //   · `model`+`tier`— escritos pelo `/model` da TUI; lidos no boot por
+      //                     `resolvePreferredModel`, que sob `tier:'custom'` resolve o
+      //                     SLUG ATIVO da sessão.
+      //
+      // O onboarding gravava só o primeiro. Numa REINSTALAÇÃO o `model` velho sobrevivia
+      // (`save` é MERGE) e o boot voltava a resolver o slug ANTIGO — o dono escolhia um
+      // modelo no instalador e a sessão abria no anterior. Em máquina limpa não havia
+      // valor velho, então o sintoma só aparecia reinstalando: exatamente como ele
+      // descreveu, e exatamente por que o conserto anterior (que só tratou `localModel`)
+      // não bastou.
+      //
+      // O onboarding DECLARA a configuração: sair dele com um modelo escolhido e outro
+      // valendo não é um estado que alguém pediu. Os dois campos passam a concordar.
+      patch.model = mp.model;
+      patch.tier = mp.tier;
     }
     patch.profile = prof;
     // Embedder do mem0 escolhido no turbo (slug do catálogo) → config.embedder. O provisioner/

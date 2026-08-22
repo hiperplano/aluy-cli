@@ -1085,8 +1085,8 @@ export class SessionController {
         readonly detail: string;
         readonly client?: ModelClient;
         readonly defaultModel?: string;
-    /** F-PROV-PERSISTE — a troca virou padrão para as próximas sessões (ver `run.tsx`). */
-    readonly persisted?: boolean;
+        /** F-PROV-PERSISTE — a troca virou padrão para as próximas sessões (ver `run.tsx`). */
+        readonly persisted?: boolean;
       }>)
     | undefined;
   // EST-0948 — os tetos EFETIVOS da sessão (CLI-SEC-8), já resolvidos (flag>env>default,
@@ -1338,6 +1338,13 @@ export class SessionController {
   // EST-0982 · CLI-SEC-10 — trilha de auditoria do plano de controle (cancel/inject):
   // `actor_type=cli`, nó-alvo. A UI/persistência a LÊ. Vive pela sessão inteira.
   private readonly controlAudit = new ControlAudit();
+  /** F-WIN (redescoberta) — avisado a cada troca de modelo. Injetado pelo wiring. */
+  private onModelChanged: ((slug: string) => void) | undefined;
+
+  /** Liga o gancho de troca de modelo (o wiring conhece a porta de descoberta; o controller não). */
+  setOnModelChanged(fn: (slug: string) => void): void {
+    this.onModelChanged = fn;
+  }
   // EST-0982 — relógio injetável (teste determinístico da contabilidade de TEMPO).
   private readonly clock: () => number;
   // EST-1015 (AG-0008) — checagem de root p/ o root-block do Tab→unsafe (ADR-0072 §3d).
@@ -1462,11 +1469,29 @@ export class SessionController {
     this.clock = opts.clock ?? Date.now;
     this.isRoot =
       opts.isRoot ?? (() => typeof process.geteuid === 'function' && process.geteuid() === 0);
-    // FANOUT-17 (Fatia 2) — flag de produto (default OFF). Lida UMA vez aqui.
+    // FANOUT-17 (Fatia 2) — DEFAULT LIGADO, por decisão do dono: "o aluy deve responder
+    // à medida do possível quando os agentes estão trabalhando".
+    //
+    // Nasceu OFF ("zero regressão"), e o custo apareceu no uso: com fan-out vivo o pai
+    // fica preso num `await Promise.all` até o último filho terminar, e a Fatia 1 sozinha
+    // só GUARDA a mensagem para o turno SEGUINTE. Da cadeira do dono isso é
+    // indistinguível de um CLI que ignorou o que ele digitou — ele relatou como "o loop
+    // fica sem comunicação... mesmo dando ESC não funciona".
+    //
+    // Ligada, a injeção DESACOPLA o fan-out na hora, semeia o estado vivo dos filhos como
+    // dado e libera o pai para responder já, em paralelo. Os filhos seguem trabalhando; o
+    // que muda é o pai deixar de ficar mudo.
+    //
+    // A env var segue valendo para DESLIGAR (`0`/`false`/`no`/`off`).
     {
       const fanoutEnv = opts.subAgents?.env ?? process.env;
-      const raw = fanoutEnv.ALUY_FANOUT_DETACH_ON_INJECT;
-      this.fanoutDetachOnInject = raw === '1' || raw === 'true' || raw === 'yes';
+      const raw = (fanoutEnv.ALUY_FANOUT_DETACH_ON_INJECT ?? '').trim().toLowerCase();
+      this.fanoutDetachOnInject = !(
+        raw === '0' ||
+        raw === 'false' ||
+        raw === 'no' ||
+        raw === 'off'
+      );
     }
     this.maxAttempts = Math.max(1, opts.retry?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
     this.backoffPolicy = { ...DEFAULT_BACKOFF, ...(opts.retry?.backoff ?? {}) };
@@ -2077,21 +2102,29 @@ export class SessionController {
             : {},
         // EST-0973 — AUTO-COMPACTAÇÃO da JANELA: quando o prompt cruza ~85% da janela,
         // o loop COMPACTA sozinho (via a porta abaixo, que reusa o Compactor/`/compact`)
-        // e CONTINUA — sem pausar/pedir confirmação. Só repassa a config quando LIGADA
-        // (`at>0`); `off`/`0` ⇒ baseline (o loop nem consulta a porta). O observador
-        // alimenta a nota/progresso na UI (o usuário VÊ que compactou — DoD §3).
-        ...(this.autoCompactCfg.at > 0
-          ? {
-              autoCompact: this.autoCompactCfg,
-              autoCompactPort: (history, signal) => this.autoCompactViaCompactor(history, signal),
-              autoCompactObserver: {
-                onStart: ({ ratioPct }) => this.onAutoCompactStart(ratioPct),
-                onDone: ({ summarizedTurns }) => this.onAutoCompactDone(summarizedTurns),
-                onGiveUp: ({ ratioPct }) => this.onAutoCompactGaveUp(ratioPct),
-                onSkip: () => this.onAutoCompactSkip(),
-              },
-            }
-          : {}),
+        // e CONTINUA — sem pausar/pedir confirmação. O observador alimenta a nota/
+        // progresso na UI (o usuário VÊ que compactou — DoD §3).
+        //
+        // F-WIN (live-update) — a porta/observador vão SEMPRE (não só quando `at>0`
+        // no boot): são closures ESTÁVEIS sobre `this` (o controller), sem custo até
+        // serem chamadas, e `maybeAutoCompact` já as gateia por `at<=0` ANTES de tocá-
+        // las (loop.ts) — presentes com a config OFF é rigorosamente inerte, igual a
+        // ausentes. O ganho: quando a janela nasce DESCONHECIDA (BYO/custom) e só fica
+        // conhecida DEPOIS que este loop já existe (`applyContextWindow` →
+        // `this.loop.setAutoCompact`, chamado pela descoberta em background ou por
+        // `/model`), só falta TROCAR a config — a porta/observador já estão prontos,
+        // sem precisar reconstruir o loop. Sem isto, `setAutoCompact` ligaria a config
+        // mas `maybeAutoCompact` seguiria saindo cedo por falta de `autoCompactPort`
+        // (o loop nasceu OFF ⇒ nunca recebeu a porta) — a MESMA classe de bug (tela
+        // corrige, mecanismo não), só que um passo adiante.
+        autoCompact: this.autoCompactCfg,
+        autoCompactPort: (history, signal) => this.autoCompactViaCompactor(history, signal),
+        autoCompactObserver: {
+          onStart: ({ ratioPct }) => this.onAutoCompactStart(ratioPct),
+          onDone: ({ summarizedTurns }) => this.onAutoCompactDone(summarizedTurns),
+          onGiveUp: ({ ratioPct }) => this.onAutoCompactGaveUp(ratioPct),
+          onSkip: () => this.onAutoCompactSkip(),
+        },
         ...(opts.maestro ? { maestro: opts.maestro } : {}),
         ...(opts.continuationConfig ? { continuationConfig: opts.continuationConfig } : {}),
         ...(opts.memoryEngine ? { memory: opts.memoryEngine } : {}),
@@ -4333,6 +4366,39 @@ export class SessionController {
   }
 
   /**
+   * HUNT-RESUME-RACE — PREPENDA ao seed pendente, sem apagar o que já está lá.
+   *
+   * `seedHistory` SUBSTITUI, e isso é correto para o `/history` ao vivo (trocar de
+   * conversa zera a anterior). Mas no BOOT há DUAS fontes: o histórico da sessão
+   * retomada — disponível de imediato — e o recall da memória, que depende de I/O.
+   * Enquanto as duas eram combinadas numa chamada só, o histórico ficava REFÉM do
+   * await: a TUI já estava de pé, aceitando Enter, com o contexto do modelo VAZIO.
+   *
+   * O sintoma relatado pelo dono: "às vezes ele se perde no que estava fazendo antes
+   * quando fechei e reabri recarregando uma sessão anterior". "Às vezes" porque é uma
+   * corrida — quem digita rápido perde, quem demora não. E a tela mostrando a conversa
+   * inteira torna impossível suspeitar que o contexto não foi junto.
+   *
+   * Agora o histórico é semeado ANTES do render e a memória PREPENDA quando chegar,
+   * preservando a ordem original (memória, depois histórico).
+   */
+  prependSeed(items: readonly HistoryItem[]): void {
+    if (items.length === 0) return;
+    this.pendingSeed = [...items, ...(this.pendingSeed ?? [])];
+  }
+
+  /**
+   * O seed pendente, só para LEITURA. Existe porque a propriedade que importa aqui —
+   * "a memória acrescenta sem apagar o histórico da sessão retomada" — é estado interno
+   * e não tem efeito observável até o próximo `submit`, que exigiria um turno inteiro
+   * (modelo, catraca, accounting) para provar uma regra de duas linhas. O acessor é
+   * inerte: devolve uma CÓPIA e não permite escrita.
+   */
+  peekPendingSeed(): readonly HistoryItem[] {
+    return this.pendingSeed ? [...this.pendingSeed] : [];
+  }
+
+  /**
    * HUNT-RESUME — TROCA de conversa: zera o CONTEXTO DE CONTINUAÇÃO dos turnos da
    * sessão ANTERIOR ao RETOMAR outra sessão AO VIVO (`/history` dentro de uma sessão
    * que já teve turnos).
@@ -4492,6 +4558,16 @@ export class SessionController {
       maxConsecutiveEnv: this.autoCompactEnv.ALUY_AUTOCOMPACT_MAX,
     });
     this.compactor.setWindow(newWindow, 0.5);
+    // F-WIN (live-update do LOOP) — o `this.loop` (e o `this.focus.loop`, se houver
+    // uma sub-sessão focada aberta) já EXISTEM antes desta chamada: são construídos 1x
+    // (ADR-0126(A), `makeLoop`) e a descoberta em background/`/model` roda DEPOIS. Sem
+    // empurrar a config nova pra eles, o `contextWindow`/`autoCompactCfg` acima corrigem
+    // (a barra `⛁ %` lê `this.contextWindow` ao vivo — por isso ela parecia certa) mas
+    // o(s) loop(s) seguem com o snapshot CONGELADO da auto-compactação do instante em
+    // que nasceram — em BYO/custom isso é `AUTOCOMPACT_OFF` pro resto da sessão inteira.
+    // Ver `setAutoCompact` no loop pro porquê de só a CONFIG precisar trocar.
+    this.loop.setAutoCompact(this.autoCompactCfg);
+    if (this.focus) this.focus.loop.setAutoCompact(this.autoCompactCfg);
     return true;
   }
 
@@ -4564,6 +4640,13 @@ export class SessionController {
    * mantendo `custom`, é uma mudança real).
    */
   setTier(tier: string, model?: string): void {
+    // F-WIN (redescoberta) — avisa QUEM SABE consultar o provider que o modelo mudou.
+    // A descoberta de janela rodava só no boot, para o modelo do boot: trocar de modelo
+    // deixava o slug novo sem janela conhecida e, quando ele também não está na tabela
+    // embutida, a auto-compactação ficava INERTE pelo resto da sessão. Ligar aqui cobre
+    // os NOVE pontos de chamada de `setTier` de uma vez — espalhar a chamada por todos
+    // eles garantiria esquecer um. O port é injetado pelo wiring; ausente ⇒ no-op.
+    if (model !== undefined && model.trim() !== '') this.onModelChanged?.(model.trim());
     if (!this.tierControl) return;
     const sameTier = tier === this.tierControl.tier;
     const sameModel = (model ?? undefined) === (this.tierControl.model ?? undefined);
@@ -6265,8 +6348,6 @@ export class SessionController {
    * dobra), não mais da raiz (que agora carrega só o uso PRÓPRIO do pai). A DURAÇÃO
    * segue da raiz (o relógio de parede do turno do agente principal). Leitura pura.
    */
-
-
 
   private refreshTurnAccounting(): void {
     if (!this.rootFlow || !this.flowTree) return;

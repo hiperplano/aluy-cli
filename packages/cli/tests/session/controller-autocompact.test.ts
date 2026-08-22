@@ -275,6 +275,64 @@ describe('EST-0973 — auto-compactação da janela (controller)', () => {
     expect(text).toMatch(/janela cheia mesmo após compactar/);
   });
 
+  it('F-WIN (descoberta) — janela chega DEPOIS que o loop principal já nasceu ⇒ auto-compactação AINDA arma', async () => {
+    // Relato do dono: BYO/custom nasce com a janela DESCONHECIDA (0 — `resolveContextWindow`
+    // não acha o slug no catálogo embutido) e só fica conhecida quando a descoberta em
+    // BACKGROUND volta (`run.tsx`: `void discoverContextWindow(slug).then(r =>
+    // controller.adoptDiscoveredModelWindow(...))`), que roda DEPOIS que a sessão (e o
+    // loop principal, construído 1x no construtor) já existem. `adoptDiscoveredModelWindow`
+    // atualiza `contextWindow`/`autoCompactCfg` do CONTROLLER (por isso a barra `⛁ %`
+    // corrigia, como o dono via) mas, sem propagar pro `this.loop` já construído, a
+    // auto-compactação ficava CEGA pro resto da sessão — exatamente "vejo a % andando,
+    // mas a compactação nunca acontece".
+    const ports = fakePorts({ 'real.txt': 'conteúdo' });
+    const engine = new PolicyPermissionEngine();
+    let ctrlRef: SessionController | null = null;
+    const { model: compactionModel, count } = compactionCaller();
+    const responses = [
+      toolCall('read_file', { path: 'real.txt' }),
+      toolCall('read_file', { path: 'real.txt' }),
+      toolCall('read_file', { path: 'real.txt' }),
+      toolCall('read_file', { path: 'real.txt' }),
+      'fim.',
+    ];
+    const tokens = [FREE, FREE, FREE, FULL, FULL];
+    const model = scriptedCaller(responses, tokens, () => ({
+      onStart: () => ctrlRef?.sink.onStart?.(),
+      onDelta: (c) => ctrlRef?.sink.onDelta(c),
+      onUsage: (u) => ctrlRef?.sink.onUsage?.(u),
+      onDone: () => ctrlRef?.sink.onDone?.(),
+    }));
+    const controller = new SessionController({
+      model,
+      compactionModel,
+      permission: engine,
+      ports,
+      askResolver: new TuiAskResolver(),
+      meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
+      contextWindow: 0, // boot: janela AINDA desconhecida (o caso BYO/custom do dono)
+      watchdogEnv: { ALUY_STUCK_OFF: '1' },
+      autoCompactEnv: {},
+    });
+    ctrlRef = controller;
+
+    // A descoberta em BACKGROUND volta SÓ AGORA — depois que `controller`/`this.loop`
+    // já existem, espelhando a ordem real (`run.tsx`).
+    const adopted = controller.adoptDiscoveredModelWindow('minimax/minimax-m3', WINDOW);
+    expect(adopted).toBe(true); // saiu do inerte
+    expect(controller.modelContextWindow).toBe(WINDOW); // a barra `⛁ %` já reflete a janela
+
+    await controller.submit('leia em loop');
+
+    expect(controller.current.phase).toBe('done');
+    // A auto-compactação de fato ARMOU (não só a % da barra).
+    expect(count()).toBe(1);
+    const notes = controller.current.blocks.filter(
+      (b) => b.kind === 'note' && b.title === 'auto-compactação',
+    );
+    expect(notes.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('FALHA de broker na compactação ⇒ nota DISTINTA (não "nada a compactar") — fix secundário', async () => {
     // Fix secundário (observabilidade): um erro de broker na compactação NÃO deve ser
     // engolido como "não consegui compactar agora" (que sugere histórico curto). A

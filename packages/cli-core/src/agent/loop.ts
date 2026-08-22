@@ -16,6 +16,7 @@
 //  - Idempotency-Key: nasce aqui (idempotency.ts), estável por chamada lógica,
 //    reusada em retry de rede.
 
+import { desembrulhaInput } from './tools/input-shape.js';
 import {
   decide,
   type PermissionEngine,
@@ -728,7 +729,9 @@ export class AgentLoop {
   // EST-0969 — env p/ a config do watchdog (limiares/toggle). undefined ⇒ process.env.
   private readonly watchdogEnv?: Record<string, string | undefined>;
   // EST-0973 — config da auto-compactação da janela. AUTOCOMPACT_OFF ⇒ baseline.
-  private readonly autoCompact: AutoCompactConfig;
+  // F-WIN (live-update) — NÃO é `readonly`: nasce com o snapshot do construtor mas
+  // pode ser TROCADA depois via `setAutoCompact` (ver o método, e o PORQUÊ lá).
+  private autoCompact: AutoCompactConfig;
   // EST-0973 — porta que compacta (reusa o /compact). undefined ⇒ auto-compactação inerte.
   private readonly autoCompactPort?: AutoCompactPort;
   // EST-0973 — observador da auto-compactação p/ a TUI. undefined ⇒ silenciosa.
@@ -1615,6 +1618,26 @@ export class AgentLoop {
   }
 
   /**
+   * F-WIN (live-update) — TROCA a config de auto-compactação em voo, DEPOIS que o loop
+   * já nasceu. O BURACO que fecha: `autoCompact` era `readonly`, gravada 1x no
+   * construtor a partir do snapshot que o caller (`SessionController`) tinha NAQUELE
+   * instante — mas em BYO/custom a janela do modelo nasce DESCONHECIDA (0) e só fica
+   * conhecida quando a descoberta em BACKGROUND volta (`adoptDiscoveredModelWindow`,
+   * bem DEPOIS que o loop principal já existe). Sem este método, o caller atualizava a
+   * PRÓPRIA config (a barra `⛁ %` corrigia, porque lê o caller ao vivo) mas o loop
+   * seguia com `AUTOCOMPACT_OFF` congelado pro resto da sessão — a auto-compactação
+   * nunca disparava, mesmo com a janela e o limiar corretos. `maybeAutoCompact` lê
+   * `this.autoCompact` DE NOVO a cada iteração, então trocar o campo aqui é suficiente
+   * (nenhum outro estado precisa mudar). `autoCompactPort`/`autoCompactObserver` NÃO
+   * precisam de um setter: já são passados incondicionalmente pelo `SessionController`
+   * (closures estáveis, inertes enquanto `at<=0` — ver o gate no topo do
+   * `maybeAutoCompact`), então ligar é só questão da CONFIG.
+   */
+  setAutoCompact(cfg: AutoCompactConfig): void {
+    this.autoCompact = cfg;
+  }
+
+  /**
    * EST-0973 — AUTO-COMPACTAÇÃO da JANELA (núcleo, chamado no topo de cada iteração).
    * Se a ocupação da janela (`lastTokensIn` / janela do modelo) cruzou o limiar,
    * COMPACTA o histórico IN-PLACE (resumindo o que já foi lido) e o loop CONTINUA com
@@ -1700,6 +1723,18 @@ export class AgentLoop {
     // catraca/execução: é assim que pegamos "o modelo re-propõe a MESMA chamada N×"
     // (mesmo que ela seja BLOQUEADA pela catraca e vire observação repetida). Uma
     // chamada DIFERENTE conta como exploração (zera a série). NÃO toca a catraca.
+    // DESEMBRULHO CENTRAL — alguns provedores/modelos entregam o input da tool
+    // EMPACOTADO numa string: `{"input": "{\"question\":…}"}` em vez de
+    // `{"question": …}`. O modelo montou o JSON CERTO; quem embrulhou foi a camada de
+    // tool-call. Medido em campo pelo dono com dois modelos baratos, em DUAS tools
+    // diferentes (`spawn_agent` e `perguntar`) — ou seja, não é defeito de uma tool, é
+    // da entrega. Cada tool tolerar isso por conta própria seria consertar o mesmo bug
+    // N vezes e esquecer a N+1: por isso o desembrulho mora AQUI, no ponto único por
+    // onde toda tool-call passa.
+    //
+    // Do lado do modelo não havia o que corrigir — ele repetia a mesma chamada e ouvia o
+    // mesmo erro, gastando turnos. Input não-embrulhado atravessa inalterado.
+    input = desembrulhaInput(input);
     watchdog?.noteToolCall(name, input);
     const tool = this.tools.get(name);
     if (!tool) {

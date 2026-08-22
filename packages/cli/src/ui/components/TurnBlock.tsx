@@ -98,7 +98,9 @@ export function YouBlock(props: YouBlockProps): React.ReactElement {
     >
       <Text backgroundColor={fundo}>
         {' '}
-        <Text {...(theme.role('fg').color !== undefined ? { color: theme.role('fg').color } : {})}>você</Text>
+        <Text {...(theme.role('fg').color !== undefined ? { color: theme.role('fg').color } : {})}>
+          você
+        </Text>
         {' '.repeat(Math.max(0, util - 4))}
       </Text>
       {linhas.map((ln, i) => (
@@ -356,7 +358,7 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
             nada — aí o pensamento é a única coisa que existe e some-lo devolveria
             exatamente o bloco em branco que este conserto existe p/ matar. */}
         {reasoningView !== undefined && (
-          <Box flexDirection="column" paddingBottom={props.streaming ? 1 : 0}>
+          <Box flexDirection="column">
             {reasoningView.map((linha, i) =>
               aluyFundo !== undefined && speechCols > 0 ? (
                 <Text key={i} backgroundColor={aluyFundo}>
@@ -370,6 +372,23 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
                 </Role>
               ),
             )}
+            {/* ESPAÇADOR PINTADO — o respiro entre o pensamento e a fala era
+                `paddingBottom={1}` no <Box>. Padding do Ink produz uma linha SEM
+                caractere nenhum, e `backgroundColor` só pinta onde há caractere: a
+                linha saía com o fundo do TERMINAL no meio de um bloco pintado, lida
+                como um risco preto (relato do dono: "a caixa do pensamento gera uma
+                linha em branco, na vdd preta"). Mesma raiz dos quadradinhos pretos já
+                corrigidos no composer e no eco.
+                A cura é a mesma: desenhar a linha com ESPAÇOS, para haver o que pintar.
+                Sem fundo (tema sem `aluyBg`) o padding original serviria — mas aí a
+                linha vazia é indistinguível do fundo mesmo, então um <Text> vazio
+                basta e mantém UM caminho só. */}
+            {props.streaming &&
+              (aluyFundo !== undefined && speechCols > 0 ? (
+                <Text backgroundColor={aluyFundo}>{' '.repeat(speechCols)}</Text>
+              ) : (
+                <Text> </Text>
+              ))}
           </Box>
         )}
         {/* A FALA do aluy renderiza como MARKDOWN (negrito/listas/títulos/citações
