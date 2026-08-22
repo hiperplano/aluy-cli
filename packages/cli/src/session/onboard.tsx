@@ -106,6 +106,91 @@ export function digitarNoCampo(
   return { buf: estado.buf + tecla, ehSugestao: false };
 }
 
+// ── F-ONB-PASTE — o que a COLAGEM deposita num campo de UMA linha ────────────────────
+//
+// MEDIDO no TTY (build rc.140, passo da API key, colagem simulada com `tmux send-keys -l`,
+// que entrega a rajada como o terminal entrega um paste):
+//   · 63 chars num chunk só ......... ENTRA INTEIRA — o `useInput` do Ink entrega o chunk
+//     COMPLETO como `input` (não é caractere-a-caractere), e o campo já concatenava tudo;
+//   · 300 chars num chunk só ........ ENTRA INTEIRA (chave longa não trunca);
+//   · `AAA\rBBB` num chunk só ........ entrava com SETE caracteres: o `\r` virava caractere
+//     LITERAL no meio do valor;
+//   · rajada de DEL (backspaces rápidos que o terminal junta num chunk) ⇒ os DELs eram
+//     INSERIDOS no campo em vez de apagar;
+//   · com bracketed paste ligado no terminal (`?2004` — a SESSÃO liga, e um encerramento
+//     abrupto pode deixar ligado), o Ink entrega o chunk MANGLED (`[200~…\x1b[201~`) e os
+//     11 bytes dos MARCADORES entravam no campo como se fossem parte da chave.
+//
+// Ou seja: colar TEXTO SIMPLES já funcionava; o que quebrava era todo chunk que trouxesse
+// algo além de imprimíveis. E como o campo da chave é MASCARADO (só `•`), o estrago é
+// INVISÍVEL: a chave gravada sai com lixo, a autenticação falha depois e não há na tela
+// nada que denuncie o motivo. Por isso a limpeza mora no caminho de entrada de TODOS os
+// campos (chave, provider custom e filtro do modelo), e não num remendo por campo.
+//
+// DECISÃO sobre quebra de linha (documentada porque é escolha, não detalhe): num campo de
+// uma linha, `\r`/`\n` NUNCA vira caractere do valor e NUNCA confirma o passo sozinho. O
+// texto colado termina na 1ª quebra e o resto é DESCARTADO — a 2ª linha de um clipboard
+// multi-linha não pode entrar escondida num campo que mostra uma só. Confirmar continua
+// sendo ato do dono: ele vê os `•` e aperta ENTER. (Um `\r` que chegue SOZINHO, em chunk
+// próprio — o caminho da digitação normal —, continua sendo Enter: é o `key.return` do
+// Ink, que este conserto não toca.)
+//
+// SEGURANÇA: transformação de STRING em memória, nada mais. O valor segue só no estado do
+// React, desenhado por `<TextRow mask>` (só `•`) — nunca é logado, nunca é impresso em
+// claro e só sai do processo pelo `storeApiKey` de sempre.
+
+/** Marcadores de bracketed paste, CRUS e MANGLED (o Ink corta o 1º `\x1b` do chunk). */
+const MARCADORES_DE_COLAGEM = ['\x1b[200~', '\x1b[201~', '[200~', '[201~'] as const;
+
+/**
+ * Deixa um chunk de entrada PRONTO pra entrar num campo de uma linha. PURA, exportada
+ * para ter teste (mesma disciplina do `digitarNoCampo`: a UI/Ink se verifica no TTY).
+ *
+ * Ordem: (1) tira os marcadores de bracketed paste; (2) fica com o 1º pedaço NÃO-VAZIO
+ * entre quebras de linha (clipboard que começa com `\n` não vira campo vazio); (3) remove
+ * o que restou de control chars C0 (`\t`, ESC, DEL, …) — bytes que não são texto e que,
+ * mascarados, ninguém veria.
+ *
+ * Caractere DIGITADO passa intacto (o caminho comum não muda): imprimível ⇒ volta ele
+ * mesmo. Chunk que só tinha lixo ⇒ `''` (o chamador não insere nada).
+ */
+export function sanitizarColagemDeCampo(bruto: string): string {
+  let s = bruto;
+  for (const m of MARCADORES_DE_COLAGEM) s = s.split(m).join('');
+  for (const linha of s.split(/\r\n|\r|\n/)) {
+    const limpa = removerControles(linha);
+    if (limpa !== '') return limpa;
+  }
+  return '';
+}
+
+/** Tira C0 (0x00–0x1f) e DEL (0x7f) — sobra só o texto imprimível do campo. */
+function removerControles(s: string): string {
+  let out = '';
+  for (let i = 0; i < s.length; i += 1) {
+    const code = s.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) continue;
+    out += s[i];
+  }
+  return out;
+}
+
+/**
+ * Quantos APAGAMENTOS um chunk representa. O Ink só reconhece `key.backspace`/`key.delete`
+ * quando o chunk traz UM byte; segurar a tecla (ou latência de SSH) faz o terminal juntar
+ * vários DEL/BS num chunk só, que o Ink entrega pelo caminho de "texto". MEDIDO no TTY:
+ * antes do conserto esses bytes eram INSERIDOS (o campo CRESCIA ao apagar); com a limpeza
+ * eles somem — mas apagar tem de APAGAR, e por isso contamos.
+ *
+ * Só conta chunk HOMOGÊNEO (nada além de DEL/BS): chunk misto é colagem, e quem cuida
+ * dela é `sanitizarColagemDeCampo`. PURA, exportada para ter teste.
+ */
+export function contarApagamentos(chunk: string): number {
+  if (chunk.length < 2) return 0; // 1 byte é o caminho normal do Ink (`key.backspace`).
+  for (const ch of chunk) if (ch !== '\x7f' && ch !== '\b') return 0;
+  return chunk.length;
+}
+
 export function resolveOnboardLocalModel(args: {
   readonly providerId: string;
   /** O que o dono digitou/confirmou no passo `model` (built-ins vêm pré-preenchidos). */
@@ -536,8 +621,25 @@ function OnboardApp(props: {
     if (prof === 'turbo' && embedderChoice !== undefined && embedderChoice !== '') {
       patch.embedder = embedderChoice;
     }
-    props.store.save(patch as never);
-    msg.push(`✓ ${T('config', 'config')}: backend ${backend}`);
+    // F-GRAVACAO-HONESTA — o retorno de `save()` era descartado, e esta é a gravação que
+    // mais custa perder: é a configuração da INSTALAÇÃO. A escrita é atômica (temp +
+    // `rename`), e no Windows o `rename` bate em `EPERM/EBUSY` quando algo segura o arquivo
+    // — antivírus ou OneDrive sobre o perfil. Sem checar, o onboarding terminava com `✓` e a
+    // primeira sessão abria sem nada configurado, pedindo credencial de um provider que o
+    // dono nem escolheu.
+    const gravou = props.store.save(patch as never);
+    if (gravou) {
+      msg.push(`✓ ${T('config', 'config')}: backend ${backend}`);
+    } else {
+      msg.push(
+        `✗ NÃO consegui gravar ${T('config', 'config')} em \`~/.aluy/config.json\` — ` +
+          'a configuração NÃO foi salva.',
+      );
+      msg.push(
+        '  Feche outras janelas do aluy e rode `aluy onboard` de novo. No Windows, ' +
+          'antivírus ou OneDrive sobre o perfil costumam travar o arquivo.',
+      );
+    }
 
     if (
       backend === 'local' &&
@@ -693,6 +795,11 @@ function OnboardApp(props: {
       } else if (key.backspace || key.delete) {
         setModelFilter((f) => f.slice(0, -1));
         setModelCursor(0);
+      } else if (contarApagamentos(input) > 0) {
+        // Rajada de backspaces que o terminal juntou num chunk (ver `contarApagamentos`).
+        const n = contarApagamentos(input);
+        setModelFilter((f) => f.slice(0, Math.max(0, f.length - n)));
+        setModelCursor(0);
       } else if (
         input &&
         !key.ctrl &&
@@ -702,8 +809,13 @@ function OnboardApp(props: {
         !key.leftArrow &&
         !key.rightArrow
       ) {
-        setModelFilter((f) => f + input);
-        setModelCursor(0);
+        // Chunk COLADO (slug inteiro) ou tecla solta — a MESMA limpeza para os dois: o
+        // `\r` que vem junto de um slug copiado não pode virar caractere do filtro.
+        const texto = sanitizarColagemDeCampo(input);
+        if (texto !== '') {
+          setModelFilter((f) => f + texto);
+          setModelCursor(0);
+        }
       }
       return;
     }
@@ -734,6 +846,14 @@ function OnboardApp(props: {
       setBufEhSugestao(false);
       return;
     }
+    const apagamentos = contarApagamentos(input);
+    if (apagamentos > 0) {
+      // Rajada de backspaces JUNTADA num chunk (ver `contarApagamentos`): o Ink não a
+      // reconhece como `key.backspace`, então ela caía no campo como texto.
+      setBuf((b) => b.slice(0, Math.max(0, b.length - apagamentos)));
+      setBufEhSugestao(false);
+      return;
+    }
     if (
       input &&
       !key.ctrl &&
@@ -743,10 +863,17 @@ function OnboardApp(props: {
       !key.leftArrow &&
       !key.rightArrow
     ) {
-      // Primeira tecla sobre uma SUGESTÃO pré-preenchida: SUBSTITUI (ver `gotoText`).
-      const proximo = digitarNoCampo({ buf, ehSugestao: bufEhSugestao }, input);
-      setBuf(proximo.buf);
-      setBufEhSugestao(proximo.ehSugestao);
+      // Uma COLAGEM chega como UM chunk de vários caracteres (ou como vários chunks
+      // seguidos, se o terminal fatiar) — os dois casos caem aqui e são aceitos inteiros.
+      // A limpeza é obrigatória ANTES de entrar no campo: ver `sanitizarColagemDeCampo`.
+      const texto = sanitizarColagemDeCampo(input);
+      if (texto !== '') {
+        // Primeira tecla (ou primeiro chunk colado) sobre uma SUGESTÃO pré-preenchida:
+        // SUBSTITUI (ver `gotoText`); daí em diante concatena.
+        const proximo = digitarNoCampo({ buf, ehSugestao: bufEhSugestao }, texto);
+        setBuf(proximo.buf);
+        setBufEhSugestao(proximo.ehSugestao);
+      }
     }
   });
 

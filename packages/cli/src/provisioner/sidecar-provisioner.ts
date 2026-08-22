@@ -32,6 +32,7 @@ import {
   type SidecarProvisioner,
   type SidecarTarget,
   type ProvisionTargetResult,
+  type ProvisionOutcome,
   type ProvisionResult,
   type AgentProfileTier,
   type PinnedArtifact,
@@ -1201,12 +1202,19 @@ async function defaultAgentInstaller(
   ctx?: AgentInstallContext,
 ): Promise<ProvisionTargetResult> {
   const goal = agentInstallGoal(target);
+  // ESTADO ANTES de mexer. Sem isto o health-check pós-agente é AMBÍGUO: `true` tanto para
+  // "acabamos de instalar" quanto para "já estava aqui desde antes" — e a mensagem afirmava
+  // a primeira. DEFEITO OBSERVADO (Windows do dono): o agente morreu com 401 nos três
+  // complementos, não instalou NADA, e os três saíram como "instalado e verificado" porque
+  // os sidecars já existiam. Barato: o check LIGHT é um GET no loopback / `existsSync`.
+  const preExisting = await verifyTargetHealthy(target, process.platform, true);
   const aluyScript = process.argv[1];
   if (!aluyScript) {
     return {
       target,
       hashOk: false,
       installed: false,
+      outcome: 'failed',
       message: 'Não foi possível localizar o binário do aluy p/ delegar ao agente.',
     };
   }
@@ -1289,16 +1297,63 @@ async function defaultAgentInstaller(
     healthy = await verifyTargetHealthy(target, process.platform, true);
   }
   // A saída do agente já foi mostrada ao vivo (inherit) — o usuário viu o que aconteceu.
-  void run; // (status do processo não é confiável p/ background pip/winget; vale o health-check)
-  return {
-    target,
-    hashOk: healthy,
-    installed: healthy,
-    message: healthy
+  //
+  // O QUE O `run` PODE E O QUE NÃO PODE DECIDIR. O raciocínio antigo (`void run`) tinha
+  // fundamento pela METADE: o status do processo realmente NÃO serve p/ decidir se o alvo
+  // está SAUDÁVEL (o agente pode deixar um `pip install`/`winget` em background e sair antes
+  // dele terminar — por isso a saúde continua vindo SÓ do health-check, que NÃO relaxamos).
+  // Mas status ≠ 0 (ou `error`, ex.: timeout de 900s) PROVA que a delegação ao agente
+  // FRACASSOU — no log do dono, `aluy -p` saiu 1 com "erro de broker: credencial inválida ou
+  // expirada (401)", ou seja, o agente nem chegou a tentar instalar. Descartar esse sinal era
+  // o que deixava "instalado e verificado" ser impresso sobre uma instalação que não houve.
+  // Então o status decide a AFIRMAÇÃO (o que dizemos ao usuário), nunca a VERIFICAÇÃO.
+  const agentOk = run.error === undefined && run.status === 0;
+  const outcome: ProvisionOutcome = !agentOk
+    ? healthy
+      ? 'failed-but-present'
+      : 'failed'
+    : preExisting && healthy
+      ? 'already-present'
+      : healthy
+        ? 'installed'
+        : 'failed';
+  const retry = `Você pode tentar de novo depois com \`aluy bootstrap\`.`;
+  const message =
+    outcome === 'installed'
       ? `complemento "${target}" instalado e verificado.`
-      : `o complemento "${target}" ainda não respondeu como esperado. O Aluy CLI ` +
-        `funciona sem ele; você pode tentar de novo depois com \`aluy bootstrap\`.`,
-  };
+      : outcome === 'already-present'
+        ? `complemento "${target}" JÁ ESTAVA presente antes desta execução — verificado, nada ` +
+          `novo foi instalado.`
+        : outcome === 'failed-but-present'
+          ? `⚠ o instalador via agente NÃO rodou até o fim (${agentFailureReason(run)}) — o ` +
+            `complemento "${target}" NÃO foi provisionado por ele. ` +
+            // O health-check passa, mas por motivos DIFERENTES nos dois casos, e afirmar o
+            // errado seria repetir o defeito noutra forma: ou o sidecar já existia, ou algum
+            // passo DETERMINÍSTICO nosso (ex.: `ensureOllamaModels`) rodou fora do agente.
+            (preExisting
+              ? `O que responde aqui é a instalação que JÁ existia nesta máquina.`
+              : `O health-check passa por conta dos passos determinísticos que rodam fora do ` +
+                `agente — o provisionamento completo NÃO aconteceu.`) +
+            ` Resolva a falha acima e re-rode \`aluy bootstrap\`.`
+          : `o complemento "${target}" ainda não respondeu como esperado` +
+            (agentOk ? '' : ` — o instalador via agente falhou (${agentFailureReason(run)})`) +
+            `. O Aluy CLI funciona sem ele; ${retry}`;
+  return { target, hashOk: healthy, installed: healthy, outcome, message };
+}
+
+/**
+ * Motivo CURTO da falha do agente p/ a mensagem. A saída completa já rolou ao vivo (stdio
+ * `inherit`); aqui é só a âncora que liga a linha do resumo ao erro que o usuário viu passar
+ * (sem isso, "falhou" no resumo e o 401 lá em cima ficam sendo dois fatos soltos).
+ */
+function agentFailureReason(run: ReturnType<typeof spawnSync>): string {
+  if (run.error !== undefined) {
+    return run.signal !== null && run.signal !== undefined
+      ? `interrompido por ${run.signal}`
+      : `não executou: ${run.error.message}`;
+  }
+  if (run.signal !== null && run.signal !== undefined) return `interrompido por ${run.signal}`;
+  return `saiu com código ${run.status ?? '?'}; veja o erro impresso acima`;
 }
 
 /** Poll de verificação pós-agente (cobre `pip install`/`winget` deixado em background).

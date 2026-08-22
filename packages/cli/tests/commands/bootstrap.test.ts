@@ -7,7 +7,12 @@
 //  - Integração via `runInit` (wizard ANTES do provisionamento)
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { runInit, runFirstRunWizard, probeModelReachable } from '../../src/commands/bootstrap.js';
+import {
+  runInit,
+  runFirstRunWizard,
+  probeModelReachable,
+  probeModelUsable,
+} from '../../src/commands/bootstrap.js';
 import { UserConfigStore } from '../../src/io/user-config.js';
 import {
   LOCAL_KEYCHAIN_SERVICE,
@@ -570,6 +575,50 @@ describe('runInit — integração wizard + provisionamento', () => {
       expect.objectContaining({ useAgent: false }),
     );
   });
+
+  // O RAMO QUE DISPARA no achado do dono: o endpoint responde, mas RECUSA a credencial.
+  // Antes o preflight dizia "alcançável ⇒ pode rodar o agente" e a instalação seguia p/ os
+  // três 401. Agora tem que cair no caminho direto E dizer o que consertar.
+  it('credencial RECUSADA (401) + caminho agente ⇒ cai p/ direto e diz `aluy login`', async () => {
+    const mem = new Map<string, string>();
+    mem.set(`${LOCAL_KEYCHAIN_SERVICE}:${apiKeyAccount('anthropic')}`, 'sk-ant');
+    const tmp = mkdtempSync(join(tmpdir(), 'aluy-bootstrap-401-'));
+    tmpDirs.push(tmp);
+    const configStore = new UserConfigStore({ baseDir: tmp });
+    configStore.save({
+      localProvider: 'anthropic',
+      localModel: 'claude-sonnet-4-8',
+      profile: 'turbo',
+    });
+
+    const out: string[] = [];
+    const code = await runInit({
+      out: (l) => out.push(l),
+      err: () => {},
+      configStore,
+      entryFactory: fakeEntryFactory(mem),
+      volatileProbe: HERMETIC_VOLATILE_PROBE,
+      fileVault: tmpFileVault(tmp),
+      isInteractive: true,
+      prompt: async () => '',
+      agent: true,
+      modelProbe: async () => ({
+        status: 'unauthorized' as const,
+        detail: 'o broker RECUSOU a credencial (401) — rode `aluy login`.',
+      }),
+    });
+
+    expect(code).toBe(0);
+    const texto = out.join('\n');
+    expect(texto).toMatch(/credencial do modelo NÃO foi aceita/i);
+    expect(texto).toMatch(/aluy login/);
+    expect(texto).toMatch(/caminho DIRETO|--no-agent/i);
+    expect(runProvisioner).toHaveBeenCalledWith(
+      'turbo',
+      undefined,
+      expect.objectContaining({ useAgent: false }),
+    );
+  });
 });
 
 describe('probeModelReachable — preflight de acessibilidade do modelo', () => {
@@ -596,5 +645,129 @@ describe('probeModelReachable — preflight de acessibilidade do modelo', () => 
       },
     });
     expect(ok).toBe(false);
+  });
+});
+
+// ─── probeModelUsable — ALCANCE **e** AUTENTICAÇÃO ───────────────────────────
+//
+// ACHADO DO DONO (log real do Windows): as três instalações via agente morreram com
+// "erro de broker: credencial inválida ou expirada (401)" e o preflight tinha passado.
+// `probeModelReachable` (acima) responde `true` para 401 — de propósito, é o que ele mede.
+// Quem decide se o agente pode rodar é este probe, e ele TEM que separar os dois casos.
+
+describe('probeModelUsable — distingue "não alcancei" de "credencial recusada"', () => {
+  const brokerEnv = { ALUY_BROKER_URL: 'https://broker.teste' };
+
+  it('BROKER 401 ⇒ unauthorized (era exatamente o caso que passava batido)', async () => {
+    let calledUrl = '';
+    let authHeader = '';
+    const v = await probeModelUsable({
+      config: { backend: 'broker' } as never,
+      env: brokerEnv,
+      brokerToken: async () => 'pat-de-teste',
+      fetchImpl: async (url, init) => {
+        calledUrl = url;
+        authHeader = init?.headers?.authorization ?? '';
+        return { status: 401 };
+      },
+    });
+    expect(v.status).toBe('unauthorized');
+    expect(v.detail).toMatch(/aluy login/);
+    // Sondou o endpoint que EXIGE auth e não gasta modelo, MANDANDO a credencial —
+    // sem o header, o 401 seria ambíguo (é o defeito da sonda anônima antiga).
+    expect(calledUrl).toBe('https://broker.teste/v1/quota');
+    expect(authHeader).toBe('Bearer pat-de-teste');
+  });
+
+  it('BROKER 403 ⇒ ok (autenticou; `quota:read` é escopo opt-in — não é falha de credencial)', async () => {
+    const v = await probeModelUsable({
+      config: { backend: 'broker' } as never,
+      env: brokerEnv,
+      brokerToken: async () => 'pat-de-teste',
+      fetchImpl: async () => ({ status: 403 }),
+    });
+    expect(v.status).toBe('ok');
+  });
+
+  it('BROKER 200 ⇒ ok', async () => {
+    const v = await probeModelUsable({
+      config: { backend: 'broker' } as never,
+      env: brokerEnv,
+      brokerToken: async () => 'pat-de-teste',
+      fetchImpl: async () => ({ status: 200 }),
+    });
+    expect(v.status).toBe('ok');
+  });
+
+  it('BROKER inalcançável (erro de rede) ⇒ unreachable, NÃO unauthorized', async () => {
+    const v = await probeModelUsable({
+      config: { backend: 'broker' } as never,
+      env: brokerEnv,
+      brokerToken: async () => 'pat-de-teste',
+      fetchImpl: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+    });
+    expect(v.status).toBe('unreachable');
+  });
+
+  it('BROKER sem credencial no keychain ⇒ unauthorized SEM tocar a rede', async () => {
+    let tocou = false;
+    const v = await probeModelUsable({
+      config: { backend: 'broker' } as never,
+      env: brokerEnv,
+      brokerToken: async () => {
+        throw new Error('SessionExpired');
+      },
+      fetchImpl: async () => {
+        tocou = true;
+        return { status: 200 };
+      },
+    });
+    expect(v.status).toBe('unauthorized');
+    expect(tocou).toBe(false);
+  });
+
+  it('BYO (backend local) 401 com chave ⇒ unauthorized; sonda /v1/models com x-api-key', async () => {
+    let calledUrl = '';
+    let apiKeyHeader = '';
+    const v = await probeModelUsable({
+      config: { backend: 'local', localProvider: 'anthropic' } as never,
+      env: {},
+      localKey: async () => 'sk-ant-ruim',
+      fetchImpl: async (url, init) => {
+        calledUrl = url;
+        apiKeyHeader = init?.headers?.['x-api-key'] ?? '';
+        return { status: 401 };
+      },
+    });
+    expect(v.status).toBe('unauthorized');
+    expect(calledUrl).toBe('https://api.anthropic.com/v1/models');
+    expect(apiKeyHeader).toBe('sk-ant-ruim');
+  });
+
+  it('BYO keyless (ollama, auth:none) 200 ⇒ ok, sem header de credencial', async () => {
+    let headers: Record<string, string> = {};
+    const v = await probeModelUsable({
+      config: { backend: 'local', localProvider: 'ollama' } as never,
+      env: {},
+      fetchImpl: async (_url, init) => {
+        headers = init?.headers ?? {};
+        return { status: 200 };
+      },
+    });
+    expect(v.status).toBe('ok');
+    expect(headers.authorization).toBeUndefined();
+  });
+
+  it('BYO com endpoint fora ⇒ unreachable', async () => {
+    const v = await probeModelUsable({
+      config: { backend: 'local', localProvider: 'ollama' } as never,
+      env: {},
+      fetchImpl: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+    });
+    expect(v.status).toBe('unreachable');
   });
 });

@@ -220,15 +220,37 @@ export type ProvisionStatus =
   | 'provisioning'; // em andamento (exclusão mútua entre alvos)
 
 /** Resultado do provisionamento de UM alvo. */
+/**
+ * COMO o alvo chegou ao estado atual. Existe porque `installed` (= "está saudável agora")
+ * NÃO distingue três situações muito diferentes, e a mensagem afirmava a mais otimista das
+ * três. DEFEITO OBSERVADO (instalação no Windows do dono): o agente falhou com 401 nos três
+ * complementos — nem chegou a tentar instalar — mas o health-check encontrou sidecars que já
+ * existiam de antes e o instalador imprimiu "instalado e verificado" para os três.
+ *
+ *   • `installed`         — não estava saudável antes, está agora: instalamos NESTA execução.
+ *   • `already-present`   — já estava saudável antes de mexermos (nada foi instalado agora).
+ *   • `failed-but-present`— o provisionamento FALHOU, mas o alvo está saudável por já existir.
+ *                            O usuário PRECISA saber que o caminho de instalação não rodou.
+ *   • `failed`            — falhou e o alvo não está saudável.
+ *
+ * Opcional: os caminhos que ainda não classificam omitem, e o consumidor cai no `installed`.
+ */
+export type ProvisionOutcome = 'installed' | 'already-present' | 'failed-but-present' | 'failed';
+
 export interface ProvisionTargetResult {
   /** O alvo provisionado. */
   readonly target: SidecarTarget;
   /** Hash verificado com sucesso? */
   readonly hashOk: boolean;
-  /** Instalação concluída com sucesso? */
+  /**
+   * O alvo está SAUDÁVEL (verificado agora)? ⚠ NÃO significa "foi instalado nesta execução" —
+   * um sidecar pré-existente também responde `true`. Para a AFIRMAÇÃO ao usuário, veja `outcome`.
+   */
   readonly installed: boolean;
   /** Mensagem legível (erro ou sucesso). */
   readonly message: string;
+  /** Como o alvo chegou aqui (ver `ProvisionOutcome`). Ausente ⇒ o caller cai no `installed`. */
+  readonly outcome?: ProvisionOutcome;
 }
 
 /** Resultado agregado do provisionamento (todos os alvos). */

@@ -21,7 +21,7 @@ import {
   type OAuthFetch,
   type LocalProviderKind,
 } from '@hiperplano/aluy-cli-core';
-import { realTerminalIO, type TerminalIO } from '../auth/io.js';
+import { realTerminalIO, PromptInterruptedError, type TerminalIO } from '../auth/io.js';
 import {
   storeApiKey,
   type KeyringEntry,
@@ -125,7 +125,24 @@ async function runApiKeyLogin(
 ): Promise<number> {
   let key = inlineToken?.trim();
   if (key === undefined || key === '') {
-    key = (await io.prompt(`Cole a API key de ${provider}: `, { secret: true })).trim();
+    // A ajuda vai NO PRÓPRIO prompt: num `cmd.exe` colar é ambíguo (Ctrl-V não cola,
+    // clique esquerdo seleciona — quem cola é o botão DIREITO), e o dono passou uma noite
+    // concluindo que o CLI estava quebrado quando o campo só estava vazio. Dizer aqui
+    // custa uma linha e resolve antes de virar suporte.
+    io.out(`  (cole com o botão direito no cmd.exe; ou use --token <chave> para não depender disso)`);
+    try {
+      key = (await io.prompt(`Cole a API key de ${provider}: `, { secret: true })).trim();
+    } catch (err) {
+      // CTRL-C — cancelar é uma decisão do usuário, não uma falha do programa. Antes isto
+      // subia até o topo e saía como `aluy: erro fatal: PromptInterruptedError`, que
+      // parece defeito e não diz o que fazer em seguida.
+      if (err instanceof PromptInterruptedError) {
+        io.err('login: cancelado.');
+        io.err(`  para informar a chave sem prompt: aluy login --provider ${provider} --token <chave>`);
+        return 1;
+      }
+      throw err;
+    }
   }
   if (key === '') {
     io.err('login: nenhuma chave informada.');

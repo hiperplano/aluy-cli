@@ -11,6 +11,7 @@
 // Read-only: NÃO escreve nada, NÃO gasta modelo, NÃO toca rede. `--json` p/ script.
 
 import { existsSync } from 'node:fs';
+import { loadLocalProviderCatalog } from '../io/providers-config.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -96,7 +97,14 @@ export function collectSettings(
   config: ReturnType<UserConfigStore['load']>,
 ): Setting[] {
   // Defaults puros: resolve com env/config VAZIOS p/ extrair o que o catálogo/domínio default.
-  const def = resolveLocalProviderConfig({ env: {}, config: {} });
+  // F-CATALOGO-DO-DONO — aqui o `config: {}` é DELIBERADO (queremos os defaults puros para
+  // exibir), mas o catálogo do usuário ainda precisa entrar: sem ele o default sai do
+  // conjunto embutido e ignora providers que o dono declarou.
+  const def = resolveLocalProviderConfig({
+    env: {},
+    config: {},
+    catalog: loadLocalProviderCatalog(),
+  });
   const defaultBaseUrl = def.baseUrl ?? '—';
 
   const settings: Setting[] = [

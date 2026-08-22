@@ -765,10 +765,14 @@ describe('`--anonymous` — defaultAgentInstaller spawna o aluy interno com --an
     // o 1º poll já bate saudável (sem cair nos 24×5s de retry, EST-1133).
     mockExists.mockReturnValue(true);
 
-    await runProvisioner('turbo', { ollama: false, mem0: true, headroom: false }, {
-      platform: 'linux',
-      useAgent: true,
-    });
+    await runProvisioner(
+      'turbo',
+      { ollama: false, mem0: true, headroom: false },
+      {
+        platform: 'linux',
+        useAgent: true,
+      },
+    );
 
     expect(mockSpawnSync).toHaveBeenCalledTimes(1);
     const argv = mockSpawnSync.mock.calls[0]?.[1] as string[] | undefined;
@@ -778,6 +782,70 @@ describe('`--anonymous` — defaultAgentInstaller spawna o aluy interno com --an
     expect(argv).toContain('-p');
     expect(argv).toContain('--yolo');
     expect(argv).toContain('--no-self-check');
+  });
+});
+
+// ─── A AFIRMAÇÃO tem que bater com o que ACONTECEU (achado do dono, Windows) ──
+//
+// Log real: o agente embutido morreu com 401 nos três complementos e o instalador imprimiu
+// "instalado e verificado" para os três — porque os sidecars já existiam de antes e o
+// health-check (corretamente) devolveu `true`. O health-check NÃO é o problema; a AFIRMAÇÃO é.
+// Estes testes exercitam os TRÊS ramos, inclusive o que dispara (agente falhou).
+
+describe('defaultAgentInstaller — instalado AGORA vs já presente vs provisionamento FALHOU', () => {
+  beforeEach(resetAllMocks);
+
+  /** mem0 saudável (light) = python do venv + script do servidor existem. */
+  function comSaudeControlada(saudavelDesdeOInicio: boolean, statusDoAgente: number) {
+    let saudavel = saudavelDesdeOInicio;
+    mockExists.mockImplementation(() => saudavel);
+    mockSpawnSync.mockImplementation(() => {
+      if (statusDoAgente === 0) saudavel = true; // o agente instalou de verdade
+      return { status: statusDoAgente, signal: null, stdout: '', stderr: '' } as ReturnType<
+        typeof spawnSync
+      >;
+    });
+  }
+
+  async function provisionaMem0() {
+    const r = await runProvisioner(
+      'turbo',
+      { ollama: false, mem0: true, headroom: false },
+      {
+        platform: 'linux',
+        useAgent: true,
+      },
+    );
+    return r.targets[0];
+  }
+
+  it('agente OK + alvo AUSENTE antes ⇒ outcome "installed" e afirma a instalação', async () => {
+    comSaudeControlada(false, 0);
+    const t = await provisionaMem0();
+    expect(t?.installed).toBe(true);
+    expect(t?.outcome).toBe('installed');
+    expect(t?.message).toMatch(/instalado e verificado/i);
+  });
+
+  it('agente OK + alvo JÁ saudável antes ⇒ outcome "already-present" (não afirma instalação)', async () => {
+    comSaudeControlada(true, 0);
+    const t = await provisionaMem0();
+    expect(t?.installed).toBe(true); // saúde: continua `true` — o health-check NÃO foi relaxado
+    expect(t?.outcome).toBe('already-present');
+    expect(t?.message).toMatch(/JÁ ESTAVA presente/i);
+    expect(t?.message).not.toMatch(/instalado e verificado/i);
+  });
+
+  it('agente FALHOU (401 ⇒ exit 1) + alvo já existia ⇒ "failed-but-present", NUNCA "instalado e verificado"', async () => {
+    comSaudeControlada(true, 1);
+    const t = await provisionaMem0();
+    // A verificação continua honesta (o sidecar responde); o que muda é o que AFIRMAMOS.
+    expect(t?.installed).toBe(true);
+    expect(t?.outcome).toBe('failed-but-present');
+    expect(t?.message).not.toMatch(/instalado e verificado/i);
+    // O usuário PRECISA saber que o caminho via agente não rodou.
+    expect(t?.message).toMatch(/NÃO rodou até o fim/i);
+    expect(t?.message).toMatch(/código 1/);
   });
 });
 

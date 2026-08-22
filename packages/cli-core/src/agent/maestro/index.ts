@@ -43,6 +43,7 @@ export {
   type SidecarTarget,
   type PinnedArtifact,
   type ProvisionStatus,
+  type ProvisionOutcome,
   type ProvisionTargetResult,
   type ProvisionResult,
   type SidecarProvisioner,
