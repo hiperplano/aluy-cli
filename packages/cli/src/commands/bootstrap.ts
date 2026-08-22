@@ -14,22 +14,36 @@ import { runProvisioner } from '../provisioner/sidecar-provisioner.js';
 import {
   storeApiKey,
   apiKeyAccount,
+  createLocalCredentialProvider,
   LOCAL_KEYCHAIN_SERVICE,
   type KeyringEntry,
 } from '../model/local/credential-resolver.js';
 import type { VolatileKeychainProbeOptions } from '../auth/keychain-volatility.js';
 import type { FileVaultOptions } from '../model/local/file-vault.js';
-import { resolveLocalProviderConfig } from '../model/local/config.js';
+import { resolveLocalProviderConfig, resolveModelBackend } from '../model/local/config.js';
+import { loadLocalProviderCatalog } from '../io/providers-config.js';
+import { loadBrokerConfig } from '../model/config.js';
+import { loadAuthConfig } from '../auth/config.js';
+import { KeychainCredentialStore } from '../auth/keychain-store.js';
 import {
   defaultLocalCatalog,
   findProvider,
+  LoginService,
   type LocalProviderKind,
 } from '@hiperplano/aluy-cli-core';
 
-/** Função de fetch injetável (testes) — assinatura mínima usada pelo preflight. */
+/**
+ * Função de fetch injetável (testes) — assinatura mínima usada pelo preflight.
+ *
+ * `method`/`headers` entraram com o preflight de AUTENTICAÇÃO (`probeModelUsable`): a sonda
+ * antiga era um GET ANÔNIMO, e um GET anônimo NÃO consegue distinguir "a chave é ruim" de
+ * "eu não mandei chave nenhuma" — todo provider remoto responderia 401 do mesmo jeito.
+ * Ambos os campos são opcionais: os fakes antigos (`async (url) => ({ status }))`) seguem
+ * válidos.
+ */
 export type FetchLike = (
   url: string,
-  init?: { signal?: AbortSignal },
+  init?: { signal?: AbortSignal; method?: string; headers?: Record<string, string> },
 ) => Promise<{ status: number }>;
 
 /**
@@ -44,6 +58,15 @@ export type FetchLike = (
  * (mesmo 401) = alcançável. Sem baseUrl efetivo (provider remoto default) ⇒ devolve `true`
  * (não bloqueia: a falha de chave de um provider remoto é assunto do wizard, não daqui).
  * Fail-safe: SÓ erro de REDE (ECONNREFUSED/timeout/DNS) conta como inacessível.
+ *
+ * ⚠ ESCOPO (não use isto como preflight sozinho): esta função responde ALCANCE, e ALCANCE
+ * NÃO É USABILIDADE. ACHADO DO DONO (instalação no Windows): as três instalações via agente
+ * morreram com "erro de broker: credencial inválida ou expirada (401)" e o preflight tinha
+ * passado — porque um broker que devolve 401 está alcançável e inútil ao mesmo tempo, e
+ * porque a sonda cai no `baseUrl` do provider LOCAL mesmo quando o backend efetivo é o
+ * BROKER (aí devolvia `true` por "sem endpoint p/ sondar"). Quem decide se o agente pode
+ * rodar é o `probeModelUsable` abaixo, que distingue os dois casos. Esta continua exportada
+ * porque a pergunta "a porta responde?" ainda é útil isolada (e é o que os testes fixam).
  */
 export async function probeModelReachable(opts: {
   config: ReturnType<UserConfigStore['load']>;
@@ -52,7 +75,7 @@ export async function probeModelReachable(opts: {
   timeoutMs?: number;
 }): Promise<boolean> {
   const { config, env } = opts;
-  const resolved = resolveLocalProviderConfig({ env, config });
+  const resolved = resolveLocalProviderConfig({ env, config, catalog: loadLocalProviderCatalog() });
   // baseUrl EFETIVO: o explícito do usuário OU o default do catálogo p/ o provider.
   const catalogBaseUrl = findProvider(defaultLocalCatalog(), resolved.provider)?.baseUrl;
   const baseUrl = resolved.baseUrl ?? catalogBaseUrl;
@@ -69,6 +92,235 @@ export async function probeModelReachable(opts: {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ─── Preflight de USABILIDADE do modelo (alcance + AUTENTICAÇÃO) ─────────────
+//
+// DEFEITO OBSERVADO (log real da instalação no Windows do dono): `aluy bootstrap` rodou o
+// agente embutido p/ os três complementos, os três morreram em
+// `erro de broker: credencial inválida ou expirada — rode aluy login. (401)`,
+// e o instalador seguiu como se nada tivesse acontecido. O preflight que deveria ter
+// evitado isso (`probeModelReachable`) errava por DOIS motivos independentes:
+//
+//   1. Sondava sempre o `baseUrl` do provider LOCAL, mesmo quando o backend EFETIVO era o
+//      broker — e, quando não achava baseUrl, devolvia `true` ("não bloqueia").
+//   2. Tratava QUALQUER resposta HTTP como sucesso, 401 inclusive, e sondava ANÔNIMO (sem
+//      mandar credencial), o que torna o 401 ambíguo por construção.
+//
+// A correção resolve os dois: o preflight agora resolve o MESMO backend que o agente vai
+// usar e faz uma sonda AUTENTICADA — com a MESMA credencial que o agente usaria. Assim
+// "não alcancei" e "a credencial não serve" viram estados DISTINTOS, cada um com sua saída.
+
+/** Veredito do preflight — ALCANCE e AUTENTICAÇÃO são falhas diferentes, com saídas diferentes. */
+export type ModelPreflightStatus = 'ok' | 'unreachable' | 'unauthorized';
+
+export interface ModelPreflight {
+  readonly status: ModelPreflightStatus;
+  /** Detalhe ACIONÁVEL p/ o usuário. NUNCA contém segredo (CLI-SEC-2/7). */
+  readonly detail?: string;
+}
+
+/** Path do broker que EXIGE auth e NÃO gasta modelo (o mesmo que o `aluy login` usa p/ validar). */
+const QUOTA_PATH = '/v1/quota';
+
+/** Timeout curto: o preflight não pode pendurar a instalação esperando um endpoint fora. */
+const PREFLIGHT_TIMEOUT_MS = 4000;
+
+export interface ModelUsableProbeOptions {
+  config: ReturnType<UserConfigStore['load']>;
+  env: NodeJS.ProcessEnv;
+  fetchImpl?: FetchLike;
+  timeoutMs?: number;
+  /**
+   * Resolve o PAT/token do BROKER (testes injetam). Default: keychain + `ALUY_TOKEN` —
+   * exatamente a mesma resolução que o agente embutido faria, senão o preflight provaria
+   * uma credencial que não é a usada.
+   */
+  brokerToken?: () => Promise<string>;
+  /** Resolve a chave BYO do provider local (testes injetam). Default: keychain → cofre → env. */
+  localKey?: () => Promise<string>;
+}
+
+/**
+ * PREFLIGHT do caminho via AGENTE: o instalador-agente precisa de um modelo que RESPONDA e
+ * que ACEITE a credencial. Devolve `ok` / `unreachable` / `unauthorized`.
+ *
+ * Roteia pelo backend EFETIVO (`resolveModelBackend`, flag>env>config>default), porque é ele
+ * que decide quem atende o agente: broker (conta) ou provider local (BYO). Sondar o lado
+ * errado foi metade do defeito original.
+ *
+ * NÃO gasta token: os dois lados usam um GET que exige auth mas não chama modelo.
+ * FAIL-SAFE: só o que PROVA o problema vira veredito negativo. Status inesperado (5xx/404)
+ * ⇒ `ok` — não temos direito de bloquear a instalação por um erro que não é do usuário.
+ */
+export async function probeModelUsable(opts: ModelUsableProbeOptions): Promise<ModelPreflight> {
+  const backend = resolveModelBackend({ env: opts.env, config: opts.config });
+  return backend === 'local' ? probeLocalProviderUsable(opts) : probeBrokerUsable(opts);
+}
+
+/** `fetch` + timeout comuns aos dois lados do preflight. Lança em erro de REDE (o caller trata). */
+async function probeGet(
+  opts: ModelUsableProbeOptions,
+  url: string,
+  headers: Record<string, string>,
+): Promise<number> {
+  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? PREFLIGHT_TIMEOUT_MS);
+  try {
+    // SEM `body`: um GET com body (mesmo `''`) faz o fetch do Node LANÇAR antes da rede.
+    const res = await fetchImpl(url, {
+      method: 'GET',
+      headers: { accept: 'application/json', ...headers },
+      signal: ctrl.signal,
+    });
+    return res.status;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Backend BROKER (o default, e o caso do log do dono): valida a credencial com `GET /v1/quota`
+ * — MESMO toque que o `aluy login` usa p/ recusar um PAT ruim ANTES de gravar.
+ *
+ * 401 ⇒ `unauthorized` (é literalmente o erro que derrubou as três instalações).
+ * 403 ⇒ `ok`: 403 significa AUTENTICOU mas não tem o escopo `quota:read` (opt-in) — um PAT
+ * normal de chat recebe 403 aqui e é PERFEITAMENTE bom p/ o agente (mesma decisão já tomada
+ * em `validatePatOnBroker`; tratá-lo como falha bloquearia login VÁLIDO).
+ */
+async function probeBrokerUsable(opts: ModelUsableProbeOptions): Promise<ModelPreflight> {
+  const { brokerBaseUrl } = loadBrokerConfig(opts.env);
+  let token: string;
+  try {
+    token = await (opts.brokerToken ?? (() => defaultBrokerToken(opts.env)))();
+  } catch {
+    // Sem credencial no keychain / sessão expirada: o agente NEM chegaria à rede.
+    return {
+      status: 'unauthorized',
+      detail: 'não há credencial válida do broker nesta máquina — rode `aluy login`.',
+    };
+  }
+  if (token === '') {
+    return {
+      status: 'unauthorized',
+      detail: 'não há credencial válida do broker nesta máquina — rode `aluy login`.',
+    };
+  }
+  let status: number;
+  try {
+    status = await probeGet(opts, `${brokerBaseUrl}${QUOTA_PATH}`, {
+      authorization: `Bearer ${token}`,
+    });
+  } catch {
+    return { status: 'unreachable', detail: 'o broker não respondeu (rede/endpoint fora).' };
+  }
+  if (status === 401) {
+    return {
+      status: 'unauthorized',
+      detail:
+        'o broker RECUSOU a credencial (401) — ela expirou ou foi revogada; rode `aluy login`.',
+    };
+  }
+  return { status: 'ok' };
+}
+
+/**
+ * Backend LOCAL (BYO): `GET <baseUrl>/models` AUTENTICADO com a chave do provider. A composição
+ * da URL e dos headers espelha `checkModelConnectivity`/`fetchModelsBody` (o `baseUrl` do
+ * catálogo já traz o `/v1` de quem usa; o wire `anthropic` é a exceção, com `x-api-key`), então
+ * um provider que funciona p/ chat funciona aqui.
+ *
+ * `auth:'none'` (ex.: Ollama no loopback) ⇒ sonda ANÔNIMA de propósito: não há credencial p/
+ * estar errada, e aí 401 realmente não é o nosso caso.
+ */
+async function probeLocalProviderUsable(opts: ModelUsableProbeOptions): Promise<ModelPreflight> {
+  const resolved = resolveLocalProviderConfig({
+    // F-CATALOGO-DO-DONO — sem o catálogo do USUÁRIO, `parseProvider` valida contra o
+    // EMBUTIDO e descarta em silêncio qualquer provider declarado em `providers[]`: o
+    // `localProvider: "tokenrouter"` do config vira o default, e o bootstrap vai sondar e
+    // instalar contra um provider que o dono nunca escolheu. Foi o que fez a tela mostrar
+    // um provider diferente do que estava gravado.
+    env: opts.env,
+    config: opts.config,
+    catalog: loadLocalProviderCatalog(),
+  });
+  const entry = findProvider(defaultLocalCatalog(), resolved.provider);
+  const baseUrl = resolved.baseUrl ?? entry?.baseUrl;
+  if (baseUrl === undefined || baseUrl === '') return { status: 'ok' }; // sem endpoint p/ sondar
+  let key = '';
+  if (resolved.auth !== 'none') {
+    try {
+      key = await (opts.localKey ?? (() => defaultLocalKey(opts)))();
+    } catch {
+      return {
+        status: 'unauthorized',
+        detail:
+          `sem chave de API resolvível p/ o provider local "${resolved.provider}" — ` +
+          `grave com \`aluy login --provider ${resolved.provider}\` ou exporte a env do provider.`,
+      };
+    }
+  }
+  const base = baseUrl.replace(/\/+$/, '');
+  const anthropicWire = (entry?.wireFormat ?? 'openai-compat') === 'anthropic';
+  const url = anthropicWire ? `${base}/v1/models` : `${base}/models`;
+  // A credencial só entra quando EXISTE: mandar `Bearer ` vazio faz alguns servers
+  // responderem 401 à toa — e um 401 fabricado por nós seria um falso "credencial ruim".
+  const headers: Record<string, string> =
+    key === ''
+      ? {}
+      : anthropicWire
+        ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' }
+        : { authorization: `Bearer ${key}` };
+  let status: number;
+  try {
+    status = await probeGet(opts, url, headers);
+  } catch {
+    return {
+      status: 'unreachable',
+      detail: `o endpoint do provider local "${resolved.provider}" não respondeu.`,
+    };
+  }
+  if (key !== '' && (status === 401 || status === 403)) {
+    return {
+      status: 'unauthorized',
+      detail:
+        `o provider local "${resolved.provider}" RECUSOU a chave (${status}) — ` +
+        `regrave com \`aluy login --provider ${resolved.provider}\`.`,
+    };
+  }
+  return { status: 'ok' };
+}
+
+/** Token do broker pela MESMA via do resto do CLI (keychain do SO + `ALUY_TOKEN`). */
+function defaultBrokerToken(env: NodeJS.ProcessEnv): Promise<string> {
+  const cfg = loadAuthConfig(env);
+  const store = new KeychainCredentialStore();
+  const login = new LoginService(
+    { ...cfg, baseUrl: cfg.identityBaseUrl, store },
+    { envToken: () => env.ALUY_TOKEN },
+  );
+  return login.getAccessToken();
+}
+
+/** Chave BYO pela MESMA via do resto do CLI (keychain → cofre em arquivo → env). */
+async function defaultLocalKey(opts: ModelUsableProbeOptions): Promise<string> {
+  const resolved = resolveLocalProviderConfig({
+    // F-CATALOGO-DO-DONO — sem o catálogo do USUÁRIO, `parseProvider` valida contra o
+    // EMBUTIDO e descarta em silêncio qualquer provider declarado em `providers[]`: o
+    // `localProvider: "tokenrouter"` do config vira o default, e o bootstrap vai sondar e
+    // instalar contra um provider que o dono nunca escolheu. Foi o que fez a tela mostrar
+    // um provider diferente do que estava gravado.
+    env: opts.env,
+    config: opts.config,
+    catalog: loadLocalProviderCatalog(),
+  });
+  const provider = createLocalCredentialProvider({
+    provider: resolved.provider,
+    auth: resolved.auth,
+    env: opts.env,
+  });
+  return (await provider()).secret;
 }
 
 const VALID_PROVIDERS: readonly LocalProviderKind[] = ['anthropic', 'openrouter', 'openai'];
@@ -285,13 +537,17 @@ export async function runInit(opts: {
   /** Ambiente (default: `process.env`) — usado pelo preflight de acessibilidade do modelo. */
   env?: NodeJS.ProcessEnv;
   /**
-   * Preflight injetável (testes): dado config+env, devolve se o modelo está acessível.
-   * Default: `probeModelReachable`. Só é consultado no caminho via agente.
+   * Preflight injetável (testes): dado config+env, devolve se o modelo está USÁVEL pelo
+   * agente. Default: `probeModelUsable`. Só é consultado no caminho via agente.
+   *
+   * Aceita `boolean` (forma antiga: `true`=ok, `false`=inacessível) OU um `ModelPreflight`,
+   * que é o que distingue "não alcancei" de "a credencial não serve" — a distinção que
+   * faltava quando os três complementos falharam com 401 e a instalação declarou sucesso.
    */
   modelProbe?: (
     config: ReturnType<UserConfigStore['load']>,
     env: NodeJS.ProcessEnv,
-  ) => Promise<boolean>;
+  ) => Promise<boolean | ModelPreflight>;
 }): Promise<number> {
   const { out, err } = opts;
 
@@ -354,14 +610,29 @@ export async function runInit(opts: {
   // pinado, só Linux com python já pronto), para quem prefere não rodar o agente.
   let useAgent = opts.agent !== false;
   // PREFLIGHT (só p/ o caminho via agente): o instalador-agente PRECISA falar com o modelo.
-  // Se o endpoint do modelo não responde (típico em máquina do zero — inclusive quando o
-  // próprio modelo seria o ollama local que ainda não subiu), cai SOZINHO no caminho direto
-  // em vez de "polir no vazio" em "verificando…". Achado do dono. Injetável p/ teste.
+  // DUAS falhas distintas o impedem, e antes só UMA era vista:
+  //   • INACESSÍVEL — o endpoint não responde (típico em máquina do zero, inclusive quando o
+  //     próprio modelo seria o ollama local que ainda não subiu). Achado do dono.
+  //   • NÃO-AUTORIZADO — o endpoint responde, mas RECUSA a credencial (401). Achado do dono
+  //     na instalação do Windows: as três delegações ao agente morreram em
+  //     "erro de broker: credencial inválida ou expirada (401)" e o preflight tinha passado,
+  //     porque a sonda antiga tratava QUALQUER resposta HTTP como "alcançável ⇒ pode rodar".
+  // Nos dois casos caímos no caminho DIRETO em vez de "polir no vazio" — mas o 401 ganha uma
+  // mensagem ACIONÁVEL (`aluy login`), senão o usuário fica sem saber o que consertar.
+  // Injetável p/ teste.
   if (useAgent) {
-    const probe = opts.modelProbe ?? ((c, e) => probeModelReachable({ config: c, env: e }));
-    const reachable = await probe(config, opts.env ?? process.env);
-    if (!reachable) {
-      out('  ⚠ O modelo local não respondeu — o instalador via agente precisa dele para rodar.');
+    const probe = opts.modelProbe ?? ((c, e) => probeModelUsable({ config: c, env: e }));
+    const verdict = await probe(config, opts.env ?? process.env);
+    const preflight: ModelPreflight =
+      typeof verdict === 'boolean' ? { status: verdict ? 'ok' : 'unreachable' } : verdict;
+    if (preflight.status !== 'ok') {
+      if (preflight.status === 'unauthorized') {
+        out('  ⚠ A credencial do modelo NÃO foi aceita — o instalador via agente não pode rodar.');
+        if (preflight.detail !== undefined) out(`    ${preflight.detail}`);
+      } else {
+        out('  ⚠ O modelo não respondeu — o instalador via agente precisa dele para rodar.');
+        if (preflight.detail !== undefined) out(`    ${preflight.detail}`);
+      }
       out('  Caindo no caminho DIRETO (--no-agent), que provisiona sem usar modelo.');
       out('');
       useAgent = false;
@@ -386,16 +657,42 @@ export async function runInit(opts: {
 
   const result = await runProvisioner(profile, sidecarToggles, { useAgent });
 
+  // ÍCONE pela AFIRMAÇÃO, não só pela saúde. `installed` responde "está saudável AGORA" — e um
+  // sidecar que já existia responde `true` mesmo quando o provisionamento não chegou a rodar
+  // (o 401 do dono). ⚠ marca exatamente esse caso; ✓ fica para o que instalamos ou verificamos
+  // sem falha. Alvo sem `outcome` (caminhos que ainda não classificam) cai no critério antigo.
   for (const t of result.targets) {
-    const icon = t.installed ? '✓' : '✗';
+    const icon = t.outcome === 'failed-but-present' ? '⚠' : t.installed ? '✓' : '✗';
     out(`  ${icon} ${t.target}: ${t.message}`);
   }
 
   out('');
 
+  // "Complementos instalados." era uma AFIRMAÇÃO CEGA: saía sempre que ALGUM alvo estivesse
+  // saudável, inclusive quando nada tinha sido instalado nesta execução — foi a linha que
+  // fechou com sucesso a instalação em que os três complementos falharam com 401. E a ressalva
+  // estava pendurada em `allFailed`, que é MUTUAMENTE EXCLUSIVO com `anySuccess`
+  // (`some(installed)` vs `every(!installed)`) ⇒ era código morto, nunca imprimia.
+  const instalouAgora = result.targets.some(
+    (t) => t.outcome === 'installed' || (t.outcome === undefined && t.installed),
+  );
+  const provisionamentoFalhou = result.targets.some((t) => t.outcome === 'failed-but-present');
+  const algumFalhou = result.targets.some((t) => !t.installed);
+
   if (result.anySuccess) {
-    out('Complementos instalados. O Aluy CLI está pronto, agora com o modo turbo.');
-    if (result.allFailed) {
+    out(
+      instalouAgora
+        ? 'Complementos instalados. O Aluy CLI está pronto, agora com o modo turbo.'
+        : 'Nada novo foi instalado — os complementos já estavam presentes. O Aluy CLI está ' +
+            'pronto, agora com o modo turbo.',
+    );
+    if (provisionamentoFalhou) {
+      out(
+        '⚠ Atenção: o instalador via agente NÃO rodou para pelo menos um complemento (veja acima).',
+      );
+      out('  O que responde é a instalação anterior; resolva a falha e re-rode `aluy bootstrap`.');
+    }
+    if (algumFalhou) {
       out('Observação: alguns complementos não instalaram — o Aluy CLI funciona sem eles.');
     }
     return 0;

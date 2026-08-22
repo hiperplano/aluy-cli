@@ -41,7 +41,12 @@ import { buildSession, type BuildSessionOptions } from './wiring.js';
 import { planSaveProvider } from './save-provider.js';
 // ADR-0120 / EST-1113 — backend LOCAL (BYO): resolve a config e monta o LocalModelClient
 // (atrás do MESMO contrato `ModelClient`) p/ injetar no wiring quando `backend:'local'`.
-import { resolveModelBackend, resolveLocalProviderConfig } from '../model/local/config.js';
+import {
+  resolveModelBackend,
+  resolveLocalProviderConfig,
+  detectLocalEnvOverrides,
+  type LocalEnvOverride,
+} from '../model/local/config.js';
 import {
   buildLocalModelClient,
   createProviderAwareLocalChildCallerFactory,
@@ -1170,6 +1175,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
 
   // EST-1113 (display) — o provider LOCAL resolvido (ex.: `tokenrouter`), p/ o `meta`
   // mostrar `◷ local · tokenrouter · <modelo>` e não o provider do tier (ex.: `openai`).
+  // F-ENV — sobreposições de `ALUY_LOCAL_*` sobre o que o `config.json` DECLAROU.
+  // Capturado aqui (onde a precedência é resolvida) e dito depois, quando o
+  // controller existe para receber a nota. Ver `detectLocalEnvOverrides`.
+  let localEnvOverrides: readonly LocalEnvOverride[] = [];
   let localProviderForMeta: string | undefined;
   // F-WIN — o SLUG do modelo LOCAL efetivamente resolvido (`--local-model` > env >
   // `config.localModel` > default do catálogo do provider). É a CHAVE de consulta da
@@ -1220,7 +1229,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // que ele responde. HOISTADA pela MESMA razão das outras portas locais: nasce dentro do
   // bloco `backend local` (precisa do `activeLocalProviderId`, que só existe lá) e é usada
   // DEPOIS, no `buildSession`.
-  let persistActiveLocalModel: ((slug: string) => void) | undefined;
+  let persistActiveLocalModel: ((slug: string) => boolean) | undefined;
   // F-LOGIN — getter do provider LOCAL ativo AGORA. HOISTADO pela mesma razão das portas
   // vizinhas: `activeLocalProviderId` só existe dentro do bloco `backend local`, e o
   // roteamento do `/login` (mais abaixo) precisa lê-lo NA HORA — o `/provider` pode ter
@@ -1260,6 +1269,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     const localCfg = resolveLocalProviderConfig({
       catalog: localCatalog,
       // (capturado abaixo p/ o meta/display)
+      flags: {
+        ...(opts.localProvider !== undefined ? { localProvider: opts.localProvider } : {}),
+        ...(opts.localModel !== undefined ? { localModel: opts.localModel } : {}),
+        ...(opts.localAuth !== undefined ? { localAuth: opts.localAuth } : {}),
+        ...(opts.localBaseUrl !== undefined ? { localBaseUrl: opts.localBaseUrl } : {}),
+      },
+      env,
+      config: savedConfig,
+    });
+    localEnvOverrides = detectLocalEnvOverrides({
       flags: {
         ...(opts.localProvider !== undefined ? { localProvider: opts.localProvider } : {}),
         ...(opts.localModel !== undefined ? { localModel: opts.localModel } : {}),
@@ -1706,8 +1725,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           slugsDoProvider.some(
             (sl) => sl.trim().toLowerCase() === entry.defaultModel.trim().toLowerCase(),
           );
-        const persistiu = podeTestar && defaultVivo;
-        if (persistiu) configStore.saveLocalProvider(entry.id, entry.defaultModel);
+        // F-GRAVACAO-HONESTA — `save()` devolve `false` quando a escrita falha, e o retorno
+        // era IGNORADO em todas as chamadas. A escrita é atômica (temp + `rename`), e no
+        // Windows o `rename` bate em `EPERM/EBUSY` quando algo segura o arquivo — antivírus
+        // ou OneDrive sobre o perfil do usuário, exatamente o que impediu o npm de remover a
+        // instalação anterior na máquina do dono. Resultado: a nota anunciava "gravado como
+        // padrão", a sessão seguinte reabria com o provider antigo, e nada explicava.
+        const persistiu =
+          podeTestar && defaultVivo && configStore.saveLocalProvider(entry.id, entry.defaultModel);
         return {
           ok: true,
           persisted: persistiu,
@@ -1734,9 +1759,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // F-MODELO-FICA — grava provider+modelo JUNTOS: o modelo pertence ao provider ATIVO
     // (que o `/provider` pode ter trocado nesta sessão), e gravar um sem o outro deixaria
     // o par incoerente. Lê `activeLocalProviderId` na HORA (não congela o do boot).
-    persistActiveLocalModel = (slug: string): void => {
+    persistActiveLocalModel = (slug: string): boolean =>
+      // Devolve o VEREDITO em vez de descartá-lo — ver F-GRAVACAO-HONESTA acima.
       configStore.saveLocalProvider(activeLocalProviderId, slug);
-    };
     activeLocalProviderIdRef = (): string => activeLocalProviderId;
     // F-SALDO-BYO (relato do dono: "não esqueça do defeito da quota do modelo de
     // consumo") — ele carregou crédito no gateway e o aluy não mostrava NADA, porque o
@@ -2757,6 +2782,31 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     built.controller.pushNote('yolo', ['YOLO cancelado — seguindo em modo normal.']);
   }
 
+  // F-ENV — o AMBIENTE venceu o `config.json`, e até aqui isso acontecia EM SILÊNCIO.
+  //
+  // O caso real que abriu isto: o dono rodou `/provider`, gravou `tokenrouter` no
+  // `~/.aluy/config.json`, conferiu o arquivo — e o rodapé seguiu dizendo `openai`,
+  // porque uma `ALUY_LOCAL_PROVIDER=openai` esquecida no ambiente da janela vinha
+  // antes na precedência. A gravação SEMPRE funcionou; a leitura é que preferia outra
+  // fonte, sem dizer. Ele concluiu (razoavelmente) que o provider "não persiste", e
+  // caçamos um bug de escrita que não existia. Pior: o par ficou incoerente
+  // (`provider` de um, `baseUrl` de outro) e o resultado foi 401 sem explicação.
+  //
+  // A precedência está CERTA e não muda — env sobre config é o que permite CI e
+  // container sobrescreverem sem editar arquivo. O defeito era o silêncio.
+  //
+  // Só fala quando as duas fontes DECLARAM e DIVERGEM (ver `detectLocalEnvOverrides`):
+  // quem configura só por ambiente nunca vê esta nota.
+  if (localEnvOverrides.length > 0) {
+    built.controller.pushNote('ambiente', [
+      'variáveis de ambiente estão sobrepondo o seu `~/.aluy/config.json`:',
+      ...localEnvOverrides.map(
+        (o) => `  ${o.envVar}=${o.envValue}  (config.json diz \`${o.configValue}\`) — vale o do ambiente`,
+      ),
+      'para o arquivo voltar a valer, remova a variável do ambiente e reabra o terminal.',
+    ]);
+  }
+
   // `--anonymous` — indicação SIMPLES de que a sessão está anônima (o usuário precisa
   // ver isto, não só saber que passou a flag): uma nota de boot, mesmo chrome das
   // demais notas de boot acima/abaixo.
@@ -3004,12 +3054,26 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             ]);
             return;
           }
+          // F-GRAVACAO-HONESTA — sem checar isto, "gravado para o próximo boot" era
+          // afirmação cega: no Windows a escrita atômica falha quando algo segura o arquivo
+          // (antivírus/OneDrive sobre o perfil), e a sessão seguinte reabria no modelo antigo
+          // sem uma linha de explicação.
+          let gravouModelo = true;
           const note = applyTierLiteral((t, m) => {
             built.controller.setTier(t, m);
             configStore.saveTier(t, m);
-            if (m !== undefined && m !== '') persistActiveLocalModel?.(m);
+            if (m !== undefined && m !== '') gravouModelo = persistActiveLocalModel?.(m) ?? false;
           }, alvo);
-          built.controller.pushNote(note.title, note.lines);
+          built.controller.pushNote(note.title, [
+            ...note.lines,
+            ...(gravouModelo
+              ? []
+              : [
+                  '⚠ não consegui GRAVAR a escolha em `~/.aluy/config.json` — vale só nesta ' +
+                    'sessão. Feche outras janelas do aluy e tente de novo; no Windows, ' +
+                    'antivírus/OneDrive sobre o perfil costumam travar o arquivo.',
+                ]),
+          ]);
         });
         return;
       }
@@ -4622,7 +4686,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                     ]
                   : [`falha ao trocar p/ "${provider}": ${r.detail}`, 'nada mudou (fail-closed).'],
               );
-              return r.ok;
+              // F-PROV-RETRY — na falha devolve o MOTIVO junto, não só `false`: o App usa
+              // o `detail` para REABRIR o campo de chave (chave velha/errada ⇒ "cole
+              // outra"), em vez de deixar o dono com uma nota mandando sair do CLI.
+              // NUNCA carrega a credencial — `detail` é o texto do teste (ex.: HTTP 401).
+              return r.ok ? true : { ok: false as const, detail: r.detail };
             });
           }
           // EST-0962 (/provider) — BROKER: o seletor confirmou: SETA o provider do modo

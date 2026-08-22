@@ -190,6 +190,18 @@ import { networkTargetOf } from '../io/egress.js';
 const HEADER_ITEM = Symbol('header');
 type StaticItem = typeof HEADER_ITEM | SessionBlock;
 
+/**
+ * F-PROV-RETRY — a troca de provider REPROVOU e o motivo veio junto.
+ *
+ * `boolean` sozinho não bastava: o App sabia que falhou e não sabia POR QUÊ, então só
+ * podia deixar a nota de erro na tela. Com o motivo, ele reabre o campo de chave.
+ * `detail` NUNCA carrega a credencial (CLI-SEC) — é o texto do teste (ex.: `HTTP 401`).
+ */
+export interface ProviderSwitchFailure {
+  readonly ok: false;
+  readonly detail: string;
+}
+
 export interface AppProps {
   readonly controller: SessionController;
   /** Comandos do usuário (DADO de ~/.aluy/commands/). */
@@ -394,7 +406,9 @@ export interface AppProps {
    * para, aí sim, pedir o modelo do provider novo. `void` (backend broker) ⇒ sem passo de
    * modelo, que é o comportamento de lá.
    */
-  readonly onSelectProvider?: (provider: string) => void | Promise<boolean>;
+  readonly onSelectProvider?: (
+    provider: string,
+  ) => void | Promise<boolean | ProviderSwitchFailure>;
   /**
    * F-PROV-FIX — o dono confirmou o VERBO explícito `/provider save`: fixa o
    * provider (e modelo) ATIVOS desta sessão como o PADRÃO da PRÓXIMA (o wiring grava
@@ -997,20 +1011,6 @@ export function App(props: AppProps): React.ReactElement {
    * não abrir nada. O `void` do backend broker também não abre: lá o provider pareia com o
    * modelo Custom por outro caminho.
    */
-  const pedirModeloAposTroca = useCallback(
-    (r: void | Promise<boolean>): void => {
-      // Checagem de THENABLE, não `!== undefined`: o handler tem várias implementações
-      // (backend local devolve a promessa do veredito, broker não devolve nada, e os
-      // testes injetam mocks síncronos). Qualquer retorno que não seja promessa fazia
-      // `r.then` estourar — e como isso roda ao CONFIRMAR o provider, o erro derrubava a
-      // TUI no meio de uma troca, que é o pior momento possível para ela cair.
-      if (typeof (r as { then?: unknown } | undefined)?.then !== 'function') return;
-      void (r as Promise<boolean>).then((ok) => {
-        if (ok === true) localModelPicker.openPicker();
-      });
-    },
-    [localModelPicker],
-  );
 
   // F161-FIX · /effort STANDALONE — seletor do `reasoning_effort` fora do fluxo
   // conjugado do `/model` (EST-1117): reusa as MESMAS opções puras do core. O ativo
@@ -1057,6 +1057,38 @@ export function App(props: AppProps): React.ReactElement {
     ...(props.hasStoredKey ? { hasStoredKey: props.hasStoredKey } : {}),
     ...(props.storeCredential ? { storeCredential: props.storeCredential } : {}),
   });
+
+  const pedirModeloAposTroca = useCallback(
+    (r: void | Promise<boolean | ProviderSwitchFailure>, provider?: string): void => {
+      // Checagem de THENABLE, não `!== undefined`: o handler tem várias implementações
+      // (backend local devolve a promessa do veredito, broker não devolve nada, e os
+      // testes injetam mocks síncronos). Qualquer retorno que não seja promessa fazia
+      // `r.then` estourar — e como isso roda ao CONFIRMAR o provider, o erro derrubava a
+      // TUI no meio de uma troca, que é o pior momento possível para ela cair.
+      if (typeof (r as { then?: unknown } | undefined)?.then !== 'function') return;
+      void (r as Promise<boolean | ProviderSwitchFailure>).then((res) => {
+        if (res === true) {
+          localModelPicker.openPicker();
+          return;
+        }
+        // F-PROV-RETRY (pedido do dono, com print: trocou p/ tokenrouter, levou 401, e a
+        // TUI só empurrou uma nota mandando rodar `aluy login --provider tokenrouter` —
+        // ou seja, SAIR do CLI). O campo de chave está a um passo dali, e o hook já sabia
+        // reabri-lo: `retryCredential` existe, tem teste próprio, e NUNCA era chamado.
+        // Funcionalidade pronta e desligada — o teste do hook passava, o gate ficava
+        // verde, e o comportamento não existia para quem usa.
+        //
+        // `retryCredential` decide sozinho se cabe reabrir (`planCredentialRetry`):
+        // provider keyless que falhou é rede/serviço fora, não credencial, e ali um campo
+        // de chave confundiria. A nota de erro que o wiring empurra continua saindo — o
+        // campo é ADIÇÃO, não substituição.
+        if (res !== false && res?.ok === false && provider !== undefined) {
+          providerPicker.retryCredential(provider, res.detail);
+        }
+      });
+    },
+    [localModelPicker, providerPicker],
+  );
 
   // EST-0989 (i18n) — os NATIVOS LOCALIZADOS no idioma ativo (summaries traduzidos). Memo
   // pelo `t`: só re-mapeia ao trocar de idioma (em pt-BR devolve a MESMA ref ⇒ sem churn).
@@ -1913,7 +1945,7 @@ export function App(props: AppProps): React.ReactElement {
         // seed. Nome inválido ⇒ cai p/ o onCommand (nota honesta de "desconhecido").
         const entry = resolveProviderName(arg, providerPicker.providers);
         if (entry) {
-          pedirModeloAposTroca(props.onSelectProvider(entry.name));
+          pedirModeloAposTroca(props.onSelectProvider(entry.name), entry.name);
           return;
         }
         // nome inválido ⇒ deixa o wiring empurrar a nota honesta.
@@ -3632,7 +3664,7 @@ export function App(props: AppProps): React.ReactElement {
           const name = providerPicker.confirmCredential();
           // `null` ⇒ campo vazio ou a gravação falhou: o hook mantém o campo aberto com o
           // motivo (nunca a chave). Só aplicamos quando ele devolve o provider.
-          if (name) pedirModeloAposTroca(props.onSelectProvider?.(name));
+          if (name) pedirModeloAposTroca(props.onSelectProvider?.(name), name);
           return;
         }
         if (key.backspace || key.delete) {
@@ -3682,7 +3714,7 @@ export function App(props: AppProps): React.ReactElement {
           providerPicker.startAddCustom();
           return;
         }
-        if (name) pedirModeloAposTroca(props.onSelectProvider?.(name));
+        if (name) pedirModeloAposTroca(props.onSelectProvider?.(name), name);
         return;
       }
       if (key.escape) {

@@ -137,3 +137,70 @@ export function resolveLocalProviderConfig(args: {
     nonEmpty(args.config.localBaseUrl);
   return { provider, model, auth, ...(baseUrl !== undefined ? { baseUrl } : {}) };
 }
+
+/**
+ * Uma fonte de ambiente que VENCEU um valor declarado em `~/.aluy/config.json`.
+ *
+ * `configValue` é o que o dono escreveu no arquivo; `envValue` é o que de fato vale.
+ */
+export interface LocalEnvOverride {
+  readonly key: 'provider' | 'model' | 'auth' | 'baseUrl';
+  readonly envVar: string;
+  readonly envValue: string;
+  readonly configValue: string;
+}
+
+/** Par (chave, env var, leitor do config) — a MESMA ordem de `resolveLocalProviderConfig`. */
+const FONTES_ENV = [
+  ['provider', 'ALUY_LOCAL_PROVIDER', (c: UserConfig) => c.localProvider, 'localProvider'],
+  ['model', 'ALUY_LOCAL_MODEL', (c: UserConfig) => c.localModel, 'localModel'],
+  ['auth', 'ALUY_LOCAL_AUTH', (c: UserConfig) => c.localAuth, 'localAuth'],
+  ['baseUrl', 'ALUY_LOCAL_BASE_URL', (c: UserConfig) => c.localBaseUrl, 'localBaseUrl'],
+] as const;
+
+/**
+ * As sobreposições de env sobre `config.json` — para que o boot possa DIZER que elas
+ * existem, em vez de o dono descobrir pelo rodapé "errado".
+ *
+ * O defeito que isto fecha: `/provider` grava `tokenrouter` no `config.json`, o ambiente
+ * traz `ALUY_LOCAL_PROVIDER=openai` de um perfil de shell esquecido, e a precedência
+ * (flag>env>config) faz o env vencer — corretamente, mas EM SILÊNCIO. O dono vê o arquivo
+ * dizendo uma coisa e o rodapé dizendo outra, e conclui que a gravação não persistiu.
+ * Pior quando o par fica incoerente (provider de um, `baseUrl` de outro): vira 401 sem
+ * explicação. Ver ADR-0120 §precedência.
+ *
+ * SÓ reporta quando o config DECLAROU algo e o valor efetivo é OUTRO. Config silencioso
+ * não é sobreposição — é só a fonte disponível, e avisar ali seria ruído em toda sessão
+ * de quem configura por ambiente de propósito (CI, container, `docker run -e`).
+ *
+ * Chave com FLAG explícita é omitida: sob `--local-provider` nem env nem config vencem, e
+ * atribuir a discrepância ao ambiente mandaria o dono caçar a variável errada.
+ *
+ * PURO: (flags, env, config) → lista. Sem I/O, sem catálogo — comparação textual, porque
+ * o que interessa é o que o dono ESCREVEU nos dois lugares, não o que cada um normaliza.
+ */
+export function detectLocalEnvOverrides(args: {
+  readonly flags?: BackendFlags;
+  readonly env: NodeJS.ProcessEnv;
+  readonly config: UserConfig;
+}): readonly LocalEnvOverride[] {
+  const flags = args.flags ?? {};
+  const daFlag: Record<LocalEnvOverride['key'], string | undefined> = {
+    provider: flags.localProvider,
+    model: flags.localModel,
+    auth: flags.localAuth,
+    baseUrl: flags.localBaseUrl,
+  };
+  const achados: LocalEnvOverride[] = [];
+  for (const [key, envVar, ler] of FONTES_ENV) {
+    if (nonEmpty(daFlag[key]) !== undefined) continue;
+    const envValue = nonEmpty(args.env[envVar]);
+    const configValue = nonEmpty(ler(args.config));
+    if (envValue === undefined || configValue === undefined) continue;
+    // Case-insensitive: `OpenAI` e `openai` resolvem para o mesmo provider, e apontar
+    // isso como conflito seria alarme falso.
+    if (envValue.toLowerCase() === configValue.toLowerCase()) continue;
+    achados.push({ key, envVar, envValue, configValue });
+  }
+  return achados;
+}

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { aluyHomeDir } from '../sandbox/aluy-home.js';
 import { triggerBoot } from '../maestro/boot-trigger.js';
 import { parseArgs } from '../cli.js';
+import { printCommandHeader } from '../commands/command-header.js';
 import {
   decideYoloEntry,
   yoloAuditEvent,
@@ -255,6 +256,10 @@ async function main(): Promise<void> {
       process.exitCode = action.exitCode;
       return;
     case 'login': {
+      // F-CMD-HEADER — cabeçalho de marca (TTY-only, ver command-header.ts). Cobre
+      // TANTO `aluy login` (broker) QUANTO `aluy login --provider` (local-login) — os
+      // dois caem neste MESMO case, então uma chamada só basta pros dois.
+      printCommandHeader();
       // ADR-0120 — `--provider <p>` ⇒ login do BACKEND LOCAL (BYO: API key OU OAuth);
       // sem ele ⇒ login do BROKER (device-flow/PAT, comportamento de hoje).
       if (action.provider !== undefined) {
@@ -275,11 +280,13 @@ async function main(): Promise<void> {
       return;
     }
     case 'logout': {
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       const { runLogout } = await import('../commands/logout.js');
       process.exitCode = await runLogout();
       return;
     }
     case 'telegram': {
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       // ADR-0154 — gestão do conector Telegram (login=keychain; allow/deny=allowlist
       // no config; status). Sem rede nesta fatia (a bridge segue inerte até `--telegram`).
       const { runTelegram } = await import('../commands/telegram.js');
@@ -291,6 +298,7 @@ async function main(): Promise<void> {
       return;
     }
     case 'whoami': {
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       const { runWhoami } = await import('../commands/whoami.js');
       process.exitCode = await runWhoami();
       return;
@@ -299,12 +307,17 @@ async function main(): Promise<void> {
       // EST-0970 — health-check read-only com validação ATIVA + ticks progressivos. Exit≠0
       // se houver ✗ (sinal honesto p/ CI/script). `--deep` testa o tier ao vivo (gasta modelo).
       // `--json` imprime o JSON dos checks no stdout (sem ticks).
+      // F-CMD-HEADER — cabeçalho de marca (TTY-only); `--json` NUNCA ganha o cabeçalho
+      // (quebraria o parser do script/CI que consome o JSON).
+      printCommandHeader({ json: action.json });
       const { runDoctor } = await import('../commands/doctor.js');
       process.exitCode = await runDoctor({ deep: action.deep, json: action.json });
       return;
     }
     case 'config': {
       // Visão consolidada read-only da config efetiva (valor + origem: default/env/config.json).
+      // F-CMD-HEADER — cabeçalho de marca (TTY-only); `--json` NUNCA ganha o cabeçalho.
+      printCommandHeader({ json: action.json });
       const { runConfig } = await import('../commands/config.js');
       process.exitCode = runConfig({ json: action.json });
       return;
@@ -313,6 +326,7 @@ async function main(): Promise<void> {
       // EST-0977 — lista os perfis de sub-agente .md mapeados (global + projeto/cwd),
       // válidos + rejeitados (RES-MD-3) com o motivo. Read-only, sem modelo, sem rede;
       // reusa os MESMOS loaders do boot. Exit 0 (é listagem, não gate).
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       const { runAgents } = await import('../commands/agents.js');
       process.exitCode = runAgents();
       return;
@@ -321,6 +335,7 @@ async function main(): Promise<void> {
       // EST-1112 · ADR-0116 — lista as SKILLS (SKILL.md) mapeadas (global + projeto/cwd),
       // válidas + rejeitadas (RES-MD-3) com o motivo. Read-only, sem modelo, sem rede;
       // reusa os MESMOS loaders confinados + o formatador puro do core. Exit 0 (listagem).
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       const { runSkills } = await import('../commands/skills.js');
       process.exitCode = runSkills();
       return;
@@ -329,6 +344,7 @@ async function main(): Promise<void> {
       // EST-1105 — lista os fluxos de atividade .md mapeados (global + projeto/cwd),
       // válidos + rejeitados (RES-MD-3) com o motivo. Read-only, sem modelo, sem rede.
       // Espelha o `agents`. Exit 0 (listagem, não gate).
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       const { runWorkflows } = await import('../commands/workflows.js');
       process.exitCode = runWorkflows();
       return;
@@ -337,6 +353,7 @@ async function main(): Promise<void> {
       // EST-1133 / ADR-0130 — provisionamento EXPLÍCITO de sidecars user-space.
       // Só sob perfil TURBO (default); LEVE sai sem provisionar.
       // Passo EXPLÍCITO (nunca download no boot — CA-G2-11).
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       const { runInit } = await import('../commands/bootstrap.js');
       process.exitCode = await runInit({
         out: (l) => process.stdout.write(l + '\n'),
@@ -353,6 +370,7 @@ async function main(): Promise<void> {
     case 'uninstall': {
       // Remove os complementos (sidecars). Determinístico nos venvs de ~/.aluy; `--agent`
       // remove o ollama de SISTEMA via o próprio agente (⚠ --yolo + sudo).
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       const { runUninstall } = await import('../commands/uninstall.js');
       process.exitCode = runUninstall({ agent: action.agent });
       // FORÇA a saída: o `--agent` pode deixar handles vivos (spawn do agente) — como já
@@ -411,6 +429,8 @@ async function main(): Promise<void> {
       // EST-1116 — lista providers/modelos disponíveis: seção LOCAL (BYO) + seção BROKER
       // (catálogo VIVO, FAIL-SOFT — broker fora ⇒ avisos, nunca quebra). `--json` p/ script;
       // `--backend local|broker` foca uma seção. Read-only, sem modelo. Exit 0 (listagem).
+      // F-CMD-HEADER — cabeçalho de marca (TTY-only); `--json` NUNCA ganha o cabeçalho.
+      printCommandHeader({ json: action.json });
       const { runModels } = await import('../commands/models.js');
       process.exitCode = await runModels({
         scope: action.scope,
@@ -428,18 +448,21 @@ async function main(): Promise<void> {
       return;
     }
     case 'mcp': {
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       // EST-0970 — `aluy mcp add/list/remove`: gerencia servers MCP (escreve a config).
       const { runMcp } = await import('../commands/mcp.js');
       process.exitCode = await runMcp(action.argv);
       return;
     }
     case 'cron': {
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       // EST-1150 · ADR-0128 — `aluy cron`: agendamento PERSISTENTE LOCAL.
       const { runCron } = await import('../commands/cron.js');
       process.exitCode = await runCron(action.argv);
       return;
     }
     case 'service': {
+      printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
       // ADR-0158 — `aluy service <sub>`: SERVIÇOS plugáveis, fase 1 (list/status/
       // install/uninstall — sem runner ainda). Espelho do `/service` in-session.
       const { runService } = await import('../commands/service.js');

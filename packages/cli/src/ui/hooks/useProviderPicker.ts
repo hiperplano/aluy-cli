@@ -505,15 +505,28 @@ export function useProviderPicker(args: UseProviderPickerArgs): ProviderPickerCo
     resetCredential();
   }, [resetCredential]);
 
-  const retryCredential = useCallback((providerId: string, detail: string): void => {
-    const plan = planCredentialRetry(authById.current.get(providerId.toLowerCase()), detail);
-    if (plan === null) return; // keyless (ou provider desconhecido) — nada a pedir.
-    setCredentialProviderId(providerId);
-    setCredentialDraft('');
-    setCredentialError(plan.error);
-    setCredentialStep('key');
-    setOpen(true);
-  }, []);
+  const retryCredential = useCallback(
+    (providerId: string, detail: string): void => {
+      let auth = authById.current.get(providerId.toLowerCase());
+      if (auth === undefined) {
+        // `/provider <nome>` aplica DIRETO, sem abrir o picker — e é `loadLocalProviders`
+        // (que só roda ao abrir) quem preenche o mapa de auth. Sem este carregamento sob
+        // demanda, uma troca por nome que levasse 401 não reabriria campo nenhum: o
+        // `planCredentialRetry` receberia `undefined`, concluiria "não exige apikey" e
+        // devolveria `null` — o MESMO silêncio que este retry existe para acabar.
+        loadLocalProviders();
+        auth = authById.current.get(providerId.toLowerCase());
+      }
+      const plan = planCredentialRetry(auth, detail);
+      if (plan === null) return; // keyless (ou provider desconhecido) — nada a pedir.
+      setCredentialProviderId(providerId);
+      setCredentialDraft('');
+      setCredentialError(plan.error);
+      setCredentialStep('key');
+      setOpen(true);
+    },
+    [loadLocalProviders],
+  );
 
   return {
     open,

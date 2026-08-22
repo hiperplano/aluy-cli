@@ -53,68 +53,104 @@ export function realTerminalIO(streams: TerminalStreams = {}): TerminalIO {
     prompt: async (question, opts) => {
       // readline só aqui (I/O de terminal mora em @hiperplano/aluy-cli — ADR-0053 §8).
       const { createInterface } = await import('node:readline');
-      const rl = createInterface({ input: entrada, output: saida, terminal: true });
+      const { Writable } = await import('node:stream');
+
+      // ECO-NA-COLAGEM — o filtro antigo deixava passar tudo que CONTIVESSE o texto do
+      // prompt. Digitando, o readline escreve caractere a caractere e o filtro engolia.
+      // COLANDO, ele redesenha a linha INTEIRA — `"<prompt><segredo>"`, que contém o
+      // prompt — e a chave ia para a tela em claro, uma vez por pedaço da colagem.
+      //
+      // A cura anterior era sobrescrever `rl.output.write` por um no-op. Isso matava o
+      // vazamento e criava um defeito PIOR, porque `rl.output` É o `saida` recebido — ou
+      // seja, o `process.stdout` do processo. O `write` do stdout virava no-op e NUNCA
+      // era restaurado: da primeira chamada de `prompt(secret)` em diante, TODA saída do
+      // comando sumia. O `✓ API key guardada` nunca chegava ao dono, que digitava, colava,
+      // não via nada e concluía "não funciona" — enquanto a chave era gravada certinho.
+      // Os ERROS continuavam visíveis (stderr é outro stream), então o comando só sabia
+      // reclamar, nunca confirmar.
+      //
+      // Agora o readline escreve num SUMIDOURO dedicado. Ele pode redesenhar o que quiser:
+      // nada daquilo alcança o terminal, e o `saida` do processo fica intacto para o
+      // prompt, o eco mascarado e a confirmação.
+      const sumidouro = opts?.secret
+        ? new Writable({
+            write(_pedaco, _enc, cb) {
+              cb();
+            },
+          })
+        : undefined;
+      const rl = createInterface({
+        input: entrada,
+        output: sumidouro ?? saida,
+        terminal: true,
+      });
+      // Removido no `finally` — um listener sobrevivente ecoaria `•` no PRÓXIMO prompt.
+      let ecoMascarado: ((pedaco: Buffer | string) => void) | undefined;
       try {
         if (opts?.secret) {
-          // ECO-NA-COLAGEM — o filtro antigo deixava passar tudo que CONTIVESSE o
-          // texto do prompt. Digitando, o readline escreve caractere a caractere e
-          // o filtro engolia. COLANDO, ele redesenha a linha INTEIRA — que é
-          // `"<prompt><segredo>"` e portanto contém o prompt — e a linha ia para a
-          // tela com a chave junto, uma vez por pedaço da colagem. Uma API key
-          // aparecia em texto claro no terminal, repetida, no unico jeito que
-          // alguem realmente informa uma chave.
-          //
-          // Agora o prompt sai UMA vez por nossa conta e o output do readline e
-          // mudo por completo: nada que venha dele chega ao terminal, com colagem,
-          // redraw, autocomplete ou o que for. Nao ha condicao a errar.
           saida.write(question);
-          const rlAny = rl as unknown as { output?: { write: (s: string) => void } };
-          if (rlAny.output) {
-            rlAny.output.write = () => {};
+          // ECO-MASCARADO — silenciar o readline resolve o vazamento e leva junto TODO
+          // retorno visual: colar não desenhava nada. O dono relatou "não consigo colar a
+          // api key" e abortou com Ctrl-C; a colagem tinha entrado. Um prompt honesto
+          // quanto ao segredo e mudo quanto ao progresso é indistinguível de um travado.
+          //
+          // A TUI já fazia certo (`maskValue` desenha `•` por caractere no
+          // <ProviderPicker>). Aqui era diferente para a MESMA chave, e a pior das duas
+          // versões era a que sobrava para quem usa a linha de comando.
+          //
+          // Nunca ecoa o que foi digitado: só `•` (um por caractere visível) e `\b \b` no
+          // backspace. Caractere de CONTROLE não vira ponto — um Ctrl-V viraria `•` e
+          // mentiria sobre o tamanho do que entrou.
+          //
+          // Só em TTY REAL: sem tela não há retorno a dar, e num pipe os pontos virariam
+          // lixo no stdout de quem consome a saída.
+          if ((entrada as { isTTY?: boolean }).isTTY === true) {
+            let mostrados = 0;
+            ecoMascarado = (pedaco: Buffer | string): void => {
+              const texto = typeof pedaco === 'string' ? pedaco : pedaco.toString('utf8');
+              let desenho = '';
+              for (const ch of texto) {
+                if (ch === '\r' || ch === '\n') break; // enter encerra — nada a desenhar
+                const code = ch.codePointAt(0) ?? 0;
+                if (code === 0x7f || code === 0x08) {
+                  if (mostrados > 0) {
+                    desenho += '\b \b';
+                    mostrados -= 1;
+                  }
+                  continue;
+                }
+                if (code < 0x20) continue; // controle — nunca vira ponto
+                desenho += '•';
+                mostrados += 1;
+              }
+              if (desenho !== '') saida.write(desenho);
+            };
+            entrada.on('data', ecoMascarado);
           }
         }
         const answer = await new Promise<string>((resolve, reject) => {
-          // CTRL-C-NO-PROMPT — o vazamento real que o dono viu ("nada aparece
-          // colando, tudo aparece no Ctrl-C") NÃO era o redraw acima: era isto
-          // aqui. Sem registrar um listener de 'SIGINT' no `rl`, o readline tem
-          // um fallback PRÓPRIO pra Ctrl-C (zero listeners ⇒ `this.close()`
-          // interno, SILENCIOSO) que:
-          //   1. devolve o tty ao modo cooked (eco do KERNEL ligado de novo) —
-          //      correto em si, o terminal PRECISA voltar ao normal em algum
-          //      momento; MAS
-          //   2. nunca dispara o callback do `rl.question()` pendente — então
-          //      este `await` fica pendurado PRA SEMPRE, o `finally` abaixo não
-          //      roda (embora seja inofensivo aqui, já que o readline já se
-          //      fechou sozinho), e o processo NÃO SAI: fica vivo, mudo, com o
-          //      terminal já em eco normal.
-          // Dali em diante, QUALQUER coisa digitada/colada é ecoada pelo
-          // KERNEL — não pelo readline, não por este módulo — porque o eco em
-          // modo cooked é propriedade do driver de tty, não do processo que lê
-          // (ou não lê) o fd. O mute de `rl.output.write` acima não alcança
-          // isso: nem chega a rodar, pois o readline nem repassa mais nada pra
-          // nós. Foi exatamente esse buraco que expôs a chave: sem entender
-          // que o prompt tinha travado, o dono colou de novo — e a segunda
-          // colagem (e a própria tecla Ctrl-C, ecoada como `^C`) foram
-          // despejadas em claro, uma vez pra cada tentativa.
+          // CTRL-C-NO-PROMPT — sem um listener de 'SIGINT' no `rl`, o readline tem um
+          // fallback PRÓPRIO (fecha sozinho, silencioso) que devolve o tty ao modo cooked
+          // mas NUNCA dispara o callback do `question()` pendente: este `await` ficava
+          // pendurado para sempre e o processo seguia vivo e mudo, com o eco do KERNEL
+          // ligado de novo. Dali em diante qualquer coisa colada era ecoada em claro pelo
+          // driver de tty — não por este módulo, que já não recebia nada. Foi esse buraco
+          // que expôs uma chave real: sem entender que o prompt tinha desistido, o dono
+          // colava outra vez, e a segunda colagem ia para a tela.
           //
-          // Registrar o listener MUDA o comportamento padrão do readline: com
-          // listener presente, ele emite 'SIGINT' pra NÓS decidirmos, em vez
-          // de sumir sozinho. Rejeitamos NA HORA — o `finally` roda de
-          // imediato, fecha o `rl` UMA vez, de forma controlada, e devolve o
-          // controle ao caller o mais rápido possível. Isso não elimina o
-          // eco cooked em si (inevitável — o terminal tem que voltar ao
-          // normal quando o prompt aborta), mas fecha a JANELA DE CONFUSÃO em
-          // que o processo fica pendurado e o usuário é tentado a colar de
-          // novo num prompt que já desistiu de ouvir.
+          // Com listener, o readline emite 'SIGINT' para NÓS decidirmos. Rejeitamos na
+          // hora: o `finally` roda, fecha o `rl` uma vez, de forma controlada, e fecha a
+          // janela de confusão em que o usuário é tentado a colar num prompt morto.
           rl.once('SIGINT', () => {
             reject(new PromptInterruptedError());
           });
-          // prompt vazio no modo secreto: ja o escrevemos antes de silenciar.
+          // prompt vazio no modo secreto: já o escrevemos antes, no `saida` de verdade.
           rl.question(opts?.secret ? '' : question, (a) => resolve(a));
         });
         if (opts?.secret) saida.write('\n');
         return answer.trim();
       } finally {
+        if (ecoMascarado) entrada.off('data', ecoMascarado);
         rl.close();
       }
     },
