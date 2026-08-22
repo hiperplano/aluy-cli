@@ -98,7 +98,7 @@ describe('i18n · detectLangFromLocale (pt-BR-first; só en quando claramente in
   });
 });
 
-describe('i18n · resolveInitialLang (PRECEDÊNCIA flag > config > auto-detect > pt-BR)', () => {
+describe('i18n · resolveInitialLang (PRECEDÊNCIA flag > env > config > auto-detect > pt-BR)', () => {
   const enLocale = { LANG: 'en_US.UTF-8' } as NodeJS.ProcessEnv;
   const ptLocale = { LANG: 'pt_BR.UTF-8' } as NodeJS.ProcessEnv;
   const noLocale = {} as NodeJS.ProcessEnv;
@@ -124,5 +124,49 @@ describe('i18n · resolveInitialLang (PRECEDÊNCIA flag > config > auto-detect >
 
   it('nada (sem flag/config, locale neutro) ⇒ pt-BR default', () => {
     expect(resolveInitialLang(undefined, undefined, noLocale)).toBe('pt-BR');
+  });
+});
+
+// ENV-LANG — o degrau `ALUY_LANG`, que FALTAVA.
+//
+// O idioma era a única configuração do CLI sem camada de ambiente: a precedência ia
+// `flag > config > auto-detect`, enquanto todo o resto pratica `flag > env ALUY_* >
+// config > default`. O efeito apareceu no instalador do site: ele pergunta "idioma /
+// language?", exporta a resposta em `ALUY_LANG` e chama `aluy onboard` em seguida — que
+// abria em outro idioma e PERGUNTAVA DE NOVO. Relato do dono: "ta perguntando duas
+// vezes o idioma".
+describe('i18n · resolveInitialLang — degrau ALUY_LANG', () => {
+  const ptLocale = { LANG: 'pt_BR.UTF-8' } as NodeJS.ProcessEnv;
+  const enLocale = { LANG: 'en_US.UTF-8' } as NodeJS.ProcessEnv;
+
+  it('env VENCE o config (é o caso do instalador: "nesta execução, este idioma")', () => {
+    expect(resolveInitialLang(undefined, 'pt-BR', { ...enLocale, ALUY_LANG: 'en' })).toBe('en');
+    expect(resolveInitialLang(undefined, 'en', { ...ptLocale, ALUY_LANG: 'pt-BR' })).toBe('pt-BR');
+  });
+
+  it('env VENCE o auto-detect do locale', () => {
+    expect(resolveInitialLang(undefined, undefined, { ...ptLocale, ALUY_LANG: 'en' })).toBe('en');
+    expect(resolveInitialLang(undefined, undefined, { ...enLocale, ALUY_LANG: 'pt-BR' })).toBe('pt-BR');
+  });
+
+  it('a FLAG ainda vence o env (quem digitou --lang mandou mais que quem exportou)', () => {
+    expect(resolveInitialLang('pt-BR', undefined, { ...enLocale, ALUY_LANG: 'en' })).toBe('pt-BR');
+  });
+
+  it('aceita as formas que o instalador pode exportar (`pt`, `pt-BR`, `en`)', () => {
+    for (const v of ['pt', 'pt-BR', 'PT-BR']) {
+      expect(resolveInitialLang(undefined, undefined, { ...enLocale, ALUY_LANG: v })).toBe('pt-BR');
+    }
+    expect(resolveInitialLang(undefined, undefined, { ...ptLocale, ALUY_LANG: 'en' })).toBe('en');
+  });
+
+  // Fronteira com DADO externo: a variável vem do ambiente de quem chama, e um valor
+  // inválido não pode derrubar nem congelar o idioma — cai para o próximo degrau.
+  it('env com LIXO cai p/ o config (não quebra, não vira default cego)', () => {
+    expect(resolveInitialLang(undefined, 'en', { ...ptLocale, ALUY_LANG: 'klingon' })).toBe('en');
+  });
+
+  it('env VAZIA é como ausente', () => {
+    expect(resolveInitialLang(undefined, 'en', { ...ptLocale, ALUY_LANG: '   ' })).toBe('en');
   });
 });
