@@ -108,8 +108,18 @@ export function resolveInitialLang(
     const entry = resolveLang(flag);
     if (entry) return entry.code;
   }
-  // (2) config salva (já validada no load do UserConfigStore).
+  // (2) env `ALUY_LANG` — o degrau que FALTAVA, e que quebrava a precedência que
+  // todo o resto do CLI pratica (`flag > env ALUY_* > config > default`). O idioma
+  // era a única exceção, e o efeito prático apareceu no instalador: ele pergunta
+  // "idioma / language?", exporta a resposta em `ALUY_LANG` e chama `aluy onboard`
+  // logo em seguida — que abria em OUTRO idioma e perguntava de novo a mesma coisa,
+  // porque ninguém lia a variável. Fica ACIMA do config de propósito: quem exporta
+  // a variável está dizendo "nesta execução, este idioma", e isso vence o arquivo
+  // pelo mesmo motivo que `ALUY_LOCAL_PROVIDER` vence `localProvider`.
+  const doEnv = resolveLang(env.ALUY_LANG ?? '');
+  if (doEnv) return doEnv.code;
+  // (3) config salva (já validada no load do UserConfigStore).
   if (configLang !== undefined) return configLang;
-  // (3) auto-detect do locale (pt-BR-first: só en quando claramente inglês).
+  // (4) auto-detect do locale (pt-BR-first: só en quando claramente inglês).
   return detectLangFromLocale(env);
 }

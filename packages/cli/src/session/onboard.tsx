@@ -24,7 +24,7 @@ import { MIN_WORDMARK_COLS, Wordmark } from '../ui/components/Wordmark.js';
 import { ShadowedWordmark } from '../ui/components/ShadowedWordmark.js';
 import { Role, ThemeProvider, resolveTheme } from '../ui/theme/index.js';
 import { CLI_VERSION } from '../version.js';
-import { LANGS, type Lang } from '../i18n/lang.js';
+import { LANGS, resolveLang, type Lang } from '../i18n/lang.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { UserConfigStore } from '../io/user-config.js';
@@ -223,6 +223,25 @@ export const MODEL_PICKER_WINDOW = 10;
  * A lista ao vivo veio (não-vazia) ⇒ `'picker'`; qualquer forma de "não veio nada"
  * (erro/401/timeout/lista genuinamente vazia) ⇒ `'text'` (o campo de hoje).
  */
+/**
+ * ONBOARD-LANG-2X — o onboarding deve ABRIR no passo de idioma, ou já sabe a resposta?
+ *
+ * O instalador do site abre com "idioma / language?" e chama `aluy onboard` em seguida.
+ * Como o onboarding começava em `'lang'` incondicionalmente, a MESMA pergunta aparecia
+ * duas vezes seguidas (relato do dono: "ta perguntando duas vezes o idioma") — e duas
+ * perguntas idênticas em sequência fazem quem instala duvidar se a primeira funcionou.
+ *
+ * Só pula com sinal EXPLÍCITO (`ALUY_LANG`). O `cfg.lang` NÃO pula de propósito: rodar
+ * `aluy onboard` de novo para TROCAR o idioma é uso legítimo, e um config antigo não
+ * pode sequestrar essa intenção — seria trocar uma pergunta a mais por uma tela
+ * INALCANÇÁVEL, que é pior.
+ *
+ * PURO: (env) → idioma explícito ou `undefined`.
+ */
+export function idiomaExplicitoDoAmbiente(env: NodeJS.ProcessEnv): Lang | undefined {
+  return resolveLang(env.ALUY_LANG ?? '')?.code;
+}
+
 export function decideOnboardModelListMode(slugs: readonly string[]): 'picker' | 'text' {
   return slugs.length > 0 ? 'picker' : 'text';
 }
@@ -341,8 +360,19 @@ function OnboardApp(props: {
   const cfg = props.store.load();
   const providers = useMemo(() => loadLocalProviderCatalog().entries, []);
 
-  const [step, setStep] = useState<Step>('lang');
-  const [lang, setLang] = useState<Lang>(cfg.lang ?? 'pt-BR');
+  // ONBOARD-LANG-2X — o idioma JÁ foi dito? Então não perguntamos de novo.
+  //
+  // O instalador do site abre com "idioma / language?" e, logo depois, chama o
+  // `aluy onboard` — que abria no passo 'lang' incondicionalmente e perguntava a MESMA
+  // coisa. Relato do dono: "ta perguntando duas vezes o idioma". Duas perguntas
+  // idênticas em sequência fazem quem instala duvidar se a primeira funcionou.
+  //
+  // Só pula com sinal EXPLÍCITO (`ALUY_LANG` do instalador, ou `--lang`). O `cfg.lang`
+  // NÃO pula de propósito: rodar `aluy onboard` de novo para TROCAR o idioma é um uso
+  // legítimo, e um config antigo não pode sequestrar essa intenção.
+  const langExplicito = idiomaExplicitoDoAmbiente(process.env);
+  const [step, setStep] = useState<Step>(langExplicito === undefined ? 'lang' : 'backend');
+  const [lang, setLang] = useState<Lang>(langExplicito ?? cfg.lang ?? 'pt-BR');
   const [backend, setBackend] = useState<Backend>('local');
   const [providerId, setProviderId] = useState<string>('anthropic');
   const [custom, setCustom] = useState<{ id: string; url: string; model: string }>({
