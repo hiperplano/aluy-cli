@@ -146,11 +146,15 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
   const tetoCol = duasColunas ? Math.max(10, larguraColuna - 2 - ROTULO_COLS - 1) : tetoValor;
 
   // ── linha 1 · SESSÃO — quem você é nesta conversa ────────────────────────────────
-  const sessao: Seg[] = [{ text: props.tier, role: props.isDefaultTier === false ? 'accent' : 'fgDim' }];
+  const sessao: Seg[] = [
+    { text: props.tier, role: props.isDefaultTier === false ? 'accent' : 'fgDim' },
+  ];
   if (props.model !== undefined && props.model !== '') {
     // Sem o orçamento acoplado da barra antiga: aqui o modelo divide a linha só com o
     // provider e o path, então o vendor (`deepseek/`) é redundante mas o resto cabe.
-    const slug = props.model.includes('/') ? (props.model.split('/').pop() ?? props.model) : props.model;
+    const slug = props.model.includes('/')
+      ? (props.model.split('/').pop() ?? props.model)
+      : props.model;
     sessao.push({ text: ' · ', role: 'fgDim' }, { text: slug, role: 'depth' });
   }
   if (props.focus !== undefined && props.focus !== '') {
@@ -158,21 +162,30 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
   }
   if (props.cycleProgress !== undefined) {
     const c = props.cycleProgress;
-    const sub = c.subcyclesTotal > 0 ? ` · ${t('statusbar.subcycles')} ${c.subcyclesDone}/${c.subcyclesTotal}` : '';
+    const sub =
+      c.subcyclesTotal > 0
+        ? ` · ${t('statusbar.subcycles')} ${c.subcyclesDone}/${c.subcyclesTotal}`
+        : '';
     sessao.push(
       { text: ' · ', role: 'fgDim' },
       { text: `↻ ${t('statusbar.cycle')} ${c.iteration}/${c.max}${sub}`, role: 'accent' },
     );
   }
   if (props.branch !== undefined && props.branch !== '') {
-    sessao.push({ text: ' · ', role: 'fgDim' }, { text: `${theme.glyph('branch')} ${props.branch}`, role: 'fgDim' });
+    sessao.push(
+      { text: ' · ', role: 'fgDim' },
+      { text: `${theme.glyph('branch')} ${props.branch}`, role: 'fgDim' },
+    );
   }
   sessao.push({ text: ' · ', role: 'fgDim' }, { text: props.cwd, role: 'fgDim' });
   if (props.governance !== undefined && govTotal(props.governance) > 0) {
     const g = props.governance;
     sessao.push(
       { text: ' · ', role: 'fgDim' },
-      { text: `⌁ ${g.agents}a·${g.commands}c·${g.skills}s·${g.workflows}w·${g.memory}m`, role: 'fgDim' },
+      {
+        text: `⌁ ${g.agents}a·${g.commands}c·${g.skills}s·${g.workflows}w·${g.memory}m`,
+        role: 'fgDim',
+      },
     );
   }
 
@@ -185,7 +198,10 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
   if (props.sidecarUsage !== undefined) {
     const chip = buildSidecarChip(props.sidecarUsage) ?? [];
     if (chip.length > 0) {
-      estado.push({ text: ` · ${theme.glyph('sidecar')} ${t('statusbar.sidecars')}`, role: 'fgDim' });
+      estado.push({
+        text: ` · ${theme.glyph('sidecar')} ${t('statusbar.sidecars')}`,
+        role: 'fgDim',
+      });
       for (const e of chip) {
         estado.push({ text: ` ${sidecarChipCell(e, !theme.unicode)}`, role: sidecarRole(e.state) });
       }
@@ -245,7 +261,10 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
 
   // ── linha 3 · USO — quanto já se gastou ──────────────────────────────────────────
   const uso: Seg[] = [
-    { text: `${theme.glyph('window')} ${props.windowPct}% ${t('statusbar.window')}`, role: windowRole(props.windowPct) },
+    {
+      text: `${theme.glyph('window')} ${props.windowPct}% ${t('statusbar.window')}`,
+      role: windowRole(props.windowPct),
+    },
   ];
   const temBudget = props.budgetPct !== undefined;
   uso.push({ text: ' · ', role: 'fgDim' });
@@ -284,6 +303,28 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
     config.push({ text: fonte, role: 'fgDim' });
   }
 
+  // LARGURA DA COLUNA ESQUERDA — medida pelo CONTEÚDO, não fixada em metade da tela.
+  //
+  // A primeira versão dividia `floor(util/2)` para as duas colunas. Parecia razoável e é
+  // errado: o vão do meio vira o RESTO da divisão, então ele varia com o TEXTO. Com
+  // `gemini-3.7-flash` + `C:\Users\Johndoe` a esquerda ocupava 75 colunas e o painel
+  // ficava equilibrado; com `hy3` + `~` ela caiu para 47 e abriu 28 colunas de buraco no
+  // meio. O dono descreveu como "ficou horrível", e estava certo — a largura da tela não
+  // mudou, o conteúdo dele mudou, e um layout que só funciona com um comprimento de
+  // string específico não é layout.
+  //
+  // Agora a coluna vale o MAIOR dos dois conteúdos da esquerda (as duas linhas precisam
+  // alinhar ENTRE SI) mais um respiro fixo, com teto na metade: passar disso espremeria a
+  // direita, que costuma ser a mais longa das duas.
+  const larguraSegs = (segs: readonly Seg[]): number =>
+    segs.reduce((n, seg) => n + displayWidth(seg.text), 0);
+  const PREFIXO_COLS = 2 + ROTULO_COLS + 1; // glifo + espaço + coluna de rótulo + espaço
+  const RESPIRO_COLS = 4; // separação mínima entre as colunas
+  const larguraEsq = Math.min(
+    larguraColuna,
+    Math.max(larguraSegs(sessao), larguraSegs(uso)) + PREFIXO_COLS + RESPIRO_COLS,
+  );
+
   if (props.mode === 'unsafe') {
     // A linha `estado` PERMANECE, sem o modo (o banner já grita qual é): ela carrega os
     // sidecars, o progresso do MCP e o pulso de trabalho. Suprimi-la inteira apagava o
@@ -296,7 +337,12 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
       .slice(2)
       .map((seg, k) => (k === 0 ? { ...seg, text: seg.text.replace(/^\s*·\s*/, '') } : seg));
     const itemSessaoU = (
-      <Linha glyph={theme.glyph('clock')} rotulo={t('painel.sessao')} segs={sessao} teto={tetoCol} />
+      <Linha
+        glyph={theme.glyph('clock')}
+        rotulo={t('painel.sessao')}
+        segs={sessao}
+        teto={tetoCol}
+      />
     );
     const itemEstadoU = (
       <Linha
@@ -324,12 +370,8 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
         <UnsafeBanner columns={cols} />
         {duasColunas ? (
           <>
-            <LinhaDupla
-              esquerda={itemSessaoU}
-              direita={itemEstadoU}
-              larguraColuna={larguraColuna}
-            />
-            <LinhaDupla esquerda={itemUsoU} direita={itemConfigU} larguraColuna={larguraColuna} />
+            <LinhaDupla esquerda={itemSessaoU} direita={itemEstadoU} larguraColuna={larguraEsq} />
+            <LinhaDupla esquerda={itemUsoU} direita={itemConfigU} larguraColuna={larguraEsq} />
           </>
         ) : (
           <>
@@ -384,8 +426,8 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
 
   return (
     <Box flexDirection="column">
-      <LinhaDupla esquerda={itemSessao} direita={itemEstado} larguraColuna={larguraColuna} />
-      <LinhaDupla esquerda={itemUso} direita={itemConfig} larguraColuna={larguraColuna} />
+      <LinhaDupla esquerda={itemSessao} direita={itemEstado} larguraColuna={larguraEsq} />
+      <LinhaDupla esquerda={itemUso} direita={itemConfig} larguraColuna={larguraEsq} />
     </Box>
   );
 }

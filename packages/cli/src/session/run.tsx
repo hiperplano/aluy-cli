@@ -59,7 +59,8 @@ import { createOAuthAccessTokenProvider } from '../model/local/oauth-store.js';
 import { createVerifyAndRegisterLocalModelPort } from '../model/local/test-then-register.js';
 // F-WIN (descoberta) — porta que PERGUNTA a janela de contexto ao próprio provider BYO
 // (`GET {baseUrl}/models`), p/ o usuário nunca precisar digitar o número à mão.
-import { fetchModelsSlugs,
+import {
+  fetchModelsSlugs,
   createProviderAwareDiscoverContextWindowPort,
   createProviderAwareListModelNamesPort,
   type ProviderDiscoveryDeps,
@@ -2042,6 +2043,33 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // A porta NUNCA rejeita (fail-open interno); o `.catch` é cinto-e-suspensório p/ que
   // um erro inesperado jamais vire `unhandledRejection` e derrube a CLI por causa de um
   // enfeite de status bar.
+  // F-WIN (redescoberta) — a descoberta rodava SÓ no boot, para o modelo do boot.
+  // Trocar de modelo com `/model` não disparava nada: o slug novo nunca era consultado,
+  // `discoveredWindowFor` devolvia undefined e — quando o modelo também não está na
+  // tabela embutida (o caso de `minimax/minimax-m3` e `gemini-3.7-flash`, ambos
+  // medidos) — a janela caía em 0 e a auto-compactação ficava inerte pelo resto da
+  // sessão. O dono chegou nisso sozinho: "após selecionar o modelo ele não busca as
+  // informações de tamanho do modelo pra saber quando deve compactar".
+  // Best-effort e em background, igual ao boot: nunca bloqueia a troca.
+  built.controller.setOnModelChanged((slug: string): void => {
+    if (discoverContextWindow === undefined) return;
+    const alvo = slug.trim();
+    if (alvo === '') return;
+    // Declarado à mão vence a descoberta — não gastamos uma chamada para nada.
+    if (
+      modelWindowFromConfig(windowSources.providerWindows, windowSources.activeProviderId, alvo) !==
+      undefined
+    )
+      return;
+    void discoverContextWindow(alvo)
+      .then((r) => {
+        if (r.window > 0) built.controller.adoptDiscoveredModelWindow(alvo, r.window);
+      })
+      .catch(() => {
+        /* enfeite: nunca derruba a sessão nem a troca de modelo. */
+      });
+  });
+
   if (discoverContextWindow !== undefined && windowSources.activeModelSlug !== undefined) {
     const slugForWindow = windowSources.activeModelSlug;
     const declaredWindow = modelWindowFromConfig(
@@ -2135,6 +2163,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // buildMessages como DADO_NAO_CONFIAVEL). NADA ingerido vira instrução (CLI-SEC-4).
   const resumedHistory: HistoryItem[] = resumedRecord ? blocksToHistory(resumedRecord.blocks) : [];
   if (resumedRecord) built.controller.restoreBlocks(resumedRecord.blocks);
+  // HUNT-RESUME-RACE — semeia o contexto do modelo AQUI, no MESMO ponto em que a tela
+  // é restaurada, e não lá embaixo depois do `await memory.recall()`. O histórico já
+  // está pronto (linha acima, síncrono); prendê-lo ao I/O da memória abria uma janela
+  // em que a TUI estava de pé, aceitando Enter, com a conversa toda na tela e o
+  // contexto do modelo VAZIO — o dono digitava e o agente respondia do zero ("às
+  // vezes ele se perde no que estava fazendo antes quando fechei e reabri"). "Às
+  // vezes" porque é CORRIDA: quem digita rápido perde. A memória PREPENDA depois.
+  if (resumedHistory.length > 0) built.controller.seedHistory(resumedHistory);
   // EST-0972 (rename) — RESTAURA o RÓTULO + COR de identificação da sessão retomada
   // (boot via --continue/--resume/auto-oferta) ⇒ o ●+nome reaparece no composer de cara.
   // DADO DE UI (HG-2). Só quando há rótulo (sem label ⇒ controller fica sem rótulo).
@@ -2801,7 +2837,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     built.controller.pushNote('ambiente', [
       'variáveis de ambiente estão sobrepondo o seu `~/.aluy/config.json`:',
       ...localEnvOverrides.map(
-        (o) => `  ${o.envVar}=${o.envValue}  (config.json diz \`${o.configValue}\`) — vale o do ambiente`,
+        (o) =>
+          `  ${o.envVar}=${o.envValue}  (config.json diz \`${o.configValue}\`) — vale o do ambiente`,
       ),
       'para o arquivo voltar a valer, remova a variável do ambiente e reabra o terminal.',
     ]);
@@ -2883,7 +2920,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   }
 
   // (ver `temCredencialUsavel` acima)
-// F-PRIMEIRO-BOOT (gap #8) — sob backend local, avisar no BOOT quando não há chave.
+  // F-PRIMEIRO-BOOT (gap #8) — sob backend local, avisar no BOOT quando não há chave.
   //
   // O comentário acima está certo sobre não mentir "rode aluy login (broker)" num setup
   // local que funciona — mas a conclusão de então (deixar a falta de chave aparecer só na
@@ -4417,8 +4454,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               // shell caía no formulário de credencial, digitava de novo (ou apertava esc) e
               // a troca simplesmente NÃO acontecia — sem erro, sem nota, o rodapé intacto.
               // Mesma distinção já aplicada ao `faltaChave` da troca.
-              hasStoredKey: (providerId: string): boolean =>
-                temCredencialUsavel(providerId, env),
+              hasStoredKey: (providerId: string): boolean => temCredencialUsavel(providerId, env),
               storeCredential: (providerId: string, apiKey: string): void => {
                 // `storeApiKey` é a ÚNICA escrita de credencial do produto — o picker não
                 // duplica nada. Lança em falha de backend; o hook mostra o motivo (nunca
@@ -4816,8 +4852,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     } catch {
       memorySeed = []; // fail-safe: sem memória recuperada, a sessão segue normal.
     }
-    const bootSeed = [...memorySeed, ...resumedHistory];
-    if (bootSeed.length > 0) built.controller.seedHistory(bootSeed);
+    // O `resumedHistory` JÁ foi semeado lá em cima (junto do `restoreBlocks`), p/ não
+    // ficar refém deste await. Aqui só a memória entra — PREPENDANDO, o que mantém a
+    // ordem original (memória, depois histórico) sem apagar o que já está lá.
+    if (memorySeed.length > 0) built.controller.prependSeed(memorySeed);
     const unsubSave = built.controller.subscribe(() => saveNow());
 
     // EST-1012 — ROBUSTEZ DE MEMÓRIA · liga o MONITOR DE PRESSÃO de heap agora que a TUI
@@ -5236,7 +5274,9 @@ export function describeConfigSources(input: {
   const lines: string[] = [];
   if (input.instructionSources.length > 0) {
     // i18n: o rótulo estava cravado em PT e ficava em português na UI em inglês.
-    lines.push(`${input.t?.('boot.instructions') ?? 'instruções'}: ${input.instructionSources.join(' + ')}`);
+    lines.push(
+      `${input.t?.('boot.instructions') ?? 'instruções'}: ${input.instructionSources.join(' + ')}`,
+    );
   }
   const cmdParts: string[] = [];
   if (input.globalCommands > 0) cmdParts.push(`~/.aluy/commands (${input.globalCommands})`);

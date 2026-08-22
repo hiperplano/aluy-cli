@@ -92,7 +92,21 @@ export function recordSidecarUse(prev: SidecarUsage, kind: SidecarKind, ok: bool
  *   • `idle` — ligado e de pé, porém AINDA NÃO consultado neste sessão.
  *   • `used` — consultado COM PROVEITO ≥1 vez (o número de chamadas é a prova).
  */
-export type SidecarUseState = 'off' | 'idle' | 'used';
+/**
+ * `off`  — a SESSÃO não ligou este sidecar (perfil leve, toggle desligado, URL não
+ *          resolvida). Não é defeito: ninguém pediu.
+ * `down` — a sessão LIGOU e TODA chamada falhou. Isto é defeito.
+ * `idle` — ligado, ainda não consultado.
+ * `used` — consultado com sucesso.
+ *
+ * `off` e `down` eram O MESMO valor, e o chip desenhava `✗` para os dois. O dono
+ * bateu de frente com isso: "o doctor fala que o mem0 ta ok mas o status diz outra
+ * coisa". Os dois estavam certos — o SERVIDOR estava de pé (o probe do doctor
+ * alcança a porta) e a SESSÃO não tinha ligado o sidecar. Mas com um glifo só para
+ * as duas condições, não havia como saber qual era, e "não pedi" ficou
+ * indistinguível de "quebrou" — que é o defeito mais caro que existe nesta base.
+ */
+export type SidecarUseState = 'off' | 'down' | 'idle' | 'used';
 
 /**
  * DERIVAÇÃO PURA do estado — sem probe de rede, e é de propósito.
@@ -107,9 +121,9 @@ export type SidecarUseState = 'off' | 'idle' | 'used';
  * Sem nenhuma chamada ainda (`ok===0 && fail===0`) ⇒ `idle` (ligado, ocioso).
  */
 export function sidecarUseState(counts: SidecarUseCounts, enabled: boolean): SidecarUseState {
-  if (!enabled) return 'off';
+  if (!enabled) return 'off'; // ninguém pediu — não é defeito
   if (counts.ok > 0) return 'used';
-  if (counts.fail > 0) return 'off'; // tentou e não respondeu ⇒ está fora, não ocioso
+  if (counts.fail > 0) return 'down'; // tentou e não respondeu ⇒ CAIU (distinto de 'off')
   return 'idle';
 }
 
@@ -172,7 +186,12 @@ export function buildSidecarChip(view: SidecarUsageView): readonly SidecarChipEn
  */
 export function sidecarChipCell(entry: SidecarChipEntry, ascii = false): string {
   if (entry.state === 'used') return `${entry.code}·${entry.ok}`;
-  if (entry.state === 'off') return `${entry.code}${ascii ? 'x' : '✗'}`;
+  // `down` (LIGOU e caiu) e `off` (não foi ligado) desenhavam o MESMO `✗`, e o dono não
+  // tinha como distinguir "quebrou" de "não pedi" — foi o que o fez reportar o `/doctor`
+  // e a barra "discordando" quando ambos estavam certos. O `✗` fica reservado ao DEFEITO;
+  // o desligado vira `−`, que lê como ausência, não como falha.
+  if (entry.state === 'down') return `${entry.code}${ascii ? 'x' : '✗'}`;
+  if (entry.state === 'off') return `${entry.code}${ascii ? '-' : '−'}`;
   return entry.code;
 }
 

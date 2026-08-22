@@ -69,8 +69,17 @@ describe('F-SIDECAR-USO · os 3 estados (a decisão que a StatusBar pinta)', () 
     expect(sidecarUseState({ ok: 1, fail: 0 }, true)).toBe('used');
   });
 
-  it('SÓ falhas ⇒ `off` — tentou e não respondeu; dizer "ocioso" seria mentira', () => {
-    expect(sidecarUseState({ ok: 0, fail: 3 }, true)).toBe('off');
+  it('SÓ falhas ⇒ `down` — tentou e não respondeu; dizer "ocioso" seria mentira', () => {
+    // Era `off`. A invariante (não pode ler como ocioso) é a MESMA; o estado ficou mais
+    // específico p/ separar "caiu" de "não foi ligado" — ver o comentário abaixo.
+    expect(sidecarUseState({ ok: 0, fail: 3 }, true)).toBe('down');
+  });
+
+  it('NÃO ligado ⇒ `off` — e isto NÃO pode ser o mesmo que caído', () => {
+    expect(sidecarUseState({ ok: 0, fail: 0 }, false)).toBe('off');
+    expect(sidecarUseState({ ok: 0, fail: 3 }, true)).not.toBe(
+      sidecarUseState({ ok: 0, fail: 0 }, false),
+    );
   });
 
   it('uso + falhas ⇒ `used` — o sidecar SERVIU pelo menos uma vez nesta sessão', () => {
@@ -96,7 +105,12 @@ describe('F-SIDECAR-USO · montagem do chip', () => {
       mem0: { ok: 0, fail: 4 }, // ligado, mas caído
     };
     const chip = buildSidecarChip(view({ usage }));
-    expect(chip?.map((e) => e.state)).toEqual(['used', 'idle', 'off']);
+    // `down`, não `off`: a invariante que este caso protege — "caído NUNCA lê como
+    // ocioso" — segue valendo. O valor ficou mais ESPECÍFICO: `off` passou a significar
+    // só "a sessão não ligou este sidecar", e caído ganhou estado próprio. Com um valor
+    // só, o dono não distinguia "quebrou" de "não pedi", e foi isso que o levou a
+    // reportar o `/doctor` e a StatusBar "discordando" quando os dois estavam certos.
+    expect(chip?.map((e) => e.state)).toEqual(['used', 'idle', 'down']);
   });
 
   it('sidecar não-ligado no fio da sessão ⇒ `off`', () => {

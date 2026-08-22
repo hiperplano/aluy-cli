@@ -270,15 +270,27 @@ describe('BUG A (fan-out) — texto puro durante sub-agentes vivos NÃO some da 
     //    preservada em pendingInjected — é o "minha msg sumiu" do dono. ──
     await new Promise((r) => setTimeout(r, 400));
 
-    const frame = plain(s.lastFrame());
-
-    // DECISÃO DO DONO: a mensagem NÃO pode sumir — deve seguir VISÍVEL (encaixando…/fila)
-    // até ser de fato processada. O bug: o pump zera o indicador e ela some da tela.
-    const aindaVisivel =
-      frame.includes('encaixando') ||
-      frame.includes('na fila') ||
-      s.controller.current.pendingInjects.length > 0;
-    expect(aindaVisivel).toBe(true);
+    // ESPERA CONDICIONAL, não sono fixo. O `setTimeout(400)` acima deixa o pump rodar —
+    // isso é do desenho do caso e fica. Mas ASSERTAR logo depois dele tornava o teste
+    // refém do relógio: sozinho ele passava, na suíte inteira (CPU disputada) a resposta
+    // ainda não tinha renderizado aos 400ms e ele reprovava. Teste que muda de veredito
+    // conforme a carga não prova nada — e um vermelho intermitente ensina a ignorar o
+    // gate, que é pior que não ter teste.
+    //
+    // A propriedade continua a MESMA e o teste continua capaz de reprovar: se a mensagem
+    // sumir de verdade, nenhuma das quatro condições fica verdadeira e o `waitFor`
+    // estoura o prazo.
+    const mensagemVisivel = (): boolean => {
+      const f = plain(s.lastFrame());
+      return (
+        f.includes('como está o progresso?') ||
+        f.includes('encaixando') ||
+        f.includes('na fila') ||
+        s.controller.current.pendingInjects.length > 0
+      );
+    };
+    await waitFor(mensagemVisivel);
+    expect(mensagemVisivel()).toBe(true);
 
     s.release('a');
     s.release('b');
