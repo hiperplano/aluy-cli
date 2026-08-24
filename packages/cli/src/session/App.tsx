@@ -1150,7 +1150,15 @@ export function App(props: AppProps): React.ReactElement {
   // EST-0970 — o `/doctor` roda em fase `idle` (a checklist viva é um bloco, não uma
   // fase), mas o spinner dos itens `pending` precisa GIRAR. Anima também enquanto houver
   // um bloco `doctor` com check pendente (some sozinho quando todos resolvem).
-  const phaseAnimates = animTickEnabled(state.phase, syncActive) || doctorRunning(state.blocks);
+  // SUB-AGENTE DESACOPLADO também anima. Depois do desacople o pai vai para REPOUSO,
+  // e o tick parava — a tela congelava com os filhos ainda trabalhando. O dono: "sumiu
+  // o processando... a ausência do processando deu uma sensação ruim". Ele estava
+  // certo: sem pulso, "trabalhando" fica indistinguível de "travado", e essa é a
+  // mesma ambiguidade que passei o dia consertando em outros lugares. Some sozinho
+  // quando o último filho termina (`detachedSubagents` volta a 0).
+  const haFilhoVivo = (state.detachedSubagents ?? 0) > 0;
+  const phaseAnimates =
+    animTickEnabled(state.phase, syncActive) || doctorRunning(state.blocks) || haFilhoVivo;
   const frame = useTick({ enabled: theme.animate && phaseAnimates });
 
   // Tick LENTO de 1s (separado da animação) p/ o INDICADOR DE ATIVIDADE (elapsed):
@@ -5426,7 +5434,15 @@ export function App(props: AppProps): React.ReactElement {
         {state.detachedSubagents !== undefined && state.detachedSubagents > 0 && (
           <Box>
             <Text color="yellow">
-              ⚠ {state.detachedSubagents} sub-agente(s) em segundo plano (esc) — F8 para parar.
+              {/* SPINNER, não `⚠` estático. O aviso nasceu para o ESC — trabalho ÓRFÃO que o dono
+                  precisa notar. Com o desacople-por-injeção ele virou o estado NORMAL de "os agentes
+                  trabalham enquanto conversamos", e aí um alerta parado erra duas vezes: não pulsa
+                  (parece travado — "sumiu o processando... deu uma sensação ruim") e grita (não é
+                  incidente). O `(esc)` também mentia: com injeção não houve ESC nenhum. */}
+              {theme.animate
+                ? theme.spinnerFrames[frame % theme.spinnerFrames.length]
+                : theme.glyph('clock')}{' '}
+              {state.detachedSubagents} sub-agente(s) trabalhando em segundo plano — F8 para parar.
             </Text>
           </Box>
         )}
