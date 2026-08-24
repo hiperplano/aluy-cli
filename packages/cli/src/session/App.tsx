@@ -5442,7 +5442,7 @@ export function App(props: AppProps): React.ReactElement {
               {theme.animate
                 ? theme.spinnerFrames[frame % theme.spinnerFrames.length]
                 : theme.glyph('clock')}{' '}
-              {state.detachedSubagents} sub-agente(s) trabalhando em segundo plano — F8 para parar.
+              {state.detachedSubagents} sub-agente(s) trabalhando — F8 para parar.
             </Text>
           </Box>
         )}

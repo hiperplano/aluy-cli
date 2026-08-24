@@ -7212,9 +7212,21 @@ export class SessionController {
 
   /** DETACH-FIX (item 4) — espelha o nº de desacoplados vivos no estado (undefined quando 0). */
   private publishDetachedCount(): void {
-    this.patch({
-      detachedSubagents: this.detachedSubagentCount > 0 ? this.detachedSubagentCount : undefined,
-    });
+    // CONTA A VERDADE — os filhos VIVOS em TODAS as árvores, não um contador à parte.
+    //
+    // O contador manual só conhecia os DESACOPLADOS, e só era publicado em eventos de
+    // desacople. O dono expôs os dois furos num teste só: disparou 3, pediu mais 3 antes
+    // de terminarem, e "não atualizou o status de 3 para 6" — porque o 2º lote rodou
+    // ACOPLADO e nunca entrou na conta. Depois, "quando terminou os 3 primeiros o status
+    // amarelo sumiu" — o contador foi a zero com 3 filhos ainda trabalhando.
+    //
+    // Um número que o dono usa para decidir se aperta F8 não pode ser mantido à mão em
+    // dois lugares. A árvore de fluxo já sabe quem está vivo; passamos a perguntar a ela.
+    let vivos = 0;
+    for (const t of this.detachedTrees) vivos += t.liveChildren().length;
+    const atual = this.flowTree;
+    if (atual !== null && !this.detachedTrees.has(atual)) vivos += atual.liveChildren().length;
+    this.patch({ detachedSubagents: vivos > 0 ? vivos : undefined });
   }
 
   /**
@@ -7417,6 +7429,9 @@ export class SessionController {
           model: this.childModelLabel(model),
           ...(node ? { nodeId: node.id } : {}),
         });
+        // O nº de filhos vivos mudou — republica p/ o aviso do rodapé acompanhar
+        // (sem isto ele só mexia em desacople, e ficava mentindo entre um e outro).
+        this.publishDetachedCount();
         extra?.onChildStart?.(label, model);
       },
       onChildEnd: (label: string, outcome: SubAgentOutcome, model?: string) => {
@@ -7441,6 +7456,9 @@ export class SessionController {
         });
         // A contabilidade do PAI (rodapé) reflete a soma agregada — atualiza o rodapé.
         this.refreshTurnAccounting();
+        // O nº de filhos vivos mudou — republica p/ o aviso do rodapé acompanhar
+        // (sem isto ele só mexia em desacople, e ficava mentindo entre um e outro).
+        this.publishDetachedCount();
         extra?.onChildEnd?.(label, outcome, model);
       },
     };

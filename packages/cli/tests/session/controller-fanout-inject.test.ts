@@ -280,8 +280,14 @@ describe('FANOUT-17 — DEFAULT OFF é bit-a-bit o comportamento atual (zero reg
 
     const callsBefore = parentCalls();
     controller.injectInput('root', 'btw');
-    // Sem flag: NÃO desacopla — nenhum filho vira "desacoplado" só por causa do inject.
-    expect(controller.current.detachedSubagents).toBeUndefined();
+    // `detachedSubagents` mudou de significado: era "quantos DESACOPLADOS", virou
+    // "quantos filhos VIVOS" — porque o dono precisa do número para decidir se aperta
+    // F8, e o contador antigo mentia (não somava lote acoplado, e zerava com filhos
+    // ainda rodando). Aqui os 2 filhos estão vivos e ACOPLADOS, então a contagem é 2.
+    //
+    // A prova de que NÃO houve desacople continua sendo a asserção abaixo, que é a
+    // forte: o pai não respondeu em paralelo — seguiu bloqueado no fan-out.
+    expect(controller.current.detachedSubagents).toBe(2);
     // O pai NÃO respondeu em paralelo (segue bloqueado no fan-out).
     expect(parentCalls()).toBe(callsBefore);
 
