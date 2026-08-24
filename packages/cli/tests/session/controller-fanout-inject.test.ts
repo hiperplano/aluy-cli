@@ -298,4 +298,35 @@ describe('FANOUT-17 — DEFAULT OFF é bit-a-bit o comportamento atual (zero reg
       .some((m) => m.content.includes('relatório-a.') && m.content.includes('relatório-b.'));
     expect(sawReports).toBe(true);
   });
+  // FANOUT-INJECT-ERRO-FALSO — regressão publicada na rc.142, achada pelo dono em uso.
+  //
+  // Com o desacople-por-injeção ligado por padrão, os filhos apareciam `✔ pronto` na
+  // árvore (com tokens e tempo) e chegavam ao MODELO como `(error, sem sucesso)` dizendo
+  // "turno interrompido (esc)" — sem ter havido ESC. O agente lia o próprio resultado como
+  // falha e respondia "estou aguardando os 3 sub-agentes" com os três concluídos.
+  //
+  // A causa: `detachedOutcome` nasceu para o ESC, onde o loop do pai é abortado e DESCARTA
+  // o retorno. Na injeção o pai segue vivo e LÊ. E não dava para distinguir pelo
+  // `rootSignal.aborted`, porque a injeção também aborta o turno do pai — o motivo tem de
+  // ser gravado por quem PEDE o desacople.
+  it('desacople por INJEÇÃO não reporta os filhos como erro nem cita "(esc)"', async () => {
+    const { model, release, captured } = buildScenario();
+    const controller = buildController(model, { ALUY_FANOUT_DETACH_ON_INJECT: '1' });
+
+    const done = controller.submit('delegue a e b');
+    await waitFor(
+      () => controller.flowOverview().filter((n) => n.kind === 'subagent').length === 2,
+    );
+
+    controller.injectInput('root', 'o que vc ta fazendo');
+    release('a');
+    release('b');
+    await done;
+
+    // O que o MODELO recebeu — é aí que a mentira aparecia.
+    const texto = captured.map((m) => m.content).join('\n');
+    expect(texto).not.toContain('turno interrompido (esc)');
+    expect(texto).not.toContain('error, sem sucesso');
+    controller.dispose();
+  }, 20000);
 });
