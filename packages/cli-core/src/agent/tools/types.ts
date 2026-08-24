@@ -417,6 +417,13 @@ export interface ToolPorts {
   readonly shell: ShellPort;
   readonly search: SearchPort;
   /**
+   * GESTÃO DE SUB-AGENTES (ver/parar/relatar). OPCIONAL: sem ela, `agents_status` e
+   * `agents_stop` respondem "indisponível neste locus" em vez de falhar — mesma
+   * disciplina das outras portas. O locus concreto liga na ÁRVORE DE FLUXO, que já é
+   * a fonte única do estado de cada filho.
+   */
+  readonly agentsControl?: import('./agents-manage.js').AgentsControlPort;
+  /**
    * EST-0982 — porta do DIRETÓRIO DE TRABALHO DE SESSÃO (`sessionCwd`) que a tool
    * `change_dir` navega (confinada à raiz). OPCIONAL: sem ela, `change_dir` é inerte
    * (erro claro, nenhum efeito) e o agente segue na raiz (não-regressão). O locus

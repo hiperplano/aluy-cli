@@ -142,7 +142,15 @@ export async function buildLocalModelClient(
   // EST-1115 — o egress BYO usa o fetch PINADO/STREAMING (IP-PIN + redirect
   // fail-closed). Em teste, um `fetch` injetado VENCE (mocka a rede). Em produção,
   // sem `fetch`, montamos o pinado (NUNCA cai no `globalThis.fetch` cru).
-  const doFetch: StreamFetch = opts.fetch ?? createPinnedStreamFetch({ resolver });
+  // LOOPBACK do provider LOCAL — o Ollama vive em `127.0.0.1:11434` e a trava
+  // anti-SSRF o recusava como "IP interno", tornando-o inutilizável como provider
+  // desde sempre. A exceção é ligada SÓ quando o baseURL que o dono declarou já
+  // aponta para loopback: quem configurou um provider remoto não ganha brecha
+  // nenhuma, e o redirect continua revalidado sem ela (ver `pinned-stream-fetch`).
+  // Metadata da cloud é LINK-LOCAL, não loopback — segue bloqueada nos dois casos.
+  const baseEhLoopback = /^https?:\/\/(127\.|\[?::1\]?|localhost)([:/]|$)/i.test(baseUrl ?? '');
+  const doFetch: StreamFetch =
+    opts.fetch ?? createPinnedStreamFetch({ resolver, allowLoopback: baseEhLoopback });
 
   const getCredential =
     opts.getCredential ??

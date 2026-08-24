@@ -5222,7 +5222,7 @@ export function App(props: AppProps): React.ReactElement {
           do orçamento (`pendingInjectLines`), fora da região viva (não treme). */}
       {state.pendingInjects.length > 0 && (
         <Box paddingBottom={1}>
-          <PendingInjects items={state.pendingInjects} />
+          <PendingInjects items={state.pendingInjects} cycleActive={state.cycleActive === true} />
         </Box>
       )}
       {/* `/ask` EM VOO — área SEPARADA da fila (canal lateral ↗), até a resposta chegar. */}

@@ -84,6 +84,13 @@ export interface PendingInjectsProps {
    * num turno VIVO, AINDA não drenados pelo loop. FIFO; o 1º é o próximo a encaixar.
    */
   readonly items: readonly string[];
+  /**
+   * Há um `/cycle` VIVO? Muda o que a linha PROMETE: com ciclo, a mensagem entra na
+   * próxima iteração (que a própria injeção acorda); sem ciclo, no próximo envio.
+   * Dizer "próxima iteração" com o ciclo já parado foi o que fez o dono concluir que
+   * a mensagem nunca seria processada. Ausente ⇒ sem ciclo (o caso comum).
+   */
+  readonly cycleActive?: boolean | undefined;
 }
 
 /**
@@ -98,12 +105,31 @@ export interface PendingInjectsProps {
 export function PendingInjects(props: PendingInjectsProps): React.ReactElement | null {
   const { items } = props;
   if (items.length === 0) return null;
+  // O TEXTO TEM DE DIZER A VERDADE DAQUELE MOMENTO.
+  //
+  // Era sempre "incorporada(s) na próxima iteração" — e depois que o ciclo PARA não
+  // existe próxima iteração. O dono leu a promessa, esperou, nada aconteceu, e concluiu
+  // que a mensagem não era processada ("ele não processa, fica encaixando"). Ela estava
+  // guardada e seria incorporada no próximo ENVIO — que é outra coisa, e ele não tinha
+  // como adivinhar.
+  //
+  // Com ciclo vivo: fala em iteração (e ela agora começa NA HORA — a injeção acorda o
+  // descanso). Sem ciclo: fala em mensagem, que é o que de fato vai consumi-la.
+  //
+  // A palavra "encaixando…" FICA. Tentei trocá-la por "aguardando" e dois testes
+  // existentes reprovaram, com razão: ela carrega o sentido sem depender de glifo (a11y)
+  // e precisa ser DISTINTA de "na fila", que é outro estado. O que enganava não era a
+  // palavra — era a promessa que vinha depois dela.
+  const destino =
+    props.cycleActive === true
+      ? 'entra na próxima iteração'
+      : 'entra na próxima mensagem que você enviar';
   const shown = items.slice(0, VISIBLE_QUEUED);
   const hidden = items.length - shown.length;
   return (
     <Box flexDirection="column">
       {/* Cabeçalho: contagem + a palavra "encaixando" (a11y — nunca só glifo). */}
-      <Role name="depth">{`↳ ${items.length} encaixando… · incorporada(s) na próxima iteração`}</Role>
+      <Role name="depth">{`↳ ${items.length} encaixando… · ${destino}`}</Role>
       {shown.map((text, i) => (
         <Box key={i}>
           <Role name="fgDim">{`  › ${elide(text)}`}</Role>

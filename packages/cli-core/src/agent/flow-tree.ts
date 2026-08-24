@@ -335,6 +335,18 @@ export class FlowNode {
    * EST-0982 — carimba o `ts` (do `Clock` injetável): cada atividade ganha QUANDO
    * começou; a duração ao vivo (`durationMs`) é derivada disto no `drillIn`.
    */
+  /** RELATO curto do próprio filho — o que ele diz que está fazendo. */
+  statusNote: string | undefined = undefined;
+
+  /** A atividade ainda em curso, se houver — a última marcada `running`. */
+  currentActivity(): { tool: string; target: string } | undefined {
+    for (let i = this.recentActivity.length - 1; i >= 0; i--) {
+      const a = this.recentActivity[i]!;
+      if (a.running) return { tool: a.tool, target: a.target };
+    }
+    return undefined;
+  }
+
   noteToolStart(tool: string, rawTarget: string): void {
     this.pushRecent({
       tool,
@@ -510,6 +522,16 @@ export interface FlowSummary {
   readonly phase: FlowPhase;
   readonly accounting: FlowAccounting;
   readonly stop?: FlowStop;
+  /**
+   * A atividade EM CURSO deste nó (tool + alvo redigido), quando há uma.
+   *
+   * A árvore já registrava isto (`noteToolStart`) e não publicava — quem lia o resumo
+   * via só "rodando", sem saber rodando O QUÊ. É o que faltava para o agente principal
+   * responder "o que os sub-agentes estão fazendo" em vez de "não tenho como saber".
+   */
+  readonly activity?: { readonly tool: string; readonly target: string };
+  /** Relato do próprio filho (`report_status`), quando ele deu um. */
+  readonly note?: string;
 }
 
 /**
@@ -657,6 +679,8 @@ export class FlowTree {
         phase: n.phase,
         accounting: n.accounting(),
         ...(n.stop !== undefined ? { stop: n.stop } : {}),
+        ...(n.currentActivity() !== undefined ? { activity: n.currentActivity()! } : {}),
+        ...(n.statusNote !== undefined ? { note: n.statusNote } : {}),
       });
       for (const c of n.childNodes) visit(c);
     };
