@@ -2462,11 +2462,26 @@ export class SessionController {
     this.monitorWaking = true;
     // EST-F158 — limpa o flag de fanout-completion (consumido neste wake).
     this.pendingFanoutCompletion = false;
-    // 6. Empurra uma NOTA visível.
-    this.pushNote(
-      'monitor',
-      events.map((e) => `⏰ ${e.label} disparou — ${e.condition}`),
+    // 6. Empurra uma NOTA visível — MENOS para os eventos INTERNOS de fan-out.
+    //
+    // `fanout-result`/`fanout-completed` não são monitores que o dono armou: são o canal
+    // de DADO que leva o resultado dos filhos ao loop. Quem conta a novidade já é a nota
+    // "sub-agentes concluíram"/"fan-out concluído", empurrada no mesmo instante. Anunciar
+    // o MECANISMO além do FATO dava QUATRO linhas para UM evento — o dono viu na tela, e
+    // o próprio agente comentou "essa é uma notificação duplicada do mesmo evento".
+    // Ruído assim ensina a ignorar o rodapé, que é o oposto do que ele existe para fazer.
+    //
+    // Monitor de VERDADE (arquivo mudou, processo terminou) segue anunciando: ali o dono
+    // precisa saber que algo disparou sozinho.
+    const eventosVisiveis = events.filter(
+      (e) => e.monitorId !== 'fanout-result' && e.monitorId !== 'fanout-completed',
     );
+    if (eventosVisiveis.length > 0) {
+      this.pushNote(
+        'monitor',
+        eventosVisiveis.map((e) => `⏰ ${e.label} disparou — ${e.condition}`),
+      );
+    }
     // 7. Converte eventos em attachments (DADO NÃO-CONFIÁVEL).
     const attachments = events.map((e) => formatMonitorEventAsData(e));
     // 8. Nudge: texto curto dizendo que um monitor disparou. NÃO é fala do usuário.

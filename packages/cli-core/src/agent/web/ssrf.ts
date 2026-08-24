@@ -379,7 +379,9 @@ function ipv4FromTransitionV6(
  */
 export function validateResolvedIps(
   ips: readonly string[],
-): { ok: true; pinnedIp: string } | { ok: false; reason: string; offendingIp: string } {
+):
+  | { ok: true; pinnedIp: string; pinnedIps: readonly string[] }
+  | { ok: false; reason: string; offendingIp: string } {
   if (ips.length === 0) {
     return { ok: false, reason: 'host não resolveu para nenhum IP', offendingIp: '' };
   }
@@ -393,6 +395,18 @@ export function validateResolvedIps(
       };
     }
   }
-  // todos públicos — pina o 1º (canônico).
-  return { ok: true, pinnedIp: classifyIp(ips[0]!).canonical };
+  // Todos públicos. Devolve TODOS os canônicos, na ordem em que o resolvedor os deu.
+  //
+  // Antes só o 1º sobrevivia, e isso quebrava máquina com IPv6 ANUNCIADO E MORTO: o DNS
+  // devolve o AAAA primeiro, o egress pinava nele e a conexão morria — com IPv4 perfeito
+  // na mesma máquina, a um endereço de distância. MEDIDO no servidor do dono: `curl -4`
+  // respondia em 0,15s e `curl -6` falhava; o CLI inteiro ficava inutilizável ali, e o
+  // diagnóstico custou horas porque `curl`, `aluy models` e o `fetch` do Node sobrevivem
+  // (fazem Happy Eyeballs) — só este caminho não tentava uma segunda família.
+  //
+  // A GARANTIA DE SEGURANÇA NÃO MUDA: o laço acima REPROVA o conjunto inteiro se QUALQUER
+  // IP for interno. Quem chega aqui tem todos os endereços aprovados pela MESMA denylist
+  // — devolver a lista não relaxa nada, só deixa de descartar alternativas já validadas.
+  const canonicos = ips.map((ip) => classifyIp(ip).canonical);
+  return { ok: true, pinnedIp: canonicos[0]!, pinnedIps: canonicos };
 }

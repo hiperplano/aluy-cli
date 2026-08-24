@@ -79,7 +79,16 @@ export async function validateProviderBaseUrl(
 
 /** Resultado de resolver+validar+pinar um host (EST-1115). */
 export type PinResult =
-  | { readonly ok: true; readonly host: string; readonly pinnedIp: string }
+  | {
+      readonly ok: true;
+      readonly host: string;
+      /** O 1º endereço validado (compat com quem só quer um). */
+      readonly pinnedIp: string;
+      /** TODOS os endereços validados, na ordem do resolvedor — o egress tenta em série
+       *  até um conectar. O porquê está em `validateResolvedIps`: IPv6 anunciado e morto
+       *  com IPv4 vivo ao lado tornava o CLI inutilizável na máquina. */
+      readonly pinnedIps: readonly string[];
+    }
   | { readonly ok: false; readonly reason: string };
 
 /**
@@ -106,7 +115,7 @@ export async function resolveAndPinHost(raw: string, resolver: HostResolver): Pr
     if (literal.blocked) {
       return { ok: false, reason: `aponta p/ IP interno (${literal.reason})` };
     }
-    return { ok: true, host, pinnedIp: literal.canonical };
+    return { ok: true, host, pinnedIp: literal.canonical, pinnedIps: [literal.canonical] };
   }
 
   let ips: readonly string[];
@@ -119,7 +128,7 @@ export async function resolveAndPinHost(raw: string, resolver: HostResolver): Pr
   if (!verdict.ok) {
     return { ok: false, reason: `aponta p/ IP interno (${verdict.reason})` };
   }
-  return { ok: true, host, pinnedIp: verdict.pinnedIp };
+  return { ok: true, host, pinnedIp: verdict.pinnedIp, pinnedIps: verdict.pinnedIps };
 }
 
 /**

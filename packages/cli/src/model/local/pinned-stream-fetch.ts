@@ -72,17 +72,52 @@ export function createPinnedStreamFetch(opts: PinnedStreamFetchOptions = {}): St
         throw new Error(`backend local: egress recusado — ${pin.reason} (PROV-SEC-1, anti-SSRF)`);
       }
 
-      const res = await connectPinned({
-        url,
-        host: pin.host,
-        pinnedIp: pin.pinnedIp,
-        method: init.method,
-        headers,
-        ...(init.body !== undefined ? { body: init.body } : {}),
-        ...(init.signal ? { signal: init.signal } : {}),
-        httpsRequestFn,
-        httpRequestFn,
-      });
+      // (1b) CONECTA — tentando CADA endereço validado, em série, até um responder.
+      //
+      // Antes pinava só o primeiro. Numa máquina com IPv6 ANUNCIADO E MORTO (rota existe,
+      // tráfego não passa) o DNS devolve o AAAA primeiro, este caminho apostava nele e o
+      // CLI inteiro ficava inutilizável — com IPv4 saudável na mesma máquina. Medido no
+      // servidor do dono: `curl -4` em 0,15s, `curl -6` falhando. `curl` e o `fetch` do Node
+      // não sofrem porque tentam as duas famílias; só este não tentava.
+      //
+      // SEGURANÇA INTACTA: `pinnedIps` são TODOS aprovados pela mesma denylist — o
+      // `resolveAndPinHost` reprova o conjunto inteiro se qualquer um for interno. Não há
+      // "cair para um IP menos seguro": ou todos passaram, ou nenhum é tentado.
+      const enderecos = pin.pinnedIps.length > 0 ? pin.pinnedIps : [pin.pinnedIp];
+      let res: Awaited<ReturnType<typeof connectPinned>> | undefined;
+      const falhas: string[] = [];
+      for (const ip of enderecos) {
+        try {
+          res = await connectPinned({
+            url,
+            host: pin.host,
+            pinnedIp: ip,
+            method: init.method,
+            headers,
+            ...(init.body !== undefined ? { body: init.body } : {}),
+            ...(init.signal ? { signal: init.signal } : {}),
+            httpsRequestFn,
+            httpRequestFn,
+          });
+          break;
+        } catch (e) {
+          // Cancelamento do usuário não é "endereço ruim" — não faz sentido tentar o
+          // próximo IP quando quem pediu para parar foi ele.
+          if (init.signal?.aborted === true) throw e;
+          const familia = ip.includes(':') ? 'IPv6' : 'IPv4';
+          falhas.push(`${ip} (${familia}): ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      if (res === undefined) {
+        // MENSAGEM QUE NOMEIA. A anterior era "falha de transporte ao chamar o provider",
+        // e mandou quem depurava investigar keychain, proxy e chave velha por horas — sem
+        // dizer em QUE endereço tentou nem que havia outro disponível. Dizer o IP e a
+        // família encerra o diagnóstico na primeira leitura.
+        throw new Error(
+          `backend local: não conectei a "${pin.host}" em nenhum dos ${enderecos.length} ` +
+            `endereço(s) resolvido(s) — ${falhas.join(' · ')}`,
+        );
+      }
 
       const status = res.statusCode ?? 0;
       const location = firstHeader(res.headers.location);
