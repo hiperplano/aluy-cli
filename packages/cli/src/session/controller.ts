@@ -44,6 +44,8 @@ import {
   budgetPct,
   SubAgentSpawner,
   spawnAgentTool,
+  agentsStatusTool,
+  agentsStopTool,
   formatSubAgentResults,
   bindNamedAgent,
   resolveModelTier,
@@ -1827,9 +1829,36 @@ export class SessionController {
           spawn: (profiles, signal, opts) =>
             this.spawnNamed(spawner, registry, profiles, signal, opts?.room === true),
         },
+        agentsControl: {
+          // A ÁRVORE é a fonte: ela já registra fase, tokens, tools, duração e a tool em
+          // curso de cada filho. Nada aqui é mantido em paralelo — a lição do contador de
+          // sub-agentes, que espelhava a verdade e dessincronizava.
+          list: () => this.listaFilhosParaGestao(),
+          stop: (label: string) => this.pararFilhoPorRotulo(label),
+        },
       };
       // `spawn_agent` SÓ no toolset do PAI (os filhos nunca o recebem — E-A1).
       allTools.push(spawnAgentTool);
+      // GESTÃO DOS FILHOS — ver e parar. Antes disto o agente respondia "não tenho como"
+      // quando o dono perguntava o que os sub-agentes estavam fazendo, e estava CERTO: a
+      // árvore de fluxo sabia tudo, o `Ctrl+T → P` do dono usava esse saber, e o agente
+      // não alcançava. `agents_status` é leitura pura; `agents_stop` é efeito e passa pela
+      // catraca, porque encerrar trabalho que o dono pediu não é decisão silenciosa.
+      allTools.push(agentsStatusTool, agentsStopTool);
+      // O RELATO do filho vai para o NÓ dele na árvore — a mesma fonte que o
+      // `agents_status` lê. Sem espelho em paralelo.
+      spawner.onChildReport = (label: string, nota: string): boolean => {
+        const arvores = [...this.detachedTrees];
+        if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
+        for (const t of arvores) {
+          const no = t.node(`root/${label}`);
+          if (no) {
+            no.statusNote = nota;
+            return true;
+          }
+        }
+        return false;
+      };
     }
 
     // EST-0948 — o contador que o controller OWNS p/ a sessão (CLI-SEC-8). Com
@@ -2598,6 +2627,10 @@ export class SessionController {
         this.onError(err);
         return;
       } finally {
+        // Mesma órfã do fim de ciclo: se o turno fecha logo depois de uma injeção, o que
+        // estava na fila VIVA não tem mais quem o drene. Move p/ a fila pendente, que o
+        // próximo submit consome. No-op quando vazia.
+        this.drainLiveInjectsToPending();
         this.abort = null;
         // EST-0982 — fecha a contabilidade do turno (carimba a duração final, congela
         // o rodapé). Idempotente (cancel/erro já podem ter fechado).
@@ -3007,6 +3040,18 @@ export class SessionController {
       // `state.cycleActive`) re-tenta — o efeito da fila re-roda nesta re-publicação.
       this.activeCycleEngine = null; // EST-1158
       this.cycleActive = false;
+      // INJEÇÃO ÓRFÃ — o que o dono encaixou durante o ciclo esperava "a próxima
+      // iteração", e o ciclo acabou de terminar: não existe próxima. Sem isto a mensagem
+      // fica presa na fila VIVA para sempre — visível como "↳ 1 encaixando…" e nunca
+      // processada. Foi exatamente o que ele viu: parou o ciclo e o `oi` ficou pendurado
+      // na tela ("coloco alguma coisa, ele não processa, fica encaixando").
+      //
+      // O impasse era estrutural: durante o ciclo o `submit` é RECUSADO (anti gasto
+      // dobrado), então texto puro só pode ENCAIXAR; se o ciclo termina antes de drenar,
+      // a mensagem não tem para onde ir. Mover p/ `pendingInjected` devolve o caminho —
+      // o próximo submit a incorpora, e o indicador só se apaga quando ela for de fato
+      // consumida. No-op quando a fila está vazia.
+      this.drainLiveInjectsToPending();
       // ADR-0137 (Fatia 3) — LIMPA a decisão do juiz e qualquer gate de teto pendente: nada
       // do ciclo que acabou pode vazar para o próximo (sem auto-aprovação herdada — C4).
       this.lastCycleContinuation = undefined;
@@ -3961,6 +4006,18 @@ export class SessionController {
     } else {
       this.pendingInjected.push(item);
     }
+    // ACORDA O CICLO — se ele estiver DESCANSANDO entre iterações, encurta a espera para
+    // que a mensagem entre AGORA em vez de daqui a um intervalo inteiro.
+    //
+    // Pedido do dono, e o raciocínio dele é o certo: "se não estiver nada sendo
+    // processado ou estiver aguardando o próximo ciclo, a msg deveria já ser
+    // processada". Durante o descanso NÃO há turno em voo — a guarda anti gasto-dobrado
+    // não protege de nada ali, e esperar até 45s/1min em silêncio é indistinguível de
+    // travado (medido: 52s num teste real com intervalo de 45s).
+    //
+    // No-op quando não há ciclo, quando ele está rodando (não há descanso a encurtar) ou
+    // quando está pausado. Não pula iteração nem toca teto/budget.
+    this.activeCycleEngine?.wake();
     return true;
   }
 
@@ -5454,11 +5511,20 @@ export class SessionController {
    * compactar / falha de broker ⇒ nota honesta, sem quebrar a sessão.
    */
   async compact(signal?: AbortSignal): Promise<void> {
-    if (!this.lastRunHistory) {
+    // SESSÃO REABERTA — `lastRunHistory` só existe depois de um turno concluído NESTE
+    // processo. Ao reabrir uma conversa antiga ele é vazio, e o `/compact` respondia
+    // "nada a compactar" com a conversa INTEIRA na tela (relato do dono). É a mesma
+    // família da corrida do resume: o mecanismo olha estado em memória enquanto a tela
+    // mostra o histórico restaurado — e diz que não há nada onde há tudo.
+    //
+    // O histórico retomado JÁ está semeado em `pendingSeed` (feito no restore). Usá-lo
+    // como fonte quando não houve turno é o que torna a resposta verdadeira.
+    const fonte = this.lastRunHistory ?? this.pendingSeed;
+    if (!fonte || fonte.length === 0) {
       this.pushNote('compact', ['nada a compactar ainda — comece uma conversa primeiro.']);
       return;
     }
-    await this.runCompaction(this.lastRunHistory, signal, /*resumeNow*/ false);
+    await this.runCompaction(fonte, signal, /*resumeNow*/ false);
   }
 
   /**
@@ -7190,6 +7256,67 @@ export class SessionController {
    * quando o fan-out real terminar, semeia os desfechos como DADO do próximo turno.
    * Nunca lança (um erro pós-desacople não tem turno onde aparecer — vira nota).
    */
+  /**
+   * Os filhos de TODAS as árvores (corrente + desacopladas) para a porta de gestão.
+   *
+   * Lê da árvore, sem espelho: o contador mantido à mão já nos custou um aviso que
+   * dizia 3 com 6 rodando e sumia com 3 vivos. Aqui a única fonte é `overview()`.
+   */
+  private listaFilhosParaGestao(): readonly {
+    label: string;
+    phase: string;
+    tokens: number;
+    toolCalls: number;
+    durationMs?: number;
+    activity?: { tool: string; target: string };
+    note?: string;
+  }[] {
+    const arvores = [...this.detachedTrees];
+    if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
+    const out: {
+      label: string;
+      phase: string;
+      tokens: number;
+      toolCalls: number;
+      durationMs?: number;
+      activity?: { tool: string; target: string };
+      note?: string;
+    }[] = [];
+    for (const t of arvores) {
+      for (const n of t.overview().filter((x) => x.kind === 'subagent')) {
+        out.push({
+          label: n.label,
+          phase: n.phase,
+          tokens: n.accounting.tokens,
+          toolCalls: n.accounting.toolCalls,
+          ...(n.accounting.durationMs !== undefined ? { durationMs: n.accounting.durationMs } : {}),
+          ...(n.activity ? { activity: n.activity } : {}),
+          ...(n.note !== undefined ? { note: n.note } : {}),
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Para UM filho pelo rótulo, em qualquer árvore. Os irmãos seguem — é o mesmo
+   * mecanismo por-filho que o `Ctrl+T → P` do dono já usava (cada nó tem o seu
+   * AbortController). `false` quando o rótulo não existe ou o filho já terminou:
+   * dizer "parei" sobre algo que não parou seria a mentira que este projeto persegue.
+   */
+  private pararFilhoPorRotulo(label: string): boolean {
+    const arvores = [...this.detachedTrees];
+    if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
+    for (const t of arvores) {
+      const no = t.node(`root/${label}`);
+      if (no && !no.isTerminal()) {
+        no.cancel();
+        return true;
+      }
+    }
+    return false;
+  }
+
   private detachSpawn(run: Promise<readonly SubAgentOutcome[]>, count = 0): void {
     const tree = this.flowTree;
     if (tree) this.detachedTrees.add(tree);
@@ -7478,7 +7605,7 @@ export class SessionController {
    */
   private upsertSubAgentChild(label: string, child: SubAgentChild): void {
     const blocks = [...this.state.blocks];
-    const idx = lastSubAgentsIndex(blocks);
+    const idx = lastSubAgentsIndex(blocks, label);
     if (idx >= 0) {
       const block = blocks[idx]!;
       if (block.kind === 'subagents') {
@@ -8018,7 +8145,24 @@ function clipLiveTail(text: string): string {
  * `running` (o fan-out corrente). Um fan-out novo (todos os anteriores concluídos)
  * cria um bloco novo, em vez de re-popular o já fechado.
  */
-function lastSubAgentsIndex(blocks: readonly SessionBlock[]): number {
+function lastSubAgentsIndex(blocks: readonly SessionBlock[], label?: string): number {
+  // POR QUE O `label` — e por que a regra antiga duplicava o bloco na tela.
+  //
+  // Antes a busca só aceitava um bloco que AINDA tivesse filho `running`. Quando o
+  // último filho concluía, o bloco deixava de ser encontrável — e a próxima atualização
+  // daquele MESMO fan-out (o desfecho do último filho, um `model` que chega depois)
+  // criava um bloco NOVO. O dono viu o resultado: `+ 3 sub-agentes` repetido na tela,
+  // com blocos de linhas em branco entre eles.
+  //
+  // Com o label, a atualização vai para o bloco que JÁ CONHECE aquele filho, terminado
+  // ou não. Um fan-out NOVO (labels inéditos) não casa e segue criando bloco próprio,
+  // que é o comportamento certo.
+  if (label !== undefined) {
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (b && b.kind === 'subagents' && b.children.some((c) => c.label === label)) return i;
+    }
+  }
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
     if (b && b.kind === 'subagents' && b.children.some((c) => c.status === 'running')) return i;

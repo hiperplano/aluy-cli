@@ -64,6 +64,18 @@ export {
   type SubAgentPort,
 } from './spawn-agent.js';
 
+// GESTÃO DE SUB-AGENTES (ver/relatar/parar) — o agente principal não tinha ferramenta
+// nenhuma para acompanhar os filhos, embora a árvore de fluxo soubesse tudo.
+export {
+  agentsStatusTool,
+  agentsStopTool,
+  reportStatusTool,
+  AGENTS_STATUS_TOOL_NAME,
+  AGENTS_STOP_TOOL_NAME,
+  REPORT_STATUS_TOOL_NAME,
+  type AgentsControlPort,
+} from './agents-manage.js';
+
 // EST-1110 · ADR-0114 — `perguntar`: tipos + tool de PERGUNTA ao usuário (PORTÁVEL). A
 // porta `QuestionPort` é injetada pelo @hiperplano/aluy-cli (TuiQuestionResolver); a tool entra em
 // NATIVE_TOOLS (effect:'read'). Os tipos/normalizadores são consumidos pelos testes e

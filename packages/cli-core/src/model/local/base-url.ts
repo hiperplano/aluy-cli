@@ -12,7 +12,7 @@
 // (api.anthropic.com / openrouter.ai / api.openai.com) são públicos e fixos — a
 // validação protege o OVERRIDE. Só `https`/`http`; só host (não IP-literal interno).
 
-import { validateResolvedIps, classifyIp } from '../../agent/web/ssrf.js';
+import { validateResolvedIps, classifyIp, isLoopbackIp } from '../../agent/web/ssrf.js';
 import type { HostResolver } from '../../agent/web/fetcher.js';
 
 /** Resultado da validação de um `base_url`. */
@@ -104,7 +104,26 @@ export type PinResult =
  * Diferença do `validateProviderBaseUrl`: aqui DEVOLVE o IP pinado (o egress vai
  * conectar AO IP validado, não re-resolver) e re-aplica-se a CADA hop de redirect.
  */
-export async function resolveAndPinHost(raw: string, resolver: HostResolver): Promise<PinResult> {
+export async function resolveAndPinHost(
+  raw: string,
+  resolver: HostResolver,
+  opts: { readonly allowLoopback?: boolean } = {},
+): Promise<PinResult> {
+  // LOOPBACK DECLARADO — a exceção que faltava, e por que ela NÃO afrouxa a trava.
+  //
+  // O Ollama vive em `127.0.0.1:11434`. Esta política tratava loopback como "IP interno"
+  // e o recusava, então o Ollama NUNCA pôde ser provider — por construção, desde sempre.
+  // O dono bateu nisso: `egress recusado — aponta p/ IP interno (loopback 127.0.0.0/8)`.
+  //
+  // O vetor que a trava existe para fechar é a METADATA DA CLOUD (`169.254.169.254`),
+  // que é LINK-LOCAL, não loopback — faixas diferentes. Liberar `127.0.0.0/8` não abre
+  // nada do que o PROV-SEC-1 protege: RFC1918, link-local e metadata seguem BLOQUEADOS
+  // com ou sem esta flag. Só o loopback é exonerado.
+  //
+  // E só para o host DECLARADO: o chamador NÃO a propaga nos redirects (cada hop
+  // revalida sem ela), então um provider que responda `302 → http://127.0.0.1/…`
+  // continua barrado. Parametrizar a política que já existe evita a QUARTA política de
+  // egress deste produto — já são três, e cada uma inverte a anterior.
   const parsed = parseHttpUrl(raw);
   if ('reason' in parsed) return { ok: false, reason: parsed.reason };
   const host = parsed.url.hostname.replace(/^\[/, '').replace(/\]$/, '');
@@ -112,7 +131,7 @@ export async function resolveAndPinHost(raw: string, resolver: HostResolver): Pr
   // Host que JÁ é IP-literal (decimal/octal/hex/IPv4-mapped): classifica direto.
   if (isProbablyIpLiteral(host)) {
     const literal = classifyIp(host);
-    if (literal.blocked) {
+    if (literal.blocked && !(opts.allowLoopback === true && isLoopbackIp(host))) {
       return { ok: false, reason: `aponta p/ IP interno (${literal.reason})` };
     }
     return { ok: true, host, pinnedIp: literal.canonical, pinnedIps: [literal.canonical] };
@@ -126,6 +145,13 @@ export async function resolveAndPinHost(raw: string, resolver: HostResolver): Pr
   }
   const verdict = validateResolvedIps(ips);
   if (!verdict.ok) {
+    // `localhost` resolve p/ loopback — mesmo caso do literal acima. Exige que TODOS
+    // sejam loopback: host que devolve loopback + público é rebinding, não Ollama.
+    const todosLoopback = ips.length > 0 && ips.every((ip) => isLoopbackIp(ip));
+    if (opts.allowLoopback === true && todosLoopback) {
+      const canon = ips.map((ip) => classifyIp(ip).canonical);
+      return { ok: true, host, pinnedIp: canon[0]!, pinnedIps: canon };
+    }
     return { ok: false, reason: `aponta p/ IP interno (${verdict.reason})` };
   }
   return { ok: true, host, pinnedIp: verdict.pinnedIp, pinnedIps: verdict.pinnedIps };

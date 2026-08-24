@@ -49,6 +49,7 @@ import { resolveModelTier } from './agent-model-tier.js';
 import { SharedBudget } from './shared-budget.js';
 import { DEFAULT_LIMITS, type SessionLimits } from './limits.js';
 import { ToolRegistry } from './tools/registry.js';
+import { reportStatusTool, REPORT_STATUS_TOOL_NAME } from './tools/agents-manage.js';
 import { SPAWN_AGENT_TOOL_NAME } from './tools/spawn-agent.js';
 import { QUESTION_TOOL_NAME } from './tools/question.js';
 import type { NativeTool, ToolPorts } from './tools/types.js';
@@ -808,6 +809,12 @@ export class SubAgentSpawner {
   private readonly callerForLocalModel?: (slug: string) => ModelCaller;
   private readonly permission: PermissionEngine;
   private readonly ports: ToolPorts;
+  /**
+   * Gancho de RELATO do filho (`report_status`) — o locus liga na árvore de fluxo, que
+   * é onde o estado de cada filho já mora. Ausente ⇒ o `report_status` responde
+   * "indisponível" em vez de fingir que anotou.
+   */
+  onChildReport?: (label: string, nota: string) => boolean;
   private readonly childTools: readonly NativeTool<ToolPorts>[];
   private readonly askResolver?: AskResolver;
   private readonly budget: SharedBudget;
@@ -847,9 +854,23 @@ export class SubAgentSpawner {
     // SEM `perguntar` (EST-1110 · ressalva seguranca AG-0008): filhos NÃO perguntam
     // ao usuário — devolvem a dúvida ao pai como DADO; o pai pergunta. Evita o
     // resolver de-uma-pergunta-por-vez ser embaralhado por N filhos em fan-out.
-    this.childTools = opts.baseTools.filter(
-      (t) => t.name !== SPAWN_AGENT_TOOL_NAME && t.name !== QUESTION_TOOL_NAME,
+    // E-A1 continua: filhos não delegam (`spawn_agent` fora) e não perguntam ao usuário
+    // (`perguntar` fora). Também fora a GESTÃO: um filho parando irmãos seria um
+    // caminho lateral fora da catraca do pai.
+    const semDelegar = opts.baseTools.filter(
+      (t) =>
+        t.name !== SPAWN_AGENT_TOOL_NAME &&
+        t.name !== QUESTION_TOOL_NAME &&
+        t.name !== 'agents_status' &&
+        t.name !== 'agents_stop',
     );
+    // RELATAR, sim. A árvore sabe o mecânico ("rodando run_command: npm test"); o que o
+    // filho está fazendo CONCEITUALMENTE só ele sabe, e sem isso o `agents_status` do
+    // pai responde metade da pergunta do dono ("eu quero que vc veja o que ele está
+    // fazendo"). Sem efeito no mundo: escreve um rótulo curto no nó dele.
+    this.childTools = semDelegar.some((t) => t.name === REPORT_STATUS_TOOL_NAME)
+      ? semDelegar
+      : [...semDelegar, reportStatusTool];
     if (opts.askResolver) this.askResolver = opts.askResolver;
     this.budget = opts.sharedBudget ?? new SharedBudget(opts.limits ?? DEFAULT_LIMITS);
     // ADR-0150 (balde b) — precedência opção(flag) > env > config > default, clampada
@@ -1109,7 +1130,17 @@ export class SubAgentSpawner {
       tools,
       // EST-1098 (WT-1) — ports ENRAIZADAS no worktree do filho quando isolado; senão
       // as do pai (back-compat). É a ÚNICA troca que o isolamento faz no loop do filho.
-      ports: worktreeHandle?.ports ?? this.ports,
+      // RELATO DO FILHO — o `report_status` escreve no NÓ DESTE filho, via a porta do
+      // pai. Sem `list`/`stop` aqui: um filho não enxerga nem para irmãos (E-A1); ele só
+      // conta o que está fazendo, e é isso que o `agents_status` do pai passa a mostrar.
+      ports: {
+        ...(worktreeHandle?.ports ?? this.ports),
+        agentsControl: {
+          list: () => [],
+          stop: () => false,
+          report: (nota: string) => this.onChildReport?.(profile.label, nota) ?? false,
+        },
+      },
       // E-A2: o MESMO SharedBudget — a reserva atômica no loop garante a soma ≤ teto.
       budget: this.budget,
       // EST-0969 (heartbeat) — CADA sinal de progresso do filho ZERA o relógio de

@@ -38,7 +38,20 @@ import { distTagFor, isNewer, shouldAutoUpdate } from '@hiperplano/aluy-cli-core
 const PKG = '@hiperplano/aluy-cli';
 const ALUY_DIR = join(homedir(), '.aluy');
 const STATE_PATH = join(ALUY_DIR, 'auto-update.json');
-const DAY_MS = 24 * 60 * 60 * 1000;
+// INTERVALO ENTRE CHECAGENS — 15 min, por decisão do dono ("ele deveria checar a cada
+// 15 minutos").
+//
+// Era 24h, herdado do update-notifier — onde faz sentido, porque lá o custo de avisar
+// tarde é uma sugestão desatualizada. Aqui o custo é outro: num único dia saíram QUATRO
+// versões, cada uma corrigindo algo que o dono acabara de reportar, e com a janela de 24h
+// ele não receberia nenhuma sozinho — checaria uma vez no meio do dia e dormiria até o
+// dia seguinte. Foi exatamente o que ele viu ("não estou vendo o autoupdate funcionar"),
+// com tudo ligado e funcionando.
+//
+// Barato: um GET no registro do npm, timeout de 4s, fail-soft, só na abertura do
+// processo. `ALUY_AUTO_UPDATE_EVERY_MS` ajusta (piso de 1 min, p/ um valor absurdo em
+// config não virar martelo no registro).
+const CHECK_EVERY_MS = 15 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 4_000;
 const INSTALL_TIMEOUT_MS = 60_000;
 
@@ -70,7 +83,10 @@ function killSwitch(env: NodeJS.ProcessEnv): boolean {
  * campo `autoUpdate` de `UserConfig`, já lido por quem chama — este módulo não faz
  * I/O de config (fronteira: quem monta `~/.aluy/config.json` é o `io/user-config.ts`).
  */
-export function autoUpdateEnabled(env: NodeJS.ProcessEnv, configValue: boolean | undefined): boolean {
+export function autoUpdateEnabled(
+  env: NodeJS.ProcessEnv,
+  configValue: boolean | undefined,
+): boolean {
   if (killSwitch(env)) return false;
   const raw = env['ALUY_AUTO_UPDATE']?.trim().toLowerCase();
   if (raw === '0' || raw === 'false') return false;
@@ -111,7 +127,10 @@ function readState(): AutoUpdateState | null {
     if (!existsSync(STATE_PATH)) return null;
     const s = JSON.parse(readFileSync(STATE_PATH, 'utf8')) as Partial<AutoUpdateState>;
     if (typeof s.lastCheck === 'number') {
-      return makeState(s.lastCheck, typeof s.installedOnDisk === 'string' ? s.installedOnDisk : undefined);
+      return makeState(
+        s.lastCheck,
+        typeof s.installedOnDisk === 'string' ? s.installedOnDisk : undefined,
+      );
     }
   } catch {
     // estado corrompido/ilegível ⇒ ignora (refaz o check depois)
@@ -205,7 +224,11 @@ export async function runAutoUpdate(
   if (!isNpmGlobalInstall(scriptPath, deps.realpath)) return; // rodando do repo — nunca instala
 
   const prev = readState();
-  if (prev && Date.now() - prev.lastCheck < DAY_MS) return; // check recente ⇒ nada a fazer ainda
+  const intervaloMs = ((): number => {
+    const bruto = Number.parseInt(env.ALUY_AUTO_UPDATE_EVERY_MS ?? '', 10);
+    return Number.isFinite(bruto) && bruto >= 60_000 ? bruto : CHECK_EVERY_MS;
+  })();
+  if (prev && Date.now() - prev.lastCheck < intervaloMs) return; // checado há pouco
 
   try {
     const tag = distTagFor(installed);

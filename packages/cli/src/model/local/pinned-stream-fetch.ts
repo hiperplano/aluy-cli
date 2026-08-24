@@ -40,6 +40,13 @@ export interface PinnedStreamFetchOptions {
   readonly httpRequestFn?: typeof httpRequest;
   /** Teto de hops de redirect a revalidar (anti-loop). Default 0 = fail-closed. */
   readonly maxRedirects?: number;
+  /**
+   * Permite que o host DECLARADO resolva p/ loopback (`127.0.0.0/8`). Existe para o
+   * provider LOCAL — Ollama vive em `127.0.0.1:11434` e era recusado por construção.
+   * NÃO afrouxa o resto: RFC1918, link-local e metadata da cloud seguem bloqueados, e a
+   * exceção não atravessa redirect (cada hop revalida sem ela).
+   */
+  readonly allowLoopback?: boolean;
 }
 
 /**
@@ -53,6 +60,9 @@ export function createPinnedStreamFetch(opts: PinnedStreamFetchOptions = {}): St
   const httpsRequestFn = opts.httpsRequestFn ?? httpsRequest;
   const httpRequestFn = opts.httpRequestFn ?? httpRequest;
   const maxRedirects = opts.maxRedirects ?? 0;
+  // LOOPBACK DECLARADO — ligado pelo wiring quando o provider é local (Ollama e afins).
+  // Default FALSE: quem não pediu segue com a trava fechada, sem regressão.
+  const allowLoopback = opts.allowLoopback === true;
 
   return async function pinnedFetch(input, init) {
     // Política de redirect (back-compat: ausente ⇒ fail-closed p/ o BYO).
@@ -67,7 +77,13 @@ export function createPinnedStreamFetch(opts: PinnedStreamFetchOptions = {}): St
 
     for (;;) {
       // (1) IP-PIN: resolve→valida→pina ESTE host (re-aplicado a cada hop).
-      const pin = await resolveAndPinHost(url, resolver);
+      const pin = await resolveAndPinHost(url, resolver, {
+        // A exceção de LOOPBACK vale só no PRIMEIRO hop — o host que o dono declarou.
+        // `hops > 0` é redirect, e redirect NÃO herda: um provider que responda
+        // `302 → http://127.0.0.1/…` seria um jeito de fazer o CLI falar com um serviço
+        // local que ninguém autorizou. Fail-closed a cada salto, como já era.
+        allowLoopback: allowLoopback && hops === 0,
+      });
       if (!pin.ok) {
         throw new Error(`backend local: egress recusado — ${pin.reason} (PROV-SEC-1, anti-SSRF)`);
       }

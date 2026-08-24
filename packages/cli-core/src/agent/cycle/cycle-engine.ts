@@ -167,6 +167,18 @@ export class CycleEngine {
   private ceilings: CycleCeilings;
   private currentTask = '';
   private paused = false;
+  // ACORDAR CEDO — resolve a espera ENTRE iterações quando chega algo do dono.
+  //
+  // Observação dele, e ela está certa: "se não estiver nada sendo processado ou
+  // estiver aguardando o próximo ciclo, a msg deveria já ser processada". Durante a
+  // espera NÃO há turno em voo — a guarda anti gasto-dobrado não protege de nada ali,
+  // e segurar a mensagem por até um intervalo inteiro (45s, 1min…) é silêncio puro:
+  // da cadeira dele, indistinguível de travado. Medido num teste real: 52s até a
+  // mensagem ser incorporada.
+  //
+  // `null` fora da espera. Acordar NÃO pula iteração nem mexe em teto/budget: só
+  // encurta o descanso, e a iteração seguinte roda normalmente já com a mensagem.
+  private acordar: (() => void) | null = null;
   private readonly runner: CycleRunner;
   private readonly budget: BudgetGate;
   private readonly clock: Clock;
@@ -281,7 +293,19 @@ export class CycleEngine {
         // Não espera ALÉM do deadline: se o intervalo passaria do relógio, espera só
         // até o deadline (e o portão de duração no topo encerra na volta).
         const remaining = Math.max(0, deadline - this.clock());
-        await this.sleep(Math.min(delayMs, remaining), signal);
+        // Corre a espera contra o "acordar": o que vier primeiro encerra o descanso.
+        // `sleep` rejeita no abort — o `catch` trata como fim normal do descanso (quem
+        // decide parar é o portão do topo, que já lê o `signal`).
+        const despertar = new Promise<void>((res) => {
+          this.acordar = res;
+        });
+        try {
+          await Promise.race([this.sleep(Math.min(delayMs, remaining), signal), despertar]);
+        } catch {
+          /* abort durante o descanso ⇒ o portão do topo encerra na volta. */
+        } finally {
+          this.acordar = null;
+        }
       }
     }
   }
@@ -318,6 +342,19 @@ export class CycleEngine {
   /** EST-1158 — RETOMA um loop pausado. */
   resume(): void {
     this.paused = false;
+  }
+
+  /**
+   * ACORDA a espera entre iterações, se houver uma em curso. No-op quando o ciclo
+   * está rodando (não há descanso a encurtar) ou pausado (quem decide é o `resume`).
+   *
+   * Não pula iteração, não mexe em teto nem em budget: a próxima iteração roda
+   * normalmente — só começa agora em vez de daqui a um intervalo.
+   */
+  wake(): void {
+    const f = this.acordar;
+    this.acordar = null;
+    f?.();
   }
 
   /** Está pausado? (p/ a TUI/status). */
