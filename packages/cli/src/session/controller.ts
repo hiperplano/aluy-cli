@@ -7011,7 +7011,7 @@ export class SessionController {
 
     if (rootSignal.aborted) {
       doDetach();
-      return profiles.map((p) => detachedOutcome(p.label));
+      return profiles.map((p) => detachedOutcome(p.label, 'esc'));
     }
 
     // FANOUT-17 (Fatia 1, SEM flag — estritamente melhor) — enquanto o `run` está
@@ -7028,6 +7028,13 @@ export class SessionController {
     // a injeção pede o desacople, vencendo a corrida abaixo (resposta paralela já com
     // seed-vivo). Sempre setado (mesmo com flag OFF) — `detach()` só é CHAMADO pela
     // injeção quando a flag está ON; com OFF, `injectInput` cai só na Fatia 1.
+    // MOTIVO DO DESACOPLE — não dá para inferir pelo `rootSignal.aborted`: a injeção
+    // TAMBÉM aborta o turno do pai (é assim que ela o libera para responder já), então o
+    // sinal fica abortado nos DOIS casos. Foi essa inferência que deixou meu primeiro
+    // conserto pela metade: o dono seguiu vendo "(error, sem sucesso) — turno
+    // interrompido (esc)" com os filhos vivos e saudáveis.
+    // Quem SABE o motivo é quem PEDE o desacople; então ele grava aqui.
+    let motivoDetach: 'esc' | 'inject' = 'esc';
     let onInjectDetach: (() => void) | null = null;
     const detachPromise = new Promise<'detach'>((res) => {
       onInjectDetach = () => res('detach');
@@ -7037,6 +7044,8 @@ export class SessionController {
     const thisFanout: ActiveFanout = {
       labels,
       detach: (): boolean => {
+        // `detach()` só é chamado pela INJEÇÃO (o ESC entra pelo abort do sinal).
+        motivoDetach = 'inject';
         const did = doDetach();
         // Acorda a corrida abaixo p/ o pai responder JÁ (seed-vivo), sem esperar o run.
         onInjectDetach?.();
@@ -7067,7 +7076,7 @@ export class SessionController {
     // (Fatia 2). Em AMBOS, `doDetach` já foi/é chamado (idempotente): os FILHOS
     // SEGUEM vivos, cercados pelos MESMOS tetos (E-A2 — `detachedTrees` populado).
     doDetach();
-    return profiles.map((p) => detachedOutcome(p.label));
+    return profiles.map((p) => detachedOutcome(p.label, motivoDetach));
   }
 
   /**
@@ -8030,14 +8039,34 @@ function errorOutcomeFor(label: string, message: string): SubAgentOutcome {
  * cessou (o loop abortado descarta isto); o desfecho REAL chega depois e vira DADO
  * do próximo turno (`onDetachedOutcomes`). Honesto se algo o ler: explica o estado.
  */
-function detachedOutcome(label: string): SubAgentOutcome {
+function detachedOutcome(label: string, motivo: 'esc' | 'inject' = 'esc'): SubAgentOutcome {
+  // POR QUE O MOTIVO IMPORTA — e por que ignorá-lo virou um defeito publicado.
+  //
+  // Este marcador nasceu para o ESC: o turno do pai é ABORTADO, o loop DESCARTA o que
+  // vier, e `ok:false`/`stop:'error'` nunca chega a ser lido por ninguém. Sob ESC isso é
+  // verdade e é inofensivo.
+  //
+  // Com o desacople-por-INJEÇÃO ligado por padrão (rc.142), o pai NÃO para — ele segue
+  // vivo e LÊ este retorno. Aí o marcador feito para ser descartado virou conteúdo: os
+  // três filhos apareciam `✔ pronto` na árvore, com tokens e tempo, e chegavam ao modelo
+  // como `(error, sem sucesso)` dizendo "turno interrompido (esc)" — sem ter havido ESC
+  // nenhum. O dono viu "os agentes quebram", e o próprio agente se confundiu: respondeu
+  // "estou aguardando os 3 sub-agentes" com os três já concluídos.
+  //
+  // Nada falhou na injeção: os filhos seguem trabalhando e o resultado REAL chega como
+  // dado quando concluírem (`onDetachedOutcomes`). Reportar falha era mentira — e mentira
+  // que o modelo lê e repassa.
+  const esc = motivo === 'esc';
   return {
     label,
-    ok: false,
-    result:
-      `turno interrompido (esc): o sub-agente "${label}" SEGUE rodando em segundo ` +
-      `plano; o resultado dele entra como dado no próximo turno.`,
-    stop: 'error',
+    ok: !esc,
+    result: esc
+      ? `turno interrompido (esc): o sub-agente "${label}" SEGUE rodando em segundo ` +
+        `plano; o resultado dele entra como dado no próximo turno.`
+      : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
+        `Você foi liberado para responder agora; o resultado dele chega como dado ` +
+        `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
+    stop: esc ? 'error' : 'final',
     usage: { iterations: 0, toolCalls: 0, tokens: 0 },
   };
 }
