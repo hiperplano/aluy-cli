@@ -66,6 +66,43 @@ describe('tick-policy — ANIMAÇÃO de 120ms: vácuo SEMPRE; streaming SÓ com 
     }
   });
 
+  // FLICKER-F8 — sub-agentes vivos com o PAI OCIOSO. O aviso do F8 tem de pulsar (alerta
+  // parado com trabalho rodando lê como travado), mas pulsar redesenha a região viva
+  // inteira 8×/s — e trabalho de sub-agente dura MINUTOS, então isso vira o REGIME, não
+  // um episódio. Daí a regra ser a de `streaming` (anima se `syncActive`) e não a de
+  // `thinking` (anima sempre).
+  //
+  // O ramo nasceu FORA desta política (`|| haFilhoVivo` no <App>, rc.144) e por isso
+  // escapava do `syncActive`: no terminal sem overwrite/sync a tela tremia o tempo todo
+  // enquanto os agentes trabalhavam. Relato do dono: "quando mando mensagens e tem
+  // agentes processando... a tela fica tremendo".
+  describe('FLICKER-F8 — sub-agentes vivos com o pai ocioso', () => {
+    it('idle + filhos vivos ⇒ anima COM sync (o pulso do aviso do F8)', () => {
+      expect(animTickEnabled('idle', true, { subagentsAlive: true })).toBe(true);
+    });
+
+    it('idle + filhos vivos ⇒ NÃO anima sem sync (era o furo da rc.144)', () => {
+      expect(animTickEnabled('idle', false, { subagentsAlive: true })).toBe(false);
+    });
+
+    it('sem filhos vivos ⇒ nada muda em fase nenhuma (não-regressão)', () => {
+      for (const p of ALL) {
+        for (const sync of [true, false]) {
+          expect(animTickEnabled(p, sync, { subagentsAlive: false })).toBe(
+            animTickEnabled(p, sync),
+          );
+          expect(animTickEnabled(p, sync, {})).toBe(animTickEnabled(p, sync));
+        }
+      }
+    });
+
+    it('filho vivo NÃO rebaixa quem já animava sempre (thinking/boot/compacting)', () => {
+      for (const p of ['thinking', 'boot', 'compacting'] as Phase[]) {
+        expect(animTickEnabled(p, false, { subagentsAlive: true })).toBe(true);
+      }
+    });
+  });
+
   it('tabela total: com sync ⇒ {boot,compacting,retrying,streaming,thinking}; sem ⇒ {boot,compacting,thinking}', () => {
     const withSync = ALL.filter((p) => animTickEnabled(p, true));
     expect(withSync.sort()).toEqual(['boot', 'compacting', 'retrying', 'streaming', 'thinking']);

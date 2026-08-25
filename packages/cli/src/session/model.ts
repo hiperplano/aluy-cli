@@ -565,6 +565,17 @@ export interface GovernanceCounts {
 }
 
 /** O estado COMPLETO da sessão que a TUI renderiza. */
+/** Um sub-agente VIVO, como o rodapé o mostra. Ver `SessionState.liveSubagents`. */
+export interface LiveSubagent {
+  readonly label: string;
+  /** Fase do nó na árvore (`running`, `final`, `error`…). */
+  readonly phase: string;
+  /** O que ele está fazendo AGORA, quando se sabe (`{tool, target}`). */
+  readonly activity?: { readonly tool: string; readonly target: string } | undefined;
+  /** Quanto tempo já correu (ms), quando o nó contabiliza. */
+  readonly durationMs?: number | undefined;
+}
+
 export interface SessionState {
   readonly blocks: readonly SessionBlock[];
   readonly meta: SessionMeta;
@@ -674,6 +685,20 @@ export interface SessionState {
    * F8 é o único stop, então o dono PRECISA ver que há trabalho órfão vivo. 0/ausente = nada.
    */
   readonly detachedSubagents?: number | undefined;
+  /**
+   * FOOTER-AGENTES — QUEM são os sub-agentes vivos, não só quantos.
+   *
+   * O dono: "e possivel colocar tambem os agentes abaixo do composer... para conseguirmos
+   * nao perder a visao dos agentes que podem ser adicionados ao longo de uma conversa". A
+   * contagem responde "há trabalho"; ela não responde "quem" nem "fazendo o quê", e numa
+   * conversa em que agentes entram ao longo do caminho é a segunda pergunta que importa.
+   *
+   * Vem da MESMA fonte da contagem (a árvore de fluxo, todas as árvores) e no mesmo
+   * instante — publicar em dois momentos abriria a janela em que o número diz 3 e a lista
+   * mostra 2. Segue a MESMA histerese: aparece na hora, some com atraso, para o bloco não
+   * piscar entre dois lotes de agentes.
+   */
+  readonly liveSubagents?: readonly LiveSubagent[] | undefined;
   /**
    * EST-MCP-STATUSBAR (pedido do dono) — progresso da CONEXÃO dos servers MCP em
    * background, exibido SÓ na StatusBar (`MCP ▰▰▱ 2/3` → `✓ MCP 3/3`, some sozinho).

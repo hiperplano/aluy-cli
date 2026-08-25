@@ -4,7 +4,7 @@
 //
 // PORTÁVEL: sem Ink/IO. Só formata a partir do snapshot de `Room`.
 
-import type { Room } from '@hiperplano/aluy-cli-core';
+import { tableLines, type Room } from '@hiperplano/aluy-cli-core';
 
 /** Tempo relativo curto ("agora", "12s", "3m", "2h", "1d") a partir de `ms` decorridos. */
 export function relTime(elapsedMs: number): string {
@@ -32,18 +32,47 @@ export function participantsOf(room: Room): string[] {
   return out;
 }
 
+/** Os campos crus de UMA sala — fonte ÚNICA p/ `formatRoomSummary` (string corrida,
+ * back-compat testada) e `formatRoomList` (tabela). Evita a dupla-manutenção que já
+ * custou caro nesta base (2 lugares calculando "há Xh" e um dos dois esquecido). */
+function roomFields(
+  room: Room,
+  now: number,
+): { code: string; n: number; activity: string; who: readonly string[]; revoked: boolean } {
+  const n = room.messages.length;
+  const who = participantsOf(room);
+  const last = n > 0 ? room.messages[n - 1]!.ts : undefined;
+  const activity = last !== undefined ? `há ${relTime(now - last)}` : 'sem atividade';
+  return { code: room.code, n, activity, who, revoked: room.revoked };
+}
+
 /**
  * Linha-resumo de UMA sala p/ o `/rooms list`: código · nº msgs · última atividade ·
  * participantes. `now` é o relógio injetável (testável). Sala vazia ⇒ sem "última".
  */
 export function formatRoomSummary(room: Room, now: number): string {
-  const n = room.messages.length;
-  const parts = participantsOf(room);
-  const last = n > 0 ? room.messages[n - 1]!.ts : undefined;
-  const activity = last !== undefined ? `há ${relTime(now - last)}` : 'sem atividade';
-  const who = parts.length > 0 ? ` · ${parts.join(', ')}` : '';
-  const flag = room.revoked ? ' (revogada)' : '';
-  return `${room.code} · ${n} msg · ${activity}${who}${flag}`;
+  const f = roomFields(room, now);
+  const who = f.who.length > 0 ? ` · ${f.who.join(', ')}` : '';
+  const flag = f.revoked ? ' (revogada)' : '';
+  return `${f.code} · ${f.n} msg · ${f.activity}${who}${flag}`;
+}
+
+/**
+ * `/rooms list` como TABELA leve — as MESMAS 4 informações de `formatRoomSummary`,
+ * mas alinhadas entre salas (código de tamanho variável não empurra as demais
+ * colunas a esmo). `gap: ' · '` preserva o separador "código · N msg · …" que o
+ * dono já lia — ganha só o alinhamento, sem virar grade. Sem cabeçalho: é a MESMA
+ * lista corrida de antes, só organizada em colunas.
+ */
+export function formatRoomList(rooms: readonly Room[], now: number): string[] {
+  return tableLines(
+    rooms.map((room) => {
+      const f = roomFields(room, now);
+      const quem = f.who.length > 0 ? f.who.join(', ') : '—';
+      return [f.revoked ? `${f.code} (revogada)` : f.code, `${f.n} msg`, f.activity, quem];
+    }),
+    { gap: ' · ' },
+  );
 }
 
 /** Cabeçalho + linhas da conversa de uma sala p/ o `/rooms read`/`watch` (texto PLANO). */

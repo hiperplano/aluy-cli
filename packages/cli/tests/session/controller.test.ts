@@ -1394,6 +1394,56 @@ describe('EST-0973 — /compact reduz o histórico ativo preservando o essencial
     expect(note?.kind).toBe('note');
   });
 
+  // O DEFEITO QUE O DONO VIU: "/compact que nao realizou a compactacao". A tela dizia
+  // "não consegui compactar agora (broker indisponível)" LOGO ABAIXO de um turno que
+  // funcionara — e nem a frase nem o desfecho estavam certos.
+  //
+  // Duas coisas erradas de uma vez: (1) o `catch` era guarda-chuva e culpava o broker por
+  // qualquer erro; (2) desistia, com a janela cheia, ENQUANTO o `compactDeterministic`
+  // existia no core, testado, com o comentário "o caller decide o fallback" — e nenhum
+  // caller decidia. É a mesma classe de "peça pronta, ponta solta" do `upstreamByModel`.
+  it('resumo por modelo FALHA ⇒ compacta MESMO ASSIM (mecânico) e diz que foi sem modelo', async () => {
+    const compactionModel: ModelCaller = {
+      async call(): Promise<ModelCallResult> {
+        throw new Error('provider recusou o resumo');
+      },
+    };
+    const { controller } = buildController({
+      responses: [
+        toolCall('read_file', { path: 'README.md' }),
+        toolCall('read_file', { path: 'README.md' }),
+        toolCall('read_file', { path: 'README.md' }),
+        toolCall('read_file', { path: 'README.md' }),
+        'pronto, li o README.',
+      ],
+      files: { 'README.md': 'conteúdo do readme' },
+      askResolver: new TuiAskResolver(),
+      compactionModel,
+    });
+    await controller.submit('leia o README e resuma');
+    expect(controller.canCompact).toBe(true);
+
+    await controller.compact();
+
+    const note = controller.current.blocks.find((b) => b.kind === 'note' && b.title === 'compact');
+    expect(note?.kind).toBe('note');
+    if (note?.kind !== 'note') return;
+    const texto = note.lines.join(' ');
+    // COMPACTOU — é o ponto todo. Antes esta linha não existia: a nota dizia que não deu.
+    expect(texto).toMatch(/compactado SEM o modelo/);
+    // E o histórico REALMENTE encolheu (não é só uma frase diferente).
+    const m = /histórico ativo: (\d+) → (\d+) itens/.exec(texto);
+    expect(m, `nota sem a métrica de histórico: ${texto}`).not.toBeNull();
+    expect(Number(m![2])).toBeLessThan(Number(m![1]));
+    // A DEGRADAÇÃO fica visível: compactou, mas não do jeito bom, e por quê.
+    expect(texto).toMatch(/o resumo por modelo falhou/);
+    // E não é mais a DESISTÊNCIA. (A frase da causa vem do `classifyBrokerError`, que é a
+    // decisão compartilhada e testada do repo — um `Error` genérico sem status cai no
+    // balde "indisponível" por definição dele, e inventar uma segunda regra aqui só
+    // criaria duas verdades. O que este teste trava é o DESFECHO.)
+    expect(texto).not.toMatch(/não consegui compactar agora/);
+  });
+
   it('conversa curta: canCompact=false e /compact não chama o modelo', async () => {
     const { model: compactionModel, calls } = recordingCompactionCaller('x');
     const { controller } = buildController({

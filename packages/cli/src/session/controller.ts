@@ -13,6 +13,7 @@ import {
   Compactor,
   DEFAULT_KEEP_RECENT_WINDOW_FRACTION,
   NothingToCompactError,
+  compactDeterministic,
   ToolRegistry,
   NATIVE_TOOLS,
   WEB_TOOLS,
@@ -164,7 +165,7 @@ import {
 import { MemoryRoomStore, buildRoomTools } from '@hiperplano/aluy-cli-core';
 import type { RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
 import {
-  formatRoomSummary,
+  formatRoomList,
   formatConversation,
   formatNewSince,
   maxSeq,
@@ -196,6 +197,7 @@ import {
   type SubAgentsBlock,
   type TurnAccountingView,
   type ToolLineBlock,
+  type LiveSubagent,
 } from './model.js';
 
 /** EST-0958 — estados do bloco `!comando` (running → ok/err/blocked). */
@@ -955,6 +957,15 @@ function applyCycleOverrides(base: CycleRequest, overrides?: CycleCeilingOverrid
   if (overrides.maxDurationMs !== undefined) merged.maxDurationMs = overrides.maxDurationMs;
   return merged;
 }
+
+/**
+ * Janela de graça antes de ESCONDER o indicador de sub-agentes.
+ *
+ * 900ms cobre a lacuna entre lotes disparados em sequência (o dono: "dispare 2 e depois
+ * de 2 segundos mais 2") sem segurar o indicador de forma perceptível quando o trabalho
+ * de fato acabou.
+ */
+const INDICADOR_SUBAGENTE_GRACA_MS = 900;
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 
@@ -5090,7 +5101,7 @@ export class SessionController {
     }
     const now = this.clock();
     this.pushNote('/rooms', [
-      ...rooms.map((r) => formatRoomSummary(r, now)),
+      ...formatRoomList(rooms, now),
       '',
       'observe: `/rooms read <código>` (snapshot) · `/rooms watch <código>` (ao vivo).',
     ]);
@@ -5562,6 +5573,8 @@ export class SessionController {
     });
 
     let result: CompactionResult;
+    /** Preenchido quando o resumo POR MODELO falhou e caímos no mecânico. */
+    let semModelo: ClassifiedBrokerError | undefined;
     try {
       result = await this.compactor.compact(history, signal);
     } catch (err) {
@@ -5577,11 +5590,52 @@ export class SessionController {
         this.setPhase(resumeNow ? 'done' : 'idle');
         return;
       }
-      // Broker/transporte: nota NEUTRA (HG-2: "broker", nunca o provider). Não perde
-      // a conversa; o usuário pode continuar ou encerrar.
-      this.pushNote('compact', ['não consegui compactar agora (broker indisponível).']);
-      this.setPhase(resumeNow ? 'done' : 'idle');
-      return;
+      // FALLBACK MECÂNICO — a compactação ACONTECE mesmo sem o modelo.
+      //
+      // O dono: "vc viu o problema do /compact que nao realizou a compactacao". Não
+      // realizou mesmo, e não por falta de meio: o `compactDeterministic` existe no core,
+      // é testado, e o comentário dele diz "útil quando o broker está indisponível ou o
+      // resumo por modelo falha — a sessão ainda consegue liberar contexto sem depender da
+      // rede". O `compact.ts` chega a dizer "o caller decide o fallback" — e nenhum caller
+      // decidia nada. Peça pronta, ponta solta: a MESMA classe do `upstreamByModel`
+      // (rc.137) e do canal de raciocínio (rc.138).
+      //
+      // Ele condensa menos (não entende semântica: lista objetivos e ferramentas tocadas),
+      // mas é HONESTO e sempre disponível — e libera janela, que é o ponto de apertar
+      // `/compact`. Desistir com a janela cheia é o pior dos três desfechos.
+      //
+      // A CAUSA REAL, classificada — não "broker indisponível" para tudo.
+      //
+      // Este `catch` era guarda-chuva: qualquer erro que não fosse `NothingToCompactError`
+      // nem cancelamento virava "broker indisponível". O dono mandou a tela em que isso
+      // aparece LOGO ABAIXO de um turno que funcionou (`✔ 26.2k tokens · 6.8s`) — ou seja,
+      // a frase acusava de estar fora justamente o que acabara de responder. Um 400 do
+      // provider, um estouro de janela ou uma resposta malformada eram todos reportados
+      // como broker fora do ar, e o dono iria depurar rede.
+      //
+      // O classificador já existe e o caminho da AUTO-compactação já o usa (ver
+      // `autoCompact`); só o `/compact` manual tinha ficado de fora. A nota manual tem
+      // espaço para a frase acionável inteira, então ela vai junto da headline.
+      // NEUTRA quanto ao provider (HG-2) e sem segredo (CLI-SEC-6) por construção — o
+      // classificador só compõe literais + status.
+      const c = classifyBrokerError(err, this.state.meta.backend ?? 'broker');
+      let mecanico: CompactionResult | undefined;
+      try {
+        mecanico = compactDeterministic(history);
+      } catch {
+        mecanico = undefined; // o fallback também não deu — cai na desistência honesta
+      }
+      // Só vale se REDUZIU. O mecânico usa o `keepRecent` padrão, não o size-aware do
+      // caminho por modelo, então pode não sobrar nada antigo para condensar — anunciar
+      // "compactado" nesse caso seria mentir na direção oposta.
+      if (mecanico !== undefined && mecanico.stats.summarizedTurns > 0) {
+        result = mecanico;
+        semModelo = c;
+      } else {
+        this.pushNote('compact', [`não consegui compactar agora — ${c.headline}.`, c.message]);
+        this.setPhase(resumeNow ? 'done' : 'idle');
+        return;
+      }
     }
 
     // Concluiu: limpa o indicador ANTES de empurrar a nota de resultado.
@@ -5589,8 +5643,15 @@ export class SessionController {
     this.compactedSeed = result.history;
     this.lastRunHistory = result.history;
     this.pushNote('compact', [
-      `contexto compactado: ${result.stats.summarizedTurns} turnos → sumário`,
+      semModelo === undefined
+        ? `contexto compactado: ${result.stats.summarizedTurns} turnos → sumário`
+        : `contexto compactado SEM o modelo (resumo mecânico): ${result.stats.summarizedTurns} turnos`,
       `histórico ativo: ${result.stats.turnsBefore} → ${result.stats.turnsAfter} itens`,
+      // A causa fica VISÍVEL: compactou, mas não do jeito bom, e por quê. Sem esta linha o
+      // desfecho degradado seria indistinguível do normal — silêncio ambíguo.
+      ...(semModelo !== undefined
+        ? [`o resumo por modelo falhou (${semModelo.headline}) — ${semModelo.message}`]
+        : []),
     ]);
 
     if (resumeNow) {
@@ -5898,6 +5959,12 @@ export class SessionController {
   stopMemoryMonitor(): void {
     if (this.memTimer !== null) {
       clearInterval(this.memTimer);
+      // O timer da histerese do indicador de sub-agentes também sai aqui: um timer vivo
+      // depois do dispose faria um `patch` numa sessão já encerrada.
+      if (this.timerSomeIndicador !== null) {
+        clearTimeout(this.timerSomeIndicador);
+        this.timerSomeIndicador = null;
+      }
       this.memTimer = null;
     }
   }
@@ -7299,6 +7366,42 @@ export class SessionController {
   }
 
   /**
+   * FOOTER-AGENTES — os filhos VIVOS, no formato que o rodapé mostra.
+   *
+   * Reusa `listaFilhosParaGestao()` (a mesma fonte que o `agents_status` lê) e FILTRA os
+   * que ainda correm: o rodapé é "quem está trabalhando agora", não um histórico. Uma
+   * fonte só para a ferramenta e para a tela — se divergirem, uma das duas mente.
+   */
+  private filhosVivosParaRodape(): readonly LiveSubagent[] {
+    // MESMA FONTE DA CONTAGEM: `liveChildren()`, que é "não terminal".
+    //
+    // A primeira versão filtrava `listaFilhosParaGestao()` por `phase === 'running'` — uma
+    // string que NÃO EXISTE neste vocabulário. Um filho vivo nasce em `thinking` e passa por
+    // `tool`/`asking`; terminal é `done`/`cancelled`/`failed`. Resultado: a contagem
+    // (que usa `liveChildren`) mostrava 3 e a lista vinha SEMPRE VAZIA, então o bloco do
+    // rodapé nunca aparecia — o dono instalou e não viu nada, sem erro nenhum na tela.
+    //
+    // Dois vocabulários para o mesmo fato é o defeito; a cura não é acertar a string, é
+    // perguntar à MESMA função que a contagem pergunta.
+    const arvores = [...this.detachedTrees];
+    if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
+    const out: LiveSubagent[] = [];
+    for (const t of arvores) {
+      for (const no of t.liveChildren()) {
+        const atividade = no.currentActivity();
+        const conta = no.accounting();
+        out.push({
+          label: no.label,
+          phase: no.phase,
+          ...(atividade ? { activity: atividade } : {}),
+          ...(conta.durationMs !== undefined ? { durationMs: conta.durationMs } : {}),
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
    * Para UM filho pelo rótulo, em qualquer árvore. Os irmãos seguem — é o mesmo
    * mecanismo por-filho que o `Ctrl+T → P` do dono já usava (cada nó tem o seu
    * AbortController). `false` quando o rótulo não existe ou o filho já terminou:
@@ -7338,6 +7441,9 @@ export class SessionController {
   }
 
   /** DETACH-FIX (item 4) — espelha o nº de desacoplados vivos no estado (undefined quando 0). */
+  /** Timer da histerese — some junto com a sessão (ver `dispose`). */
+  private timerSomeIndicador: ReturnType<typeof setTimeout> | null = null;
+
   private publishDetachedCount(): void {
     // CONTA A VERDADE — os filhos VIVOS em TODAS as árvores, não um contador à parte.
     //
@@ -7353,7 +7459,34 @@ export class SessionController {
     for (const t of this.detachedTrees) vivos += t.liveChildren().length;
     const atual = this.flowTree;
     if (atual !== null && !this.detachedTrees.has(atual)) vivos += atual.liveChildren().length;
-    this.patch({ detachedSubagents: vivos > 0 ? vivos : undefined });
+    // HISTERESE NA DESCIDA — sem ela a tela TREME.
+    //
+    // Dois elementos da região viva dependem deste número: o indicador "trabalhando"
+    // e a linha do F8. Juntos somam ~3 linhas. Quando a contagem oscila (lotes
+    // disparados em sequência, filhos terminando em tempos diferentes), a ALTURA da
+    // região viva muda a cada transição e o Ink limpa e redesenha — o dono viu isso
+    // como "a tela fica tremendo" ao disparar 2 agentes e mais 2 logo depois.
+    //
+    // Subir é imediato (trabalho começou: mostre já). DESCER espera, porque zero
+    // costuma ser passageiro. Um lote novo dentro da janela cancela a descida e a
+    // altura nunca chega a mudar.
+    if (this.timerSomeIndicador !== null) {
+      clearTimeout(this.timerSomeIndicador);
+      this.timerSomeIndicador = null;
+    }
+    if (vivos > 0) {
+      // A LISTA sai junto do número, da MESMA leitura das árvores. Publicar em dois
+      // momentos abriria a janela em que a contagem diz 3 e a lista mostra 2 — a mesma
+      // doença de "duas listas" que este método veio curar.
+      this.patch({ detachedSubagents: vivos, liveSubagents: this.filhosVivosParaRodape() });
+      return;
+    }
+    if (this.state.detachedSubagents === undefined) return; // já escondido: nada a fazer
+    this.timerSomeIndicador = setTimeout(() => {
+      this.timerSomeIndicador = null;
+      this.patch({ detachedSubagents: undefined, liveSubagents: undefined });
+    }, INDICADOR_SUBAGENTE_GRACA_MS);
+    if (typeof this.timerSomeIndicador.unref === "function") this.timerSomeIndicador.unref();
   }
 
   /**
@@ -7440,10 +7573,15 @@ export class SessionController {
       payload: text,
       firedAt: new Date(this.clock()).toISOString(),
     });
+    // CONCORDÂNCIA — a frase pluralizava o SUBSTANTIVO e esquecia o VERBO: saía
+    // "3 sub-agentes terminou". E o segundo verbo concordava com a coisa errada — o
+    // ternário `isTurnLive()` escolhia entre "entra" e "entram" pelo ESTADO DO TURNO, não
+    // pelo número de resultados, então "1 sub-agente terminou — resultado entram" era
+    // alcançável. Texto que o dono lê a cada fan-out não pode ser desleixado assim.
+    const plural = n > 1;
     this.pushNote('fan-out concluído', [
-      `${n} sub-agente${n > 1 ? 's' : ''} terminou — ` +
-        `resultado${n > 1 ? 's' : ''} ` +
-        `${this.isTurnLive() ? 'entra' : 'entram'} como dado.`,
+      `${n} sub-agente${plural ? 's' : ''} ${plural ? 'terminaram' : 'terminou'} — ` +
+        `${plural ? 'os resultados entram' : 'o resultado entra'} como dado.`,
     ]);
     // EST-F158 — acorda o turn-loop: se o pai está ocioso (ex.: terminou enquanto
     // aguardava), processa IMEDIATAMENTE. O flag fura a guarda detachedTrees>0.

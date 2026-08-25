@@ -21,6 +21,8 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  subagentNoticeOverhead,
+  subagentIndicatorLine,
   speechMaxLines,
   slashMenuMaxRows,
   liveOverheadLines,
@@ -876,5 +878,112 @@ describe('F196 — liveRegionMinRows: piso estrutural que decide pular o clearSc
     expect(liveRegionMinRows({ ...base, live: [longSpeech(1)] })).toBe(
       liveRegionMinRows({ ...base, live: [longSpeech(100)] }),
     );
+  });
+});
+
+// FLICKER-F8 — o aviso "N sub-agente(s) trabalhando — F8 para parar" mora na região viva
+// e ficou FORA do orçamento quando nasceu (rc.144). Relato do dono: "quando mando
+// mensagens e tem agentes processando, depois que eles terminam a tela fica tremendo".
+//
+// Uma linha basta: o gatilho do Ink é `outputHeight >= rows`, e o `SAFETY_MARGIN` existe
+// para absorver imprevisto, não para pagar altura que alguém esqueceu de contar. Pior, a
+// linha só existe QUANDO há agentes — então o estouro acontecia exatamente no cenário em
+// que ela aparece, e sumia sozinho depois, o que faz o defeito parecer intermitente.
+describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
+
+  // Não há mais limiar CRAVADO: a medida sai da linha que o render compõe. Uma constante
+  // de largura é uma medida congelada — bastava reescrever a frase para o número mentir em
+  // silêncio, que é como este defeito nasceu.
+  it('o desconto acompanha a LINHA COMPOSTA (sem número mágico)', () => {
+    const linha = subagentIndicatorLine(99); // 2 dígitos: o pior caso realista
+    expect(visualLines(linha, linha.length)).toBe(1);
+    expect(visualLines(linha, linha.length - 1)).toBe(2);
+    // e o desconto vira 2 exatamente onde ela quebra.
+    expect(subagentNoticeOverhead(99, linha.length, 'idle')).toBe(1);
+    expect(subagentNoticeOverhead(99, linha.length - 1, 'idle')).toBe(2);
+  });
+
+  // A contagem só custa altura quando o `phase` NÃO rende o indicador por conta própria —
+  // com o pai pensando ela é SUFIXO da mesma linha, e descontar contaria duas vezes.
+  it('pai já trabalhando ⇒ desconto ZERO (a contagem entra como sufixo)', () => {
+    expect(subagentNoticeOverhead(3, 80, 'thinking')).toBe(0);
+    expect(subagentNoticeOverhead(3, 80, 'compacting')).toBe(0);
+    expect(subagentNoticeOverhead(3, 80, 'idle')).toBe(1);
+  });
+
+  it('sem sub-agentes ⇒ desconto ZERO (não-regressão de quem nunca dispara agente)', () => {
+    expect(subagentNoticeOverhead(undefined, 80, 'idle')).toBe(0);
+    expect(subagentNoticeOverhead(0, 80, 'idle')).toBe(0);
+    const base = { rows: 40, live: [], phase: 'idle' as const, hasBlocks: true, mode: 'normal' as SessionMode, columns: 80 };
+    expect(speechMaxLines({ ...base, detachedSubagents: 0 })).toBe(speechMaxLines(base));
+  });
+
+  it('com sub-agentes ⇒ a fala cede 1 linha (2 em terminal estreito)', () => {
+    const base = { rows: 40, live: [], phase: 'streaming' as const, hasBlocks: true, mode: 'normal' as SessionMode };
+    expect(speechMaxLines({ ...base, columns: 80 })
+      - speechMaxLines({ ...base, columns: 80, detachedSubagents: 3 })).toBe(1);
+    expect(speechMaxLines({ ...base, columns: 40 })
+      - speechMaxLines({ ...base, columns: 40, detachedSubagents: 3 })).toBe(2);
+  });
+
+  // O CENÁRIO DO DONO: mandar mensagem (fila) com agentes trabalhando (aviso + bloco de
+  // sub-agentes) durante o stream. É a soma que tem de caber; se não cabe, o Ink repinta
+  // a tela inteira a cada frame do spinner — e o spinner corre o tempo todo.
+  it('stream + sub-agentes + aviso do F8 + fila ⇒ total ≤ rows-1', () => {
+    for (const rows of [30, 40, 60, 100]) {
+      for (const columns of [40, 60, 80, 120]) {
+        const args = {
+          rows,
+          live: [longSpeech(300), subagents(3)],
+          phase: 'streaming' as const,
+          hasBlocks: true,
+          mode: 'normal' as SessionMode,
+          columns,
+          detachedSubagents: 3,
+        };
+        const queuedLines = 3; // 2 na fila + o paddingBottom
+        const total =
+          LIVE_CHROME_BASE_ROWS +
+          respiroOverhead(rows) +
+          modeIndicatorOverhead(args.mode) +
+          narrowChromeOverhead(columns) +
+          subagentNoticeOverhead(3, columns, 'streaming') +
+          liveOverheadLines({ live: args.live, phase: args.phase, hasBlocks: true, rows, columns }) +
+          speechMaxLines({ ...args, queuedLines }) +
+          queuedLines;
+        expect(total).toBeLessThanOrEqual(rows - 1);
+      }
+    }
+  });
+
+  // PROVA DO BUG (mesma disciplina do F88/F163 acima): com o orçamento CEGO ao aviso — o
+  // estado da rc.144 — o mesmo frame estoura. Sem este caso, o teste acima passaria mesmo
+  // que o desconto fosse inócuo, porque o SAFETY_MARGIN esconderia a linha faltante.
+  //
+  // A geometria não é escolhida a dedo por conveniência: varrendo 784 combinações de
+  // rows×colunas×filhos×fila×modo, 40 são ATRIBUÍVEIS ao aviso (cabiam sem ele e deixam
+  // de caber com ele) e TODAS têm colunas < 47 — onde a frase quebra e custa 2 linhas. Em
+  // terminal largo o SAFETY_MARGIN absorvia a linha faltante, e é por isso que o defeito
+  // de orçamento se manifesta só no estreito. (O tremor em tela LARGA tem outra causa: o
+  // tique de animação, ver `tick-policy.ts`.)
+  it('o teto CEGO ao aviso (rc.144) estoura em terminal ESTREITO — o defeito era real', () => {
+    const rows = 24;
+    const columns = 40;
+    const live = [longSpeech(300), subagents(3)];
+    const queuedLines = 0;
+    // `speechMaxLines` SEM `detachedSubagents` = o orçamento antigo.
+    const cego = speechMaxLines({ rows, live, phase: 'streaming', hasBlocks: true, mode: 'normal', columns, queuedLines });
+    const semAviso =
+      LIVE_CHROME_BASE_ROWS +
+      respiroOverhead(rows) +
+      modeIndicatorOverhead('normal') +
+      narrowChromeOverhead(columns) +
+      liveOverheadLines({ live, phase: 'streaming', hasBlocks: true, rows, columns }) +
+      cego +
+      queuedLines;
+    // Sem o aviso o frame CABIA — o estouro é dele, não do resto do conteúdo.
+    expect(semAviso).toBeLessThanOrEqual(rows - 1);
+    // Com a altura REAL do aviso (que o teto cego ignorava), estoura.
+    expect(semAviso + subagentNoticeOverhead(3, columns, 'streaming')).toBeGreaterThan(rows - 1);
   });
 });

@@ -15,7 +15,12 @@
 // MODO (Plan nega mutações). FIXAR é controle de RETENÇÃO — o fato fixado CONTINUA
 // entrando no recall como DADO (a invariante B/GS-M3 é absoluta e independe de pin).
 
-import { looksImperative, type AgentMemory, type MemoryFact } from '@hiperplano/aluy-cli-core';
+import {
+  looksImperative,
+  tableLines,
+  type AgentMemory,
+  type MemoryFact,
+} from '@hiperplano/aluy-cli-core';
 import type { SlashNote } from './handlers.js';
 
 /** O subcomando parseado de `/memory <args>`. */
@@ -67,15 +72,18 @@ export function parseMemoryCommand(args: string): MemoryCommand {
   return { kind: 'help', reason: `subcomando desconhecido: "${verb}".` };
 }
 
-/** Uma linha de fato p/ a listagem (id · escopo · proveniência · pin · sinal). */
-function factLine(f: MemoryFact): string {
-  const tags = [
-    f.scope,
-    f.provenance,
+/**
+ * Uma LINHA de fato p/ a tabela: id · escopo · origem · sinais · fato. `sinais`
+ * (fixado/diretiva) é o que muda o que fazer com o fato — fica com "—" quando
+ * nenhum se aplica (nunca célula vazia). id/fato nunca truncam (id é o que
+ * `/memory forget|edit|pin <id>` pede de volta; o fato É o dado — cortar é mentir).
+ */
+function factRow(f: MemoryFact): readonly string[] {
+  const sinais = [
     ...(f.pinned ? ['📌 fixado'] : []),
-    ...(looksImperative(f.text) ? ['⚠ diretiva (é DADO, não ordem)'] : []),
-  ].join(' · ');
-  return `${f.id}  [${tags}]  ${f.text}`;
+    ...(looksImperative(f.text) ? ['⚠ diretiva'] : []),
+  ];
+  return [f.id, f.scope, f.provenance, sinais.length > 0 ? sinais.join(' · ') : '—', f.text];
 }
 
 const HELP_LINES: readonly string[] = [
@@ -112,7 +120,13 @@ export async function runMemoryCommand(
     }
     return {
       title: `memory (${facts.length})`,
-      lines: [...facts.map(factLine), '', 'edite com /memory edit|forget|pin <id>'],
+      lines: [
+        ...tableLines(facts.map(factRow), {
+          headers: ['id', 'escopo', 'origem', 'sinais', 'fato'],
+        }),
+        '',
+        'edite com /memory edit|forget|pin <id>',
+      ],
     };
   }
 

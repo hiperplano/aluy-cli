@@ -83,6 +83,8 @@ export { Boot } from './Boot.js';
 export type { BootProps } from './Boot.js';
 export { Onboarding } from './Onboarding.js';
 export type { OnboardingProps } from './Onboarding.js';
+export { FooterAgents, LINHAS_RODAPE_AGENTES, linhasDoRodape, linhaAgente, formataDuracao } from './FooterAgents.js';
+export type { FooterAgentsProps } from './FooterAgents.js';
 export { Working } from './Working.js';
 export type { WorkingProps } from './Working.js';
 export { Spinner } from './Spinner.js';

@@ -35,7 +35,7 @@ import { parseMarkdown, type Inline } from '../ui/markdown/parse.js';
 // F-HEADER-HARMONIA — a MESMA coluna de rótulo que o `<NoteBlock>` usa p/ desenhar. A
 // medição precisa vir da mesma fonte: duplicar o número aqui reabriria justamente a
 // divergência medida×render que este módulo existe p/ evitar (ADR-0076 §5).
-import { ROTULO_COLS } from '../ui/components/StatusPanel.js';
+import { noteContinuationIndent, noteTitleFitsColumn } from '../ui/components/NoteBlock.js';
 
 /** Contexto de medição — o que o render usa e a medição precisa espelhar. */
 export interface ConversaCtx {
@@ -277,8 +277,11 @@ export function measureConversaBlock(b: SessionBlock, ctx: ConversaCtx): number 
       // (`◕ ajuda   linha 1`) e só as demais descem, alinhadas SOB o valor (recuo
       // `ROTULO_COLS + 1`). Quando o título NÃO cabe na coluna de rótulo, o valor INTEIRO
       // desce (todas as linhas abaixo) p/ não desalinhar a coluna.
-      const cabeNaColuna = b.title.length <= ROTULO_COLS - 1;
-      const larguraValor = Math.max(1, c - SPEECH_INDENT - (ROTULO_COLS + 1));
+      // O recuo vem do MESMO lugar que o render usa (`noteContinuationIndent`) — medir com
+      // um recuo e desenhar com outro produz altura errada, que aqui vira buraco ou refluxo
+      // do grid.
+      const cabeNaColuna = noteTitleFitsColumn(b.title);
+      const larguraValor = Math.max(1, c - SPEECH_INDENT - noteContinuationIndent(b.title));
       const primeira = cabeNaColuna ? b.lines[0] : undefined;
       const abaixo = cabeNaColuna ? b.lines.slice(1) : [...b.lines];
       // cabeçalho (≥1 linha, com a 1ª da nota junto) + demais linhas + paddingBottom (1).

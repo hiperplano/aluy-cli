@@ -32,6 +32,7 @@
 // ausente/0 ⇒ cai p/ linhas-fonte (degradação graciosa, comportamento antigo).
 
 import type { SessionBlock, SessionState } from './model.js';
+import { rodapeAgentesOverhead } from './footer-agents-layout.js';
 import { displayWidth, visualLines } from './visual-lines.js';
 import { aluyNeedsLeadingBlank } from './block-rhythm.js';
 
@@ -175,6 +176,86 @@ export function narrowChromeOverhead(columns?: number): number {
   if (columns === undefined || columns <= 0) return 0;
   // < 80 colunas: StatusBar +1 e FooterHints +1 (cada um quebra p/ 2 visuais).
   return columns < NARROW_CHROME_MAX_COLS ? 2 : 0;
+}
+
+/**
+ * FLICKER-F8 — EXCEDENTE do AVISO DE SUB-AGENTES (`◌ N sub-agente(s) trabalhando — F8
+ * para parar.`). Ele mora na região viva do rodapé, ABAIXO da fala, e é CONDICIONAL —
+ * por isso não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
+ * sempre). Sem este desconto ele era altura FORA do orçamento, e a região viva cruzava
+ * `rows` exatamente no cenário em que o aviso existe: agentes trabalhando. Aí o Ink cai
+ * no caminho `outputHeight >= rows` e reescreve tudo A CADA FRAME — o relato do dono,
+ * "quando mando mensagens e tem agentes processando... a tela fica tremendo".
+ *
+ * A linha mede 47 colunas com 2 dígitos (spinner + contagem + texto + a dica do F8) —
+ * medido, não estimado —, então abaixo de
+ * a largura da linha composta ela QUEBRA e custa 2. Mesma disciplina do banner `unsafe` e
+ * do chrome estreito: base no chrome, excedente por condição, ancorado por teste.
+ */
+/**
+ * O TEXTO do aviso mora aqui, ao lado da conta, de propósito: o limiar acima é uma
+ * largura em colunas, e uma largura só é verdade enquanto a frase for aquela. Separar os
+ * dois deixaria alguém reescrever a frase sem tocar no número, e o desconto voltaria a
+ * mentir em silêncio — que é como este defeito nasceu. O teste mede a string e ancora o
+ * limiar; o <App> renderiza ESTA função, não uma cópia.
+ */
+export function subagentNoticeText(count: number): string {
+  return `${String(count)} sub-agente(s) trabalhando`;
+}
+
+/** A dica de parada, sufixo do indicador. Separada porque só aparece com filhos vivos. */
+export const SUBAGENT_STOP_HINT = '· F8 para parar';
+
+/**
+ * O QUE O INDICADOR ÚNICO MOSTRA. Uma função só, usada pelo render E pela medição — a
+ * mesma disciplina do recuo da nota: quem desenha e quem mede o frame não podem compor a
+ * frase de jeitos diferentes, senão o orçamento erra a largura e o Ink repinta a tela.
+ *
+ * Três casos:
+ *  · sem filhos ⇒ só o verbo do pai (`pensando`), como sempre foi;
+ *  · pai trabalhando COM filhos ⇒ o verbo do pai + a contagem ao lado (uma linha só);
+ *  · pai OCIOSO com filhos ⇒ a contagem VIRA o verbo (não há o que o pai esteja fazendo).
+ */
+export function workingIndicator(args: {
+  readonly count: number;
+  readonly phase: SessionPhase;
+  readonly workingLabel?: string;
+}): { readonly label: string; readonly suffix?: string } {
+  const base = args.workingLabel ?? 'pensando';
+  if (args.count <= 0) return { label: base };
+  const hint = SUBAGENT_STOP_HINT;
+  const paiTrabalha = args.phase === 'thinking' || args.phase === 'retrying';
+  return paiTrabalha
+    ? { label: base, suffix: `· ${subagentNoticeText(args.count)} ${hint}` }
+    : { label: subagentNoticeText(args.count), suffix: hint };
+}
+
+/**
+ * A LINHA que o indicador desenha quando há filhos vivos e o pai está ocioso. Existe para
+ * a medição usar a MESMA frase do render — antes havia aqui uma constante de largura (47),
+ * e uma constante é uma medida CONGELADA: bastava alguém reescrever a frase para o número
+ * mentir sem nada acusar.
+ *
+ * Conservadora no wordmark: conta 5 células (`/\luy`, o fallback ASCII) em vez das 4 do
+ * `Λluy`. Errar para MAIS custa uma coluna de fala; errar para menos deixa a região viva
+ * cruzar `rows` e o Ink repinta tudo — os dois erros não são simétricos.
+ */
+export function subagentIndicatorLine(count: number): string {
+  return `xxxxx ${subagentNoticeText(count)}… ${SUBAGENT_STOP_HINT}`;
+}
+export function subagentNoticeOverhead(
+  count?: number,
+  columns?: number,
+  phase?: SessionPhase,
+): number {
+  if (count === undefined || count <= 0) return 0; // sem filhos ⇒ sem desconto
+  // Se a FASE já rende o `<Working>` (é o que `liveOverheadLines` conta abaixo), a
+  // contagem entra como SUFIXO na MESMA linha e não custa altura nenhuma. Descontar aqui
+  // contaria a linha duas vezes e apertaria a fala à toa.
+  if (phase === 'thinking' || phase === 'compacting') return 0;
+  if (columns === undefined || columns <= 0) return 1;
+  // A largura medida da linha COMPOSTA, não de uma frase avulsa — é o que o render desenha.
+  return columns < subagentIndicatorLine(count).length ? 2 : 1;
 }
 
 /** Piso do teto da fala: nunca menos que isto, mesmo em terminais minúsculos. */
@@ -560,6 +641,14 @@ export function slashMenuMaxRows(args: {
   readonly columns?: number;
   /** Altura (linhas) da fila/encaixando abaixo da viva (EST-0982). Default 0. */
   readonly stagedLines?: number;
+  /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
+  readonly detachedSubagents?: number;
+  /**
+   * FOOTER-AGENTES — a coluna de sub-agentes vivos abaixo do composer ocupa altura do
+   * RODAPÉ. Ela não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
+   * sempre), então sem este desconto o frame cruza `rows` justamente quando há agentes.
+   */
+  readonly temAgentesRodape?: boolean;
 }): number {
   const liveFloor =
     LIVE_CHROME_BASE_ROWS +
@@ -576,6 +665,8 @@ export function slashMenuMaxRows(args: {
       ...(args.columns !== undefined ? { columns: args.columns } : {}),
     }) +
     MIN_SPEECH_LINES +
+    subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) +
+    rodapeAgentesOverhead(args.temAgentesRodape === true, args.columns ?? 0) +
     (args.stagedLines ?? 0);
   // −1 (paddingTop do contêiner do menu) − SAFETY_MARGIN (gatilho `>=` do Ink).
   return Math.max(4, args.rows - liveFloor - 1 - SAFETY_MARGIN);
@@ -611,6 +702,14 @@ export function speechMaxLines(args: {
   readonly composerOverflow?: number;
   /** EST-0965 (wrap) — largura do terminal; mede a altura VISUAL dos vivos. */
   readonly columns?: number;
+  /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
+  readonly detachedSubagents?: number;
+  /**
+   * FOOTER-AGENTES — a coluna de sub-agentes vivos abaixo do composer ocupa altura do
+   * RODAPÉ. Ela não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
+   * sempre), então sem este desconto o frame cruza `rows` justamente quando há agentes.
+   */
+  readonly temAgentesRodape?: boolean;
 }): number {
   const overhead = liveOverheadLines({
     live: args.live,
@@ -634,6 +733,9 @@ export function speechMaxLines(args: {
     // desconto o frame cruzava `rows` em tela baixa+estreita ⇒ clearTerminal
     // reescrevendo o histórico INTEIRO a cada frame (o flicker de sessão gigante).
     narrowChromeOverhead(args.columns) -
+    // FLICKER-F8 — o aviso de sub-agentes é altura viva CONDICIONAL; ver o helper.
+    subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) -
+    rodapeAgentesOverhead(args.temAgentesRodape === true, args.columns ?? 0) -
     (args.queuedLines ?? 0) -
     (args.overlayLines ?? 0) -
     (args.composerOverflow ?? 0) -
@@ -681,6 +783,14 @@ export function liveRegionMinRows(args: {
   readonly overlayLines?: number;
   /** Excedente VISUAL do composer (wrap) além da 1 linha do chrome (RESIZE-FIX). Default 0. */
   readonly composerOverflow?: number;
+  /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
+  readonly detachedSubagents?: number;
+  /**
+   * FOOTER-AGENTES — a coluna de sub-agentes vivos abaixo do composer ocupa altura do
+   * RODAPÉ. Ela não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
+   * sempre), então sem este desconto o frame cruza `rows` justamente quando há agentes.
+   */
+  readonly temAgentesRodape?: boolean;
 }): number {
   const overhead = liveOverheadLines({
     live: args.live,
@@ -696,6 +806,8 @@ export function liveRegionMinRows(args: {
     respiroOverhead(args.rows) +
     modeIndicatorOverhead(args.mode) +
     narrowChromeOverhead(args.columns) +
+    subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) +
+    rodapeAgentesOverhead(args.temAgentesRodape === true, args.columns ?? 0) +
     overhead +
     (args.stagedLines ?? 0) +
     (args.overlayLines ?? 0) +

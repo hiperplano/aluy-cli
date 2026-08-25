@@ -23,7 +23,12 @@ describe('AluyBlock — markdown no acumulado, stream fluido', () => {
     // F-MARCA-LAMBDA (pedido do dono) — o bloco do agente deixou de ser rotulado `Λ aluy`
     // (marca + palavra ao lado) e passou a ASSINAR `Λluy`: "a marca é a primeira letra do
     // nome, não um ícone ao lado dele". O que o teste prova é o mesmo (o bloco é do aluy).
-    expect(out).toContain('Λluy');
+    //
+    // A busca passou a ser no texto SEM COR: com o brilho correndo letra a letra, cada uma
+    // sai envolvida no seu próprio código ANSI, e `Λluy` deixou de existir como pedaço
+    // contíguo dos bytes crus. O que se quer provar é a ASSINATURA na tela, não o byte.
+    // eslint-disable-next-line no-control-regex
+    expect(out.replace(/\u001b\[[0-9;]*m/g, '')).toContain('Λluy');
     expect(out).toContain('isto'); // markdown aplicado mesmo durante o stream
     expect(out).toContain('●'); // cursor de trabalho presente (EST-0965)
   });

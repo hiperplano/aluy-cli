@@ -139,10 +139,17 @@ export function resolveRetry(inputs: {
 }): RetryConfig {
   const rawEnv = (inputs.attemptsEnv ?? '').trim().toLowerCase();
   if (rawEnv === 'off' || rawEnv === 'false' || rawEnv === '0') return RETRY_OFF;
-  // `on`/`true`/`1` ⇒ liga no default recomendado (sem precisar escolher um número).
+  // `on`/`true` ⇒ liga no default recomendado (sem precisar escolher um número).
   // MESMO caminho que a AUSÊNCIA de env agora segue (ver fallback abaixo) — mantido
   // como ramo explícito só pela clareza do `rawEnv` já ter sido parseado aqui.
-  if (rawEnv === 'on' || rawEnv === 'true' || rawEnv === '1') {
+  //
+  // O `1` SAIU desta lista. Ele estava aqui como sinônimo booleano de "ligado", e o
+  // resultado era a única leitura em que um número não significa ele mesmo: `0` desliga
+  // (zero tentativas), `3` dá três, e `1` dava VINTE. Quem escreve `ALUY_RETRY=1` está
+  // pedindo UMA tentativa — pedir uma e receber vinte é a classe de surpresa silenciosa
+  // que este projeto persegue, e ainda por cima na direção cara (vinte esperas de 5s).
+  // As formas booleanas explícitas seguem valendo.
+  if (rawEnv === 'on' || rawEnv === 'true') {
     return {
       attempts: DEFAULT_RETRY_ATTEMPTS,
       waitMs:

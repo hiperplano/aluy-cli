@@ -148,9 +148,12 @@ export async function buildLocalModelClient(
   // aponta para loopback: quem configurou um provider remoto não ganha brecha
   // nenhuma, e o redirect continua revalidado sem ela (ver `pinned-stream-fetch`).
   // Metadata da cloud é LINK-LOCAL, não loopback — segue bloqueada nos dois casos.
-  const baseEhLoopback = /^https?:\/\/(127\.|\[?::1\]?|localhost)([:/]|$)/i.test(baseUrl ?? '');
+  // A regra mora no `pinned-stream-fetch` (`baseUrlEhLocal`), não aqui: este arquivo teve
+  // a versão ORIGINAL dela, com um regex que exigia `:` ou `/` logo depois de `127.` e
+  // por isso nunca casava `127.0.0.1` — a exceção só valia para quem escrevia
+  // `localhost`. Passando o `baseUrl`, quem decide é uma função só, testada num lugar só.
   const doFetch: StreamFetch =
-    opts.fetch ?? createPinnedStreamFetch({ resolver, allowLoopback: baseEhLoopback });
+    opts.fetch ?? createPinnedStreamFetch({ resolver, baseUrl: baseUrl ?? '' });
 
   const getCredential =
     opts.getCredential ??

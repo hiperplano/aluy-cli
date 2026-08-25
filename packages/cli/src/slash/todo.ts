@@ -8,7 +8,7 @@
 // O roteamento (parse) é PURO/testável; o runner consome a `TodoStorePort` e
 // checa o MODO (Plan nega mutações). Comandos EM INGLÊS (done/clear).
 
-import type { TodoItem, TodoStorePort } from '@hiperplano/aluy-cli-core';
+import { tableLines, type TodoItem, type TodoStorePort } from '@hiperplano/aluy-cli-core';
 import type { SlashNote } from './handlers.js';
 
 /** O subcomando parseado de `/todo <args>`. */
@@ -48,10 +48,14 @@ export function parseTodoCommand(args: string): TodoCommand {
   return { kind: 'help', reason: `subcomando desconhecido: "${verb}".` };
 }
 
-/** Uma linha de item p/ a listagem. */
-function itemLine(t: TodoItem): string {
-  const marker = t.done ? '✓' : '○';
-  return `${marker} ${t.id}  ${t.text}`;
+/**
+ * As linhas de UM grupo (pendentes OU feitos) alinhadas — item (marca+id) · tarefa.
+ * Sem cabeçalho: cada grupo já tem o título "── Pendentes ──"/"── Feitos ──" acima,
+ * repetir "id/tarefa" seria redundante. O id nunca é truncado (é o que `/todo done
+ * <id>` pede de volta); a tarefa é a última coluna — livre p/ ficar longa.
+ */
+function itemsTable(items: readonly TodoItem[]): string[] {
+  return tableLines(items.map((t) => [`${t.done ? '✓' : '○'} ${t.id}`, t.text]));
 }
 
 const HELP_LINES: readonly string[] = [
@@ -89,9 +93,9 @@ export async function runTodoCommand(
     const lines = [
       `backlog (${items.length} itens: ${pending.length} pendentes, ${done.length} feitos):`,
       ...(pending.length > 0
-        ? ['', '── Pendentes ──', ...pending.map(itemLine)]
+        ? ['', '── Pendentes ──', ...itemsTable(pending)]
         : ['', '(nenhum pendente)']),
-      ...(done.length > 0 ? ['', '── Feitos ──', ...done.map(itemLine)] : []),
+      ...(done.length > 0 ? ['', '── Feitos ──', ...itemsTable(done)] : []),
       '',
       'marque feito com /todo done <id> · limpe feitos com /todo clear',
     ];

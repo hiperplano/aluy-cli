@@ -616,7 +616,7 @@ function OnboardApp(props: {
       wireFormat,
       baseUrl,
       key,
-      fetchImpl: createPinnedStreamFetch({}),
+      fetchImpl: createPinnedStreamFetch({ baseUrl: baseUrl }),
     }).then((slugs) => {
       if (cancelled) return;
       if (decideOnboardModelListMode(slugs) === 'picker') {

@@ -12,6 +12,10 @@ import type { ServiceManifest } from './service-parse.js';
 // ADR-0158 §5 pt.4 (FASE 3, item 4 da missão) — "status/list mostram 'aguardando
 // dono (pergunta enviada há X)'": reusa o MESMO formatador de elapsed do canal.
 import { formatElapsedSince } from './service-messages.js';
+// Pedido do dono (UX das listagens) — tabela LEVE (alinhamento + régua, sem grade
+// completa) em vez das linhas cruas concatenadas por " · ". Mesmo helper do
+// `/tools`/`/mcp`/etc.; PORTÁVEL (mora no core, o `cli` só reexporta).
+import { tableLines } from '../../util/table-lines.js';
 
 /** Uma nota (título + linhas) — espelha o `SlashNote` do @hiperplano/aluy-cli, sem acoplar a ele. */
 export interface ServicesListNote {
@@ -105,9 +109,16 @@ export function buildServicesNote(input: ServicesListInput): ServicesListNote {
 
   if (valid.length > 0) {
     lines.push(`instalados (${valid.length}):`);
+    // 1 LINHA por serviço = as 4 colunas que respondem "o que tem instalado, tá
+    // rodando, quando roda de novo, faz o quê" — o resto (id longo, tunables) não é
+    // o que se procura ao rodar `/service`. `grupo:`/`modelo:` (raros, opcionais) NÃO
+    // entram como 5ª/6ª coluna: forçariam "—" em toda linha que não os declara, e
+    // criariam colunas quase sempre vazias. Viram uma ANOTAÇÃO sob a própria linha
+    // (mesmo padrão do `service.md`: informação rara não deforma a tabela comum).
+    const rows: string[][] = [];
+    const annotations: (string | undefined)[] = [];
     for (const s of valid) {
       const desc = serviceDescriptionLine(s.manifest);
-      const descSuffix = desc !== '' ? ` · ${desc}` : '';
       const schedule = s.manifest.schedule !== undefined ? s.manifest.schedule : 'sem schedule';
       // ADR-0158 §5 (fase 2) — `runtimeStatus` presente ⇒ estado REAL; AUSENTE ⇒
       // mantém o "parado" fixo da fase 1 (não-regressão dos testes da fase 1).
@@ -133,23 +144,36 @@ export function buildServicesNote(input: ServicesListInput): ServicesListNote {
         rt?.running === true && rt.turnState === 'sleeping' && rt.nextFireIso !== undefined
           ? ` (${rt.nextFireIso})`
           : '';
+      rows.push([`✓ ${s.name}`, stateLabel, `${schedule}${nextSuffix}`, desc !== '' ? desc : '—']);
+
       // Descoberta entre serviços (o maestro lista os irmãos por grupo) — só aparece
       // quando declarado, nunca regride quem não usa `group:`/`model:`.
-      const groupSuffix = s.manifest.group !== undefined ? ` · grupo: ${s.manifest.group}` : '';
-      const modelSuffix = s.manifest.model !== undefined ? ` · modelo: ${s.manifest.model}` : '';
-      lines.push(
-        `  ✓ ${s.name} · ${stateLabel} · próximo turno: ${schedule}${nextSuffix}${descSuffix}${groupSuffix}${modelSuffix}`,
-      );
+      const groupPart = s.manifest.group !== undefined ? `grupo: ${s.manifest.group}` : undefined;
+      const modelPart = s.manifest.model !== undefined ? `modelo: ${s.manifest.model}` : undefined;
+      const extras = [groupPart, modelPart].filter((x): x is string => x !== undefined);
+      annotations.push(extras.length > 0 ? extras.join(' · ') : undefined);
     }
+    const table = tableLines(rows, {
+      headers: ['serviço', 'estado', 'próximo turno', 'descrição'],
+    });
+    // `table` = [cabeçalho, régua, linha0, linha1, …] — alinhado 1:1 com `valid`.
+    lines.push(table[0]!, table[1]!);
+    valid.forEach((_s, i) => {
+      lines.push(table[2 + i]!);
+      const extra = annotations[i];
+      if (extra !== undefined) lines.push(`      ${extra}`);
+    });
   }
 
   if (rejected.length > 0) {
     if (lines.length > 0) lines.push('');
     lines.push(`rejeitados (${rejected.length}) — não foram carregados por estarem inválidos:`);
-    for (const e of rejected) {
-      lines.push(`  ⚠ ${e.dirName}`);
-      lines.push(`      ${e.reason}`);
-    }
+    lines.push(
+      ...tableLines(
+        rejected.map((e) => [`⚠ ${e.dirName}`, e.reason]),
+        { headers: ['diretório', 'motivo'] },
+      ),
+    );
   }
 
   lines.push('');

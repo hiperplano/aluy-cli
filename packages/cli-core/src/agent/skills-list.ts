@@ -17,7 +17,11 @@
 // + erros aqui. Determinístico/testável sem montar Ink nem tocar o filesystem.
 
 import type { Skill, SkillError, SkillOrigin } from './skill.js';
-import { boxTable } from '../util/box-table.js';
+// ESTÉTICA ÚNICA (decisão do dono: "deixe tudo na mesma estética") — as listagens
+// usavam DOIS desenhos: grade de box-drawing aqui, linha crua nas outras onze.
+// Duas estéticas no mesmo produto são a versão visual do problema que ele apontou:
+// o mesmo conceito representado de duas formas, e as duas divergindo.
+import { tableLines } from '../util/table-lines.js';
 
 /** Uma nota (título + linhas) — espelha o `AgentsListNote`/`SlashNote`. */
 export interface SkillsListNote {
@@ -102,14 +106,14 @@ export function buildSkillsNote(input: SkillsListInput): SkillsListNote {
       s.origin === 'global' ? 'global' : 'projeto',
       skillDescriptionLine(s),
     ]);
-    lines.push(...boxTable(['skill', 'escopo', 'sobre'], rows, { maxWidths: [20, 8, 50] }));
+    lines.push(...tableLines(rows, { headers: ['skill', 'escopo', 'sobre'], ...{ maxWidths: [20, 8, 50] } }));
   }
 
   if (rejected.length > 0) {
     if (lines.length > 0) lines.push('');
     lines.push(`rejeitadas (${rejected.length}) — não foram carregadas por estarem inválidas:`);
     const rows = rejected.map((e) => [e.name, e.reason]);
-    lines.push(...boxTable(['skill', 'motivo'], rows, { maxWidths: [22, 50] }));
+    lines.push(...tableLines(rows, { headers: ['skill', 'motivo'], ...{ maxWidths: [22, 50] } }));
     lines.push('  conserto: o SKILL.md precisa de `name` (ou herda o nome da pasta) e de um');
     lines.push('  corpo não-vazio (as instruções da skill).');
   }

@@ -230,6 +230,7 @@ export async function runAutoUpdate(
   })();
   if (prev && Date.now() - prev.lastCheck < intervaloMs) return; // checado há pouco
 
+
   try {
     const tag = distTagFor(installed);
     const url = `https://registry.npmjs.org/${PKG.replace('/', '%2f')}/${tag}`;
