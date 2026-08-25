@@ -45,7 +45,6 @@ import {
   type StatusBarProps,
 } from './StatusBar.js';
 import { MODE_VIEW } from './ModeIndicator.js';
-import { BusyPulse } from './BusyPulse.js';
 import { progressRatio, renderBar } from './ProgressBar.js';
 import { UnsafeBanner } from './UnsafeBanner.js';
 
@@ -240,12 +239,12 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
           <Role name="fgDim">{` ${mcp.connected + mcp.failed}/${mcp.total}`}</Role>
         </>
       )}
-      {props.busy === true && (
-        <>
-          <Text> </Text>
-          <BusyPulse {...(props.frame !== undefined ? { frame: props.frame } : {})} />
-        </>
-      )}
+      {/* O <BusyPulse> SAIU daqui. Ele era a barrinha âmbar que enchia e esvaziava no
+          rodapé, e nasceu como TERCEIRO indicador de "há trabalho", ao lado do Λ que pulsa
+          e do verbo vivo. Agora que o brilho corre pelo nome no cabeçalho da própria caixa
+          da resposta, ele virou repetição: "eu falei que nao precisava ter mais a barra de
+          progresso, acho redundante a barra de progresso e o efeito brilho juntos" e "a
+          barra de progresso amarelo que fica rolando de um lado pra outro deve sair". */}
     </>
   );
   if (props.error === true) {

@@ -180,3 +180,62 @@ describe('contagem de sub-agentes vivos no rodapé', () => {
     c.dispose();
   });
 });
+
+// PROVA DE FIO do rodapé de agentes — a lista tem de chegar ao ESTADO, não só existir.
+//
+// O componente `<FooterAgents>` tinha teste e passava; o bloco nunca apareceu na tela do
+// dono ("eu nao vi ainda os agentes no footer apesar de ter instalado"). A causa estava no
+// meio: a lista era montada filtrando `phase === 'running'`, string que NÃO EXISTE neste
+// vocabulário — filho vivo nasce em `thinking` e passa por `tool`/`asking`; terminal é
+// `done`/`cancelled`/`failed`. A contagem usava `liveChildren()` e acertava; a lista usava
+// a string e vinha SEMPRE VAZIA. Nada falhava: um `[]` renderiza como "sem agentes".
+//
+// Testar o componente prova o desenho. Só o fio prova que há o que desenhar.
+describe('FOOTER-AGENTES — a lista chega ao estado junto da contagem', () => {
+  it('filhos vivos ⇒ `liveSubagents` com os rótulos, na MESMA hora que a contagem', async () => {
+    const c = ctl();
+    const arv = await comArvore(c);
+    const i = c as unknown as Interno;
+    for (const n of ['analista', 'historiador', 'revisor']) arv.ensureChild(n, 'subagent');
+    i.publishDetachedCount();
+
+    expect(c.current.detachedSubagents).toBe(3);
+    // O PONTO: a lista não pode estar vazia enquanto a contagem diz 3.
+    expect(c.current.liveSubagents?.map((a) => a.label).sort()).toEqual([
+      'analista',
+      'historiador',
+      'revisor',
+    ]);
+    c.dispose();
+  });
+
+  it('a lista acompanha a contagem quando um filho termina', async () => {
+    const c = ctl();
+    const arv = await comArvore(c);
+    const i = c as unknown as Interno;
+    const a = arv.ensureChild('a', 'subagent');
+    arv.ensureChild('b', 'subagent');
+    i.publishDetachedCount();
+    expect(c.current.liveSubagents).toHaveLength(2);
+
+    a.finish('final');
+    i.publishDetachedCount();
+    expect(c.current.detachedSubagents).toBe(1);
+    expect(c.current.liveSubagents?.map((x) => x.label)).toEqual(['b']);
+    c.dispose();
+  });
+
+  it('contagem e lista NUNCA discordam (é o defeito, em forma de invariante)', async () => {
+    const c = ctl();
+    const arv = await comArvore(c);
+    const i = c as unknown as Interno;
+    const nos = ['a', 'b', 'c', 'd'].map((n) => arv.ensureChild(n, 'subagent'));
+    for (let k = 0; k < nos.length; k += 1) {
+      i.publishDetachedCount();
+      expect(c.current.liveSubagents ?? []).toHaveLength(c.current.detachedSubagents ?? 0);
+      nos[k]!.finish('final');
+    }
+    c.dispose();
+  });
+});
+

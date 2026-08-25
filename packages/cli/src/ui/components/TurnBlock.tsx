@@ -308,12 +308,19 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
     aluyFundo !== undefined && cabecalhoUtil !== undefined ? (
       <Text backgroundColor={aluyFundo}>
         {' '}
+        {/* O BRILHO CORRE PELO NOME INTEIRO enquanto ele trabalha. Antes só o `Λ` era
+            animado e o `luy` ficava estático: a caixa da conversa não fazia o efeito que o
+            indicador fazia, e o dono viu a diferença — "na caixa do Aluy quando ele tá
+            pensando nao esta fazendo o efeito... o brilho deveria aparecer na conversacao".
+            Parado, é a marca sólida de sempre. */}
         {props.streaming ? (
-          <AluyLoader frame={props.frame ?? 0} />
+          <AluyLoader frame={props.frame ?? 0} wordmark />
         ) : (
-          <Glyph name="aluy" role="accent" />
+          <>
+            <Glyph name="aluy" role="accent" />
+            <Role name="accent">luy</Role>
+          </>
         )}
-        <Role name="accent">luy</Role>
         {conta !== undefined && <Role name="fgDim">{`  ${conta}`}</Role>}
         {/* ` ` + `Λ` + `luy` = 5 colunas. A conta some com os 2 espaços que a separam.
             Errar esta soma para MAIS pinta além do bloco e o Ink joga o excedente na
@@ -324,12 +331,19 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
       </Text>
     ) : (
       <Box>
+        {/* O BRILHO CORRE PELO NOME INTEIRO enquanto ele trabalha. Antes só o `Λ` era
+            animado e o `luy` ficava estático: a caixa da conversa não fazia o efeito que o
+            indicador fazia, e o dono viu a diferença — "na caixa do Aluy quando ele tá
+            pensando nao esta fazendo o efeito... o brilho deveria aparecer na conversacao".
+            Parado, é a marca sólida de sempre. */}
         {props.streaming ? (
-          <AluyLoader frame={props.frame ?? 0} />
+          <AluyLoader frame={props.frame ?? 0} wordmark />
         ) : (
-          <Glyph name="aluy" role="accent" />
+          <>
+            <Glyph name="aluy" role="accent" />
+            <Role name="accent">luy</Role>
+          </>
         )}
-        <Role name="accent">luy</Role>
         {conta !== undefined && <Role name="fgDim">{`  ${conta}`}</Role>}
       </Box>
     );

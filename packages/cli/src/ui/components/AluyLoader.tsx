@@ -105,14 +105,19 @@ export function AluyLoader(props: AluyLoaderProps): React.ReactElement {
   // poluída, e o nome do produto faz o mesmo trabalho ocupando a mesma largura).
   if (props.wordmark === true) {
     const cabeca = wordmarkHeadIndex(frame, celulas.length);
+    // FRAGMENTO, não `<Box>`. O cabeçalho da caixa da conversa desenha o nome DENTRO de um
+    // `<Text>` (é ele que pinta o fundo da faixa), e um `<Box>` ali dentro quebra o layout
+    // do Ink — o efeito não foi um erro de tipo, foi meia dúzia de testes de render caindo
+    // com o texto reflowado. O fragmento compõe nos dois contextos (dentro de `<Text>` e
+    // solto numa `<Box>`), que é o que este componente precisa ser.
     return (
-      <Box>
+      <>
         {celulas.map((ch, i) => (
           <Role key={i} name={i === cabeca ? 'accent' : 'accentDim'}>
             {ch}
           </Role>
         ))}
-      </Box>
+      </>
     );
   }
 

@@ -51,9 +51,16 @@ describe('F61 — output grande streamado não reprocessa o texto inteiro por ti
   it('PROVA (estabilidade): a saída VISÍVEL é IDÊNTICA e bounded entre 2 ticks (frames)', () => {
     const a = frame(<AluyBlock text={HUGE} streaming maxLines={6} columns={80} frame={0} />);
     const b = frame(<AluyBlock text={HUGE} streaming maxLines={6} columns={80} frame={3} />);
-    // O `frame` só muda o pisca do cursor (●/espaço); o CORPO da janela é o mesmo.
-    // Removemos a linha do cursor de trabalho p/ comparar só o conteúdo de fala.
-    const body = (s: string) => s.replace(/[●]/g, ' ');
+    // O `frame` muda o pisca do cursor (●/espaço) e, desde que o nome do Aluy brilha no
+    // cabeçalho, a COR de cada letra dele. O CORPO da janela é que não pode mudar — é o que
+    // esta prova existe para travar ("não reprocessa o texto inteiro por tick").
+    //
+    // Por isso a comparação é da saída VISÍVEL, como diz o nome do caso: sem os códigos de
+    // cor e sem o cursor. Comparar os bytes crus passaria a reprovar QUALQUER animação, e o
+    // que se quer proibir é reprocessar TEXTO, não pulsar cor numa linha de cabeçalho.
+    const body = (s: string) =>
+      // eslint-disable-next-line no-control-regex
+      s.replace(/\u001b\[[0-9;]*m/g, '').replace(/[●]/g, ' ');
     expect(body(a)).toBe(body(b));
     // Bounded: a janela mostra só a cauda — NÃO as 6000 linhas. Altura ≪ 6000.
     expect(a.split('\n').length).toBeLessThan(60);

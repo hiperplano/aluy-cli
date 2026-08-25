@@ -7373,14 +7373,32 @@ export class SessionController {
    * fonte só para a ferramenta e para a tela — se divergirem, uma das duas mente.
    */
   private filhosVivosParaRodape(): readonly LiveSubagent[] {
-    return this.listaFilhosParaGestao()
-      .filter((f) => f.phase === 'running')
-      .map((f) => ({
-        label: f.label,
-        phase: f.phase,
-        ...(f.activity ? { activity: f.activity } : {}),
-        ...(f.durationMs !== undefined ? { durationMs: f.durationMs } : {}),
-      }));
+    // MESMA FONTE DA CONTAGEM: `liveChildren()`, que é "não terminal".
+    //
+    // A primeira versão filtrava `listaFilhosParaGestao()` por `phase === 'running'` — uma
+    // string que NÃO EXISTE neste vocabulário. Um filho vivo nasce em `thinking` e passa por
+    // `tool`/`asking`; terminal é `done`/`cancelled`/`failed`. Resultado: a contagem
+    // (que usa `liveChildren`) mostrava 3 e a lista vinha SEMPRE VAZIA, então o bloco do
+    // rodapé nunca aparecia — o dono instalou e não viu nada, sem erro nenhum na tela.
+    //
+    // Dois vocabulários para o mesmo fato é o defeito; a cura não é acertar a string, é
+    // perguntar à MESMA função que a contagem pergunta.
+    const arvores = [...this.detachedTrees];
+    if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
+    const out: LiveSubagent[] = [];
+    for (const t of arvores) {
+      for (const no of t.liveChildren()) {
+        const atividade = no.currentActivity();
+        const conta = no.accounting();
+        out.push({
+          label: no.label,
+          phase: no.phase,
+          ...(atividade ? { activity: atividade } : {}),
+          ...(conta.durationMs !== undefined ? { durationMs: conta.durationMs } : {}),
+        });
+      }
+    }
+    return out;
   }
 
   /**

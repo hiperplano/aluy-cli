@@ -4877,17 +4877,15 @@ export function App(props: AppProps): React.ReactElement {
           viva oscilava e a tela tremia. O dono: "acho que ta poluido... ele deveria
           substituir o progress dos subagentes que aparece embaixo (ele deveria ficar do
           lado)". Agora é uma linha só, e a contagem é SUFIXO dela. */}
-      {(state.phase === 'thinking' || state.phase === 'retrying' || haFilhoVivo) && (
+      {/* A linha de progresso volta a ser SÓ o vácuo pré-token (`thinking`/`retrying`).
+          Ela tinha ganhado um ramo por sub-agentes vivos, e com o rodapé mostrando os
+          agentes isso virou a redundância que o dono apontou — "acho redundante a barra de
+          progresso e o efeito brilho juntos". Enquanto ele FALA, quem indica trabalho é o
+          brilho do nome no cabeçalho da própria caixa; enquanto ele PENSA (antes do 1º
+          token) não há caixa nenhuma, e é para esse vazio que esta linha existe. */}
+      {(state.phase === 'thinking' || state.phase === 'retrying') && (
         <Box paddingTop={state.blocks.length > 0 ? 1 : 0}>
-          <Working
-            glyph="aluy"
-            glyphRole="accent"
-            label={indicadorTrabalho.label}
-            {...(indicadorTrabalho.suffix !== undefined
-              ? { suffix: indicadorTrabalho.suffix }
-              : {})}
-            frame={frame}
-          />
+          <Working glyph="aluy" glyphRole="accent" label={indicadorTrabalho.label} frame={frame} />
         </Box>
       )}
 
@@ -5429,6 +5427,10 @@ export function App(props: AppProps): React.ReactElement {
             separados por uma barra vertical (pedido do dono). Sem agentes vivos o
             <FooterAgents> é passagem direta: a tela de quem não dispara agente não muda. */}
         <FooterAgents agentes={agentesRodape} largura={larguraAgentes}>
+        {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
+            pulso âmbar, que saiu. Continuar passando faria o painel re-renderizar a cada
+            quadro sem desenhar nada diferente, e deixaria dois campos aceitos-e-ignorados
+            na interface — a armadilha que já custou o `maxWidths` hoje. */}
         <StatusPanel
           mode={state.mode}
           {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
@@ -5473,8 +5475,6 @@ export function App(props: AppProps): React.ReactElement {
               // nem ganha o campo). Responde "estão sendo USADOS?", não "estão de pé?".
               { sidecarUsage: state.sidecarUsage }
             : {})}
-          busy={busy}
-          frame={frame}
         />
         </FooterAgents>
         {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
