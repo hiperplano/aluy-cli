@@ -7555,10 +7555,15 @@ export class SessionController {
       payload: text,
       firedAt: new Date(this.clock()).toISOString(),
     });
+    // CONCORDÂNCIA — a frase pluralizava o SUBSTANTIVO e esquecia o VERBO: saía
+    // "3 sub-agentes terminou". E o segundo verbo concordava com a coisa errada — o
+    // ternário `isTurnLive()` escolhia entre "entra" e "entram" pelo ESTADO DO TURNO, não
+    // pelo número de resultados, então "1 sub-agente terminou — resultado entram" era
+    // alcançável. Texto que o dono lê a cada fan-out não pode ser desleixado assim.
+    const plural = n > 1;
     this.pushNote('fan-out concluído', [
-      `${n} sub-agente${n > 1 ? 's' : ''} terminou — ` +
-        `resultado${n > 1 ? 's' : ''} ` +
-        `${this.isTurnLive() ? 'entra' : 'entram'} como dado.`,
+      `${n} sub-agente${plural ? 's' : ''} ${plural ? 'terminaram' : 'terminou'} — ` +
+        `${plural ? 'os resultados entram' : 'o resultado entra'} como dado.`,
     ]);
     // EST-F158 — acorda o turn-loop: se o pai está ocioso (ex.: terminou enquanto
     // aguardava), processa IMEDIATAMENTE. O flag fura a guarda detachedTrees>0.

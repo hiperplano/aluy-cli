@@ -150,3 +150,31 @@ describe('F-RETRY · resolveRetry — precedência env > config > default (ADR-0
     expect(resolveRetry({ attemptsEnv: '0' })).toEqual(RETRY_OFF);
   });
 });
+
+// NÚMERO SIGNIFICA NÚMERO — achado medindo a tabela, não lendo o código.
+//
+// `ALUY_RETRY=1` devolvia VINTE tentativas: o `1` estava na lista dos sinônimos booleanos
+// de "ligado", junto de `on`/`true`. O resultado era a única leitura em que um número não
+// vale ele mesmo — `0` desliga, `3` dá três, `1` dava vinte. Quem escreve `1` está pedindo
+// UMA tentativa, e receber vinte erra na direção cara: vinte esperas de 5s.
+//
+// Nenhum teste travava isso, e é por isso que pôde virar surpresa.
+describe('ALUY_RETRY numérico — cada número vale ele mesmo', () => {
+  for (const n of [0, 1, 2, 3, 7]) {
+    it(`ALUY_RETRY=${String(n)} ⇒ ${String(n)} tentativa(s)`, () => {
+      expect(resolveRetry({ attemptsEnv: String(n) }).attempts).toBe(n);
+    });
+  }
+
+  it('as formas BOOLEANAS seguem valendo (não é regressão de quem usa `on`)', () => {
+    expect(resolveRetry({ attemptsEnv: 'on' }).attempts).toBe(DEFAULT_RETRY_ATTEMPTS);
+    expect(resolveRetry({ attemptsEnv: 'true' }).attempts).toBe(DEFAULT_RETRY_ATTEMPTS);
+    expect(resolveRetry({ attemptsEnv: 'off' }).attempts).toBe(0);
+    expect(resolveRetry({ attemptsEnv: 'false' }).attempts).toBe(0);
+  });
+
+  it('ausente ⇒ o default LIGADO (ADR-0156) — o `1` não muda essa decisão', () => {
+    expect(resolveRetry({}).attempts).toBe(DEFAULT_RETRY_ATTEMPTS);
+  });
+});
+

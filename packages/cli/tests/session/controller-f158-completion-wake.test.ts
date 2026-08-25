@@ -403,3 +403,50 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
     expect(outcomes[1]).toEqual({ label: 'b', content: 'feito-b' });
   });
 });
+
+// CONCORDÂNCIA da nota de fan-out — o dono lê esta frase a cada delegação.
+//
+// Ela pluralizava o SUBSTANTIVO e esquecia o VERBO ("3 sub-agentes terminou"), e o segundo
+// verbo concordava com a coisa errada: o ternário escolhia entre "entra" e "entram" pelo
+// ESTADO DO TURNO, não pelo número de resultados — "1 sub-agente terminou — resultado
+// entram" era alcançável. Nenhum teste travava a frase, e é por isso que ela pôde sair
+// assim e ficar.
+describe('nota de fan-out — singular e plural concordam', () => {
+  /** Chama o emissor direto, com N desfechos, e devolve o texto da nota. */
+  function noteDe(n: number): string {
+    const { ports } = fakePorts();
+    const controller = new SessionController({
+      model: { async call() { return { request_id: 'r', content: 'ok', finish_reason: 'stop' }; } },
+      permission: new PolicyPermissionEngine(),
+      ports,
+      askResolver: approveAll,
+      meta,
+    });
+    const outcomes = Array.from({ length: n }, (_, i) => ({
+      label: `a${String(i)}`,
+      result: 'feito',
+      ok: true,
+      stop: 'final' as const,
+      usage: { tokens: 1 },
+    }));
+    (controller as unknown as { onFanoutCompleted(o: unknown): void }).onFanoutCompleted(outcomes);
+    const texto = notesText(controller);
+    controller.dispose();
+    return texto;
+  }
+
+  it('UM sub-agente ⇒ tudo no singular', () => {
+    const t = noteDe(1);
+    expect(t).toContain('1 sub-agente terminou');
+    expect(t).toContain('o resultado entra como dado');
+    expect(t).not.toContain('terminaram');
+  });
+
+  it('TRÊS sub-agentes ⇒ tudo no plural (era "3 sub-agentes terminou")', () => {
+    const t = noteDe(3);
+    expect(t).toContain('3 sub-agentes terminaram');
+    expect(t).toContain('os resultados entram como dado');
+    expect(t).not.toMatch(/sub-agentes terminou/);
+  });
+});
+
