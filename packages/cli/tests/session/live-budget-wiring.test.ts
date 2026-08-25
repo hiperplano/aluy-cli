@@ -36,3 +36,15 @@ describe('FLICKER-F8 — o <App> passa `detachedSubagents` a TODO o orçamento d
     });
   }
 });
+
+// FOOTER-AGENTES — mesma guarda, mesmo motivo. A coluna de agentes muda a altura do rodapé
+// e o campo é OPCIONAL: quem esquecer não vê erro de tipo nem teste vermelho, e o frame
+// volta a cruzar `rows` só quando há agentes na tela — o defeito mais difícil de reproduzir
+// que existe, porque some sozinho quando eles terminam.
+describe('FOOTER-AGENTES — o <App> avisa o orçamento que o rodapé cresceu', () => {
+  for (const fn of ['speechMaxLines', 'slashMenuMaxRows', 'liveRegionMinRows']) {
+    it(`${fn} recebe \`temAgentesRodape\``, () => {
+      expect(chamada(fn)).toContain('temAgentesRodape');
+    });
+  }
+});

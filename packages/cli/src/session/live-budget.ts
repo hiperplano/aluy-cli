@@ -32,6 +32,7 @@
 // ausente/0 ⇒ cai p/ linhas-fonte (degradação graciosa, comportamento antigo).
 
 import type { SessionBlock, SessionState } from './model.js';
+import { rodapeAgentesOverhead } from './footer-agents-layout.js';
 import { displayWidth, visualLines } from './visual-lines.js';
 import { aluyNeedsLeadingBlank } from './block-rhythm.js';
 
@@ -642,6 +643,12 @@ export function slashMenuMaxRows(args: {
   readonly stagedLines?: number;
   /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
   readonly detachedSubagents?: number;
+  /**
+   * FOOTER-AGENTES — a coluna de sub-agentes vivos abaixo do composer ocupa altura do
+   * RODAPÉ. Ela não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
+   * sempre), então sem este desconto o frame cruza `rows` justamente quando há agentes.
+   */
+  readonly temAgentesRodape?: boolean;
 }): number {
   const liveFloor =
     LIVE_CHROME_BASE_ROWS +
@@ -659,6 +666,7 @@ export function slashMenuMaxRows(args: {
     }) +
     MIN_SPEECH_LINES +
     subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) +
+    rodapeAgentesOverhead(args.temAgentesRodape === true, args.columns ?? 0) +
     (args.stagedLines ?? 0);
   // −1 (paddingTop do contêiner do menu) − SAFETY_MARGIN (gatilho `>=` do Ink).
   return Math.max(4, args.rows - liveFloor - 1 - SAFETY_MARGIN);
@@ -696,6 +704,12 @@ export function speechMaxLines(args: {
   readonly columns?: number;
   /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
   readonly detachedSubagents?: number;
+  /**
+   * FOOTER-AGENTES — a coluna de sub-agentes vivos abaixo do composer ocupa altura do
+   * RODAPÉ. Ela não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
+   * sempre), então sem este desconto o frame cruza `rows` justamente quando há agentes.
+   */
+  readonly temAgentesRodape?: boolean;
 }): number {
   const overhead = liveOverheadLines({
     live: args.live,
@@ -721,6 +735,7 @@ export function speechMaxLines(args: {
     narrowChromeOverhead(args.columns) -
     // FLICKER-F8 — o aviso de sub-agentes é altura viva CONDICIONAL; ver o helper.
     subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) -
+    rodapeAgentesOverhead(args.temAgentesRodape === true, args.columns ?? 0) -
     (args.queuedLines ?? 0) -
     (args.overlayLines ?? 0) -
     (args.composerOverflow ?? 0) -
@@ -770,6 +785,12 @@ export function liveRegionMinRows(args: {
   readonly composerOverflow?: number;
   /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
   readonly detachedSubagents?: number;
+  /**
+   * FOOTER-AGENTES — a coluna de sub-agentes vivos abaixo do composer ocupa altura do
+   * RODAPÉ. Ela não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
+   * sempre), então sem este desconto o frame cruza `rows` justamente quando há agentes.
+   */
+  readonly temAgentesRodape?: boolean;
 }): number {
   const overhead = liveOverheadLines({
     live: args.live,
@@ -786,6 +807,7 @@ export function liveRegionMinRows(args: {
     modeIndicatorOverhead(args.mode) +
     narrowChromeOverhead(args.columns) +
     subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) +
+    rodapeAgentesOverhead(args.temAgentesRodape === true, args.columns ?? 0) +
     overhead +
     (args.stagedLines ?? 0) +
     (args.overlayLines ?? 0) +

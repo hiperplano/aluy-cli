@@ -60,7 +60,9 @@ import {
   QuotaFooter,
   Divider,
   type HintState,
+  FooterAgents,
 } from '../ui/components/index.js';
+import { colunasDoPainel, larguraColunaAgentes } from './footer-agents-layout.js';
 import { Role, useTheme } from '../ui/theme/index.js';
 import { useTick } from '../ui/hooks/useTick.js';
 import { useFilePicker } from '../ui/hooks/useFilePicker.js';
@@ -1160,6 +1162,16 @@ export function App(props: AppProps): React.ReactElement {
   const haFilhoVivo = (state.detachedSubagents ?? 0) > 0;
   // A composição do indicador vem do MESMO módulo que a MEDE (`live-budget`) — render e
   // orçamento não podem compor a frase de jeitos diferentes.
+  // FOOTER-AGENTES — a coluna dos vivos abaixo do composer. A largura é uma FRAÇÃO da
+  // tela, com piso e teto: fixa demais some em terminal estreito, e livre demais come o
+  // painel de status em terminal largo.
+  // As larguras vêm do `footer-agents-layout` — o MESMO módulo que o orçamento de altura
+  // consulta. Duplicar a conta aqui faria a medição e o desenho divergirem, que é como o
+  // frame cruza `rows` e o Ink passa a repintar tudo.
+  const agentesRodape = state.liveSubagents ?? [];
+  const temAgentesRodape = agentesRodape.length > 0;
+  const larguraAgentes = temAgentesRodape ? larguraColunaAgentes(columns) : 0;
+  const colunasPainel = colunasDoPainel(columns, temAgentesRodape);
   const indicadorTrabalho = workingIndicator({
     count: state.detachedSubagents ?? 0,
     phase: state.phase,
@@ -4348,6 +4360,7 @@ export function App(props: AppProps): React.ReactElement {
   ...(state.detachedSubagents !== undefined
     ? { detachedSubagents: state.detachedSubagents }
     : {}),
+    temAgentesRodape,
     rows,
     live,
     phase: state.phase,
@@ -4367,6 +4380,7 @@ export function App(props: AppProps): React.ReactElement {
   ...(state.detachedSubagents !== undefined
     ? { detachedSubagents: state.detachedSubagents }
     : {}),
+    temAgentesRodape,
     rows,
     live,
     phase: state.phase,
@@ -4408,6 +4422,7 @@ export function App(props: AppProps): React.ReactElement {
     ...(state.detachedSubagents !== undefined
       ? { detachedSubagents: state.detachedSubagents }
       : {}),
+      temAgentesRodape,
       rows,
       live,
       phase: state.phase,
@@ -5410,6 +5425,10 @@ export function App(props: AppProps): React.ReactElement {
           1 coluna, então o texto dele começa na coluna 2. O rodapé começava na 0 e ficava
           desalinhado com o campo logo acima. `paddingLeft={2}` alinha os dois. */}
       <Box paddingLeft={2} flexDirection="column">
+        {/* FOOTER-AGENTES — os sub-agentes VIVOS ganham uma coluna À ESQUERDA do painel,
+            separados por uma barra vertical (pedido do dono). Sem agentes vivos o
+            <FooterAgents> é passagem direta: a tela de quem não dispara agente não muda. */}
+        <FooterAgents agentes={agentesRodape} largura={larguraAgentes}>
         <StatusPanel
           mode={state.mode}
           {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
@@ -5440,7 +5459,7 @@ export function App(props: AppProps): React.ReactElement {
           // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
           // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
           // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
-          columns={Math.max(20, columns - 2)}
+          columns={colunasPainel}
           error={state.phase === 'error'}
           {...(state.governance !== undefined ? { governance: state.governance } : {})}
           {...(!cycleUiOff && state.cycleProgress !== undefined
@@ -5457,6 +5476,7 @@ export function App(props: AppProps): React.ReactElement {
           busy={busy}
           frame={frame}
         />
+        </FooterAgents>
         {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
           descansa). Sempre visível (glifo+palavra, a11y): plan=read-only (petrol),
           normal=catraca (neutro), unsafe=BANNER gritante e persistente (CLI-SEC-3 —

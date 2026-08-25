@@ -345,7 +345,7 @@ async function gatherLocalProvider(
     wireFormat: entry?.wireFormat ?? 'openai-compat',
     baseUrl,
     key: segredo,
-    fetchImpl: createPinnedStreamFetch({}) as never,
+    fetchImpl: createPinnedStreamFetch({ baseUrl: baseUrl }) as never,
   }).catch(() => undefined);
   if (slugs === undefined || slugs.length === 0) {
     // Sem listagem não dá para afirmar que está fora: há provider que não expõe `/models`.

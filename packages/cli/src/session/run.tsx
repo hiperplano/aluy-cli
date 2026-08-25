@@ -1428,7 +1428,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         // `globalThis.fetch`. `checkModelConnectivity` não seta `init.redirect` ⇒ o
         // pinado cai no default `'error'` (fail-closed) — um `302 → 169.254.169.254`
         // nunca é seguido.
-        fetchImpl: createPinnedStreamFetch({}),
+        fetchImpl: createPinnedStreamFetch({ baseUrl: localCfg.baseUrl ?? findProvider(localCatalog, localCfg.provider)?.baseUrl ?? '' }),
         // COND-S2 (credencial do boot) — MESMO `createLocalCredentialProvider` que o
         // `localModelClient`/`callerForLocalModel` do pai usam (construído UMA vez,
         // resolve a CADA chamada — mesma disciplina do resolvedor); `auth:'none'`
@@ -1461,7 +1461,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       const port = createVerifyAndRegisterLocalModelPort({
         wireFormat: entry?.wireFormat ?? 'openai-compat',
         baseUrl: entry?.baseUrl ?? '',
-        fetchImpl: createPinnedStreamFetch({}),
+        fetchImpl: createPinnedStreamFetch({ baseUrl: entry?.baseUrl ?? '' }),
         getKey: async () => {
           const cred = await getCredentialForProvider();
           return cred.secret;
@@ -1517,7 +1517,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       return {
         wireFormat: entry?.wireFormat ?? 'openai-compat',
         baseUrl: (isBootProvider ? localCfg.baseUrl : undefined) ?? entry?.baseUrl ?? '',
-        fetchImpl: createPinnedStreamFetch({}),
+        fetchImpl: createPinnedStreamFetch({ baseUrl: (isBootProvider ? localCfg.baseUrl : undefined) ?? entry?.baseUrl ?? '' }),
         getKey: async () => {
           const cred = await getCredential();
           return cred.secret;
@@ -1668,7 +1668,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             wireFormat: entry.wireFormat ?? 'openai-compat',
             baseUrl: entry.baseUrl ?? '',
             key: credencial?.secret ?? '',
-            fetchImpl: createPinnedStreamFetch({}) as never,
+            fetchImpl: createPinnedStreamFetch({ baseUrl: entry.baseUrl ?? '' }) as never,
           }).catch(() => [] as readonly string[]);
           const slugs = slugsDoProvider;
 
@@ -1682,7 +1682,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               baseUrl: entry.baseUrl ?? '',
               model: entry.defaultModel,
               key: credencial?.secret ?? '',
-              fetchImpl: createPinnedStreamFetch({}) as never,
+              fetchImpl: createPinnedStreamFetch({ baseUrl: entry.baseUrl ?? '' }) as never,
             }).catch((e: unknown) => ({
               ok: false as const,
               detail: e instanceof Error ? e.message : String(e),
@@ -1790,7 +1790,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           wireFormat: entry.wireFormat ?? 'openai-compat',
           baseUrl: entry.baseUrl ?? '',
           key: cred?.secret ?? '',
-          fetchImpl: createPinnedStreamFetch({}) as never,
+          fetchImpl: createPinnedStreamFetch({ baseUrl: entry.baseUrl ?? '' }) as never,
         });
         if (saldo === undefined) return undefined;
         return { windows: {}, credit: { balance: saldo.remaining } };

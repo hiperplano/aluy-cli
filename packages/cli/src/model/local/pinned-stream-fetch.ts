@@ -32,6 +32,41 @@ import {
 } from '@hiperplano/aluy-cli-core';
 import { NodeHostResolver } from '../../io/web-port.js';
 
+/**
+ * O baseURL DECLARADO aponta para a própria máquina?
+ *
+ * Uma FUNÇÃO, e não um regex repetido em cada chamador, porque a decisão já foi esquecida
+ * uma vez: a rc.147 destravou o Ollama no caminho de STREAMING e deixou os outros OITO
+ * pontos de chamada do fetch pinado sem a exceção. O dono trocou de provider e levou
+ * "egress recusado — aponta p/ IP interno (loopback)" na cara, num provider que o próprio
+ * Aluy oferece. Comportamento consertado em UM ponto de chamada de vários volta a quebrar
+ * na primeira execução do irmão que faltou.
+ *
+ * O que ela reconhece é o que o dono ESCREVEU na config, não o que o DNS devolve — a
+ * validação do IP resolvido segue toda no `resolveAndPinHost`. Metadata da cloud é
+ * LINK-LOCAL (`169.254.0.0/16`), não loopback: continua bloqueada aqui e lá.
+ */
+export function baseUrlEhLocal(baseUrl: string | undefined): boolean {
+  // O `127.` do regex anterior exigia `:` ou `/` LOGO DEPOIS do ponto — e o que vem depois
+  // é `0`, de `127.0.0.1`. Resultado: o endereço mais comum do Ollama nunca casou, e a
+  // exceção da rc.147 só valia para quem escrevia `localhost`. O erro que o dono recebeu
+  // dizia "loopback (127.0.0.0/8)" — o próprio texto apontava o endereço que a regra não
+  // reconhecia. Só apareceu porque imprimi a tabela de casos; lendo o regex ele parece
+  // certo, e foi assim que passou.
+  const host = /^https?:\/\/([^/?#]+)/i.exec(baseUrl ?? '')?.[1];
+  if (host === undefined) return false;
+  // Tira credencial (`user:pass@`) e porta; mantém o colchete do IPv6 para o teste abaixo.
+  const semCred = host.includes('@') ? host.slice(host.lastIndexOf('@') + 1) : host;
+  const semPorta = semCred.startsWith('[')
+    ? (/^\[([^\]]*)\]/.exec(semCred)?.[1] ?? '')
+    : (semCred.split(':')[0] ?? '');
+  const h = semPorta.toLowerCase();
+  if (h === 'localhost') return true;
+  if (h === '::1' || h === '0:0:0:0:0:0:0:1') return true;
+  // TODO o /8, como o próprio bloqueio anuncia (`127.0.0.0/8`) — não só `127.0.0.1`.
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+}
+
 export interface PinnedStreamFetchOptions {
   /** Resolver de DNS (default: NodeHostResolver). Injetável p/ teste. */
   readonly resolver?: HostResolver;
@@ -47,6 +82,13 @@ export interface PinnedStreamFetchOptions {
    * exceção não atravessa redirect (cada hop revalida sem ela).
    */
   readonly allowLoopback?: boolean;
+  /**
+   * O baseURL que este fetch vai visitar. Informado, a exceção de loopback é DERIVADA
+   * dele (`baseUrlEhLocal`) — o chamador não precisa lembrar da regra, que é exatamente
+   * o que oito chamadores não lembraram. `allowLoopback` explícito ainda vence, para o
+   * caso em que o chamador sabe mais que a URL (teste, wiring já resolvido).
+   */
+  readonly baseUrl?: string | undefined;
 }
 
 /**
@@ -62,7 +104,7 @@ export function createPinnedStreamFetch(opts: PinnedStreamFetchOptions = {}): St
   const maxRedirects = opts.maxRedirects ?? 0;
   // LOOPBACK DECLARADO — ligado pelo wiring quando o provider é local (Ollama e afins).
   // Default FALSE: quem não pediu segue com a trava fechada, sem regressão.
-  const allowLoopback = opts.allowLoopback === true;
+  const allowLoopback = opts.allowLoopback ?? baseUrlEhLocal(opts.baseUrl);
 
   return async function pinnedFetch(input, init) {
     // Política de redirect (back-compat: ausente ⇒ fail-closed p/ o BYO).

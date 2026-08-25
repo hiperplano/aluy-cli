@@ -197,6 +197,7 @@ import {
   type SubAgentsBlock,
   type TurnAccountingView,
   type ToolLineBlock,
+  type LiveSubagent,
 } from './model.js';
 
 /** EST-0958 — estados do bloco `!comando` (running → ok/err/blocked). */
@@ -7365,6 +7366,24 @@ export class SessionController {
   }
 
   /**
+   * FOOTER-AGENTES — os filhos VIVOS, no formato que o rodapé mostra.
+   *
+   * Reusa `listaFilhosParaGestao()` (a mesma fonte que o `agents_status` lê) e FILTRA os
+   * que ainda correm: o rodapé é "quem está trabalhando agora", não um histórico. Uma
+   * fonte só para a ferramenta e para a tela — se divergirem, uma das duas mente.
+   */
+  private filhosVivosParaRodape(): readonly LiveSubagent[] {
+    return this.listaFilhosParaGestao()
+      .filter((f) => f.phase === 'running')
+      .map((f) => ({
+        label: f.label,
+        phase: f.phase,
+        ...(f.activity ? { activity: f.activity } : {}),
+        ...(f.durationMs !== undefined ? { durationMs: f.durationMs } : {}),
+      }));
+  }
+
+  /**
    * Para UM filho pelo rótulo, em qualquer árvore. Os irmãos seguem — é o mesmo
    * mecanismo por-filho que o `Ctrl+T → P` do dono já usava (cada nó tem o seu
    * AbortController). `false` quando o rótulo não existe ou o filho já terminou:
@@ -7438,13 +7457,16 @@ export class SessionController {
       this.timerSomeIndicador = null;
     }
     if (vivos > 0) {
-      this.patch({ detachedSubagents: vivos });
+      // A LISTA sai junto do número, da MESMA leitura das árvores. Publicar em dois
+      // momentos abriria a janela em que a contagem diz 3 e a lista mostra 2 — a mesma
+      // doença de "duas listas" que este método veio curar.
+      this.patch({ detachedSubagents: vivos, liveSubagents: this.filhosVivosParaRodape() });
       return;
     }
     if (this.state.detachedSubagents === undefined) return; // já escondido: nada a fazer
     this.timerSomeIndicador = setTimeout(() => {
       this.timerSomeIndicador = null;
-      this.patch({ detachedSubagents: undefined });
+      this.patch({ detachedSubagents: undefined, liveSubagents: undefined });
     }, INDICADOR_SUBAGENTE_GRACA_MS);
     if (typeof this.timerSomeIndicador.unref === "function") this.timerSomeIndicador.unref();
   }

@@ -451,7 +451,7 @@ export function StatusPanel(props: StatusPanelProps): React.ReactElement {
  * (uso) — as duas que se varre para saber "onde estou e quanto gastei"; à direita o que
  * descreve a máquina (estado, config), consultado com menos frequência.
  */
-const LARGURA_MINIMA_2COL = 100;
+export const LARGURA_MINIMA_2COL = 100;
 
 function LinhaDupla(props: {
   readonly esquerda: React.ReactElement;
