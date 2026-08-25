@@ -188,7 +188,7 @@ export function narrowChromeOverhead(columns?: number): number {
  *
  * A linha mede 47 colunas com 2 dígitos (spinner + contagem + texto + a dica do F8) —
  * medido, não estimado —, então abaixo de
- * `SUBAGENT_NOTICE_MIN_COLS` ela QUEBRA e custa 2. Mesma disciplina do banner `unsafe` e
+ * a largura da linha composta ela QUEBRA e custa 2. Mesma disciplina do banner `unsafe` e
  * do chrome estreito: base no chrome, excedente por condição, ancorado por teste.
  */
 /**
@@ -199,14 +199,62 @@ export function narrowChromeOverhead(columns?: number): number {
  * limiar; o <App> renderiza ESTA função, não uma cópia.
  */
 export function subagentNoticeText(count: number): string {
-  return `${String(count)} sub-agente(s) trabalhando — F8 para parar.`;
+  return `${String(count)} sub-agente(s) trabalhando`;
 }
 
-export const SUBAGENT_NOTICE_MIN_COLS = 47;
-export function subagentNoticeOverhead(count?: number, columns?: number): number {
-  if (count === undefined || count <= 0) return 0; // sem aviso ⇒ sem desconto
+/** A dica de parada, sufixo do indicador. Separada porque só aparece com filhos vivos. */
+export const SUBAGENT_STOP_HINT = '· F8 para parar';
+
+/**
+ * O QUE O INDICADOR ÚNICO MOSTRA. Uma função só, usada pelo render E pela medição — a
+ * mesma disciplina do recuo da nota: quem desenha e quem mede o frame não podem compor a
+ * frase de jeitos diferentes, senão o orçamento erra a largura e o Ink repinta a tela.
+ *
+ * Três casos:
+ *  · sem filhos ⇒ só o verbo do pai (`pensando`), como sempre foi;
+ *  · pai trabalhando COM filhos ⇒ o verbo do pai + a contagem ao lado (uma linha só);
+ *  · pai OCIOSO com filhos ⇒ a contagem VIRA o verbo (não há o que o pai esteja fazendo).
+ */
+export function workingIndicator(args: {
+  readonly count: number;
+  readonly phase: SessionPhase;
+  readonly workingLabel?: string;
+}): { readonly label: string; readonly suffix?: string } {
+  const base = args.workingLabel ?? 'pensando';
+  if (args.count <= 0) return { label: base };
+  const hint = SUBAGENT_STOP_HINT;
+  const paiTrabalha = args.phase === 'thinking' || args.phase === 'retrying';
+  return paiTrabalha
+    ? { label: base, suffix: `· ${subagentNoticeText(args.count)} ${hint}` }
+    : { label: subagentNoticeText(args.count), suffix: hint };
+}
+
+/**
+ * A LINHA que o indicador desenha quando há filhos vivos e o pai está ocioso. Existe para
+ * a medição usar a MESMA frase do render — antes havia aqui uma constante de largura (47),
+ * e uma constante é uma medida CONGELADA: bastava alguém reescrever a frase para o número
+ * mentir sem nada acusar.
+ *
+ * Conservadora no wordmark: conta 5 células (`/\luy`, o fallback ASCII) em vez das 4 do
+ * `Λluy`. Errar para MAIS custa uma coluna de fala; errar para menos deixa a região viva
+ * cruzar `rows` e o Ink repinta tudo — os dois erros não são simétricos.
+ */
+export function subagentIndicatorLine(count: number): string {
+  return `xxxxx ${subagentNoticeText(count)}… ${SUBAGENT_STOP_HINT}`;
+}
+export function subagentNoticeOverhead(
+  count?: number,
+  columns?: number,
+  phase?: SessionPhase,
+): number {
+  if (count === undefined || count <= 0) return 0; // sem filhos ⇒ sem desconto
+  // Se a FASE já rende o `<Working>` (é o que `liveOverheadLines` conta abaixo), a
+  // contagem entra como SUFIXO na MESMA linha e não custa altura nenhuma. Descontar aqui
+  // contaria a linha duas vezes e apertaria a fala à toa.
+  if (phase === 'thinking' || phase === 'compacting') return 0;
   if (columns === undefined || columns <= 0) return 1;
-  return columns < SUBAGENT_NOTICE_MIN_COLS ? 2 : 1;
+  // A largura medida da linha COMPOSTA, não de uma frase avulsa — é o que o render desenha.
+  return columns < subagentIndicatorLine(count).length ? 2 : 1;
 }
 
 /** Piso do teto da fala: nunca menos que isto, mesmo em terminais minúsculos. */
@@ -610,7 +658,7 @@ export function slashMenuMaxRows(args: {
       ...(args.columns !== undefined ? { columns: args.columns } : {}),
     }) +
     MIN_SPEECH_LINES +
-    subagentNoticeOverhead(args.detachedSubagents, args.columns) +
+    subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) +
     (args.stagedLines ?? 0);
   // −1 (paddingTop do contêiner do menu) − SAFETY_MARGIN (gatilho `>=` do Ink).
   return Math.max(4, args.rows - liveFloor - 1 - SAFETY_MARGIN);
@@ -672,7 +720,7 @@ export function speechMaxLines(args: {
     // reescrevendo o histórico INTEIRO a cada frame (o flicker de sessão gigante).
     narrowChromeOverhead(args.columns) -
     // FLICKER-F8 — o aviso de sub-agentes é altura viva CONDICIONAL; ver o helper.
-    subagentNoticeOverhead(args.detachedSubagents, args.columns) -
+    subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) -
     (args.queuedLines ?? 0) -
     (args.overlayLines ?? 0) -
     (args.composerOverflow ?? 0) -
@@ -737,7 +785,7 @@ export function liveRegionMinRows(args: {
     respiroOverhead(args.rows) +
     modeIndicatorOverhead(args.mode) +
     narrowChromeOverhead(args.columns) +
-    subagentNoticeOverhead(args.detachedSubagents, args.columns) +
+    subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) +
     overhead +
     (args.stagedLines ?? 0) +
     (args.overlayLines ?? 0) +

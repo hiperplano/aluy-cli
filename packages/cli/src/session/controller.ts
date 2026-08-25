@@ -13,6 +13,7 @@ import {
   Compactor,
   DEFAULT_KEEP_RECENT_WINDOW_FRACTION,
   NothingToCompactError,
+  compactDeterministic,
   ToolRegistry,
   NATIVE_TOOLS,
   WEB_TOOLS,
@@ -5571,6 +5572,8 @@ export class SessionController {
     });
 
     let result: CompactionResult;
+    /** Preenchido quando o resumo POR MODELO falhou e caímos no mecânico. */
+    let semModelo: ClassifiedBrokerError | undefined;
     try {
       result = await this.compactor.compact(history, signal);
     } catch (err) {
@@ -5586,11 +5589,52 @@ export class SessionController {
         this.setPhase(resumeNow ? 'done' : 'idle');
         return;
       }
-      // Broker/transporte: nota NEUTRA (HG-2: "broker", nunca o provider). Não perde
-      // a conversa; o usuário pode continuar ou encerrar.
-      this.pushNote('compact', ['não consegui compactar agora (broker indisponível).']);
-      this.setPhase(resumeNow ? 'done' : 'idle');
-      return;
+      // FALLBACK MECÂNICO — a compactação ACONTECE mesmo sem o modelo.
+      //
+      // O dono: "vc viu o problema do /compact que nao realizou a compactacao". Não
+      // realizou mesmo, e não por falta de meio: o `compactDeterministic` existe no core,
+      // é testado, e o comentário dele diz "útil quando o broker está indisponível ou o
+      // resumo por modelo falha — a sessão ainda consegue liberar contexto sem depender da
+      // rede". O `compact.ts` chega a dizer "o caller decide o fallback" — e nenhum caller
+      // decidia nada. Peça pronta, ponta solta: a MESMA classe do `upstreamByModel`
+      // (rc.137) e do canal de raciocínio (rc.138).
+      //
+      // Ele condensa menos (não entende semântica: lista objetivos e ferramentas tocadas),
+      // mas é HONESTO e sempre disponível — e libera janela, que é o ponto de apertar
+      // `/compact`. Desistir com a janela cheia é o pior dos três desfechos.
+      //
+      // A CAUSA REAL, classificada — não "broker indisponível" para tudo.
+      //
+      // Este `catch` era guarda-chuva: qualquer erro que não fosse `NothingToCompactError`
+      // nem cancelamento virava "broker indisponível". O dono mandou a tela em que isso
+      // aparece LOGO ABAIXO de um turno que funcionou (`✔ 26.2k tokens · 6.8s`) — ou seja,
+      // a frase acusava de estar fora justamente o que acabara de responder. Um 400 do
+      // provider, um estouro de janela ou uma resposta malformada eram todos reportados
+      // como broker fora do ar, e o dono iria depurar rede.
+      //
+      // O classificador já existe e o caminho da AUTO-compactação já o usa (ver
+      // `autoCompact`); só o `/compact` manual tinha ficado de fora. A nota manual tem
+      // espaço para a frase acionável inteira, então ela vai junto da headline.
+      // NEUTRA quanto ao provider (HG-2) e sem segredo (CLI-SEC-6) por construção — o
+      // classificador só compõe literais + status.
+      const c = classifyBrokerError(err, this.state.meta.backend ?? 'broker');
+      let mecanico: CompactionResult | undefined;
+      try {
+        mecanico = compactDeterministic(history);
+      } catch {
+        mecanico = undefined; // o fallback também não deu — cai na desistência honesta
+      }
+      // Só vale se REDUZIU. O mecânico usa o `keepRecent` padrão, não o size-aware do
+      // caminho por modelo, então pode não sobrar nada antigo para condensar — anunciar
+      // "compactado" nesse caso seria mentir na direção oposta.
+      if (mecanico !== undefined && mecanico.stats.summarizedTurns > 0) {
+        result = mecanico;
+        semModelo = c;
+      } else {
+        this.pushNote('compact', [`não consegui compactar agora — ${c.headline}.`, c.message]);
+        this.setPhase(resumeNow ? 'done' : 'idle');
+        return;
+      }
     }
 
     // Concluiu: limpa o indicador ANTES de empurrar a nota de resultado.
@@ -5598,8 +5642,15 @@ export class SessionController {
     this.compactedSeed = result.history;
     this.lastRunHistory = result.history;
     this.pushNote('compact', [
-      `contexto compactado: ${result.stats.summarizedTurns} turnos → sumário`,
+      semModelo === undefined
+        ? `contexto compactado: ${result.stats.summarizedTurns} turnos → sumário`
+        : `contexto compactado SEM o modelo (resumo mecânico): ${result.stats.summarizedTurns} turnos`,
       `histórico ativo: ${result.stats.turnsBefore} → ${result.stats.turnsAfter} itens`,
+      // A causa fica VISÍVEL: compactou, mas não do jeito bom, e por quê. Sem esta linha o
+      // desfecho degradado seria indistinguível do normal — silêncio ambíguo.
+      ...(semModelo !== undefined
+        ? [`o resumo por modelo falhou (${semModelo.headline}) — ${semModelo.message}`]
+        : []),
     ]);
 
     if (resumeNow) {

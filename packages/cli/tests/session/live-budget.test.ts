@@ -21,9 +21,8 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  subagentNoticeText,
   subagentNoticeOverhead,
-  SUBAGENT_NOTICE_MIN_COLS,
+  subagentIndicatorLine,
   speechMaxLines,
   slashMenuMaxRows,
   liveOverheadLines,
@@ -891,19 +890,30 @@ describe('F196 — liveRegionMinRows: piso estrutural que decide pular o clearSc
 // linha só existe QUANDO há agentes — então o estouro acontecia exatamente no cenário em
 // que ela aparece, e sumia sozinho depois, o que faz o defeito parecer intermitente.
 describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
-  const GLIFO = '◌ '; // spinner + espaço, o prefixo do render
 
-  it('o limiar está ANCORADO na frase real (medido, não número mágico)', () => {
-    // 99 é o pior caso realista de contagem (2 dígitos).
-    const linha = GLIFO + subagentNoticeText(99);
-    expect(visualLines(linha, SUBAGENT_NOTICE_MIN_COLS)).toBe(1);
-    // Uma coluna abaixo do limiar a frase QUEBRA — é isto que o desconto de 2 paga.
-    expect(visualLines(linha, SUBAGENT_NOTICE_MIN_COLS - 1)).toBe(2);
+  // Não há mais limiar CRAVADO: a medida sai da linha que o render compõe. Uma constante
+  // de largura é uma medida congelada — bastava reescrever a frase para o número mentir em
+  // silêncio, que é como este defeito nasceu.
+  it('o desconto acompanha a LINHA COMPOSTA (sem número mágico)', () => {
+    const linha = subagentIndicatorLine(99); // 2 dígitos: o pior caso realista
+    expect(visualLines(linha, linha.length)).toBe(1);
+    expect(visualLines(linha, linha.length - 1)).toBe(2);
+    // e o desconto vira 2 exatamente onde ela quebra.
+    expect(subagentNoticeOverhead(99, linha.length, 'idle')).toBe(1);
+    expect(subagentNoticeOverhead(99, linha.length - 1, 'idle')).toBe(2);
+  });
+
+  // A contagem só custa altura quando o `phase` NÃO rende o indicador por conta própria —
+  // com o pai pensando ela é SUFIXO da mesma linha, e descontar contaria duas vezes.
+  it('pai já trabalhando ⇒ desconto ZERO (a contagem entra como sufixo)', () => {
+    expect(subagentNoticeOverhead(3, 80, 'thinking')).toBe(0);
+    expect(subagentNoticeOverhead(3, 80, 'compacting')).toBe(0);
+    expect(subagentNoticeOverhead(3, 80, 'idle')).toBe(1);
   });
 
   it('sem sub-agentes ⇒ desconto ZERO (não-regressão de quem nunca dispara agente)', () => {
-    expect(subagentNoticeOverhead(undefined, 80)).toBe(0);
-    expect(subagentNoticeOverhead(0, 80)).toBe(0);
+    expect(subagentNoticeOverhead(undefined, 80, 'idle')).toBe(0);
+    expect(subagentNoticeOverhead(0, 80, 'idle')).toBe(0);
     const base = { rows: 40, live: [], phase: 'idle' as const, hasBlocks: true, mode: 'normal' as SessionMode, columns: 80 };
     expect(speechMaxLines({ ...base, detachedSubagents: 0 })).toBe(speechMaxLines(base));
   });
@@ -937,7 +947,7 @@ describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
           respiroOverhead(rows) +
           modeIndicatorOverhead(args.mode) +
           narrowChromeOverhead(columns) +
-          subagentNoticeOverhead(3, columns) +
+          subagentNoticeOverhead(3, columns, 'streaming') +
           liveOverheadLines({ live: args.live, phase: args.phase, hasBlocks: true, rows, columns }) +
           speechMaxLines({ ...args, queuedLines }) +
           queuedLines;
@@ -974,6 +984,6 @@ describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
     // Sem o aviso o frame CABIA — o estouro é dele, não do resto do conteúdo.
     expect(semAviso).toBeLessThanOrEqual(rows - 1);
     // Com a altura REAL do aviso (que o teto cego ignorava), estoura.
-    expect(semAviso + subagentNoticeOverhead(3, columns)).toBeGreaterThan(rows - 1);
+    expect(semAviso + subagentNoticeOverhead(3, columns, 'streaming')).toBeGreaterThan(rows - 1);
   });
 });

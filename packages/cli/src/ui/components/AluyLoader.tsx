@@ -46,9 +46,42 @@ export function legRole(frame: number, delay: number): TermRole {
   return phase < ALUY_LOADER_CYCLE / 2 ? 'accent' : 'accentDim';
 }
 
+/**
+ * As CÉLULAS do wordmark, na ordem em que o brilho corre. A marca em ASCII são duas
+ * células (`/` e `\\`), então o wordmark tem 5 lá e 4 em Unicode — o que importa é que o
+ * número é CONSTANTE dentro de um terminal, nunca entre frames.
+ */
+export function wordmarkCells(mark: string): readonly string[] {
+  return [...mark, 'l', 'u', 'y'];
+}
+
+/**
+ * Qual célula está ACESA no frame — a "cabeça" que corre Λ→l→u→y. PURA, e exportada
+ * porque é o único jeito de PROVAR o movimento: o brilho é COR, e no harness de teste o
+ * Ink não emite código de cor nenhum (stdout não é TTY), então comparar quadros
+ * renderizados não distingue um wordmark que corre de um parado.
+ */
+export function wordmarkHeadIndex(frame: number, total: number): number {
+  if (total <= 0) return 0;
+  return ((frame % total) + total) % total;
+}
+
 export interface AluyLoaderProps {
   /** Frame do tick central (puro). Default 0 (estático/“montado”). */
   readonly frame?: number;
+  /**
+   * WORDMARK — desenha `Λluy` inteiro em vez de só a inicial, com o brilho CORRENDO de
+   * letra em letra. Pedido do dono: "eu colocaria todos os caracteres do aluy aparecendo e
+   * desaparecendo um apos o outro... ao vines somente do inicial".
+   *
+   * Ele disse "aparecendo e desaparecendo", e é aí que esta implementação diverge de
+   * propósito: célula que SOME muda a largura da linha a cada frame, e a largura constante
+   * é o anti-jitter do EST-0956 (o cabeçalho deste arquivo). As quatro letras ficam SEMPRE
+   * na tela; o que corre é a COR (`accent` numa, `accentDim` nas outras). O olho lê
+   * "acendendo uma após a outra" — que é o efeito pedido — sem a linha nunca mudar de
+   * tamanho.
+   */
+  readonly wordmark?: boolean;
 }
 
 /**
@@ -60,9 +93,27 @@ export function AluyLoader(props: AluyLoaderProps): React.ReactElement {
   const frame = props.frame ?? 0;
   const animate = theme.animate;
 
+  const celulas = wordmarkCells(theme.aluyMark);
+
   // Reduced-motion / não-TTY: marca SÓLIDA (accent), sem pulso (sentido preservado).
   if (!animate) {
-    return <Role name="accent">{theme.aluyMark}</Role>;
+    return <Role name="accent">{props.wordmark === true ? celulas.join('') : theme.aluyMark}</Role>;
+  }
+
+  // WORDMARK: o brilho corre Λ→l→u→y. Uma célula `accent`, o resto `accentDim` — a mesma
+  // gramática da cabeça da onda que este modo veio SUBSTITUIR (o dono achou a banda `～～～`
+  // poluída, e o nome do produto faz o mesmo trabalho ocupando a mesma largura).
+  if (props.wordmark === true) {
+    const cabeca = wordmarkHeadIndex(frame, celulas.length);
+    return (
+      <Box>
+        {celulas.map((ch, i) => (
+          <Role key={i} name={i === cabeca ? 'accent' : 'accentDim'}>
+            {ch}
+          </Role>
+        ))}
+      </Box>
+    );
   }
 
   // ASCII `/\`: duas pernas independentes ⇒ o "monta esquerda→direita" é literal.

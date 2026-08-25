@@ -107,7 +107,7 @@ import { animTickEnabled, elapsedTickEnabled } from './tick-policy.js';
 import { splitBlocks } from './render-split.js';
 import { aluyNeedsLeadingBlank } from './block-rhythm.js';
 import {
-  subagentNoticeText,
+  workingIndicator,
   speechMaxLines,
   slashMenuMaxRows,
   LIVE_SHELL_OUTPUT_MAX_LINES,
@@ -1158,6 +1158,13 @@ export function App(props: AppProps): React.ReactElement {
   // mesma ambiguidade que passei o dia consertando em outros lugares. Some sozinho
   // quando o último filho termina (`detachedSubagents` volta a 0).
   const haFilhoVivo = (state.detachedSubagents ?? 0) > 0;
+  // A composição do indicador vem do MESMO módulo que a MEDE (`live-budget`) — render e
+  // orçamento não podem compor a frase de jeitos diferentes.
+  const indicadorTrabalho = workingIndicator({
+    count: state.detachedSubagents ?? 0,
+    phase: state.phase,
+    ...(state.workingLabel !== undefined ? { workingLabel: state.workingLabel } : {}),
+  });
   const phaseAnimates =
     animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo }) ||
     doctorRunning(state.blocks);
@@ -4849,12 +4856,21 @@ export function App(props: AppProps): React.ReactElement {
            e `retrying` (backoff). NO `streaming` o próprio texto da resposta é o
            indicador vivo — mostrar o Λ junto duplica ("bolinha + processando ao mesmo
            tempo"). No `tool` o <ToolLine> ○ cobre. Por isso só thinking+retrying. */}
-      {(state.phase === 'thinking' || state.phase === 'retrying') && (
+      {/* INDICADOR ÚNICO de trabalho. Antes eram DOIS: este (guiado pelo `phase`) e uma
+          linha amarela no rodapé para os sub-agentes (guiada pela contagem). Gatilhos
+          independentes ⇒ apareciam e sumiam em momentos diferentes, a altura da região
+          viva oscilava e a tela tremia. O dono: "acho que ta poluido... ele deveria
+          substituir o progress dos subagentes que aparece embaixo (ele deveria ficar do
+          lado)". Agora é uma linha só, e a contagem é SUFIXO dela. */}
+      {(state.phase === 'thinking' || state.phase === 'retrying' || haFilhoVivo) && (
         <Box paddingTop={state.blocks.length > 0 ? 1 : 0}>
           <Working
             glyph="aluy"
             glyphRole="accent"
-            label={state.workingLabel ?? 'pensando'}
+            label={indicadorTrabalho.label}
+            {...(indicadorTrabalho.suffix !== undefined
+              ? { suffix: indicadorTrabalho.suffix }
+              : {})}
             frame={frame}
           />
         </Box>
@@ -5448,24 +5464,10 @@ export function App(props: AppProps): React.ReactElement {
           desligada). Reativo: o Tab cicla `normal→plan→unsafe` (invertido) — fica VIVO (fora do
           Static, na região viva do rodapé, já dentro do LIVE_CHROME_ROWS), só mudou
           de lugar (topo→rodapé), sem flicker. */}
-        {/* DETACH-FIX (item 4) — AVISO PERSISTENTE de sub-agentes desacoplados vivos (esc). Com o
-          teto de relógio em "nunca" (decisão do dono), F8 é o único stop ⇒ o dono PRECISA ver
-          que há trabalho órfão rodando. Só quando há ⇒ não infla o frame no caso comum. */}
-        {state.detachedSubagents !== undefined && state.detachedSubagents > 0 && (
-          <Box>
-            <Text color="yellow">
-              {/* SPINNER, não `⚠` estático. O aviso nasceu para o ESC — trabalho ÓRFÃO que o dono
-                  precisa notar. Com o desacople-por-injeção ele virou o estado NORMAL de "os agentes
-                  trabalham enquanto conversamos", e aí um alerta parado erra duas vezes: não pulsa
-                  (parece travado — "sumiu o processando... deu uma sensação ruim") e grita (não é
-                  incidente). O `(esc)` também mentia: com injeção não houve ESC nenhum. */}
-              {theme.animate
-                ? theme.spinnerFrames[frame % theme.spinnerFrames.length]
-                : theme.glyph('clock')}{' '}
-              {subagentNoticeText(state.detachedSubagents)}
-            </Text>
-          </Box>
-        )}
+        {/* A linha amarela de sub-agentes SAIU daqui: virou sufixo do indicador único de
+            trabalho (ver o <Working> acima). Manter as duas desenhava a mesma informação
+            duas vezes, em dois lugares, com gatilhos diferentes — e era a segunda que
+            fazia a altura da região viva oscilar. */}
         {/* F-PAINEL — o <ModeIndicator> foi ABSORVIDO: modo e catraca são a linha `estado`
           do painel. Manter os dois desenharia a mesma informação duas vezes, uma dentro da
           caixa e outra fora. O banner do modo `unsafe` continua existindo — o próprio
