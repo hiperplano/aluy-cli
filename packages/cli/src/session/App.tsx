@@ -107,6 +107,7 @@ import { animTickEnabled, elapsedTickEnabled } from './tick-policy.js';
 import { splitBlocks } from './render-split.js';
 import { aluyNeedsLeadingBlank } from './block-rhythm.js';
 import {
+  subagentNoticeText,
   speechMaxLines,
   slashMenuMaxRows,
   LIVE_SHELL_OUTPUT_MAX_LINES,
@@ -1158,7 +1159,8 @@ export function App(props: AppProps): React.ReactElement {
   // quando o último filho termina (`detachedSubagents` volta a 0).
   const haFilhoVivo = (state.detachedSubagents ?? 0) > 0;
   const phaseAnimates =
-    animTickEnabled(state.phase, syncActive) || doctorRunning(state.blocks) || haFilhoVivo;
+    animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo }) ||
+    doctorRunning(state.blocks);
   const frame = useTick({ enabled: theme.animate && phaseAnimates });
 
   // Tick LENTO de 1s (separado da animação) p/ o INDICADOR DE ATIVIDADE (elapsed):
@@ -4333,6 +4335,12 @@ export function App(props: AppProps): React.ReactElement {
   // stream a viva já passa de 10 ⇒ menu+viva estourava `rows` ⇒ flicker + fantasma ao
   // fechar. Agora desconta chrome+blocos+fala-mín+staged (ver `slashMenuMaxRows`).
   const slashMenuRowCap = slashMenuMaxRows({
+  // FLICKER-F8 — o aviso "N sub-agente(s) trabalhando — F8 para parar" é altura VIVA
+  // condicional. Fora do orçamento, ele fazia a região viva cruzar `rows` justamente
+  // quando existe (agentes trabalhando) ⇒ repaint total a cada frame (o tremor).
+  ...(state.detachedSubagents !== undefined
+    ? { detachedSubagents: state.detachedSubagents }
+    : {}),
     rows,
     live,
     phase: state.phase,
@@ -4346,6 +4354,12 @@ export function App(props: AppProps): React.ReactElement {
     : 0;
   const overlayLines = slashOpen ? cappedSlashLines + 1 : 0;
   const liveMaxLines = speechMaxLines({
+  // FLICKER-F8 — o aviso "N sub-agente(s) trabalhando — F8 para parar" é altura VIVA
+  // condicional. Fora do orçamento, ele fazia a região viva cruzar `rows` justamente
+  // quando existe (agentes trabalhando) ⇒ repaint total a cada frame (o tremor).
+  ...(state.detachedSubagents !== undefined
+    ? { detachedSubagents: state.detachedSubagents }
+    : {}),
     rows,
     live,
     phase: state.phase,
@@ -4381,6 +4395,12 @@ export function App(props: AppProps): React.ReactElement {
   // (piso `< rows`) segue `false` ⇒ o clearScreen continua limpando os órfãos do reflow.
   liveRegionExceedsRowsRef.current =
     liveRegionMinRows({
+    // FLICKER-F8 — o aviso "N sub-agente(s) trabalhando — F8 para parar" é altura VIVA
+    // condicional. Fora do orçamento, ele fazia a região viva cruzar `rows` justamente
+    // quando existe (agentes trabalhando) ⇒ repaint total a cada frame (o tremor).
+    ...(state.detachedSubagents !== undefined
+      ? { detachedSubagents: state.detachedSubagents }
+      : {}),
       rows,
       live,
       phase: state.phase,
@@ -5442,7 +5462,7 @@ export function App(props: AppProps): React.ReactElement {
               {theme.animate
                 ? theme.spinnerFrames[frame % theme.spinnerFrames.length]
                 : theme.glyph('clock')}{' '}
-              {state.detachedSubagents} sub-agente(s) trabalhando — F8 para parar.
+              {subagentNoticeText(state.detachedSubagents)}
             </Text>
           </Box>
         )}

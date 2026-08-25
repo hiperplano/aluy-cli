@@ -47,10 +47,6 @@ function waitFor(cond: () => boolean, ms = 2000): Promise<void> {
   });
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 function notesText(controller: SessionController): string {
   return controller.current.blocks
     .filter((b): b is NoteBlock => b.kind === 'note')
@@ -372,12 +368,16 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
     gates.get('a')!.release();
     gates.get('b')!.release();
 
-    // Aguarda o processamento assíncrono do completion.
-    await delay(100);
-
     // Após a completion, os resultados foram processados (detachedSubagents zera).
     // A nota de "fan-out concluído" pode já ter sumido ou sido substituída.
     // O que importa: os detached foram drenados e o estado estabilizou.
+    //
+    // ESPERA PELA CONDIÇÃO, não por um sono fixo. O `delay(100)` daqui presumia que o
+    // aviso sumia no mesmo tick da drenagem; hoje ele tem HISTERESE (~900ms) para não
+    // piscar entre dois lotes de agentes — ver `contagem-subagentes-vivos.test.ts` e o
+    // relato de tela tremendo que a motivou. O invariante deste teste é a DRENAGEM, e ele
+    // continua valendo: se os desacoplados não forem drenados, isto estoura no timeout.
+    await waitFor(() => controller.current.detachedSubagents === undefined);
     expect(controller.current.detachedSubagents).toBeUndefined();
   });
 

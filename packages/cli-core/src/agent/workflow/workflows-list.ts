@@ -5,6 +5,12 @@
 // PORTÁVEL (ADR-0053 §8): formatação de string PURA (sem `node:*`, sem I/O).
 
 import type { WorkflowDef, WorkflowError, WorkflowOrigin } from './workflow-parse.js';
+// Pedido do dono (UX das listagens) — alinha "N atividades"/escopo entre workflows
+// irmãos. `gap: ' · '` (em vez do default 2-espaços) preserva o separador que os
+// testes já fixam linha-a-linha (`✓ nome · desc · N atividades · escopo`) — SEM
+// cabeçalho/régua aqui: com só 1 coluna variável (nome+descrição, que pode ficar
+// ausente) um cabeçalho forçaria a régua a repetir o "·" fora de lugar.
+import { tableLines } from '../../util/table-lines.js';
 
 /** Uma nota (título + linhas) — espelha o `SlashNote` do @hiperplano/aluy-cli, sem acoplar a ele. */
 export interface WorkflowsListNote {
@@ -74,13 +80,23 @@ export function buildWorkflowsNote(input: WorkflowsListInput): WorkflowsListNote
 
   if (valid.length > 0) {
     lines.push(`válidos (${valid.length}):`);
-    for (const wf of valid) {
-      const desc = workflowDescriptionLine(wf);
-      const descSuffix = desc !== '' ? ` · ${desc}` : '';
-      lines.push(
-        `  ✓ ${wf.name}${descSuffix} · ${wf.activities.length} atividades (${workflowOriginLabel(wf.origin)})`,
-      );
-    }
+    // Alinha "N atividades"/escopo entre os workflows — a coluna nome+descrição varia
+    // muito de tamanho, mas as outras duas ganham legibilidade ficando na mesma régua
+    // vertical em vez de "empurradas" pra direita a esmo linha a linha.
+    lines.push(
+      ...tableLines(
+        valid.map((wf) => {
+          const desc = workflowDescriptionLine(wf);
+          const descSuffix = desc !== '' ? ` · ${desc}` : '';
+          return [
+            `✓ ${wf.name}${descSuffix}`,
+            `${wf.activities.length} atividades`,
+            workflowOriginLabel(wf.origin),
+          ];
+        }),
+        { gap: ' · ' },
+      ),
+    );
   }
 
   if (rejected.length > 0) {

@@ -164,7 +164,7 @@ import {
 import { MemoryRoomStore, buildRoomTools } from '@hiperplano/aluy-cli-core';
 import type { RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
 import {
-  formatRoomSummary,
+  formatRoomList,
   formatConversation,
   formatNewSince,
   maxSeq,
@@ -955,6 +955,15 @@ function applyCycleOverrides(base: CycleRequest, overrides?: CycleCeilingOverrid
   if (overrides.maxDurationMs !== undefined) merged.maxDurationMs = overrides.maxDurationMs;
   return merged;
 }
+
+/**
+ * Janela de graça antes de ESCONDER o indicador de sub-agentes.
+ *
+ * 900ms cobre a lacuna entre lotes disparados em sequência (o dono: "dispare 2 e depois
+ * de 2 segundos mais 2") sem segurar o indicador de forma perceptível quando o trabalho
+ * de fato acabou.
+ */
+const INDICADOR_SUBAGENTE_GRACA_MS = 900;
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 
@@ -5090,7 +5099,7 @@ export class SessionController {
     }
     const now = this.clock();
     this.pushNote('/rooms', [
-      ...rooms.map((r) => formatRoomSummary(r, now)),
+      ...formatRoomList(rooms, now),
       '',
       'observe: `/rooms read <código>` (snapshot) · `/rooms watch <código>` (ao vivo).',
     ]);
@@ -5898,6 +5907,12 @@ export class SessionController {
   stopMemoryMonitor(): void {
     if (this.memTimer !== null) {
       clearInterval(this.memTimer);
+      // O timer da histerese do indicador de sub-agentes também sai aqui: um timer vivo
+      // depois do dispose faria um `patch` numa sessão já encerrada.
+      if (this.timerSomeIndicador !== null) {
+        clearTimeout(this.timerSomeIndicador);
+        this.timerSomeIndicador = null;
+      }
       this.memTimer = null;
     }
   }
@@ -7338,6 +7353,9 @@ export class SessionController {
   }
 
   /** DETACH-FIX (item 4) — espelha o nº de desacoplados vivos no estado (undefined quando 0). */
+  /** Timer da histerese — some junto com a sessão (ver `dispose`). */
+  private timerSomeIndicador: ReturnType<typeof setTimeout> | null = null;
+
   private publishDetachedCount(): void {
     // CONTA A VERDADE — os filhos VIVOS em TODAS as árvores, não um contador à parte.
     //
@@ -7353,7 +7371,31 @@ export class SessionController {
     for (const t of this.detachedTrees) vivos += t.liveChildren().length;
     const atual = this.flowTree;
     if (atual !== null && !this.detachedTrees.has(atual)) vivos += atual.liveChildren().length;
-    this.patch({ detachedSubagents: vivos > 0 ? vivos : undefined });
+    // HISTERESE NA DESCIDA — sem ela a tela TREME.
+    //
+    // Dois elementos da região viva dependem deste número: o indicador "trabalhando"
+    // e a linha do F8. Juntos somam ~3 linhas. Quando a contagem oscila (lotes
+    // disparados em sequência, filhos terminando em tempos diferentes), a ALTURA da
+    // região viva muda a cada transição e o Ink limpa e redesenha — o dono viu isso
+    // como "a tela fica tremendo" ao disparar 2 agentes e mais 2 logo depois.
+    //
+    // Subir é imediato (trabalho começou: mostre já). DESCER espera, porque zero
+    // costuma ser passageiro. Um lote novo dentro da janela cancela a descida e a
+    // altura nunca chega a mudar.
+    if (this.timerSomeIndicador !== null) {
+      clearTimeout(this.timerSomeIndicador);
+      this.timerSomeIndicador = null;
+    }
+    if (vivos > 0) {
+      this.patch({ detachedSubagents: vivos });
+      return;
+    }
+    if (this.state.detachedSubagents === undefined) return; // já escondido: nada a fazer
+    this.timerSomeIndicador = setTimeout(() => {
+      this.timerSomeIndicador = null;
+      this.patch({ detachedSubagents: undefined });
+    }, INDICADOR_SUBAGENTE_GRACA_MS);
+    if (typeof this.timerSomeIndicador.unref === "function") this.timerSomeIndicador.unref();
   }
 
   /**

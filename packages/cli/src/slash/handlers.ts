@@ -34,7 +34,7 @@ import { runMcpSearch } from '../mcp/registry-search.js';
 import type { SessionController } from '../session/controller.js';
 import { NATIVE_COMMANDS, type NativeCommandId } from './commands.js';
 import { THEMES, resolveThemeName, type ThemeName } from '../ui/theme/themes.js';
-import { boxTable } from '../ui/table-lines.js';
+import { tableLines } from '../ui/table-lines.js';
 import { LANGS, resolveLang, t as translate, type Lang } from '../i18n/index.js';
 import { PROVIDERS, resolveProviderName } from '../model/providers.js';
 import { PromptInterruptedError, type TerminalIO } from '../auth/io.js';
@@ -261,12 +261,19 @@ export function buildProviderEffect(
         title: 'provider',
         lines: [
           'providers do modo Custom (use `/provider <nome>`):',
-          ...(catalogo ?? PROVIDERS).map((p) => {
-            const marca = p.name === currentProvider ? '● ' : '  ';
-            const desc = 'summary' in p && p.summary !== undefined ? ` — ${p.summary}` : '';
-            const padrao = 'isDefault' in p && p.isDefault === true ? ' (padrão)' : '';
-            return `${marca}${p.name}${desc}${padrao}`;
-          }),
+          // Mesma estética das outras listagens (`tableLines`: cabeçalho + régua) — o
+          // dono pediu "tudo na mesma estética". Em linha corrida o resumo empurrava o
+          // nome para uma coluna diferente a cada linha e o `●` do ativo se perdia no
+          // meio do texto; em coluna, o marcador fica na margem e o olho o acha.
+          ...tableLines(
+            (catalogo ?? PROVIDERS).map((p) => {
+              const marca = p.name === currentProvider ? '●' : ' ';
+              const padrao = 'isDefault' in p && p.isDefault === true ? ' (padrão)' : '';
+              const desc = 'summary' in p && p.summary !== undefined ? p.summary : '';
+              return [`${marca} ${p.name}${padrao}`, desc];
+            }),
+            { headers: ['  provider', 'o que é'], maxWidths: [28, 52] },
+          ),
           '◍ só o NOME vai ao broker, que resolve provider/credencial (nunca exibido)',
           'pareia com o modelo Custom (`/model` → Custom). fora de Custom, é ignorado.',
         ],
@@ -364,18 +371,34 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
         },
       };
     case 'usage':
+      // 3 métricas, cada uma com rótulo + valor — uma tabela de 2 colunas lê melhor
+      // que 3 linhas soltas (o rótulo vira ponto de referência fixo à esquerda).
       return {
         kind: 'note',
         note: {
           title: 'usage',
-          lines: [
-            `tokens nesta sessão: ${abbrev(ctx.usage.tokens)}`,
-            `janela de contexto: ${ctx.usage.windowPct}% usada`,
-            `tier: ${ctx.usage.tier}`,
-          ],
+          lines: tableLines(
+            [
+              ['tokens nesta sessão', abbrev(ctx.usage.tokens)],
+              ['janela de contexto', `${ctx.usage.windowPct}% usada`],
+              ['tier', ctx.usage.tier],
+            ],
+            { headers: ['métrica', 'valor'] },
+          ),
         },
       };
-    case 'permissions':
+    case 'permissions': {
+      // categoria → política: o que a pessoa quer saber ao rodar /permissions é "o
+      // que passa direto vs. o que me interrompe" — 2 colunas bastam (a mesma tabela
+      // vale de referência sob YOLO, mesmo com a catraca desligada agora).
+      const policyTable = tableLines(
+        [
+          ['leitura (read/grep)', 'allow'],
+          ['escrita (edit) / bash (run_command)', 'ask — mostra o efeito exato'],
+          ['sempre-ask', 'rede/destrutivo/escalada/exec-de-pacote/config — sempre pergunta'],
+        ],
+        { headers: ['categoria', 'política'] },
+      );
       return {
         kind: 'note',
         note: {
@@ -383,17 +406,13 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           lines: ctx.unsafe
             ? [
                 '⚠ MODO YOLO ativo — a catraca está DESLIGADA: tudo é auto-aprovado.',
-                'sem --yolo: leitura = allow · escrita/bash = ask · sempre-ask (rede/',
-                'destrutivo/escalada/exec-de-pacote/config) sempre pergunta.',
+                'sem --yolo seguem as regras abaixo (referência — não em vigor agora):',
+                ...policyTable,
               ]
-            : [
-                'leitura (read/grep) = allow',
-                'escrita (edit) e bash (run_command) = ask com o efeito exato',
-                'sempre-ask (rede/destrutivo/escalada/exec-de-pacote/config): sempre pergunta',
-                'regras por workspace = evolução pós-v1',
-              ],
+            : [...policyTable, '', 'regras por workspace = evolução pós-v1'],
         },
       };
+    }
     case 'tools':
       // F59 — /tools: inventário unificado. PURO: as 8 nativas + permissão.
       // MCP tools e spawn_agent/room são enriquecidos em run.tsx com discovery real;
@@ -1055,10 +1074,9 @@ export function buildMcpNote(servers: readonly McpListedServer[], configError?: 
     // de bullets corridos sem alinhamento (o que o dono reclamou no `/mcp list`).
     if (s.tools.length > 0) {
       lines.push(
-        ...boxTable(
-          ['tool', 'descrição'],
+        ...tableLines(
           s.tools.map((t) => [t.qualifiedName, t.description ?? '']),
-          { maxWidths: [40, 52] },
+          { headers: ['tool', 'descrição'], maxWidths: [40, 52] },
         ),
       );
     }
@@ -1200,9 +1218,14 @@ export function buildToolsNote(
           : 'read';
     return [name, EFFECT_LABEL[effect] ?? effect, desc];
   });
-  // tabela COM BORDAS (ferramenta · efeito · o que faz) — desc truncada p/ não estourar.
+  // Tabela (ferramenta · efeito · o que faz), desc truncada p/ não estourar. SEM bordas:
+  // o dono pediu UMA estética para tudo que as barras listam, e as outras listagens já
+  // usam `tableLines` (cabeçalho + régua, sem quadriculado).
   lines.push(
-    ...boxTable(['ferramenta', 'efeito', 'o que faz'], nativeRows, { maxWidths: [14, 9, 48] }),
+    ...tableLines(nativeRows, {
+      headers: ['ferramenta', 'efeito', 'o que faz'],
+      maxWidths: [14, 9, 48],
+    }),
   );
 
   // ── MCP — por server ─────────────────────────────────────────────────────
@@ -1219,11 +1242,17 @@ export function buildToolsNote(
               ? '⚠ desabilitado'
               : '? desconhecido';
       lines.push(`  mcp__${s.name} (${s.command}) — ${stateIcon}`);
-      if (s.state.kind === 'ok') {
-        for (const t of s.tools) {
-          const desc = t.description ? ` — ${t.description}` : '';
-          lines.push(`    ${t.qualifiedName}${desc}`);
-        }
+      // Tools do server ALINHADAS (nome · descrição) em vez de bullets soltos — o
+      // nome (identifica a tool que o agente chama) nunca é truncado; sem descrição
+      // ⇒ "—" (rule: célula vazia não é string vazia). Sem cabeçalho: é uma sub-lista
+      // aninhada sob o server, não uma seção própria — leve, não uma grade.
+      if (s.state.kind === 'ok' && s.tools.length > 0) {
+        lines.push(
+          ...tableLines(
+            s.tools.map((t) => [t.qualifiedName, t.description ?? '—']),
+            { indent: '    ' },
+          ),
+        );
       }
     }
   } else {

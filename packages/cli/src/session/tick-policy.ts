@@ -48,13 +48,31 @@ type Phase = SessionState['phase'];
  * `syncActive` default `true` (sync LIGADO por padrão, igual ao `syncOutputEnabled`):
  * chamador sem o flag ⇒ a animação volta no streaming, como esperado.
  */
-export function animTickEnabled(phase: Phase, syncActive = true): boolean {
+export function animTickEnabled(
+  phase: Phase,
+  syncActive = true,
+  opts: { readonly subagentsAlive?: boolean } = {},
+): boolean {
   if (phase === 'thinking' || phase === 'boot') return true;
   // EST-0973 — `compacting` é um VÁCUO de progresso (1 chamada ao broker, sem token a
   // exibir, como `thinking`): o spinner do <ProgressBar> precisa girar SEMPRE p/ a tela
   // não parecer travada. É 1 célula numa linha pequena ⇒ não reintroduz flicker.
   if (phase === 'compacting') return true;
   if (phase === 'streaming' || phase === 'retrying') return syncActive;
+  // FLICKER-F8 — SUB-AGENTES VIVOS com o pai OCIOSO. O aviso do F8 pulsa (um alerta
+  // parado com trabalho rodando lê como travado — "sumiu o processando... deu uma
+  // sensação ruim"), mas pulsar custa o MESMO redraw de 8×/s da região viva INTEIRA que
+  // este módulo mede no cabeçalho. Trabalho de sub-agente dura MINUTOS, não os segundos
+  // de um `thinking`, então o custo não é episódico: é o regime.
+  //
+  // Por isso a regra é a de `streaming`, não a de `thinking` — anima SE `syncActive`. Com
+  // overwrite-in-place/Mode-2026 (o padrão) o frame é atômico e o pulso não treme; sem
+  // eles o terminal pintaria o estado intermediário do erase+redraw a cada 120ms durante
+  // todo o trabalho, que é exatamente o flicker que o #75 matou.
+  //
+  // Este ramo NASCEU fora daqui (`|| haFilhoVivo` no <App>, rc.144) e por isso escapava do
+  // `syncActive` — a política existe para que a decisão seja UMA, pura e testável.
+  if (opts.subagentsAlive === true) return syncActive;
   return false;
 }
 

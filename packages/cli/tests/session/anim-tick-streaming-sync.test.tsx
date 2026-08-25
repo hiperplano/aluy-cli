@@ -166,3 +166,49 @@ describe('App — RELIGA a animação de 120ms no streaming sob sync (EST-0965)'
     r.unmount();
   });
 });
+
+// FLICKER-F8 — PROVA DE FIO da decisão para sub-agentes vivos com o pai OCIOSO. O
+// `tick-policy.test.ts` trava a REGRA (pura); aqui o que se prova é que a App a CONSULTA
+// passando o `syncActive` — o elo que faltava na rc.144, onde a condição vivia pendurada
+// no <App> (`|| haFilhoVivo`) e nunca via o flag. Uma regra certa que o render não
+// consulta é uma correção que não corrige.
+describe('App — sub-agentes vivos com o pai ocioso (FLICKER-F8)', () => {
+  /** App OCIOSA com N sub-agentes vivos publicados no estado. */
+  async function renderOciosoComFilhos(syncActive: boolean, vivos: number) {
+    const { controller } = buildStreaming(); // só o controller; nada é submetido
+    (controller as unknown as { patch(p: Record<string, unknown>): void }).patch({
+      detachedSubagents: vivos,
+    });
+    const theme = resolveTheme({ env: ENV });
+    const r = render(
+      <ThemeProvider theme={theme}>
+        <App controller={controller} animate bootMs={0} syncActive={syncActive} />
+      </ThemeProvider>,
+    );
+    await waitFor(() => controller.current.phase === 'idle');
+    return { controller, r };
+  }
+
+  it('ocioso + filhos vivos + sync ATIVO ⇒ 120ms ENABLED (o aviso do F8 pulsa)', async () => {
+    tickCalls.length = 0;
+    const { r } = await renderOciosoComFilhos(true, 3);
+    expect(lastEnabledFor(DEFAULT_TICK_MS)).toBe(true);
+    r.unmount();
+  });
+
+  it('ocioso + filhos vivos + sync OFF ⇒ 120ms DISABLED (não redesenha 8×/s por minutos)', async () => {
+    tickCalls.length = 0;
+    const { r } = await renderOciosoComFilhos(false, 3);
+    expect(lastEnabledFor(DEFAULT_TICK_MS)).toBe(false);
+    r.unmount();
+  });
+
+  it('ocioso SEM filhos ⇒ 120ms DISABLED nos dois modos (não-regressão do ocioso)', async () => {
+    for (const sync of [true, false]) {
+      tickCalls.length = 0;
+      const { r } = await renderOciosoComFilhos(sync, 0);
+      expect(lastEnabledFor(DEFAULT_TICK_MS)).toBe(false);
+      r.unmount();
+    }
+  });
+});

@@ -18,7 +18,16 @@ describe('tableLines — alinhamento de colunas', () => {
     expect(tableLines([])).toEqual([]);
     const out = tableLines([['a', 'bb']], { indent: '', gap: ' ', headers: ['NOME', 'X'] });
     expect(out[0]).toBe('NOME X'); // header alinhado às colunas
-    expect(out[1]).toBe('a    bb'); // 'a' padEnd à largura de 'NOME'
+    // A RÉGUA entra entre cabeçalho e dados — decisão do dono ao pedir uma estética só
+    // para todas as listagens ("não precisa ser quadriculada, mas organizada"). A
+    // intenção deste caso não muda: o header alinha às colunas, e agora a régua
+    // também acompanha a largura delas.
+    expect(out[1]).toBe('──── ──'); // régua com a largura de cada coluna
+    expect(out[2]).toBe('a    bb'); // 'a' padEnd à largura de 'NOME'
+
+    // `rule: false` devolve o formato anterior, para quem não quiser a régua.
+    const semRegua = tableLines([['a', 'bb']], { indent: '', gap: ' ', headers: ['NOME', 'X'], rule: false });
+    expect(semRegua[1]).toBe('a    bb');
   });
 });
 

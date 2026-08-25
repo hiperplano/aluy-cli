@@ -17,7 +17,11 @@
 // + erros aqui. Determinístico/testável sem montar Ink nem tocar o filesystem.
 
 import type { AgentProfile, AgentProfileError, AgentOrigin } from './agent-profile.js';
-import { boxTable } from '../util/box-table.js';
+// ESTÉTICA ÚNICA (decisão do dono: "deixe tudo na mesma estética") — as listagens
+// usavam DOIS desenhos: grade de box-drawing aqui, linha crua nas outras onze.
+// Duas estéticas no mesmo produto são a versão visual do problema que ele apontou:
+// o mesmo conceito representado de duas formas, e as duas divergindo.
+import { tableLines } from '../util/table-lines.js';
 
 /** Uma nota (título + linhas) — espelha o `SlashNote` do @hiperplano/aluy-cli, sem acoplar a ele. */
 export interface AgentsListNote {
@@ -119,7 +123,7 @@ export function buildAgentsNote(input: AgentsListInput): AgentsListNote {
       agentPersonaLine(p),
     ]);
     lines.push(
-      ...boxTable(['agente', 'escopo', 'tools', 'sobre'], rows, { maxWidths: [18, 8, 24, 44] }),
+      ...tableLines(rows, { headers: ['agente', 'escopo', 'tools', 'sobre'], ...{ maxWidths: [18, 8, 24, 44] } }),
     );
   }
 
@@ -127,7 +131,7 @@ export function buildAgentsNote(input: AgentsListInput): AgentsListNote {
     if (lines.length > 0) lines.push('');
     lines.push(`rejeitados (${rejected.length}) — não foram carregados por estarem inválidos:`);
     const rows = rejected.map((e) => [e.file, e.reason]);
-    lines.push(...boxTable(['arquivo', 'motivo'], rows, { maxWidths: [22, 52] }));
+    lines.push(...tableLines(rows, { headers: ['arquivo', 'motivo'], ...{ maxWidths: [22, 52] } }));
     lines.push('  conserto: o frontmatter precisa de `name`, corpo (persona) e — se declarar');
     lines.push('  `tools:` — uma LISTA legível (ex.: `tools: read_file, grep`).');
   }

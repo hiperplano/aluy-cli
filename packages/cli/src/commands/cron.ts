@@ -15,6 +15,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { tableLines } from '../ui/table-lines.js';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -409,11 +410,19 @@ export async function runCron(argv: readonly string[], deps: CronDeps = {}): Pro
       }
 
       out(`Jobs agendados (${state.jobs.length}):`);
-      for (const job of state.jobs) {
-        const shortId = job.id.slice(0, 8);
-        const yoloLabel = job.yolo ? 'yolo' : 'ask';
-        const stateLabel = job.enabled === false ? 'off' : 'on ';
-        out(`  ${shortId}  [${stateLabel}]  ${job.schedule}  [${yoloLabel}]  ${job.task}`);
+      // id nunca trunca além do prefixo já usado p/ endereçar o job (rm/run/edit
+      // aceitam esse mesmo prefixo); tarefa é a última coluna — livre p/ ficar longa.
+      const rows = state.jobs.map((job) => [
+        job.id.slice(0, 8),
+        job.enabled === false ? 'off' : 'on',
+        job.schedule,
+        job.yolo ? '[yolo]' : '[ask]',
+        job.task,
+      ]);
+      for (const line of tableLines(rows, {
+        headers: ['id', 'estado', 'schedule', 'modo', 'tarefa'],
+      })) {
+        out(line);
       }
       return 0;
     }

@@ -175,13 +175,34 @@ describe('buildMcpNote — reorganização da lista (resumo + grupos + tabela)',
     expect(lines[iGammaLine - 1]).toBe('com erro (1) — falharam a conexão:');
   });
 
-  it('tools aparecem numa tabela com bordas (não bullets soltos)', () => {
-    const text = buildMcpNote(buildMcpListing(mixed, disc)).lines.join('\n');
-    expect(text).toContain('┌');
-    expect(text).toContain('│ tool');
-    expect(text).toContain('descrição');
+  // O INVARIANTE aqui sempre foi "TABELA, não bullets soltos" — o dono reclamou de um
+  // bloco de bullets corridos sem alinhamento no `/mcp list`. O `┌`/`│` que este teste
+  // travava era o MECANISMO daquele dia (`boxTable`).
+  //
+  // O dono depois pediu uma coisa a mais: "eu quero que vc deixe tudo na mesma estetica".
+  // As outras onze listagens (`/service list`, `/rooms`, `/todo`, `/usage`, …) usam
+  // `tableLines` — cabeçalho + régua, sem quadriculado —, então manter só o `/mcp` com
+  // borda cheia era a exceção que quebrava o pedido. O desenho mudou; a intenção não, e é
+  // ela que este teste continua travando: cabeçalho, colunas ALINHADAS e nada de bullet.
+  it('tools aparecem numa TABELA alinhada (não bullets soltos)', () => {
+    const linhas = buildMcpNote(buildMcpListing(mixed, disc)).lines;
+    const text = linhas.join('\n');
     expect(text).toContain('mcp__alpha__do');
     expect(text).toContain('faz algo');
     expect(text).not.toContain('• mcp__alpha__do'); // não é mais bullet solto.
+
+    // Cabeçalho + régua: é o que faz disto uma tabela e não uma lista indentada.
+    const iCab = linhas.findIndex((l) => /\btool\b/.test(l) && l.includes('descrição'));
+    expect(iCab, 'cabeçalho `tool  descrição` ausente').toBeGreaterThan(-1);
+    expect(linhas[iCab + 1]).toMatch(/^\s*─+\s+─+\s*$/);
+
+    // ALINHAMENTO — a coluna da descrição começa na MESMA coluna em todas as linhas.
+    const col = (l: string): number => l.indexOf('descrição') >= 0
+      ? l.indexOf('descrição')
+      : l.search(/\S+\s{2,}\S/) >= 0
+        ? l.replace(/^(\s*\S+\s+)/, '$1').length - l.replace(/^\s*\S+\s+/, '').length
+        : -1;
+    const linhaDo = linhas.find((l) => l.includes('mcp__alpha__do'))!;
+    expect(col(linhaDo)).toBe(col(linhas[iCab]!));
   });
 });

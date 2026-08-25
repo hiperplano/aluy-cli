@@ -127,3 +127,48 @@ describe('runProviderLinear — não-TTY (§9)', () => {
     expect(text().toLowerCase()).toContain('desconhecido');
   });
 });
+
+// ESTÉTICA ÚNICA — o dono: "eu quero que vc deixe tudo na mesma estetica", depois de pedir
+// "uma revisao de ux profunda na visualizacao... do que acontece quando aciono os menus".
+// Onze listagens passaram a usar `tableLines` (cabeçalho + régua, sem quadriculado); o
+// `/provider` sem argumento ficou para trás em linha corrida, onde o resumo empurrava o
+// nome para uma coluna diferente a cada linha e o `●` do ativo se perdia no meio do texto.
+describe('/provider sem argumento — listagem em TABELA, com o ativo na margem', () => {
+  const catalogo = [
+    { name: 'openrouter', summary: 'catálogo agregado' },
+    { name: 'deepseek', summary: 'barato e rápido' },
+    { name: 'gmicloud' },
+  ];
+
+  /** As linhas da nota do `/provider` sem argumento. */
+  function linhas(ativo: string): readonly string[] {
+    return buildProviderEffect('', ativo, catalogo).note?.lines ?? [];
+  }
+
+  it('tem cabeçalho + régua (é tabela, não linha corrida)', () => {
+    const l = linhas('deepseek');
+    const iCab = l.findIndex((x) => x.includes('provider') && x.includes('o que é'));
+    expect(iCab, 'cabeçalho ausente').toBeGreaterThan(-1);
+    expect(l[iCab + 1]).toMatch(/^\s*─+\s+─+\s*$/);
+  });
+
+  it('o `●` marca SÓ o ativo e fica na MARGEM (mesma coluna em toda linha)', () => {
+    const l = linhas('deepseek');
+    const doProvider = l.filter((x) => /\b(openrouter|deepseek|gmicloud)\b/.test(x));
+    expect(doProvider.length).toBe(3);
+    const comMarca = doProvider.filter((x) => x.includes('●'));
+    expect(comMarca).toHaveLength(1);
+    expect(comMarca[0]).toContain('deepseek');
+    // A margem: o nome começa na MESMA coluna com e sem marcador — é o que faz o `●`
+    // saltar aos olhos em vez de deslocar o texto.
+    const col = (x: string): number => x.search(/[A-Za-z]/);
+    expect(new Set(doProvider.map(col)).size).toBe(1);
+  });
+
+  it('o resumo vai na SEGUNDA coluna, alinhado entre linhas', () => {
+    const l = linhas('openrouter');
+    const a = l.find((x) => x.includes('openrouter'))!;
+    const b = l.find((x) => x.includes('deepseek'))!;
+    expect(a.indexOf('catálogo agregado')).toBe(b.indexOf('barato e rápido'));
+  });
+});

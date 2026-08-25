@@ -16,6 +16,7 @@ import {
 } from './synchronized-output.js';
 import { enableBracketedPaste } from './bracketed-paste.js';
 import { resolveTheme } from '../ui/theme/index.js';
+import { tableLines } from '../ui/table-lines.js';
 import type { RewindChoice } from '../ui/hooks/useRewindPicker.js';
 import {
   queryTerminalBrightness,
@@ -3875,14 +3876,22 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       const join = (xs: readonly string[]): string => (xs.length > 0 ? xs.join(', ') : '—');
       const aluyMd =
         instructionSources.length > 0 ? `✓ ${instructionSources.join(' › ')}` : '✗ ausente';
-      built.controller.pushNote('inventário · .aluy/', [
-        `instruções de projeto: ${aluyMd}`,
-        `agentes (${agentNames.length}): ${join(agentNames)}`,
-        `comandos do usuário (${cmdNames.length}): ${join(cmdNames)}`,
-        `skills (${sk.length}): ${join(sk.map((s) => s.name))}`,
-        `workflows (${wf.length}): ${join(wf.map((w) => w.name))}`,
-        `memória de projeto: ${gov?.memory ?? 0} fato(s)`,
-      ]);
+      // categoria → contagem+nomes: 2 colunas (a StatusBar já mostra só os números —
+      // aqui é onde a pessoa vem ver OS NOMES, então eles precisam caber sem cortar).
+      built.controller.pushNote(
+        'inventário · .aluy/',
+        tableLines(
+          [
+            ['ALUY.md', aluyMd],
+            [`agentes (${agentNames.length})`, join(agentNames)],
+            [`comandos (${cmdNames.length})`, join(cmdNames)],
+            [`skills (${sk.length})`, join(sk.map((s) => s.name))],
+            [`workflows (${wf.length})`, join(wf.map((w) => w.name))],
+            ['memória de projeto', `${gov?.memory ?? 0} fato(s)`],
+          ],
+          { headers: ['categoria', 'detalhe'] },
+        ),
+      );
       return;
     }
 

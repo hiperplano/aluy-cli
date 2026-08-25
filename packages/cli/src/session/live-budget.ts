@@ -177,6 +177,38 @@ export function narrowChromeOverhead(columns?: number): number {
   return columns < NARROW_CHROME_MAX_COLS ? 2 : 0;
 }
 
+/**
+ * FLICKER-F8 — EXCEDENTE do AVISO DE SUB-AGENTES (`◌ N sub-agente(s) trabalhando — F8
+ * para parar.`). Ele mora na região viva do rodapé, ABAIXO da fala, e é CONDICIONAL —
+ * por isso não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
+ * sempre). Sem este desconto ele era altura FORA do orçamento, e a região viva cruzava
+ * `rows` exatamente no cenário em que o aviso existe: agentes trabalhando. Aí o Ink cai
+ * no caminho `outputHeight >= rows` e reescreve tudo A CADA FRAME — o relato do dono,
+ * "quando mando mensagens e tem agentes processando... a tela fica tremendo".
+ *
+ * A linha mede 47 colunas com 2 dígitos (spinner + contagem + texto + a dica do F8) —
+ * medido, não estimado —, então abaixo de
+ * `SUBAGENT_NOTICE_MIN_COLS` ela QUEBRA e custa 2. Mesma disciplina do banner `unsafe` e
+ * do chrome estreito: base no chrome, excedente por condição, ancorado por teste.
+ */
+/**
+ * O TEXTO do aviso mora aqui, ao lado da conta, de propósito: o limiar acima é uma
+ * largura em colunas, e uma largura só é verdade enquanto a frase for aquela. Separar os
+ * dois deixaria alguém reescrever a frase sem tocar no número, e o desconto voltaria a
+ * mentir em silêncio — que é como este defeito nasceu. O teste mede a string e ancora o
+ * limiar; o <App> renderiza ESTA função, não uma cópia.
+ */
+export function subagentNoticeText(count: number): string {
+  return `${String(count)} sub-agente(s) trabalhando — F8 para parar.`;
+}
+
+export const SUBAGENT_NOTICE_MIN_COLS = 47;
+export function subagentNoticeOverhead(count?: number, columns?: number): number {
+  if (count === undefined || count <= 0) return 0; // sem aviso ⇒ sem desconto
+  if (columns === undefined || columns <= 0) return 1;
+  return columns < SUBAGENT_NOTICE_MIN_COLS ? 2 : 1;
+}
+
 /** Piso do teto da fala: nunca menos que isto, mesmo em terminais minúsculos. */
 export const MIN_SPEECH_LINES = 4;
 
@@ -560,6 +592,8 @@ export function slashMenuMaxRows(args: {
   readonly columns?: number;
   /** Altura (linhas) da fila/encaixando abaixo da viva (EST-0982). Default 0. */
   readonly stagedLines?: number;
+  /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
+  readonly detachedSubagents?: number;
 }): number {
   const liveFloor =
     LIVE_CHROME_BASE_ROWS +
@@ -576,6 +610,7 @@ export function slashMenuMaxRows(args: {
       ...(args.columns !== undefined ? { columns: args.columns } : {}),
     }) +
     MIN_SPEECH_LINES +
+    subagentNoticeOverhead(args.detachedSubagents, args.columns) +
     (args.stagedLines ?? 0);
   // −1 (paddingTop do contêiner do menu) − SAFETY_MARGIN (gatilho `>=` do Ink).
   return Math.max(4, args.rows - liveFloor - 1 - SAFETY_MARGIN);
@@ -611,6 +646,8 @@ export function speechMaxLines(args: {
   readonly composerOverflow?: number;
   /** EST-0965 (wrap) — largura do terminal; mede a altura VISUAL dos vivos. */
   readonly columns?: number;
+  /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
+  readonly detachedSubagents?: number;
 }): number {
   const overhead = liveOverheadLines({
     live: args.live,
@@ -634,6 +671,8 @@ export function speechMaxLines(args: {
     // desconto o frame cruzava `rows` em tela baixa+estreita ⇒ clearTerminal
     // reescrevendo o histórico INTEIRO a cada frame (o flicker de sessão gigante).
     narrowChromeOverhead(args.columns) -
+    // FLICKER-F8 — o aviso de sub-agentes é altura viva CONDICIONAL; ver o helper.
+    subagentNoticeOverhead(args.detachedSubagents, args.columns) -
     (args.queuedLines ?? 0) -
     (args.overlayLines ?? 0) -
     (args.composerOverflow ?? 0) -
@@ -681,6 +720,8 @@ export function liveRegionMinRows(args: {
   readonly overlayLines?: number;
   /** Excedente VISUAL do composer (wrap) além da 1 linha do chrome (RESIZE-FIX). Default 0. */
   readonly composerOverflow?: number;
+  /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
+  readonly detachedSubagents?: number;
 }): number {
   const overhead = liveOverheadLines({
     live: args.live,
@@ -696,6 +737,7 @@ export function liveRegionMinRows(args: {
     respiroOverhead(args.rows) +
     modeIndicatorOverhead(args.mode) +
     narrowChromeOverhead(args.columns) +
+    subagentNoticeOverhead(args.detachedSubagents, args.columns) +
     overhead +
     (args.stagedLines ?? 0) +
     (args.overlayLines ?? 0) +
