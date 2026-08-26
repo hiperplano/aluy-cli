@@ -21,6 +21,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  mostraIndicadorTrabalho,
   subagentNoticeOverhead,
   subagentIndicatorLine,
   speechMaxLines,
@@ -987,3 +988,39 @@ describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
     expect(semAviso + subagentNoticeOverhead(3, columns, 'streaming')).toBeGreaterThan(rows - 1);
   });
 });
+
+// QUEM INDICA TRABALHO — a decisão virou de lado DUAS vezes num dia, e das duas o efeito
+// colateral só apareceu na tela do dono. Por isso ela saiu do JSX e virou tabela.
+//
+// Ida:   "acho redundante a barra de progresso e o efeito brilho juntos" ⇒ tirei o ramo dos
+//        sub-agentes INTEIRO.
+// Volta: "quando eu peço alguma coisa no meio de um trabalho de subagentes... depois que ele
+//        me responde ele para de mostrar o processando" ⇒ com os filhos ainda trabalhando e
+//        NADA na tela dizendo isso.
+//
+// A regra que concilia as duas: mostra quando há trabalho E não há OUTRA coisa mostrando.
+describe('mostraIndicadorTrabalho — tabela de verdade', () => {
+  it('ele FALA ⇒ NÃO (o brilho do cabeçalho da caixa já indica) — com ou sem filhos', () => {
+    expect(mostraIndicadorTrabalho('streaming', false)).toBe(false);
+    expect(mostraIndicadorTrabalho('streaming', true)).toBe(false);
+  });
+
+  it('ele PENSA ⇒ SIM (não há caixa ainda; a linha enche o vazio)', () => {
+    expect(mostraIndicadorTrabalho('thinking', false)).toBe(true);
+    expect(mostraIndicadorTrabalho('retrying', false)).toBe(true);
+  });
+
+  // O CASO DO RELATO: o pai respondeu e parou; os filhos seguem.
+  it('ele PAROU e os FILHOS seguem ⇒ SIM (é a única coisa que sinaliza)', () => {
+    for (const p of ['idle', 'done'] as SessionState['phase'][]) {
+      expect(mostraIndicadorTrabalho(p, true)).toBe(true);
+    }
+  });
+
+  it('ele PAROU e não há filho ⇒ NÃO (não inventa trabalho que não existe)', () => {
+    for (const p of ['idle', 'done', 'error'] as SessionState['phase'][]) {
+      expect(mostraIndicadorTrabalho(p, false)).toBe(false);
+    }
+  });
+});
+

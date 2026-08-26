@@ -109,6 +109,7 @@ import { animTickEnabled, elapsedTickEnabled } from './tick-policy.js';
 import { splitBlocks } from './render-split.js';
 import { aluyNeedsLeadingBlank } from './block-rhythm.js';
 import {
+  mostraIndicadorTrabalho,
   workingIndicator,
   speechMaxLines,
   slashMenuMaxRows,
@@ -4877,15 +4878,27 @@ export function App(props: AppProps): React.ReactElement {
           viva oscilava e a tela tremia. O dono: "acho que ta poluido... ele deveria
           substituir o progress dos subagentes que aparece embaixo (ele deveria ficar do
           lado)". Agora é uma linha só, e a contagem é SUFIXO dela. */}
-      {/* A linha de progresso volta a ser SÓ o vácuo pré-token (`thinking`/`retrying`).
-          Ela tinha ganhado um ramo por sub-agentes vivos, e com o rodapé mostrando os
-          agentes isso virou a redundância que o dono apontou — "acho redundante a barra de
-          progresso e o efeito brilho juntos". Enquanto ele FALA, quem indica trabalho é o
-          brilho do nome no cabeçalho da própria caixa; enquanto ele PENSA (antes do 1º
-          token) não há caixa nenhuma, e é para esse vazio que esta linha existe. */}
-      {(state.phase === 'thinking' || state.phase === 'retrying') && (
+      {/* QUEM ESTÁ INDICANDO TRABALHO NESTE FRAME?
+          · ele FALA (`streaming`) ⇒ o brilho do nome no cabeçalho da caixa da resposta.
+            Somar esta linha ali é a redundância que o dono apontou ("acho redundante a
+            barra de progresso e o efeito brilho juntos").
+          · ele PENSA (`thinking`/`retrying`) ⇒ não há caixa ainda; a linha enche o vazio.
+          · ele PAROU e os FILHOS seguem ⇒ não há brilho nenhum, e aí esta linha é a ÚNICA
+            coisa que sinaliza. Foi o que quebrou quando tirei o ramo dos sub-agentes
+            inteiro: "depois que ele me responde ele para de mostrar o processando" — com
+            os agentes ainda trabalhando. Redundante era mostrar os DOIS juntos, não
+            mostrar este quando o outro não existe. */}
+      {mostraIndicadorTrabalho(state.phase, haFilhoVivo) && (
         <Box paddingTop={state.blocks.length > 0 ? 1 : 0}>
-          <Working glyph="aluy" glyphRole="accent" label={indicadorTrabalho.label} frame={frame} />
+          <Working
+            glyph="aluy"
+            glyphRole="accent"
+            label={indicadorTrabalho.label}
+            {...(indicadorTrabalho.suffix !== undefined
+              ? { suffix: indicadorTrabalho.suffix }
+              : {})}
+            frame={frame}
+          />
         </Box>
       )}
 

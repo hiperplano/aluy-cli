@@ -216,6 +216,28 @@ export const SUBAGENT_STOP_HINT = '· F8 para parar';
  *  · pai trabalhando COM filhos ⇒ o verbo do pai + a contagem ao lado (uma linha só);
  *  · pai OCIOSO com filhos ⇒ a contagem VIRA o verbo (não há o que o pai esteja fazendo).
  */
+/**
+ * A LINHA de progresso aparece neste frame?
+ *
+ * Decisão PURA porque ela já virou de lado duas vezes em um dia, e nas duas o efeito
+ * colateral só apareceu na tela do dono:
+ *
+ *  · ele FALA (`streaming`) ⇒ NÃO. Quem indica trabalho é o brilho do nome no cabeçalho da
+ *    caixa da resposta; somar a linha ali é a redundância que ele apontou ("acho redundante
+ *    a barra de progresso e o efeito brilho juntos").
+ *  · ele PENSA (`thinking`/`retrying`) ⇒ SIM. Ainda não há caixa; a linha enche o vazio.
+ *  · ele PAROU e os FILHOS seguem ⇒ SIM. Não há brilho nenhum, e a linha vira a única coisa
+ *    que sinaliza. Tirar este caso junto com a redundância produziu o relato seguinte:
+ *    "depois que ele me responde ele para de mostrar o processando" — com agentes vivos.
+ *
+ * A regra que resolve os três: mostra quando há trabalho E não há OUTRA coisa mostrando.
+ */
+export function mostraIndicadorTrabalho(phase: SessionPhase, temFilhosVivos: boolean): boolean {
+  if (phase === 'thinking' || phase === 'retrying') return true;
+  if (phase === 'streaming') return false; // o cabeçalho da caixa já brilha
+  return temFilhosVivos;
+}
+
 export function workingIndicator(args: {
   readonly count: number;
   readonly phase: SessionPhase;
