@@ -574,6 +574,11 @@ export interface LiveSubagent {
   readonly activity?: { readonly tool: string; readonly target: string } | undefined;
   /** Quanto tempo já correu (ms), quando o nó contabiliza. */
   readonly durationMs?: number | undefined;
+  /**
+   * Tokens consumidos por ELE até agora. AO VIVO: sobe durante o trabalho, não só no fim
+   * (ver `onChildProgress` no spawner — antes o número ficava em zero a corrida inteira).
+   */
+  readonly tokens?: number | undefined;
 }
 
 export interface SessionState {

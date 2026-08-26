@@ -383,6 +383,19 @@ export interface SubAgentObserver {
    */
   onChildStart?(label: string, model?: string): void;
   onChildEnd?(label: string, outcome: SubAgentOutcome, model?: string): void;
+  /**
+   * PROGRESSO do filho — o uso PRÓPRIO dele a cada débito, ENQUANTO ele trabalha.
+   *
+   * Existiam só `onChildStart`/`onChildEnd`, e o dono viu o efeito na tela: "a
+   * atualizacao do consumo de tokens na visualizacao dos agentes so aparece no fim".
+   * Não era o número chegando tarde — era ele não sendo REPORTADO: o `ownUsage` já
+   * era atualizado a cada débito dentro do `runChild` e nunca saía de lá, então o
+   * total pulava de zero ao valor final no instante em que o filho acabava.
+   *
+   * Cadência: uma chamada por DÉBITO do loop (uma por chamada ao modelo), não por
+   * token — poucas por agente, não um fluxo.
+   */
+  onChildProgress?(label: string, usage: SubAgentOutcome['usage']): void;
 }
 
 /**
@@ -1153,6 +1166,9 @@ export class SubAgentSpawner {
       // se o loop for abortado (timeout/cancelamento) antes de retornar um resultado.
       onUsage: (u): void => {
         ownUsage = u;
+        // O uso sobe AO VIVO para quem observa (a árvore de fluxo, e daí o rodapé). Antes
+        // ele morria aqui dentro e só aparecia no `onChildEnd` — o total pulava de zero.
+        this.observer?.onChildProgress?.(profile.label, u);
       },
       ...(childAsk ? { askResolver: childAsk } : {}),
       // EST-0977/0978 — o SYSTEM PROMPT do agente nomeado (persona, corpo do `.md`) +

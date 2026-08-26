@@ -16,6 +16,11 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+const APP_CONTROLLER = readFileSync(
+  fileURLToPath(new URL('../../src/session/controller.ts', import.meta.url)),
+  'utf8',
+);
+
 const APP = readFileSync(
   fileURLToPath(new URL('../../src/session/App.tsx', import.meta.url)),
   'utf8',
@@ -48,3 +53,46 @@ describe('FOOTER-AGENTES — o <App> avisa o orçamento que o rodapé cresceu', 
     });
   }
 });
+
+// CONSUMO AO VIVO — a guarda do FIO, não do dado.
+//
+// O teste de estado prova que `liveSubagents[].tokens` carrega o número. Ele NÃO prova que
+// alguém alimenta o nó durante a corrida — e essa distinção já custou uma versão: o bloco
+// de agentes no rodapé tinha teste de componente, passava, e nunca apareceu na tela, porque
+// o que faltava era o caminho até ele.
+//
+// São três elos, e basta um faltar para o número voltar a pular de zero ao total no fim:
+//   1. o spawner EMITE (`onChildProgress`) a cada débito do filho;
+//   2. o controller ESCUTA e escreve no nó;
+//   3. o controller REPUBLICA, senão a tela não vê.
+describe('CONSUMO AO VIVO — os três elos do fio existem', () => {
+  const SPAWNER = readFileSync(
+    fileURLToPath(new URL('../../../cli-core/src/agent/subagent.ts', import.meta.url)),
+    'utf8',
+  );
+
+  it('1) o spawner EMITE progresso a cada débito (dentro do `onUsage`)', () => {
+    const i = SPAWNER.indexOf('onUsage:');
+    expect(i, '`onUsage` sumiu do spawner').toBeGreaterThan(-1);
+    const bloco = SPAWNER.slice(i, i + 600);
+    expect(bloco, 'o `onUsage` não emite `onChildProgress` — o número morre no runChild').toContain(
+      'onChildProgress',
+    );
+  });
+
+  it('2) o controller ESCUTA e escreve no nó do filho', () => {
+    const i = APP_CONTROLLER.indexOf('onChildProgress');
+    expect(i, 'o controller não registra `onChildProgress`').toBeGreaterThan(-1);
+    const bloco = APP_CONTROLLER.slice(i, i + 900);
+    expect(bloco, 'escuta mas não escreve no nó').toContain('setUsage');
+  });
+
+  it('3) e REPUBLICA, senão a tela não enxerga a subida', () => {
+    const i = APP_CONTROLLER.indexOf('onChildProgress');
+    const bloco = APP_CONTROLLER.slice(i, i + 900);
+    expect(bloco, 'escreve no nó mas não republica — a tela fica parada').toContain(
+      'publishDetachedCount',
+    );
+  });
+});
+
