@@ -16,7 +16,10 @@ import { LARGURA_MINIMA_2COL } from '../ui/components/StatusPanel.js';
  * cada filho que nasce mudaria a altura do frame o tempo todo; com teto, ela muda DUAS
  * vezes (quando entra e quando sai) e o resto é o "+K outros" absorvendo o excedente.
  */
-export const LINHAS_RODAPE_AGENTES = 4;
+// 6 (1 cabeçalho + 5 agentes). Quatro escondiam metade de um fan-out comum — o dono mandou
+// um de OITO, seis deles com falha. É um número, não uma lei: subir custa altura de frame em
+// toda sessão que dispara agente, e a conta disso está em `rodapeAgentesOverhead` abaixo.
+export const LINHAS_RODAPE_AGENTES = 6;
 
 /** Barra vertical (1) + o respiro dela (1). */
 export const CALHA_RODAPE_AGENTES = 2;

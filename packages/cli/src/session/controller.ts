@@ -2365,6 +2365,9 @@ export class SessionController {
     // OBSERVE-ONLY/best-effort (atrás da catraca, via o callback do wiring) — NÃO bloqueia
     // o submit nem altera o `goal` (composição não-relaxável; o callback nunca veta aqui).
     this.onUserPromptSubmit?.(goal);
+    // O LOTE ANTERIOR sai do rodapé aqui, e só aqui: ele sobrevive ao FIM do trabalho de
+    // propósito (é o desfecho), e vira passado quando começa o turno seguinte.
+    if (this.state.liveSubagents !== undefined) this.patch({ liveSubagents: undefined });
     // EST-1107 — modo ATIVO de workflow: se há um workflow ativo, cada submissão
     // é DIRECIONADA pelo fluxo (atividades em ordem, com [agente] opcional).
     if (this.activeWorkflow) {
@@ -7372,7 +7375,7 @@ export class SessionController {
    * que ainda correm: o rodapé é "quem está trabalhando agora", não um histórico. Uma
    * fonte só para a ferramenta e para a tela — se divergirem, uma das duas mente.
    */
-  private filhosVivosParaRodape(): readonly LiveSubagent[] {
+  private filhosDoLoteParaRodape(): readonly LiveSubagent[] {
     // MESMA FONTE DA CONTAGEM: `liveChildren()`, que é "não terminal".
     //
     // A primeira versão filtrava `listaFilhosParaGestao()` por `phase === 'running'` — uma
@@ -7387,14 +7390,18 @@ export class SessionController {
     if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
     const out: LiveSubagent[] = [];
     for (const t of arvores) {
-      for (const no of t.liveChildren()) {
-        const atividade = no.currentActivity();
-        const conta = no.accounting();
+      // O LOTE INTEIRO, não só quem ainda corre. O rodapé precisa mostrar COMO acabou —
+      // no relato do dono, 6 de 8 falharam, e uma lista só-de-vivos apaga isso justamente
+      // no instante em que passa a importar.
+      for (const no of t.overview().filter((x) => x.kind === 'subagent')) {
         out.push({
           label: no.label,
           phase: no.phase,
-          ...(atividade ? { activity: atividade } : {}),
-          ...(conta.durationMs !== undefined ? { durationMs: conta.durationMs } : {}),
+          ...(no.activity ? { activity: no.activity } : {}),
+          ...(no.accounting.durationMs !== undefined
+            ? { durationMs: no.accounting.durationMs }
+            : {}),
+          tokens: no.accounting.tokens,
         });
       }
     }
@@ -7478,13 +7485,17 @@ export class SessionController {
       // A LISTA sai junto do número, da MESMA leitura das árvores. Publicar em dois
       // momentos abriria a janela em que a contagem diz 3 e a lista mostra 2 — a mesma
       // doença de "duas listas" que este método veio curar.
-      this.patch({ detachedSubagents: vivos, liveSubagents: this.filhosVivosParaRodape() });
+      this.patch({ detachedSubagents: vivos, liveSubagents: this.filhosDoLoteParaRodape() });
       return;
     }
+    // ZERO VIVOS: a CONTAGEM some (com histerese — ela é o "há trabalho agora"), mas a
+    // LISTA FICA com o desfecho de cada um. Quem a aposenta é o começo do próximo turno.
+    const lote = this.filhosDoLoteParaRodape();
+    if (lote.length > 0) this.patch({ liveSubagents: lote });
     if (this.state.detachedSubagents === undefined) return; // já escondido: nada a fazer
     this.timerSomeIndicador = setTimeout(() => {
       this.timerSomeIndicador = null;
-      this.patch({ detachedSubagents: undefined, liveSubagents: undefined });
+      this.patch({ detachedSubagents: undefined });
     }, INDICADOR_SUBAGENTE_GRACA_MS);
     if (typeof this.timerSomeIndicador.unref === "function") this.timerSomeIndicador.unref();
   }
@@ -7698,6 +7709,19 @@ export class SessionController {
         // (sem isto ele só mexia em desacople, e ficava mentindo entre um e outro).
         this.publishDetachedCount();
         extra?.onChildStart?.(label, model);
+      },
+      onChildProgress: (label: string, usage: SubAgentOutcome['usage']): void => {
+        // O CONSUMO SOBE DURANTE O TRABALHO, não só no fim. O dono: "a atualizacao do
+        // consumo de tokens na visualizacao dos agentes so aparece no fim, pelo menos nao
+        // vi atualizando durante o trabalho do agente". Estava certo: o único `setUsage`
+        // do nó do filho vivia no `onChildEnd`, então o número ficava em zero a corrida
+        // inteira e saltava para o total no instante em que ele acabava.
+        const no = this.flowTree?.node(`root/${label}`);
+        if (no === undefined) return;
+        no.setUsage(usage);
+        // Republica para a tela acompanhar. A cadência é uma por chamada ao modelo do
+        // filho — não por token —, então isto não vira um fluxo de re-render.
+        this.publishDetachedCount();
       },
       onChildEnd: (label: string, outcome: SubAgentOutcome, model?: string) => {
         // EST-0982 — fecha a contabilidade do filho na árvore: espelha o usage (tokens/

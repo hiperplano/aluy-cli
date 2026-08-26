@@ -209,7 +209,10 @@ describe('FOOTER-AGENTES — a lista chega ao estado junto da contagem', () => {
     c.dispose();
   });
 
-  it('a lista acompanha a contagem quando um filho termina', async () => {
+  // A LISTA é o LOTE, a CONTAGEM é quem está vivo — deixaram de ser o mesmo número de
+  // propósito. O rodapé precisa mostrar COMO cada um acabou (no relato do dono, 6 de 8
+  // falharam); uma lista só-de-vivos apaga isso justamente quando passa a importar.
+  it('filho que termina PERMANECE na lista, com o desfecho — só sai da contagem', async () => {
     const c = ctl();
     const arv = await comArvore(c);
     const i = c as unknown as Interno;
@@ -220,21 +223,80 @@ describe('FOOTER-AGENTES — a lista chega ao estado junto da contagem', () => {
 
     a.finish('final');
     i.publishDetachedCount();
-    expect(c.current.detachedSubagents).toBe(1);
-    expect(c.current.liveSubagents?.map((x) => x.label)).toEqual(['b']);
+    expect(c.current.detachedSubagents).toBe(1); // vivos: só o `b`
+    // mas os DOIS seguem na lista, e o `a` carrega como terminou.
+    const porRotulo = new Map(c.current.liveSubagents?.map((x) => [x.label, x.phase]));
+    expect([...porRotulo.keys()].sort()).toEqual(['a', 'b']);
+    expect(porRotulo.get('a')).toBe('done');
     c.dispose();
   });
 
-  it('contagem e lista NUNCA discordam (é o defeito, em forma de invariante)', async () => {
+  it('a CONTAGEM é sempre o nº de VIVOS da lista (é assim que as duas não mentem juntas)', async () => {
     const c = ctl();
     const arv = await comArvore(c);
     const i = c as unknown as Interno;
     const nos = ['a', 'b', 'c', 'd'].map((n) => arv.ensureChild(n, 'subagent'));
+    const terminal = (p: string): boolean => p === 'done' || p === 'failed' || p === 'cancelled';
     for (let k = 0; k < nos.length; k += 1) {
       i.publishDetachedCount();
-      expect(c.current.liveSubagents ?? []).toHaveLength(c.current.detachedSubagents ?? 0);
+      const vivosNaLista = (c.current.liveSubagents ?? []).filter((x) => !terminal(x.phase)).length;
+      expect(vivosNaLista).toBe(c.current.detachedSubagents ?? 0);
+      // e o lote NUNCA encolhe — ninguém some da lista ao terminar.
+      expect(c.current.liveSubagents ?? []).toHaveLength(4);
       nos[k]!.finish('final');
     }
+    c.dispose();
+  });
+});
+
+// CONSUMO AO VIVO — relato do dono: "a atualizacao do consumo de tokens na visualizacao dos
+// agentes so aparece no fim, pelo menos nao vi atualizando o consumo durante o trabalho do
+// agente".
+//
+// Ele estava certo, e a causa não era o número chegar tarde: o ÚNICO `setUsage` do nó do
+// filho vivia no `onChildEnd`. O `ownUsage` já era atualizado a cada débito lá dentro do
+// `runChild` — e nunca saía de lá. Então o valor ficava em ZERO a corrida inteira e saltava
+// para o total no instante em que o filho acabava.
+//
+// O que este teste trava é o que ele viu: o número TEM de subir com o filho ainda vivo.
+describe('CONSUMO AO VIVO — os tokens do filho sobem durante o trabalho', () => {
+  it('o nó acumula ANTES de terminar, e o rodapé enxerga', async () => {
+    const c = ctl();
+    const arv = await comArvore(c);
+    const i = c as unknown as Interno;
+    const filho = arv.ensureChild('pesquisador', 'subagent');
+
+    i.publishDetachedCount();
+    expect(c.current.liveSubagents?.[0]?.tokens).toBe(0);
+
+    // Débito do meio da corrida (é o que o `onChildProgress` passa a reportar).
+    filho.setUsage({ tokens: 1200, toolCalls: 1, iterations: 1 });
+    i.publishDetachedCount();
+    expect(c.current.liveSubagents?.[0]?.tokens).toBe(1200);
+    // e ele CONTINUA VIVO — é esse o ponto: não é o número do fim.
+    expect(c.current.detachedSubagents).toBe(1);
+
+    // Segundo débito: sobe de novo.
+    filho.setUsage({ tokens: 5400, toolCalls: 3, iterations: 2 });
+    i.publishDetachedCount();
+    expect(c.current.liveSubagents?.[0]?.tokens).toBe(5400);
+    expect(c.current.detachedSubagents).toBe(1);
+
+    c.dispose();
+  });
+
+  it('cada filho tem o SEU número (um não contamina o outro)', async () => {
+    const c = ctl();
+    const arv = await comArvore(c);
+    const i = c as unknown as Interno;
+    const a = arv.ensureChild('a', 'subagent');
+    const b = arv.ensureChild('b', 'subagent');
+    a.setUsage({ tokens: 900, toolCalls: 0, iterations: 1 });
+    b.setUsage({ tokens: 30, toolCalls: 0, iterations: 1 });
+    i.publishDetachedCount();
+    const porRotulo = new Map(c.current.liveSubagents?.map((x) => [x.label, x.tokens]));
+    expect(porRotulo.get('a')).toBe(900);
+    expect(porRotulo.get('b')).toBe(30);
     c.dispose();
   });
 });
