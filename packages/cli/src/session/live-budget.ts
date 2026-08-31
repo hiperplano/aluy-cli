@@ -666,11 +666,11 @@ export function slashMenuMaxRows(args: {
   /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
   readonly detachedSubagents?: number;
   /**
-   * FOOTER-AGENTES — a coluna de sub-agentes vivos abaixo do composer ocupa altura do
-   * RODAPÉ. Ela não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
-   * sempre), então sem este desconto o frame cruza `rows` justamente quando há agentes.
+   * FOOTER-AGENTES — QUANTOS agentes o rodapé lista. O bloco ocupa linhas INTEIRAS acima
+   * do painel e não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome de sempre);
+   * sem este desconto o frame cruza `rows` justamente quando há agentes na tela.
    */
-  readonly temAgentesRodape?: boolean;
+  readonly agentesNoRodape?: number;
 }): number {
   const liveFloor =
     LIVE_CHROME_BASE_ROWS +
@@ -688,7 +688,7 @@ export function slashMenuMaxRows(args: {
     }) +
     MIN_SPEECH_LINES +
     subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) +
-    rodapeAgentesOverhead(args.temAgentesRodape === true, args.columns ?? 0) +
+    rodapeAgentesOverhead(args.agentesNoRodape ?? 0, args.rows) +
     (args.stagedLines ?? 0);
   // −1 (paddingTop do contêiner do menu) − SAFETY_MARGIN (gatilho `>=` do Ink).
   return Math.max(4, args.rows - liveFloor - 1 - SAFETY_MARGIN);
@@ -727,11 +727,11 @@ export function speechMaxLines(args: {
   /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
   readonly detachedSubagents?: number;
   /**
-   * FOOTER-AGENTES — a coluna de sub-agentes vivos abaixo do composer ocupa altura do
-   * RODAPÉ. Ela não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
-   * sempre), então sem este desconto o frame cruza `rows` justamente quando há agentes.
+   * FOOTER-AGENTES — QUANTOS agentes o rodapé lista. O bloco ocupa linhas INTEIRAS acima
+   * do painel e não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome de sempre);
+   * sem este desconto o frame cruza `rows` justamente quando há agentes na tela.
    */
-  readonly temAgentesRodape?: boolean;
+  readonly agentesNoRodape?: number;
 }): number {
   const overhead = liveOverheadLines({
     live: args.live,
@@ -757,7 +757,7 @@ export function speechMaxLines(args: {
     narrowChromeOverhead(args.columns) -
     // FLICKER-F8 — o aviso de sub-agentes é altura viva CONDICIONAL; ver o helper.
     subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) -
-    rodapeAgentesOverhead(args.temAgentesRodape === true, args.columns ?? 0) -
+    rodapeAgentesOverhead(args.agentesNoRodape ?? 0, args.rows) -
     (args.queuedLines ?? 0) -
     (args.overlayLines ?? 0) -
     (args.composerOverflow ?? 0) -
@@ -808,11 +808,11 @@ export function liveRegionMinRows(args: {
   /** FLICKER-F8 — sub-agentes vivos: o aviso do F8 ocupa altura do frame. Default 0. */
   readonly detachedSubagents?: number;
   /**
-   * FOOTER-AGENTES — a coluna de sub-agentes vivos abaixo do composer ocupa altura do
-   * RODAPÉ. Ela não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome que existe
-   * sempre), então sem este desconto o frame cruza `rows` justamente quando há agentes.
+   * FOOTER-AGENTES — QUANTOS agentes o rodapé lista. O bloco ocupa linhas INTEIRAS acima
+   * do painel e não está no `LIVE_CHROME_BASE_ROWS` (que só conta o chrome de sempre);
+   * sem este desconto o frame cruza `rows` justamente quando há agentes na tela.
    */
-  readonly temAgentesRodape?: boolean;
+  readonly agentesNoRodape?: number;
 }): number {
   const overhead = liveOverheadLines({
     live: args.live,
@@ -829,7 +829,7 @@ export function liveRegionMinRows(args: {
     modeIndicatorOverhead(args.mode) +
     narrowChromeOverhead(args.columns) +
     subagentNoticeOverhead(args.detachedSubagents, args.columns, args.phase) +
-    rodapeAgentesOverhead(args.temAgentesRodape === true, args.columns ?? 0) +
+    rodapeAgentesOverhead(args.agentesNoRodape ?? 0, args.rows) +
     overhead +
     (args.stagedLines ?? 0) +
     (args.overlayLines ?? 0) +

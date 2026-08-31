@@ -301,3 +301,46 @@ describe('CONSUMO AO VIVO — os tokens do filho sobem durante o trabalho', () =
   });
 });
 
+// PEDIR MAIS COISA NO MEIO DO TRABALHO — relato do dono: "quando ele ta processando
+// mostrando em baixo e eu peco mais 2 ele fica estranho".
+//
+// Estranho porque o rodapé SUMIA no instante em que ele mandava a mensagem: a limpeza do
+// lote era feita no começo de TODO turno, sem olhar se o trabalho ainda corria. Uma piscada
+// exatamente quando a informação mais importa — e ele estava pedindo MAIS agentes.
+//
+// A regra passou a ser sobre o TRABALHO, não sobre o turno: desfecho de lote vira passado
+// quando você começa outra coisa; trabalho VIVO não vira passado porque alguém digitou.
+describe('mandar mensagem com agentes VIVOS não apaga o rodapé', () => {
+  it('lote em curso ⇒ a lista SOBREVIVE ao submit', async () => {
+    const c = ctl();
+    const arv = await comArvore(c);
+    const i = c as unknown as Interno;
+    arv.ensureChild('a', 'subagent');
+    arv.ensureChild('b', 'subagent');
+    i.publishDetachedCount();
+    expect(c.current.liveSubagents).toHaveLength(2);
+    expect(c.current.detachedSubagents).toBe(2);
+
+    // O dono manda outra mensagem enquanto eles trabalham.
+    void c.submit('me conta uma lorota');
+    expect(c.current.liveSubagents, 'o rodapé piscou com agentes vivos').toHaveLength(2);
+    c.dispose();
+  });
+
+  it('lote TERMINADO ⇒ o desfecho sai no próximo turno (vira passado)', async () => {
+    const c = ctl();
+    const arv = await comArvore(c);
+    const i = c as unknown as Interno;
+    const nos = ['a', 'b'].map((n) => arv.ensureChild(n, 'subagent'));
+    i.publishDetachedCount();
+    for (const no of nos) no.finish('final');
+    i.publishDetachedCount();
+    // a lista fica (é o desfecho), mas a contagem de vivos zerou
+    expect(c.current.liveSubagents).toHaveLength(2);
+
+    void c.submit('agora outra coisa');
+    expect(c.current.liveSubagents).toBeUndefined();
+    c.dispose();
+  });
+});
+

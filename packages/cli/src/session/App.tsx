@@ -62,7 +62,8 @@ import {
   type HintState,
   FooterAgents,
 } from '../ui/components/index.js';
-import { colunasDoPainel, larguraColunaAgentes } from './footer-agents-layout.js';
+import type { SubAgentChildView } from '../ui/components/SubAgents.js';
+import { blocoSubagentesNaTela } from './subagentes-visiveis.js';
 import { Role, useTheme } from '../ui/theme/index.js';
 import { useTick } from '../ui/hooks/useTick.js';
 import { useFilePicker } from '../ui/hooks/useFilePicker.js';
@@ -109,6 +110,7 @@ import { animTickEnabled, elapsedTickEnabled } from './tick-policy.js';
 import { splitBlocks } from './render-split.js';
 import { aluyNeedsLeadingBlank } from './block-rhythm.js';
 import {
+  LIVE_CHROME_BASE_ROWS,
   mostraIndicadorTrabalho,
   workingIndicator,
   speechMaxLines,
@@ -1169,10 +1171,34 @@ export function App(props: AppProps): React.ReactElement {
   // As larguras vêm do `footer-agents-layout` — o MESMO módulo que o orçamento de altura
   // consulta. Duplicar a conta aqui faria a medição e o desenho divergirem, que é como o
   // frame cruza `rows` e o Ink passa a repintar tudo.
-  const agentesRodape = state.liveSubagents ?? [];
-  const temAgentesRodape = agentesRodape.length > 0;
-  const larguraAgentes = temAgentesRodape ? larguraColunaAgentes(columns) : 0;
-  const colunasPainel = colunasDoPainel(columns, temAgentesRodape);
+  // O RODAPÉ FIXA O MESMO BLOCO DA CONVERSA. O dado vem do último bloco `subagents` — a
+  // mesma fonte, o mesmo componente, a mesma gramática. Inventar um segundo desenho aqui
+  // foi o que produziu "os mesmos agentes com informacoes de status diferentes" em cima e
+  // embaixo; a cópia fixa não tem como divergir.
+  const filhosRodape = ((): readonly SubAgentChildView[] => {
+    // O `liveSubagents` é o INTERRUPTOR, não o dado: ele nasce com o lote e é apagado no
+    // começo do turno seguinte. Sem ele, o bloco da conversa (que fica na história para
+    // sempre) manteria a cópia fixada eternamente no rodapé, muito depois de ela importar.
+    if (state.liveSubagents === undefined) return [];
+    // SÓ QUANDO O DE CIMA SUMIU. "os agentes no footer deveriam aparecer embaixo somente
+    // quando os de cima sumirem" — a cópia é socorro, não um segundo painel.
+    if (
+      blocoSubagentesNaTela({
+        blocks: state.blocks,
+        rows,
+        columns,
+        linhasDoRodape: LIVE_CHROME_BASE_ROWS,
+      })
+    ) {
+      return [];
+    }
+    for (let i = state.blocks.length - 1; i >= 0; i -= 1) {
+      const b = state.blocks[i];
+      if (b?.kind === 'subagents') return b.children;
+    }
+    return [];
+  })();
+
   const indicadorTrabalho = workingIndicator({
     count: state.detachedSubagents ?? 0,
     phase: state.phase,
@@ -4361,7 +4387,7 @@ export function App(props: AppProps): React.ReactElement {
   ...(state.detachedSubagents !== undefined
     ? { detachedSubagents: state.detachedSubagents }
     : {}),
-    temAgentesRodape,
+    agentesNoRodape: filhosRodape.length,
     rows,
     live,
     phase: state.phase,
@@ -4381,7 +4407,7 @@ export function App(props: AppProps): React.ReactElement {
   ...(state.detachedSubagents !== undefined
     ? { detachedSubagents: state.detachedSubagents }
     : {}),
-    temAgentesRodape,
+    agentesNoRodape: filhosRodape.length,
     rows,
     live,
     phase: state.phase,
@@ -4423,7 +4449,7 @@ export function App(props: AppProps): React.ReactElement {
     ...(state.detachedSubagents !== undefined
       ? { detachedSubagents: state.detachedSubagents }
       : {}),
-      temAgentesRodape,
+      agentesNoRodape: filhosRodape.length,
       rows,
       live,
       phase: state.phase,
@@ -5439,7 +5465,7 @@ export function App(props: AppProps): React.ReactElement {
         {/* FOOTER-AGENTES — os sub-agentes VIVOS ganham uma coluna À ESQUERDA do painel,
             separados por uma barra vertical (pedido do dono). Sem agentes vivos o
             <FooterAgents> é passagem direta: a tela de quem não dispara agente não muda. */}
-        <FooterAgents agentes={agentesRodape} largura={larguraAgentes} frame={frame}>
+        <FooterAgents filhos={filhosRodape} rows={rows}>
         {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
             pulso âmbar, que saiu. Continuar passando faria o painel re-renderizar a cada
             quadro sem desenhar nada diferente, e deixaria dois campos aceitos-e-ignorados
@@ -5474,7 +5500,7 @@ export function App(props: AppProps): React.ReactElement {
           // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
           // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
           // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
-          columns={colunasPainel}
+          columns={Math.max(20, columns - 2)}
           error={state.phase === 'error'}
           {...(state.governance !== undefined ? { governance: state.governance } : {})}
           {...(!cycleUiOff && state.cycleProgress !== undefined

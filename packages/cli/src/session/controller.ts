@@ -2365,9 +2365,27 @@ export class SessionController {
     // OBSERVE-ONLY/best-effort (atrás da catraca, via o callback do wiring) — NÃO bloqueia
     // o submit nem altera o `goal` (composição não-relaxável; o callback nunca veta aqui).
     this.onUserPromptSubmit?.(goal);
-    // O LOTE ANTERIOR sai do rodapé aqui, e só aqui: ele sobrevive ao FIM do trabalho de
-    // propósito (é o desfecho), e vira passado quando começa o turno seguinte.
-    if (this.state.liveSubagents !== undefined) this.patch({ liveSubagents: undefined });
+    // O LOTE ANTERIOR sai do rodapé aqui — MAS SÓ SE JÁ ACABOU.
+    //
+    // A primeira versão limpava sempre, e o dono viu o efeito: "quando ele ta processando
+    // mostrando em baixo e eu peco mais 2 ele fica estranho". Estranho porque, no instante
+    // em que ele mandava a mensagem, o rodapé SUMIA — com os agentes ainda trabalhando — e
+    // só voltava quando os novos nasciam. Uma piscada bem no momento em que a informação
+    // mais importa.
+    //
+    // A regra certa é sobre o TRABALHO, não sobre o turno: o desfecho de um lote vira
+    // passado quando você começa outra coisa, mas trabalho VIVO não vira passado por você
+    // ter digitado.
+    // A pergunta é sobre as FASES da lista, não sobre a contagem publicada: aquela tem
+    // HISTERESE (segura ~900ms para o indicador não piscar entre lotes) e, logo depois de
+    // todos terminarem, ainda diz que há trabalho. Consultar o número atrasado fazia o
+    // desfecho ficar pendurado no rodapé um turno a mais.
+    const terminal = (f: string): boolean =>
+      f === 'done' || f === 'failed' || f === 'cancelled';
+    const aindaCorre = (this.state.liveSubagents ?? []).some((f) => !terminal(f.phase));
+    if (this.state.liveSubagents !== undefined && !aindaCorre) {
+      this.patch({ liveSubagents: undefined });
+    }
     // EST-1107 — modo ATIVO de workflow: se há um workflow ativo, cada submissão
     // é DIRECIONADA pelo fluxo (atividades em ordem, com [agente] opcional).
     if (this.activeWorkflow) {
@@ -7388,6 +7406,16 @@ export class SessionController {
     // perguntar à MESMA função que a contagem pergunta.
     const arvores = [...this.detachedTrees];
     if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
+    // O RÓTULO DO MODELO vem do bloco da conversa, não de um campo novo na árvore: é a
+    // MESMA fonte que a conversa mostra, então os dois não podem divergir. O dono viu os
+    // dois blocos falando gramáticas diferentes sobre os mesmos agentes ("ficou muito
+    // redundante em cima e em baixo porem com informacoes de status diferentes"); manter
+    // duas origens para o mesmo rótulo é como isso começa.
+    const modelos = new Map<string, string>();
+    for (const b of this.state.blocks) {
+      if (b.kind !== 'subagents') continue;
+      for (const c of b.children) if (c.model !== undefined) modelos.set(c.label, c.model);
+    }
     const out: LiveSubagent[] = [];
     for (const t of arvores) {
       // O LOTE INTEIRO, não só quem ainda corre. O rodapé precisa mostrar COMO acabou —
@@ -7402,6 +7430,7 @@ export class SessionController {
             ? { durationMs: no.accounting.durationMs }
             : {}),
           tokens: no.accounting.tokens,
+          ...(modelos.has(no.label) ? { model: modelos.get(no.label) } : {}),
         });
       }
     }
@@ -7719,6 +7748,17 @@ export class SessionController {
         const no = this.flowTree?.node(`root/${label}`);
         if (no === undefined) return;
         no.setUsage(usage);
+      // E o BLOCO da conversa acompanha: é ele que a tela desenha (e que o rodapé fixa),
+      // então atualizar só o nó da árvore deixaria o número subindo onde ninguém vê.
+      const atual = this.state.blocks[lastSubAgentsIndex([...this.state.blocks], label)];
+      const filho =
+        atual?.kind === 'subagents' ? atual.children.find((c) => c.label === label) : undefined;
+      if (filho !== undefined && filho.status === 'running') {
+        this.upsertSubAgentChild(label, {
+          ...filho,
+          summary: `${abbreviateCount(usage.tokens)} tokens`,
+        });
+      }
         // Republica para a tela acompanhar. A cadência é uma por chamada ao modelo do
         // filho — não por token —, então isto não vira um fluxo de re-render.
         this.publishDetachedCount();
