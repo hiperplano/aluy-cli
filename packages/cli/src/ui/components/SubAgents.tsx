@@ -13,7 +13,8 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
-import { Glyph, Role } from '../theme/index.js';
+import { Glyph, Role, useTheme } from '../theme/index.js';
+import stringWidth from 'string-width';
 
 /** Espelha `SubAgentChild` do model (sem importar o tipo p/ manter o componente puro). */
 export interface SubAgentChildView {
@@ -57,6 +58,7 @@ function statusWord(child: SubAgentChildView): string {
 
 /** UMA linha de filho: `  [rust] ◷ rodando` / `  [rust] ✓ pronto · 1.2k tokens · 3 tools`. */
 function ChildLine(props: { readonly child: SubAgentChildView }): React.ReactElement {
+  const theme = useTheme();
   const c = props.child;
   const word = statusWord(c);
   const glyph =
@@ -71,19 +73,32 @@ function ChildLine(props: { readonly child: SubAgentChildView }): React.ReactEle
       <Glyph name="err" role="danger" />
     );
   const wordRole = c.status === 'done' ? 'success' : c.status === 'fail' ? 'danger' : 'fgDim';
+  // O `✔` mede DUAS colunas na conta do Ink (`string-width`) e UMA na nossa
+  // (`displayWidth`) — as duas bibliotecas discordam. Com o separador FIXO em um espaço, a
+  // linha do filho PRONTO nascia uma coluna mais larga que a dos outros: o `✔  pronto`
+  // saía com um espaço a mais que o `✘ falhou` logo abaixo. Visível na tela do dono.
+  //
+  // A célula do glifo passa a ter largura FIXA, medida pela conta do próprio Ink.
+  const nomeGlifo =
+    c.status === 'running' ? 'clock' : c.status === 'done' ? 'ok' : c.status === 'cancelled' ? 'err' : 'err';
+  // A célula do glifo vale 2 colunas SEMPRE, e o separador é 1 espaço em cima disso.
+  // (A primeira tentativa usava `max(1, 2 - largura)`, que dá 1 nos dois casos e não
+  // compensa nada — o `✔` seguia uma coluna à frente do `✘`.)
+  const espacoAposGlifo = ' '.repeat(Math.max(0, 2 - stringWidth(theme.glyph(nomeGlifo))) + 1);
   return (
     <Box paddingLeft={2}>
       <Role name="accent">[{c.label}]</Role>
       <Text> </Text>
       {glyph}
-      <Text> </Text>
+      <Text>{espacoAposGlifo}</Text>
       <Role name={wordRole}>{word}</Role>
       {/* ADR-0146 (D5) — tier/modelo RESOLVIDO: visível enquanto roda E mantido no
           resumo final (mesma linha, ao lado do status/summary). NUNCA credencial. */}
       {c.model !== undefined && <Role name="fgDim"> · {c.model}</Role>}
-      {c.summary !== undefined && c.status !== 'running' && (
-        <Role name="fgDim"> · {c.summary}</Role>
-      )}
+      {/* O resumo aparece TAMBÉM enquanto ele corre. Era escondido no `running` porque, na
+          época, o número só existia no fim; desde que o uso do filho passou a subir a cada
+          débito (`onChildProgress`), esconder o resumo é esconder justamente o que muda. */}
+      {c.summary !== undefined && <Role name="fgDim"> · {c.summary}</Role>}
     </Box>
   );
 }

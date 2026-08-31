@@ -46,10 +46,13 @@ describe('FLICKER-F8 — o <App> passa `detachedSubagents` a TODO o orçamento d
 // e o campo é OPCIONAL: quem esquecer não vê erro de tipo nem teste vermelho, e o frame
 // volta a cruzar `rows` só quando há agentes na tela — o defeito mais difícil de reproduzir
 // que existe, porque some sozinho quando eles terminam.
+// O campo passou de booleano a CONTAGEM quando o bloco deixou de ser uma coluna ao lado do
+// painel e virou linhas inteiras acima dele: a altura passou a depender de QUANTOS agentes
+// há, não só de haver algum.
 describe('FOOTER-AGENTES — o <App> avisa o orçamento que o rodapé cresceu', () => {
   for (const fn of ['speechMaxLines', 'slashMenuMaxRows', 'liveRegionMinRows']) {
-    it(`${fn} recebe \`temAgentesRodape\``, () => {
-      expect(chamada(fn)).toContain('temAgentesRodape');
+    it(`${fn} recebe \`agentesNoRodape\``, () => {
+      expect(chamada(fn)).toContain('agentesNoRodape');
     });
   }
 });
@@ -80,19 +83,34 @@ describe('CONSUMO AO VIVO — os três elos do fio existem', () => {
     );
   });
 
-  it('2) o controller ESCUTA e escreve no nó do filho', () => {
-    const i = APP_CONTROLLER.indexOf('onChildProgress');
+  /**
+   * O CORPO do handler, delimitado pelo handler SEGUINTE — e não por uma janela de N
+   * caracteres, que foi como esta guarda nasceu e como ela quebrou: bastou o handler
+   * crescer (passou a atualizar também o bloco da conversa) para a chamada de republicação
+   * cair fora da janela e o teste acusar um defeito que não existia. Régua que depende do
+   * tamanho do código mede o código, não o contrato.
+   */
+  function corpoDoHandler(): string {
+    const i = APP_CONTROLLER.indexOf('onChildProgress:');
     expect(i, 'o controller não registra `onChildProgress`').toBeGreaterThan(-1);
-    const bloco = APP_CONTROLLER.slice(i, i + 900);
-    expect(bloco, 'escuta mas não escreve no nó').toContain('setUsage');
+    const fim = APP_CONTROLLER.indexOf('onChildEnd:', i);
+    return APP_CONTROLLER.slice(i, fim === -1 ? i + 4000 : fim);
+  }
+
+  it('2) o controller ESCUTA e escreve no nó do filho', () => {
+    expect(corpoDoHandler(), 'escuta mas não escreve no nó').toContain('setUsage');
   });
 
   it('3) e REPUBLICA, senão a tela não enxerga a subida', () => {
-    const i = APP_CONTROLLER.indexOf('onChildProgress');
-    const bloco = APP_CONTROLLER.slice(i, i + 900);
-    expect(bloco, 'escreve no nó mas não republica — a tela fica parada').toContain(
+    expect(corpoDoHandler(), 'escreve no nó mas não republica — a tela fica parada').toContain(
       'publishDetachedCount',
     );
+  });
+
+  // O bloco da CONVERSA é o que a tela desenha (e o que o rodapé fixa). Atualizar só o nó
+  // da árvore deixaria o número subindo onde ninguém vê.
+  it('4) e atualiza o BLOCO, que é o que aparece', () => {
+    expect(corpoDoHandler(), 'atualiza o nó mas não o bloco').toContain('upsertSubAgentChild');
   });
 });
 

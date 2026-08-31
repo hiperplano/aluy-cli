@@ -579,6 +579,11 @@ export interface LiveSubagent {
    * (ver `onChildProgress` no spawner — antes o número ficava em zero a corrida inteira).
    */
   readonly tokens?: number | undefined;
+  /**
+   * Rótulo do modelo/tier RESOLVIDO deste filho (`herdado (...)`, `custom · <slug>`).
+   * NUNCA provider/baseURL/credencial (HG-2/CLI-SEC-7) — mesmo filtro do resto da tela.
+   */
+  readonly model?: string | undefined;
 }
 
 export interface SessionState {
