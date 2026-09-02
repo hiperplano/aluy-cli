@@ -131,6 +131,37 @@ export class TelegramClient {
   }
 
   /**
+   * "DIGITANDO…" no Telegram (`sendChatAction`).
+   *
+   * Pedido do dono em 02/09: "ele não dá a msg como lida e nem mostra que tá digitando uma
+   * resposta". O ACK (👀) responde a primeira metade; esta é a segunda — enquanto o agente
+   * trabalha, o celular mostra o indicador nativo, em vez de silêncio por dezenas de
+   * segundos (um turno dele levou 42s).
+   *
+   * O indicador do Telegram EXPIRA em ~5s, então quem chama precisa repetir enquanto o
+   * trabalho durar — a janela curta é do protocolo, não uma escolha nossa.
+   *
+   * Segurança: o alvo vem do INGRESSO, nunca de argumento do modelo, e não há conteúdo —
+   * é um sinal de estado. FAIL-SAFE: qualquer falha devolve `false` e segue; um indicador
+   * que não sai não pode atrapalhar a resposta que importa.
+   */
+  async typing(chatId: number, signal?: AbortSignal): Promise<boolean> {
+    const url = `${this.apiBase}/bot${this.token}/sendChatAction`;
+    try {
+      const resp = await this.fetchFn(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, action: 'typing' }),
+        ...(signal ? { signal } : {}),
+      });
+      if (!resp.ok) return false;
+      const body = (await resp.json()) as { ok?: unknown };
+      return body?.ok === true;
+    } catch {
+      return false;
+    }
+  }
+  /**
    * ACK VISUAL — reage a uma mensagem recebida ("visto").
    *
    * Pedido do dono em 01/09: "ele não deveria marcar a msg quando é lida". A Bot API NÃO

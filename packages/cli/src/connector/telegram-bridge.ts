@@ -72,6 +72,15 @@ export interface TelegramBridgeOptions {
    */
   readonly ack?: (chatId: number, messageId: number, emoji: '👀' | '🚫') => void;
   /**
+   * "DIGITANDO…" no canal enquanto o agente trabalha (`sendChatAction`).
+   *
+   * Pedido do dono em 02/09: "nem mostra que tá digitando uma resposta". Um turno dele
+   * levou 42s — sem sinal nenhum, o celular fica mudo e a impressão é de que nada chegou.
+   *
+   * Porta opcional: ausente ⇒ comportamento de hoje, zero regressão.
+   */
+  readonly digitando?: (chatId: number) => void;
+  /**
    * Recuo (ms) da N-ésima tentativa. Injetável só p/ TESTE: com o recuo real (1s, 2s,
    * 4s…) provar o reinício custaria segundos de suíte por caso. Ausente ⇒ o recuo real.
    */
@@ -116,6 +125,12 @@ const TELEGRAM_DATA_LABEL = 'telegram (dado externo)';
  * Base curta porque a queda típica é transitória (rede oscilou, 409 de outro cliente) e
  * o dono espera a ponte de volta em segundos, não em minutos.
  */
+/** Intervalo do batimento do "digitando" — o indicador expira em ~5s no Telegram. */
+const DIGITANDO_INTERVALO_MS = 4_000;
+
+/** Teto de batimentos (~2 min). Ver `iniciarDigitando` para o porquê de haver teto. */
+const DIGITANDO_MAX_BATIMENTOS = 30;
+
 const PUMP_RECUO_BASE_MS = 1_000;
 const PUMP_RECUO_MAX_MS = 30_000;
 
@@ -167,6 +182,12 @@ export class TelegramBridge {
     | ((chatId: number, messageId: number, emoji: '👀' | '🚫') => void)
     | undefined;
 
+  /** Ver `TelegramBridgeOptions.digitando`. */
+  private readonly digitando: ((chatId: number) => void) | undefined;
+
+  /** Batimento do "digitando" — o indicador do Telegram expira em ~5s. */
+  private batimentoDigitando: ReturnType<typeof setInterval> | undefined;
+
   /** Ver `TelegramBridgeOptions.recuoMs`. */
   private readonly recuoMs: (tentativa: number) => number;
   /**
@@ -192,6 +213,7 @@ export class TelegramBridge {
     this.log = opts.log ?? ((line) => process.stderr.write(`${line}\n`));
     this.aoParar = opts.aoParar;
     this.ack = opts.ack;
+    this.digitando = opts.digitando;
     this.recuoMs =
       opts.recuoMs ??
       ((t) => Math.min(PUMP_RECUO_MAX_MS, PUMP_RECUO_BASE_MS * 2 ** Math.max(0, t - 1)));
@@ -234,6 +256,8 @@ export class TelegramBridge {
     }
     switch (decision.kind) {
       case 'instruction':
+        // "digitando…" JÁ — antes de o modelo pensar. É o sinal de que a mensagem chegou.
+        this.iniciarDigitando(Number(msg.conversation));
         // C3 — TRAVA o alvo do egresso no chat allowlistado que falou (a conversa corrente).
         // O `telegram_send` responderá AQUI, nunca a um destino arbitrário do modelo.
         this.lockedConversation = msg.conversation;
@@ -361,6 +385,39 @@ export class TelegramBridge {
   }
 
   /**
+   * Liga o "digitando…" no canal e o REPETE — o indicador do Telegram expira em ~5s, então
+   * um único disparo sumiria antes de o agente terminar (um turno do dono levou 42s).
+   *
+   * O TETO existe porque nada aqui sabe quando o turno acaba de verdade: a resposta pode
+   * sair por `telegram_send` (e aí `pararDigitando` corta), mas também pode não sair nunca
+   * — turno que falha, que responde só no terminal, ou que o dono interrompe. Sem teto, o
+   * "digitando" ficaria eterno, que é pior que não ter: viraria mentira permanente.
+   */
+  private iniciarDigitando(chatId: number): void {
+    if (this.digitando === undefined) return;
+    this.digitando(chatId);
+    let restantes = DIGITANDO_MAX_BATIMENTOS;
+    this.batimentoDigitando = setInterval(() => {
+      restantes -= 1;
+      if (restantes <= 0 || this.ac.signal.aborted) {
+        this.pararDigitando();
+        return;
+      }
+      this.digitando?.(chatId);
+    }, DIGITANDO_INTERVALO_MS);
+    // `unref`: o batimento JAMAIS pode segurar o processo vivo no encerramento — foi
+    // exatamente um handle esquecido que fez o Ctrl-C demorar 2,2s (ver `descartar-corpo`).
+    this.batimentoDigitando.unref?.();
+  }
+
+  /** Corta o "digitando". Idempotente. */
+  private pararDigitando(): void {
+    if (this.batimentoDigitando !== undefined) {
+      clearInterval(this.batimentoDigitando);
+      this.batimentoDigitando = undefined;
+    }
+  }
+  /**
    * C3 + C4 — a tool `telegram_send` GATEADA. O agente passa SÓ `{ text }`: o DESTINO é o
    * alvo TRAVADO (`lockedConversation`), NUNCA um arg do modelo (fecha exfiltração, TC-5).
    * Antes de enviar, consulta a catraca (C4): estouro ⇒ NEGA (devolve erro, não enfileira).
@@ -392,6 +449,8 @@ export class TelegramBridge {
    * DESTINO é o alvo TRAVADO — NUNCA um arg do modelo (fecha exfiltração, TC-5).
    */
   private async runSend(input: Readonly<Record<string, unknown>>): Promise<ToolResult> {
+    // A resposta saiu ⇒ o "digitando" cumpriu seu papel e para agora, sem esperar o teto.
+    this.pararDigitando();
     const text = String((input as { text?: unknown }).text ?? '').trim();
     if (text === '') {
       return { ok: false, observation: 'telegram_send: "text" é obrigatório.' };

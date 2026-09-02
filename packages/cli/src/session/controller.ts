@@ -2401,6 +2401,20 @@ export class SessionController {
     await this.loop.drainMemoryWrites();
   }
 
+  /**
+   * A origem do ÚLTIMO turno submetido (`'telegram'`, ou ausente = digitado aqui).
+   *
+   * Existe para desgrudar a DICA DE CANAL. Quando um turno chega do Telegram, injetamos
+   * uma observação dizendo "responda com `telegram_send`" — e ela FICA no histórico. O
+   * dono viu o efeito em 02/09: mandou uma pelo Telegram, ele respondeu lá (certo);
+   * digitou "ola" no TERMINAL logo depois, e ele respondeu pelo Telegram de novo. Ao
+   * consertar "ele não sabe por onde responder" eu criei "ele nunca mais responde aqui".
+   *
+   * Uma observação não se apaga do histórico, então a correção é SIMÉTRICA: quando o
+   * turno vem do terminal DEPOIS de um turno externo, dizemos isso com a mesma clareza.
+   */
+  private origemDoUltimoTurno: string | undefined;
+
   async submit(
     goal: string,
     attachments: readonly HistoryItem[] = [],
@@ -2508,7 +2522,33 @@ export class SessionController {
       text: goal,
       ...(opts.origem !== undefined && opts.origem !== '' ? { origem: opts.origem } : {}),
     });
-    await this.runResolvedTurn(goal, attachments);
+    // DESGRUDA A DICA DE CANAL. Um turno do Telegram injeta uma observação dizendo
+    // "responda com `telegram_send`", e observação NÃO se apaga do histórico: nos turnos
+    // seguintes o modelo continuava lendo aquilo e respondendo pelo Telegram mesmo com o
+    // dono digitando aqui. Ele viu em 02/09 — mandou uma pelo Telegram, foi respondida lá
+    // (certo); digitou "ola" no terminal e a resposta saiu pelo Telegram de novo.
+    //
+    // A correção é SIMÉTRICA: se este turno veio do TERMINAL logo depois de um externo,
+    // dizemos isso com a mesma clareza. Só nessa TRANSIÇÃO — repetir a cada turno local
+    // encheria o contexto de ruído e treinaria o modelo a ignorar o aviso.
+    const origemAgora = opts.origem !== undefined && opts.origem !== '' ? opts.origem : undefined;
+    const veioDeFora = this.origemDoUltimoTurno !== undefined;
+    const contra: HistoryItem[] =
+      origemAgora === undefined && veioDeFora
+        ? [
+            {
+              role: 'observation',
+              toolName: 'canal',
+              text:
+                `Este turno foi digitado NO TERMINAL, não veio do ${this.origemDoUltimoTurno}. ` +
+                'Responda AQUI, na conversa do terminal. A instrução do turno anterior sobre ' +
+                'usar a tool de envio do canal externo NÃO vale para este turno — use-a apenas ' +
+                'quando a mensagem tiver chegado por lá, ou quando o dono pedir explicitamente.',
+            },
+          ]
+        : [];
+    this.origemDoUltimoTurno = origemAgora;
+    await this.runResolvedTurn(goal, [...contra, ...attachments]);
   }
 
   /**

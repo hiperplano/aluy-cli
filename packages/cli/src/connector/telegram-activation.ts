@@ -124,6 +124,28 @@ export async function activateTelegram(
     sink: opts.sink,
     redactor: client,
     ...(opts.aoParar !== undefined ? { aoParar: opts.aoParar } : {}),
+    // ACK VISUAL (👀 aceita · 🚫 descartada) e "digitando…". As DUAS portas vivem aqui
+    // porque só a ativação tem o `client`; a ponte apenas as CHAMA. Uma fiação minha se
+    // perdeu entre edições e o efeito foi silencioso e enganoso: a ponte seguia chamando
+    // `this.ack(...)`, mas com a porta ausente a chamada virava no-op — nenhuma reação
+    // saía. O dono reportou em 02/09 ("não dá a msg como lida") e eu quase errei o
+    // diagnóstico: verifiquei a CHAMADA no bundle e concluí que estava instalado, sem
+    // checar se alguém FORNECIA a porta.
+    //
+    // Alvo e conteúdo vêm do INGRESSO, nunca do modelo: emoji de conjunto fechado, e o
+    // "digitando" não carrega texto. Best-effort: falhar aqui não pode travar o ingresso.
+    ack: (chatId, messageId, emoji) => {
+      void client.react(chatId, messageId, emoji).then((ok) => {
+        // O RESULTADO vai ao diário: sem ele, "a reação não apareceu" ficava
+        // indistinguível de "a reação nem foi tentada" — a dúvida exata do dono.
+        opts.bridgeOverrides?.log?.(
+          `[telegram] ack chat=${String(chatId)} msg=${String(messageId)} → ${ok ? 'ok' : 'FALHOU'}`,
+        );
+      });
+    },
+    digitando: (chatId) => {
+      void client.typing(chatId);
+    },
     ...(opts.bridgeOverrides ?? {}),
   });
   return { active: true, bridge, allowlistSize: allowlist.size };
