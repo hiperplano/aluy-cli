@@ -2,6 +2,9 @@
 // exit 0. Injeta o probe inteiro (fatos prontos) — sem keychain/rede/fs reais.
 
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runDoctor } from '../../src/commands/doctor.js';
 import type { TerminalIO } from '../../src/auth/io.js';
 import type { DoctorFacts } from '../../src/doctor/checks.js';
@@ -56,6 +59,20 @@ function allOk(): DoctorFacts {
 /** Probe que devolve os fatos prontos (override de cada gatherer). */
 function probeOf(facts: DoctorFacts): DoctorProbeDeps {
   return {
+    // AMBIENTE DETERMINÍSTICO — sem isto o teste dependia da máquina de quem o rodava.
+    //
+    // `probeOf` dubla os coletores por fato, mas o do PROVIDER LOCAL não tem um `gather*`
+    // injetável: nasce dentro do probe lendo config e env REAIS (`gatherLocalProvider` em
+    // probe.ts). Na máquina do dev há credencial e passa; na CI, com HOME limpo, não há —
+    // `provider-local` vira `fail` e o exit vira 1, reprovando um caso cuja premissa é
+    // "tudo ok ⇒ exit 0".
+    //
+    // Foi o que reprovou o job `ci` desde a rc.139 e, sem release, congelou a dist-tag `rc`
+    // do npm — a mesma que o autoupdate consulta (nenhuma máquina do npm atualizou por ~10
+    // dias). Usa as deps que JÁ existem para isso; nada é afrouxado, o check continua
+    // rodando e continua podendo falhar — só deixa de ler o ambiente de quem testa.
+    aluyHome: mkdtempSync(join(tmpdir(), 'aluy-doctor-cmd-')),
+    env: { ALUY_BACKEND: 'local', ALUY_LOCAL_API_KEY: 'chave-sintetica-de-teste' },
     gatherAuth: async () => facts.auth,
     gatherBroker: async () => facts.broker,
     gatherCatalog: async () => facts.catalog,
@@ -131,8 +148,11 @@ describe('aluy doctor — exit code', () => {
     const okProbe: DoctorProbeDeps = {
       // F182 — tier de BROKER exige backend broker explícito (num box local/BYO o
       // probe marca o tier N/A e o tester não roda).
-      env: { ALUY_BACKEND: 'broker', ALUY_BROKER_URL: 'https://broker.test' },
       ...probeOf(allOk()),
+      // O `env` vem DEPOIS do spread de propósito: `probeOf` passou a injetar um
+      // ambiente LOCAL determinístico (ver lá) e este caso precisa do backend BROKER.
+      // Sem a inversão o local venceria e o `provider-local` entraria no relatório.
+      env: { ALUY_BACKEND: 'broker', ALUY_BROKER_URL: 'https://broker.test' },
       tierTester: async () => ({ tier: 'aluy-granito', responded: true }),
     };
     const ok = fakeIO();
@@ -141,8 +161,11 @@ describe('aluy doctor — exit code', () => {
     expect(ok.out.join('\n')).toContain('tier (--deep)');
 
     const badProbe: DoctorProbeDeps = {
-      env: { ALUY_BACKEND: 'broker', ALUY_BROKER_URL: 'https://broker.test' },
       ...probeOf(allOk()),
+      // O `env` vem DEPOIS do spread de propósito: `probeOf` passou a injetar um
+      // ambiente LOCAL determinístico (ver lá) e este caso precisa do backend BROKER.
+      // Sem a inversão o local venceria e o `provider-local` entraria no relatório.
+      env: { ALUY_BACKEND: 'broker', ALUY_BROKER_URL: 'https://broker.test' },
       tierTester: async () => ({ tier: 'aluy-flux', responded: false, error: 'sem crédito' }),
     };
     const bad = fakeIO();

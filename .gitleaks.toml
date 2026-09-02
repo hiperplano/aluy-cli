@@ -161,6 +161,32 @@ paths = [
   '''packages/cli-core/tests/mcp/discovery\.test\.ts$''',
 ]
 
+# ── Allowlist da FIXTURE de redação do DIGEST do turno (F199, path fechado) ───
+# Este arquivo prova que um segredo na SAÍDA DE ERRO é redigido JÁ no digest do turno
+# (defesa em camada, CLI-SEC-6) — o resumo que vai ao rodapé nunca pode carregar o que
+# o journal apaga. Por natureza planta uma string com a FORMA de chave AWS
+# (`AKIA` + letras SEQUENCIAIS `ABCDEFGHIJKLMNOP`, entropia zero) — SINTÉTICA/FAKE —
+# que é o insumo que prova a redação: o próprio teste asserta `.not.toContain(...)`.
+#
+# Por que a allowlist e não um conserto no fonte: o gitleaks varre o HISTÓRICO
+# (`gitleaks git .`), e o literal entrou no commit da rc.139 (5e0730ab, 21/08).
+# Mudar o HEAD não tira o achado do passado — a mesma razão já documentada no
+# cabeçalho deste arquivo para os fixtures da R9 e do /export.
+#
+# CONSEQUÊNCIA MEDIDA: este achado é o que reprovava o job `secrets` e, com ele, TODA
+# a pipeline de release desde a rc.139. Sem release, a dist-tag `rc` do npm congelou
+# na 139 — e era justamente ela que o autoupdate consultava, então nenhuma máquina
+# instalada pelo npm recebeu atualização por ~10 dias. Um falso positivo numa fixture
+# de teste de segurança parou a entrega inteira, em silêncio.
+#
+# Cobertura por PATH EXATO (regex ancorado `$`); nenhum outro path é afetado. Mesma
+# política honesta dos fixtures acima — NÃO é supressão de segredo real.
+[[allowlists]]
+description = "Fixture sintética da redação do digest do turno (F199) — só este path, nunca segredo real."
+paths = [
+  '''packages/cli/tests/session/suggest-digest\.test\.ts$''',
+]
+
 # ── Allowlist global (HONESTA, fechada) ──────────────────────────────────────
 [[allowlists]]
 description = "Placeholders sintéticos da F0-S1 (EST-0004/0005) e e-mails RFC 2606 — NÃO são segredos reais."

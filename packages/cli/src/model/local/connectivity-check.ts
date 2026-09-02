@@ -7,6 +7,8 @@
 // sucesso sem o modelo ter respondido de verdade. Devolve ok + um detalhe ACIONÁVEL
 // (status HTTP + dica de chave/baseURL/modelo). 15s de timeout. NUNCA lança.
 
+import { descartarCorpo } from './descartar-corpo.js';
+
 export interface ModelCheckResult {
   readonly ok: boolean;
   /** Detalhe legível: `HTTP 200`, `HTTP 401 — chave inválida? …`, `não conectou: …`. */
@@ -80,7 +82,14 @@ export async function checkModelConnectivity(args: {
               messages: [{ role: 'user', content: 'ping' }],
             }),
           });
-    if (res.ok) return { ok: true, detail: `HTTP ${res.status}` };
+    if (res.ok) {
+      // SAÍDA EM 2 CTRL-C — o ping só olha o STATUS; o corpo (um `chat/completions` de 1
+      // token) nunca é lido. Deixá-lo pendurado prende o socket à requisição e SEGURA o
+      // laço de eventos do Node — o processo sobrevivia ao 2º Ctrl-C e só morria no cão
+      // de guarda de 2s do `run.tsx`. Ver `descartar-corpo.ts` p/ a medição.
+      descartarCorpo(res);
+      return { ok: true, detail: `HTTP ${res.status}` };
+    }
     let body = '';
     try {
       body = (await res.text()).replace(/\s+/g, ' ').slice(0, 160);

@@ -65,7 +65,9 @@ import { isNewer, newestInChannel, pickAutoUpdateCandidate } from '@hiperplano/a
 
 const PKG = '@hiperplano/aluy-cli';
 const ALUY_DIR = join(homedir(), '.aluy');
-const STATE_PATH = join(ALUY_DIR, 'auto-update.json');
+/** Nome do arquivo de estado — separado p/ compor com o dir INJETÁVEL (ver `aluyDir`). */
+const STATE_FILE = 'auto-update.json';
+const STATE_PATH = join(ALUY_DIR, STATE_FILE);
 // INTERVALO ENTRE CHECAGENS — 15 min, por decisão do dono ("ele deveria checar a cada
 // 15 minutos").
 //
@@ -141,6 +143,19 @@ export interface AutoUpdateDeps {
    * não dispara. Resultado: só a FALHA aparecia; o SUCESSO, nunca.
    */
   readonly aoInstalar?: (versao: string) => void;
+  /**
+   * Raiz do `~/.aluy/` — INJETÁVEL PARA TESTE, e não é conveniência: sem ela, a única
+   * forma de isolar era dublar `homedir` do `node:os`, e esse dublê vale só para o grafo
+   * de módulos do arquivo que o declara. Quando OUTRO teste do mesmo worker já carregou
+   * este módulo, o dublê não se aplica — e o teste passa a ler (e poder ESCREVER) o
+   * `~/.aluy/auto-update.json` REAL de quem roda a suíte.
+   *
+   * Foi medido em 02/09: o caso passava isolado e falhava junto dos vizinhos, porque caía
+   * no estado real (com `lastCheck` recente ⇒ retorno antecipado). Um caminho injetável
+   * remove a classe inteira — mesma disciplina do `baseDir` do TodoStore e do `vaultPath`
+   * do cofre, ambos adotados depois de dano equivalente.
+   */
+  readonly aluyDir?: string;
 }
 
 function killSwitch(env: NodeJS.ProcessEnv): boolean {
@@ -209,10 +224,11 @@ function makeState(lastCheck: number, extras: AutoUpdateExtras = {}): AutoUpdate
 
 const OUTCOMES: readonly string[] = ['sem-novidade', 'instalado', 'instalacao-falhou'];
 
-function readState(): AutoUpdateState | null {
+function readState(dir?: string): AutoUpdateState | null {
+  const alvo = dir !== undefined ? join(dir, STATE_FILE) : STATE_PATH;
   try {
-    if (!existsSync(STATE_PATH)) return null;
-    const s = JSON.parse(readFileSync(STATE_PATH, 'utf8')) as Partial<AutoUpdateState>;
+    if (!existsSync(alvo)) return null;
+    const s = JSON.parse(readFileSync(alvo, 'utf8')) as Partial<AutoUpdateState>;
     if (typeof s.lastCheck === 'number') {
       return makeState(s.lastCheck, {
         installedOnDisk: typeof s.installedOnDisk === 'string' ? s.installedOnDisk : undefined,
@@ -233,10 +249,11 @@ function readState(): AutoUpdateState | null {
   return null;
 }
 
-function writeState(state: AutoUpdateState): void {
+function writeState(state: AutoUpdateState, dir?: string): void {
   try {
-    mkdirSync(ALUY_DIR, { recursive: true });
-    writeFileSync(STATE_PATH, JSON.stringify(state), { mode: 0o600 });
+    const raiz = dir ?? ALUY_DIR;
+    mkdirSync(raiz, { recursive: true });
+    writeFileSync(join(raiz, STATE_FILE), JSON.stringify(state), { mode: 0o600 });
   } catch {
     // fail-soft — perder o cache só custa um check a mais no próximo boot
   }
@@ -345,7 +362,7 @@ export async function runAutoUpdate(
   const scriptPath = deps.scriptPath ?? process.argv[1];
   if (!isNpmGlobalInstall(scriptPath, deps.realpath)) return; // rodando do repo — nunca instala
 
-  const prev = readState();
+  const prev = readState(deps.aluyDir);
   const intervaloMs = ((): number => {
     const bruto = Number.parseInt(env.ALUY_AUTO_UPDATE_EVERY_MS ?? '', 10);
     return Number.isFinite(bruto) && bruto >= 60_000 ? bruto : CHECK_EVERY_MS;
@@ -390,6 +407,7 @@ export async function runAutoUpdate(
     }
     writeState(
       makeState(Date.now(), { installedOnDisk, lastOutcome: outcome, latestSeen, failedVersion }),
+      deps.aluyDir,
     );
   } catch {
     // offline / timeout / registry fora / npm ausente ⇒ silêncio total, sem bumpar o cache

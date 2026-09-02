@@ -20,23 +20,16 @@ import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { runAutoUpdate } from '../../src/io/auto-update.js';
 
-// ISOLAMENTO OBRIGATÓRIO. `readState`/`writeState` usam `homedir()` do `node:os` — NÃO o
-// `env` passado por parâmetro. Sem este dublê, este arquivo LERIA E ESCREVERIA o
-// `~/.aluy/auto-update.json` REAL de quem roda a suíte. Já aconteceu dano por isso duas
-// vezes em 01/09 (5.617 vetores na memória mem0 do dono; o token de Telegram dele
-// sobrescrito por um de teste), e aqui o efeito seria mais sutil: bagunçar o `lastCheck`
-// de quem roda, adiando a atualização real dele em silêncio.
-// `vi.hoisted`: o `vi.mock` é IÇADO acima das declarações do módulo, então uma const
-// comum ainda não existe quando a fábrica roda.
-const HOME_FALSO = vi.hoisted(() => ({ valor: '' }));
-vi.mock('node:os', async () => {
-  const real = await vi.importActual<typeof import('node:os')>('node:os');
-  return {
-    ...real,
-    homedir: () => HOME_FALSO.valor,
-    default: { ...real, homedir: () => HOME_FALSO.valor },
-  };
-});
+// ISOLAMENTO — pelo CAMINHO INJETÁVEL (`aluyDir`), não por dublê de `node:os`.
+//
+// A 1ª versão dublava `homedir` com `vi.mock('node:os')`. Passava isolada e FALHAVA junto
+// dos vizinhos: o dublê vale só para o grafo de módulos do arquivo que o declara, e quando
+// outro teste do mesmo worker já carregou `auto-update.js`, ele fica com o `homedir` REAL —
+// o teste passava a ler (e a poder ESCREVER) o `~/.aluy/auto-update.json` de quem roda a
+// suíte. Com `lastCheck` recente lá, a função retornava antes e o caso caía.
+//
+// Uma dep de caminho remove a classe inteira, e é a MESMA disciplina já adotada no repo
+// depois de dano equivalente: `baseDir` no TodoStore e `vaultPath` no cofre.
 
 /** Registry dublê: devolve o mapa de dist-tags pedido. */
 function registry(tags: Record<string, string>) {
@@ -66,7 +59,6 @@ describe('aoInstalar — o sucesso AVISA na sessão', () => {
   let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'aluy-autoup-'));
-    HOME_FALSO.valor = dir; // o estado do autoupdate vai p/ o tmpdir, nunca p/ o ~ real
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -77,6 +69,7 @@ describe('aoInstalar — o sucesso AVISA na sessão', () => {
       spawn: spawnFalso(true),
       scriptPath: '/x/lib/node_modules/@hiperplano/aluy-cli/dist-bundle/bin/aluy.js',
       realpath: (p) => p,
+      aluyDir: dir, // NUNCA o `~/.aluy` real de quem roda a suíte
       aoInstalar,
     });
     expect(aoInstalar, 'o sucesso tem de ser anunciado').toHaveBeenCalledWith('1.0.0-rc.161');
@@ -89,6 +82,7 @@ describe('aoInstalar — o sucesso AVISA na sessão', () => {
       spawn: spawnFalso(true),
       scriptPath: '/x/lib/node_modules/@hiperplano/aluy-cli/dist-bundle/bin/aluy.js',
       realpath: (p) => p,
+      aluyDir: dir, // NUNCA o `~/.aluy` real de quem roda a suíte
       aoInstalar,
     });
     expect(aoInstalar).not.toHaveBeenCalled();
@@ -101,6 +95,7 @@ describe('aoInstalar — o sucesso AVISA na sessão', () => {
       spawn: spawnFalso(false),
       scriptPath: '/x/lib/node_modules/@hiperplano/aluy-cli/dist-bundle/bin/aluy.js',
       realpath: (p) => p,
+      aluyDir: dir, // NUNCA o `~/.aluy` real de quem roda a suíte
       aoInstalar,
     });
     expect(
@@ -116,6 +111,7 @@ describe('aoInstalar — o sucesso AVISA na sessão', () => {
         spawn: spawnFalso(true),
         scriptPath: '/x/lib/node_modules/@hiperplano/aluy-cli/dist-bundle/bin/aluy.js',
         realpath: (p) => p,
+        aluyDir: dir, // NUNCA o `~/.aluy` real de quem roda a suíte
       }),
     ).resolves.toBeUndefined();
   });
