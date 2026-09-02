@@ -32,6 +32,11 @@ export interface YouBlockProps {
    * esfarrapado. Ausente ⇒ bloco sem fundo (degradação graciosa, o desenho antigo).
    */
   readonly columns?: number;
+  /**
+   * PROCEDÊNCIA (ex.: `telegram`) quando o turno não veio do composer. Ausente ⇒
+   * cabeçalho `você` puro, exatamente como sempre foi.
+   */
+  readonly origem?: string;
 }
 
 /**
@@ -63,6 +68,10 @@ export function YouBlock(props: YouBlockProps): React.ReactElement {
   // pintava 138 colunas e o composer 139, e a diferença de UMA coluna aparecia como um
   // degrau na borda direita dos dois retângulos.
   const util = props.columns !== undefined ? Math.max(8, props.columns - 3) : undefined;
+  // Rótulo de ORIGEM ao lado de "você" (pedido do dono: "mostrar que a msg chegou
+  // pelo telegram"). Vazio quando o turno foi digitado aqui — o caso normal.
+  const sufixoOrigem =
+    props.origem !== undefined && props.origem.trim() !== '' ? ` · ${props.origem.trim()}` : '';
 
   if (fundo === undefined || util === undefined) {
     // Terminal sem truecolor (ou largura desconhecida): sem fundo, o desenho de sempre.
@@ -71,6 +80,7 @@ export function YouBlock(props: YouBlockProps): React.ReactElement {
         <Box>
           <Glyph name="you" role="fg" />
           <Role name="fg"> você</Role>
+          {sufixoOrigem !== '' && <Role name="fgDim">{sufixoOrigem}</Role>}
         </Box>
         <Box paddingLeft={2}>
           <Role name={speech}>{props.text}</Role>
@@ -101,7 +111,19 @@ export function YouBlock(props: YouBlockProps): React.ReactElement {
         <Text {...(theme.role('fg').color !== undefined ? { color: theme.role('fg').color } : {})}>
           você
         </Text>
-        {' '.repeat(Math.max(0, util - 4))}
+        {sufixoOrigem !== '' && (
+          <Text
+            {...(theme.role('fgDim').color !== undefined
+              ? { color: theme.role('fgDim').color }
+              : {})}
+          >
+            {sufixoOrigem}
+          </Text>
+        )}
+        {/* O preenchimento DESCONTA o rótulo: sem isso a linha pintada estoura a
+            largura e vaza um retângulo para a linha seguinte — o mesmo "quadradinho
+            cinza solto" que o dono já reportou. */}
+        {' '.repeat(Math.max(0, util - 4 - displayWidth(sufixoOrigem)))}
       </Text>
       {linhas.map((ln, i) => (
         <Text

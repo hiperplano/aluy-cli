@@ -115,6 +115,49 @@ def _untrack_user(users: dict[str, dict[str, Any]], user_id: str) -> None:
 
 
 # ── Handler HTTP ──────────────────────────────────────────────────────────
+
+# ── COMPATIBILIDADE DE API DO mem0ai ──────────────────────────────────────────
+#
+# O mem0ai TROCOU a assinatura de leitura entre as linhas 0.1.x e 2.x, e este script
+# tinha sido escrito só para a 2.x:
+#
+#     0.1.x  search(query, user_id=..., limit=...)      get_all(user_id=...)
+#     2.x    search(query, filters={...}, top_k=...)    get_all(filters={...})
+#
+# Só que `MEM0_PIP_PACKAGES` (provisioner-contract.ts) pina `mem0ai==0.1.76` — ou seja,
+# o que É INSTALADO tem a API ANTIGA e o script chamava a NOVA. Toda leitura levava
+# `TypeError: Memory.search() got an unexpected keyword argument 'top_k'` ⇒ HTTP 500.
+#
+# O que isso produzia, e por que passou tanto tempo despercebido: `add` usa a API
+# ANTIGA (linha do _handle_add) e SEMPRE funcionou. Então a memória GRAVAVA e nunca
+# LIA — o agente anotava os fatos, o `recall` do boot morria no 500, o chamador
+# engolia num `catch` e a sessão abria amnésica. O único sinal para o usuário era um
+# `✗` de um caractere no rodapé. Diagnóstico do dono, em 31/08: "entrei e parece que
+# ele nem sabe do que se trata".
+#
+# Tentamos a assinatura DO PIN primeiro (0.1.x) e caímos na 2.x só no `TypeError`,
+# porque quem provisionou antes pode ter qualquer uma das duas no venv. `TypeError` é
+# estreito de propósito: erro de backend (conexão, disco) tem de CONTINUAR subindo
+# como 500 em vez de virar "lista vazia" silenciosa — conflar os dois é o defeito que
+# este bloco existe para não repetir.
+
+
+def _search_compat(memory, query, user_id, limit):
+    """`search` tolerante às duas linhas de API do mem0ai. Ver bloco acima."""
+    try:
+        return memory.search(query, user_id=user_id, limit=limit)
+    except TypeError:
+        return memory.search(query, filters={"user_id": user_id}, top_k=limit)
+
+
+def _get_all_compat(memory, user_id):
+    """`get_all` tolerante às duas linhas de API do mem0ai. Ver bloco acima."""
+    try:
+        return memory.get_all(user_id=user_id)
+    except TypeError:
+        return memory.get_all(filters={"user_id": user_id})
+
+
 class Mem0Handler(BaseHTTPRequestHandler):
     """
     Handler HTTP que traduz requests REST ↔ chamadas ao Memory() do mem0ai.
@@ -254,8 +297,7 @@ class Mem0Handler(BaseHTTPRequestHandler):
         query = qs.get("query", "")
         limit = int(qs.get("limit", "10"))
 
-        # mem0ai 2.0.7: entity params via filters=, paginação via top_k= (não user_id/limit).
-        resp = self.memory.search(query, filters={"user_id": user_id}, top_k=limit)
+        resp = _search_compat(self.memory, query, user_id, limit)
 
         # mem0ai.search retorna {"results": [...]}
         results = resp.get("results", []) if isinstance(resp, dict) else []
@@ -268,8 +310,7 @@ class Mem0Handler(BaseHTTPRequestHandler):
         users_list = []
         for user_id in list(self.users.keys()):
             try:
-                # mem0ai 2.0.7: get_all usa filters= e retorna {"results": [...]}.
-                all_mems = self.memory.get_all(filters={"user_id": user_id})
+                all_mems = _get_all_compat(self.memory, user_id)
             except Exception:
                 # F100 — erro TRANSITÓRIO no get_all NÃO é "scope vazio". Conflar os dois
                 # (count=0 ⇒ untrack) DESTRÓI o tracking de um scope COM memórias num hiccup

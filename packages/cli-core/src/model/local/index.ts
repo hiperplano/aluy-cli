@@ -66,3 +66,7 @@ export {
   normalizeModelFamily,
   builtinContextWindowForSlug,
 } from './known-context-windows.js';
+
+// F-WIN (emenda) — parser da janela DIGITADA pelo dono quando o provider não a anuncia.
+export { parseJanelaDigitada, explicaRecusa } from './janela-digitada.js';
+export type { JanelaDigitada, MotivoRecusa } from './janela-digitada.js';

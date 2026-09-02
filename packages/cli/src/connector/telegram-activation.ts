@@ -34,8 +34,18 @@ export interface ActivateTelegramOptions {
    * quando há token (caminho ativo). Sem token, nada é construído ⇒ nem o fetch é referenciado.
    */
   readonly fetchFn?: typeof fetch;
-  /** Overrides repassados à `TelegramBridge` (catraca/relógio/log) — teste. */
-  readonly bridgeOverrides?: Pick<TelegramBridgeOptions, 'egressLimiter' | 'now' | 'log'>;
+  /** Overrides repassados à `TelegramBridge` (catraca/relógio/log/recuo) — teste. */
+  readonly bridgeOverrides?: Pick<
+    TelegramBridgeOptions,
+    'egressLimiter' | 'now' | 'log' | 'recuoMs'
+  >;
+  /**
+   * Avisa que a ponte DESISTIU de reerguer o long-poll (falha permanente, ex.: token
+   * revogado ⇒ 401 eterno). A sessão usa isto para NOTIFICAR na tela — sem ele a morte
+   * volta a ser silenciosa, que é o defeito de 01/09: o dono via "ponte ATIVA" enquanto o
+   * processo segurava ZERO conexões TCP.
+   */
+  readonly aoParar?: (motivo: string) => void;
 }
 
 /** O resultado da ativação: ou subiu (bridge ativa) ou não (com o motivo p/ a UI explicar). */
@@ -101,6 +111,9 @@ export async function activateTelegram(
   // (allowNonDefaultApiBase NÃO é passado ⇒ host forçado — config/env não redireciona).
   const client = new TelegramClient({
     token,
+    // O MESMO diário da ponte: o parse descarta em silêncio e com o offset já
+    // avançado, então sem isto a mensagem do dono some sem rastro em lugar nenhum.
+    ...(opts.bridgeOverrides?.log ? { log: opts.bridgeOverrides.log } : {}),
     ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
   });
   // A bridge cria seu próprio AbortController e passa o `signal` à FÁBRICA do connector, p/ o
@@ -110,6 +123,7 @@ export async function activateTelegram(
     allowlist,
     sink: opts.sink,
     redactor: client,
+    ...(opts.aoParar !== undefined ? { aoParar: opts.aoParar } : {}),
     ...(opts.bridgeOverrides ?? {}),
   });
   return { active: true, bridge, allowlistSize: allowlist.size };

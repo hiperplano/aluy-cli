@@ -250,10 +250,21 @@ describe('TelegramBridge — C1 (token NUNCA vaza: log do erro é REDIGIDO)', ()
       sink: spySink(),
       redactor: client,
       log: (l) => logs.push(l),
+      // MUDANÇA DE MECANISMO (01/09) com a INTENÇÃO deste caso INTOCADA — ele segue
+      // provando que o token é REDIGIDO antes de ir ao log. O que mudou: o pump deixou
+      // de morrer no primeiro erro. Antes, um erro logava UMA linha (no stderr, que a
+      // TUI engole) e a função RETORNAVA — a ponte parava de receber pelo resto da
+      // sessão, em silêncio. O dono levou exatamente isso: "ponte ATIVA" na tela com
+      // ZERO conexões TCP no processo. Agora ela reergue com recuo e só desiste no
+      // teto; com o recuo REAL (1s, 2s, 4s…) este caso levaria ~2min, e `recuoMs: () => 0`
+      // o mantém instantâneo sem afrouxar nada do que ele verifica.
+      recuoMs: () => 0,
     });
     await bridge.pump();
-    expect(logs).toHaveLength(1);
-    expect(logs[0]).not.toContain(TOKEN); // o token NÃO aparece no log
+    // Agora há uma linha por tentativa (o pump insiste antes de desistir) — o que
+    // este caso trava é que NENHUMA delas vaze o token.
+    expect(logs.length).toBeGreaterThanOrEqual(1);
+    for (const l of logs) expect(l).not.toContain(TOKEN);
     expect(logs[0]).toContain('«REDACTED»'); // foi REDIGIDO (redactSecretIn)
   });
 

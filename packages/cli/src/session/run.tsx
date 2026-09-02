@@ -9,6 +9,7 @@
 // evolução natural; o I/O do device-flow já está pronto em commands/login.ts).
 
 import { render } from 'ink';
+import { suggestFlag } from '../cli.js';
 import {
   wrapStdoutWithSync,
   syncOutputEnabled,
@@ -105,18 +106,24 @@ import {
   buildProviderEffect,
   parseMcpSlash,
   parseMcpRefresh,
+  parseAgentsRefresh,
   mcpSearchUsageNote,
   mcpSearchPendingNote,
   runMcpSearchSlash,
   runAsyncSlash,
   runTelegramSlash,
+  runWindowSlash,
   runAddDir,
 } from '../slash/handlers.js';
 import { KeychainConnectorSecretStore } from '../auth/connector-secret-store.js';
 import { activateTelegram } from '../connector/telegram-activation.js';
 import type { IngressSink, TelegramBridge } from '../connector/telegram-bridge.js';
 import type { SessionController } from './controller.js';
+import { homedir as userHome } from 'node:os';
 import { createRegistryFetch } from '../mcp/registry-search.js';
+import { searchRegistry, type RegistrySearchResult } from '@hiperplano/aluy-cli-core';
+import { McpConfigWriter } from '../mcp/mcp-config-writer.js';
+import { nomeParaConfig, type ItemMcp, type EscopoMcp } from '../mcp/mcp-picker-model.js';
 import { runDoctorLive } from '../doctor/slash.js';
 import { buildRepairGoal, gatherLogTails, SIDECAR_KINDS } from '../doctor/repair.js';
 import { testTierLive } from '../doctor/tier-test.js';
@@ -238,6 +245,9 @@ import {
   type ClearArmedVerb,
 } from '../slash/clear.js';
 import { basename, join } from 'node:path';
+import { semearMemoria, notaFalhaDeMemoria } from './recall-seed.js';
+import { criarSinkTelegram } from '../connector/telegram-sink.js';
+import { criarLogTelegram } from '../connector/telegram-log.js';
 
 export interface RunSessionOptions extends BuildSessionOptions {
   /** Objetivo inicial (`aluy "objetivo"`). */
@@ -276,6 +286,13 @@ export interface RunSessionOptions extends BuildSessionOptions {
    * Injetável p/ teste via `telegramActivate` (sem keychain/rede real).
    */
   readonly telegram?: boolean;
+  /**
+   * Flags que o parser NÃO reconheceu (ex.: `--telgram`). O binário já avisa no stderr com
+   * sugestão — e o aviso é APAGADO quando a TUI sobe e limpa a tela: o dono digitou
+   * `--telgram`, viu uma sessão normal subir e concluiu que a ponte estava quebrada. Aqui
+   * a lista vira nota de boot, que sobrevive à limpeza.
+   */
+  readonly unknownFlags?: readonly string[];
   /**
    * Override da ATIVAÇÃO do Telegram (teste) — recebe o sink e devolve o resultado, sem
    * tocar keychain/rede. Default: `activateTelegram` (keychain + connector reais). Só é
@@ -523,6 +540,26 @@ function temCredencialUsavel(providerId: string, env: NodeJS.ProcessEnv): boolea
  * Renderiza a TUI interativa (ou roda linear se não há TTY). Resolve quando o app
  * sai. É o que o binário `aluy` chama na invocação default/com objetivo.
  */
+/**
+ * TETO do encerramento. Cada etapa do teardown (fechar MCP, gravar transcrição) ganha
+ * este prazo; estourou, seguimos para a próxima em vez de pendurar.
+ */
+const TETO_ENCERRAMENTO_MS = 3_000;
+
+/**
+ * PRAZO extra depois do teardown completo. Se o laço de eventos ainda não esvaziou —
+ * porque algum canal/socket/filho ficou de pé —, forçamos a saída.
+ *
+ * O timer é `unref`: ele NÃO segura o processo. Se tudo fechou direito, o Node sai antes
+ * e este caminho nunca roda; se algo insiste em segurar, ele dispara e encerra.
+ */
+const TETO_SAIDA_FORCADA_MS = 2_000;
+
+/** Corre `p` com prazo. Estourou ⇒ resolve mesmo assim (nunca lança, nunca pendura). */
+async function comPrazo<T>(p: Promise<T>, ms: number): Promise<void> {
+  await Promise.race([p.catch(() => undefined), new Promise<void>((r) => setTimeout(r, ms))]);
+}
+
 export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const env = opts.env ?? process.env;
   // `--anonymous` — DESLIGA os sidecars de DADOS (mem0/headroom) pelos kill-switches
@@ -1026,22 +1063,86 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // guarda uma ref mutável ao controller, preenchida logo depois. DORMENTE (C6): sem token,
   // `activateTelegram` devolve `active:false` (nenhum client/egress) e só avisamos no stderr.
   let telegramController: SessionController | undefined; // preenchido após o build (deferido).
-  const telegramSink: IngressSink = {
-    // INSTRUÇÃO do dono ⇒ canal `user` (MESMA via do "btw"; a catraca re-decide qualquer efeito).
-    injectInstruction: (text) => {
-      telegramController?.injectInput('root', text);
-    },
-    // DADO não-confiável ⇒ canal `observation` (envelopado DADO_NAO_CONFIAVEL, CLI-SEC-4).
-    injectData: (label, text) => {
-      telegramController?.ingestExternalData(label, text);
-    },
+  // O SINK vive em `connector/telegram-sink.ts` — a regra dele (encaixa se há turno,
+  // senão ABRE um) foi a que estava errada e precisava de teste próprio; aqui é só a
+  // composição, que fica fora da cobertura.
+  const telegramSink: IngressSink = criarSinkTelegram(() => telegramController, criarLogTelegram());
+  // ABRIDOR do picker de MCP — ref DEFERIDA, mesma mecânica do sink do Telegram: quem
+  // despacha a barra é este módulo, mas o picker vive na <App>, que só existe depois.
+  const abrirMcpPicker: { current: ((query: string) => void) | undefined } = { current: undefined };
+
+  /** PORTA de busca do picker: o registro oficial, com o mesmo egress fixo do `/mcp search`. */
+  const mcpPickerSearch = async (
+    query: string,
+  ): Promise<
+    | { readonly ok: true; readonly results: readonly RegistrySearchResult[] }
+    | { readonly ok: false; readonly reason: string }
+  > => {
+    const outcome = await searchRegistry(query, mcpRegistryFetch);
+    return outcome.ok
+      ? { ok: true, results: outcome.results }
+      : { ok: false, reason: outcome.reason };
+  };
+
+  /**
+   * PORTA de instalação: escreve na config do ESCOPO ESCOLHIDO. O caminho é montado AQUI
+   * (nunca vem do registro nem do modelo) — o escritor só recebe um caminho absoluto.
+   */
+  const mcpPickerInstall = async (
+    item: ItemMcp,
+    escopo: EscopoMcp,
+  ): Promise<{ readonly ok: boolean; readonly detail: string }> => {
+    const arquivo =
+      escopo === 'global' ? join(userHome(), '.aluy', 'mcp.json') : join(cwdAbs, '.mcp.json');
+    const nome = nomeParaConfig(item.name);
+    try {
+      const writer = new McpConfigWriter({ file: arquivo });
+      const { replaced } = writer.add({
+        name: nome,
+        command: item.command ?? '',
+        args: [...item.args],
+        // `env` VAZIO de propósito: o registro só diz QUE variáveis o server pede, não os
+        // valores — e inventá-los seria pior que deixar em branco. O picker avisa quais são
+        // (na linha e no desfecho) para o dono defini-las.
+        env: {},
+      });
+      return {
+        ok: true,
+        detail: `${replaced ? 'substituí' : 'instalei'} "${nome}" em ${arquivo} — reabra a sessão para carregar.`,
+      };
+    } catch (err) {
+      return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+    }
   };
   let telegramBridge: TelegramBridge | undefined;
+  /** O desfecho da ativação, para virar NOTA na conversa (o stderr some com a tela). */
+  const telegramBootNote: string[] = [];
   if (opts.telegram === true) {
     const activate = opts.telegramActivate ?? activateTelegram;
-    const result = await activate({ sink: telegramSink });
+    const result = await activate({
+      // DIÁRIO EM ARQUIVO (`~/.aluy/telegram.log`). O default da ponte é
+      // `process.stderr`, que a TUI engole — foi assim que o motivo de cada mensagem
+      // sumida ficou invisível o dia inteiro.
+      bridgeOverrides: { log: criarLogTelegram() },
+      sink: telegramSink,
+      // A ponte DESISTINDO tem de virar nota na tela: o log dela vai para o stderr,
+      // que a TUI engole. Foi assim que o dono ficou com "ponte ATIVA (1 chat
+      // autorizado)" na tela enquanto o processo segurava ZERO conexões TCP — medido
+      // em 01/09. Usa a MESMA ref deferida do sink: o controller ainda não existe aqui.
+      aoParar: (motivo) => {
+        telegramController?.pushNote('telegram', [
+          `a ponte PAROU de receber: ${motivo}.`,
+          'reabra com `aluy --telegram`; se persistir, cheque o token em `/telegram status`.',
+        ]);
+      },
+    });
     if (result.active) {
       telegramBridge = result.bridge;
+      telegramBootNote.push(
+        result.allowlistSize === 0
+          ? 'ponte ATIVA, mas a allowlist está VAZIA — nada entra até autorizar o chat.'
+          : `ponte ATIVA (${String(result.allowlistSize)} chat(s) autorizado(s)).`,
+      );
       if (result.allowlistSize === 0) {
         process.stderr.write(
           'aluy: telegram — bridge ativa mas allowlist VAZIA (fechada): autorize seu chat com ' +
@@ -1050,6 +1151,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       }
     } else {
       // C6 — não ativou: avisa por que (sem token etc.) e segue SEM bridge (zero egress).
+      telegramBootNote.push(`ponte NÃO subiu: ${result.reason}`);
       process.stderr.write(`aluy: telegram — ${result.reason}\n`);
     }
   }
@@ -1082,10 +1184,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     new UserAgentsLoader(serviceScopeDir ? { baseDir: serviceScopeDir } : {});
   const projectAgentsLoader =
     opts.projectAgentsLoader ?? new ProjectAgentsLoader({ workspace: cwdWorkspace });
-  const globalAgents = userAgentsLoader.load();
-  const projectAgents = projectAgentsLoader.load();
+  // GS-MD7 (recarga viva) — `let`, não `const`: o `/agents refresh` RE-ATRIBUI estas
+  // cargas relendo as MESMAS pastas confinadas, e a nota do `/agents` passa a mostrar o
+  // que existe AGORA (inclusive os `.md` criados no meio da sessão — o caso do dono).
+  let globalAgents = userAgentsLoader.load();
+  let projectAgents = projectAgentsLoader.load();
   const agentRegistry = new AgentRegistry(globalAgents.profiles, projectAgents.profiles);
-  const agentLoadErrors = [...globalAgents.errors, ...projectAgents.errors];
+  // GS-MD7 — o registro que o `/agents refresh` substitui. O `agentRegistry` acima segue
+  // `const` porque é o que vai ao wiring no BOOT (e o que o `servicePersonaLock` resolve,
+  // ANTES de existir sessão); daqui pra frente quem manda é este.
+  let agentRegistryLive: AgentRegistry = agentRegistry;
+  let agentLoadErrors = [...globalAgents.errors, ...projectAgents.errors];
   // EST-0977 — as MESMAS duas classes de aviso de carga de agente (homônimo entre
   // camadas + `.md` rejeitado, RES-MD-3) viram uma nota da TUI mais abaixo
   // (`pushNote('agentes', …)`) — mas aquele bloco fica DEPOIS do `return` do
@@ -1428,7 +1537,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         // `globalThis.fetch`. `checkModelConnectivity` não seta `init.redirect` ⇒ o
         // pinado cai no default `'error'` (fail-closed) — um `302 → 169.254.169.254`
         // nunca é seguido.
-        fetchImpl: createPinnedStreamFetch({ baseUrl: localCfg.baseUrl ?? findProvider(localCatalog, localCfg.provider)?.baseUrl ?? '' }),
+        fetchImpl: createPinnedStreamFetch({
+          baseUrl: localCfg.baseUrl ?? findProvider(localCatalog, localCfg.provider)?.baseUrl ?? '',
+        }),
         // COND-S2 (credencial do boot) — MESMO `createLocalCredentialProvider` que o
         // `localModelClient`/`callerForLocalModel` do pai usam (construído UMA vez,
         // resolve a CADA chamada — mesma disciplina do resolvedor); `auth:'none'`
@@ -1517,7 +1628,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       return {
         wireFormat: entry?.wireFormat ?? 'openai-compat',
         baseUrl: (isBootProvider ? localCfg.baseUrl : undefined) ?? entry?.baseUrl ?? '',
-        fetchImpl: createPinnedStreamFetch({ baseUrl: (isBootProvider ? localCfg.baseUrl : undefined) ?? entry?.baseUrl ?? '' }),
+        fetchImpl: createPinnedStreamFetch({
+          baseUrl: (isBootProvider ? localCfg.baseUrl : undefined) ?? entry?.baseUrl ?? '',
+        }),
         getKey: async () => {
           const cred = await getCredential();
           return cred.secret;
@@ -1880,6 +1993,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // `projectAgentsLoader` está ancorado no `cwdWorkspace` (= cwdPort), cujo `load()` resolve
     // `.claude/agents/` relativo ao sessionCwd — então segue o `cd`. Globais ficam fixos do boot.
     reloadProjectAgents: () => projectAgentsLoader.load().profiles,
+    // GS-MD7 (recarga viva) — relê também os GLOBAIS (`~/.aluy/agents/`) a cada resolução
+    // por nome. RELATO DO DONO: o Aluy criou `~/.aluy/agents/ux-frontend.md` com
+    // `write_file` (sucesso) e o `spawn_agent({ agent: "ux-frontend" })` do mesmo turno foi
+    // RECUSADO — "agente desconhecido (GS-MD7)"; ele teve que sair e reabrir a sessão,
+    // perdendo o contexto. É o MESMO `userAgentsLoader` do boot, então o escopo de SERVIÇO
+    // (ADR-0158 §2 — `serviceScopeDir` no lugar do `~/.aluy/` do dono) é preservado: um
+    // serviço continua enxergando só o próprio diretório.
+    reloadGlobalAgents: () => userAgentsLoader.load().profiles,
     // tier resolvido pela precedência (flag > sessão retomada > pref salva > default).
     tier: resolvedTier,
     // ADR-0120 — backend EFETIVO (flag>env>config>default) p/ a StatusBar indicar o modo.
@@ -2105,9 +2226,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           built.controller.pushNote('janela', [
             `o provider não informa a janela de contexto de "${slugForWindow}" em /models —` +
               ' a auto-compactação fica INERTE e o `⛁ %` não sai de 0.',
-            `declare o número em \`providers[].contextByModel["${slugForWindow}"]\` no` +
-              ' `~/.aluy/config.json` (ou `context.window` / `ALUY_CONTEXT_WINDOW`) —' +
-              ' feito isso, este aviso não aparece mais.',
+            // F-WIN (emenda, pedido do dono): antes isto mandava editar o JSON à mão —
+            // "dar a opção de digitar quando o modelo não achar". O `/window` aplica na
+            // hora E persiste; o caminho do config fica como alternativa, não como única
+            // saída.
+            'informe o número com `/window <tokens>` — ex.: `/window 128k`. Ele vale já' +
+              ' nesta sessão e fica gravado p/ as próximas.',
           ]);
         })
         .catch(() => {
@@ -2365,11 +2489,15 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         }
         // Semente de memória (paridade com o não-TTY): fatos lembrados entram como DADO
         // ENVELOPADO. Best-effort — falha de leitura não derruba o one-shot.
-        let memorySeed: HistoryItem[] = [];
-        try {
-          memorySeed = [...(await built.memory.recall())];
-        } catch {
-          memorySeed = [];
+        // A sessão SEGUE sem memória (CA-MA8) — o que muda é que ela deixa de FINGIR que
+        // não havia nada a lembrar. Ver `recall-seed.ts`: um defeito de 12 dias (todo
+        // recall em HTTP 500) apareceu para o dono só como uma sessão amnésica.
+        const semente = await semearMemoria(() => built.memory.recall());
+        const memorySeed: HistoryItem[] = [...semente.itens];
+        // A falha vai p/ o STDERR (o stdout é do script). O `catch` seco que estava
+        // aqui a engolia e o one-shot rodava sem memória sem dizer nada.
+        if (semente.falha !== undefined) {
+          process.stderr.write(`aluy: ${notaFalhaDeMemoria(semente.falha)[0]}\n`);
         }
         const seed = [...memorySeed, ...resumedHistory];
         const format = opts.headless?.outputFormat ?? 'text';
@@ -2681,11 +2809,13 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       // contexto do objetivo deste turno — junto do histórico de uma sessão retomada.
       // Sem isto, a sessão piped NUNCA relembrava (o write ia pro disco, mas o read
       // nunca rodava). Best-effort: uma falha de leitura não derruba a sessão.
-      let memorySeedLinear: HistoryItem[] = [];
-      try {
-        memorySeedLinear = [...(await built.memory.recall())];
-      } catch {
-        memorySeedLinear = [];
+      // A sessão SEGUE sem memória (CA-MA8) — o que muda é que ela deixa de FINGIR que
+      // não havia nada a lembrar. Ver `recall-seed.ts`: um defeito de 12 dias (todo
+      // recall em HTTP 500) apareceu para o dono só como uma sessão amnésica.
+      const sementeLinear = await semearMemoria(() => built.memory.recall());
+      const memorySeedLinear: HistoryItem[] = [...sementeLinear.itens];
+      if (sementeLinear.falha !== undefined) {
+        built.controller.pushNote('memória', notaFalhaDeMemoria(sementeLinear.falha));
       }
       const linearSeed = [...memorySeedLinear, ...resumedHistory];
       // EST-0972 — auto-save no não-TTY: assina o estado e grava a transcrição a cada
@@ -2711,7 +2841,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       // EST-1007 (HANG) — fecha os processos-server MCP em TODA saída do não-TTY
       // (best-effort, idempotente com o cleanup do ramo TTY). É o que destrava o EXIT:
       // sem isto os child-servers stdio pinam o event-loop e o `-p`/posicional travam.
-      await closeMcpSetup();
+      // PRAZO no encerramento. Medido em 01/09: depois do duplo Ctrl-C a TELA some (o
+      // `exit()` do Ink desmonta e devolve o terminal), mas o PROCESSO fica vivo — com os
+      // 4 servidores MCP de pé e 9 sockets abertos. O Node só termina quando o laço de
+      // eventos esvazia, e este `await` pode nunca voltar se um server MCP não responde
+      // ao fechamento.
+      //
+      // O estrago não é cosmético: a sessão "fechada" continua POLIZANDO o Telegram e
+      // COMENDO as mensagens da sessão nova — o Telegram entrega a um consumidor só. Foi
+      // a causa de fundo do dia inteiro de "mandei e não chegou", e deixou 13 processos
+      // `aluy` vivos nesta máquina, alguns de 11 dias.
+      await comPrazo(closeMcpSetup(), TETO_ENCERRAMENTO_MS);
     }
   }
 
@@ -2834,6 +2974,23 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   //
   // Só fala quando as duas fontes DECLARAM e DIVERGEM (ver `detectLocalEnvOverrides`):
   // quem configura só por ambiente nunca vê esta nota.
+  // FLAG DESCONHECIDA — o aviso do stderr é APAGADO quando a TUI sobe e limpa a tela.
+  // O dono digitou `--telgram`, viu uma sessão normal subir sem sinal nenhum e concluiu
+  // que a ponte do Telegram estava quebrada. O código avisava; o aviso é que não
+  // sobrevivia. Aqui ele fica na conversa.
+  if (opts.unknownFlags !== undefined && opts.unknownFlags.length > 0) {
+    built.controller.pushNote('flag', [
+      ...opts.unknownFlags.map((f) => {
+        const alvo = suggestFlag(f.replace(/^--/, ''));
+        return alvo !== undefined
+          ? `${f} não existe e foi IGNORADA — você quis dizer \`--${alvo}\`?`
+          : `${f} não existe e foi IGNORADA — veja \`aluy --help\`.`;
+      }),
+      'o que você pediu com ela NÃO aconteceu.',
+    ]);
+  }
+  // TELEGRAM — o desfecho da ativação (subiu? por que não?) também morria no stderr.
+  if (telegramBootNote.length > 0) built.controller.pushNote('telegram', telegramBootNote);
   if (localEnvOverrides.length > 0) {
     built.controller.pushNote('ambiente', [
       'variáveis de ambiente estão sobrepondo o seu `~/.aluy/config.json`:',
@@ -2901,7 +3058,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   {
     const autoNote = readAutoUpdateNote(CLI_VERSION, env);
     if (autoNote !== undefined) built.controller.pushNote('autoupdate', [autoNote]);
-    void runAutoUpdate(CLI_VERSION, env, savedConfig.autoUpdate, {});
+    void runAutoUpdate(CLI_VERSION, env, savedConfig.autoUpdate, {
+      // O sucesso do autoupdate era MUDO de ponta a ponta (ver `aoInstalar`): a nota do
+      // boot só cobre a FALHA. O dono percebeu — "tenho uma máquina na versão 158 e nada
+      // de mostrar a atualização".
+      aoInstalar: (versao) => {
+        built.controller.pushNote('autoupdate', [
+          `atualizado para ${versao} em segundo plano — reinicie o aluy para usar.`,
+          `esta sessão segue na ${CLI_VERSION}.`,
+        ]);
+      },
+    });
   }
 
   // EST-0942 — CHECK DE CREDENCIAL no boot. Se NÃO há credencial alguma (keychain
@@ -3487,6 +3654,35 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // escopo global/projeto · tools ⊆ pai · persona) e os REJEITADOS (RES-MD-3) com o
     // motivo exato + a dica de conserto. Pasta ausente ⇒ "nenhum" (loader fail-safe).
     if (command.id === 'agents') {
+      // GS-MD7 (recarga viva) — `/agents refresh`: RELÊ as duas pastas confinadas e TROCA
+      // o registro da sessão, sem reiniciar. Espelha o `/mcp reload` (que já resolvia esta
+      // MESMA classe de problema nos servers MCP — a solução só nunca tinha sido estendida
+      // aos agentes). RELATO DO DONO: ele viu o Aluy criar `~/.aluy/agents/ux-frontend.md`
+      // e, no turno seguinte, ouvir "agente desconhecido (GS-MD7)"; sair e reabrir a sessão
+      // era o único caminho, e custou o contexto do trabalho.
+      //
+      // Segurança: reler NÃO afrouxa nada. São os MESMOS loaders confinados do boot
+      // (`~/.aluy/agents/` 0700 + `.claude|.aluy/agents/` resolvidos SÓ sob a raiz), a
+      // `origin` continua vindo do loader (project = DADO, ADR-0113) e a política inteira
+      // é re-derivada pelo construtor PURO do `AgentRegistry`. RES-MD-3 segue fechando:
+      // `.md` malformado vai p/ `errors` (visível), nunca vira "agente sem restrição".
+      if (parseAgentsRefresh(args)) {
+        const antes = agentRegistryLive.list().length;
+        globalAgents = userAgentsLoader.load();
+        projectAgents = projectAgentsLoader.load();
+        agentLoadErrors = [...globalAgents.errors, ...projectAgents.errors];
+        agentRegistryLive = new AgentRegistry(globalAgents.profiles, projectAgents.profiles);
+        built.controller.setAgentRegistry(agentRegistryLive);
+        const note = buildAgentsNote({
+          profiles: [...globalAgents.profiles, ...projectAgents.profiles],
+          errors: agentLoadErrors,
+        });
+        built.controller.pushNote(`${note.title} · refresh`, [
+          `relidos: ${agentRegistryLive.list().length} agente(s) (antes: ${antes}).`,
+          ...note.lines,
+        ]);
+        return;
+      }
       const note = buildAgentsNote({
         profiles: [...globalAgents.profiles, ...projectAgents.profiles],
         errors: agentLoadErrors,
@@ -4018,6 +4214,18 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           built.controller.pushNote(u.title, u.lines);
           return;
         }
+        // PICKER, não tabela. Pedido do dono, repetido: "ele lista tudo, mas acho que
+        // deveria dizer no search via picker e nao numa tabela gigante para eu instalar
+        // fora". A tabela obrigava a sair da TUI e montar `aluy mcp add <nome> -- <cmd>` à
+        // mão; agora a escolha e a instalação acontecem aqui dentro, e o ESCOPO é
+        // PERGUNTADO ("vc tem que perguntar se é para o projeto ou se é global").
+        //
+        // Sem o abridor (headless / App antiga) cai na tabela de antes: degradação, não
+        // quebra — o `/mcp search` continua respondendo alguma coisa.
+        if (abrirMcpPicker.current !== undefined) {
+          abrirMcpPicker.current(search.query);
+          return;
+        }
         const pending = mcpSearchPendingNote(search.query);
         built.controller.pushNote(pending.title, pending.lines);
         void runMcpSearchSlash(search.query, mcpRegistryFetch).then((note) =>
@@ -4075,8 +4283,38 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       return;
     }
 
+    if (command.id === 'window') {
+      // F-WIN (emenda) — o slug e o provider vêm do CONTROLLER (estado VIVO), não do
+      // retrato do boot: o dono troca de modelo com `/model` no meio da sessão, e usar
+      // o snapshot gravaria a janela na chave do modelo ERRADO.
+      void runWindowSlash(args, {
+        slug: built.controller.model,
+        providerId: built.controller.providerAtivoId,
+        janelaAtual: built.controller.modelContextWindow,
+        aplicar: (slug, tokens) => {
+          built.controller.adoptDiscoveredModelWindow(slug, tokens);
+        },
+        persistir: (pid, slug, tokens) => configStore.registerModelContextWindow(pid, slug, tokens),
+      }).then((note) => built.controller.pushNote(note.title, note.lines));
+      return;
+    }
+
     if (command.id === 'telegram') {
       void runTelegramSlash(args, {
+        // O status precisa saber se a ponte subiu NESTA sessão — sem isto ele só sabe
+        // do disco, e era assim que ele negava um recurso que estava no ar.
+        bridgeAtiva: telegramBridge !== undefined,
+        // O DIAGNÓSTICO real: MONTADA ≠ RECEBENDO. O status anterior olhava só se o
+        // objeto existia e por isso dizia "ATIVA" com zero conexão aberta.
+        ...(telegramBridge
+          ? {
+              pontePolling: telegramBridge.diagnostico.polling,
+              ponteReinicios: telegramBridge.diagnostico.reinicios,
+              ...(telegramBridge.diagnostico.ultimaQueda !== undefined
+                ? { ponteUltimaQueda: telegramBridge.diagnostico.ultimaQueda }
+                : {}),
+            }
+          : {}),
         configStore,
         secretStore: new KeychainConnectorSecretStore('telegram'),
       }).then((note) => built.controller.pushNote(note.title, note.lines));
@@ -4703,6 +4941,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           }
         }}
         {...bootProviderProp}
+        mcpSearch={mcpPickerSearch}
+        mcpInstall={mcpPickerInstall}
+        onMcpPickerReady={(abrir) => {
+          abrirMcpPicker.current = abrir;
+        }}
         onSelectProvider={(provider) => {
           // F-PROV — backend LOCAL (BYO): TROCA DE VERDADE o provider ativo (client +
           // catálogo de modelos do /model). Achado em dogfooding: antes deste fix, o
@@ -4855,11 +5098,13 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     //   (2) o histórico de uma sessão RETOMADA (EST-0972), se houver.
     // Ambos entram como `attachments` inertes (não tocam a catraca; nunca instrução).
     // Best-effort: uma falha de leitura da memória NUNCA derruba o boot.
-    let memorySeed: HistoryItem[] = [];
-    try {
-      memorySeed = [...(await built.memory.recall())];
-    } catch {
-      memorySeed = []; // fail-safe: sem memória recuperada, a sessão segue normal.
+    // A sessão SEGUE sem memória (CA-MA8) — o que muda é que ela deixa de FINGIR que
+    // não havia nada a lembrar. Ver `recall-seed.ts`: um defeito de 12 dias (todo
+    // recall em HTTP 500) apareceu para o dono só como uma sessão amnésica.
+    const semente = await semearMemoria(() => built.memory.recall());
+    const memorySeed: HistoryItem[] = [...semente.itens];
+    if (semente.falha !== undefined) {
+      built.controller.pushNote('memória', notaFalhaDeMemoria(semente.falha));
     }
     // O `resumedHistory` JÁ foi semeado lá em cima (junto do `restoreBlocks`), p/ não
     // ficar refém deste await. Aqui só a memória entra — PREPENDANDO, o que mantém a
@@ -4948,6 +5193,23 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // EST-0972 — solta o auto-save e grava a transcrição final ao sair.
     unsubSave();
     saveNow();
+    // CÃO DE GUARDA DA SAÍDA — o pedido do dono: "quero que o ctrl-c encerre tudo".
+    //
+    // O teardown acima já pede para tudo fechar, mas PEDIR não basta: o Node só termina
+    // quando o laço de eventos esvazia, e um único canal de MCP, socket ou processo
+    // filho que não solte segura o processo INDEFINIDAMENTE. Medido em 01/09: depois do
+    // duplo Ctrl-C a tela some e o processo fica vivo com 4 servidores MCP e 9 sockets.
+    // A consequência prática não era cosmética — a sessão "fechada" seguia polizando o
+    // Telegram e COMENDO as mensagens da sessão nova (o Telegram entrega a um só
+    // consumidor). Havia 13 processos `aluy` vivos nesta máquina, alguns de 11 dias.
+    //
+    // `unref` é o ponto todo: este timer NÃO segura o processo. Se o teardown funcionou,
+    // o Node sai antes e isto nunca roda. Se algo insiste em segurar, dispara e encerra
+    // com o código que já estava definido (não inventa sucesso nem falha).
+    const caoDeGuarda = setTimeout(() => {
+      process.exit(process.exitCode ?? 0);
+    }, TETO_SAIDA_FORCADA_MS);
+    caoDeGuarda.unref();
     // Ao SAIR, mostra o id da sessão + como retomá-la na linha de comando (como o Claude
     // Code). Só na saída INTERATIVA (TTY) e quando há conversa de fato — uma sessão vazia
     // (abriu e fechou) não imprime nada. O id é DADO (nome de arquivo em ~/.aluy/sessions/),

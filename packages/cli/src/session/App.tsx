@@ -63,6 +63,8 @@ import {
   FooterAgents,
 } from '../ui/components/index.js';
 import type { SubAgentChildView } from '../ui/components/SubAgents.js';
+import { useMcpPicker, type McpSearchPort, type McpInstallPort } from '../ui/hooks/useMcpPicker.js';
+import { McpPicker } from '../ui/components/McpPicker.js';
 import { blocoSubagentesNaTela } from './subagentes-visiveis.js';
 import { Role, useTheme } from '../ui/theme/index.js';
 import { useTick } from '../ui/hooks/useTick.js';
@@ -413,6 +415,21 @@ export interface AppProps {
    * modelo, que é o comportamento de lá.
    */
   readonly onSelectProvider?: (provider: string) => void | Promise<boolean | ProviderSwitchFailure>;
+  /**
+   * PICKER DE MCP — busca no registro oficial e escrita na config, injetadas pelo wiring.
+   *
+   * O dono pediu, várias vezes: "ele lista tudo, mas acho que deveria dizer no search via
+   * picker e nao numa tabela gigante para eu instalar fora". Antes o `/mcp search` imprimia
+   * a tabela e mandava sair da TUI para montar `aluy mcp add` à mão.
+   */
+  readonly mcpSearch?: McpSearchPort;
+  readonly mcpInstall?: McpInstallPort;
+  /**
+   * Entrega ao wiring a função que ABRE o picker. O despacho de `/mcp search` mora no
+   * `run.tsx` (é lá que a barra é lida), mas o picker vive aqui — mesma mecânica deferida
+   * do sink do Telegram.
+   */
+  readonly onMcpPickerReady?: (abrir: (query: string) => void) => void;
   /**
    * F-PROV-FIX — o dono confirmou o VERBO explícito `/provider save`: fixa o
    * provider (e modelo) ATIVOS desta sessão como o PADRÃO da PRÓXIMA (o wiring grava
@@ -1041,6 +1058,22 @@ export function App(props: AppProps): React.ReactElement {
   // ativo vem da prop (wiring) ou, na sua ausência, deriva do brilho corrente.
   const currentTheme: ThemeName = props.currentTheme ?? themeNameForBrightness(theme.brightness);
   const themePicker = useThemePicker({ currentTheme });
+
+  // PICKER DE MCP — busca no registro oficial, escolha do server e do ESCOPO, e instalação
+  // sem sair da TUI (pedido do dono, repetido). O desfecho vira nota na conversa.
+  const mcpPicker = useMcpPicker({
+    ...(props.mcpSearch !== undefined ? { search: props.mcpSearch } : {}),
+    ...(props.mcpInstall !== undefined ? { install: props.mcpInstall } : {}),
+    onNota: (titulo, linhas) => {
+      controller.pushNote(titulo, linhas);
+    },
+  });
+  // Entrega o abridor ao wiring (o despacho de `/mcp search` mora lá).
+  const avisouMcpPronto = React.useRef(false);
+  if (!avisouMcpPronto.current && props.onMcpPickerReady !== undefined) {
+    avisouMcpPronto.current = true;
+    props.onMcpPickerReady(mcpPicker.abrir);
+  }
 
   // EST-0989 (i18n) — seletor `/lang`: lista os idiomas (pt-BR/en), marca o ativo. O
   // idioma ativo vem do contexto i18n (injetado pelo ThemeRoot). Espelha o /theme.
@@ -2368,6 +2401,7 @@ export function App(props: AppProps): React.ReactElement {
       }
       if (
         permPanel.open ||
+        mcpPicker.open ||
         themePicker.open ||
         langPicker.open ||
         historyPicker.open ||
@@ -2467,6 +2501,7 @@ export function App(props: AppProps): React.ReactElement {
     localModelPicker.open ||
     effortPicker.open ||
     permPanel.open ||
+    mcpPicker.open ||
     themePicker.open ||
     langPicker.open ||
     providerPicker.open ||
@@ -3134,6 +3169,24 @@ export function App(props: AppProps): React.ReactElement {
             setSlashOpen(false);
             setSlashSel(0);
             const line = terminalSubmitLine(entry);
+            // PARALELO-SEGURO ⇒ EXECUTA JÁ, não enfileira.
+            //
+            // Este ramo enfileirava SEMPRE, sem nunca consultar `isParallelWhileBusy`. Foi
+            // o que manteve o `/cycle stop` quebrado mesmo depois de o predicado existir:
+            // `stop` é subcomando TERMINAL, então escolher no menu caía aqui e ia direto
+            // p/ a fila. O dono viu e disse o essencial — "o /cycle stop não funcionou,
+            // enfileirou; vc não testou no modo interativo tmux?". Não tinha: eu havia
+            // testado só o predicado isolado, que passava verde sem exercitar este caminho.
+            //
+            // O agravante era o mesmo de antes: a fila criada aqui DESARMA o Esc (só
+            // interrompe em `isDoubleEsc && !hasQueue`) — pedir para parar tirava o freio.
+            if (isParallelWhileBusy(entry.parent, entry.sub.name)) {
+              runCommand(entry.parent, entry.sub.name);
+              setHistory((h) => [...h, line]);
+              setText('');
+              setHistIdx(-1);
+              return;
+            }
             enqueue(line);
             setHistory((h) => [...h, line]);
             setText('');
@@ -3678,6 +3731,27 @@ export function App(props: AppProps): React.ReactElement {
     // ── seletor `/theme` CAPTURA o foco (EST-0966) ─────────────────────────────
     // Mesma mecânica/teclas do slash-menu/file-picker/model-picker: ↑↓ navega,
     // enter troca o tema da sessão (re-render com a nova paleta), esc fecha. Modal.
+    // PICKER DE MCP — mesma gramática dos outros: ↑↓ navega, enter avança (lista → escopo →
+    // instala), esc volta um passo (do escopo para a lista) e só então fecha.
+    if (mcpPicker.open) {
+      if (key.upArrow) {
+        mcpPicker.move(-1);
+        return;
+      }
+      if (key.downArrow) {
+        mcpPicker.move(1);
+        return;
+      }
+      if (key.return) {
+        mcpPicker.confirm();
+        return;
+      }
+      if (key.escape) {
+        mcpPicker.cancel();
+        return;
+      }
+      return; // MODAL: nada mais recebe tecla enquanto ele está aberto
+    }
     if (themePicker.open) {
       if (key.upArrow) {
         themePicker.move(-1);
@@ -4381,12 +4455,12 @@ export function App(props: AppProps): React.ReactElement {
   // stream a viva já passa de 10 ⇒ menu+viva estourava `rows` ⇒ flicker + fantasma ao
   // fechar. Agora desconta chrome+blocos+fala-mín+staged (ver `slashMenuMaxRows`).
   const slashMenuRowCap = slashMenuMaxRows({
-  // FLICKER-F8 — o aviso "N sub-agente(s) trabalhando — F8 para parar" é altura VIVA
-  // condicional. Fora do orçamento, ele fazia a região viva cruzar `rows` justamente
-  // quando existe (agentes trabalhando) ⇒ repaint total a cada frame (o tremor).
-  ...(state.detachedSubagents !== undefined
-    ? { detachedSubagents: state.detachedSubagents }
-    : {}),
+    // FLICKER-F8 — o aviso "N sub-agente(s) trabalhando — F8 para parar" é altura VIVA
+    // condicional. Fora do orçamento, ele fazia a região viva cruzar `rows` justamente
+    // quando existe (agentes trabalhando) ⇒ repaint total a cada frame (o tremor).
+    ...(state.detachedSubagents !== undefined
+      ? { detachedSubagents: state.detachedSubagents }
+      : {}),
     agentesNoRodape: filhosRodape.length,
     rows,
     live,
@@ -4401,12 +4475,12 @@ export function App(props: AppProps): React.ReactElement {
     : 0;
   const overlayLines = slashOpen ? cappedSlashLines + 1 : 0;
   const liveMaxLines = speechMaxLines({
-  // FLICKER-F8 — o aviso "N sub-agente(s) trabalhando — F8 para parar" é altura VIVA
-  // condicional. Fora do orçamento, ele fazia a região viva cruzar `rows` justamente
-  // quando existe (agentes trabalhando) ⇒ repaint total a cada frame (o tremor).
-  ...(state.detachedSubagents !== undefined
-    ? { detachedSubagents: state.detachedSubagents }
-    : {}),
+    // FLICKER-F8 — o aviso "N sub-agente(s) trabalhando — F8 para parar" é altura VIVA
+    // condicional. Fora do orçamento, ele fazia a região viva cruzar `rows` justamente
+    // quando existe (agentes trabalhando) ⇒ repaint total a cada frame (o tremor).
+    ...(state.detachedSubagents !== undefined
+      ? { detachedSubagents: state.detachedSubagents }
+      : {}),
     agentesNoRodape: filhosRodape.length,
     rows,
     live,
@@ -4443,12 +4517,12 @@ export function App(props: AppProps): React.ReactElement {
   // (piso `< rows`) segue `false` ⇒ o clearScreen continua limpando os órfãos do reflow.
   liveRegionExceedsRowsRef.current =
     liveRegionMinRows({
-    // FLICKER-F8 — o aviso "N sub-agente(s) trabalhando — F8 para parar" é altura VIVA
-    // condicional. Fora do orçamento, ele fazia a região viva cruzar `rows` justamente
-    // quando existe (agentes trabalhando) ⇒ repaint total a cada frame (o tremor).
-    ...(state.detachedSubagents !== undefined
-      ? { detachedSubagents: state.detachedSubagents }
-      : {}),
+      // FLICKER-F8 — o aviso "N sub-agente(s) trabalhando — F8 para parar" é altura VIVA
+      // condicional. Fora do orçamento, ele fazia a região viva cruzar `rows` justamente
+      // quando existe (agentes trabalhando) ⇒ repaint total a cada frame (o tremor).
+      ...(state.detachedSubagents !== undefined
+        ? { detachedSubagents: state.detachedSubagents }
+        : {}),
       agentesNoRodape: filhosRodape.length,
       rows,
       live,
@@ -4591,6 +4665,7 @@ export function App(props: AppProps): React.ReactElement {
     modelPicker.open ||
     localModelPicker.open ||
     effortPicker.open ||
+    mcpPicker.open ||
     themePicker.open ||
     langPicker.open ||
     providerPicker.open ||
@@ -4732,6 +4807,20 @@ export function App(props: AppProps): React.ReactElement {
               customOpen={effortPicker.customOpen}
               customInput={effortPicker.customInput}
               customWarn={effortPicker.customWarn}
+            />
+          </Box>
+        )}
+        {mcpPicker.open && (
+          <Box flexDirection="column" {...box}>
+            <McpPicker
+              query={mcpPicker.query}
+              itens={mcpPicker.itens}
+              selected={mcpPicker.selected}
+              {...(mcpPicker.escopoDe !== undefined ? { escopoDe: mcpPicker.escopoDe } : {})}
+              escopoSelecionado={mcpPicker.escopoSelecionado}
+              carregando={mcpPicker.carregando}
+              {...(mcpPicker.erro !== undefined ? { erro: mcpPicker.erro } : {})}
+              maxRows={Math.min(10, slashMenuRowCap)}
             />
           </Box>
         )}
@@ -5466,55 +5555,55 @@ export function App(props: AppProps): React.ReactElement {
             separados por uma barra vertical (pedido do dono). Sem agentes vivos o
             <FooterAgents> é passagem direta: a tela de quem não dispara agente não muda. */}
         <FooterAgents filhos={filhosRodape} rows={rows}>
-        {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
+          {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
             pulso âmbar, que saiu. Continuar passando faria o painel re-renderizar a cada
             quadro sem desenhar nada diferente, e deixaria dois campos aceitos-e-ignorados
             na interface — a armadilha que já custou o `maxWidths` hoje. */}
-        <StatusPanel
-          mode={state.mode}
-          {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
-          {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
-          cwd={state.meta.cwd}
-          tier={tierDisplay}
-          isDefaultTier={isDefaultTier}
-          {...(displayModel !== undefined
-            ? // HG-2/CLI-SEC-7: o `model` da via Custom (slug que o USUÁRIO escolheu) SEMPRE
-              // exibe. O `activeModel` (=usage.model resolvido do tier) só entra com o OPT-IN
-              // `ALUY_SHOW_MODEL` (default OFF — o binário público NÃO revela o mapa tier→
-              // provider; gate AG-0008). `displayModel` já aplicou essa regra acima. A redação
-              // server-side do trailer (broker) segue como o caminho p/ expor por default.
-              { model: displayModel }
-            : {})}
-          tokens={state.meta.tokens}
-          {...(state.meta.budgetPct !== undefined ? { budgetPct: state.meta.budgetPct } : {})}
-          windowPct={state.meta.windowPct}
-          {...(dominantQuota !== undefined
-            ? { quotaPct: dominantQuota.pct, quotaLevel: dominantQuota.level }
-            : {})}
-          // F-SALDO-BYO — saldo do provider BYO na linha PRIMÁRIA, colado no par
-          // provider·modelo (pedido do dono: "deveria ficar após o provedor"). Antes caía
-          // no <QuotaFooter>, numa linha própria e órfã acima do rodapé.
-          {...(state.meta.quota?.credit?.balance !== undefined
-            ? { credit: state.meta.quota.credit.balance }
-            : {})}
-          // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
-          // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
-          // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
-          columns={Math.max(20, columns - 2)}
-          error={state.phase === 'error'}
-          {...(state.governance !== undefined ? { governance: state.governance } : {})}
-          {...(!cycleUiOff && state.cycleProgress !== undefined
-            ? { cycleProgress: state.cycleProgress }
-            : {})}
-          {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
-          {...(state.sidecarUsage !== undefined
-            ? // F-SIDECAR-USO — USO REAL dos sidecars (headroom/ollama/mem0). O wiring arma
-              // o medidor e o controller espelha as contagens aqui; o chip só aparece no
-              // perfil TURBO (em leve o `buildSidecarChip` devolve `undefined` e a barra
-              // nem ganha o campo). Responde "estão sendo USADOS?", não "estão de pé?".
-              { sidecarUsage: state.sidecarUsage }
-            : {})}
-        />
+          <StatusPanel
+            mode={state.mode}
+            {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
+            {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
+            cwd={state.meta.cwd}
+            tier={tierDisplay}
+            isDefaultTier={isDefaultTier}
+            {...(displayModel !== undefined
+              ? // HG-2/CLI-SEC-7: o `model` da via Custom (slug que o USUÁRIO escolheu) SEMPRE
+                // exibe. O `activeModel` (=usage.model resolvido do tier) só entra com o OPT-IN
+                // `ALUY_SHOW_MODEL` (default OFF — o binário público NÃO revela o mapa tier→
+                // provider; gate AG-0008). `displayModel` já aplicou essa regra acima. A redação
+                // server-side do trailer (broker) segue como o caminho p/ expor por default.
+                { model: displayModel }
+              : {})}
+            tokens={state.meta.tokens}
+            {...(state.meta.budgetPct !== undefined ? { budgetPct: state.meta.budgetPct } : {})}
+            windowPct={state.meta.windowPct}
+            {...(dominantQuota !== undefined
+              ? { quotaPct: dominantQuota.pct, quotaLevel: dominantQuota.level }
+              : {})}
+            // F-SALDO-BYO — saldo do provider BYO na linha PRIMÁRIA, colado no par
+            // provider·modelo (pedido do dono: "deveria ficar após o provedor"). Antes caía
+            // no <QuotaFooter>, numa linha própria e órfã acima do rodapé.
+            {...(state.meta.quota?.credit?.balance !== undefined
+              ? { credit: state.meta.quota.credit.balance }
+              : {})}
+            // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
+            // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
+            // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
+            columns={Math.max(20, columns - 2)}
+            error={state.phase === 'error'}
+            {...(state.governance !== undefined ? { governance: state.governance } : {})}
+            {...(!cycleUiOff && state.cycleProgress !== undefined
+              ? { cycleProgress: state.cycleProgress }
+              : {})}
+            {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
+            {...(state.sidecarUsage !== undefined
+              ? // F-SIDECAR-USO — USO REAL dos sidecars (headroom/ollama/mem0). O wiring arma
+                // o medidor e o controller espelha as contagens aqui; o chip só aparece no
+                // perfil TURBO (em leve o `buildSidecarChip` devolve `undefined` e a barra
+                // nem ganha o campo). Responde "estão sendo USADOS?", não "estão de pé?".
+                { sidecarUsage: state.sidecarUsage }
+              : {})}
+          />
         </FooterAgents>
         {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
           descansa). Sempre visível (glifo+palavra, a11y): plan=read-only (petrol),
@@ -5592,6 +5681,7 @@ export function BlockView(props: {
             text={b.text}
             isCurrent={props.isCurrent}
             {...(props.columns !== undefined ? { columns: props.columns } : {})}
+            {...(b.origem !== undefined ? { origem: b.origem } : {})}
           />
         </Box>
       );
