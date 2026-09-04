@@ -469,6 +469,16 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
     case 'whoami':
     case 'logout':
       return { kind: 'async', id };
+    case 'upgrade':
+      // Roteado ANTES em run.tsx (precisa de rede e do controller p/ as notas). Cair
+      // aqui só sem esse roteamento (teste linear) ⇒ nota honesta, como o `/window`.
+      return {
+        kind: 'note',
+        note: {
+          title: 'upgrade',
+          lines: ['a atualização só roda na sessão interativa.'],
+        },
+      };
     case 'window':
       // `/window` é roteado ANTES (run.tsx) p/ `runWindowSlash`, que precisa do modelo
       // ativo, do provider e do config. Cair AQUI só acontece sem esse roteamento (ex.:

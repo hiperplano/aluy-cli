@@ -248,6 +248,8 @@ import { basename, join } from 'node:path';
 import { semearMemoria, notaFalhaDeMemoria } from './recall-seed.js';
 import { criarSinkTelegram } from '../connector/telegram-sink.js';
 import { criarLogTelegram } from '../connector/telegram-log.js';
+import { runUpgrade } from '../io/auto-update.js';
+import { linhaDeInicio, linhasDoUpgrade } from '../io/upgrade.js';
 
 export interface RunSessionOptions extends BuildSessionOptions {
   /** Objetivo inicial (`aluy "objetivo"`). */
@@ -4280,6 +4282,28 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         'o campo de chave DENTRO da sessão está desligado: por baixo da TUI a digitação',
         'não fica oculta de verdade (a tecla vaza p/ o composer e a chave aparece na tela).',
       ]);
+      return;
+    }
+
+    if (command.id === 'upgrade') {
+      // A atualização EXPLÍCITA. O dono recusou o upgrade silencioso — aqui ele vê o
+      // que vai acontecer ANTES (nota de início) e o desfecho DEPOIS, inclusive nos
+      // casos em que o autoupdate cala: "já está no topo" e "não é instalação global".
+      built.controller.pushNote('upgrade', ['consultando o npm…']);
+      void runUpgrade(CLI_VERSION, {
+        aoComecar: (de, para) => {
+          built.controller.pushNote('upgrade', [linhaDeInicio(de, para)]);
+        },
+      })
+        .then((r) => {
+          built.controller.pushNote('upgrade', linhasDoUpgrade(r));
+        })
+        .catch((e: unknown) => {
+          // Nunca derruba a sessão por causa de uma atualização.
+          built.controller.pushNote('upgrade', [
+            `não deu p/ atualizar: ${e instanceof Error ? e.message : String(e)}`,
+          ]);
+        });
       return;
     }
 

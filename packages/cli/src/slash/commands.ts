@@ -60,7 +60,8 @@ export type NativeCommandId =
   | 'tools'
   | 'quit'
   | 'todo'
-  | 'window';
+  | 'window'
+  | 'upgrade';
 
 /** Seção do menu (agrupamento visual §2.15). */
 export type SlashSection = 'conta' | 'sessão' | 'workspace' | 'usuário';
@@ -546,6 +547,18 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // deixar o Enter submeter a linha). `/mcp`/`/clear` não têm esse problema porque
     // seus verbos são um conjunto FECHADO (nenhum arg livre de 1 token). Descoberta
     // de "save" fica só no `summary`/doc — não no menu incremental.
+  },
+  {
+    // Pedido do dono (02/09): "ele não deveria rodar o upgrade silenciosamente —
+    // mostrando que atualizou no final na barra do footer, ou dar a opção do
+    // /upgrade". Trocar o binário de alguém sem pedir é decisão que não é nossa;
+    // aqui ele MANDA e VÊ: o que há, o que vai acontecer, e o resultado.
+    name: 'upgrade',
+    summary: 'atualiza o aluy para a versão mais nova do canal (explícito)',
+    source: 'native',
+    id: 'upgrade',
+    section: 'sessão',
+    agentEffect: 'human-only', // trocar o binário NÃO é algo que o agente decide
   },
   {
     // F-WIN (emenda, pedido do dono) — `/window [<tokens>]`. Quando o provider NÃO

@@ -62,6 +62,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { isNewer, newestInChannel, pickAutoUpdateCandidate } from '@hiperplano/aluy-cli-core';
+import type { ResultadoUpgrade, UpgradeDeps } from './upgrade.js';
 
 const PKG = '@hiperplano/aluy-cli';
 const ALUY_DIR = join(homedir(), '.aluy');
@@ -412,4 +413,63 @@ export async function runAutoUpdate(
   } catch {
     // offline / timeout / registry fora / npm ausente ⇒ silêncio total, sem bumpar o cache
   }
+}
+
+/**
+ * `/upgrade` — a atualização EXPLÍCITA. Pedido do dono em 02/09: "ele não deveria rodar o
+ * upgrade silenciosamente — mostrando que atualizou no final na barra do footer, ou dar a
+ * opção do /upgrade".
+ *
+ * Diferenças deliberadas em relação ao `runAutoUpdate`:
+ *  • IGNORA o intervalo de 15 min. Aquele teto existe para o boot não martelar o registro;
+ *    aqui foi o dono que pediu AGORA, e obrigá-lo a esperar seria absurdo.
+ *  • IGNORA o kill-switch de autoupdate. Desligar a atualização AUTOMÁTICA é dizer "não
+ *    troque meu binário sem eu mandar" — não é dizer "nunca me deixe mandar".
+ *  • RELATA todos os desfechos, inclusive "já está no topo" e "não é instalação global".
+ *    O autoupdate cala nesses casos, e é justamente esse silêncio que o dono recusou.
+ *
+ * Continua honrando o que NÃO é preferência: fora de um `npm install -g` não mexe (trocaria
+ * o binário errado), e o estado em disco é atualizado igual, para o boot seguinte saber.
+ */
+export async function runUpgrade(
+  installed: string,
+  deps: UpgradeDeps = {},
+): Promise<ResultadoUpgrade> {
+  const scriptPath = deps.scriptPath ?? process.argv[1];
+  if (!isNpmGlobalInstall(scriptPath, deps.realpath)) return { kind: 'nao-e-global' };
+
+  let promovidas: readonly string[];
+  try {
+    const f = deps.fetch ?? fetch;
+    const resp = await f(
+      `https://registry.npmjs.org/-/package/${encodeURIComponent(PKG)}/dist-tags`,
+    );
+    if (!resp.ok) return { kind: 'sem-registro', motivo: `HTTP ${String(resp.status)}` };
+    const data = (await resp.json()) as Record<string, unknown>;
+    promovidas = Object.values(data).filter((v): v is string => typeof v === 'string');
+  } catch (e) {
+    return { kind: 'sem-registro', motivo: e instanceof Error ? e.message : String(e) };
+  }
+
+  const candidate = pickAutoUpdateCandidate(installed, promovidas);
+  const latestSeen = newestInChannel(installed, promovidas) ?? undefined;
+  if (candidate === null) {
+    writeState(makeState(Date.now(), { lastOutcome: 'sem-novidade', latestSeen }), deps.aluyDir);
+    return { kind: 'ja-no-topo', instalada: installed };
+  }
+
+  deps.aoComecar?.(installed, candidate);
+  const ok = await installInBackground(candidate, deps.spawn ?? spawn);
+  writeState(
+    makeState(Date.now(), {
+      ...(ok ? { installedOnDisk: candidate } : {}),
+      lastOutcome: ok ? 'instalado' : 'instalacao-falhou',
+      latestSeen,
+      ...(ok ? {} : { failedVersion: candidate }),
+    }),
+    deps.aluyDir,
+  );
+  return ok
+    ? { kind: 'instalado', de: installed, para: candidate }
+    : { kind: 'falhou', de: installed, para: candidate };
 }
