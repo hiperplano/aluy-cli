@@ -29,6 +29,13 @@ export interface TelegramUpdate {
   /** O texto da mensagem. */
   readonly text: string;
   /**
+   * `message.message_id` — necessário para REAGIR à mensagem (o "visto" que o dono pediu
+   * em 01/09: "ele não deveria marcar a msg quando é lida"). A Bot API não tem
+   * "marcar como lida" para bots; o equivalente é `setMessageReaction`, e ele exige o id
+   * da mensagem. Opcional porque o parser é fail-safe: sem id, apenas não se reage.
+   */
+  readonly messageId?: number;
+  /**
    * A mensagem INTEIRA é um FORWARD de terceiro (`forward_origin`/`forward_from`): o
    * `text` não foi escrito pelo dono ⇒ a mensagem toda é DADO (`third-party-relayed`).
    */
@@ -68,6 +75,7 @@ export function telegramUpdateToIncoming(update: TelegramUpdate): IncomingMessag
     sender: String(update.fromId),
     conversation: String(update.chatId),
     provenance,
+    ...(update.messageId !== undefined ? { messageId: update.messageId } : {}),
     ...(update.isBot === true ? { senderIsBot: true } : {}),
   };
 }

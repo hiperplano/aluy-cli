@@ -87,6 +87,7 @@ import { EventQueue, formatMonitorEventAsData } from './monitor/event-queue.js';
 import { REMEMBER_TOOL_NAME } from './memory/contract.js';
 import type { ToolRegistry } from './tools/registry.js';
 import type { ShellChunk, ToolPorts, ToolRunContext } from './tools/types.js';
+import { valeMemorizar } from './memory/vale-memorizar.js';
 
 /**
  * Caller do modelo que o loop consome. Recebe as mensagens montadas e a
@@ -695,7 +696,8 @@ export class AgentLoop {
   // EST-0964 — AGENT.md confiável (já clampado). undefined ⇒ nada a injetar.
   private readonly projectInstructions?: string;
   // EST-1109 — agentes DISPONÍVEIS (nota já formatada). undefined ⇒ nada a injetar.
-  private readonly availableAgents?: string;
+  // NÃO é `readonly`: pode ser TROCADA depois via `setAvailableAgents` (ver o método).
+  private availableAgents: string | undefined;
   // EST-1149 — COMANDOS DA SESSÃO (nota já formatada). undefined ⇒ nada a injetar.
   private readonly sessionCommands?: string;
   // ADR-0145 (frente c) — thunk do tier corrente (gateia o few-shot no `system`).
@@ -830,6 +832,12 @@ export class AgentLoop {
    */
   private async storeMemory(goal: string, answer: string): Promise<void> {
     if (!this.memory || !this.memoryScope) return;
+    // F-MEM (emenda) — NÃO grava turno cujo objetivo é só continuação ("ok", "segue").
+    // Medido em 31/08 na máquina do dono: ~100 memórias no scope deste projeto, e cinco
+    // consultas sem relação entre si devolviam 10 resultados cada com UM valor distinto —
+    // `"Objetivo: segue\nResultado: feito."`. Os clones AFOGAM os fatos reais no ranking,
+    // então consertar só a LEITURA não resolvia: o recall voltava, e voltava ruído.
+    if (!valeMemorizar(goal, answer)) return;
     try {
       // F108 (CLI-SEC-6) — REDIGE antes de persistir no mem0. O store é AT-REST (disco
       // do sidecar) E é RECALLADO em prompts futuros: um segredo aqui vazaria duplamente
@@ -1635,6 +1643,28 @@ export class AgentLoop {
    */
   setAutoCompact(cfg: AutoCompactConfig): void {
     this.autoCompact = cfg;
+  }
+
+  /**
+   * GS-MD7 (recarga viva dos agentes `.md`) — TROCA a nota de AGENTES DISPONÍVEIS que
+   * entra no canal `system` a cada iteração. Mesmo padrão (e mesmo porquê) do
+   * `setAutoCompact` logo acima: o campo era `readonly` e ficava congelado no que o
+   * BOOT descobriu.
+   *
+   * O relato do dono: o Aluy criou `~/.aluy/agents/ux-frontend.md` com `write_file`
+   * (sucesso), e o `spawn_agent({ agent: "ux-frontend" })` seguinte foi RECUSADO —
+   * "agente desconhecido (GS-MD7)". Ele teve que sair e reabrir a sessão, PERDENDO o
+   * contexto do trabalho. A recusa em si está certa (nome explícito, sem fallback); o
+   * defeito era não haver como recarregar sem reiniciar. Com a resolução por nome já
+   * relendo o disco, faltava a outra metade: o modelo continuar VENDO no prompt a
+   * lista velha, e portanto nunca descobrir o agente novo por conta própria.
+   *
+   * `buildMessages` lê `this.availableAgents` DE NOVO a cada iteração, então trocar o
+   * campo aqui basta (nenhum outro estado precisa mudar). `undefined` ⇒ volta ao
+   * prompt baseline (sem a seção) — é o mesmo caminho de "nenhum agente mapeado".
+   */
+  setAvailableAgents(note: string | undefined): void {
+    this.availableAgents = note;
   }
 
   /**

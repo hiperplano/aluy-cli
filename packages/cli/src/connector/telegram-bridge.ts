@@ -55,6 +55,37 @@ export interface TelegramBridgeOptions {
    */
   readonly connectorFactory: (signal: AbortSignal) => Connector;
   /**
+   * Chamado quando o pump DESISTE (estourou o teto de tentativas). É o gancho para a
+   * sessão AVISAR o dono na tela — sem ele a morte da ponte volta a ser silenciosa, que é
+   * o defeito que este mecanismo existe para corrigir.
+   */
+  readonly aoParar?: (motivo: string) => void;
+  /**
+   * ACK VISUAL do ingresso — reage à mensagem do dono no próprio Telegram.
+   *
+   * Pedido dele em 01/09 ("ele não deveria marcar a msg quando é lida") e resposta direta
+   * ao que mais doeu no dia: uma mensagem descartada sumia sem sinal NENHUM, e ele só
+   * descobria lendo arquivo. Com o ACK, o retorno chega no celular — 👀 aceita, 🚫
+   * descartada — sem depender de log nem de resposta do agente.
+   *
+   * Porta opcional: ausente ⇒ comportamento de hoje (sem ACK), zero regressão.
+   */
+  readonly ack?: (chatId: number, messageId: number, emoji: '👀' | '🚫') => void;
+  /**
+   * "DIGITANDO…" no canal enquanto o agente trabalha (`sendChatAction`).
+   *
+   * Pedido do dono em 02/09: "nem mostra que tá digitando uma resposta". Um turno dele
+   * levou 42s — sem sinal nenhum, o celular fica mudo e a impressão é de que nada chegou.
+   *
+   * Porta opcional: ausente ⇒ comportamento de hoje, zero regressão.
+   */
+  readonly digitando?: (chatId: number) => void;
+  /**
+   * Recuo (ms) da N-ésima tentativa. Injetável só p/ TESTE: com o recuo real (1s, 2s,
+   * 4s…) provar o reinício custaria segundos de suíte por caso. Ausente ⇒ o recuo real.
+   */
+  readonly recuoMs?: (tentativa: number) => number;
+  /**
    * Allowlist de chats AUTORIZADOS (chat-id como `ConversationRef` — string). VAZIA ⇒ a
    * malha descarta TUDO (default fechado, C2). É a MESMA chave que a malha casa contra
    * `IncomingMessage.conversation`.
@@ -89,8 +120,31 @@ const TELEGRAM_DATA_LABEL = 'telegram (dado externo)';
  * no boot, run.tsx). O `telegram_send` é construído por `sendTool()` e fechado sobre ESTA
  * instância (o alvo é o travado AQUI, nunca um arg do modelo — C3).
  */
+/**
+ * RECUO do pump entre tentativas de reerguer o long-poll. Dobra a cada queda até o teto.
+ * Base curta porque a queda típica é transitória (rede oscilou, 409 de outro cliente) e
+ * o dono espera a ponte de volta em segundos, não em minutos.
+ */
+/** Intervalo do batimento do "digitando" — o indicador expira em ~5s no Telegram. */
+const DIGITANDO_INTERVALO_MS = 4_000;
+
+/** Teto de batimentos (~2 min). Ver `iniciarDigitando` para o porquê de haver teto. */
+const DIGITANDO_MAX_BATIMENTOS = 30;
+
+const PUMP_RECUO_BASE_MS = 1_000;
+const PUMP_RECUO_MAX_MS = 30_000;
+
+/**
+ * Teto de tentativas seguidas. Existe para que uma falha PERMANENTE (token revogado ⇒
+ * 401 eterno) não fique escondida atrás de reconexões infinitas: estourado o teto,
+ * paramos e AVISAMOS. Um ingresso bem-sucedido zera o contador, então uma ponte saudável
+ * nunca chega perto disto.
+ */
+const PUMP_MAX_TENTATIVAS = 8;
+
 export class TelegramBridge {
-  private readonly connector: Connector;
+  /** NÃO-`readonly`: o pump o RECRIA quando o long-poll cai (iterador consumido). */
+  private connector: Connector;
   private readonly allowlist: ReadonlySet<ConversationRef>;
   private readonly sink: IngressSink;
   private readonly redactor: TokenRedactor;
@@ -99,6 +153,43 @@ export class TelegramBridge {
   private readonly log: (line: string) => void;
   /** O AbortController do long-poll — `abort()` encerra o pump junto com a sessão. */
   private readonly ac = new AbortController();
+
+  /** Fábrica do connector — guardada p/ RECRIAR o long-poll numa queda (ver `pump`). */
+  private readonly connectorFactory: (signal: AbortSignal) => Connector;
+
+  /**
+   * O pump está DE FATO drenando o long-poll agora?
+   *
+   * Existe porque "ponte ativa" passou a ser mentira: o `/telegram status` respondia
+   * ATIVA olhando só se o OBJETO da ponte existia. O dono levou exatamente isso em 01/09
+   * — "mandei uma msg, ele não viu; mandei outra, apareceu; a terceira e a quarta, nada" —
+   * e a medição confirmou: o processo da sessão segurava ZERO conexões TCP, ou seja,
+   * nenhum long-poll no ar, enquanto a tela dizia "ponte ATIVA (1 chat autorizado)".
+   */
+  private polling = false;
+
+  /** Quantas vezes o long-poll caiu e foi reerguido nesta sessão (diagnóstico honesto). */
+  private reinicios = 0;
+
+  /** Último motivo de queda, JÁ REDIGIDO (C1). `undefined` ⇒ nunca caiu. */
+  private ultimaQueda: string | undefined;
+
+  /** Ver `TelegramBridgeOptions.aoParar`. */
+  private readonly aoParar: ((motivo: string) => void) | undefined;
+
+  /** Ver `TelegramBridgeOptions.ack`. */
+  private readonly ack:
+    | ((chatId: number, messageId: number, emoji: '👀' | '🚫') => void)
+    | undefined;
+
+  /** Ver `TelegramBridgeOptions.digitando`. */
+  private readonly digitando: ((chatId: number) => void) | undefined;
+
+  /** Batimento do "digitando" — o indicador do Telegram expira em ~5s. */
+  private batimentoDigitando: ReturnType<typeof setInterval> | undefined;
+
+  /** Ver `TelegramBridgeOptions.recuoMs`. */
+  private readonly recuoMs: (tentativa: number) => number;
   /**
    * C3 — o ALVO TRAVADO do egresso: o `ConversationRef` do ÚLTIMO chat allowlistado que
    * mandou uma INSTRUÇÃO. O `telegram_send` responde AQUI — nunca a um destino do modelo.
@@ -109,6 +200,9 @@ export class TelegramBridge {
   constructor(opts: TelegramBridgeOptions) {
     // A fábrica captura o signal do AbortController interno ⇒ o connector já nasce cancelável
     // por `this.stop()` (sem dependência circular nem re-troca de porta em runtime).
+    // GUARDADA (não só usada e descartada): o pump precisa dela para RECRIAR o connector
+    // quando o long-poll cai — um iterador já consumido não volta a produzir.
+    this.connectorFactory = opts.connectorFactory;
     this.connector = opts.connectorFactory(this.ac.signal);
     this.allowlist = opts.allowlist;
     this.sink = opts.sink;
@@ -117,6 +211,12 @@ export class TelegramBridge {
       opts.egressLimiter ?? new EgressRateLimiter(TELEGRAM_EGRESS_MAX, TELEGRAM_EGRESS_WINDOW_MS);
     this.now = opts.now ?? Date.now;
     this.log = opts.log ?? ((line) => process.stderr.write(`${line}\n`));
+    this.aoParar = opts.aoParar;
+    this.ack = opts.ack;
+    this.digitando = opts.digitando;
+    this.recuoMs =
+      opts.recuoMs ??
+      ((t) => Math.min(PUMP_RECUO_MAX_MS, PUMP_RECUO_BASE_MS * 2 ** Math.max(0, t - 1)));
   }
 
   /** O sinal do pump (encerra com a sessão). Passado ao connector p/ cancelar o long-poll. */
@@ -136,8 +236,28 @@ export class TelegramBridge {
    */
   route(msg: IncomingMessage): ConnectorIngress {
     const decision = classifyConnectorIngress(msg, this.allowlist, TELEGRAM_META);
+    // DIÁRIO de TODA decisão, não só do descarte. Antes só o `discard` era registrado, e
+    // num destino invisível (stderr sob a TUI): quando a mensagem chegava e não
+    // aparecia, não dava para saber SE chegou, COMO foi classificada, nem onde se
+    // perdeu. O dono passou um dia nesse escuro. METADADOS apenas — o texto é dele e
+    // não vai p/ disco; o tamanho basta para casar com o que ele mandou.
+    this.log(
+      `[telegram] ingresso: ${decision.kind} · chat=${msg.conversation} · ` +
+        `${String((msg.content ?? '').length)} chars`,
+    );
+    // ACK VISUAL no próprio Telegram — ver `TelegramBridgeOptions.ack`. Best-effort e
+    // SEM `await`: o ACK jamais pode atrasar (nem impedir) o processamento da mensagem.
+    // `chat` vem do ingresso, nunca do modelo; o emoji é de conjunto fechado.
+    if (this.ack !== undefined && msg.messageId !== undefined) {
+      const chat = Number(msg.conversation);
+      if (Number.isFinite(chat)) {
+        this.ack(chat, msg.messageId, decision.kind === 'discard' ? '🚫' : '👀');
+      }
+    }
     switch (decision.kind) {
       case 'instruction':
+        // "digitando…" JÁ — antes de o modelo pensar. É o sinal de que a mensagem chegou.
+        this.iniciarDigitando(Number(msg.conversation));
         // C3 — TRAVA o alvo do egresso no chat allowlistado que falou (a conversa corrente).
         // O `telegram_send` responderá AQUI, nunca a um destino arbitrário do modelo.
         this.lockedConversation = msg.conversation;
@@ -160,30 +280,143 @@ export class TelegramBridge {
     return decision;
   }
 
-  /**
-   * O PUMP do long-poll: drena `connector.incoming()` e roteia CADA mensagem pela malha
-   * (C2). Encerra quando o sinal aborta (fim da sessão). FAIL-SAFE: um erro do iterador é
-   * REDIGIDO (C1) e o pump termina sem derrubar a sessão (a próxima sessão re-ativa). NÃO
-   * relança (o boot não pode quebrar por uma falha do conector).
-   */
-  async pump(): Promise<void> {
-    try {
-      for await (const msg of this.connector.incoming()) {
-        if (this.ac.signal.aborted) break;
-        try {
-          this.route(msg);
-        } catch (err) {
-          // C1 — NUNCA loga `err` cru: a msg pode ecoar a URL `…/bot<token>/…`. Redige.
-          this.log(`[telegram] erro ao rotear ingresso: ${this.safe(err)}`);
-        }
-      }
-    } catch (err) {
-      // C1 — idem p/ a falha do PRÓPRIO long-poll (o client é fail-safe, mas defesa em
-      // profundidade: se o iterador lançar, o que vai pro log está REDIGIDO).
-      this.log(`[telegram] long-poll encerrado: ${this.safe(err)}`);
-    }
+  /** Espera cancelável — não segura o processo se a sessão encerrar no meio. */
+  private async espera(ms: number): Promise<void> {
+    if (this.ac.signal.aborted) return;
+    await new Promise<void>((resolve) => {
+      const id = setTimeout(resolve, ms);
+      this.ac.signal.addEventListener('abort', () => {
+        clearTimeout(id);
+        resolve();
+      });
+    });
   }
 
+  /**
+   * O PUMP do long-poll: drena `connector.incoming()` e roteia CADA mensagem pela malha
+   * (C2). Encerra SÓ quando o sinal aborta (fim da sessão).
+   *
+   * POR QUE HÁ UM LAÇO EXTERNO. A versão anterior era um `for await` único dentro de um
+   * `try`: qualquer erro — ou o simples FIM do iterador — caía no `catch`, escrevia uma
+   * linha no stderr e RETORNAVA. Não havia reinício. Numa TUI o stderr é engolido pela
+   * tela, então a ponte morria para o resto da sessão sem UM sinal sequer, e o
+   * `/telegram status` continuava anunciando "ponte ATIVA" (ele olhava só se o OBJETO
+   * existia). O dono descreveu o sintoma com precisão em 01/09: "mandei uma msg, ele não
+   * viu; mandei outra, apareceu e respondeu; mandei uma terceira e quarta e nada" — e a
+   * medição fechou: ZERO conexões TCP no processo da sessão, nenhum long-poll no ar.
+   *
+   * Um long-poll cai por motivo BANAL e transitório (rede oscilou, 409 quando outro
+   * cliente pediu `getUpdates`, o servidor cortou a conexão). Morrer de vez por causa
+   * disso é desproporcional: reerguemos com espera crescente, e um ingresso bem-sucedido
+   * zera o contador. O connector é RECRIADO a cada tentativa — um iterador já consumido
+   * não volta a produzir, e reusar o antigo daria um laço girando em falso.
+   *
+   * O teto existe para não esconder um defeito PERMANENTE (token revogado ⇒ 401 eterno)
+   * atrás de reconexões infinitas: estourado o teto, paramos e AVISAMOS — que é o oposto
+   * do silêncio que este bloco veio corrigir.
+   */
+  async pump(): Promise<void> {
+    let tentativa = 0;
+    while (!this.ac.signal.aborted) {
+      try {
+        this.polling = true;
+        for await (const msg of this.connector.incoming()) {
+          if (this.ac.signal.aborted) break;
+          tentativa = 0; // chegou mensagem ⇒ a conexão está sã: zera o recuo
+          try {
+            this.route(msg);
+          } catch (err) {
+            // C1 — NUNCA loga `err` cru: a msg pode ecoar a URL `…/bot<token>/…`. Redige.
+            this.log(`[telegram] erro ao rotear ingresso: ${this.safe(err)}`);
+          }
+        }
+        // FIM LIMPO do iterador. NÃO reerguemos aqui, e a razão veio dos testes: o
+        // connector REAL (`client.stream`) só sai do laço em ABORT, então "terminou sem
+        // erro e sem abort" não acontece em produção. Reerguer neste ramo só fazia os
+        // dublês FINITOS da suíte girarem para sempre — 4 testes deste repo passaram a
+        // pendurar 135s cada. Eles estavam certos e a minha primeira versão exagerou.
+        // O que NÃO se repete é o silêncio: encerrar aqui vira aviso.
+        if (this.ac.signal.aborted) break;
+        this.polling = false;
+        this.ultimaQueda = 'o long-poll terminou sozinho';
+        this.log('[telegram] long-poll terminou sozinho — a ponte parou de receber.');
+        this.aoParar?.(this.ultimaQueda);
+        return;
+      } catch (err) {
+        // C1 — idem p/ a falha do PRÓPRIO long-poll: o que vai pro log está REDIGIDO.
+        this.ultimaQueda = this.safe(err);
+      }
+      this.polling = false;
+      if (this.ac.signal.aborted) break;
+      tentativa += 1;
+      this.reinicios += 1;
+      if (tentativa > PUMP_MAX_TENTATIVAS) {
+        this.log(
+          `[telegram] long-poll caiu ${String(tentativa)}× seguidas e NÃO voltou ` +
+            `(${this.ultimaQueda ?? 'motivo desconhecido'}) — a ponte parou de receber.`,
+        );
+        this.aoParar?.(this.ultimaQueda ?? 'motivo desconhecido');
+        return;
+      }
+      const recuo = this.recuoMs(tentativa);
+      this.log(
+        `[telegram] long-poll caiu (${this.ultimaQueda ?? '?'}) — ` +
+          `reerguendo em ${String(Math.round(recuo / 1000))}s (tentativa ${String(tentativa)}).`,
+      );
+      await this.espera(recuo);
+      if (this.ac.signal.aborted) break;
+      // Connector NOVO: o anterior já foi consumido e não volta a produzir.
+      this.connector = this.connectorFactory(this.ac.signal);
+    }
+    this.polling = false;
+  }
+
+  /** Diagnóstico HONESTO da ponte — o que o `/telegram status` precisa para não mentir. */
+  get diagnostico(): {
+    readonly polling: boolean;
+    readonly reinicios: number;
+    readonly ultimaQueda?: string;
+  } {
+    return {
+      polling: this.polling,
+      reinicios: this.reinicios,
+      ...(this.ultimaQueda !== undefined ? { ultimaQueda: this.ultimaQueda } : {}),
+    };
+  }
+
+  /**
+   * Liga o "digitando…" no canal e o REPETE — o indicador do Telegram expira em ~5s, então
+   * um único disparo sumiria antes de o agente terminar (um turno do dono levou 42s).
+   *
+   * O TETO existe porque nada aqui sabe quando o turno acaba de verdade: a resposta pode
+   * sair por `telegram_send` (e aí `pararDigitando` corta), mas também pode não sair nunca
+   * — turno que falha, que responde só no terminal, ou que o dono interrompe. Sem teto, o
+   * "digitando" ficaria eterno, que é pior que não ter: viraria mentira permanente.
+   */
+  private iniciarDigitando(chatId: number): void {
+    if (this.digitando === undefined) return;
+    this.digitando(chatId);
+    let restantes = DIGITANDO_MAX_BATIMENTOS;
+    this.batimentoDigitando = setInterval(() => {
+      restantes -= 1;
+      if (restantes <= 0 || this.ac.signal.aborted) {
+        this.pararDigitando();
+        return;
+      }
+      this.digitando?.(chatId);
+    }, DIGITANDO_INTERVALO_MS);
+    // `unref`: o batimento JAMAIS pode segurar o processo vivo no encerramento — foi
+    // exatamente um handle esquecido que fez o Ctrl-C demorar 2,2s (ver `descartar-corpo`).
+    this.batimentoDigitando.unref?.();
+  }
+
+  /** Corta o "digitando". Idempotente. */
+  private pararDigitando(): void {
+    if (this.batimentoDigitando !== undefined) {
+      clearInterval(this.batimentoDigitando);
+      this.batimentoDigitando = undefined;
+    }
+  }
   /**
    * C3 + C4 — a tool `telegram_send` GATEADA. O agente passa SÓ `{ text }`: o DESTINO é o
    * alvo TRAVADO (`lockedConversation`), NUNCA um arg do modelo (fecha exfiltração, TC-5).
@@ -216,6 +449,8 @@ export class TelegramBridge {
    * DESTINO é o alvo TRAVADO — NUNCA um arg do modelo (fecha exfiltração, TC-5).
    */
   private async runSend(input: Readonly<Record<string, unknown>>): Promise<ToolResult> {
+    // A resposta saiu ⇒ o "digitando" cumpriu seu papel e para agora, sem esperar o teto.
+    this.pararDigitando();
     const text = String((input as { text?: unknown }).text ?? '').trim();
     if (text === '') {
       return { ok: false, observation: 'telegram_send: "text" é obrigatório.' };

@@ -615,6 +615,11 @@ async function main(): Promise<void> {
         // na sessão INTERATIVA (não no headless `-p` one-shot: um long-poll não faz sentido
         // num turno único que sai logo). run.tsx faz a ativação real (keychain → connector).
         ...(action.telegram && !action.print ? { telegram: true } : {}),
+        // As flags desconhecidas VIAJAM para a sessão: o aviso do stderr logo acima é
+        // apagado quando a TUI limpa a tela, e sem isto o usuário fica sem nenhum sinal.
+        ...(action.unknownFlags && action.unknownFlags.length > 0
+          ? { unknownFlags: action.unknownFlags }
+          : {}),
         // EST-1007 — no headless o objetivo é o prompt resolvido (arg/posicional/stdin);
         // fora do headless é o objetivo posicional cru (`aluy "obj"`).
         ...(headlessGoal !== undefined ? { goal: headlessGoal } : {}),

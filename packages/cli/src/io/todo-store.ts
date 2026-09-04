@@ -16,15 +16,16 @@
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import {
-  openSync,
-  writeSync,
   closeSync,
-  readFileSync,
+  constants as fsConstants,
+  existsSync,
   mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
   renameSync,
   unlinkSync,
-  existsSync,
-  constants as fsConstants,
+  writeSync,
 } from 'node:fs';
 import type { TodoItem, TodoStorePort } from '@hiperplano/aluy-cli-core';
 import { withFileLock } from './file-lock.js';
@@ -78,8 +79,12 @@ function sanitizeSessionId(id: string): string {
 export class NodeTodoStore implements TodoStorePort {
   private readonly file: string;
 
+  /** Raiz do `~/.aluy/` — guardada p/ o `pendingElsewhere` varrer os IRMÃOS. */
+  private readonly base: string;
+
   constructor(opts: NodeTodoStoreOptions = {}) {
     const base = opts.baseDir ?? join(homedir(), '.aluy');
+    this.base = base;
     // BUG-0029 — ESCOPO POR CONVERSA: com `sessionId`, cada conversa tem seu
     // próprio `~/.aluy/todos/<sessionId>.json` (uma sessão nova NÃO herda tarefas de
     // outra ⇒ fim do "retome" cross-conversa). Sem `sessionId`, arquivo global
@@ -164,7 +169,56 @@ export class NodeTodoStore implements TodoStorePort {
     });
   }
 
+  /**
+   * BUG-0029 (emenda) — conta os PENDENTES nos backlogs das OUTRAS conversas.
+   *
+   * Existe porque a lista vazia era AMBÍGUA: `list_todos` numa sessão nova dizia
+   * "nenhum item anotado ainda" com a mesma cara de quem nunca anotou nada e de quem
+   * anotou na conversa anterior (o dono levou exatamente isso em 31/08, depois que a
+   * própria CLI mandou reiniciar a sessão). Devolvemos só o NÚMERO — o texto dos itens
+   * fica isolado, que é o que o BUG-0029 garante e não estamos relaxando.
+   *
+   * Varre `<base>/todos/*.json` (menos o próprio) e o legado `<base>/todos.json`.
+   * Fail-safe em tudo: dir ausente, arquivo ilegível ou JSON sujo contam ZERO — este
+   * caminho serve para ENRIQUECER uma mensagem, nunca para derrubar a listagem.
+   */
+  async pendingElsewhere(): Promise<number> {
+    const arquivos: string[] = [];
+    const dir = join(this.base, 'todos');
+    try {
+      for (const nome of readdirSync(dir)) {
+        if (nome.endsWith('.json')) arquivos.push(join(dir, nome));
+      }
+    } catch {
+      // dir ainda não existe (nenhuma sessão escopada gravou) — segue p/ o legado.
+    }
+    // O legado é backlog de verdade: quem rodou sem `sessionId` anotou ali.
+    arquivos.push(join(this.base, TODO_FILE));
+
+    let total = 0;
+    for (const arq of arquivos) {
+      if (arq === this.file) continue; // o próprio já foi contado pelo `list()`
+      total += this.pendentesEm(arq);
+    }
+    return total;
+  }
+
   // ── interno ──────────────────────────────────────────────────────────────────
+
+  /** Pendentes de UM arquivo de backlog. Qualquer problema ⇒ 0 (nunca lança). */
+  private pendentesEm(arq: string): number {
+    try {
+      if (!existsSync(arq)) return 0;
+      const dados: unknown = JSON.parse(readFileSync(arq, 'utf8'));
+      if (!Array.isArray(dados)) return 0;
+      return dados.filter(
+        (t): boolean =>
+          typeof t === 'object' && t !== null && (t as { done?: unknown }).done !== true,
+      ).length;
+    } catch {
+      return 0;
+    }
+  }
 
   private readAll(): TodoItem[] {
     if (!existsSync(this.file)) return [];

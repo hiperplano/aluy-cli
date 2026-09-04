@@ -34,8 +34,18 @@ export interface ActivateTelegramOptions {
    * quando há token (caminho ativo). Sem token, nada é construído ⇒ nem o fetch é referenciado.
    */
   readonly fetchFn?: typeof fetch;
-  /** Overrides repassados à `TelegramBridge` (catraca/relógio/log) — teste. */
-  readonly bridgeOverrides?: Pick<TelegramBridgeOptions, 'egressLimiter' | 'now' | 'log'>;
+  /** Overrides repassados à `TelegramBridge` (catraca/relógio/log/recuo) — teste. */
+  readonly bridgeOverrides?: Pick<
+    TelegramBridgeOptions,
+    'egressLimiter' | 'now' | 'log' | 'recuoMs'
+  >;
+  /**
+   * Avisa que a ponte DESISTIU de reerguer o long-poll (falha permanente, ex.: token
+   * revogado ⇒ 401 eterno). A sessão usa isto para NOTIFICAR na tela — sem ele a morte
+   * volta a ser silenciosa, que é o defeito de 01/09: o dono via "ponte ATIVA" enquanto o
+   * processo segurava ZERO conexões TCP.
+   */
+  readonly aoParar?: (motivo: string) => void;
 }
 
 /** O resultado da ativação: ou subiu (bridge ativa) ou não (com o motivo p/ a UI explicar). */
@@ -101,6 +111,9 @@ export async function activateTelegram(
   // (allowNonDefaultApiBase NÃO é passado ⇒ host forçado — config/env não redireciona).
   const client = new TelegramClient({
     token,
+    // O MESMO diário da ponte: o parse descarta em silêncio e com o offset já
+    // avançado, então sem isto a mensagem do dono some sem rastro em lugar nenhum.
+    ...(opts.bridgeOverrides?.log ? { log: opts.bridgeOverrides.log } : {}),
     ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
   });
   // A bridge cria seu próprio AbortController e passa o `signal` à FÁBRICA do connector, p/ o
@@ -110,6 +123,29 @@ export async function activateTelegram(
     allowlist,
     sink: opts.sink,
     redactor: client,
+    ...(opts.aoParar !== undefined ? { aoParar: opts.aoParar } : {}),
+    // ACK VISUAL (👀 aceita · 🚫 descartada) e "digitando…". As DUAS portas vivem aqui
+    // porque só a ativação tem o `client`; a ponte apenas as CHAMA. Uma fiação minha se
+    // perdeu entre edições e o efeito foi silencioso e enganoso: a ponte seguia chamando
+    // `this.ack(...)`, mas com a porta ausente a chamada virava no-op — nenhuma reação
+    // saía. O dono reportou em 02/09 ("não dá a msg como lida") e eu quase errei o
+    // diagnóstico: verifiquei a CHAMADA no bundle e concluí que estava instalado, sem
+    // checar se alguém FORNECIA a porta.
+    //
+    // Alvo e conteúdo vêm do INGRESSO, nunca do modelo: emoji de conjunto fechado, e o
+    // "digitando" não carrega texto. Best-effort: falhar aqui não pode travar o ingresso.
+    ack: (chatId, messageId, emoji) => {
+      void client.react(chatId, messageId, emoji).then((ok) => {
+        // O RESULTADO vai ao diário: sem ele, "a reação não apareceu" ficava
+        // indistinguível de "a reação nem foi tentada" — a dúvida exata do dono.
+        opts.bridgeOverrides?.log?.(
+          `[telegram] ack chat=${String(chatId)} msg=${String(messageId)} → ${ok ? 'ok' : 'FALHOU'}`,
+        );
+      });
+    },
+    digitando: (chatId) => {
+      void client.typing(chatId);
+    },
     ...(opts.bridgeOverrides ?? {}),
   });
   return { active: true, bridge, allowlistSize: allowlist.size };

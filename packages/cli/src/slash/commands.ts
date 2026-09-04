@@ -59,7 +59,9 @@ export type NativeCommandId =
   | 'export'
   | 'tools'
   | 'quit'
-  | 'todo';
+  | 'todo'
+  | 'window'
+  | 'upgrade';
 
 /** Seção do menu (agrupamento visual §2.15). */
 export type SlashSection = 'conta' | 'sessão' | 'workspace' | 'usuário';
@@ -179,6 +181,26 @@ export function isParallelWhileBusy(command: SlashCommand, args = ''): boolean {
 
 // EST-0982 — predicados de paralelismo p/ os comandos DUAL-MODE (read-only vs mutador).
 // Exportados (testáveis) e reusados nos registros dos NATIVOS abaixo.
+
+/**
+ * EST-1158 (emenda) — os VERBOS DE CICLO DE VIDA do `/cycle` têm de rodar JÁ, com a
+ * sessão OCUPADA. É a única situação em que eles fazem sentido.
+ *
+ * O defeito (dono, 01/09): ele pôs um `/cycle` mandando mensagem no Telegram a cada
+ * minuto e, ao dar `/cycle stop`, "ele fica esperando o término do turno". Estava certo, e
+ * a causa é este campo: sem `parallelWhileBusy`/`parallelWhileBusyWith` o comando
+ * ENFILEIRA (ver `isParallelWhileBusy` — "falta dos dois ⇒ enfileira"). Ou seja, o comando
+ * cuja função é PARAR o que está rodando só era executado depois que aquilo parasse
+ * sozinho: inútil por construção. Vale igual para `pause`, `resume` e `status`.
+ *
+ * INICIAR um ciclo (`/cycle 5m "tarefa"`) continua ENFILEIRANDO, e isso é deliberado —
+ * abrir ciclo novo por cima de um turno vivo é o gasto dobrado que a fila existe p/ evitar.
+ */
+export function cycleIsLifecycle(args: string): boolean {
+  const verbo = args.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  // ALLOWLIST fechada: o que não estiver aqui (inclusive iniciar) vai p/ a fila.
+  return verbo === 'stop' || verbo === 'pause' || verbo === 'resume' || verbo === 'status';
+}
 
 /** `/effort` é leitura SÓ sem argumento (`/effort` ⇒ mostra o atual). `/effort <v>` MUTA. */
 export function effortIsReadOnly(args: string): boolean {
@@ -527,6 +549,33 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // de "save" fica só no `summary`/doc — não no menu incremental.
   },
   {
+    // Pedido do dono (02/09): "ele não deveria rodar o upgrade silenciosamente —
+    // mostrando que atualizou no final na barra do footer, ou dar a opção do
+    // /upgrade". Trocar o binário de alguém sem pedir é decisão que não é nossa;
+    // aqui ele MANDA e VÊ: o que há, o que vai acontecer, e o resultado.
+    name: 'upgrade',
+    summary: 'atualiza o aluy para a versão mais nova do canal (explícito)',
+    source: 'native',
+    id: 'upgrade',
+    section: 'sessão',
+    agentEffect: 'human-only', // trocar o binário NÃO é algo que o agente decide
+  },
+  {
+    // F-WIN (emenda, pedido do dono) — `/window [<tokens>]`. Quando o provider NÃO
+    // anuncia a janela em `/models` (o caso medido: tokenrouter, 131 modelos, nenhum
+    // campo de janela no catálogo inteiro), a auto-compactação fica inerte e o `⛁ %`
+    // trava em 0. Antes disso a única saída era editar `~/.aluy/config.json` à mão.
+    // Sem arg ⇒ só LÊ o estado; com arg ⇒ aplica na sessão e persiste.
+    // NOME EM INGLÊS (CLAUDE.md §1): slash é IDENTIFICADOR, como /model, /effort e
+    // /compact. Nasceu `/janela` e foi corrigido antes de qualquer release.
+    name: 'window',
+    summary: 'informa a janela de contexto do modelo ativo (ex.: /window 128k)',
+    source: 'native',
+    id: 'window',
+    section: 'sessão',
+    agentEffect: 'session-effect',
+  },
+  {
     // EST-0962 · /effort — seta o `reasoning_effort` (PASSTHROUGH: qualquer string ≤32 chars;
     // low/medium/high são comuns mas CUSTOM é aceito). SEM tier-gate: vale em qualquer tier.
     // Sem arg ⇒ mostra o valor atual; `/effort low` seta direto. É só DADO (não credencial).
@@ -745,6 +794,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // iniciar/pause/resume/edit/stop são session-effect (allow direto).
     agentEffect: 'session-effect',
     subcommandEffects: { status: 'read-only' },
+    // Os verbos de ciclo de vida FURAM a fila — ver `cycleIsLifecycle` para o porquê.
+    parallelWhileBusyWith: cycleIsLifecycle,
     // EST-1158 — lifecycle do /cycle EM EXECUÇÃO, DESCOBRÍVEIS no menu (o dono pediu).
     // A forma de INICIAR é posicional (`/cycle 5m "tarefa"`); estes verbos só atuam num
     // ciclo JÁ rodando (run.tsx roteia). `/cycle ` abre o submenu; `/cycle 5m "..."`
@@ -968,13 +1019,28 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // EST-0977 · ADR-0061 — `/agents`: lista os perfis de sub-agente .md que o aluy
     // MAPEOU (válidos + rejeitados c/ motivo). Read-only; reusa o loader do boot.
     name: 'agents',
-    summary: 'lista os agentes .md mapeados (global + projeto · válidos + rejeitados)',
+    summary: 'lista os agentes .md mapeados (global + projeto · válidos + rejeitados · refresh)',
     source: 'native',
     id: 'agents',
     section: 'workspace',
-    // EST-0982 — read-only puro (lista perfis numa nota): roda JÁ mid-turn.
+    // EST-0982 — read-only puro (lista perfis numa nota): roda JÁ mid-turn. O `refresh`
+    // também é seguro mid-turn: relê duas pastas e TROCA o registro (uma atribuição);
+    // não toca histórico, catraca nem o turno vivo.
     parallelWhileBusy: true,
     agentEffect: 'read-only', // ADR-0147
+    // GS-MD7 — o `refresh` relê o disco e troca o registro da sessão: não é leitura pura,
+    // é efeito de SESSÃO (reversível, não-destrutivo). O efeito PRÓPRIO de cada agente
+    // recarregado segue passando por `decide()` como sempre.
+    subcommandEffects: { refresh: 'session-effect', reload: 'session-effect' },
+    // GS-MD7 (recarga viva) — relata do dono: agente `.md` criado NO MEIO da sessão só
+    // valia depois de reiniciar. Espelha o `/mcp reload`.
+    subcommands: [
+      {
+        name: 'refresh',
+        summary: 'relê os .md de agentes (aplica os criados/editados na sessão)',
+        usage: 'refresh',
+      },
+    ],
   },
   {
     // EST-1112 · ADR-0116 — `/skills`: lista as SKILLS (SKILL.md) que o aluy MAPEOU
@@ -1074,7 +1140,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
       },
       {
         name: 'create',
-        summary: 'criação conversacional — descreva em prosa; o agente entrevista e escreve o rascunho',
+        summary:
+          'criação conversacional — descreva em prosa; o agente entrevista e escreve o rascunho',
         usage: 'create <descrição em prosa do serviço>',
       },
       {

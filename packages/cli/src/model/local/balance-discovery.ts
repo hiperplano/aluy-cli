@@ -61,6 +61,7 @@
 //     dado ou nada; nunca uma exceção deste módulo.
 
 import type { ConnectivityFetch } from './connectivity-check.js';
+import { descartarCorpo } from './descartar-corpo.js';
 
 /**
  * O saldo restante da conta no gateway BYO, já num formato que o rodapé consegue
@@ -220,7 +221,14 @@ async function fetchBalanceJson(
       },
       // SEM `body`: GET com body (mesmo `''`) faz o fetch do Node LANÇAR antes da rede.
     });
-    if (!res.ok) return undefined;
+    if (!res.ok) {
+      // SAÍDA EM 2 CTRL-C — sair daqui sem tocar no corpo era o que segurava o processo:
+      // o `/credits` do tokenrouter responde 404 e a `IncomingMessage` do fetch pinado
+      // ficava pendurada, com o socket preso ao laço de eventos até o cão de guarda de 2s
+      // do `run.tsx` matar tudo à força. Ver `descartar-corpo.ts` p/ a medição.
+      descartarCorpo(res);
+      return undefined;
+    }
     const text = await res.text();
     if (text.length > MAX_BALANCE_BODY_CHARS) return undefined;
     return text === '' ? undefined : (JSON.parse(text) as unknown);

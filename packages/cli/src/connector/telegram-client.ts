@@ -20,6 +20,12 @@ import {
 export const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
 export interface TelegramClientOptions {
+  /**
+   * DIÁRIO do cliente. O parse descarta updates em silêncio ABSOLUTO e com o offset já
+   * avançado — a mensagem do dono é consumida e some. Sem um log aqui não há como saber
+   * que isso aconteceu, nem por quê. Default: no-op (o chamador decide o destino).
+   */
+  readonly log?: (linha: string) => void;
   /** Token do bot (do keychain). NUNCA logado em claro. */
   readonly token: string;
   /** `fetch` injetável (teste). Default: o global. */
@@ -43,10 +49,14 @@ export class TelegramClient {
   private readonly fetchFn: typeof fetch;
   private readonly apiBase: string;
   private readonly longPollSeconds: number;
+  /** Ver `TelegramClientOptions.log`. */
+  private readonly log: (linha: string) => void;
+
   private offset = 0;
 
   constructor(opts: TelegramClientOptions) {
     this.token = opts.token;
+    this.log = opts.log ?? ((): void => undefined);
     this.fetchFn = opts.fetchFn ?? (globalThis.fetch as typeof fetch);
     // R7 — apiBase só != default COM a flag explícita de código (teste/proxy). Sem ela,
     // o host é TRAVADO em api.telegram.org (config/env não redireciona o token).
@@ -88,6 +98,21 @@ export class TelegramClient {
     }
     const parsed = parseGetUpdates(raw, this.offset);
     this.offset = parsed.nextOffset; // confirma os updates (não reprocessa).
+    // DIÁRIO do que o parse jogou fora. É o único trecho do caminho de ingresso que
+    // descartava em SILÊNCIO ABSOLUTO — e com o offset já avançado, ou seja, consumindo
+    // a mensagem do dono e sumindo com ela. Em 01/09 isso custou horas: a ponte polizava,
+    // a fila do Telegram zerava e o roteamento nunca era chamado.
+    const fora = parsed.descartados ?? [];
+    if (fora.length > 0) {
+      for (const d of fora) {
+        this.log(
+          `[telegram] update DESCARTADO no parse: motivo=${d.motivo}` +
+            (d.chatType !== undefined ? ` chat.type=${d.chatType}` : '') +
+            (d.chatId !== undefined ? ` chat=${String(d.chatId)}` : '') +
+            (d.updateId !== undefined ? ` update_id=${String(d.updateId)}` : ''),
+        );
+      }
+    }
     return parsed.updates;
   }
 
@@ -105,6 +130,76 @@ export class TelegramClient {
     }
   }
 
+  /**
+   * "DIGITANDO…" no Telegram (`sendChatAction`).
+   *
+   * Pedido do dono em 02/09: "ele não dá a msg como lida e nem mostra que tá digitando uma
+   * resposta". O ACK (👀) responde a primeira metade; esta é a segunda — enquanto o agente
+   * trabalha, o celular mostra o indicador nativo, em vez de silêncio por dezenas de
+   * segundos (um turno dele levou 42s).
+   *
+   * O indicador do Telegram EXPIRA em ~5s, então quem chama precisa repetir enquanto o
+   * trabalho durar — a janela curta é do protocolo, não uma escolha nossa.
+   *
+   * Segurança: o alvo vem do INGRESSO, nunca de argumento do modelo, e não há conteúdo —
+   * é um sinal de estado. FAIL-SAFE: qualquer falha devolve `false` e segue; um indicador
+   * que não sai não pode atrapalhar a resposta que importa.
+   */
+  async typing(chatId: number, signal?: AbortSignal): Promise<boolean> {
+    const url = `${this.apiBase}/bot${this.token}/sendChatAction`;
+    try {
+      const resp = await this.fetchFn(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, action: 'typing' }),
+        ...(signal ? { signal } : {}),
+      });
+      if (!resp.ok) return false;
+      const body = (await resp.json()) as { ok?: unknown };
+      return body?.ok === true;
+    } catch {
+      return false;
+    }
+  }
+  /**
+   * ACK VISUAL — reage a uma mensagem recebida ("visto").
+   *
+   * Pedido do dono em 01/09: "ele não deveria marcar a msg quando é lida". A Bot API NÃO
+   * tem "marcar como lida" para bots; o equivalente é `setMessageReaction`, que ancora um
+   * emoji NA mensagem dele — melhor que um "visto" genérico, porque diz QUAL mensagem.
+   *
+   * Segurança: o alvo (`chatId`/`messageId`) vem do INGRESSO que acabou de chegar, nunca
+   * de um argumento do modelo — não há superfície de exfiltração aqui, e o conteúdo é um
+   * emoji de um conjunto FECHADO (o modelo não escolhe nem o alvo nem o símbolo).
+   *
+   * FAIL-SAFE: qualquer falha devolve `false` e segue. Um ACK que não sai não pode
+   * impedir a mensagem de ser processada — seria trocar um silêncio por um travamento.
+   */
+  async react(
+    chatId: number,
+    messageId: number,
+    emoji: '👀' | '🚫',
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const url = `${this.apiBase}/bot${this.token}/setMessageReaction`;
+    try {
+      const resp = await this.fetchFn(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reaction: [{ type: 'emoji', emoji }],
+        }),
+        ...(signal ? { signal } : {}),
+      });
+      if (!resp.ok) return false;
+      const body = (await resp.json()) as { ok?: unknown };
+      return body?.ok === true;
+    } catch {
+      return false; // rede/abort/JSON inválido ⇒ sem ACK, sem barulho.
+    }
+  }
   /**
    * EGRESSO — envia texto a um chat (sendMessage). Espelha o `send()` da porta `Connector`.
    * O `chatId` é o ALVO TRAVADO pela malha (o chat allowlistado da conversa corrente — a

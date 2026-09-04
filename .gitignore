@@ -40,3 +40,10 @@ __pycache__/
 # Credencial do npm: o `npm config set` grava o token AQUI quando rodado dentro do repo,
 # e um token de publicação no working tree é um segredo a uma distração de virar commit.
 .npmrc
+
+# Artefatos do `npm pack` (empacotamento local p/ instalar e publicar) — nunca versionados.
+packages/*/hiperplano-aluy-cli-*.tgz
+
+# Estado do aluy escrito DENTRO do projeto. O lugar dele é `~/.aluy/`; quando aparece aqui
+# é um teste (ou uma execução) resolvendo o caminho a partir do CWD em vez do HOME.
+.aluy/

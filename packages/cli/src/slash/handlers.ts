@@ -39,6 +39,11 @@ import { LANGS, resolveLang, t as translate, type Lang } from '../i18n/index.js'
 import { PROVIDERS, resolveProviderName } from '../model/providers.js';
 import { PromptInterruptedError, type TerminalIO } from '../auth/io.js';
 import type { StoreApiKeyResult } from '../model/local/credential-resolver.js';
+import {
+  parseJanelaDigitada,
+  explicaRecusa,
+  isPlausibleContextWindow,
+} from '@hiperplano/aluy-cli-core';
 
 /** Uma nota a empurrar na conversa (título + linhas). */
 export interface SlashNote {
@@ -464,6 +469,27 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
     case 'whoami':
     case 'logout':
       return { kind: 'async', id };
+    case 'upgrade':
+      // Roteado ANTES em run.tsx (precisa de rede e do controller p/ as notas). Cair
+      // aqui só sem esse roteamento (teste linear) ⇒ nota honesta, como o `/window`.
+      return {
+        kind: 'note',
+        note: {
+          title: 'upgrade',
+          lines: ['a atualização só roda na sessão interativa.'],
+        },
+      };
+    case 'window':
+      // `/window` é roteado ANTES (run.tsx) p/ `runWindowSlash`, que precisa do modelo
+      // ativo, do provider e do config. Cair AQUI só acontece sem esse roteamento (ex.:
+      // teste linear) ⇒ nota honesta, mesmo padrão do `/telegram` logo abaixo.
+      return {
+        kind: 'note',
+        note: {
+          title: 'janela',
+          lines: ['a janela de contexto só pode ser ajustada na sessão interativa.'],
+        },
+      };
     case 'telegram':
       // `/telegram` é roteado ANTES (run.tsx) p/ `runTelegramSlash` com os `args` (config +
       // keychain). Cair AQUI só acontece sem esse roteamento (ex.: teste linear) ⇒ nota honesta.
@@ -1143,6 +1169,24 @@ export function parseMcpRefresh(args: string): McpRefresh | null {
 }
 
 /**
+ * GS-MD7 (recarga viva dos agentes `.md`) — detecta `/agents refresh` (sinônimo:
+ * `reload`, o MESMO verbo do `/mcp`). PURO (só parse do arg).
+ *
+ * Existe porque a descoberta de agentes rodava SÓ no boot. O relato do dono: o Aluy
+ * criou `~/.aluy/agents/ux-frontend.md` com `write_file` (sucesso) e o
+ * `spawn_agent({ agent: "ux-frontend" })` seguinte foi RECUSADO — "agente desconhecido
+ * (GS-MD7)". Ele teve que sair e reabrir a sessão, perdendo o contexto do trabalho. O
+ * `/mcp reload` já resolvia exatamente esta classe de problema para os servers MCP; o
+ * `/agents refresh` é a mesma porta, para a mesma doença, na outra fonte de `.md`.
+ *
+ * Sem SCOPE (diferente do `parseMcpRefresh`): não há "server" a nomear — as duas pastas
+ * confinadas são relidas juntas, e reler uma pasta que não mudou é inerte.
+ */
+export function parseAgentsRefresh(args: string): boolean {
+  return /^(refresh|reload)$/i.test(args.trim());
+}
+
+/**
  * EST-0970 (UX) — STUB HONESTO do `/mcp reload` (FU-VAU-002). Substituído pelo
  * reload AO VIVO (parseMcpRefresh + refreshMcp em run.tsx). Mantido p/ back-compat
  * de testes antigos.
@@ -1482,9 +1526,55 @@ export async function runLoginSlash(deps: LoginSlashDeps): Promise<SlashNote> {
  *   /telegram login           → aponta p/ o terminal (o token é sensível — prompt sem eco lá)
  * O TOKEN nunca é digitado/exibido aqui (CLI-SEC-2): só a allowlist (DADO) é manipulada.
  */
+/**
+ * A linha de ESTADO do `/telegram status`. PURA.
+ *
+ * Distingue três coisas que antes saíam como uma só: (a) não há ponte; (b) a ponte foi
+ * MONTADA mas não está recebendo; (c) está recebendo. O caso (b) é o que custou horas ao
+ * dono em 01/09 — a tela dizia "ATIVA" e o processo não tinha uma conexão sequer aberta.
+ */
+export function estadoDaPonte(d: {
+  bridgeAtiva?: boolean;
+  pontePolling?: boolean;
+  ponteReinicios?: number;
+  ponteUltimaQueda?: string;
+}): string {
+  if (d.bridgeAtiva !== true) return 'estado:    ponte parada — inicie com `aluy --telegram`.';
+  if (d.pontePolling === true) {
+    const r = d.ponteReinicios ?? 0;
+    return r > 0
+      ? `estado:    ponte RECEBENDO (reerguida ${String(r)}× nesta sessão).`
+      : 'estado:    ponte RECEBENDO mensagens.';
+  }
+  // Montada e MUDA — o caso que o status escondia.
+  const motivo = d.ponteUltimaQueda;
+  return motivo !== undefined
+    ? `estado:    ponte MONTADA mas NÃO está recebendo (última queda: ${motivo}).`
+    : 'estado:    ponte MONTADA mas ainda NÃO está recebendo.';
+}
+
 export async function runTelegramSlash(
   args: string,
-  deps: { configStore: UserConfigStore; secretStore: ConnectorSecretStore },
+  deps: {
+    configStore: UserConfigStore;
+    secretStore: ConnectorSecretStore;
+    /** A ponte foi MONTADA nesta sessão? (o objeto existe) */
+    bridgeAtiva?: boolean;
+    /**
+     * A ponte está DE FATO drenando o long-poll agora?
+     *
+     * `bridgeAtiva` sozinho MENTIA: em 01/09 o status anunciava "ponte ATIVA (1 chat
+     * autorizado)" enquanto o processo da sessão segurava ZERO conexões TCP — o pump
+     * tinha morrido e o objeto continuava lá. O dono descreveu o sintoma sem saber a
+     * causa: "mandei uma msg, ele não viu; mandei outra, apareceu; a terceira e a quarta,
+     * nada". Montada ≠ recebendo, e o status precisa dizer QUAL das duas.
+     */
+    pontePolling?: boolean;
+    /** Quantas vezes o long-poll caiu e foi reerguido nesta sessão. */
+    ponteReinicios?: number;
+    /** Último motivo de queda, já redigido. */
+    ponteUltimaQueda?: string;
+  },
 ): Promise<SlashNote> {
   const parts = args.trim().split(/\s+/).filter(Boolean);
   const sub = (parts[0] ?? 'status').toLowerCase();
@@ -1498,7 +1588,11 @@ export async function runTelegramSlash(
       lines: [
         `token:     ${token ? `presente (${redactTelegramToken(token)})` : 'ausente — rode `aluy telegram login` no terminal'}`,
         `allowlist: ${allow.length > 0 ? `[${allow.join(', ')}]` : 'VAZIA (bridge fechada — /telegram allow <chat-id>)'}`,
-        'estado:    a bridge ainda NÃO está ativa (ativação sob revisão de segurança).',
+        // `bridgeAtiva` era recebido (run.tsx passa) e NUNCA lido: a frase abaixo era
+        // cravada, então o status dizia "não está ativa" mesmo com a ponte no ar. Como é
+        // propriedade de interface e não variável local, o `noUnusedLocals` não reclamou e
+        // a meia-correção passou pelo build.
+        estadoDaPonte(deps),
       ],
     };
   }
@@ -1547,4 +1641,90 @@ export function applySlashEffect(effect: SlashEffect, controller: SessionControl
     controller.clear();
   }
   // 'quit'/'async' são tratados pelo chamador (precisam do instance.unmount / login).
+}
+
+/**
+ * F-WIN (emenda) — `/window [<tokens>]`: informa a JANELA DE CONTEXTO do modelo ativo
+ * quando o provider não a anuncia.
+ *
+ * O buraco que fecha (dono, 01/09, `z-ai/glm-5.3-flash` no tokenrouter): a descoberta por
+ * `GET /models` roda certo e não acha nada — verificado na conta dele, 131 modelos, e o
+ * catálogo inteiro só traz `id`/`object`/`created`/`owned_by`/`supported_endpoint_types`/
+ * `tags`. Sem janela, a auto-compactação fica INERTE e o `⛁ %` não sai de 0. O aviso
+ * mandava editar `~/.aluy/config.json` à mão; ele pediu "dar a opção de digitar".
+ *
+ * Sem argumento: mostra o estado. Com argumento: valida (parser puro + o MESMO piso de
+ * plausibilidade da descoberta), aplica NESTA sessão e persiste em
+ * `providers[].contextByModel` — a escrita idempotente que já existia.
+ */
+export async function runWindowSlash(
+  args: string,
+  deps: {
+    /** Slug do modelo ATIVO — é a chave do `contextByModel`. */
+    readonly slug: string | undefined;
+    /** Id do provider ativo — sem ele só dá p/ valer nesta sessão. */
+    readonly providerId: string | undefined;
+    /** Janela em vigor agora (0 ⇒ desconhecida). */
+    readonly janelaAtual: number;
+    /** Aplica na sessão em curso (efeito imediato no `⛁ %`). */
+    readonly aplicar: (slug: string, tokens: number) => void;
+    /** Persiste no config. `false` ⇒ vale só nesta sessão (ver o writer). */
+    readonly persistir: (providerId: string, slug: string, tokens: number) => boolean;
+  },
+): Promise<SlashNote> {
+  const slug = deps.slug?.trim() ?? '';
+  const bruto = args.trim();
+
+  if (bruto === '') {
+    return {
+      title: 'janela',
+      lines:
+        deps.janelaAtual > 0
+          ? [
+              `janela em vigor: ${deps.janelaAtual.toLocaleString('pt-BR')} tokens${slug !== '' ? ` (${slug})` : ''}.`,
+              'p/ trocar: `/window <tokens>` — ex.: `/window 128k`.',
+            ]
+          : [
+              `janela DESCONHECIDA${slug !== '' ? ` p/ "${slug}"` : ''} — a auto-compactação está inerte e o \`⛁ %\` fica em 0.`,
+              'informe o número da doc do provider: `/window 128k` ou `/window 131072`.',
+            ],
+    };
+  }
+
+  const r = parseJanelaDigitada(bruto);
+  if (r.tokens === undefined) {
+    return { title: 'janela', lines: [explicaRecusa(r.recusa ?? 'nao-numero')] };
+  }
+  if (!isPlausibleContextWindow(r.tokens)) {
+    // MESMO piso da descoberta (fonte única): um denominador absurdo ou vira loop de
+    // compactação, ou a desliga em silêncio — e este número vai p/ o disco.
+    return {
+      title: 'janela',
+      lines: [
+        `${r.tokens.toLocaleString('pt-BR')} tokens está fora da faixa plausível p/ uma janela de contexto.`,
+        'confira o número na doc do provider — ex.: `/window 128k`.',
+      ],
+    };
+  }
+  if (slug === '') {
+    return {
+      title: 'janela',
+      lines: ['não sei qual é o modelo ativo agora — escolha um com `/model` e repita.'],
+    };
+  }
+
+  deps.aplicar(slug, r.tokens);
+  const gravou = deps.providerId !== undefined && deps.persistir(deps.providerId, slug, r.tokens);
+  return {
+    title: 'janela',
+    lines: gravou
+      ? [
+          `janela de "${slug}" definida em ${r.tokens.toLocaleString('pt-BR')} tokens.`,
+          'gravado em `~/.aluy/config.json` — as próximas sessões já abrem com ela.',
+        ]
+      : [
+          `janela de "${slug}" definida em ${r.tokens.toLocaleString('pt-BR')} tokens NESTA sessão.`,
+          'não deu p/ gravar no config (provider sem entrada própria) — na próxima sessão, repita.',
+        ],
+  };
 }

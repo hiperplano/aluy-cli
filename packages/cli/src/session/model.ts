@@ -29,6 +29,16 @@ export type { SidecarUsageView };
 export interface YouTurn {
   readonly kind: 'you';
   readonly text: string;
+  /**
+   * PROCEDÊNCIA do turno, quando ele NÃO veio do composer (pedido do dono, 01/09:
+   * "deveria ter algum jeito de mostrar que a msg chegou pelo telegram"). Ausente ⇒
+   * digitado aqui, o caso normal, e o desenho é o de sempre.
+   *
+   * É rótulo de ORIGEM, não conteúdo: não entra no que vai ao modelo — o objetivo
+   * segue sendo só o `text`. Serve para o dono distinguir, na transcrição, o que ele
+   * digitou do que chegou por um canal externo.
+   */
+  readonly origem?: string;
 }
 
 /** Um turno do agente (◇ aluy) — texto que faz stream token-a-token. */
