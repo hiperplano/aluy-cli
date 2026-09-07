@@ -295,7 +295,20 @@ export function readAutoUpdateNote(running: string, env: NodeJS.ProcessEnv): str
  * passar de `INSTALL_TIMEOUT_MS` (nunca deixa um `npm` pendurado). `true` só no exit
  * code 0; qualquer outro desfecho (timeout, exit≠0, ENOENT — sem npm no PATH, sem
  * permissão) devolve `false`, sem lançar. */
-function installInBackground(candidate: string, spawnImpl: SpawnFn): Promise<boolean> {
+/** O desfecho do `npm install -g`, com o MOTIVO quando falha (ver `motivoDaFalha`). */
+interface DesfechoInstalacao {
+  readonly ok: boolean;
+  /** Frase curta e ACIONÁVEL. Ausente quando `ok`. */
+  readonly motivo?: string;
+}
+
+/** Mensagem curta de um erro qualquer (nunca vazia). */
+function msgDe(e: unknown): string {
+  const t = e instanceof Error ? e.message : String(e);
+  return t.trim() === '' ? 'erro desconhecido' : t.trim();
+}
+
+function installInBackground(candidate: string, spawnImpl: SpawnFn): Promise<DesfechoInstalacao> {
   return new Promise((resolve) => {
     let done = false;
     let child: ReturnType<SpawnFn>;
@@ -308,12 +321,22 @@ function installInBackground(candidate: string, spawnImpl: SpawnFn): Promise<boo
       // prefix` devolve o do projeto; a partir do HOME devolve `/home/aluy/.aluy-npm`,
       // que é o prefixo real da instalação. Instalação global não tem nada a ver com o
       // diretório em que o agente por acaso foi aberto — daí o HOME.
-      child = spawnImpl('npm', ['install', '-g', `${PKG}@${candidate}`], {
+      // WINDOWS: o `npm` é um SHIM `.cmd` (batch), e o `spawn` do Node não executa
+      // `.cmd` sem shell — falha com ENOENT. Ou seja, no Windows a atualização
+      // automática NUNCA funcionou; a falha era MUDA, então ninguém soube. O dono a viu
+      // em 04/09 justamente porque a rc.168 passou a REPORTAR o fracasso: "tentei usar
+      // o /upgrade no windows e não foi".
+      //
+      // Usamos o NOME do executável certo em vez de `shell: true`: com shell, o
+      // `candidate` viraria parte de uma linha de comando interpretada, e argumento
+      // não-interpretado é sempre a opção mais segura.
+      const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+      child = spawnImpl(npmBin, ['install', '-g', `${PKG}@${candidate}`], {
         stdio: 'ignore',
         cwd: homedir(),
       });
-    } catch {
-      resolve(false);
+    } catch (e) {
+      resolve({ ok: false, motivo: `não consegui iniciar o npm: ${msgDe(e)}` });
       return;
     }
     const timer = setTimeout(() => {
@@ -324,19 +347,23 @@ function installInBackground(candidate: string, spawnImpl: SpawnFn): Promise<boo
       } catch {
         // já morto / sem permissão de sinal ⇒ segue
       }
-      resolve(false);
+      resolve({ ok: false, motivo: 'o npm demorou demais e foi interrompido' });
     }, INSTALL_TIMEOUT_MS);
-    child.once('error', () => {
+    child.once('error', (e: unknown) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      resolve(false); // ex.: ENOENT — sem npm no PATH
+      // ENOENT aqui era o caso do WINDOWS antes do `npm.cmd`. Dizer o motivo é o que
+      // separa "npm ausente do PATH" de "npm rodou e falhou".
+      resolve({ ok: false, motivo: `o npm não pôde ser executado: ${msgDe(e)}` });
     });
     child.once('exit', (code) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      resolve(code === 0);
+      resolve(
+        code === 0 ? { ok: true } : { ok: false, motivo: `o npm saiu com código ${String(code)}` },
+      );
     });
   });
 }
@@ -395,8 +422,11 @@ export async function runAutoUpdate(
     let failedVersion: string | undefined;
     if (candidate !== null) {
       const spawnImpl = deps.spawn ?? spawn;
-      const ok = await installInBackground(candidate, spawnImpl);
-      if (ok) {
+      // `installInBackground` devolve um OBJETO (`{ok, motivo}`), não um booleano — um
+      // objeto é SEMPRE verdadeiro, então `if (resultado)` daria sucesso em toda falha.
+      // Foi o que eu fiz ao mudar a assinatura, e os testes deste arquivo pegaram.
+      const desfechoAuto = await installInBackground(candidate, spawnImpl);
+      if (desfechoAuto.ok) {
         installedOnDisk = candidate;
         outcome = 'instalado';
         // AVISA JÁ, nesta sessão — ver `aoInstalar`: a nota do boot nunca cobre o sucesso.
@@ -459,7 +489,8 @@ export async function runUpgrade(
   }
 
   deps.aoComecar?.(installed, candidate);
-  const ok = await installInBackground(candidate, deps.spawn ?? spawn);
+  const desfecho = await installInBackground(candidate, deps.spawn ?? spawn);
+  const ok = desfecho.ok;
   writeState(
     makeState(Date.now(), {
       ...(ok ? { installedOnDisk: candidate } : {}),
@@ -471,5 +502,10 @@ export async function runUpgrade(
   );
   return ok
     ? { kind: 'instalado', de: installed, para: candidate }
-    : { kind: 'falhou', de: installed, para: candidate };
+    : {
+        kind: 'falhou',
+        de: installed,
+        para: candidate,
+        ...(desfecho.motivo !== undefined ? { motivo: desfecho.motivo } : {}),
+      };
 }

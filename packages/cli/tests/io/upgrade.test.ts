@@ -80,7 +80,15 @@ describe('runUpgrade — nenhum desfecho é mudo', () => {
       fetch: registry({ rc: '1.0.0-rc.167' }),
       spawn: spawnFalso(false),
     });
-    expect(r).toEqual({ kind: 'falhou', de: '1.0.0-rc.162', para: '1.0.0-rc.167' });
+    // O resultado passou a carregar o MOTIVO (mudança deliberada): "não completou" não
+    // ajudava a agir. O dono levou exatamente isso no Windows em 04/09 — a causa era o
+    // `npm` ser um shim `.cmd`, que o `spawn` não executa, e a nota não dizia nada disso.
+    expect(r.kind).toBe('falhou');
+    expect(r).toMatchObject({ de: '1.0.0-rc.162', para: '1.0.0-rc.167' });
+    expect(
+      (r as { motivo?: string }).motivo,
+      'a falha tem de dizer POR QUE — foi o que faltou no Windows',
+    ).toBeDefined();
   });
 
   it('registro fora ⇒ diz o motivo (não some)', async () => {

@@ -20,7 +20,13 @@ export type ResultadoUpgrade =
   | { readonly kind: 'nao-e-global' }
   | { readonly kind: 'sem-registro'; readonly motivo: string }
   | { readonly kind: 'instalado'; readonly de: string; readonly para: string }
-  | { readonly kind: 'falhou'; readonly de: string; readonly para: string };
+  | {
+      readonly kind: 'falhou';
+      readonly de: string;
+      readonly para: string;
+      /** POR QUE falhou — sem isto a nota dizia só "não completou", que não ajuda a agir. */
+      readonly motivo?: string;
+    };
 
 /** Linhas da nota, prontas para o `pushNote`. PURA. */
 export function linhasDoUpgrade(r: ResultadoUpgrade): string[] {
@@ -44,7 +50,7 @@ export function linhasDoUpgrade(r: ResultadoUpgrade): string[] {
       ];
     case 'falhou':
       return [
-        `a atualização para ${r.para} FALHOU (o \`npm install -g\` não completou).`,
+        `a atualização para ${r.para} FALHOU${r.motivo !== undefined ? `: ${r.motivo}` : ''}.`,
         `você segue na ${r.de}. Tente à mão: npm i -g @hiperplano/aluy-cli@${r.para}`,
       ];
   }
