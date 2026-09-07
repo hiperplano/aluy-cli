@@ -2201,7 +2201,23 @@ export function App(props: AppProps): React.ReactElement {
       ) {
         return false;
       }
-      // `injectInput('root', …)`: VIVO ⇒ fila viva (mid-turn); PARADO ⇒ `pendingInjected`.
+      // TURNO VIVO é a única situação em que ENCAIXAR entrega a mensagem.
+      //
+      // `injectInput` devolve `true` em DOIS casos: "encaixei na fila viva" (mid-turn) e
+      // "guardei em `pendingInjected`" (próximo turno) — e essa segunda fila só é drenada
+      // pelo `submit`. Como o chamador trata `true` como "linha consumida", ele NÃO
+      // enfileira; e como a UI de staging (`<QueuedInputs>`) só mostra os ENFILEIRADOS, a
+      // mensagem sumia da tela E do fluxo, sem nada para drená-la.
+      //
+      // Relato do dono (04/09): "quando estou digitando e paralelamente está sendo escrito
+      // algo na saída, quando envio a msg ela não fica esperando, ela simplesmente some".
+      // A janela é estreita e por isso enganosa — a fase transiciona entre a tecla e a
+      // chamada, o que acontece justamente quando o streaming está terminando.
+      //
+      // Mesma causa e mesma correção do ingresso do Telegram (`telegram-sink.ts`): perguntar
+      // ANTES se há turno vivo. Fora dele, devolvemos `false` e o caller ENFILEIRA — visível
+      // no staging e drenado no repouso, que é o comportamento que ele esperava.
+      if (!controller.turnoVivo) return false;
       return controller.injectInput('root', route.text);
     },
     [controller, userCommands, picker],
