@@ -41,6 +41,13 @@ export interface AlvoDeInjecao {
   injectInput(nodeId: string, text: string): boolean;
   /** DADO não-confiável: já acorda a sessão parada por conta própria. */
   ingestExternalData(label: string, text: string): void;
+  /**
+   * A mensagem é a RESPOSTA de uma pergunta que o agente mandou por este canal?
+   *
+   * `true` ⇒ já foi consumida (resolvida, ou reapresentada por ilegível) e NÃO deve virar
+   * instrução. Opcional: alvo sem esta porta se comporta como antes. Ver o cabeçalho.
+   */
+  responderPeloCanal?(texto: string): boolean;
   /** Abre um turno NOVO — a mesma via do composer. */
   submit(
     goal: string,
@@ -100,6 +107,18 @@ export function criarSinkTelegram(
       if (alvo === undefined) {
         // Acontece se uma mensagem chega ANTES de o controller existir (ref deferida).
         log('[telegram] sink: descartado — a sessão ainda não tem controller.');
+        return;
+      }
+      // ANTES DE TUDO: isto pode ser a RESPOSTA de uma pergunta que o agente fez POR AQUI.
+      //
+      // O dono, em 02/09: "quando ele quer tirar uma dúvida, se a pergunta é do telegram
+      // ele não pode enviar no console pois o usuário não vai ver". A pergunta agora sai
+      // pelo canal — mas a resposta precisa VOLTAR à pergunta, e este é o único ponto onde
+      // dá para desviá-la. O `perguntar` deixa o turno VIVO enquanto espera, então sem o
+      // desvio a resposta cairia no `injectInput` logo abaixo como texto solto do turno, e
+      // a promessa da pergunta seguiria pendurada para sempre (o resolver não tem prazo).
+      if (alvo.responderPeloCanal?.(text) === true) {
+        log('[telegram] sink: resposta de PERGUNTA pendente (não virou instrução).');
         return;
       }
       // TURNO VIVO é a única situação em que ENCAIXAR entrega a mensagem AGORA.

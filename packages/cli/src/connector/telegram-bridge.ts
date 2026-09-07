@@ -486,6 +486,42 @@ export class TelegramBridge {
     }
   }
 
+  /**
+   * ENVIO DA SESSÃO (não do modelo): um aviso que a própria CLI precisa pôr no canal.
+   *
+   * Existe para a PERGUNTA do agente (`perguntar`) quando o turno chegou pelo Telegram: a
+   * caixa abre no terminal e o dono está no celular, então sem isto o loop fica parado
+   * esperando um teclado que ninguém vai tocar. Ver `controller.espelharPerguntaNoCanal`.
+   *
+   * Mesmas travas do `telegram_send`: alvo TRAVADO no chat allowlistado (C3, nunca um
+   * destino escolhido em outro lugar) e catraca ANTES do envio (C4) — o texto vem de uma
+   * spec que o MODELO escreveu, então não é conteúdo mais confiável que o da tool.
+   *
+   * `false` ⇒ não foi (sem conversa travada, catraca estourada ou falha de envio). O
+   * chamador é quem decide o que fazer com isso; aqui a falha é REGISTRADA, nunca muda.
+   */
+  async notificar(texto: string): Promise<boolean> {
+    // Estamos passando a bola PARA o dono: "digitando…" a partir daqui seria mentira.
+    this.pararDigitando();
+    const alvo = this.lockedConversation;
+    if (alvo === undefined) {
+      this.log('[telegram] aviso da sessão NÃO enviado: nenhuma conversa travada.');
+      return false;
+    }
+    if (!this.egressLimiter.tryConsume(this.now())) {
+      this.log('[telegram] aviso da sessão NÃO enviado: teto anti-spam do egresso.');
+      return false;
+    }
+    try {
+      await this.connector.send({ content: texto, conversation: alvo });
+      return true;
+    } catch (err) {
+      // C1 — a mensagem do erro pode ecoar a URL `…/bot<token>/…`. REDIGE.
+      this.log(`[telegram] aviso da sessão FALHOU: ${this.safe(err)}`);
+      return false;
+    }
+  }
+
   /** Encerra o pump (chamado no teardown da sessão) — cancela o long-poll do connector. */
   stop(): void {
     this.ac.abort();

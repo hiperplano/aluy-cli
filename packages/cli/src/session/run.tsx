@@ -5159,6 +5159,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // teardown cancela o long-poll. Só existe quando a bridge subiu (token presente — C6).
     if (telegramBridge) {
       telegramController = built.controller;
+      // A PERGUNTA do agente (`perguntar`) também sai pelo canal quando o turno veio de lá
+      // — senão a caixa abre num terminal que o dono não está vendo e o loop fica parado
+      // esperando um teclado que ninguém vai tocar (dono, 02/09). O controller só espelha
+      // quando a origem do turno é externa; aqui é só o ligamento do egresso.
+      const ponte = telegramBridge;
+      built.controller.ligarPerguntaNoCanal((texto: string): void => {
+        void ponte.notificar(texto);
+      });
       void telegramBridge.pump();
     }
 

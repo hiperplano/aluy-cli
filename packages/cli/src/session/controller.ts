@@ -205,6 +205,14 @@ import {
 type BangStatus = BangBlock['status'];
 import type { TuiAskResolver, PendingAskEntry } from '../ask/ask-resolver.js';
 import type { TuiQuestionResolver, PendingQuestionEntry } from '../ask/question-resolver.js';
+import {
+  ehDesistencia,
+  interpretarResposta,
+  textoDaPergunta,
+  textoDeAprovacaoPendente,
+  textoDeAprovacaoSoNoTerminal,
+  textoDeNaoEntendi,
+} from '../connector/pergunta-no-canal.js';
 import type { AskResolver, QuestionAnswer, QuestionSpec } from '@hiperplano/aluy-cli-core';
 // ADR-0147 — tipos das dependências OPCIONAIS da `SessionCommandPort` (ver os campos
 // `agentMemory`/`commandWorkspace`/`login` em `SessionControllerOptions` acima).
@@ -6682,8 +6690,12 @@ export class SessionController {
 
   private onAskChange(pending: PendingAskEntry | null): void {
     if (pending) {
+      // ORDEM: o aviso ANTES do `patch` — o `patch` notifica, e um observador pode
+      // responder na mesma pilha (ver `onQuestionChange`).
+      this.avisarAprovacaoNoCanal(pending.request);
       this.patch({ phase: 'asking', pendingAsk: { request: pending.request } });
     } else if (this.state.phase === 'asking') {
+      this.aprovacaoNoCanal = undefined;
       // ask resolvido ⇒ volta a streaming (o loop do agente continua) ou, se foi o
       // ask de um `!comando` (EST-0958), a `runBang` reassume a fase no `finally`
       // (idle/done) — então aqui só limpamos o pending sem forçar `streaming`.
@@ -6713,10 +6725,25 @@ export class SessionController {
 
   private onQuestionChange(pending: PendingQuestionEntry | null): void {
     if (pending) {
+      // ORDEM IMPORTA: o espelho ANTES do `patch`. O `patch` notifica os observadores, e um
+      // deles pode responder na mesma pilha — se `perguntaNoCanal` ainda não estivesse
+      // armada, a resposta cairia num vazio e a pergunta ficaria pendurada.
+      const espelhou = this.espelharPerguntaNoCanal(pending.spec);
       this.patch({ phase: 'questioning', pendingQuestion: { spec: pending.spec } });
-    } else if (this.state.phase === 'questioning') {
-      // Pergunta resolvida ⇒ volta a streaming (o loop do agente continua com a resposta).
-      this.patch({ phase: 'streaming', pendingQuestion: undefined });
+      if (espelhou) {
+        // Na tela, quem lê precisa saber que a caixa tem OUTRO respondente possível — senão
+        // a pergunta parece travada aqui e some sozinha quando ele responde do celular.
+        this.pushNote('pergunta', [
+          `a pergunta foi enviada pelo ${this.origemDoUltimoTurno ?? 'canal'} — ` +
+            'dá para responder por lá ou aqui.',
+        ]);
+      }
+    } else {
+      this.perguntaNoCanal = undefined;
+      if (this.state.phase === 'questioning') {
+        // Pergunta resolvida ⇒ volta a streaming (o loop do agente continua com a resposta).
+        this.patch({ phase: 'streaming', pendingQuestion: undefined });
+      }
     }
   }
 
@@ -6725,6 +6752,120 @@ export class SessionController {
     const pending = this.questionResolver?.pending;
     if (!pending) return;
     pending.resolve(answer);
+  }
+
+  // ── A PERGUNTA quando o turno veio de FORA (Telegram) ────────────────────────────
+  //
+  // O dono, em 02/09: "quando ele quer tirar uma dúvida, se a pergunta é do telegram ele
+  // não pode enviar no console pois o usuário não vai ver".
+  //
+  // A tool `perguntar` abre o `<QuestionDialog>` no TERMINAL e BLOQUEIA o loop até alguém
+  // teclar ali — e o resolver NÃO tem prazo por tempo, de propósito (uma pergunta pode
+  // esperar o usuário pensar). Num turno que chegou pelo celular isso é um impasse
+  // completo: ninguém vai teclar. Pior, a tentativa de responder também não chegava — o
+  // `perguntar` deixa o turno VIVO, então a mensagem dele entrava pelo `injectInput` como
+  // texto solto do turno e a promessa da pergunta seguia pendurada. Silêncio dos dois lados.
+  //
+  // As duas metades, portanto: a pergunta SAI pelo canal, e a resposta que volta por lá
+  // RESOLVE a pendência em vez de virar instrução nova.
+
+  /** Envia texto pelo canal externo. Só existe quando a ponte subiu (ver `run.tsx`). */
+  private canalDaPergunta: ((texto: string) => void) | undefined;
+
+  /**
+   * A pergunta pendente que FOI para o canal. `undefined` ⇒ não há pergunta lá fora, e a
+   * mensagem que chegar pelo canal é instrução normal (comportamento de sempre).
+   */
+  private perguntaNoCanal: QuestionSpec | undefined;
+
+  /** Liga o canal externo (Telegram) como destino ALTERNATIVO das perguntas. */
+  ligarPerguntaNoCanal(enviar: (texto: string) => void): void {
+    this.canalDaPergunta = enviar;
+  }
+
+  /**
+   * Manda a pergunta também pelo canal — SÓ quando o turno corrente veio de lá.
+   *
+   * A condição é `origemDoUltimoTurno`: um turno digitado no terminal continua exatamente
+   * como hoje (a caixa, e nada no celular). Repetir toda pergunta no canal seria ruído no
+   * telefone dele para uma caixa que ele está olhando.
+   */
+  private espelharPerguntaNoCanal(spec: QuestionSpec): boolean {
+    const enviar = this.canalDaPergunta;
+    if (enviar === undefined || this.origemDoUltimoTurno === undefined) return false;
+    this.perguntaNoCanal = spec;
+    enviar(textoDaPergunta(spec));
+    return true;
+  }
+
+  /**
+   * A mensagem que voltou pelo canal É a resposta da pergunta pendente?
+   *
+   * `true` ⇒ CONSUMIMOS a mensagem (resolvida, ou reapresentada por ilegível) e o sink NÃO
+   * deve injetá-la como instrução. `false` ⇒ não havia pergunta no canal; segue o caminho
+   * normal. Ilegível devolve `true` de propósito: a pergunta continua pendente e o dono
+   * recebe o formato de volta — tratar como instrução ali abriria um turno novo por cima
+   * de um loop que está parado esperando exatamente esta resposta.
+   */
+  responderPeloCanal(texto: string): boolean {
+    if (this.responderAprovacaoDoCanal(texto)) return true;
+    const spec = this.perguntaNoCanal;
+    if (spec === undefined) return false;
+    if (!this.questionResolver?.pending) {
+      // A pergunta já foi resolvida por outra via (teclado, esc, abort do turno): a
+      // mensagem é instrução comum. Sem esta guarda, ela sumiria no vazio.
+      this.perguntaNoCanal = undefined;
+      return false;
+    }
+    const answer = interpretarResposta(spec, texto);
+    if (answer === undefined) {
+      this.canalDaPergunta?.(textoDeNaoEntendi(spec));
+      return true;
+    }
+    this.perguntaNoCanal = undefined;
+    this.resolveQuestion(answer);
+    return true;
+  }
+
+  /**
+   * A APROVAÇÃO pendente que foi anunciada no canal. `undefined` ⇒ nada pendente lá fora.
+   */
+  private aprovacaoNoCanal: AskRequest | undefined;
+
+  /**
+   * Avisa no canal que o turno PAROU numa aprovação — mesma família do espelho da pergunta,
+   * e a mais cara: a catraca abre o diálogo no terminal e o loop fica parado SEM PRAZO.
+   * Vindo o turno do celular, o dono não via absolutamente nada acontecer.
+   */
+  private avisarAprovacaoNoCanal(pedido: AskRequest): void {
+    const enviar = this.canalDaPergunta;
+    if (enviar === undefined || this.origemDoUltimoTurno === undefined) return;
+    this.aprovacaoNoCanal = pedido;
+    enviar(textoDeAprovacaoPendente(pedido));
+  }
+
+  /**
+   * A mensagem do canal decide a aprovação pendente?
+   *
+   * APROVAR remotamente NÃO é oferecido, de propósito: o dono aprova o efeito EXATO que vê
+   * (CLI-SEC-9), e uma linha de chat não é esse lugar — o diff/comando inteiro está no
+   * terminal, aqui vai um trecho. NEGAR é diferente: é o default fail-safe da catraca e só
+   * pode DIMINUIR o que acontece, então "cancelar" pelo celular vale.
+   */
+  private responderAprovacaoDoCanal(texto: string): boolean {
+    if (this.aprovacaoNoCanal === undefined) return false;
+    if (!this.tuiResolver?.pending) {
+      // Já foi decidido no terminal (ou o turno abortou): a mensagem é instrução comum.
+      this.aprovacaoNoCanal = undefined;
+      return false;
+    }
+    if (!ehDesistencia(texto)) {
+      this.canalDaPergunta?.(textoDeAprovacaoSoNoTerminal());
+      return true;
+    }
+    this.aprovacaoNoCanal = undefined;
+    this.resolveAsk({ kind: 'deny', reason: 'negado pelo dono pelo canal externo' });
+    return true;
   }
 
   private onError(err: unknown): void {
