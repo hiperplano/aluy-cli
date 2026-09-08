@@ -308,10 +308,27 @@ function msgDe(e: unknown): string {
   return t.trim() === '' ? 'erro desconhecido' : t.trim();
 }
 
+/**
+ * O charset que uma VERSÃO pode ter. O `candidate` vem do mapa de dist-tags do npm — DADO
+ * REMOTO — e no Windows ele passa a viajar numa linha de comando interpretada pelo
+ * `cmd.exe` (ver `installInBackground`). Travamos o charset ANTES: só o que um semver
+ * contém. Nada de espaço, aspas, `&`, `|`, `>`, `%` ou `^`.
+ *
+ * A validação vale nos DOIS sistemas de propósito: é uma versão que estamos prestes a
+ * instalar GLOBALMENTE, e conferir a forma é barato em qualquer plataforma.
+ */
+const VERSAO_ACEITAVEL = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
+
 function installInBackground(candidate: string, spawnImpl: SpawnFn): Promise<DesfechoInstalacao> {
   return new Promise((resolve) => {
     let done = false;
     let child: ReturnType<SpawnFn>;
+    // Ver `VERSAO_ACEITAVEL`. NÃO ecoa o valor recusado: ele é texto remoto, e a tela do
+    // dono não é lugar para exibi-lo.
+    if (!VERSAO_ACEITAVEL.test(candidate)) {
+      resolve({ ok: false, motivo: 'o npm anunciou uma versão com formato inesperado' });
+      return;
+    }
     try {
       // `cwd: homedir()` NÃO é detalhe: o npm lê `.npmrc` a partir do CWD e o
       // ./.npmrc do PROJETO tem precedência SOBRE o ~/.npmrc do usuário. O aluy roda
@@ -330,10 +347,23 @@ function installInBackground(candidate: string, spawnImpl: SpawnFn): Promise<Des
       // Usamos o NOME do executável certo em vez de `shell: true`: com shell, o
       // `candidate` viraria parte de uma linha de comando interpretada, e argumento
       // não-interpretado é sempre a opção mais segura.
-      const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+      const win = process.platform === 'win32';
+      const npmBin = win ? 'npm.cmd' : 'npm';
       child = spawnImpl(npmBin, ['install', '-g', `${PKG}@${candidate}`], {
         stdio: 'ignore',
         cwd: homedir(),
+        // WINDOWS, 2ª volta: `npm.cmd` sozinho DEIXOU de bastar. Desde o Node 18.20.2/
+        // 20.12.2/22 (correção da CVE-2024-27980), o `spawn` RECUSA executar `.cmd`/`.bat`
+        // sem shell e lança `EINVAL` — que é literalmente o que o dono levou em 08/09:
+        // "a atualização para 1.0.0-rc.171 FALHOU: não consegui iniciar o npm: spawn
+        // EINVAL". O `npm.cmd` consertou o ENOENT de antes e virou este.
+        //
+        // O comentário anterior preferia "argumento não-interpretado" a `shell: true`, e a
+        // preferência continua certa — só deixou de ser possível para um `.cmd`. O que
+        // sobra é fechar o buraco pelo DADO: `candidate` é validado contra
+        // `VERSAO_ACEITAVEL` logo acima, e `PKG` é uma constante nossa. Nada do que entra
+        // nessa linha de comando vem de fora sem passar pelo charset de semver.
+        ...(win ? { shell: true } : {}),
       });
     } catch (e) {
       resolve({ ok: false, motivo: `não consegui iniciar o npm: ${msgDe(e)}` });

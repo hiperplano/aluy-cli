@@ -10,6 +10,18 @@
 //
 // Preferimos o NOME certo do executável a `shell: true`: com shell, a versão viraria parte
 // de uma linha de comando interpretada, e argumento não-interpretado é sempre mais seguro.
+//
+// ── EMENDA (08/09/2026): `npm.cmd` sozinho DEIXOU de bastar ────────────────────────────
+//
+// O dono levou o sucessor do ENOENT na tela: "a atualização para 1.0.0-rc.171 FALHOU: não
+// consegui iniciar o npm: spawn EINVAL". Desde o Node 18.20.2/20.12.2/22 (correção da
+// CVE-2024-27980), o `spawn` RECUSA executar `.cmd`/`.bat` sem shell — o conserto anterior
+// trocou um erro por outro, e o Windows seguiu sem nunca conseguir atualizar.
+//
+// A preferência acima continua CERTA e simplesmente deixou de ser possível para um `.cmd`.
+// O que sobrou foi fechar o buraco pelo DADO, não pela forma da chamada: a versão vem do
+// mapa de dist-tags (remoto) e agora passa por um charset de semver ANTES de chegar perto
+// de uma linha de comando. Os dois casos abaixo travam as duas metades.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
@@ -27,9 +39,10 @@ const registry = () =>
   })) as never;
 
 /** Captura o executável pedido; `falhaENOENT` simula o Windows sem o `.cmd`. */
-function spawnEspiao(vistos: string[], falhaENOENT = false) {
-  return vi.fn((bin: string) => {
+function spawnEspiao(vistos: string[], falhaENOENT = false, opts: unknown[] = []) {
+  return vi.fn((bin: string, _args: readonly string[], o: unknown) => {
     vistos.push(bin);
+    opts.push(o);
     const c = new EventEmitter() as EventEmitter & { kill: () => void };
     c.kill = () => undefined;
     queueMicrotask(() => {
@@ -86,5 +99,62 @@ describe('a falha diz POR QUE', () => {
     expect(motivo, 'sem o motivo não dá p/ saber se é PATH, permissão ou o npm falhando').toContain(
       'ENOENT',
     );
+  });
+});
+
+describe('EMENDA 08/09 — o `.cmd` precisa de shell, e o dado precisa de charset', () => {
+  it('WINDOWS ⇒ spawn com `shell` — sem isso o Node lança EINVAL no `.cmd`', async () => {
+    fingePlataforma('win32');
+    const opts: unknown[] = [];
+    await runUpgrade('1.0.0-rc.1', {
+      ...base,
+      fetch: registry(),
+      spawn: spawnEspiao([], false, opts),
+    });
+    expect((opts[0] as { shell?: boolean } | undefined)?.shell).toBe(true);
+  });
+
+  it('LINUX/macOS ⇒ SEM shell (argumento não-interpretado onde ainda dá)', async () => {
+    fingePlataforma('linux');
+    const opts: unknown[] = [];
+    await runUpgrade('1.0.0-rc.1', {
+      ...base,
+      fetch: registry(),
+      spawn: spawnEspiao([], false, opts),
+    });
+    expect((opts[0] as { shell?: boolean } | undefined)?.shell).toBeUndefined();
+  });
+
+  it('versão com metacaractere de shell é RECUSADA antes do spawn', async () => {
+    // O `candidate` vem do mapa de dist-tags — dado REMOTO. Sob `shell:true` ele viraria
+    // parte de uma linha interpretada pelo `cmd.exe`; um `&` ali seria execução extra.
+    fingePlataforma('win32');
+    const vistos: string[] = [];
+    const registryHostil = () =>
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ rc: '1.0.0-rc.2 & calc.exe' }),
+      })) as never;
+    const r = await runUpgrade('1.0.0-rc.1', {
+      ...base,
+      fetch: registryHostil(),
+      spawn: spawnEspiao(vistos),
+    });
+    expect(vistos, 'nada pode ser spawnado com esse valor').toHaveLength(0);
+    expect(r.kind).toBe('falhou');
+  });
+
+  it('uma versão NORMAL passa — a guarda não pode bloquear o caminho bom', async () => {
+    // Guarda que recusa tudo "passa" sem provar nada; este caso é o contra-exemplo.
+    fingePlataforma('win32');
+    const vistos: string[] = [];
+    const r = await runUpgrade('1.0.0-rc.1', {
+      ...base,
+      fetch: registry(),
+      spawn: spawnEspiao(vistos),
+    });
+    expect(vistos).toEqual(['npm.cmd']);
+    expect(r.kind).not.toBe('falhou');
   });
 });

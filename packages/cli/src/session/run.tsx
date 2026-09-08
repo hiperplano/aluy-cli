@@ -1885,9 +1885,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               'próximo turno, senão ele vai falhar por falta de chave.'
             : defaultVivo
               ? `provider ativo agora: ${entry.id} (modelo default: ${modeloAtivo}).`
-              : `provider ativo agora: ${entry.id} · modelo ${modeloAtivo}. o default do ` +
-                `catálogo ("${entry.defaultModel}") não consta nos ${slugsDoProvider.length} ` +
-                'que ele anuncia — escolha um na lista a seguir.',
+              : provaDoModeloFalhou
+                ? `provider ativo agora: ${entry.id}. a chave passou, mas o modelo do ` +
+                  `catálogo ("${entry.defaultModel}") não respondeu — escolha um na lista.`
+                : `provider ativo agora: ${entry.id} · modelo ${modeloAtivo}. o default do ` +
+                  `catálogo ("${entry.defaultModel}") não consta nos ${slugsDoProvider.length} ` +
+                  'que ele anuncia — escolha um na lista a seguir.',
           client,
           defaultModel: modeloAtivo,
         };
