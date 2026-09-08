@@ -9,12 +9,16 @@
 import { describe, expect, it } from 'vitest';
 import type { QuestionSpec } from '@hiperplano/aluy-cli-core';
 import {
+  ehContinuar,
   ehDesistencia,
   interpretarResposta,
   textoDaPergunta,
   textoDeAprovacaoPendente,
   textoDeNaoEntendi,
+  textoDePausaPorOrcamento,
+  textoDePausaPorTravamento,
   MAX_EFEITO_NO_CANAL,
+  PALAVRAS_DE_CONTINUAR,
   PALAVRAS_DE_DESISTENCIA,
 } from '../../src/connector/pergunta-no-canal.js';
 
@@ -201,5 +205,46 @@ describe('ehDesistencia', () => {
     expect(ehDesistencia('Cancelar')).toBe(true);
     expect(ehDesistencia('  CANCELA ')).toBe(true);
     expect(ehDesistencia('pode mandar')).toBe(false);
+  });
+});
+
+describe('as PAUSAS — travamento e orçamento', () => {
+  it('o travamento diz O QUE se repetiu e as três saídas do terminal', () => {
+    const t = textoDePausaPorTravamento({
+      kind: 'same-tool-call',
+      count: 4,
+      sample: 'run_command',
+    });
+    expect(t).toContain('run_command');
+    expect(t).toContain('4');
+    expect(t).toContain('DIREÇÃO');
+    expect(t).toContain(PALAVRAS_DE_CONTINUAR[0]!);
+    expect(t).toContain(PALAVRAS_DE_DESISTENCIA[0]!);
+  });
+
+  it('traduz cada `kind` do watchdog — o nome cru não diz nada a quem lê no celular', () => {
+    const de = (kind: string) => textoDePausaPorTravamento({ kind, count: 3, sample: 'grep' });
+    expect(de('same-tool-call')).toContain('repeti');
+    expect(de('same-tool-error')).toContain('erro');
+    expect(de('empty-turns')).toContain('sem dizer nada');
+    expect(de('no-progress')).toContain('sem sair do lugar');
+  });
+
+  it('o orçamento dá o número E avisa que seguir descarta o trabalho do turno', () => {
+    const t = textoDePausaPorOrcamento({ tokens: 12_000, toolCalls: 7, budgetPct: 104 });
+    expect(t).toContain('12000');
+    expect(t).toContain('7');
+    expect(t).toContain('104%');
+    expect(t).toContain('se perde');
+  });
+
+  it('ehContinuar reconhece as formas usuais, e só elas', () => {
+    for (const p of PALAVRAS_DE_CONTINUAR) expect(ehContinuar(p.toUpperCase())).toBe(true);
+    expect(ehContinuar('continuar com o plano B')).toBe(false);
+    expect(ehContinuar('cancelar')).toBe(false);
+  });
+
+  it('"parar" desiste — é a palavra natural para uma pausa, não para uma pergunta', () => {
+    expect(ehDesistencia('parar')).toBe(true);
   });
 });

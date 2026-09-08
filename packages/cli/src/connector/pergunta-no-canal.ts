@@ -32,7 +32,12 @@ import type {
  * equivalente aqui, uma pergunta de `single` com `allowOther:false` e opções que não servem
  * seria uma armadilha: nada que ele escrevesse casaria, e ele não tem o `esc` à mão.
  */
-export const PALAVRAS_DE_DESISTENCIA: readonly string[] = ['cancelar', 'cancela', 'cancel'];
+export const PALAVRAS_DE_DESISTENCIA: readonly string[] = [
+  'cancelar',
+  'cancela',
+  'cancel',
+  'parar',
+];
 
 /** Normaliza p/ comparar: minúsculas, sem acento, sem espaço nas pontas. */
 function chave(texto: string): string {
@@ -233,4 +238,76 @@ export function textoDeAprovacaoSoNoTerminal(): string {
     `o efeito exato. Para eu desistir do passo e seguir, mande: ` +
     `${PALAVRAS_DE_DESISTENCIA[0] ?? 'cancelar'}`
   );
+}
+
+/**
+ * As palavras que mandam SEGUIR. Só valem para as PAUSAS (travamento e orçamento), onde
+ * "continuar" é uma das opções que o terminal oferece — nunca para a catraca de permissão,
+ * cuja aprovação não se dá por chat.
+ */
+export const PALAVRAS_DE_CONTINUAR: readonly string[] = [
+  'continuar',
+  'continua',
+  'segue',
+  'seguir',
+  'siga',
+];
+
+/** `true` quando a mensagem manda seguir ("continuar"). PURO. */
+export function ehContinuar(bruto: string): boolean {
+  return PALAVRAS_DE_CONTINUAR.includes(chave(bruto));
+}
+
+/** O que o watchdog viu, em português — o `kind` cru não diz nada a quem lê no celular. */
+function motivoDoTravamento(kind: string, count: number, sample: string): string {
+  const n = String(count);
+  switch (kind) {
+    case 'same-tool-call':
+      return `repeti \`${sample}\` ${n}× com a mesma chamada`;
+    case 'same-tool-error':
+      return `bati ${n}× no mesmo erro de \`${sample}\``;
+    case 'empty-turns':
+      return `voltei ${n}× sem dizer nada`;
+    default:
+      return `dei ${n} voltas sem sair do lugar (${sample})`;
+  }
+}
+
+/**
+ * O aviso da pausa do WATCHDOG de travamento. Diferente da pergunta e da aprovação, aqui as
+ * três saídas do terminal ([r] redirecionar · [c] continuar · [n] encerrar) cabem inteiras
+ * no canal: todas são input do DONO, nenhuma relaxa a catraca.
+ */
+export function textoDePausaPorTravamento(alerta: {
+  readonly kind: string;
+  readonly count: number;
+  readonly sample: string;
+}): string {
+  return [
+    `⏸ Parei: ${motivoDoTravamento(alerta.kind, alerta.count, alerta.sample)}.`,
+    'Escreva a NOVA DIREÇÃO para eu seguir por outro caminho, ' +
+      `ou mande \`${PALAVRAS_DE_CONTINUAR[0] ?? 'continuar'}\` para eu insistir, ` +
+      `ou \`${PALAVRAS_DE_DESISTENCIA[0] ?? 'cancelar'}\` para eu encerrar o turno.`,
+  ].join('\n\n');
+}
+
+/**
+ * O aviso do GATE DE ORÇAMENTO. Aqui o turno NÃO fica pendurado — ele volta e a sessão fica
+ * parada no gate. O risco é outro e é preciso dizê-lo: mandar outra coisa ABANDONA o
+ * trabalho já feito no turno que estourou (o `[c]` retoma do ponto exato).
+ */
+export function textoDePausaPorOrcamento(b: {
+  readonly tokens: number;
+  readonly toolCalls: number;
+  readonly budgetPct: number;
+}): string {
+  const pct = Number.isFinite(b.budgetPct)
+    ? `${String(Math.round(b.budgetPct))}% do teto`
+    : 'o teto';
+  return [
+    `⏸ Parei no orçamento: ${pct} (${String(b.tokens)} tokens · ${String(b.toolCalls)} ferramentas).`,
+    `Mande \`${PALAVRAS_DE_CONTINUAR[0] ?? 'continuar'}\` para eu estender o teto e retomar ` +
+      'de onde parei. Qualquer outra mensagem eu trato como instrução nova — e aí o trabalho ' +
+      'deste turno se perde.',
+  ].join('\n\n');
 }

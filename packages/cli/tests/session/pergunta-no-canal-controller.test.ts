@@ -341,3 +341,177 @@ describe('aprovação pendente num turno que veio do canal', () => {
     expect(enviados).toHaveLength(0);
   });
 });
+
+// ── AS PAUSAS: watchdog de travamento e gate de orçamento ─────────────────────────────
+//
+// As duas últimas fases que paravam o loop esperando o teclado. O `stuck` é o pior dos
+// quatro casos: a promise do loop fica pendurada SEM PRAZO e, como o turno segue vivo, a
+// tentativa de destravar pelo celular caía no `injectInput` como texto solto.
+//
+// Aqui o canal aceita MAIS que na catraca de permissão, e de propósito: nenhuma das saídas
+// da pausa relaxa a catraca — todas são input do dono, o mesmo que ele daria no teclado.
+
+const REPETE = toolCall('run_command', { command: 'ls' });
+
+function cenarioTravado(turns: readonly string[]) {
+  const resolver = new TuiQuestionResolver();
+  const visto: string[] = [];
+  const controller = new SessionController({
+    model: modeloQueGrava(turns, visto),
+    permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+    ports: fakePorts(resolver),
+    askResolver: approveAll,
+    questionResolver: resolver,
+    meta,
+  });
+  const enviados: string[] = [];
+  controller.ligarPerguntaNoCanal((t) => {
+    enviados.push(t);
+  });
+  return { controller, enviados, visto };
+}
+
+describe('pausa do watchdog num turno que veio do canal', () => {
+  it('AVISA no canal o que travou — antes disso o loop parava calado, sem prazo', async () => {
+    const { controller, enviados } = cenarioTravado([REPETE, REPETE, REPETE, REPETE, 'pronto.']);
+    let viu = false;
+    const unsub = controller.subscribe((s) => {
+      if (s.phase === 'stuck' && !viu) {
+        viu = true;
+        controller.responderPeloCanal('cancelar');
+      }
+    });
+    await controller.submit('faça', [], { origem: 'telegram' });
+    unsub();
+    expect(viu).toBe(true);
+    expect(enviados).toHaveLength(1);
+    expect(enviados[0]).toContain('Parei');
+    expect(enviados[0], 'o que se repetiu tem de aparecer').toContain('run_command');
+  });
+
+  it('"cancelar" ENCERRA o turno travado — a saída [n], pelo celular', async () => {
+    const { controller } = cenarioTravado([REPETE, REPETE, REPETE, REPETE, REPETE, REPETE]);
+    let viu = false;
+    const unsub = controller.subscribe((s) => {
+      if (s.phase === 'stuck' && !viu) {
+        viu = true;
+        expect(controller.responderPeloCanal('cancelar')).toBe(true);
+      }
+    });
+    await controller.submit('faça', [], { origem: 'telegram' });
+    unsub();
+    expect(viu).toBe(true);
+    expect(controller.current.phase, 'não pode ficar preso em stuck').not.toBe('stuck');
+  });
+
+  it('"continuar" insiste — a saída [c]', async () => {
+    const { controller } = cenarioTravado([REPETE, REPETE, REPETE, REPETE, 'pronto.']);
+    const fases: string[] = [];
+    let viu = false;
+    const unsub = controller.subscribe((s) => {
+      fases.push(s.phase);
+      if (s.phase === 'stuck' && !viu) {
+        viu = true;
+        expect(controller.responderPeloCanal('continuar')).toBe(true);
+      }
+    });
+    await controller.submit('faça', [], { origem: 'telegram' });
+    unsub();
+    expect(viu).toBe(true);
+    expect(fases.slice(fases.indexOf('stuck') + 1), 'o turno retomou').toContain('thinking');
+    // DISTINGUE do redirect: os dois voltam a `thinking`, então "voltou a pensar" não prova
+    // qual saída foi tomada. O redirect deixa a nota; o continuar, não.
+    const notas = controller.current.blocks.filter((b) => b.kind === 'note');
+    expect(notas.some((n) => n.kind === 'note' && n.title === 'redirecionado')).toBe(false);
+  });
+
+  it('texto livre vira a NOVA DIREÇÃO — a saída [r], que é a útil pelo celular', async () => {
+    const { controller, visto } = cenarioTravado([REPETE, REPETE, REPETE, REPETE, 'pronto.']);
+    let viu = false;
+    const unsub = controller.subscribe((s) => {
+      if (s.phase === 'stuck' && !viu) {
+        viu = true;
+        expect(controller.responderPeloCanal('pare e leia o README')).toBe(true);
+      }
+    });
+    await controller.submit('faça', [], { origem: 'telegram' });
+    unsub();
+    expect(viu).toBe(true);
+    // A direção tem de CHEGAR ao modelo — senão o "redirect" seria decorativo.
+    expect(visto.join('\n')).toContain('pare e leia o README');
+    const notas = controller.current.blocks.filter((b) => b.kind === 'note');
+    expect(notas.some((n) => n.kind === 'note' && n.title === 'redirecionado')).toBe(true);
+  });
+
+  it('turno digitado no terminal não manda nada para o celular', async () => {
+    const { controller, enviados } = cenarioTravado([REPETE, REPETE, REPETE, REPETE, 'pronto.']);
+    let viu = false;
+    const unsub = controller.subscribe((s) => {
+      if (s.phase === 'stuck' && !viu) {
+        viu = true;
+        controller.endAfterStuck();
+      }
+    });
+    await controller.submit('faça');
+    unsub();
+    expect(viu).toBe(true);
+    expect(enviados).toHaveLength(0);
+  });
+});
+
+function cenarioOrcamento() {
+  const resolver = new TuiQuestionResolver();
+  const controller = new SessionController({
+    model: modeloQueGrava(['pronto.'], []),
+    permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+    ports: fakePorts(resolver),
+    askResolver: approveAll,
+    questionResolver: resolver,
+    meta,
+    // Estoura por ITERAÇÕES na hora, com folga de tokens p/ o `continuar` conseguir retomar.
+    limits: { maxIterations: 0, maxToolCalls: 50, maxTokens: 1_000_000 },
+  });
+  const enviados: string[] = [];
+  controller.ligarPerguntaNoCanal((t) => {
+    enviados.push(t);
+  });
+  return { controller, enviados };
+}
+
+describe('gate de orçamento num turno que veio do canal', () => {
+  it('AVISA no canal que parou no teto, com o número e o risco', async () => {
+    const { controller, enviados } = cenarioOrcamento();
+    await controller.submit('faça', [], { origem: 'telegram' });
+    expect(controller.current.phase).toBe('budget');
+    expect(enviados).toHaveLength(1);
+    expect(enviados[0]).toContain('orçamento');
+    expect(enviados[0], 'o dono precisa saber que perde o trabalho').toContain('se perde');
+  });
+
+  it('"continuar" estende o teto e RETOMA de onde parou', async () => {
+    const { controller } = cenarioOrcamento();
+    await controller.submit('faça', [], { origem: 'telegram' });
+    expect(controller.responderPeloCanal('continuar')).toBe(true);
+    // `continueAfterBudget` é async e disparado com `void` — espera assentar.
+    for (let i = 0; i < 200 && controller.current.phase === 'budget'; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(controller.current.phase).not.toBe('budget');
+    expect(controller.current.pendingBudget).toBeUndefined();
+  });
+
+  it('qualquer outra mensagem NÃO é consumida — vira instrução, que é o dono seguindo', async () => {
+    // Diferente do `stuck`: aqui o turno já voltou, nada está pendurado. Engolir a mensagem
+    // deixaria o dono sem conseguir mudar de assunto.
+    const { controller } = cenarioOrcamento();
+    await controller.submit('faça', [], { origem: 'telegram' });
+    expect(controller.responderPeloCanal('deixa pra lá, faz outra coisa')).toBe(false);
+  });
+
+  it('turno digitado no terminal não manda nada para o celular', async () => {
+    const { controller, enviados } = cenarioOrcamento();
+    await controller.submit('faça');
+    expect(controller.current.phase).toBe('budget');
+    expect(enviados).toHaveLength(0);
+  });
+});

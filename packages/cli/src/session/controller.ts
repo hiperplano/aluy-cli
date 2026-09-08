@@ -206,12 +206,15 @@ type BangStatus = BangBlock['status'];
 import type { TuiAskResolver, PendingAskEntry } from '../ask/ask-resolver.js';
 import type { TuiQuestionResolver, PendingQuestionEntry } from '../ask/question-resolver.js';
 import {
+  ehContinuar,
   ehDesistencia,
   interpretarResposta,
   textoDaPergunta,
   textoDeAprovacaoPendente,
   textoDeAprovacaoSoNoTerminal,
   textoDeNaoEntendi,
+  textoDePausaPorOrcamento,
+  textoDePausaPorTravamento,
 } from '../connector/pergunta-no-canal.js';
 import type { AskResolver, QuestionAnswer, QuestionSpec } from '@hiperplano/aluy-cli-core';
 // ADR-0147 — tipos das dependências OPCIONAIS da `SessionCommandPort` (ver os campos
@@ -4333,6 +4336,9 @@ export class SessionController {
       const onAbort = (): void => this.cancelStuckPause();
       signal?.addEventListener('abort', onAbort, { once: true });
     });
+    // O canal ANTES do `patch`, pelo mesmo motivo do comentário acima: o `patch` notifica
+    // síncrono e um observador pode resolver a pausa na hora.
+    this.avisarPausaNoCanal('stuck', textoDePausaPorTravamento(alert));
     this.patch({
       phase: 'stuck',
       pendingStuck: { kind: alert.kind, count: alert.count, sample: alert.sample },
@@ -4344,6 +4350,7 @@ export class SessionController {
   private settleStuck(r: StuckResolution): void {
     const resolve = this.stuckResolve;
     this.stuckResolve = null;
+    this.pausaNoCanal = undefined;
     this.patch({ pendingStuck: undefined });
     resolve?.(r);
   }
@@ -5623,6 +5630,7 @@ export class SessionController {
     // (b) RETOMA o MESMO turno a partir do histórico íntegro (preserva o trabalho).
     const history = this.budgetResumeHistory;
     this.budgetResumeHistory = undefined;
+    this.pausaNoCanal = undefined;
     this.patch({ phase: 'thinking', workingLabel: 'pensando', pendingBudget: undefined });
     this.abort = new AbortController();
     try {
@@ -5701,6 +5709,7 @@ export class SessionController {
    */
   async compactAfterBudget(signal?: AbortSignal): Promise<void> {
     if (this.state.phase !== 'budget' || !this.lastRunHistory) return;
+    this.pausaNoCanal = undefined;
     this.patch({ pendingBudget: undefined });
     await this.runCompaction(this.lastRunHistory, signal, /*resumeNow*/ true);
   }
@@ -6809,6 +6818,7 @@ export class SessionController {
    */
   responderPeloCanal(texto: string): boolean {
     if (this.responderAprovacaoDoCanal(texto)) return true;
+    if (this.responderPausaDoCanal(texto)) return true;
     const spec = this.perguntaNoCanal;
     if (spec === undefined) return false;
     if (!this.questionResolver?.pending) {
@@ -6868,6 +6878,63 @@ export class SessionController {
     return true;
   }
 
+  /** A PAUSA anunciada no canal: o watchdog de travamento ou o gate de orçamento. */
+  private pausaNoCanal: 'stuck' | 'budget' | undefined;
+
+  /** Anuncia no canal que o turno parou numa PAUSA. Mesma condição de origem das demais. */
+  private avisarPausaNoCanal(qual: 'stuck' | 'budget', texto: string): void {
+    const enviar = this.canalDaPergunta;
+    if (enviar === undefined || this.origemDoUltimoTurno === undefined) return;
+    this.pausaNoCanal = qual;
+    enviar(texto);
+  }
+
+  /**
+   * A mensagem do canal decide a pausa pendente?
+   *
+   * As duas pausas são MUITO diferentes do ask, e por isso aceitam mais pelo celular:
+   * nenhuma das saídas relaxa a catraca — todas são input do dono, o mesmo que ele daria
+   * no teclado. `redirect`, aliás, é a MESMA via do "btw" que o sink já usa.
+   *
+   * `stuck` é um IMPASSE REAL: a promise do loop fica pendurada sem prazo. Consumimos
+   * qualquer mensagem, porque é isso que destrava (texto livre vira a nova direção).
+   *
+   * `budget` NÃO pendura — o turno voltou e a sessão está parada no gate. Só `continuar`
+   * é consumido; qualquer outra coisa segue como instrução nova, que é o dono decidindo
+   * tocar em frente (o aviso diz, em letras, que aí o trabalho do turno se perde).
+   */
+  private responderPausaDoCanal(texto: string): boolean {
+    const qual = this.pausaNoCanal;
+    if (qual === undefined) return false;
+
+    if (qual === 'budget') {
+      if (this.state.phase !== 'budget') {
+        this.pausaNoCanal = undefined;
+        return false;
+      }
+      if (!ehContinuar(texto)) return false;
+      this.pausaNoCanal = undefined;
+      void this.continueAfterBudget();
+      return true;
+    }
+
+    if (this.state.phase !== 'stuck' || !this.stuckResolve) {
+      // Já resolvida no terminal (ou o turno abortou): a mensagem é instrução comum.
+      this.pausaNoCanal = undefined;
+      return false;
+    }
+    if (ehDesistencia(texto)) {
+      this.endAfterStuck();
+      return true;
+    }
+    if (ehContinuar(texto)) {
+      this.continueAfterStuck();
+      return true;
+    }
+    this.redirectAfterStuck(texto);
+    return true;
+  }
+
   private onError(err: unknown): void {
     if (err instanceof ModelCallAbortedError) {
       // Interrupção do usuário (Ctrl-C / PARAR) — volta ao composer, sem bloco de erro.
@@ -6916,6 +6983,7 @@ export class SessionController {
   // ── budget gate ──────────────────────────────────────────────────────────────
 
   private setBudget(budget: SessionState['pendingBudget']): void {
+    if (budget !== undefined) this.avisarPausaNoCanal('budget', textoDePausaPorOrcamento(budget));
     this.patch({ phase: 'budget', pendingBudget: budget });
   }
 
