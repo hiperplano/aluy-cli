@@ -4,7 +4,7 @@ import {
   resolveModelBackend,
   resolveLocalProviderConfig,
 } from '../../../src/model/local/config.js';
-import { buildLocalCatalog } from '@hiperplano/aluy-cli-core';
+import { buildLocalCatalog, defaultLocalCatalog, findProvider } from '@hiperplano/aluy-cli-core';
 import type { UserConfig } from '../../../src/io/user-config.js';
 
 describe('resolveModelBackend', () => {
@@ -57,7 +57,12 @@ describe('resolveLocalProviderConfig — provider/model/auth/base_url', () => {
       config: { localProvider: 'openai' }, // sem localModel na config
     });
     expect(c.provider).toBe('openrouter');
-    expect(c.model).toBe('anthropic/claude-3.5-sonnet'); // default do openrouter.
+    // LÊ o default do catálogo em vez de cravar o slug: o que este caso prova é a
+    // PRECEDÊNCIA (env vence config; sem model, cai no default do provider), não a
+    // identidade de um modelo. Cravado, ele quebrava a cada refresh do catálogo — e
+    // catálogo precisa poder ser refrescado: em 08/09/2026 o default do OpenRouter foi
+    // medido ausente dos 431 modelos que ele anuncia.
+    expect(c.model).toBe(findProvider(defaultLocalCatalog(), 'openrouter')?.defaultModel);
   });
 
   it('model da config aplica quando não há env/flag de model (campo independente do provider)', () => {

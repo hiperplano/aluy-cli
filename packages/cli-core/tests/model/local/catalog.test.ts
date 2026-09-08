@@ -48,10 +48,16 @@ describe('catálogo default EMBUTIDO (lista pré-carregada — ADR-0118 §4)', (
       baseUrl: 'https://api.openai.com/v1',
       defaultModel: 'gpt-4o',
     });
+    // O `defaultModel` do OpenRouter MUDOU em 08/09/2026, e a mudança é o conserto: o
+    // `anthropic/claude-3.5-sonnet` que estava aqui foi medido AUSENTE dos 431 modelos que
+    // o provider anuncia (`GET /models`). Enquanto ele foi o default, toda troca para o
+    // OpenRouter ativava um modelo inexistente e caía no ramo "não persiste" — o relato do
+    // dono de 08/09 ("mudo para o openrouter e não muda nada na barra, nem persiste").
+    // Ver `escolher-modelo-vivo.test.ts`, que trava a não-volta deste slug.
     expect(byId('openrouter')).toMatchObject({
       wireFormat: 'openai-compat',
       baseUrl: 'https://openrouter.ai/api/v1',
-      defaultModel: 'anthropic/claude-3.5-sonnet',
+      defaultModel: 'anthropic/claude-sonnet-5',
     });
     // o catalogHint do OpenRouter (pista de centenas) sobrevive
     expect(byId('openrouter')?.catalogHint).toMatch(/centenas/i);

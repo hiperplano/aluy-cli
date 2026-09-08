@@ -39,6 +39,7 @@ export {
   mergeLocalCatalog,
   buildLocalCatalog,
   findProvider,
+  escolherModeloVivo,
 } from './catalog.js';
 // F-WIN (descoberta) — PARSE PURO do `GET {baseUrl}/models` p/ DESCOBRIR a janela de
 // contexto de um slug BYO (o número que o dono teria de digitar à mão em

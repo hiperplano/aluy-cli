@@ -69,7 +69,10 @@ import {
 } from '../model/local/context-window-discovery.js';
 import { createPinnedStreamFetch } from '../model/local/pinned-stream-fetch.js';
 // F-PROV-TESTA — a prova de conectividade do par (provider, credencial, modelo) na troca.
-import { checkModelConnectivity } from '../model/local/connectivity-check.js';
+import {
+  checkModelConnectivity,
+  classificarFalhaDeProva,
+} from '../model/local/connectivity-check.js';
 // F-SALDO-BYO — leitura do saldo da conta no gateway BYO (dialetos conhecidos, fail-open).
 import { discoverBalance } from '../model/local/balance-discovery.js';
 import type { Quota } from '@hiperplano/aluy-cli-core';
@@ -139,6 +142,7 @@ import {
   buildServiceManifestVisibleNote,
   formatElapsedSince,
   findProvider,
+  escolherModeloVivo,
   SERVICE_AUTONOMOUS_MODE,
   type NativeTool,
   type ToolPorts,
@@ -1736,6 +1740,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       // F-DEFAULT-MORTO (gap #7) — a lista que a prova de credencial já devolveu. Serve
       // para não fixar como padrão um modelo que o provider não anuncia mais.
       let slugsDoProvider: readonly string[] = [];
+      // A prova de fallback (provider que não lista modelos) REPROVOU por causa do
+      // MODELO? Então o default do catálogo não se confirmou e não pode virar padrão.
+      let provaDoModeloFalhou = false;
       try {
         const auth = authNovo;
         // F-UP — o upstream declarado é POR PROVIDER: ao trocar de provider, relê o mapa
@@ -1802,7 +1809,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               ok: false as const,
               detail: e instanceof Error ? e.message : String(e),
             }));
-            if (!prova.ok) {
+            // RECUSA SÓ o que é motivo para recusar. O modelo provado aqui é o
+            // `defaultModel` do NOSSO catálogo, não uma escolha do dono — e catálogo
+            // envelhece. Tratar "esse modelo não existe" como "esse provider não presta"
+            // prendia o dono no provider antigo, e a recusa acontecia ANTES do passo que
+            // pediria o modelo: não havia como sair do buraco por dentro do fluxo.
+            //
+            // Um status HTTP que não é 401/403 prova que alcançamos o provider e ele
+            // respondeu — a credencial passou pela porta. O que falhou foi o palpite de
+            // modelo, e essa é a pergunta do picker que abre em seguida.
+            const causa = prova.ok ? undefined : classificarFalhaDeProva(prova.detail);
+            if (causa === 'credencial' || causa === 'conexao') {
               return {
                 ok: false,
                 detail:
@@ -1813,6 +1830,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                     : 'grave a chave com `aluy login --provider ' + entry.id + '`.'),
               };
             }
+            // `modelo` ⇒ a troca SEGUE, mas o default não se confirmou: não vira padrão.
+            provaDoModeloFalhou = causa === 'modelo';
           }
         }
         // Só ATUALIZA o estado compartilhado (catálogo de modelos do /model, test-
@@ -1837,33 +1856,40 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         // que o `anthropic/claude-3.5-sonnet` aposentado virou o modelo ativo de uma troca
         // bem-sucedida. Se a listagem do provider não o anuncia, gravamos só o PROVIDER — o
         // picker que abre em seguida grava o modelo que o dono escolher.
-        const defaultVivo =
-          slugsDoProvider.length === 0 ||
-          slugsDoProvider.some(
-            (sl) => sl.trim().toLowerCase() === entry.defaultModel.trim().toLowerCase(),
-          );
+        // O default do catálogo pode estar MORTO — e até 08/09 nós PROVÁVAMOS isso aqui e
+        // devolvíamos o slug morto assim mesmo, para virar o modelo ATIVO da sessão. Quem
+        // fechasse o picker que abre em seguida ficava num provider certo com um modelo
+        // inexistente, e só descobria no turno seguinte, longe da causa. MEDIDO em 08/09: o
+        // `anthropic/claude-3.5-sonnet`, que era o default do OpenRouter, sumiu dos 431
+        // modelos que ele anuncia — junto com outro dos cinco slugs curados.
+        const escolha = escolherModeloVivo(entry, slugsDoProvider);
+        const modeloAtivo = escolha.model;
+        const defaultVivo = escolha.doCatalogo && !provaDoModeloFalhou;
         // F-GRAVACAO-HONESTA — `save()` devolve `false` quando a escrita falha, e o retorno
         // era IGNORADO em todas as chamadas. A escrita é atômica (temp + `rename`), e no
         // Windows o `rename` bate em `EPERM/EBUSY` quando algo segura o arquivo — antivírus
         // ou OneDrive sobre o perfil do usuário, exatamente o que impediu o npm de remover a
         // instalação anterior na máquina do dono. Resultado: a nota anunciava "gravado como
         // padrão", a sessão seguinte reabria com o provider antigo, e nada explicava.
+        // Persiste SÓ o default do próprio catálogo, verificado vivo: um substituto
+        // escolhido por nós é palpite, não a escolha do dono. O picker que abre em seguida
+        // grava o que ele escolher.
         const persistiu =
-          podeTestar && defaultVivo && configStore.saveLocalProvider(entry.id, entry.defaultModel);
+          podeTestar && defaultVivo && configStore.saveLocalProvider(entry.id, modeloAtivo);
         return {
           ok: true,
           persisted: persistiu,
           detail: faltaChave
-            ? `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}). ` +
+            ? `provider ativo agora: ${entry.id} (modelo default: ${modeloAtivo}). ` +
               `ATENÇÃO: não há credencial guardada p/ "${entry.id}" — rode /login antes do ` +
               'próximo turno, senão ele vai falhar por falta de chave.'
             : defaultVivo
-              ? `provider ativo agora: ${entry.id} (modelo default: ${entry.defaultModel}).`
-              : `provider ativo agora: ${entry.id}. o modelo default do catálogo ` +
-                `("${entry.defaultModel}") não consta nos ${slugsDoProvider.length} que ele ` +
-                'anuncia — escolha um na lista a seguir.',
+              ? `provider ativo agora: ${entry.id} (modelo default: ${modeloAtivo}).`
+              : `provider ativo agora: ${entry.id} · modelo ${modeloAtivo}. o default do ` +
+                `catálogo ("${entry.defaultModel}") não consta nos ${slugsDoProvider.length} ` +
+                'que ele anuncia — escolha um na lista a seguir.',
           client,
-          defaultModel: entry.defaultModel,
+          defaultModel: modeloAtivo,
         };
       } catch (e) {
         return {

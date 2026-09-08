@@ -93,11 +93,14 @@ const DEFAULT_ENTRIES: readonly LocalProviderEntry[] = [
     wireFormat: 'openai-compat',
     baseUrl: 'https://openrouter.ai/api/v1',
     auth: ['apikey'],
-    defaultModel: 'anthropic/claude-3.5-sonnet',
+    // MEDIDO contra a listagem viva do provider (431 modelos): o antigo default
+    // `anthropic/claude-3.5-sonnet` e o `google/gemini-2.0-flash` NÃO constam mais. Um
+    // default morto aqui tem consequência real — ver `escolherModeloVivo` abaixo.
+    defaultModel: 'anthropic/claude-sonnet-5',
     models: [
-      'anthropic/claude-3.5-sonnet',
+      'anthropic/claude-sonnet-5',
       'openai/gpt-4o',
-      'google/gemini-2.0-flash',
+      'google/gemini-2.5-flash',
       'meta-llama/llama-3.3-70b-instruct',
       'deepseek/deepseek-chat',
     ],
@@ -355,6 +358,42 @@ export function buildLocalCatalog(userRaw?: unknown): LocalProviderCatalog {
   const base = defaultLocalCatalog();
   if (userRaw === undefined || userRaw === null) return base;
   return mergeLocalCatalog(base, sanitizeUserEntries(userRaw));
+}
+
+/**
+ * O modelo a ATIVAR ao entrar num provider, confrontado com o que ele ANUNCIA agora.
+ *
+ * Este catálogo é uma foto, e foto envelhece: medido em 08/09/2026, o `defaultModel` do
+ * OpenRouter (`anthropic/claude-3.5-sonnet`) tinha sumido dos 431 modelos que ele lista, e
+ * dois dos cinco slugs curados junto com ele. A troca de provider PROVAVA isso — comparava
+ * o default com a listagem — e mesmo assim devolvia o slug morto para virar o modelo ativo
+ * da sessão. Quem fechasse o picker de modelo que abre em seguida ficava num provider certo
+ * com um modelo inexistente, e só descobria no turno seguinte, longe da causa.
+ *
+ * A regra: o default do catálogo, se o provider ainda o anuncia; senão o primeiro CURADO
+ * que ele anuncia; senão o default mesmo (não há alternativa melhor, e a nota manda
+ * escolher). `anunciados` vazio ⇒ não deu para saber (provider que não expõe `/models`,
+ * rede fora) e nada muda — nunca se troca um slug bom por causa de uma listagem ausente.
+ *
+ * `doCatalogo` distingue os dois casos para quem PERSISTE: só o default do próprio
+ * catálogo, verificado vivo, vira padrão da próxima sessão. Um substituto escolhido aqui é
+ * nosso palpite, não a escolha do dono — serve para a sessão não nascer quebrada, não para
+ * virar preferência gravada.
+ *
+ * PURO.
+ */
+export function escolherModeloVivo(
+  entry: Pick<LocalProviderEntry, 'defaultModel' | 'models'>,
+  anunciados: readonly string[],
+): { readonly model: string; readonly doCatalogo: boolean } {
+  const padrao = entry.defaultModel;
+  if (anunciados.length === 0) return { model: padrao, doCatalogo: true };
+  const vivos = new Set(anunciados.map((s) => s.trim().toLowerCase()));
+  const anunciado = (slug: string): boolean => vivos.has(slug.trim().toLowerCase());
+  if (anunciado(padrao)) return { model: padrao, doCatalogo: true };
+  const substituto = (entry.models ?? []).find((m) => anunciado(m));
+  if (substituto !== undefined) return { model: substituto, doCatalogo: false };
+  return { model: padrao, doCatalogo: false };
 }
 
 /** Busca uma entrada por `id` (case-insensitive no `id`). `undefined` se ausente. PURO. */

@@ -112,6 +112,33 @@ export async function checkModelConnectivity(args: {
 }
 
 /**
+ * O que a prova de conectividade REPROVOU — e, portanto, o que dá para concluir dela.
+ *
+ * Existe porque a troca de provider tratava toda reprovação como "provider ruim" e recusava
+ * a troca inteira. Só que o modelo provado ali é o `defaultModel` do NOSSO catálogo, não uma
+ * escolha do dono: quando o slug envelhece (MEDIDO em 08/09 — o default do OpenRouter sumiu
+ * dos 431 que ele anuncia), a recusa acontecia ANTES do passo que pediria o modelo, e não
+ * havia como sair do buraco por dentro do fluxo. O dono ficava preso no provider antigo sem
+ * nada na tela explicando por quê.
+ *
+ * A leitura correta de um status HTTP que NÃO é 401/403: nós alcançamos o provider e ele
+ * respondeu — a credencial passou pela porta. O que falhou foi o palpite de modelo, e essa
+ * é a pergunta seguinte, do picker.
+ *
+ * PURO — lê só o `detail` que `checkModelConnectivity` compõe.
+ */
+export type FalhaDeProva = 'credencial' | 'modelo' | 'conexao';
+
+/** Classifica o `detail` de um `ModelCheckResult{ok:false}`. Ver `FalhaDeProva`. */
+export function classificarFalhaDeProva(detail: string): FalhaDeProva {
+  const m = /^HTTP (\d{3})\b/.exec(detail.trim());
+  if (m === null) return 'conexao'; // branch `catch`: rede/timeout/redirect bloqueado.
+  const status = Number(m[1]);
+  if (status === 401 || status === 403) return 'credencial';
+  return 'modelo';
+}
+
+/**
  * ADR-0153 (COND-S5) — SANITIZA o `detail` de um `ModelCheckResult{ok:false}` ANTES
  * de alcançar a TUI (nota/erro por-filho), p/ o caminho de TEST-THEN-REGISTER
  * (`verifyAndRegisterLocalModel`, `run.tsx`). `detail` hoje pode ecoar até 160
