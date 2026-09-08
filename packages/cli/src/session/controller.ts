@@ -5078,6 +5078,18 @@ export class SessionController {
     return this.state.meta.provider;
   }
 
+  /**
+   * O BACKEND efetivo da sessão (`'local'` = BYO com provider próprio; senão broker).
+   *
+   * Existe porque a escolha entre `setProvider` e `setLocalProvider` depende dele — e quem
+   * precisava decidir isso FORA do `run.tsx` (a `SessionCommandPort`, por onde o agente
+   * dispara comandos de sessão) não tinha como perguntar, então chamava sempre o primeiro.
+   * Sob backend local, o primeiro é o NO-OP silencioso documentado logo abaixo.
+   */
+  get backend(): string | undefined {
+    return this.state.meta.backend;
+  }
+
   /** O tier de modelo corrente da sessão (p/ teste/seletor). */
   get tier(): string {
     return this.state.meta.tier;

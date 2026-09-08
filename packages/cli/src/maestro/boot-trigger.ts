@@ -41,6 +41,26 @@ export interface BootTriggerOptions {
  * Retorna `undefined` se LEVE; retorna a Promise<BootResult> se TURBO
  * (o caller PODE aguardar para teste, mas em produção é fire-and-forget).
  */
+/**
+ * A TUI é dona da tela agora?
+ *
+ * Com o Ink no ar, uma escrita no stderr cai DENTRO do frame: pinta uma linha solta e some
+ * no repaint seguinte. O dono viu isso em 08/09 — "aparece no início e depois some uma linha
+ * em branco dizendo a quantidade de sidecars prontos... não entendi". Não havia o que
+ * entender: era um write disputando a tela com quem a controla.
+ *
+ * Com TTY quem reporta os sidecars é o RODAPÉ (`◈ sidecars hdr oll mem`), de forma estável.
+ * SEM TTY (headless/`-p`/pipe/CI) o stderr é o único canal que existe — por isso a checagem
+ * é NEGATIVA em todos os usos.
+ *
+ * É FUNÇÃO, e não a leitura direta da flag do stdout, por dois motivos: o TS estreita o tipo
+ * depois da primeira comparação e passa a acusar as seguintes como inúteis; e um nome diz
+ * POR QUE a checagem existe, o que a flag crua repetida em três lugares não diz.
+ */
+function tuiDonaDaTela(): boolean {
+  return process.stdout.isTTY === true;
+}
+
 export function triggerBoot(opts: BootTriggerOptions = {}): Promise<unknown> | undefined {
   const home = opts.homeDir ?? process.env.HOME ?? process.env.USERPROFILE ?? '/home/unknown';
   const aluyDir = opts.aluyDir ?? join(home, '.aluy');
@@ -110,8 +130,9 @@ export function triggerBoot(opts: BootTriggerOptions = {}): Promise<unknown> | u
       .then((result) => {
         const up = result.states.filter((s) => s.running).length;
         const total = result.states.length;
-        if (total > 0) {
-          // Log discreto: informa quantos sidecars subiram sem poluir a TUI.
+        // O comentário antigo dizia "log discreto ... sem poluir a TUI", que era o oposto
+        // do que acontecia. Ver `tuiDonaDaTela`.
+        if (total > 0 && !tuiDonaDaTela()) {
           process.stderr.write(
             `aluy: boot-supervisor — ${up}/${total} sidecar(s) prontos` +
               (result.allFailed ? ' (todos falharam — seguindo sem sidecars)' : '') +
@@ -135,13 +156,20 @@ export function triggerBoot(opts: BootTriggerOptions = {}): Promise<unknown> | u
       .catch((err: unknown) => {
         // CA-G2-5: um erro inesperado NUNCA trava o boot do aluy.
         const msg = err instanceof Error ? err.message : String(err);
-        process.stderr.write(`aluy: boot-supervisor — erro inesperado: ${msg}\n`);
+        // Mesma regra: o erro não se perde por ficar fora do stderr — o boot é fail-open
+        // (CA-G2-5), a sessão segue sem sidecars, e o rodapé já mostra quais faltam.
+        if (!tuiDonaDaTela()) {
+          process.stderr.write(`aluy: boot-supervisor — erro inesperado: ${msg}\n`);
+        }
         return undefined;
       });
   } catch (err: unknown) {
     // CA-G2-5: throw síncrono também é engolido.
     const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`aluy: boot-supervisor — erro inesperado: ${msg}\n`);
+    // Idem (throw síncrono) — ver `tuiDonaDaTela`.
+    if (!tuiDonaDaTela()) {
+      process.stderr.write(`aluy: boot-supervisor — erro inesperado: ${msg}\n`);
+    }
     return undefined;
   }
 
