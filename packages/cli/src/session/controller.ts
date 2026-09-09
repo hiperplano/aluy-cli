@@ -4943,6 +4943,35 @@ export class SessionController {
     // EST-0962 — trocar de tier/modelo DESCARTA o provider (o caller já o limpou no
     // `setTier`): o `meta.provider` também sai p/ não ficar um provider fantasma do slug
     // anterior. Re-adiciona só o que o caller mantiver (geralmente undefined aqui).
+    //
+    // ── EXCEÇÃO: backend LOCAL (BYO) ──────────────────────────────────────────────
+    //
+    // Sob BROKER a regra acima está certa: lá o provider é um atributo do par
+    // tier+slug Custom, e trocar o slug de fato o invalida.
+    //
+    // Sob LOCAL ele NÃO pertence ao par. É o provider ATIVO do BYO — o que o
+    // `/provider` trocou, cujo client foi reconstruído e swapado, e que vive em
+    // `activeProviderId`. O `tierControl.provider` (do caller de broker) nada sabe
+    // dele e devolve `undefined`, então esta reconstrução APAGAVA o provider ativo do
+    // meta. A StatusBar então caía no fallback `props.currentLocalProvider`, que é o
+    // provider do BOOT.
+    //
+    // O efeito na tela do dono (09/09, rc.173) — e é impiedoso, porque o passo que
+    // dispara o apagamento é o passo que o PRÓPRIO `/provider` abre em seguida:
+    //
+    //   ◕ provider  provider ativo agora: ollama · modelo llama3.2 …
+    //   ◕ model     modelo Custom: qwen2.5-coder
+    //   ◕ sessão    local · openrouter · qwen2.5-coder     ← provider do boot de volta
+    //
+    // Ele trocou para ollama, escolheu o modelo, e o rodapé voltou a dizer openrouter.
+    // A troca em si estava CERTA (o client já era o do ollama); só o meta mentia.
+    //
+    // Eu não peguei isto na reprodução em tmux porque olhei o rodapé com o picker de
+    // modelo ainda ABERTO — ali ainda dizia `ollama`. Exercitei a metade que funciona.
+    const providerLocalVivo = this.state.meta.backend === 'local';
+    const providerEfetivo = providerLocalVivo
+      ? this.state.meta.provider
+      : this.tierControl.provider;
     const metaSansModel: Omit<SessionMeta, 'model' | 'provider'> & {
       model?: string;
       provider?: string;
@@ -4954,7 +4983,7 @@ export class SessionController {
         ...metaSansModel,
         tier: this.tierControl.tier,
         ...(this.tierControl.model !== undefined ? { model: this.tierControl.model } : {}),
-        ...(this.tierControl.provider !== undefined ? { provider: this.tierControl.provider } : {}),
+        ...(providerEfetivo !== undefined ? { provider: providerEfetivo } : {}),
       },
     });
   }

@@ -619,7 +619,14 @@ describe('ToolLine — bloco de DIFF compacto no histórico (edit_file/write_fil
     const diff = '--- a.ts\n+++ a.ts\n+linha nova';
     const out = plain(
       wrap(
-        <ToolLine verb="edit" target="a.ts" result="" status="running" verbGerund="editando" diff={diff} />,
+        <ToolLine
+          verb="edit"
+          target="a.ts"
+          result=""
+          status="running"
+          verbGerund="editando"
+          diff={diff}
+        />,
       ).lastFrame() ?? '',
     );
     expect(out).not.toContain('linha nova');
@@ -1048,19 +1055,19 @@ describe('SlashMenu — lista filtrável (CA-3)', () => {
       <SlashMenu commands={filterCommands('mcp')} selected={0} query="mcp" />,
     );
     expect(plain(lastFrame() ?? '')).toMatchInlineSnapshot(`
-      "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-      │ / para comandos · ↑↓ navega · enter executa · esc fecha                                          │
-      │ ── workspace                                                                                     │
-      │ › /mcp               lista/gerencia servers MCP (add/remove/disable/enable · search <termo>)     │
-      │     /mcp search        busca no registro oficial aberto                                          │
-      │     /mcp add           adiciona um server local (stdio)                                          │
-      │     /mcp list          lista os servers de todas as fontes                                       │
-      │     /mcp remove        remove um server gerenciado pelo aluy                                     │
-      │     /mcp disable       desativa um server sem desinstalar                                        │
-      │     /mcp enable        reativa um server desativado                                              │
-      │     /mcp reconnect     re-sobe + re-handshake os servers (recupera "Not connected")              │
-      │     /mcp reload        re-lê o ~/.aluy/mcp.json + reconecta (aplica edições da config)           │
-      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+      "╭─────────────────────────────────────────────────────────────────────────────────────────────────╮
+      │ / para comandos · ↑↓ navega · enter executa · esc fecha                                         │
+      │ ── workspace                                                                                    │
+      │ › /mcp               lista/gerencia servers MCP (add/remove/disable/enable · search <termo>)    │
+      │     /mcp search        busca no registro oficial aberto                                         │
+      │     /mcp add           adiciona um server local (stdio)                                         │
+      │     /mcp list          lista os servers de todas as fontes                                      │
+      │     /mcp remove        remove um server gerenciado pelo aluy                                    │
+      │     /mcp disable       desativa um server sem desinstalar                                       │
+      │     /mcp enable        reativa um server desativado                                             │
+      │     /mcp reconnect     re-sobe + re-handshake os servers (recupera "Not connected")             │
+      │     /mcp reload        re-lê o ~/.aluy/mcp.json + reconecta (aplica edições da config)          │
+      ╰─────────────────────────────────────────────────────────────────────────────────────────────────╯"
     `);
   });
 });

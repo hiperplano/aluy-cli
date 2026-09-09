@@ -347,24 +347,32 @@ function installInBackground(candidate: string, spawnImpl: SpawnFn): Promise<Des
       // Usamos o NOME do executável certo em vez de `shell: true`: com shell, o
       // `candidate` viraria parte de uma linha de comando interpretada, e argumento
       // não-interpretado é sempre a opção mais segura.
-      const win = process.platform === 'win32';
-      const npmBin = win ? 'npm.cmd' : 'npm';
-      child = spawnImpl(npmBin, ['install', '-g', `${PKG}@${candidate}`], {
-        stdio: 'ignore',
-        cwd: homedir(),
-        // WINDOWS, 2ª volta: `npm.cmd` sozinho DEIXOU de bastar. Desde o Node 18.20.2/
-        // 20.12.2/22 (correção da CVE-2024-27980), o `spawn` RECUSA executar `.cmd`/`.bat`
-        // sem shell e lança `EINVAL` — que é literalmente o que o dono levou em 08/09:
-        // "a atualização para 1.0.0-rc.171 FALHOU: não consegui iniciar o npm: spawn
-        // EINVAL". O `npm.cmd` consertou o ENOENT de antes e virou este.
-        //
-        // O comentário anterior preferia "argumento não-interpretado" a `shell: true`, e a
-        // preferência continua certa — só deixou de ser possível para um `.cmd`. O que
-        // sobra é fechar o buraco pelo DADO: `candidate` é validado contra
-        // `VERSAO_ACEITAVEL` logo acima, e `PKG` é uma constante nossa. Nada do que entra
-        // nessa linha de comando vem de fora sem passar pelo charset de semver.
-        ...(win ? { shell: true } : {}),
-      });
+      // WINDOWS, 3ª volta. Histórico curto, porque cada volta trocou um erro por outro:
+      //
+      //   `npm`      ⇒ ENOENT  (lá o npm é um shim `.cmd`, e o spawn não o acha pelo nome)
+      //   `npm.cmd`  ⇒ EINVAL  (Node ≥18.20.2/20.12.2/22, correção da CVE-2024-27980: o
+      //                         spawn RECUSA `.cmd`/`.bat` sem shell)
+      //   `shell:true` + args ⇒ FUNCIONA — o dono confirmou a rc.172→173 na máquina dele —
+      //                         mas o Node emite DEP0190 no stderr, e stderr com o Ink no ar
+      //                         é linha fantasma na tela, que é o defeito que acabamos de
+      //                         tirar dali. Ele viu as duas coisas no mesmo print.
+      //
+      // Agora invocamos o `cmd.exe` NÓS MESMOS. É literalmente o que `shell:true` faz por
+      // baixo (`/d /s /c`), só que explícito: sem opção depreciada, sem aviso, e com a linha
+      // de comando montada num lugar só, à vista.
+      //
+      // O que torna isto seguro é o DADO, não a forma: `candidate` já passou por
+      // `VERSAO_ACEITAVEL` acima (charset de semver — sem espaço, aspas, `&`, `|`, `%` ou
+      // `^`) e `PKG` é constante nossa. Nada aqui vem de fora sem passar pelo charset.
+      const alvo = `${PKG}@${candidate}`;
+      child =
+        process.platform === 'win32'
+          ? spawnImpl(
+              process.env.ComSpec ?? 'cmd.exe',
+              ['/d', '/s', '/c', `npm.cmd install -g ${alvo}`],
+              { stdio: 'ignore', cwd: homedir() },
+            )
+          : spawnImpl('npm', ['install', '-g', alvo], { stdio: 'ignore', cwd: homedir() });
     } catch (e) {
       resolve({ ok: false, motivo: `não consegui iniciar o npm: ${msgDe(e)}` });
       return;

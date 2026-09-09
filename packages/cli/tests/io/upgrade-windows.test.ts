@@ -39,9 +39,15 @@ const registry = () =>
   })) as never;
 
 /** Captura o executável pedido; `falhaENOENT` simula o Windows sem o `.cmd`. */
-function spawnEspiao(vistos: string[], falhaENOENT = false, opts: unknown[] = []) {
-  return vi.fn((bin: string, _args: readonly string[], o: unknown) => {
+function spawnEspiao(
+  vistos: string[],
+  falhaENOENT = false,
+  opts: unknown[] = [],
+  argsVistos: string[][] = [],
+) {
+  return vi.fn((bin: string, args: readonly string[], o: unknown) => {
     vistos.push(bin);
+    argsVistos.push([...args]);
     opts.push(o);
     const c = new EventEmitter() as EventEmitter & { kill: () => void };
     c.kill = () => undefined;
@@ -71,11 +77,23 @@ function fingePlataforma(p: string): void {
 const base = { scriptPath: GLOBAL, realpath: (p: string) => p, aluyDir: dir };
 
 describe('o executável do npm por plataforma', () => {
-  it('WINDOWS ⇒ chama `npm.cmd` (o `spawn` não roda `.cmd` pelo nome `npm`)', async () => {
+  it('WINDOWS ⇒ chama o `cmd.exe` COM o `npm.cmd` na linha (nunca o `npm` cru)', async () => {
+    // A intenção original deste caso — "no Windows não dá para chamar `npm` pelo nome" —
+    // continua valendo; o que mudou foi COMO se chega no `npm.cmd`. Três voltas:
+    // `npm` ⇒ ENOENT, `npm.cmd` ⇒ EINVAL (Node ≥18.20.2), `shell:true` ⇒ funciona mas
+    // emite DEP0190 no stderr, que sob a TUI vira linha fantasma. Agora invocamos o
+    // `cmd.exe` nós mesmos — é o que o `shell:true` fazia por baixo, sem a depreciação.
     fingePlataforma('win32');
     const vistos: string[] = [];
-    await runUpgrade('1.0.0-rc.1', { ...base, fetch: registry(), spawn: spawnEspiao(vistos) });
-    expect(vistos[0]).toBe('npm.cmd');
+    const args: readonly string[][] = [];
+    await runUpgrade('1.0.0-rc.1', {
+      ...base,
+      fetch: registry(),
+      spawn: spawnEspiao(vistos, false, [], args as string[][]),
+    });
+    expect(vistos[0]?.toLowerCase()).toContain('cmd');
+    expect(vistos[0], 'nunca o `npm` cru — era o ENOENT original').not.toBe('npm');
+    expect((args[0] ?? []).join(' ')).toContain('npm.cmd install -g');
   });
 
   it('LINUX/macOS ⇒ segue chamando `npm` (sem regressão)', async () => {
@@ -103,7 +121,11 @@ describe('a falha diz POR QUE', () => {
 });
 
 describe('EMENDA 08/09 — o `.cmd` precisa de shell, e o dado precisa de charset', () => {
-  it('WINDOWS ⇒ spawn com `shell` — sem isso o Node lança EINVAL no `.cmd`', async () => {
+  it('WINDOWS ⇒ SEM `shell` — ele funciona, mas cospe DEP0190 no stderr', async () => {
+    // O dono viu o aviso no mesmo print em que confirmou a rc.172→173 subindo: "Passing
+    // args to a child process with shell option true...". Sob a TUI, stderr é linha
+    // fantasma — o defeito que acabamos de tirar da tela. Invocar o `cmd.exe` direto faz o
+    // mesmo trabalho sem a opção depreciada.
     fingePlataforma('win32');
     const opts: unknown[] = [];
     await runUpgrade('1.0.0-rc.1', {
@@ -111,7 +133,7 @@ describe('EMENDA 08/09 — o `.cmd` precisa de shell, e o dado precisa de charse
       fetch: registry(),
       spawn: spawnEspiao([], false, opts),
     });
-    expect((opts[0] as { shell?: boolean } | undefined)?.shell).toBe(true);
+    expect((opts[0] as { shell?: boolean } | undefined)?.shell).toBeUndefined();
   });
 
   it('LINUX/macOS ⇒ SEM shell (argumento não-interpretado onde ainda dá)', async () => {
@@ -154,7 +176,8 @@ describe('EMENDA 08/09 — o `.cmd` precisa de shell, e o dado precisa de charse
       fetch: registry(),
       spawn: spawnEspiao(vistos),
     });
-    expect(vistos).toEqual(['npm.cmd']);
+    expect(vistos, 'o caminho bom tem de spawnar algo').toHaveLength(1);
+    expect(vistos[0]?.toLowerCase()).toContain('cmd');
     expect(r.kind).not.toBe('falhou');
   });
 });
