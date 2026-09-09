@@ -84,7 +84,33 @@ const STATE_PATH = join(ALUY_DIR, STATE_FILE);
 // config não virar martelo no registro).
 const CHECK_EVERY_MS = 15 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 4_000;
-const INSTALL_TIMEOUT_MS = 60_000;
+/**
+ * TETO do `npm install -g`. Existe para um npm PENDURADO não ficar de pé para sempre — não
+ * para apressar um install que está progredindo.
+ *
+ * Era 60s, e o dono bateu nele em 09/09: "a atualização para 1.0.0-rc.174 FALHOU: o npm
+ * demorou demais e foi interrompido". Sessenta segundos é um número de Linux com cache
+ * quente (aqui um `npm pack` do pacote leva 1,4s); no Windows o mesmo install atravessa o
+ * antivírus lendo cada arquivo extraído e, quando o perfil está no OneDrive, a sincronização
+ * por cima. Passar de um minuto ali é normal, não é sintoma.
+ *
+ * E o custo de esperar é ZERO: o install roda em SEGUNDO PLANO, ninguém está bloqueado nele.
+ * O prazo curto não protegia o dono de nada — só transformava um install lento numa falha, e
+ * numa falha que se repete a cada abertura, porque a versão nunca chega.
+ *
+ * `ALUY_UPGRADE_TIMEOUT_MS` ajusta, com piso (um valor minúsculo em config voltaria a matar
+ * install bom) e teto (um valor absurdo faria o processo pendurado sobreviver à sessão).
+ */
+const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
+const INSTALL_TIMEOUT_MIN_MS = 30_000;
+const INSTALL_TIMEOUT_MAX_MS = 20 * 60 * 1000;
+
+/** O teto EFETIVO do install (env com piso/teto). PURO — é o que o teste trava. */
+export function tetoDeInstalacaoMs(env: NodeJS.ProcessEnv = process.env): number {
+  const bruto = Number.parseInt(env.ALUY_UPGRADE_TIMEOUT_MS ?? '', 10);
+  if (!Number.isFinite(bruto)) return INSTALL_TIMEOUT_MS;
+  return Math.min(INSTALL_TIMEOUT_MAX_MS, Math.max(INSTALL_TIMEOUT_MIN_MS, bruto));
+}
 
 type SpawnFn = typeof spawn;
 
@@ -385,8 +411,13 @@ function installInBackground(candidate: string, spawnImpl: SpawnFn): Promise<Des
       } catch {
         // já morto / sem permissão de sinal ⇒ segue
       }
-      resolve({ ok: false, motivo: 'o npm demorou demais e foi interrompido' });
-    }, INSTALL_TIMEOUT_MS);
+      resolve({
+        ok: false,
+        motivo:
+          `o npm passou de ${String(Math.round(tetoDeInstalacaoMs() / 1000))}s e foi ` +
+          'interrompido (ajuste com ALUY_UPGRADE_TIMEOUT_MS se a sua máquina é mais lenta)',
+      });
+    }, tetoDeInstalacaoMs());
     child.once('error', (e: unknown) => {
       if (done) return;
       done = true;
