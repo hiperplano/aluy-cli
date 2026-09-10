@@ -43,6 +43,13 @@ export function TurnFooter(props: TurnFooterProps): React.ReactElement {
   const parts: string[] = [];
   if (props.showCost !== false) {
     parts.push(`${abbreviateCount(a.tokens)} tokens`);
+    // CACHE DE PROMPT — a resposta à pergunta do dono ("a gente usa prompt caching?"), na
+    // única forma que responde de verdade: um número na tela, no turno em que aconteceu.
+    //
+    // A FRAÇÃO, não o total: "8.2k reaproveitados" não diz se foi muito ou pouco sem o
+    // total ao lado. Só aparece quando o provider REPORTOU — ausente é diferente de 0%
+    // ("o cache existe e não pegou"), e inventar 0% ali seria afirmar o que não se sabe.
+    if (a.cachePct !== undefined) parts.push(`${a.cachePct}% cache`);
     if (a.toolCalls > 0) parts.push(`${a.toolCalls} tools`);
     parts.push(formatDuration(a.durationMs));
   }

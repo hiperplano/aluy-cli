@@ -151,6 +151,7 @@ import {
   groupMcpServers,
 } from './capabilities-snapshot.js';
 import { runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
+import { pctDeCache } from '@hiperplano/aluy-cli-core';
 // F191 — primitivo de EXPEDITE ("acelerar o encaixe"): o controller o POSSUI e o passa
 // ao loop; `controller.expedite()` toca o sino p/ cortar a chamada de modelo em voo.
 import { ExpediteSignal } from '@hiperplano/aluy-cli-core';
@@ -4436,6 +4437,7 @@ export class SessionController {
       toolCalls: agg.toolCalls,
       durationMs: this.rootFlow.accounting().durationMs,
       live: !this.rootFlow.isTerminal(),
+      ...(this.cachePctDoUltimoTurno !== undefined ? { cachePct: this.cachePctDoUltimoTurno } : {}),
     };
   }
 
@@ -6528,8 +6530,20 @@ export class SessionController {
     }
   }
 
+  /**
+   * % do prompt servida do CACHE na última resposta. `undefined` ⇒ o provider não reportou.
+   *
+   * Guardado aqui porque é a ÚNICA passagem por onde o número transita: o `usage` chega,
+   * é somado em tokens, e o resto é descartado. Sem reter, a resposta à pergunta do dono
+   * ("a gente usa prompt caching?") continuaria sendo "não sei" — agora com o dado tendo
+   * passado pela mão e sido jogado fora.
+   */
+  private cachePctDoUltimoTurno: number | undefined;
+
   private applyUsage(usage: ModelUsage): void {
     const total = (usage.tokens_in ?? 0) + (usage.tokens_out ?? 0);
+    const pct = pctDeCache(usage.tokens_in, usage.tokens_cached);
+    if (pct !== undefined) this.cachePctDoUltimoTurno = pct;
     const tokens = this.state.meta.tokens + total;
     // F11 (dogfooding) — a `% janela` é a OCUPAÇÃO do contexto ATUAL = `tokens_in`
     // (prompt enviado ao modelo neste turno), NÃO o acumulado da sessão. Espelha o

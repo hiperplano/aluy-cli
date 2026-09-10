@@ -429,6 +429,16 @@ export interface TurnAccountingView {
   readonly toolCalls: number;
   readonly durationMs: number;
   readonly live: boolean;
+  /**
+   * % do prompt servida do CACHE do provider neste turno. `undefined` ⇒ o provider não
+   * reportou — que é DIFERENTE de 0% ("o cache existe e não pegou").
+   *
+   * O dono perguntou em 10/09 "a gente usa prompt caching?" e a resposta honesta era "não
+   * sei". Os adaptadores passaram a ler o número; se ele parasse aí, a resposta continuaria
+   * sendo "não sei" — só que com o dado em memória. Sem chegar à TELA, não há como PROVAR
+   * que o `cache_control` que passamos a mandar teve efeito.
+   */
+  readonly cachePct?: number;
 }
 
 /** Estado da confirmação pendente (ask) — o que o `<AskDialog>` renderiza. */

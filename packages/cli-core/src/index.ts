@@ -114,3 +114,14 @@ export {
   redactSecretIn,
 } from './connector/secret-store.js';
 export type { ConnectorSecretStore } from './connector/secret-store.js';
+
+// ADR-plugins — o BUNDLE instalável (agents/commands/skills/workflows/hooks juntos).
+export {
+  parseManifesto,
+  rotuloDeItem,
+  descricaoDeOrigem,
+  TIPOS_DE_EXTENSAO,
+  type PluginManifest,
+  type ParseManifesto,
+  type TipoDeExtensao,
+} from './plugin/manifest.js';
