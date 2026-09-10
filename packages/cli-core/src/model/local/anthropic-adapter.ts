@@ -24,6 +24,8 @@ import { BrokerError } from '../errors.js';
 import type { ModelStreamEvent, ModelUsage, NativeToolCall, ToolFunctionSchema } from '../types.js';
 import type { ProviderAdapter, BuiltRequest, SseAccumulator } from './adapter.js';
 import type { LocalRequest, ResolvedCredential, LocalMessage, ContentPart } from './types.js';
+import { lerUsoDeCache } from './cache-usage.js';
+import { systemAnthropicComCache } from './cache-breakpoint.js';
 
 /** Versão da API Anthropic (header obrigatório `anthropic-version`). */
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -53,7 +55,12 @@ export class AnthropicAdapter implements ProviderAdapter {
       messages: toAnthropicMessages(request.messages),
       stream: true,
     };
-    if (request.system !== undefined && request.system !== '') body.system = request.system;
+    // CACHE DE PROMPT — string pura quando não vale a pena; array com `cache_control`
+    // quando vale. Sem o marcador o desconto aqui é ZERO, por mais estável que o prefixo
+    // seja (dialeto de cache EXPLÍCITO — ver `cache-breakpoint.ts`).
+    if (request.system !== undefined && request.system !== '') {
+      body.system = systemAnthropicComCache(request.system);
+    }
     if (request.temperature !== undefined) body.temperature = request.temperature;
     if (request.tools !== undefined && request.tools.length > 0) {
       body.tools = request.tools.map(toAnthropicTool);
@@ -91,6 +98,11 @@ export class AnthropicAdapter implements ProviderAdapter {
         if (usage !== undefined) {
           const inTok = num(usage, 'input_tokens');
           if (inTok !== undefined) anthropicState(acc).inputTokens = inTok;
+          // CACHE — aqui é o único lugar onde ele aparece: o `message_delta` do fim só
+          // carrega `output_tokens`. Sem ler agora, o número se perde.
+          const cache = lerUsoDeCache(usage);
+          if (cache.lidos !== undefined) anthropicState(acc).cachedTokens = cache.lidos;
+          if (cache.gravados !== undefined) anthropicState(acc).cacheWriteTokens = cache.gravados;
         }
         const model = msg !== undefined ? str(msg, 'model') : undefined;
         if (model !== undefined) anthropicState(acc).model = model;
@@ -172,6 +184,10 @@ export class AnthropicAdapter implements ProviderAdapter {
 // ── estado por-chamada específico do Anthropic (anexado ao acumulador comum) ──
 interface AnthropicState {
   inputTokens?: number;
+  /** CACHE DE PROMPT — `cache_read_input_tokens` do `message_start` (ver `cache-usage.ts`). */
+  cachedTokens?: number;
+  /** `cache_creation_input_tokens` — os tokens GRAVADOS no cache (cobrados com ágio). */
+  cacheWriteTokens?: number;
   outputTokens?: number;
   model?: string;
   requestId?: string;
@@ -195,6 +211,8 @@ function buildUsage(acc: SseAccumulator): ModelUsage {
   };
   if (s.model !== undefined) out.model = s.model;
   if (s.inputTokens !== undefined) out.tokens_in = s.inputTokens;
+  if (s.cachedTokens !== undefined) out.tokens_cached = s.cachedTokens;
+  if (s.cacheWriteTokens !== undefined) out.tokens_cache_write = s.cacheWriteTokens;
   if (s.outputTokens !== undefined) out.tokens_out = s.outputTokens;
   return out;
 }
@@ -234,7 +252,8 @@ export function toAnthropicMessages(messages: readonly LocalMessage[]): Record<s
             // ADR-0159 — string SEGUE IDÊNTICA a antes; `ContentPart[]` (não esperado
             // num resultado de tool nesta fase, mas o tipo widened obriga o ramo)
             // vira os MESMOS blocos texto/imagem do Anthropic.
-            content: typeof m.content === 'string' ? m.content : toAnthropicContentBlocks(m.content),
+            content:
+              typeof m.content === 'string' ? m.content : toAnthropicContentBlocks(m.content),
           },
         ],
       });

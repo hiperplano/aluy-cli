@@ -361,39 +361,46 @@ export function buildLocalCatalog(userRaw?: unknown): LocalProviderCatalog {
 }
 
 /**
- * O modelo a ATIVAR ao entrar num provider, confrontado com o que ele ANUNCIA agora.
+ * O modelo a ATIVAR ao entrar num provider — e, principalmente, QUANDO não ativar nenhum.
  *
- * Este catálogo é uma foto, e foto envelhece: medido em 08/09/2026, o `defaultModel` do
- * OpenRouter (`anthropic/claude-3.5-sonnet`) tinha sumido dos 431 modelos que ele lista, e
- * dois dos cinco slugs curados junto com ele. A troca de provider PROVAVA isso — comparava
- * o default com a listagem — e mesmo assim devolvia o slug morto para virar o modelo ativo
- * da sessão. Quem fechasse o picker de modelo que abre em seguida ficava num provider certo
- * com um modelo inexistente, e só descobria no turno seguinte, longe da causa.
+ * O dono, em 10/09/2026: "esses modelos default estão todos furados, não vamos usá-los".
+ * Ele tem razão, e a versão anterior desta função tratava o sintoma: eu tinha acabado de
+ * MEDIR que o default do OpenRouter (`anthropic/claude-3.5-sonnet`) sumira dos 431 modelos
+ * que ele anuncia, junto com outro dos cinco curados. Trocar os slugs por outros mais novos
+ * só adia — a lista curada é uma FOTO, e foto envelhece igual.
  *
- * A regra: o default do catálogo, se o provider ainda o anuncia; senão o primeiro CURADO
- * que ele anuncia; senão o default mesmo (não há alternativa melhor, e a nota manda
- * escolher). `anunciados` vazio ⇒ não deu para saber (provider que não expõe `/models`,
- * rede fora) e nada muda — nunca se troca um slug bom por causa de uma listagem ausente.
+ * A regra que não envelhece: **quando o provider sabe dizer o que tem, o catálogo não
+ * opina**. Se a listagem veio, o modelo é assunto do picker que abre logo em seguida, e
+ * `model: undefined` é a resposta honesta — nenhum palpite nosso vira o modelo ativo da
+ * sessão. Só quando NÃO dá para listar (provider sem `/models`, rede fora, chave recusada)
+ * o catálogo volta a ser útil, porque aí ele é a única coisa que existe.
  *
- * `doCatalogo` distingue os dois casos para quem PERSISTE: só o default do próprio
- * catálogo, verificado vivo, vira padrão da próxima sessão. Um substituto escolhido aqui é
- * nosso palpite, não a escolha do dono — serve para a sessão não nascer quebrada, não para
- * virar preferência gravada.
+ * A exceção: se o default do catálogo POR ACASO está na lista viva, ele passa — não porque
+ * confiamos nele, mas porque o provider acabou de confirmá-lo, e evitar um passo a mais
+ * para quem só quer entrar e usar vale mais que a pureza.
+ *
+ * `doCatalogo` distingue, para quem PERSISTE, o que foi confirmado do que foi chutado: só o
+ * confirmado vira padrão da próxima sessão.
  *
  * PURO.
  */
 export function escolherModeloVivo(
   entry: Pick<LocalProviderEntry, 'defaultModel' | 'models'>,
   anunciados: readonly string[],
-): { readonly model: string; readonly doCatalogo: boolean } {
+): { readonly model: string | undefined; readonly doCatalogo: boolean } {
   const padrao = entry.defaultModel;
+  // Sem listagem, o catálogo é tudo o que temos. Não é confiável, mas é melhor que nada —
+  // e a alternativa (sessão sem modelo nenhum e sem lista para escolher) seria um beco.
   if (anunciados.length === 0) return { model: padrao, doCatalogo: true };
+
   const vivos = new Set(anunciados.map((s) => s.trim().toLowerCase()));
-  const anunciado = (slug: string): boolean => vivos.has(slug.trim().toLowerCase());
-  if (anunciado(padrao)) return { model: padrao, doCatalogo: true };
-  const substituto = (entry.models ?? []).find((m) => anunciado(m));
-  if (substituto !== undefined) return { model: substituto, doCatalogo: false };
-  return { model: padrao, doCatalogo: false };
+  // O provider CONFIRMOU o default: passa, e conta como catálogo (pode virar padrão).
+  if (vivos.has(padrao.trim().toLowerCase())) return { model: padrao, doCatalogo: true };
+
+  // O default está furado e HÁ lista. Aqui a versão anterior escolhia o primeiro curado que
+  // ainda existisse — outro palpite nosso, com a mesma validade da foto. Agora não
+  // escolhemos: quem escolhe é o dono, no picker que o `/provider` abre em seguida.
+  return { model: undefined, doCatalogo: false };
 }
 
 /** Busca uma entrada por `id` (case-insensitive no `id`). `undefined` se ausente. PURO. */

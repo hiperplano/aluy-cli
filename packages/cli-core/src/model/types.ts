@@ -196,6 +196,27 @@ export interface ModelUsage {
   readonly model?: string;
   readonly tokens_in?: number;
   readonly tokens_out?: number;
+  /**
+   * Quantos dos `tokens_in` vieram do CACHE DE PROMPT do provider, em vez de serem
+   * processados de novo.
+   *
+   * Existe porque, até 10/09/2026, o aluy era CEGO a isto — lia só `prompt_tokens` e
+   * `completion_tokens`. O dono perguntou "a gente usa prompt caching?" e a resposta
+   * honesta era "não sei": nos providers de cache IMPLÍCITO (DeepSeek, OpenAI, GLM) ele
+   * quase certamente já estava acontecendo e sendo cobrado mais barato, e nem ele nem eu
+   * tínhamos como ver. Silêncio ambíguo — a mesma classe de defeito de sempre.
+   *
+   * Cada dialeto tem o seu nome para o mesmo número (`prompt_tokens_details.cached_tokens`,
+   * `prompt_cache_hit_tokens`, `cache_read_input_tokens`); quem normaliza é o adaptador.
+   * AUSENTE ⇒ o provider não reportou (não é o mesmo que zero — ver `cache_hit_pct`).
+   */
+  readonly tokens_cached?: number;
+  /**
+   * Tokens GRAVADOS no cache nesta chamada (só os dialetos de cache EXPLÍCITO reportam —
+   * Anthropic `cache_creation_input_tokens`). Costuma ser cobrado com ÁGIO sobre o token
+   * normal, então é o número que explica uma primeira chamada mais cara que o esperado.
+   */
+  readonly tokens_cache_write?: number;
   readonly cost?: string;
   readonly price_version?: string;
   readonly partial?: boolean;

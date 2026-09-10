@@ -5049,11 +5049,19 @@ export class SessionController {
       };
     }
     const result = await this.switchLocalProviderPort(name);
-    if (!result.ok || result.client === undefined || result.defaultModel === undefined) {
+    // `defaultModel` AUSENTE não é falha — é a porta dizendo "o provider listou o que tem e
+    // o palpite do catálogo não estava lá; não ative nada". O dono, em 10/09: "esses modelos
+    // default estão todos furados, não vamos usá-los". Tratar isso como erro seria RECUSAR
+    // a troca por causa de um palpite nosso vencido, que é o defeito de 08/09 de volta.
+    if (!result.ok || result.client === undefined) {
       return { ok: false, detail: result.detail };
     }
     this.tierControl?.setClient?.(result.client);
-    if (this.tierControl && typeof this.tierControl.setTier === 'function') {
+    if (
+      result.defaultModel !== undefined &&
+      this.tierControl &&
+      typeof this.tierControl.setTier === 'function'
+    ) {
       this.tierControl.setTier('custom', result.defaultModel);
     }
     if (this.tierControl && typeof this.tierControl.setProvider === 'function') {
@@ -5064,11 +5072,18 @@ export class SessionController {
     // provider NOVO nunca era encontrado — o aviso "o provider não informa a janela"
     // continuava, com a auto-compactação inerte.
     this.activeProviderId = name;
+    // Sem modelo confirmado, o campo é REMOVIDO em vez de carregar o slug do provider
+    // ANTERIOR — que seria uma mentira pior que a ausência (o rodapé mostraria o provider
+    // novo ao lado do modelo velho). O picker que abre em seguida o preenche.
+    const metaSemModelo: Omit<SessionMeta, 'model'> & { model?: string } = {
+      ...this.state.meta,
+    };
+    delete metaSemModelo.model;
     this.patch({
       meta: {
-        ...this.state.meta,
+        ...metaSemModelo,
         tier: 'custom',
-        model: result.defaultModel,
+        ...(result.defaultModel !== undefined ? { model: result.defaultModel } : {}),
         provider: name,
       },
     });

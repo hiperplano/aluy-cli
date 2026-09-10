@@ -1875,24 +1875,31 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         // escolhido por nós é palpite, não a escolha do dono. O picker que abre em seguida
         // grava o que ele escolher.
         const persistiu =
-          podeTestar && defaultVivo && configStore.saveLocalProvider(entry.id, modeloAtivo);
+          podeTestar &&
+          defaultVivo &&
+          modeloAtivo !== undefined &&
+          configStore.saveLocalProvider(entry.id, modeloAtivo);
         return {
           ok: true,
           persisted: persistiu,
           detail: faltaChave
-            ? `provider ativo agora: ${entry.id} (modelo default: ${modeloAtivo}). ` +
+            ? `provider ativo agora: ${entry.id}${
+                modeloAtivo !== undefined ? ` (modelo: ${modeloAtivo})` : ''
+              }. ` +
               `ATENÇÃO: não há credencial guardada p/ "${entry.id}" — rode /login antes do ` +
               'próximo turno, senão ele vai falhar por falta de chave.'
-            : defaultVivo
-              ? `provider ativo agora: ${entry.id} (modelo default: ${modeloAtivo}).`
+            : defaultVivo && modeloAtivo !== undefined
+              ? `provider ativo agora: ${entry.id} (modelo: ${modeloAtivo}).`
               : provaDoModeloFalhou
                 ? `provider ativo agora: ${entry.id}. a chave passou, mas o modelo do ` +
                   `catálogo ("${entry.defaultModel}") não respondeu — escolha um na lista.`
-                : `provider ativo agora: ${entry.id} · modelo ${modeloAtivo}. o default do ` +
-                  `catálogo ("${entry.defaultModel}") não consta nos ${slugsDoProvider.length} ` +
-                  'que ele anuncia — escolha um na lista a seguir.',
+                : `provider ativo agora: ${entry.id}. o modelo do catálogo ` +
+                  `("${entry.defaultModel}") não está entre os ${slugsDoProvider.length} que ` +
+                  'ele anuncia — escolha um na lista a seguir.',
           client,
-          defaultModel: modeloAtivo,
+          // AUSENTE quando o provider listou e o default do catálogo não estava lá: o
+          // modelo é assunto do picker que abre em seguida, não de um palpite nosso.
+          ...(modeloAtivo !== undefined ? { defaultModel: modeloAtivo } : {}),
         };
       } catch (e) {
         return {
