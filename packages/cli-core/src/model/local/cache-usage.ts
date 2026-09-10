@@ -85,3 +85,33 @@ export function pctDeCache(
   // precisar saber qual dialeto respondeu — e sem nunca exibir "137% em cache".
   return Math.min(100, Math.round((lidos / tokensIn) * 100));
 }
+
+/**
+ * DIAGNÓSTICO do cache — uma linha que diz o que o provider de fato mandou.
+ *
+ * Existe porque a pergunta "por que não aparece o cache?" tem pelo menos quatro respostas
+ * (o provider não reporta; reporta e deu zero; não pedimos o detalhamento; o modelo não
+ * cacheia), e sem o dado cru elas são indistinguíveis — foi exatamente onde eu fiquei em
+ * 10/09 quando o dono disse "no windows não está aparecendo o cache". Chutar qual das
+ * quatro é o defeito de silêncio ambíguo outra vez.
+ *
+ * PURO. Só METADADOS do `usage` — nunca conteúdo de prompt.
+ */
+export function diagnosticoDeCache(raw: unknown): string {
+  const u = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : undefined;
+  if (u === undefined) return 'cache: o provider não mandou usage nenhum';
+  const { lidos, gravados } = lerUsoDeCache(raw);
+  if (lidos === undefined && gravados === undefined) {
+    // Listar as CHAVES que vieram é o que distingue "não pedimos o detalhamento" de "este
+    // provider não faz cache": num caso vem só o par de totais, no outro vêm outros campos.
+    const chaves = Object.keys(u).sort().join(', ');
+    return `cache: o provider NÃO reportou campo de cache. usage trouxe: ${chaves || '(vazio)'}`;
+  }
+  const partes: string[] = [];
+  if (lidos !== undefined) partes.push(`lidos=${String(lidos)}`);
+  if (gravados !== undefined) partes.push(`gravados=${String(gravados)}`);
+  const pin = typeof u.prompt_tokens === 'number' ? u.prompt_tokens : undefined;
+  const pct = pctDeCache(pin, lidos);
+  if (pct !== undefined) partes.push(`${String(pct)}%`);
+  return `cache: ${partes.join(' · ')}`;
+}

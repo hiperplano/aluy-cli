@@ -125,3 +125,8 @@ export {
   type ParseManifesto,
   type TipoDeExtensao,
 } from './plugin/manifest.js';
+export {
+  linhasDaListaDePlugins,
+  type PluginParaListar,
+  type FalhaParaListar,
+} from './plugin/lista.js';

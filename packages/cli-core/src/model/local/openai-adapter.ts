@@ -22,6 +22,22 @@ import type { LocalRequest, ResolvedCredential, LocalProviderKind, ContentPart }
 import { lerUsoDeCache } from './cache-usage.js';
 import { systemOpenAiComCache } from './cache-breakpoint.js';
 
+/**
+ * É o OpenRouter? Pelo ID do catálogo OU pela baseURL.
+ *
+ * Os dois porque o dono já rodou um provider CUSTOM (`tokenrouter`) apontando para um
+ * agregador: gate só por id perderia esse caso, e é justamente quem tem provider custom que
+ * fica sem o número sem entender por quê. A baseURL é o que de fato decide quem atende.
+ */
+function ehOpenRouter(provider: string, baseUrl: string): boolean {
+  if (provider === 'openrouter') return true;
+  try {
+    return new URL(baseUrl).hostname.toLowerCase().endsWith('openrouter.ai');
+  } catch {
+    return false;
+  }
+}
+
 const ATTRIBUTION_URL = 'https://github.com/hiperplano/aluy-cli';
 const ATTRIBUTION_TITLE = 'aluy-cli';
 
@@ -76,6 +92,17 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
       // pede o trailer de usage no fim do stream (OpenRouter/OpenAI honram).
       stream_options: { include_usage: true },
     };
+    // CONTABILIDADE DETALHADA do OpenRouter — sem isto o trailer vem SÓ com os dois totais,
+    // e o `prompt_tokens_details.cached_tokens` (de onde sai o `% cache` do rodapé) nunca
+    // chega. O dono reportou exatamente isso em 10/09: "no windows não está aparecendo o
+    // cache", já na rc.177 (a versão em que a exibição funciona) e falando com o OpenRouter.
+    //
+    // GUARDADO ao provider, como os headers de atribuição logo abaixo: campo desconhecido no
+    // corpo é ignorado pela maioria dos compatíveis, mas alguns respondem 400 — e uma troca
+    // de provider não pode virar erro de requisição por causa de um extra de observabilidade.
+    if (ehOpenRouter(this.provider, base)) {
+      body.usage = { include: true };
+    }
     if (request.temperature !== undefined) body.temperature = request.temperature;
     // reasoning_effort: passthrough (o3/gpt-5 e openrouter aceitam; demais ignoram).
     if (request.reasoningEffort !== undefined && request.reasoningEffort !== '') {

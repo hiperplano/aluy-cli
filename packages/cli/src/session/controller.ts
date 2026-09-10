@@ -151,7 +151,7 @@ import {
   groupMcpServers,
 } from './capabilities-snapshot.js';
 import { runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
-import { pctDeCache } from '@hiperplano/aluy-cli-core';
+import { pctDeCache, diagnosticoDeCache } from '@hiperplano/aluy-cli-core';
 // F191 — primitivo de EXPEDITE ("acelerar o encaixe"): o controller o POSSUI e o passa
 // ao loop; `controller.expedite()` toca o sino p/ cortar a chamada de modelo em voo.
 import { ExpediteSignal } from '@hiperplano/aluy-cli-core';
@@ -6552,6 +6552,25 @@ export class SessionController {
     const total = (usage.tokens_in ?? 0) + (usage.tokens_out ?? 0);
     const pct = pctDeCache(usage.tokens_in, usage.tokens_cached);
     if (pct !== undefined) this.cachePctDoUltimoTurno = pct;
+    // DIAGNÓSTICO sob `ALUY_DEBUG` — "por que não aparece o cache?" tem pelo menos quatro
+    // respostas (o provider não reporta; reporta e deu zero; não pedimos o detalhamento; o
+    // modelo não cacheia) e, sem o dado cru, elas são indistinguíveis. Foi onde eu fiquei
+    // quando o dono disse "no windows não está aparecendo o cache" — chutando entre quatro.
+    // Só metadados; nunca conteúdo de prompt.
+    if (process.env.ALUY_DEBUG !== undefined) {
+      this.pushNote('cache (debug)', [
+        diagnosticoDeCache({
+          prompt_tokens: usage.tokens_in,
+          ...(usage.tokens_cached !== undefined
+            ? { prompt_tokens_details: { cached_tokens: usage.tokens_cached } }
+            : {}),
+          ...(usage.tokens_cache_write !== undefined
+            ? { cache_creation_input_tokens: usage.tokens_cache_write }
+            : {}),
+        }),
+        `provider: ${usage.provider ?? '?'} · modelo: ${usage.model ?? '?'}`,
+      ]);
+    }
     const tokens = this.state.meta.tokens + total;
     // F11 (dogfooding) — a `% janela` é a OCUPAÇÃO do contexto ATUAL = `tokens_in`
     // (prompt enviado ao modelo neste turno), NÃO o acumulado da sessão. Espelha o

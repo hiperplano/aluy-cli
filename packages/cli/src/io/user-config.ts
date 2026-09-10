@@ -183,6 +183,16 @@ export interface UserConfig {
    */
   readonly embedder?: string;
   /**
+   * Plugins DESLIGADOS pelo dono (`/plugin disable <nome>`).
+   *
+   * Guardamos os DESLIGADOS, não os ligados: um plugin recém-instalado tem de funcionar sem
+   * precisar ser habilitado depois — instalar já é o ato de consentimento. E a lista de
+   * desligados envelhece bem: desinstalar um plugin deixa um nome órfão aqui, que é inócuo,
+   * enquanto uma lista de LIGADOS que perdesse uma entrada desligaria silenciosamente um
+   * plugin que o dono instalou.
+   */
+  readonly pluginsDesligados?: readonly string[];
+  /**
    * PISO de relevância do recall do mem0 (0..1): só injeta memórias com `score >=` isto.
    * Antes só env `ALUY_MEM_MIN_SCORE`; agora config-driven (precedência env > config > default
    * 0.6). 0 desliga o piso. Calibra conforme o embedder (forte discrimina ⇒ piso maior).
@@ -854,6 +864,7 @@ function sanitize(raw: unknown): UserConfig {
     profile?: 'turbo' | 'leve';
     sidecarToggles?: { ollama?: boolean; mem0?: boolean; headroom?: boolean };
     embedder?: string;
+    pluginsDesligados?: readonly string[];
     recallMinScore?: number;
     providers?: readonly UserProviderEntry[];
     services?: UserServicesConfig;
@@ -938,6 +949,15 @@ function sanitize(raw: unknown): UserConfig {
   // descartado ⇒ default. Validado contra o catálogo p/ não puxar/verificar modelo desconhecido.
   if (typeof obj.embedder === 'string' && embedderSpec(obj.embedder.trim()) !== undefined) {
     out.embedder = obj.embedder.trim();
+  }
+  if (Array.isArray(obj.pluginsDesligados)) {
+    // DADO de config: só strings não-vazias, deduplicadas, com teto. Um nome inválido aqui
+    // não desliga nada — e não pode derrubar a leitura do resto da config.
+    const nomes = obj.pluginsDesligados
+      .filter((v): v is string => typeof v === 'string' && v.trim() !== '')
+      .map((v) => v.trim())
+      .slice(0, 128);
+    if (nomes.length > 0) out.pluginsDesligados = [...new Set(nomes)];
   }
 
   // recallMinScore: número finito em [0,1]. Fora disso ⇒ descartado (cai no default 0.6).

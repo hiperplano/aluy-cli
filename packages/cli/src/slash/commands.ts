@@ -47,6 +47,7 @@ export type NativeCommandId =
   | 'memory'
   | 'mcp'
   | 'agents'
+  | 'plugin'
   | 'skills'
   | 'inventory'
   | 'workflows'
@@ -1040,6 +1041,31 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
         summary: 'relê os .md de agentes (aplica os criados/editados na sessão)',
         usage: 'refresh',
       },
+    ],
+  },
+  {
+    // ADR-plugins — `/plugin`: o BUNDLE instalável (agents/commands/skills/workflows/hooks
+    // numa pasta só). Pedido do dono: "quero que você tenha a opção de plugins do aluy como
+    // no claude".
+    //
+    // `list` é read-only. `disable`/`enable` são efeito de SESSÃO+config (reversíveis,
+    // não-destrutivos) — espelham o `/agents refresh`. NÃO há `install` aqui ainda: instalar
+    // é copiar/clonar arquivo de terceiro, que é efeito de ESCRITA e merece passar pela
+    // catraca com o caminho exato à vista; entra quando o comando de escrita for fiado.
+    name: 'plugin',
+    summary: 'lista os plugins instalados (bundles em ~/.aluy/plugins) · enable/disable',
+    source: 'native',
+    id: 'plugin',
+    section: 'workspace',
+    // Listar é ler uma nota; ligar/desligar é uma atribuição + uma escrita de config. Nada
+    // toca histórico, catraca ou o turno vivo.
+    parallelWhileBusy: true,
+    agentEffect: 'read-only',
+    subcommandEffects: { enable: 'session-effect', disable: 'session-effect' },
+    subcommands: [
+      { name: 'list', summary: 'lista os plugins instalados e o que cada um traz', usage: 'list' },
+      { name: 'enable', summary: 'liga um plugin desligado', usage: 'enable <nome>' },
+      { name: 'disable', summary: 'desliga um plugin sem desinstalar', usage: 'disable <nome>' },
     ],
   },
   {

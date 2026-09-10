@@ -16,7 +16,7 @@ export {
   newSseAccumulator,
 } from './adapter.js';
 export { AnthropicAdapter, toAnthropicMessages } from './anthropic-adapter.js';
-export { lerUsoDeCache, pctDeCache, type UsoDeCache } from './cache-usage.js';
+export { lerUsoDeCache, pctDeCache, diagnosticoDeCache, type UsoDeCache } from './cache-usage.js';
 export {
   valeCachear,
   systemOpenAiComCache,

@@ -36,6 +36,8 @@ import { resolveHeadroomUrl } from '../maestro/sidecar-urls.js';
 import { CLI_VERSION } from '../version.js';
 import { readUpdateNote, refreshUpdateCheck } from '../io/update-check.js';
 import { readAutoUpdateNote, runAutoUpdate } from '../io/auto-update.js';
+import { PluginStore } from '../io/plugin-store.js';
+import { carregarAgentesDePlugins } from '../io/plugin-agents.js';
 import { ThemeRoot } from './ThemeRoot.js';
 import { buildSession, type BuildSessionOptions } from './wiring.js';
 // F-PROV-FIX — lógica PURA (sem I/O) do ato explícito `/provider save`: decide o
@@ -1195,12 +1197,31 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // que existe AGORA (inclusive os `.md` criados no meio da sessão — o caso do dono).
   let globalAgents = userAgentsLoader.load();
   let projectAgents = projectAgentsLoader.load();
-  const agentRegistry = new AgentRegistry(globalAgents.profiles, projectAgents.profiles);
+  // PLUGINS — os agentes de bundles instalados entram na camada de PROJETO, com o nome
+  // prefixado (`meu-plugin:revisor`). Ver `plugin-agents.ts`: a propriedade que importa é
+  // "não entra na auto-seleção", e a camada de projeto já a garante; o prefixo é o que
+  // torna a proveniência visível. Sem plugin instalado ⇒ lista vazia, zero mudança.
+  const pluginStore = new PluginStore(
+    savedConfig.pluginsDesligados !== undefined
+      ? { desligados: savedConfig.pluginsDesligados }
+      : {},
+  );
+  const pluginsLidos = pluginStore.load();
+  const pluginAgents = carregarAgentesDePlugins(pluginsLidos.plugins);
+  const agentRegistry = new AgentRegistry(globalAgents.profiles, [
+    ...projectAgents.profiles,
+    ...pluginAgents.profiles,
+  ]);
   // GS-MD7 — o registro que o `/agents refresh` substitui. O `agentRegistry` acima segue
   // `const` porque é o que vai ao wiring no BOOT (e o que o `servicePersonaLock` resolve,
   // ANTES de existir sessão); daqui pra frente quem manda é este.
   let agentRegistryLive: AgentRegistry = agentRegistry;
-  let agentLoadErrors = [...globalAgents.errors, ...projectAgents.errors];
+  let agentLoadErrors = [
+    ...globalAgents.errors,
+    ...projectAgents.errors,
+    // Bundle ilegível é carga VISÍVEL, nunca silêncio — mesma disciplina do `.md` rejeitado.
+    ...pluginAgents.errors,
+  ];
   // EST-0977 — as MESMAS duas classes de aviso de carga de agente (homônimo entre
   // camadas + `.md` rejeitado, RES-MD-3) viram uma nota da TUI mais abaixo
   // (`pushNote('agentes', …)`) — mas aquele bloco fica DEPOIS do `return` do

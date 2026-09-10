@@ -822,6 +822,25 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           ],
         },
       };
+    case 'plugin':
+      // ADR-plugins — o `/plugin` REAL (que LÊ `~/.aluy/plugins/`) é roteado antes em
+      // run.tsx, onde o `PluginStore` do boot já existe. Cair aqui é o caso sem esse
+      // roteamento (não-TTY sem wiring): explica o comando sem tocar o disco — mesma
+      // disciplina do `/agents` acima.
+      return {
+        kind: 'note',
+        note: {
+          title: 'plugin',
+          lines: [
+            'lista os PLUGINS instalados — bundles em ~/.aluy/plugins/<nome>/ com um',
+            'aluy-plugin.json na raiz e as extensões dentro (agents/, commands/, skills/,',
+            'workflows/, hooks/).',
+            'os itens de um plugin aparecem PREFIXADOS (meu-plugin:revisor): plugin é código',
+            'de terceiro, então não entra na auto-seleção e a origem fica sempre à vista.',
+            '`/plugin disable <nome>` desliga sem desinstalar; `enable` religa.',
+          ],
+        },
+      };
     case 'inventory':
       // LOTE-2 — o `/inventory` REAL (lista o que a sessão carregou da .aluy/, com os loaders +
       // o `state.governance`) é roteado ANTES em run.tsx. Cair aqui só sem esse roteamento

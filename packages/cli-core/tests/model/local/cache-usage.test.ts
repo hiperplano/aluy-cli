@@ -9,7 +9,11 @@
 // efeito — a visibilidade é o que torna o resto verificável.
 
 import { describe, expect, it } from 'vitest';
-import { lerUsoDeCache, pctDeCache } from '../../../src/model/local/cache-usage.js';
+import {
+  lerUsoDeCache,
+  pctDeCache,
+  diagnosticoDeCache,
+} from '../../../src/model/local/cache-usage.js';
 
 describe('lerUsoDeCache — um número, três dialetos', () => {
   it('OpenAI/OpenRouter: aninhado em prompt_tokens_details', () => {
@@ -80,5 +84,47 @@ describe('pctDeCache — a fração é o que vale a pena mostrar', () => {
     expect(pctDeCache(10_000, undefined)).toBeUndefined();
     expect(pctDeCache(undefined, 8_000)).toBeUndefined();
     expect(pctDeCache(0, 0)).toBeUndefined();
+  });
+});
+
+describe('diagnosticoDeCache — distingue as quatro respostas de "por que não aparece?"', () => {
+  it('provider MUDO: diz que não reportou E lista o que veio', () => {
+    // Listar as chaves é o que separa "não pedimos o detalhamento" (vem só o par de totais)
+    // de "este provider não faz cache" (vêm outros campos).
+    const d = diagnosticoDeCache({ prompt_tokens: 100, completion_tokens: 5 });
+    expect(d).toContain('NÃO reportou');
+    expect(d).toContain('prompt_tokens');
+    expect(d).toContain('completion_tokens');
+  });
+
+  it('reportou ZERO: é diferente de não reportar', () => {
+    const d = diagnosticoDeCache({
+      prompt_tokens: 100,
+      prompt_tokens_details: { cached_tokens: 0 },
+    });
+    expect(d).toContain('lidos=0');
+    expect(d).not.toContain('NÃO reportou');
+  });
+
+  it('reportou: traz o número e a fração', () => {
+    const d = diagnosticoDeCache({
+      prompt_tokens: 1000,
+      prompt_tokens_details: { cached_tokens: 800 },
+    });
+    expect(d).toContain('lidos=800');
+    expect(d).toContain('80%');
+  });
+
+  it('dialeto Anthropic: mostra leitura E escrita', () => {
+    const d = diagnosticoDeCache({
+      cache_read_input_tokens: 500,
+      cache_creation_input_tokens: 120,
+    });
+    expect(d).toContain('lidos=500');
+    expect(d).toContain('gravados=120');
+  });
+
+  it('sem usage nenhum, diz isso', () => {
+    expect(diagnosticoDeCache(undefined)).toContain('não mandou usage');
   });
 });
