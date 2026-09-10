@@ -320,6 +320,19 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
       return cortado ? `${marca} interrompido · consumo não contabilizado` : undefined;
     }
     const partes: string[] = [`${abbreviateCount(a.tokens)} tokens`];
+    // CACHE DE PROMPT — a resposta à pergunta do dono ("a gente usa prompt caching?"), no
+    // lugar onde o custo do turno de fato aparece.
+    //
+    // Eu instrumentei o `<TurnFooter>` primeiro, escrevi teste de unidade e ele passou — mas
+    // o custo MIGROU para cá (F-CONTA-NO-BLOCO: "o custo passou a viver no cabeçalho do
+    // AluyBlock do turno que o gastou"), e o rodapé roda com `showCost:false`. Ou seja: o
+    // componente que eu provei não é o que a tela usa. Só apareceu quando rodei a versão
+    // publicada contra um provider de verdade e o `% cache` não estava lá.
+    //
+    // A FRAÇÃO, não o total: "8.2k reaproveitados" não diz se foi muito ou pouco sem o total
+    // ao lado. E ausente NÃO vira 0% — "o provider não reportou" é diferente de "o cache
+    // existe e não pegou"; inventar zero seria afirmar o que não se sabe.
+    if (a.cachePct !== undefined) partes.push(`${a.cachePct}% cache`);
     if (a.toolCalls > 0) partes.push(`${a.toolCalls} tools`);
     partes.push(formatDuration(a.durationMs));
     if (cortado) partes.push('interrompido');

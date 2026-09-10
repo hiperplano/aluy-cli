@@ -6495,6 +6495,14 @@ export class SessionController {
                 toolCalls: agg.toolCalls,
                 durationMs: this.rootFlow?.accounting().durationMs ?? 0,
                 live: false,
+                // CACHE — este é o accounting que SELA no bloco, e é o que a tela mostra.
+                // Instrumentei primeiro o `turnAccounting()` (estado VIVO) e o `<TurnFooter>`;
+                // os dois testes passaram e a tela seguiu sem o número, porque o custo do turno
+                // CONCLUÍDO vem daqui. Só apareceu rodando contra um provider de verdade —
+                // eram três componentes plausíveis e o certo era o terceiro.
+                ...(this.cachePctDoUltimoTurno !== undefined
+                  ? { cachePct: this.cachePctDoUltimoTurno }
+                  : {}),
               }
             : undefined;
         blocks[blocks.length - 1] = {
