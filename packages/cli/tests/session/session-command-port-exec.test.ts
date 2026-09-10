@@ -161,7 +161,9 @@ describe('execTodo (session/session-command-port.ts)', () => {
     const outcome = await port.run('todo', 'done 1');
     expect(outcome.ok).toBe(true);
     expect(outcome.text).toMatch(/concluído/);
-    expect(await store.list()).toEqual([{ id: '1', text: 'comprar leite', createdAt: 1, done: true }]);
+    expect(await store.list()).toEqual([
+      { id: '1', text: 'comprar leite', createdAt: 1, done: true },
+    ]);
   });
 });
 
@@ -184,6 +186,65 @@ describe('execProvider (session/session-command-port.ts)', () => {
     const outcome = await port.run('provider', 'deepseek');
     expect(outcome.ok).toBe(true);
     expect(outcome.text).toContain('deepseek');
+    expect(
+      (controller as unknown as { setProvider: ReturnType<typeof vi.fn> }).setProvider,
+    ).toHaveBeenCalledWith('deepseek');
+  });
+
+  // ── backend LOCAL (BYO) ────────────────────────────────────────────────────
+  //
+  // Relato do dono (08/09): "pedi para ele mudar pro ollama e não atualizou no status
+  // embaixo; depois resetei e aí sim mostrou o footer atualizado". Ele PEDIU AO AGENTE, e o
+  // agente chega por aqui. `setProvider` sob backend local é o NO-OP silencioso que o
+  // controller documenta — nada trocava, e ainda devolvíamos `ok:true` com "provider
+  // setado", então o agente anunciava a troca que não houve.
+  //
+  // Mesmo conserto, segundo ponto de chamada: o `/provider` do HUMANO (run.tsx) já usava
+  // `setLocalProvider`; este não.
+
+  it('LOCAL ⇒ usa setLocalProvider (o que TROCA), nunca o no-op setProvider', async () => {
+    const setLocalProvider = vi.fn(async () => ({ ok: true, detail: 'provider ativo: ollama' }));
+    const controller = fakeController({ backend: 'local', setLocalProvider });
+    const port = createSessionCommandPort(baseDeps({ controller }));
+    const outcome = await port.run('provider', 'ollama');
+    expect(setLocalProvider).toHaveBeenCalledWith('ollama');
+    expect(
+      (controller as unknown as { setProvider: ReturnType<typeof vi.fn> }).setProvider,
+      'o no-op não pode ser chamado sob backend local',
+    ).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(true);
+    expect(outcome.text).toContain('ollama');
+  });
+
+  it('LOCAL ⇒ manda CONFIRMAR o modelo (cada provider tem o próprio catálogo)', async () => {
+    // O humano ganha o picker de modelo aberto logo depois da troca; o agente não tem
+    // picker, então o que sobra é a instrução no texto de volta.
+    const setLocalProvider = vi.fn(async () => ({ ok: true, detail: 'provider ativo: ollama' }));
+    const port = createSessionCommandPort(
+      baseDeps({ controller: fakeController({ backend: 'local', setLocalProvider }) }),
+    );
+    expect((await port.run('provider', 'ollama')).text).toContain('/model');
+  });
+
+  it('LOCAL + falha ⇒ ok:FALSE — antes anunciava "provider setado" para uma troca que não houve', async () => {
+    const setLocalProvider = vi.fn(async () => ({
+      ok: false,
+      detail: 'provider "xpto" não está no catálogo local',
+    }));
+    const port = createSessionCommandPort(
+      baseDeps({ controller: fakeController({ backend: 'local', setLocalProvider }) }),
+    );
+    const outcome = await port.run('provider', 'xpto');
+    expect(outcome.ok, 'mentir aqui faz o agente reportar sucesso ao dono').toBe(false);
+    expect(outcome.text).toContain('catálogo');
+  });
+
+  it('BROKER segue no setProvider — a via local não pode vazar para fora do BYO', async () => {
+    const setLocalProvider = vi.fn(async () => ({ ok: true, detail: 'x' }));
+    const controller = fakeController({ backend: 'broker', setLocalProvider });
+    const port = createSessionCommandPort(baseDeps({ controller }));
+    await port.run('provider', 'deepseek');
+    expect(setLocalProvider).not.toHaveBeenCalled();
     expect(
       (controller as unknown as { setProvider: ReturnType<typeof vi.fn> }).setProvider,
     ).toHaveBeenCalledWith('deepseek');

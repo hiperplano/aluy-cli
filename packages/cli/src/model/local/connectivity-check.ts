@@ -7,6 +7,8 @@
 // sucesso sem o modelo ter respondido de verdade. Devolve ok + um detalhe ACIONÁVEL
 // (status HTTP + dica de chave/baseURL/modelo). 15s de timeout. NUNCA lança.
 
+import { descartarCorpo } from './descartar-corpo.js';
+
 export interface ModelCheckResult {
   readonly ok: boolean;
   /** Detalhe legível: `HTTP 200`, `HTTP 401 — chave inválida? …`, `não conectou: …`. */
@@ -80,7 +82,14 @@ export async function checkModelConnectivity(args: {
               messages: [{ role: 'user', content: 'ping' }],
             }),
           });
-    if (res.ok) return { ok: true, detail: `HTTP ${res.status}` };
+    if (res.ok) {
+      // SAÍDA EM 2 CTRL-C — o ping só olha o STATUS; o corpo (um `chat/completions` de 1
+      // token) nunca é lido. Deixá-lo pendurado prende o socket à requisição e SEGURA o
+      // laço de eventos do Node — o processo sobrevivia ao 2º Ctrl-C e só morria no cão
+      // de guarda de 2s do `run.tsx`. Ver `descartar-corpo.ts` p/ a medição.
+      descartarCorpo(res);
+      return { ok: true, detail: `HTTP ${res.status}` };
+    }
     let body = '';
     try {
       body = (await res.text()).replace(/\s+/g, ' ').slice(0, 160);
@@ -100,6 +109,33 @@ export async function checkModelConnectivity(args: {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * O que a prova de conectividade REPROVOU — e, portanto, o que dá para concluir dela.
+ *
+ * Existe porque a troca de provider tratava toda reprovação como "provider ruim" e recusava
+ * a troca inteira. Só que o modelo provado ali é o `defaultModel` do NOSSO catálogo, não uma
+ * escolha do dono: quando o slug envelhece (MEDIDO em 08/09 — o default do OpenRouter sumiu
+ * dos 431 que ele anuncia), a recusa acontecia ANTES do passo que pediria o modelo, e não
+ * havia como sair do buraco por dentro do fluxo. O dono ficava preso no provider antigo sem
+ * nada na tela explicando por quê.
+ *
+ * A leitura correta de um status HTTP que NÃO é 401/403: nós alcançamos o provider e ele
+ * respondeu — a credencial passou pela porta. O que falhou foi o palpite de modelo, e essa
+ * é a pergunta seguinte, do picker.
+ *
+ * PURO — lê só o `detail` que `checkModelConnectivity` compõe.
+ */
+export type FalhaDeProva = 'credencial' | 'modelo' | 'conexao';
+
+/** Classifica o `detail` de um `ModelCheckResult{ok:false}`. Ver `FalhaDeProva`. */
+export function classificarFalhaDeProva(detail: string): FalhaDeProva {
+  const m = /^HTTP (\d{3})\b/.exec(detail.trim());
+  if (m === null) return 'conexao'; // branch `catch`: rede/timeout/redirect bloqueado.
+  const status = Number(m[1]);
+  if (status === 401 || status === 403) return 'credencial';
+  return 'modelo';
 }
 
 /**

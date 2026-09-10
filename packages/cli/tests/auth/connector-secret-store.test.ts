@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { KeychainConnectorSecretStore } from '../../src/auth/connector-secret-store.js';
 import { NoKeychainError, type KeychainEntry } from '../../src/auth/keychain-store.js';
 
@@ -34,10 +37,37 @@ class DeadEntry implements KeychainEntry {
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
+/**
+ * COFRE ISOLADO por arquivo — obrigatório desde que o store ganhou um SEGUNDO lugar de
+ * gravação (arquivo cifrado). Sem `fileVault` injetado, o default é o cofre REAL do usuário
+ * (`~/.aluy/credentials.enc`): estes testes rodaram assim e ESCREVERAM lá. As credenciais
+ * sobreviveram (a gravação faz merge), mas teste que toca o cofre de quem roda a suíte é
+ * acidente esperando acontecer — e o `get` passou a ler de lá, o que fez "sem login ⇒ null"
+ * reprovar por encontrar o que outro teste tinha deixado.
+ */
+let cofreBase: string;
+let cofreTeste: {
+  vaultPath: string;
+  machineId: { reader: () => string };
+  username: string;
+};
+beforeEach(() => {
+  cofreBase = mkdtempSync(join(tmpdir(), 'aluy-conn-'));
+  cofreTeste = {
+    vaultPath: join(cofreBase, 'credentials.enc'),
+    machineId: { reader: () => 'maquina-de-teste' },
+    username: 'teste',
+  };
+});
+afterEach(() => {
+  rmSync(cofreBase, { recursive: true, force: true });
+});
+
 function fakeStore(id = 'telegram') {
   FakeEntry.store.clear();
   return new KeychainConnectorSecretStore(id, {
     entryFactory: (s, a) => new FakeEntry(`${s}:${a}`),
+    fileVault: cofreTeste,
   });
 }
 
@@ -61,11 +91,18 @@ describe('KeychainConnectorSecretStore (backend disponível)', () => {
 
   it('conta de keychain é por conector (telegram ≠ slack)', async () => {
     FakeEntry.store.clear();
+    // `fileVault` OBRIGATÓRIO aqui: este caso era inofensivo enquanto `set` só escrevia no
+    // keychain (dublê). Quando a emenda do CLI-SEC-2 passou a gravar TAMBÉM no cofre em
+    // arquivo, o `tg.set(TOKEN)` abaixo começou a escrever em `~/.aluy/credentials.enc`
+    // REAL — e sobrescreveu o token de Telegram do dono com o `123456789:…` de teste. Ele
+    // levou uma ponte que "ativava" e morria em 401, calada. Achado por bissecção em 01/09.
     const tg = new KeychainConnectorSecretStore('telegram', {
       entryFactory: (s, a) => new FakeEntry(`${s}:${a}`),
+      fileVault: cofreTeste,
     });
     const sl = new KeychainConnectorSecretStore('slack', {
       entryFactory: (s, a) => new FakeEntry(`${s}:${a}`),
+      fileVault: cofreTeste,
     });
     await tg.set(TOKEN);
     expect(await sl.get()).toBeNull(); // não vaza entre conectores
@@ -74,14 +111,51 @@ describe('KeychainConnectorSecretStore (backend disponível)', () => {
 });
 
 describe('KeychainConnectorSecretStore (backend AUSENTE — CA-4 / CLI-SEC-2)', () => {
-  const deadStore = () =>
-    new KeychainConnectorSecretStore('telegram', { entryFactory: () => new DeadEntry() });
-
-  it('set ⇒ NoKeychainError (NUNCA grava em claro)', async () => {
-    await expect(deadStore().set(TOKEN)).rejects.toBeInstanceOf(NoKeychainError);
+  // COFRE ISOLADO, obrigatório desde que o store passou a ter um segundo lugar de
+  // gravação. Sem isto o teste cai no cofre REAL (`~/.aluy/credentials.enc`) do usuário:
+  // ele rodou assim uma vez e ESCREVEU lá. As credenciais sobreviveram (a gravação faz
+  // merge), mas teste que toca o cofre do dono é acidente esperando acontecer.
+  let base: string;
+  let cofre: { vaultPath: string; machineId: { reader: () => string }; username: string };
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'aluy-conn-dead-'));
+    cofre = {
+      vaultPath: join(base, 'credentials.enc'),
+      machineId: { reader: () => 'maquina-de-teste' },
+      username: 'teste',
+    };
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
   });
 
-  it('get ⇒ null (não vaza detalhe do backend)', async () => {
+  const deadStore = () =>
+    new KeychainConnectorSecretStore('telegram', {
+      entryFactory: () => new DeadEntry(),
+      fileVault: cofre,
+    });
+
+  // O INVARIANTE ("nunca em claro") NÃO mudou — o que mudou foi onde o segredo pode ir
+  // parar quando o keychain falta: agora existe o cofre em ARQUIVO CIFRADO, decisão do
+  // dono depois de o token do bot evaporar de um keyring volátil. Então `set` com keychain
+  // morto deixou de ser uma recusa: ele GRAVA, cifrado, e a sessão seguinte acha.
+  it('set com keychain morto ⇒ grava no cofre CIFRADO (e não em claro)', async () => {
+    await expect(deadStore().set(TOKEN)).resolves.toBeUndefined();
+    expect(readFileSync(cofre.vaultPath, 'utf8')).not.toContain(TOKEN);
+    expect(await deadStore().get()).toBe(TOKEN);
+  });
+
+  // A recusa continua existindo — só mudou a condição: ela vale quando NENHUM dos dois
+  // lugares pode guardar. É esse o caso em que fingir sucesso seria mentira.
+  it('keychain morto E sem machine-id ⇒ NoKeychainError (nada foi guardado)', async () => {
+    const semMaquina = new KeychainConnectorSecretStore('telegram', {
+      entryFactory: () => new DeadEntry(),
+      fileVault: { ...cofre, machineId: { reader: () => undefined } },
+    });
+    await expect(semMaquina.set(TOKEN)).rejects.toBeInstanceOf(NoKeychainError);
+  });
+
+  it('get sem nada guardado ⇒ null (não vaza detalhe do backend)', async () => {
     expect(await deadStore().get()).toBeNull();
   });
 

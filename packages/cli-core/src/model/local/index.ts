@@ -39,6 +39,7 @@ export {
   mergeLocalCatalog,
   buildLocalCatalog,
   findProvider,
+  escolherModeloVivo,
 } from './catalog.js';
 // F-WIN (descoberta) — PARSE PURO do `GET {baseUrl}/models` p/ DESCOBRIR a janela de
 // contexto de um slug BYO (o número que o dono teria de digitar à mão em
@@ -66,3 +67,7 @@ export {
   normalizeModelFamily,
   builtinContextWindowForSlug,
 } from './known-context-windows.js';
+
+// F-WIN (emenda) — parser da janela DIGITADA pelo dono quando o provider não a anuncia.
+export { parseJanelaDigitada, explicaRecusa } from './janela-digitada.js';
+export type { JanelaDigitada, MotivoRecusa } from './janela-digitada.js';

@@ -511,6 +511,15 @@ export interface BuildSessionOptions {
    */
   readonly reloadProjectAgents?: () => readonly AgentProfile[];
   /**
+   * GS-MD7 (recarga viva) — callback que relê os agentes GLOBAIS (`~/.aluy/agents/*.md`)
+   * do MESMO loader confinado do boot. Simétrico ao `reloadProjectAgents` acima: a
+   * camada de PROJETO já era relida no `spawnNamed`, a GLOBAL ficava congelada no boot —
+   * então um `.md` criado NA sessão só valia depois de reiniciar (relato do dono: agente
+   * `ux-frontend` criado com sucesso e delegação recusada logo em seguida). Ausente ⇒
+   * globais do boot (não-regressão).
+   */
+  readonly reloadGlobalAgents?: () => readonly AgentProfile[];
+  /**
    * EST-1012 — ROBUSTEZ DE MEMÓRIA · MONITOR DE PRESSÃO de heap (backstop de OOM).
    * Quando presente, o controller liga um monitor LEVE que DEGRADA com graça antes do
    * "Killed" cego do kernel (compactar → avisar → encerrar-limpo salvando a sessão). O
@@ -1500,6 +1509,11 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // GS-MD7 (fix registry-cwd) — relê os agentes de PROJETO do cwd corrente no spawnNamed.
     ...(opts.subAgents?.enabled && opts.reloadProjectAgents
       ? { reloadProjectAgents: opts.reloadProjectAgents }
+      : {}),
+    // GS-MD7 (recarga viva) — relê os agentes GLOBAIS no spawnNamed (agente `.md` criado
+    // NO MEIO da sessão passa a valer sem reiniciar). MESMO gate do de projeto.
+    ...(opts.subAgents?.enabled && opts.reloadGlobalAgents
+      ? { reloadGlobalAgents: opts.reloadGlobalAgents }
       : {}),
     // EST-0969 (display) — caller dedicado dos filhos (não-streaming): evita o
     // interleave dos tokens crus dos N filhos na região viva do pai.

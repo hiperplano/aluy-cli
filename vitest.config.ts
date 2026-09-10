@@ -41,7 +41,43 @@ export default defineConfig({
     // (sem Ink/chalk), logo sem ANSI mesmo com FORCE_COLOR. Os fallbacks NO_COLOR
     // continuam exercitados via env do PRÓPRIO teste (resolveTheme({env})), pois
     // a palette MONO simplesmente não tem `color` — nenhum SGR de cor é emitido.
-    env: { FORCE_COLOR: '3' },
+    // ISOLAMENTO DO SIDECAR DE MEMÓRIA — a suíte NUNCA pode falar com o mem0 real.
+    //
+    // Achado em 01/09 no store do dono: `chroma.sqlite3` tinha 5.617 vetores e só 467
+    // distintos, e os campeões eram literais de TESTE — 736× "Objetivo: faça algo /
+    // Resultado: pronto.", 570× "...Resultado: resultado headless." (de headless-hooks.
+    // test.ts), 279× "...consolidei os filhos." (de subagent-per-model-wiring.test.ts).
+    // Ou seja: cada `npm test` numa máquina com o sidecar de pé DESPEJAVA lixo na
+    // memória REAL do usuário — o engine cai no default `127.0.0.1:11435` e a fiação não
+    // tinha nenhuma guarda de ambiente de teste.
+    //
+    // O dano não é só sujeira: os clones AFOGAM as memórias reais no ranking da busca.
+    // Cinco consultas sem relação entre si ("telegram", "mcp picker", "flicker", ...)
+    // devolviam 10 resultados cada com UM único texto distinto — o recall funcionava e
+    // voltava ruído.
+    //
+    // A porta 1 é privilegiada e não escuta ninguém: a conexão é RECUSADA na hora (sem
+    // timeout, sem lentidão) e o caminho de degradação (CA-MA8: a sessão segue sem
+    // memória) é o mesmo que roda em máquina sem sidecar. Quem testa o engine de
+    // propósito passa `mem0Url` explícito, que TEM precedência (`opts.mem0Url ?? ...`).
+    // CAPACIDADE DE COR DECLARADA, não herdada de quem roda a suíte.
+    //
+    // O `FORCE_COLOR` acima resolve o lado do `chalk`, mas o TEMA do repo decide por conta
+    // própria em `detectColorMode(env)`: `TERM=dumb` ou `TERM` vazio ⇒ `mono`. O runner do
+    // GitHub exporta `TERM=dumb`, então todo teste que afirma comportamento DEPENDENTE DE
+    // COR passava aqui e reprovava lá — dois casos medidos em 02/09 (`brilho-e-progresso`,
+    // que prova que o brilho CORRE comparando quadros, e `note-block-indent`).
+    //
+    // Declarar aqui fecha a CLASSE em vez de remendar arquivo por arquivo: eram 7 os testes
+    // que herdavam o ambiente, e 5 só não quebravam porque hoje não olham cor — ficariam
+    // como armadilha para o próximo. Quem PRECISA de `mono`/`NO_COLOR` segue exercitando o
+    // fallback ao passar o próprio `env` para `resolveTheme` (o `env` do teste vence este).
+    env: {
+      FORCE_COLOR: '3',
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+      ALUY_MEM0_URL: 'http://127.0.0.1:1',
+    },
     // Build (`tsc -b`) ANTES da suíte — o job `unit` da CI central roda `vitest
     // run` sem build prévio, mas cli.test.ts resolve `@hiperplano/aluy-cli-core` pelo seu
     // `exports` (./dist/index.js, wiring REAL de pacote) e bin.smoke.test.ts

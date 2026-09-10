@@ -23,6 +23,7 @@ import {
   autoUpdateEnabled,
   isNpmGlobalInstall,
   readAutoUpdateNote,
+  readAutoUpdateStatus,
   runAutoUpdate,
 } from '../../src/io/auto-update.js';
 
@@ -34,6 +35,28 @@ const mockMkdir = vi.mocked(mkdirSync);
 const STATE_PATH = '/home/fake-user/.aluy/auto-update.json';
 const NPM_SCRIPT = '/usr/lib/node_modules/@hiperplano/aluy-cli/dist/bin/aluy.js';
 const REPO_SCRIPT = '/home/dev/aluy-cli/packages/cli/dist/bin/aluy.js';
+
+// Mapa de dist-tags REAL, medido em 2026-09-01 no registry, quando o dono disse "me
+// parece que o autoupdate não funcionou": o topo do canal rc (rc.156) estava sob a tag
+// `latest` e a tag `rc` ficara 17 versões para trás.
+const DIST_TAGS_REAIS = { rc: '1.0.0-rc.139', latest: '1.0.0-rc.156' };
+
+// Fakes de `spawn`. NENHUM teste deste arquivo pode deixar o `spawn` real escapar: um
+// `npm install -g` de verdade trocaria a versão instalada na máquina de quem roda a
+// suíte. `spawnProibido` é a rede de segurança — se um caminho que deveria ser inerte
+// chamar o spawn, o teste QUEBRA em vez de instalar algo silenciosamente.
+function spawnQueSai(code: number) {
+  const child = new EventEmitter() as EventEmitter & { kill: () => void };
+  child.kill = vi.fn();
+  return vi.fn(() => {
+    queueMicrotask(() => child.emit('exit', code));
+    return child as never;
+  });
+}
+
+const spawnProibido = vi.fn(() => {
+  throw new Error('spawn REAL barrado: nenhum teste pode rodar `npm install -g` de verdade');
+});
 
 const mockFetch = vi.fn();
 
@@ -153,30 +176,41 @@ describe('runAutoUpdate — orquestração fim-a-fim (fetch por dist-tag → dec
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('busca no dist-tag CERTO do canal instalado (rc → tag "rc", não "latest")', async () => {
+  // ATUALIZADO na investigação do "me parece que o autoupdate não funcionou" (rc.159).
+  // Estes dois testes exigiam uma URL POR CANAL (`/<pkg>/rc` p/ um rc, `/<pkg>/latest`
+  // p/ uma estável) — e era exatamente essa premissa que estava errada: no registry, no
+  // dia, o topo do canal rc morava na tag `latest` (`{rc:'1.0.0-rc.139',
+  // latest:'1.0.0-rc.156'}`), então perguntar pela tag de NOME `rc` devolvia uma versão
+  // mais VELHA que a instalada e o autoupdate nunca fazia nada. A consulta passou a ser
+  // o MAPA de dist-tags, uma só, igual p/ qualquer canal; a segurança de canal continua
+  // testada (e mais forte) nos testes de GUARDA DE CANAL abaixo, que agora barram a
+  // estável mesmo quando ela vem na MESMA resposta que o rc.
+  it('consulta o MAPA de dist-tags (uma URL só, independente do canal instalado)', async () => {
     mockExists.mockReturnValue(false);
-    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ version: '1.0.0-rc.137' }) });
+    mockFetch.mockResolvedValue({ ok: true, json: async () => DIST_TAGS_REAIS });
+    // `spawn` SEMPRE injetado: rc.137 + estas tags dá candidato de verdade (rc.156), e
+    // sem o fake o teste rodaria um `npm install -g` REAL na máquina de quem testa.
     await runAutoUpdate('1.0.0-rc.137', {}, true, {
       scriptPath: NPM_SCRIPT,
       realpath: (p) => p,
       fetch: mockFetch,
+      spawn: spawnQueSai(0) as never,
     });
     const [url] = mockFetch.mock.calls[0] as [string];
     expect(url).toContain('registry.npmjs.org');
     expect(url).toContain('%2faluy-cli');
-    expect(url.endsWith('/rc')).toBe(true);
-  });
+    expect(url.endsWith('/dist-tags')).toBe(true);
 
-  it('estável instalada ⇒ busca no dist-tag "latest"', async () => {
+    mockFetch.mockClear();
     mockExists.mockReturnValue(false);
-    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ version: '1.0.0' }) });
     await runAutoUpdate('1.0.0', {}, true, {
       scriptPath: NPM_SCRIPT,
       realpath: (p) => p,
       fetch: mockFetch,
+      spawn: spawnProibido as never,
     });
-    const [url] = mockFetch.mock.calls[0] as [string];
-    expect(url.endsWith('/latest')).toBe(true);
+    const [urlEstavel] = mockFetch.mock.calls[0] as [string];
+    expect(urlEstavel).toBe(url); // mesma consulta; quem separa canal é a decisão pura
   });
 
   it('candidato MAIS NOVO no MESMO canal ⇒ spawna `npm install -g` e grava a versão instalada', async () => {
@@ -305,5 +339,204 @@ describe('runAutoUpdate — orquestração fim-a-fim (fetch por dist-tag → dec
         spawn: spawnImpl as never,
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+// ── Regressão do relato "me parece que o autoupdate não funcionou" (rc.159) ───
+// O que o dono viu era real, só que não na máquina dele: com rc.159 instalada
+// localmente (acima de tudo que está publicado) o autoupdate corretamente não tinha o
+// que fazer. O defeito aparece uma linha abaixo — para QUALQUER instalação vinda do
+// npm. O registry tinha `{rc:'1.0.0-rc.139', latest:'1.0.0-rc.156'}` e o módulo
+// consultava só a tag de NOME igual ao canal (`rc`), recebendo uma versão 17 releases
+// atrasada: quem instalou pelo caminho documentado (`npm i -g`, que entrega o `latest`
+// = rc.156) nunca atualizava, e quem estava atrás subia só até rc.139 e congelava.
+describe('runAutoUpdate — candidato vem de TODAS as tags promovidas (defeito da rc.159)', () => {
+  it('rc.130 instalada + tags reais ⇒ instala rc.156 (o topo do canal), NÃO o rc.139 da tag "rc"', async () => {
+    mockExists.mockReturnValue(false);
+    mockFetch.mockResolvedValue({ ok: true, json: async () => DIST_TAGS_REAIS });
+    const spawnImpl = spawnQueSai(0);
+
+    await runAutoUpdate('1.0.0-rc.130', {}, true, {
+      scriptPath: NPM_SCRIPT,
+      realpath: (p) => p,
+      fetch: mockFetch,
+      spawn: spawnImpl as never,
+    });
+
+    expect(spawnImpl).toHaveBeenCalledWith(
+      'npm',
+      ['install', '-g', '@hiperplano/aluy-cli@1.0.0-rc.156'],
+      expect.anything(),
+    );
+    const [, body] = mockWrite.mock.calls[0] as [string, string];
+    expect(JSON.parse(body)).toMatchObject({
+      installedOnDisk: '1.0.0-rc.156',
+      lastOutcome: 'instalado',
+    });
+  });
+
+  it('GUARDA DE CANAL na resposta REAL: rc instalado + estável na tag `latest` ⇒ não salta', async () => {
+    // Cenário do dia em que sair a 1.0.0 estável: o mapa traz as duas de uma vez. Olhar
+    // todas as tags não pode virar "pular de canal" — só o dono troca de canal.
+    mockExists.mockReturnValue(false);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ rc: '1.0.0-rc.156', latest: '1.0.0' }),
+    });
+
+    await runAutoUpdate('1.0.0-rc.156', {}, true, {
+      scriptPath: NPM_SCRIPT,
+      realpath: (p) => p,
+      fetch: mockFetch,
+      spawn: spawnProibido as never,
+    });
+
+    expect(spawnProibido).not.toHaveBeenCalled();
+  });
+
+  it('A MÁQUINA DO DONO (rc.159 local > rc.156 publicada): nada a instalar, e o estado DIZ isso', async () => {
+    // Este é o lado "alarme falso" do relato: com a versão local à frente da publicada,
+    // não instalar é o comportamento CERTO. O que faltava era o estado deixar isso
+    // legível — antes, "nada a fazer" e "falhou" gravavam o mesmo `lastCheck` mudo.
+    mockExists.mockReturnValue(false);
+    mockFetch.mockResolvedValue({ ok: true, json: async () => DIST_TAGS_REAIS });
+
+    await runAutoUpdate('1.0.0-rc.159', {}, true, {
+      scriptPath: NPM_SCRIPT,
+      realpath: (p) => p,
+      fetch: mockFetch,
+      spawn: spawnProibido as never,
+    });
+
+    expect(spawnProibido).not.toHaveBeenCalled();
+    const [path, body] = mockWrite.mock.calls[0] as [string, string];
+    expect(path).toBe(STATE_PATH);
+    expect(JSON.parse(body)).toMatchObject({
+      lastOutcome: 'sem-novidade',
+      latestSeen: '1.0.0-rc.156',
+    });
+  });
+
+  it('resposta sem nenhuma versão utilizável (mapa vazio/lixo) ⇒ não instala nem grava', async () => {
+    mockExists.mockReturnValue(false);
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+
+    await runAutoUpdate('1.0.0-rc.130', {}, true, {
+      scriptPath: NPM_SCRIPT,
+      realpath: (p) => p,
+      fetch: mockFetch,
+      spawn: spawnProibido as never,
+    });
+
+    expect(spawnProibido).not.toHaveBeenCalled();
+    expect(mockWrite).not.toHaveBeenCalled();
+  });
+});
+
+describe('runAutoUpdate — o `npm install -g` roda a partir do HOME, não do projeto', () => {
+  it('spawna com cwd = homedir (um ./.npmrc de projeto não sequestra prefix/registry)', async () => {
+    // MEDIDO nesta máquina: num diretório com `.npmrc` contendo `prefix=`/`registry=`,
+    // o `npm config get prefix` devolve o do PROJETO — o ./.npmrc tem precedência sobre
+    // o ~/.npmrc. O aluy roda dentro do projeto do usuário, então herdar esse cwd faria
+    // a instalação GLOBAL ir para o lugar errado (ou para outro registry) e falhar em
+    // silêncio. O prefixo real desta instalação (`~/.aluy-npm`) só é lido a partir do HOME.
+    mockExists.mockReturnValue(false);
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ rc: '1.0.0-rc.140' }) });
+    const spawnImpl = spawnQueSai(0);
+
+    await runAutoUpdate('1.0.0-rc.139', {}, true, {
+      scriptPath: NPM_SCRIPT,
+      realpath: (p) => p,
+      fetch: mockFetch,
+      spawn: spawnImpl as never,
+    });
+
+    expect(spawnImpl).toHaveBeenCalledWith(
+      'npm',
+      expect.anything(),
+      expect.objectContaining({ cwd: '/home/fake-user' }),
+    );
+  });
+});
+
+describe('desfecho do ciclo — "não havia nada" deixa de ser igual a "falhou"', () => {
+  it('instalação falha ⇒ grava lastOutcome/failedVersion (o que o dono não tinha como saber)', async () => {
+    mockExists.mockReturnValue(false);
+    mockFetch.mockResolvedValue({ ok: true, json: async () => DIST_TAGS_REAIS });
+
+    await runAutoUpdate('1.0.0-rc.130', {}, true, {
+      scriptPath: NPM_SCRIPT,
+      realpath: (p) => p,
+      fetch: mockFetch,
+      spawn: spawnQueSai(1) as never,
+    });
+
+    const [, body] = mockWrite.mock.calls[0] as [string, string];
+    expect(JSON.parse(body)).toMatchObject({
+      lastOutcome: 'instalacao-falhou',
+      failedVersion: '1.0.0-rc.156',
+    });
+  });
+
+  it('nota do rodapé: falha de INSTALAÇÃO vira aviso acionável, com o comando à mão', () => {
+    mockExists.mockReturnValue(true);
+    mockRead.mockReturnValue(
+      JSON.stringify({
+        lastCheck: Date.now(),
+        lastOutcome: 'instalacao-falhou',
+        failedVersion: '1.0.0-rc.156',
+      }),
+    );
+    const note = readAutoUpdateNote('1.0.0-rc.130', {});
+    expect(note).toContain('1.0.0-rc.156');
+    expect(note).toContain('npm i -g @hiperplano/aluy-cli@1.0.0-rc.156');
+  });
+
+  it('nota some quando a versão que falhou já não é mais nova (o dono resolveu à mão)', () => {
+    mockExists.mockReturnValue(true);
+    mockRead.mockReturnValue(
+      JSON.stringify({
+        lastCheck: Date.now(),
+        lastOutcome: 'instalacao-falhou',
+        failedVersion: '1.0.0-rc.156',
+      }),
+    );
+    expect(readAutoUpdateNote('1.0.0-rc.159', {})).toBeUndefined();
+  });
+
+  it('"sem-novidade" NÃO vira nota — só o acionável fala (rodapé não é log)', () => {
+    mockExists.mockReturnValue(true);
+    mockRead.mockReturnValue(
+      JSON.stringify({
+        lastCheck: Date.now(),
+        lastOutcome: 'sem-novidade',
+        latestSeen: '1.0.0-rc.156',
+      }),
+    );
+    expect(readAutoUpdateNote('1.0.0-rc.159', {})).toBeUndefined();
+  });
+
+  it('readAutoUpdateStatus expõe o desfecho p/ diagnóstico; sem arquivo ⇒ null', () => {
+    mockExists.mockReturnValue(true);
+    mockRead.mockReturnValue(
+      JSON.stringify({ lastCheck: 42, lastOutcome: 'sem-novidade', latestSeen: '1.0.0-rc.156' }),
+    );
+    expect(readAutoUpdateStatus()).toMatchObject({
+      lastCheck: 42,
+      lastOutcome: 'sem-novidade',
+      latestSeen: '1.0.0-rc.156',
+    });
+
+    mockExists.mockReturnValue(false);
+    expect(readAutoUpdateStatus()).toBeNull();
+  });
+
+  it('desfecho DESCONHECIDO no estado (escrito por versão futura) ⇒ ignorado, sem nota', () => {
+    mockExists.mockReturnValue(true);
+    mockRead.mockReturnValue(
+      JSON.stringify({ lastCheck: 1, lastOutcome: 'coisa-que-nao-existe', failedVersion: '9.9.9' }),
+    );
+    expect(readAutoUpdateNote('1.0.0-rc.130', {})).toBeUndefined();
+    expect(readAutoUpdateStatus()?.lastOutcome).toBeUndefined();
   });
 });

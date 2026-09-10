@@ -127,9 +127,27 @@ export const listTodosTool: NativeTool<ToolPorts> = {
     try {
       const items = await todo.list();
       if (items.length === 0) {
+        // BUG-0029 (emenda) — a lista vazia NÃO pode afirmar "nenhum item anotado":
+        // ela só sabe do backlog DESTA conversa. Quando há pendentes em outra, dizer
+        // o número muda a resposta de uma mentira confiante para um ponteiro útil.
+        // (Relato do dono, 31/08: a CLI mandou reiniciar a sessão, o backlog novo veio
+        // vazio, e o agente respondeu "não anotei nada que tenha esquecido" — falso.)
+        const outros = todo.pendingElsewhere ? await todo.pendingElsewhere().catch(() => 0) : 0;
+        if (outros > 0) {
+          const plural = outros === 1 ? '1 item pendente' : `${outros} itens pendentes`;
+          return {
+            ok: true,
+            observation:
+              `backlog/TODO vazio NESTA conversa — mas há ${plural} anotado(s) em OUTRA(S) ` +
+              'conversa(s). O backlog é escopado por sessão: uma sessão nova não herda o de ' +
+              'outra. NÃO afirme que nada foi anotado — o que existe está em outra conversa. ' +
+              'Para retomá-la: `aluy --continue` (a última) ou `aluy --resume` (escolher qual).',
+            display: `[TODO] vazio aqui · ${outros} em outra conversa`,
+          };
+        }
         return {
           ok: true,
-          observation: 'backlog/TODO vazio — nenhum item anotado ainda.',
+          observation: 'backlog/TODO vazio — nenhum item anotado nesta conversa.',
           display: '[TODO] vazio',
         };
       }

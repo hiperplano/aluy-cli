@@ -49,6 +49,7 @@ import {
   agentsStopTool,
   formatSubAgentResults,
   bindNamedAgent,
+  buildAvailableAgentsNote,
   resolveModelTier,
   formatUnknownModelError,
   formatUnknownLocalModelError,
@@ -204,6 +205,17 @@ import {
 type BangStatus = BangBlock['status'];
 import type { TuiAskResolver, PendingAskEntry } from '../ask/ask-resolver.js';
 import type { TuiQuestionResolver, PendingQuestionEntry } from '../ask/question-resolver.js';
+import {
+  ehContinuar,
+  ehDesistencia,
+  interpretarResposta,
+  textoDaPergunta,
+  textoDeAprovacaoPendente,
+  textoDeAprovacaoSoNoTerminal,
+  textoDeNaoEntendi,
+  textoDePausaPorOrcamento,
+  textoDePausaPorTravamento,
+} from '../connector/pergunta-no-canal.js';
 import type { AskResolver, QuestionAnswer, QuestionSpec } from '@hiperplano/aluy-cli-core';
 // ADR-0147 — tipos das dependências OPCIONAIS da `SessionCommandPort` (ver os campos
 // `agentMemory`/`commandWorkspace`/`login` em `SessionControllerOptions` acima).
@@ -594,6 +606,27 @@ export interface SessionControllerOptions {
    * de homônimo) é re-derivada pelo construtor PURO — a política não muda, só os dados.
    */
   readonly reloadProjectAgents?: () => readonly AgentProfile[];
+  /**
+   * GS-MD7 (recarga viva dos agentes `.md`) — relê os agentes GLOBAIS
+   * (`~/.aluy/agents/*.md`) do MESMO loader confinado do boot. Simétrico ao
+   * `reloadProjectAgents` acima, que já existia: a camada de PROJETO era relida a cada
+   * `spawnNamed`, a GLOBAL ficava congelada no retrato do boot.
+   *
+   * O RELATO DO DONO que trouxe isto: o Aluy criou `~/.aluy/agents/ux-frontend.md` com
+   * `write_file` (sucesso) e, no mesmo turno, `spawn_agent({ agent: "ux-frontend" })`
+   * foi RECUSADO — `agente "ux-frontend" desconhecido … delegação RECUSADA (GS-MD7)`.
+   * Ele teve que sair e reabrir a sessão, PERDENDO o contexto do trabalho. A recusa é
+   * a trava certa (nome explícito, sem fallback p/ perfil sem restrição); o defeito era
+   * a descoberta rodar SÓ no boot, sem nenhuma via de recarga.
+   *
+   * NÃO relaxa nada: quem escreve em `~/.aluy/` é o HUMANO na catraca
+   * (`always-ask:aluy-config-write-deny` — o agente não passa sozinho), a `origin`
+   * continua sendo decidida pelo loader, e a política (precedência projeto>global §4,
+   * auto-seleção só-global R-S3-3, anti-spoofing RES-MD-1) é RE-DERIVADA pelo
+   * construtor PURO do `AgentRegistry`. Só os DADOS ficam frescos. Ausente ⇒ globais
+   * do boot (não-regressão).
+   */
+  readonly reloadGlobalAgents?: () => readonly AgentProfile[];
   /**
    * EST-0969 (display) · CLI-SEC-7 — ModelCaller DEDICADO dos FILHOS (sub-agentes).
    * MESMO broker/credencial do pai, mas SEM o sink de stream ao vivo: o `model` do
@@ -1063,9 +1096,17 @@ export class SessionController {
   // ADR-0126(A·PR2) — engine do pai + registro de agentes, p/ o `/subagent` derivar a
   // engine escopada (childEngineOf, ⊆ pai, deny spawn) e resolver o perfil `.md` por nome.
   private readonly permissionEngine: PermissionEngine;
-  private readonly subagentRegistry: AgentRegistry | undefined;
+  /**
+   * GS-MD7 (recarga viva) — NÃO é `readonly`: o registro é RECONSTRUÍDO a cada
+   * `spawnNamed` (relendo o disco) e trocável por `setAgentRegistry` (`/agents refresh`).
+   * Guardar a versão nova AQUI é o que faz `/subagent`, `capabilities` e `spawn_agent`
+   * enxergarem o MESMO conjunto — antes, cada um lia um retrato diferente do boot.
+   */
+  private subagentRegistry: AgentRegistry | undefined;
   /** GS-MD7 (fix registry-cwd) — relê agentes de projeto do cwd corrente (lazy no spawnNamed). */
   private readonly reloadProjectAgents: (() => readonly AgentProfile[]) | undefined;
+  /** GS-MD7 (recarga viva) — relê os agentes GLOBAIS `~/.aluy/agents/` (idem, no spawnNamed). */
+  private readonly reloadGlobalAgents: (() => readonly AgentProfile[]) | undefined;
   /** ADR-0146 (D2/L2) — porta do catálogo vivo p/ o probe de nome de modelo (sugestão). */
   private readonly modelProbe:
     | { readonly availableNames: () => Promise<readonly string[]> }
@@ -1157,7 +1198,15 @@ export class SessionController {
   private contextWindow: number;
   /** F-WIN — fonte da janela POR MODELO (config BYO) + provider ativo. */
   private readonly providerWindows: readonly ProviderWindowSource[] | undefined;
-  private readonly activeProviderId: string | undefined;
+  /**
+   * Provider ATIVO — a chave que acha a janela declarada em `providers[].contextByModel`.
+   *
+   * Era `readonly`, atribuído uma única vez no boot, e o `/provider` nunca o atualizava.
+   * Depois de trocar, a busca ia ao bloco do provider ANTIGO: o dono declarava o número sob
+   * o provider novo e o aviso "o provider não informa a janela de contexto" continuava, com
+   * a auto-compactação inerte. Deixou de ser `readonly` porque ele MUDA.
+   */
+  private activeProviderId: string | undefined;
   /**
    * F-WIN (descoberta) — janelas DESCOBERTAS no provider (`/models`) NESTA sessão, por
    * slug em minúsculas. Existe porque o `providerWindows` acima é um SNAPSHOT do config
@@ -1473,6 +1522,7 @@ export class SessionController {
     this.permissionEngine = opts.permission; // ADR-0126(A·PR2)
     this.subagentRegistry = opts.agentRegistry; // ADR-0126(A·PR2)
     this.reloadProjectAgents = opts.reloadProjectAgents; // GS-MD7 fix: registry segue o cwd
+    this.reloadGlobalAgents = opts.reloadGlobalAgents; // GS-MD7: agente .md criado NA sessão
     this.modelProbe = opts.modelProbe; // ADR-0146 (D2/L2) — catálogo vivo p/ sugestão
     this.defaultChildModel = opts.defaultChildModel; // ADR-0146 (D4) — dial global
     this.localModelCatalog = opts.localModelCatalog; // ADR-0152 (D6c) — probe local
@@ -1895,7 +1945,8 @@ export class SessionController {
     //  - `tools`  ← `this.toolRegistry.list()` (nome/efeito/grupo/when de CADA tool já
     //    registrada — nativas+web+memória+monitor+MCP+spawn_agent; MCP tem o `group`
     //    INFERIDO do prefixo `mcp__<server>__`, nunca de um rótulo auto-declarado);
-    //  - `agents` ← `opts.agentRegistry.list()` (mesma fonte de `buildAvailableAgentsNote`);
+    //  - `agents` ← o registro CORRENTE (`this.subagentRegistry.list()`, já recarregável —
+    //    GS-MD7; mesma fonte de `buildAvailableAgentsNote`);
     //  - `skills` ← `opts.skills` (já carregados pelo wiring, mesmos loaders do `/skills`);
     //  - `mcpServers` ← agrupamento de `opts.mcpTools` por server (SÓ contador/prefixo —
     //    NUNCA a description de terceiro, que nem entra no `CapabilityMcpServer`);
@@ -1907,7 +1958,6 @@ export class SessionController {
     // SEGURANÇA (AG-0008): nenhum destes campos carrega credencial/provider/base_url/
     // api_key/model/tier — o TIPO (`CapabilitiesSnapshot`, core) não tem onde guardar
     // isso; ver o teste anti-vazamento em `tests/agent/capabilities.test.ts`.
-    const capabilitiesAgents = opts.agentRegistry?.list() ?? [];
     const capabilitiesSkills = opts.skills ?? [];
     const capabilitiesPort: CapabilitiesPort = {
       snapshot: async (): Promise<CapabilitiesSnapshot> => {
@@ -1926,7 +1976,11 @@ export class SessionController {
 
         return {
           tools: mapToolsToCapabilityInfo(this.toolRegistry.list()),
-          agents: mapAgentsToCapabilityItems(capabilitiesAgents),
+          // GS-MD7 (recarga viva) — LIVE (`this.subagentRegistry`, não o `opts.agentRegistry`
+          // congelado do boot), pelo MESMO motivo do `mcpServers` logo abaixo: sem isto o
+          // menu de capacidades seguiria mentindo "esse agente não existe" depois de um
+          // `/agents refresh` (ou de o próprio `spawn_agent` já ter relido o disco).
+          agents: mapAgentsToCapabilityItems(this.subagentRegistry?.list() ?? []),
           skills: mapSkillsToCapabilityItems(capabilitiesSkills),
           // EST-BOOT-DECOUPLE — LIVE (não a `mcpToolsForCapabilities` congelada do boot):
           // sem isto, uma tool MCP anexada em background (ou por `/mcp reload`) nunca
@@ -2358,7 +2412,25 @@ export class SessionController {
     await this.loop.drainMemoryWrites();
   }
 
-  async submit(goal: string, attachments: readonly HistoryItem[] = []): Promise<void> {
+  /**
+   * A origem do ÚLTIMO turno submetido (`'telegram'`, ou ausente = digitado aqui).
+   *
+   * Existe para desgrudar a DICA DE CANAL. Quando um turno chega do Telegram, injetamos
+   * uma observação dizendo "responda com `telegram_send`" — e ela FICA no histórico. O
+   * dono viu o efeito em 02/09: mandou uma pelo Telegram, ele respondeu lá (certo);
+   * digitou "ola" no TERMINAL logo depois, e ele respondeu pelo Telegram de novo. Ao
+   * consertar "ele não sabe por onde responder" eu criei "ele nunca mais responde aqui".
+   *
+   * Uma observação não se apaga do histórico, então a correção é SIMÉTRICA: quando o
+   * turno vem do terminal DEPOIS de um turno externo, dizemos isso com a mesma clareza.
+   */
+  private origemDoUltimoTurno: string | undefined;
+
+  async submit(
+    goal: string,
+    attachments: readonly HistoryItem[] = [],
+    opts: { readonly origem?: string } = {},
+  ): Promise<void> {
     if (goal.trim() === '') return;
     // EST-0980 — `user-prompt-submit` (Claude: UserPromptSubmit): o usuário submeteu um
     // prompt. Dispara os hooks ANTES de qualquer roteamento (workflow/cycle/turno). É
@@ -2380,8 +2452,7 @@ export class SessionController {
     // HISTERESE (segura ~900ms para o indicador não piscar entre lotes) e, logo depois de
     // todos terminarem, ainda diz que há trabalho. Consultar o número atrasado fazia o
     // desfecho ficar pendurado no rodapé um turno a mais.
-    const terminal = (f: string): boolean =>
-      f === 'done' || f === 'failed' || f === 'cancelled';
+    const terminal = (f: string): boolean => f === 'done' || f === 'failed' || f === 'cancelled';
     const aindaCorre = (this.state.liveSubagents ?? []).some((f) => !terminal(f.phase));
     if (this.state.liveSubagents !== undefined && !aindaCorre) {
       this.patch({ liveSubagents: undefined });
@@ -2455,8 +2526,40 @@ export class SessionController {
     // corte da conversa ao voltar aqui). A fronteira de CÓDIGO (seq do journal) é
     // capturada pelo registry. Hook no-op se o wiring não o ligou.
     this.onUserPrompt?.(goal, this.state.blocks.length);
-    this.pushBlock({ kind: 'you', text: goal });
-    await this.runResolvedTurn(goal, attachments);
+    // `origem` só existe quando o turno NÃO veio do composer (ex.: Telegram) — ver
+    // `YouTurn.origem`. Ausente ⇒ bloco idêntico ao de sempre, sem regressão.
+    this.pushBlock({
+      kind: 'you',
+      text: goal,
+      ...(opts.origem !== undefined && opts.origem !== '' ? { origem: opts.origem } : {}),
+    });
+    // DESGRUDA A DICA DE CANAL. Um turno do Telegram injeta uma observação dizendo
+    // "responda com `telegram_send`", e observação NÃO se apaga do histórico: nos turnos
+    // seguintes o modelo continuava lendo aquilo e respondendo pelo Telegram mesmo com o
+    // dono digitando aqui. Ele viu em 02/09 — mandou uma pelo Telegram, foi respondida lá
+    // (certo); digitou "ola" no terminal e a resposta saiu pelo Telegram de novo.
+    //
+    // A correção é SIMÉTRICA: se este turno veio do TERMINAL logo depois de um externo,
+    // dizemos isso com a mesma clareza. Só nessa TRANSIÇÃO — repetir a cada turno local
+    // encheria o contexto de ruído e treinaria o modelo a ignorar o aviso.
+    const origemAgora = opts.origem !== undefined && opts.origem !== '' ? opts.origem : undefined;
+    const veioDeFora = this.origemDoUltimoTurno !== undefined;
+    const contra: HistoryItem[] =
+      origemAgora === undefined && veioDeFora
+        ? [
+            {
+              role: 'observation',
+              toolName: 'canal',
+              text:
+                `Este turno foi digitado NO TERMINAL, não veio do ${this.origemDoUltimoTurno}. ` +
+                'Responda AQUI, na conversa do terminal. A instrução do turno anterior sobre ' +
+                'usar a tool de envio do canal externo NÃO vale para este turno — use-a apenas ' +
+                'quando a mensagem tiver chegado por lá, ou quando o dono pedir explicitamente.',
+            },
+          ]
+        : [];
+    this.origemDoUltimoTurno = origemAgora;
+    await this.runResolvedTurn(goal, [...contra, ...attachments]);
   }
 
   /**
@@ -4087,6 +4190,22 @@ export class SessionController {
    * FlowTree existe e ainda não terminou). É o discriminante do `injectInput('root')`:
    * vivo ⇒ injeção mid-turn (fila viva); parado ⇒ próximo turno.
    */
+
+  /**
+   * Há um turno RODANDO agora? Leitura pública do `isTurnLive` interno.
+   *
+   * Existe porque `injectInput` devolve `true` em DOIS casos que o chamador precisa
+   * distinguir: "encaixei no turno vivo" e "guardei para o PRÓXIMO turno"
+   * (`pendingInjected`). O sink do Telegram tratava os dois como iguais e, no segundo, a
+   * mensagem do dono ficava guardada enquanto a dica de canal ACORDAVA a sessão pelo
+   * monitor — o turno nascia sem a mensagem. O agente descreveu o próprio sintoma na
+   * tela do dono, em 01/09: "canal externo notificou que há uma sessão ativa, mas não há
+   * uma mensagem do usuário com conteúdo específico... favor reenviar".
+   */
+  get turnoVivo(): boolean {
+    return this.isTurnLive();
+  }
+
   private isTurnLive(): boolean {
     return this.rootFlow !== null && !this.rootFlow.isTerminal();
   }
@@ -4217,6 +4336,9 @@ export class SessionController {
       const onAbort = (): void => this.cancelStuckPause();
       signal?.addEventListener('abort', onAbort, { once: true });
     });
+    // O canal ANTES do `patch`, pelo mesmo motivo do comentário acima: o `patch` notifica
+    // síncrono e um observador pode resolver a pausa na hora.
+    this.avisarPausaNoCanal('stuck', textoDePausaPorTravamento(alert));
     this.patch({
       phase: 'stuck',
       pendingStuck: { kind: alert.kind, count: alert.count, sample: alert.sample },
@@ -4228,6 +4350,7 @@ export class SessionController {
   private settleStuck(r: StuckResolution): void {
     const resolve = this.stuckResolve;
     this.stuckResolve = null;
+    this.pausaNoCanal = undefined;
     this.patch({ pendingStuck: undefined });
     resolve?.(r);
   }
@@ -4721,6 +4844,16 @@ export class SessionController {
    * avisar o dono (ver o aviso no `run.tsx`). Somente LEITURA: quem MUDA a janela é o
    * `applyContextWindow` (tier/env/config/descoberta), nunca um consumidor externo.
    */
+
+  /**
+   * F-WIN (emenda) — id do provider ATIVO, p/ o `/window` saber ONDE persistir a janela
+   * digitada (`providers[<id>].contextByModel`). Só leitura; o campo já seguia a troca de
+   * provider (`setLocalProvider`), o que faltava era exposição.
+   */
+  get providerAtivoId(): string | undefined {
+    return this.activeProviderId;
+  }
+
   get modelContextWindow(): number {
     return this.contextWindow;
   }
@@ -4810,6 +4943,35 @@ export class SessionController {
     // EST-0962 — trocar de tier/modelo DESCARTA o provider (o caller já o limpou no
     // `setTier`): o `meta.provider` também sai p/ não ficar um provider fantasma do slug
     // anterior. Re-adiciona só o que o caller mantiver (geralmente undefined aqui).
+    //
+    // ── EXCEÇÃO: backend LOCAL (BYO) ──────────────────────────────────────────────
+    //
+    // Sob BROKER a regra acima está certa: lá o provider é um atributo do par
+    // tier+slug Custom, e trocar o slug de fato o invalida.
+    //
+    // Sob LOCAL ele NÃO pertence ao par. É o provider ATIVO do BYO — o que o
+    // `/provider` trocou, cujo client foi reconstruído e swapado, e que vive em
+    // `activeProviderId`. O `tierControl.provider` (do caller de broker) nada sabe
+    // dele e devolve `undefined`, então esta reconstrução APAGAVA o provider ativo do
+    // meta. A StatusBar então caía no fallback `props.currentLocalProvider`, que é o
+    // provider do BOOT.
+    //
+    // O efeito na tela do dono (09/09, rc.173) — e é impiedoso, porque o passo que
+    // dispara o apagamento é o passo que o PRÓPRIO `/provider` abre em seguida:
+    //
+    //   ◕ provider  provider ativo agora: ollama · modelo llama3.2 …
+    //   ◕ model     modelo Custom: qwen2.5-coder
+    //   ◕ sessão    local · openrouter · qwen2.5-coder     ← provider do boot de volta
+    //
+    // Ele trocou para ollama, escolheu o modelo, e o rodapé voltou a dizer openrouter.
+    // A troca em si estava CERTA (o client já era o do ollama); só o meta mentia.
+    //
+    // Eu não peguei isto na reprodução em tmux porque olhei o rodapé com o picker de
+    // modelo ainda ABERTO — ali ainda dizia `ollama`. Exercitei a metade que funciona.
+    const providerLocalVivo = this.state.meta.backend === 'local';
+    const providerEfetivo = providerLocalVivo
+      ? this.state.meta.provider
+      : this.tierControl.provider;
     const metaSansModel: Omit<SessionMeta, 'model' | 'provider'> & {
       model?: string;
       provider?: string;
@@ -4821,7 +4983,7 @@ export class SessionController {
         ...metaSansModel,
         tier: this.tierControl.tier,
         ...(this.tierControl.model !== undefined ? { model: this.tierControl.model } : {}),
-        ...(this.tierControl.provider !== undefined ? { provider: this.tierControl.provider } : {}),
+        ...(providerEfetivo !== undefined ? { provider: providerEfetivo } : {}),
       },
     });
   }
@@ -4897,6 +5059,11 @@ export class SessionController {
     if (this.tierControl && typeof this.tierControl.setProvider === 'function') {
       this.tierControl.setProvider(name);
     }
+    // A CHAVE DA JANELA acompanha o provider. Sem isto, `modelWindowFromConfig` seguia
+    // procurando no bloco do provider ANTERIOR, e o `contextByModel` declarado sob o
+    // provider NOVO nunca era encontrado — o aviso "o provider não informa a janela"
+    // continuava, com a auto-compactação inerte.
+    this.activeProviderId = name;
     this.patch({
       meta: {
         ...this.state.meta,
@@ -4938,6 +5105,18 @@ export class SessionController {
    */
   get provider(): string | undefined {
     return this.state.meta.provider;
+  }
+
+  /**
+   * O BACKEND efetivo da sessão (`'local'` = BYO com provider próprio; senão broker).
+   *
+   * Existe porque a escolha entre `setProvider` e `setLocalProvider` depende dele — e quem
+   * precisava decidir isso FORA do `run.tsx` (a `SessionCommandPort`, por onde o agente
+   * dispara comandos de sessão) não tinha como perguntar, então chamava sempre o primeiro.
+   * Sob backend local, o primeiro é o NO-OP silencioso documentado logo abaixo.
+   */
+  get backend(): string | undefined {
+    return this.state.meta.backend;
   }
 
   /** O tier de modelo corrente da sessão (p/ teste/seletor). */
@@ -5288,7 +5467,10 @@ export class SessionController {
       ]);
       return;
     }
-    const res = this.subagentRegistry?.resolveByName(n);
+    // GS-MD7 (recarga viva) — relê o disco ANTES de dizer "não encontrado": um `.md`
+    // criado nesta mesma sessão (o caso do dono) tem que valer aqui também, não só no
+    // `spawn_agent`. `rescanAgents` já guarda o fresco em `this.subagentRegistry`.
+    const res = this.rescanAgents(this.subagentRegistry)?.resolveByName(n);
     if (res === undefined) {
       this.pushNote('/subagent', [
         `agente "${n}" não encontrado. Veja os perfis mapeados com \`/agents\``,
@@ -5489,6 +5671,7 @@ export class SessionController {
     // (b) RETOMA o MESMO turno a partir do histórico íntegro (preserva o trabalho).
     const history = this.budgetResumeHistory;
     this.budgetResumeHistory = undefined;
+    this.pausaNoCanal = undefined;
     this.patch({ phase: 'thinking', workingLabel: 'pensando', pendingBudget: undefined });
     this.abort = new AbortController();
     try {
@@ -5567,6 +5750,7 @@ export class SessionController {
    */
   async compactAfterBudget(signal?: AbortSignal): Promise<void> {
     if (this.state.phase !== 'budget' || !this.lastRunHistory) return;
+    this.pausaNoCanal = undefined;
     this.patch({ pendingBudget: undefined });
     await this.runCompaction(this.lastRunHistory, signal, /*resumeNow*/ true);
   }
@@ -6556,8 +6740,12 @@ export class SessionController {
 
   private onAskChange(pending: PendingAskEntry | null): void {
     if (pending) {
+      // ORDEM: o aviso ANTES do `patch` — o `patch` notifica, e um observador pode
+      // responder na mesma pilha (ver `onQuestionChange`).
+      this.avisarAprovacaoNoCanal(pending.request);
       this.patch({ phase: 'asking', pendingAsk: { request: pending.request } });
     } else if (this.state.phase === 'asking') {
+      this.aprovacaoNoCanal = undefined;
       // ask resolvido ⇒ volta a streaming (o loop do agente continua) ou, se foi o
       // ask de um `!comando` (EST-0958), a `runBang` reassume a fase no `finally`
       // (idle/done) — então aqui só limpamos o pending sem forçar `streaming`.
@@ -6587,10 +6775,25 @@ export class SessionController {
 
   private onQuestionChange(pending: PendingQuestionEntry | null): void {
     if (pending) {
+      // ORDEM IMPORTA: o espelho ANTES do `patch`. O `patch` notifica os observadores, e um
+      // deles pode responder na mesma pilha — se `perguntaNoCanal` ainda não estivesse
+      // armada, a resposta cairia num vazio e a pergunta ficaria pendurada.
+      const espelhou = this.espelharPerguntaNoCanal(pending.spec);
       this.patch({ phase: 'questioning', pendingQuestion: { spec: pending.spec } });
-    } else if (this.state.phase === 'questioning') {
-      // Pergunta resolvida ⇒ volta a streaming (o loop do agente continua com a resposta).
-      this.patch({ phase: 'streaming', pendingQuestion: undefined });
+      if (espelhou) {
+        // Na tela, quem lê precisa saber que a caixa tem OUTRO respondente possível — senão
+        // a pergunta parece travada aqui e some sozinha quando ele responde do celular.
+        this.pushNote('pergunta', [
+          `a pergunta foi enviada pelo ${this.origemDoUltimoTurno ?? 'canal'} — ` +
+            'dá para responder por lá ou aqui.',
+        ]);
+      }
+    } else {
+      this.perguntaNoCanal = undefined;
+      if (this.state.phase === 'questioning') {
+        // Pergunta resolvida ⇒ volta a streaming (o loop do agente continua com a resposta).
+        this.patch({ phase: 'streaming', pendingQuestion: undefined });
+      }
     }
   }
 
@@ -6599,6 +6802,178 @@ export class SessionController {
     const pending = this.questionResolver?.pending;
     if (!pending) return;
     pending.resolve(answer);
+  }
+
+  // ── A PERGUNTA quando o turno veio de FORA (Telegram) ────────────────────────────
+  //
+  // O dono, em 02/09: "quando ele quer tirar uma dúvida, se a pergunta é do telegram ele
+  // não pode enviar no console pois o usuário não vai ver".
+  //
+  // A tool `perguntar` abre o `<QuestionDialog>` no TERMINAL e BLOQUEIA o loop até alguém
+  // teclar ali — e o resolver NÃO tem prazo por tempo, de propósito (uma pergunta pode
+  // esperar o usuário pensar). Num turno que chegou pelo celular isso é um impasse
+  // completo: ninguém vai teclar. Pior, a tentativa de responder também não chegava — o
+  // `perguntar` deixa o turno VIVO, então a mensagem dele entrava pelo `injectInput` como
+  // texto solto do turno e a promessa da pergunta seguia pendurada. Silêncio dos dois lados.
+  //
+  // As duas metades, portanto: a pergunta SAI pelo canal, e a resposta que volta por lá
+  // RESOLVE a pendência em vez de virar instrução nova.
+
+  /** Envia texto pelo canal externo. Só existe quando a ponte subiu (ver `run.tsx`). */
+  private canalDaPergunta: ((texto: string) => void) | undefined;
+
+  /**
+   * A pergunta pendente que FOI para o canal. `undefined` ⇒ não há pergunta lá fora, e a
+   * mensagem que chegar pelo canal é instrução normal (comportamento de sempre).
+   */
+  private perguntaNoCanal: QuestionSpec | undefined;
+
+  /** Liga o canal externo (Telegram) como destino ALTERNATIVO das perguntas. */
+  ligarPerguntaNoCanal(enviar: (texto: string) => void): void {
+    this.canalDaPergunta = enviar;
+  }
+
+  /**
+   * Manda a pergunta também pelo canal — SÓ quando o turno corrente veio de lá.
+   *
+   * A condição é `origemDoUltimoTurno`: um turno digitado no terminal continua exatamente
+   * como hoje (a caixa, e nada no celular). Repetir toda pergunta no canal seria ruído no
+   * telefone dele para uma caixa que ele está olhando.
+   */
+  private espelharPerguntaNoCanal(spec: QuestionSpec): boolean {
+    const enviar = this.canalDaPergunta;
+    if (enviar === undefined || this.origemDoUltimoTurno === undefined) return false;
+    this.perguntaNoCanal = spec;
+    enviar(textoDaPergunta(spec));
+    return true;
+  }
+
+  /**
+   * A mensagem que voltou pelo canal É a resposta da pergunta pendente?
+   *
+   * `true` ⇒ CONSUMIMOS a mensagem (resolvida, ou reapresentada por ilegível) e o sink NÃO
+   * deve injetá-la como instrução. `false` ⇒ não havia pergunta no canal; segue o caminho
+   * normal. Ilegível devolve `true` de propósito: a pergunta continua pendente e o dono
+   * recebe o formato de volta — tratar como instrução ali abriria um turno novo por cima
+   * de um loop que está parado esperando exatamente esta resposta.
+   */
+  responderPeloCanal(texto: string): boolean {
+    if (this.responderAprovacaoDoCanal(texto)) return true;
+    if (this.responderPausaDoCanal(texto)) return true;
+    const spec = this.perguntaNoCanal;
+    if (spec === undefined) return false;
+    if (!this.questionResolver?.pending) {
+      // A pergunta já foi resolvida por outra via (teclado, esc, abort do turno): a
+      // mensagem é instrução comum. Sem esta guarda, ela sumiria no vazio.
+      this.perguntaNoCanal = undefined;
+      return false;
+    }
+    const answer = interpretarResposta(spec, texto);
+    if (answer === undefined) {
+      this.canalDaPergunta?.(textoDeNaoEntendi(spec));
+      return true;
+    }
+    this.perguntaNoCanal = undefined;
+    this.resolveQuestion(answer);
+    return true;
+  }
+
+  /**
+   * A APROVAÇÃO pendente que foi anunciada no canal. `undefined` ⇒ nada pendente lá fora.
+   */
+  private aprovacaoNoCanal: AskRequest | undefined;
+
+  /**
+   * Avisa no canal que o turno PAROU numa aprovação — mesma família do espelho da pergunta,
+   * e a mais cara: a catraca abre o diálogo no terminal e o loop fica parado SEM PRAZO.
+   * Vindo o turno do celular, o dono não via absolutamente nada acontecer.
+   */
+  private avisarAprovacaoNoCanal(pedido: AskRequest): void {
+    const enviar = this.canalDaPergunta;
+    if (enviar === undefined || this.origemDoUltimoTurno === undefined) return;
+    this.aprovacaoNoCanal = pedido;
+    enviar(textoDeAprovacaoPendente(pedido));
+  }
+
+  /**
+   * A mensagem do canal decide a aprovação pendente?
+   *
+   * APROVAR remotamente NÃO é oferecido, de propósito: o dono aprova o efeito EXATO que vê
+   * (CLI-SEC-9), e uma linha de chat não é esse lugar — o diff/comando inteiro está no
+   * terminal, aqui vai um trecho. NEGAR é diferente: é o default fail-safe da catraca e só
+   * pode DIMINUIR o que acontece, então "cancelar" pelo celular vale.
+   */
+  private responderAprovacaoDoCanal(texto: string): boolean {
+    if (this.aprovacaoNoCanal === undefined) return false;
+    if (!this.tuiResolver?.pending) {
+      // Já foi decidido no terminal (ou o turno abortou): a mensagem é instrução comum.
+      this.aprovacaoNoCanal = undefined;
+      return false;
+    }
+    if (!ehDesistencia(texto)) {
+      this.canalDaPergunta?.(textoDeAprovacaoSoNoTerminal());
+      return true;
+    }
+    this.aprovacaoNoCanal = undefined;
+    this.resolveAsk({ kind: 'deny', reason: 'negado pelo dono pelo canal externo' });
+    return true;
+  }
+
+  /** A PAUSA anunciada no canal: o watchdog de travamento ou o gate de orçamento. */
+  private pausaNoCanal: 'stuck' | 'budget' | undefined;
+
+  /** Anuncia no canal que o turno parou numa PAUSA. Mesma condição de origem das demais. */
+  private avisarPausaNoCanal(qual: 'stuck' | 'budget', texto: string): void {
+    const enviar = this.canalDaPergunta;
+    if (enviar === undefined || this.origemDoUltimoTurno === undefined) return;
+    this.pausaNoCanal = qual;
+    enviar(texto);
+  }
+
+  /**
+   * A mensagem do canal decide a pausa pendente?
+   *
+   * As duas pausas são MUITO diferentes do ask, e por isso aceitam mais pelo celular:
+   * nenhuma das saídas relaxa a catraca — todas são input do dono, o mesmo que ele daria
+   * no teclado. `redirect`, aliás, é a MESMA via do "btw" que o sink já usa.
+   *
+   * `stuck` é um IMPASSE REAL: a promise do loop fica pendurada sem prazo. Consumimos
+   * qualquer mensagem, porque é isso que destrava (texto livre vira a nova direção).
+   *
+   * `budget` NÃO pendura — o turno voltou e a sessão está parada no gate. Só `continuar`
+   * é consumido; qualquer outra coisa segue como instrução nova, que é o dono decidindo
+   * tocar em frente (o aviso diz, em letras, que aí o trabalho do turno se perde).
+   */
+  private responderPausaDoCanal(texto: string): boolean {
+    const qual = this.pausaNoCanal;
+    if (qual === undefined) return false;
+
+    if (qual === 'budget') {
+      if (this.state.phase !== 'budget') {
+        this.pausaNoCanal = undefined;
+        return false;
+      }
+      if (!ehContinuar(texto)) return false;
+      this.pausaNoCanal = undefined;
+      void this.continueAfterBudget();
+      return true;
+    }
+
+    if (this.state.phase !== 'stuck' || !this.stuckResolve) {
+      // Já resolvida no terminal (ou o turno abortou): a mensagem é instrução comum.
+      this.pausaNoCanal = undefined;
+      return false;
+    }
+    if (ehDesistencia(texto)) {
+      this.endAfterStuck();
+      return true;
+    }
+    if (ehContinuar(texto)) {
+      this.continueAfterStuck();
+      return true;
+    }
+    this.redirectAfterStuck(texto);
+    return true;
   }
 
   private onError(err: unknown): void {
@@ -6649,6 +7024,7 @@ export class SessionController {
   // ── budget gate ──────────────────────────────────────────────────────────────
 
   private setBudget(budget: SessionState['pendingBudget']): void {
+    if (budget !== undefined) this.avisarPausaNoCanal('budget', textoDePausaPorOrcamento(budget));
     this.patch({ phase: 'budget', pendingBudget: budget });
   }
 
@@ -6891,6 +7267,75 @@ export class SessionController {
     return `${q} Disponíveis: ${listed}${tail}.`;
   }
 
+  /**
+   * GS-MD7 (recarga viva dos agentes `.md`) — RECONSTRÓI o registro relendo o DISCO,
+   * pelas MESMAS portas confinadas do boot. Chamado ANTES de qualquer resolução por
+   * nome (`spawnNamed`, `/subagent`).
+   *
+   * A metade de PROJETO já existia (fix registry-cwd: o `cd`/change_dir move o cwd e o
+   * registro do boot ficava preso no dir de LANÇAMENTO). A metade GLOBAL entrou depois,
+   * pelo relato do dono: ele viu o Aluy CRIAR `~/.aluy/agents/ux-frontend.md` com
+   * sucesso e, no turno seguinte, ouvir `agente "ux-frontend" desconhecido … delegação
+   * RECUSADA (GS-MD7)` — teve que sair e reabrir a sessão, perdendo o contexto. A
+   * recusa estava CERTA; o que faltava era o disco ser lido de novo antes dela.
+   *
+   * POR QUE ISTO NÃO AFROUXA NADA (a recusa continua sendo a recusa):
+   *   • quem grava em `~/.aluy/agents/` é o HUMANO na catraca — a escrita do agente ali
+   *     é `always-ask:aluy-config-write-deny`. Reler não cria capacidade nenhuma: só
+   *     encurta p/ ZERO a espera de algo que o dono JÁ aprovou.
+   *   • a `origin` de cada perfil segue sendo decidida pelo LOADER (global=dono,
+   *     project=dado, ADR-0113) — não por quem chama esta função;
+   *   • toda a política é RE-DERIVADA pelo construtor PURO do `AgentRegistry`
+   *     (precedência projeto>global §4, auto-seleção só-global R-S3-3, anti-spoofing
+   *     cross-camada RES-MD-1). Só os DADOS ficam frescos;
+   *   • o `tools:` do `.md` continua ⊆ pai (GS-MD1 — `toolScope` só NEGA, nunca amplia)
+   *     e o nome continua tendo que ser EXPLÍCITO (sem fallback p/ perfil elevado).
+   *
+   * `registry === undefined` (sub-agentes sem registro) ⇒ segue `undefined`: NÃO
+   * inventamos um registro onde o wiring disse que não há (senão um `agent:` qualquer
+   * passaria a virar erro onde antes era filho genérico). Sem nenhum reload injetado ⇒
+   * devolve o mesmo registro (não-regressão de teste/back-compat).
+   */
+  private rescanAgents(registry: AgentRegistry | undefined): AgentRegistry | undefined {
+    if (registry === undefined) return undefined;
+    if (this.reloadGlobalAgents === undefined && this.reloadProjectAgents === undefined) {
+      return registry;
+    }
+    const globals = this.reloadGlobalAgents?.() ?? registry.listGlobal();
+    // Sem reload de projeto, os de PROJETO saem do próprio registro: `list()` já aplica a
+    // precedência (projeto vence global por nome), então filtrar por `origin` devolve
+    // exatamente a camada de projeto — nenhum global é promovido por engano.
+    const projects =
+      this.reloadProjectAgents?.() ?? registry.list().filter((p) => p.origin === 'project');
+    const fresh = new AgentRegistry(globals, projects);
+    // Guarda o fresco: `/subagent` e o menu de `capabilities` leem DESTE campo, então
+    // uma releitura feita pelo spawn também conserta a visão deles (antes, cada um
+    // respondia a partir de um retrato diferente e o dono via listas divergentes).
+    this.subagentRegistry = fresh;
+    return fresh;
+  }
+
+  /**
+   * GS-MD7 (recarga viva) — TROCA o registro de agentes `.md` da sessão inteira. É o
+   * que o `/agents refresh` chama depois de reler as duas pastas confinadas (o wiring
+   * é dono dos loaders; o controller só ACEITA o dado já parseado, como no boot).
+   * Espelha o `/mcp reload`, que já resolvia esta MESMA classe de problema para os
+   * servers MCP — a solução simplesmente nunca tinha sido estendida aos agentes.
+   *
+   * Além do registro, atualiza a nota de AGENTES DISPONÍVEIS do canal `system`: sem
+   * isso o modelo continuaria lendo a lista do boot e nunca DESCOBRIRIA sozinho o
+   * agente recém-criado (só conseguiria usá-lo se já soubesse o nome).
+   */
+  setAgentRegistry(registry: AgentRegistry): void {
+    this.subagentRegistry = registry;
+    this.loop.setAvailableAgents(buildAvailableAgentsNote(registry.list()));
+  }
+
+  /** GS-MD7 — o registro CORRENTE (pós-recarga), p/ quem precisa da visão viva. */
+  get agentRegistry(): AgentRegistry | undefined {
+    return this.subagentRegistry;
+  }
+
   private async spawnNamed(
     spawner: SubAgentSpawner,
     registry: AgentRegistry | undefined,
@@ -6904,15 +7349,10 @@ export class SessionController {
     // cada filho (DADO confiável do pai, não conteúdo ingerido). Os filhos conversam.
     const roomActive = roomRequested && profiles.length > 0;
     profiles = roomActive ? await this.openBatchRoom(profiles) : profiles;
-    // GS-MD7 (fix registry-cwd) — RECONSTRÓI o registro pelo cwd CORRENTE da sessão: agentes de
-    // PROJETO frescos do cwd (o `cd`/change_dir move o cwd; o registro do boot ficava preso no
-    // dir de LANÇAMENTO ⇒ "agente desconhecido" mesmo com o `.claude/agents/<nome>.md` no projeto
-    // atual), e os GLOBAIS fixos do boot (dono confiável, independem do cwd — `listGlobal()`).
-    // A fronteira é re-derivada pelo construtor PURO (precedência projeto>global §4, fora da
-    // auto-seleção R-S3-3, conflito de homônimo RES-MD-1) — só os DADOS de projeto mudam.
-    if (registry !== undefined && this.reloadProjectAgents !== undefined) {
-      registry = new AgentRegistry(registry.listGlobal(), this.reloadProjectAgents());
-    }
+    // GS-MD7 — RECONSTRÓI o registro relendo o DISCO antes de resolver qualquer nome.
+    // Ver `rescanAgents`: nasceu do fix registry-cwd (projeto) e passou a cobrir também os
+    // GLOBAIS depois do relato do dono (agente criado NA sessão só valia no próximo boot).
+    registry = this.rescanAgents(registry);
     // Resolve cada perfil; separa os que falharam (nome desconhecido/model inválido)
     // dos que rodam. SEQUENCIAL (não `forEach`) porque a confirmação cross-camada
     // (RES-MD-1) e o PROBE de modelo (ADR-0146 D2) podem pedir I/O (`askResolver`/
@@ -7526,7 +7966,7 @@ export class SessionController {
       this.timerSomeIndicador = null;
       this.patch({ detachedSubagents: undefined });
     }, INDICADOR_SUBAGENTE_GRACA_MS);
-    if (typeof this.timerSomeIndicador.unref === "function") this.timerSomeIndicador.unref();
+    if (typeof this.timerSomeIndicador.unref === 'function') this.timerSomeIndicador.unref();
   }
 
   /**
@@ -7748,17 +8188,17 @@ export class SessionController {
         const no = this.flowTree?.node(`root/${label}`);
         if (no === undefined) return;
         no.setUsage(usage);
-      // E o BLOCO da conversa acompanha: é ele que a tela desenha (e que o rodapé fixa),
-      // então atualizar só o nó da árvore deixaria o número subindo onde ninguém vê.
-      const atual = this.state.blocks[lastSubAgentsIndex([...this.state.blocks], label)];
-      const filho =
-        atual?.kind === 'subagents' ? atual.children.find((c) => c.label === label) : undefined;
-      if (filho !== undefined && filho.status === 'running') {
-        this.upsertSubAgentChild(label, {
-          ...filho,
-          summary: `${abbreviateCount(usage.tokens)} tokens`,
-        });
-      }
+        // E o BLOCO da conversa acompanha: é ele que a tela desenha (e que o rodapé fixa),
+        // então atualizar só o nó da árvore deixaria o número subindo onde ninguém vê.
+        const atual = this.state.blocks[lastSubAgentsIndex([...this.state.blocks], label)];
+        const filho =
+          atual?.kind === 'subagents' ? atual.children.find((c) => c.label === label) : undefined;
+        if (filho !== undefined && filho.status === 'running') {
+          this.upsertSubAgentChild(label, {
+            ...filho,
+            summary: `${abbreviateCount(usage.tokens)} tokens`,
+          });
+        }
         // Republica para a tela acompanhar. A cadência é uma por chamada ao modelo do
         // filho — não por token —, então isto não vira um fluxo de re-render.
         this.publishDetachedCount();

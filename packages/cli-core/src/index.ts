@@ -64,10 +64,18 @@ export * from './util/table-lines.js';
 export { parseVersion, compareVersions, isNewer } from './version-compare.js';
 export type { ParsedVersion } from './version-compare.js';
 
-// Autoupdate — dist-tag do canal (rc/latest) + decisão "devo instalar?" (mesmo canal,
-// estritamente mais nova). O I/O (fetch ao registry, spawn do `npm install -g`, cache
-// em ~/.aluy/) vive no @hiperplano/aluy-cli; aqui só a regra pura, testável sem rede/fs.
-export { distTagFor, shouldAutoUpdate } from './version-compare.js';
+// Autoupdate — canal da versão (rc/latest) + decisão "devo instalar?" (mesmo canal,
+// estritamente mais nova) + a ESCOLHA do candidato entre TODAS as versões que o
+// registry promoveu (`newestInChannel`/`pickAutoUpdateCandidate` — o nome da dist-tag
+// não é o canal; ver o achado da rc.159 no cabeçalho daquela seção). O I/O (fetch ao
+// registry, spawn do `npm install -g`, cache em ~/.aluy/) vive no @hiperplano/aluy-cli;
+// aqui só a regra pura, testável sem rede/fs.
+export {
+  distTagFor,
+  shouldAutoUpdate,
+  newestInChannel,
+  pickAutoUpdateCandidate,
+} from './version-compare.js';
 
 // Padrão de conectores (ADR-0154) — porta `Connector` portável + a MALHA genérica (a
 // fronteira de confiança, single-source). PURO e INERTE (ainda não ligado a `--connector`/

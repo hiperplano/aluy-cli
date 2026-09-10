@@ -86,3 +86,54 @@ export function shouldAutoUpdate(installed: string, candidate: string): boolean 
   if (distTagFor(installed) !== distTagFor(candidate)) return false;
   return isNewer(candidate, installed);
 }
+
+// ── Achado real (rc.159): o NOME da dist-tag não é o canal ──────────────────
+// O dono relatou "me parece que o autoupdate não funcionou". A lógica de decisão
+// (`shouldAutoUpdate`) estava certa; quem estava errado era a DESCOBERTA do candidato:
+// o autoupdate perguntava ao registry só pela tag com o NOME do canal instalado
+// (`1.0.0-rc.159` → tag `rc`). Só que o registry tinha, no dia:
+//
+//     dist-tags = { rc: "1.0.0-rc.139", latest: "1.0.0-rc.156" }
+//
+// O topo REAL do canal rc (rc.156) morava na tag `latest` e a tag `rc` ficara 17
+// versões para trás. Por quê (verificado no histórico de releases): o workflow de
+// release falha desde a rc.139 — é ele quem publica com `--tag rc` — e de lá pra cá as
+// versões saíram POR FORA dele, indo parar só no `latest`. Consequência: quem instalava
+// pelo caminho documentado (`npm i -g`, que entrega o `latest`, ou seja rc.156)
+// consultava a tag `rc`, recebia rc.139 — MAIS VELHA — e nunca atualizava; quem estava
+// atrás subia só até rc.139 e congelava ali. Morto para todo mundo, sem nenhum erro.
+//
+// A lição: o nome da tag é convenção de PUBLICAÇÃO e pode ficar para trás; o CANAL é
+// propriedade da VERSÃO (o identificador de prerelease). Por isso as funções abaixo
+// recebem TODAS as versões promovidas pelo registry e deixam `shouldAutoUpdate` —
+// que compara canal por versão, nunca por nome de tag — dizer quais valem.
+
+/**
+ * A versão mais NOVA de `published` que está no MESMO canal de `installed` — mesmo
+ * que seja igual ou mais velha que a instalada (serve p/ diagnóstico: "o mais novo
+ * publicado no seu canal é X"). `null` quando nenhuma é do canal (ou nada parseia).
+ */
+export function newestInChannel(installed: string, published: readonly string[]): string | null {
+  const canal = parseVersion(installed) ? distTagFor(installed) : null;
+  if (canal === null) return null;
+  let melhor: string | null = null;
+  for (const v of published) {
+    if (!parseVersion(v) || distTagFor(v) !== canal) continue;
+    if (melhor === null || compareVersions(v, melhor) === 1) melhor = v;
+  }
+  return melhor;
+}
+
+/**
+ * O que o autoupdate deve instalar por cima de `installed`, dadas TODAS as versões que
+ * o registry promoveu (os alvos de todas as dist-tags). É a mais nova do mesmo canal,
+ * e só se `shouldAutoUpdate` a aprovar (estritamente mais nova, nunca downgrade, nunca
+ * cruzando canal). `null` = nada a fazer.
+ */
+export function pickAutoUpdateCandidate(
+  installed: string,
+  published: readonly string[],
+): string | null {
+  const alvo = newestInChannel(installed, published);
+  return alvo !== null && shouldAutoUpdate(installed, alvo) ? alvo : null;
+}

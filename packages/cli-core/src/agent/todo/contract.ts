@@ -41,4 +41,21 @@ export interface TodoStorePort {
   done(id: string): Promise<boolean>;
   /** Limpa os itens já concluídos (opcional, p/ o /todo clear). */
   clearDone(): Promise<number>;
+  /**
+   * BUG-0029 (emenda) — quantos itens PENDENTES existem em backlogs de OUTRAS
+   * conversas. OPCIONAL: store sem escopo por sessão não implementa (⇒ `undefined`).
+   *
+   * Por que só a CONTAGEM, e nunca o texto: o isolamento por conversa é o ponto do
+   * BUG-0029 e continua de pé — devolver o conteúdo de outra conversa seria reabrir
+   * exatamente o vazamento que ele fechou. O número é o mínimo necessário para a
+   * lista vazia parar de MENTIR.
+   *
+   * O defeito que isto fecha (relato do dono, 31/08): ele pediu ao agente para anotar
+   * o trabalho, a CLI mandou REINICIAR a sessão (para descobrir um agente `.md` novo),
+   * e o `list_todos` da sessão nova respondeu "nenhum item anotado ainda". O agente
+   * repetiu isso como fato — "não anotei nada que tenha esquecido". Era falso: os itens
+   * estavam no arquivo da conversa anterior. Lista vazia saía IDÊNTICA em "não há nada"
+   * e "está em outro arquivo", que é a classe de defeito mais cara que existe aqui.
+   */
+  pendingElsewhere?(): Promise<number>;
 }

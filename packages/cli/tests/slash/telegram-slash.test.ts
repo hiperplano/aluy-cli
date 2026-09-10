@@ -47,7 +47,15 @@ describe('runTelegramSlash (/telegram na sessão)', () => {
     expect(note.title).toBe('telegram');
     expect(text).toMatch(/ausente/);
     expect(text).toMatch(/VAZIA/);
-    expect(text).toMatch(/não.*ativa|inert/i);
+    // O VOCABULÁRIO mudou em 01/09 e a intenção NÃO: antes a linha de estado era CRAVADA
+    // ("a bridge ainda NÃO está ativa (ativação sob revisão de segurança)") e mentia nos
+    // dois sentidos — dizia "não ativa" mesmo com a ponte no ar. O `bridgeAtiva` era
+    // recebido do run.tsx e nunca lido; como é propriedade de interface, o `noUnusedLocals`
+    // não reclamou e a meia-correção passou pelo build. Agora o estado é COMPUTADO, e sem
+    // token a frase é "ponte parada (sem token não há o que iniciar)".
+    // O que este caso protege segue igual: sem token, o status NÃO pode dizer que está no ar.
+    expect(text).toMatch(/não.*ativa|inert|parada/i);
+    expect(text).not.toMatch(/ponte ATIVA/);
   });
 
   it('status COM token ⇒ redige (mostra bot_id, esconde o auth)', async () => {

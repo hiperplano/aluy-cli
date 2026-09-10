@@ -245,3 +245,60 @@ describe('F-PROV — SessionController.setLocalProvider (fix do no-op silencioso
     controller.dispose();
   });
 });
+
+// O QUE O DONO VIU: "alterei o provider... na mesma hora ele nao alterou no footer o
+// provider novo que estava funcionando" — e depois de sair e entrar na sessão, aparecia.
+//
+// O rodapé lê `state.meta.provider`. Estes casos seguem o CAMINHO INTEIRO, incluindo o
+// passo que o fluxo real faz logo depois da troca: ele FORÇA a escolha do modelo do
+// provider novo ("quando eu trocar o provider ele sempre tem que pedir o modelo"), e é esse
+// `setTier` seguinte que precisa preservar o provider recém-trocado.
+describe('F-PROV — o provider trocado APARECE no rodapé, na hora', () => {
+  function montar() {
+    const caller = tierControlCaller();
+    const controller = new SessionController({
+      model: caller,
+      permission: new PolicyPermissionEngine(),
+      ports: fakePorts(),
+      askResolver: { async resolve() { return { kind: 'approve-once' as const }; } },
+      meta: LOCAL_META,
+      flush: { intervalMs: 0 },
+      switchLocalProvider: async (name: string) => ({
+        ok: true,
+        detail: `provider ativo agora: ${name}.`,
+        client: fakeClient(name),
+        defaultModel: `${name}-default`,
+      }),
+    });
+    return { caller, controller };
+  }
+
+  it('logo após a troca, `meta.provider` é o NOVO (é isso que o rodapé desenha)', async () => {
+    const { controller } = montar();
+    await controller.setLocalProvider('deepseek');
+    expect(controller.current.meta.provider).toBe('deepseek');
+    controller.dispose();
+  });
+
+  it('e SOBREVIVE à escolha do modelo que o fluxo pede em seguida', async () => {
+    const { controller } = montar();
+    await controller.setLocalProvider('deepseek');
+    // o picker de modelo abre e o dono escolhe um slug do provider NOVO
+    controller.setTier('custom', 'deepseek/deepseek-v4');
+    expect(controller.current.meta.model).toBe('deepseek/deepseek-v4');
+    expect(
+      controller.current.meta.provider,
+      'o provider sumiu do rodapé depois de escolher o modelo',
+    ).toBe('deepseek');
+    controller.dispose();
+  });
+
+  it('trocar duas vezes seguidas: o rodapé mostra o ÚLTIMO', async () => {
+    const { controller } = montar();
+    await controller.setLocalProvider('deepseek');
+    await controller.setLocalProvider('gmicloud');
+    expect(controller.current.meta.provider).toBe('gmicloud');
+    controller.dispose();
+  });
+});
+

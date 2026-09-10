@@ -292,6 +292,8 @@ export interface DoctorFacts {
   readonly sidecars: SidecarsFact;
   /** #10 Maestro — supervisor de sessão (resolveMaestro do wiring). */
   readonly maestro: MaestroFact;
+  /** #TG Conector Telegram. Ausente ⇒ o check não aparece (quem não usa não vê). */
+  readonly telegram?: TelegramFact;
   /**
    * EST-0970 — só presente sob `--deep`/`--test` (opt-in que GASTA modelo). Ausente ⇒ o
    * relatório NÃO inclui a linha do tier (o default não chama o modelo).
@@ -358,6 +360,67 @@ function checkLocalProvider(f: LocalProviderFact): DoctorCheck {
     label: 'provider (BYO)',
     status: 'ok',
     detail: `${alvo} — responde${f.modelCount !== undefined ? ` (${f.modelCount} modelos)` : ''}`,
+  };
+}
+
+/**
+ * #TG Conector Telegram — o que o `/doctor` precisa saber para o dono não descobrir
+ * sozinho, como aconteceu.
+ *
+ * O dono passou dias achando que o conector não existia. A causa foi o token evaporar do
+ * keyring volátil, somada a três lugares que não contavam: o motivo da recusa ia para um
+ * stderr apagado pela TUI, o `/telegram status` negava o recurso com uma frase cravada, e
+ * o `/doctor` — que é justamente o lugar onde se vai perguntar "o que está errado?" —
+ * ignorava o conector por completo. "o doctor tmbm nao valida nada do telegram", nas
+ * palavras dele.
+ *
+ * NUNCA carrega o token: só a PRESENÇA e contagens (mesma disciplina do resto do módulo).
+ */
+export interface TelegramFact {
+  /** Há token guardado? (keychain OU cofre em arquivo — ver `connector-secret-store`.) */
+  readonly tokenPresent: boolean;
+  /** Quantos chats autorizados na allowlist. 0 = fechada (nada entra). */
+  readonly allowlistSize: number;
+  /** A ponte subiu NESTA sessão? `undefined` fora de sessão (ex.: `aluy doctor`). */
+  readonly bridgeActive?: boolean;
+}
+
+export function checkTelegram(f: TelegramFact): DoctorCheck {
+  const label = 'telegram (conector)';
+  if (!f.tokenPresent) {
+    return {
+      id: 'telegram',
+      label,
+      status: 'warn',
+      detail: 'sem token guardado — a ponte não sobe',
+      fix: 'rode `aluy telegram login` (o token vai para o cofre e sobrevive ao reboot).',
+    };
+  }
+  if (f.allowlistSize === 0) {
+    return {
+      id: 'telegram',
+      label,
+      status: 'warn',
+      detail: 'token presente, mas a allowlist está VAZIA — a ponte sobe fechada e descarta tudo',
+      fix: 'autorize o seu chat com `aluy telegram allow <chat-id>`.',
+    };
+  }
+  if (f.bridgeActive === true) {
+    return {
+      id: 'telegram',
+      label,
+      status: 'ok',
+      detail: `ponte ATIVA — ${String(f.allowlistSize)} chat(s) autorizado(s)`,
+    };
+  }
+  // Configurado e não ligado NESTA sessão: não é falha — é a flag que faltou. E é
+  // exatamente o estado em que o dono ficou preso sem ninguém dizer.
+  return {
+    id: 'telegram',
+    label,
+    status: 'warn',
+    detail: `configurado (${String(f.allowlistSize)} chat(s)), mas a ponte não está ligada nesta sessão`,
+    fix: 'reabra com `aluy --telegram` — sem a flag o conector fica dormente.',
   };
 }
 
@@ -805,6 +868,9 @@ export function buildDoctorReport(facts: DoctorFacts): DoctorReport {
     checkMemory(facts.memory),
     checkSidecars(facts.sidecars),
     checkMaestro(facts.maestro),
+    // #TG — só entra quando o probe coletou os fatos do conector. Fica no fim porque é
+    // opcional: quem não usa Telegram não ganha uma linha a mais no relatório.
+    ...(facts.telegram !== undefined ? [checkTelegram(facts.telegram)] : []),
   ];
   // EST-0970 (--deep) — a linha do tier ao vivo só entra quando o probe a coletou (opt-in
   // que gasta modelo). Sem `--deep`, `facts.tier` é undefined ⇒ relatório idêntico ao #120

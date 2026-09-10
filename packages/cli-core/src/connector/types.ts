@@ -38,6 +38,13 @@ export type Provenance =
 
 /** Uma mensagem que CHEGA de um canal externo (ingresso). Tipos portáveis (ADR-0154 §1). */
 export interface IncomingMessage {
+  /**
+   * Id da mensagem NO CANAL de origem, quando o conector o fornece. Serve para o ACK
+   * visual — reagir à mensagem do dono ("visto"), que ele pediu em 01/09 ao notar que
+   * não tinha como saber se a ponte havia recebido. OPCIONAL: nem todo conector tem um
+   * id de mensagem, e sem ele o comportamento é o de hoje (só não há ACK).
+   */
+  readonly messageId?: number;
   /** Conteúdo (texto — v1). */
   readonly content: string;
   /** Id do remetente, autenticado pelo transporte. */

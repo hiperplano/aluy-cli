@@ -527,8 +527,31 @@ async function execProvider(
 ): Promise<SessionCommandOutcome> {
   const v = args.trim();
   // Bare `/provider` LÊ (lista os providers) — a nota do fallback É a resposta legítima
-  // (read-only ⇒ ok:true); `/provider <n>` MUTA de verdade abaixo (setProvider).
+  // (read-only ⇒ ok:true); `/provider <n>` MUTA de verdade abaixo.
   if (v === '') return fromSlashEffectFallback('provider', 'read-only', deps);
+  // BACKEND LOCAL (BYO) — o dono, 08/09: "pedi para ele mudar pro ollama e não atualizou no
+  // status embaixo; depois resetei e aí sim mostrou o footer atualizado".
+  //
+  // Ele PEDIU AO AGENTE, e o agente chega por aqui. `setProvider` sob backend local é o
+  // NO-OP silencioso que o próprio controller documenta: mexe num dado passageiro do
+  // request (`customProvider`) que o `LocalModelClient` nunca lê — ele fala com um provider
+  // FIXO, resolvido no boot. Nada trocava, o `meta.provider` ainda saía do meta (o caller
+  // recusa o nome fora de Custom) e a barra voltava ao provider do boot. Pior: devolvíamos
+  // `ok:true` com "provider setado", então o agente ANUNCIAVA a troca que não houve.
+  //
+  // Quem troca de verdade é `setLocalProvider` — a MESMA via do humano no `/provider`
+  // (reconstrói o client, swapa no caller, alinha tier+modelo, espelha no meta e persiste).
+  // Mesmo conserto, segundo ponto de chamada: o `run.tsx` tinha sido corrigido e este não.
+  if (deps.controller.backend === 'local') {
+    const r = await deps.controller.setLocalProvider(v);
+    if (!r.ok) return { ok: false, text: r.detail };
+    return {
+      ok: true,
+      text:
+        `${r.detail} Cada provider tem o próprio catálogo: confirme o modelo com ` +
+        '`/model` antes de seguir.',
+    };
+  }
   deps.controller.setProvider(v);
   return { ok: true, text: `provider setado: ${v}` };
 }
@@ -617,8 +640,20 @@ async function execWhoami(deps: SessionCommandPortDeps): Promise<SessionCommandO
   return { ok: true, text: noteText(note) };
 }
 
+/**
+ * GS-MD7 (recarga viva) — o registro VIVO da sessão, não o retrato do boot. O
+ * `deps.agentRegistry` é capturado UMA vez, na construção da porta; depois que o
+ * `spawn_agent`/`/subagent`/`/agents refresh` releem o disco, ele fica velho — e o
+ * agente perguntaria "quais agentes existem?" e receberia a lista de antes do `.md` que
+ * ele mesmo acabou de criar (o caso do dono). Fallback p/ `deps.agentRegistry` quando o
+ * controller não tem registro (injeção de teste).
+ */
+function liveRegistry(deps: SessionCommandPortDeps): AgentRegistry | undefined {
+  return deps.controller.agentRegistry ?? deps.agentRegistry;
+}
+
 async function execAgents(deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
-  const profiles = deps.agentRegistry?.list() ?? [];
+  const profiles = liveRegistry(deps)?.list() ?? [];
   const note = buildAgentsNote({ profiles, errors: [] });
   return { ok: true, text: noteText(note) };
 }
@@ -663,7 +698,7 @@ async function execWorkflows(
 }
 
 async function execInventory(deps: SessionCommandPortDeps): Promise<SessionCommandOutcome> {
-  const agentNames = (deps.agentRegistry?.list() ?? []).map((p) => p.name);
+  const agentNames = (liveRegistry(deps)?.list() ?? []).map((p) => p.name);
   return {
     ok: true,
     text: `inventário · agentes (${agentNames.length}): ${agentNames.length > 0 ? agentNames.join(', ') : '—'}`,

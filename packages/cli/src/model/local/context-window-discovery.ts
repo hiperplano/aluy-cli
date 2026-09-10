@@ -39,6 +39,7 @@ import {
   type DiscoveredModelContext,
 } from '@hiperplano/aluy-cli-core';
 import type { ConnectivityFetch } from './connectivity-check.js';
+import { descartarCorpo } from './descartar-corpo.js';
 
 /**
  * Teto de SLUGS DISTINTOS cuja janela tentamos descobrir por sessão. Espelha o
@@ -139,6 +140,10 @@ async function fetchModelsBody(args: FetchModelsContextsArgs): Promise<unknown> 
     // que pode contar falha no rate limit) e 5xx é falha do servidor.
     let resposta = res;
     if (!resposta.ok && (resposta.status === 400 || resposta.status === 404)) {
+      // SAÍDA EM 2 CTRL-C — a 1ª resposta é ABANDONADA aqui; sem descartar o corpo, o
+      // socket dela fica preso à requisição e SEGURA o laço de eventos do Node (o
+      // processo só morria pelo cão de guarda de 2s do `run.tsx`). Ver `descartar-corpo.ts`.
+      descartarCorpo(resposta);
       resposta = await args.fetchImpl(`${base}/models?`, {
         method: 'GET',
         signal: ctrl.signal,
@@ -148,7 +153,13 @@ async function fetchModelsBody(args: FetchModelsContextsArgs): Promise<unknown> 
         },
       });
     }
-    if (!resposta.ok) return undefined; // 401/404/5xx ⇒ não descobrimos. Sem nota, sem erro (fail-open).
+    if (!resposta.ok) {
+      // 401/404/5xx ⇒ não descobrimos. Sem nota, sem erro (fail-open) — mas o corpo que
+      // não vamos ler PRECISA ser descartado (ver `descartar-corpo.ts`: era isso que
+      // deixava o processo vivo depois do 2º Ctrl-C).
+      descartarCorpo(resposta);
+      return undefined;
+    }
     const text = await resposta.text();
     if (text.length > MAX_MODELS_BODY_CHARS) return undefined;
     return JSON.parse(text) as unknown;

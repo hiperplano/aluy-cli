@@ -14,21 +14,56 @@
 // padrão replicado à mão é um padrão que diverge no primeiro ajuste.
 
 import React from 'react';
-import { Box } from 'ink';
+import { Box, useStdout } from 'ink';
 import { useTheme } from '../theme/index.js';
 
 export interface PickerFrameProps {
   readonly children: React.ReactNode;
+  /** Largura do terminal. Ausente ⇒ lê do stdout (produção). Injetável p/ teste. */
+  readonly columns?: number;
+}
+
+/**
+ * COLUNA DE FOLGA à direita.
+ *
+ * O dono, em 08-09/09: "por que não aparece a borda da direita do menu". Aqui a moldura
+ * fecha dos dois lados em 200, 120, 100, 90 e 80 colunas — eu medi —, então a causa não é
+ * o desenho em si: é a moldura ocupar EXATAMENTE `columns` e o terminal dele discordar da
+ * nossa conta por uma coluna. Duas fontes conhecidas disso, ambas fora do nosso alcance:
+ *
+ *  - terminais que não deixam escrever na última coluna sem disparar o auto-wrap (o
+ *    caractere vai para a linha seguinte e some sob o repaint);
+ *  - glifo que medimos como 1 coluna e o terminal desenha com 2 (`⚠`, `◈`, setas) — comum
+ *    no Windows Terminal/conhost. A linha estoura por um e a borda cai fora.
+ *
+ * Reservar uma coluna absorve as duas sem precisar saber qual delas é. O custo é uma coluna
+ * que ninguém vê; o benefício é a moldura nunca encostar no limite.
+ *
+ * HONESTIDADE: isto é MITIGAÇÃO, não diagnóstico. Não reproduzi o defeito do dono em
+ * nenhuma largura aqui; o que está provado é o invariante abaixo (a moldura nunca ocupa a
+ * largura inteira), não que ele seja a causa do que ele vê.
+ */
+export const FOLGA_DIREITA = 1;
+
+/** Largura da moldura para um terminal de `columns` colunas. PURA — é o que o teste trava. */
+export function larguraDaMoldura(columns: number | undefined): number | undefined {
+  if (columns === undefined || !Number.isFinite(columns)) return undefined;
+  // Terminal minúsculo: melhor não impor largura nenhuma que impor uma inútil.
+  if (columns < 20) return undefined;
+  return columns - FOLGA_DIREITA;
 }
 
 export function PickerFrame(props: PickerFrameProps): React.ReactElement {
   const theme = useTheme();
+  const { stdout } = useStdout();
+  const largura = larguraDaMoldura(props.columns ?? stdout?.columns);
   return (
     <Box
       flexDirection="column"
       borderStyle="round"
       borderColor={theme.role('accent').color}
       paddingX={1}
+      {...(largura !== undefined ? { width: largura } : {})}
     >
       {props.children}
     </Box>
