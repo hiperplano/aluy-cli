@@ -16,6 +16,13 @@ export {
   newSseAccumulator,
 } from './adapter.js';
 export { AnthropicAdapter, toAnthropicMessages } from './anthropic-adapter.js';
+export { lerUsoDeCache, pctDeCache, type UsoDeCache } from './cache-usage.js';
+export {
+  valeCachear,
+  systemOpenAiComCache,
+  systemAnthropicComCache,
+  MIN_TOKENS_P_CACHE,
+} from './cache-breakpoint.js';
 export { OpenAiCompatAdapter, type OpenAiCompatAdapterOptions } from './openai-adapter.js';
 export { LocalModelClient, type LocalModelClientOptions } from './local-client.js';
 export {

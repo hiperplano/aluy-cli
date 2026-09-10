@@ -19,6 +19,8 @@ import type { ModelStreamEvent, ModelUsage, NativeToolCall } from '../types.js';
 import { MAX_TRAILER_EVENTS } from './adapter.js';
 import type { ProviderAdapter, BuiltRequest, SseAccumulator } from './adapter.js';
 import type { LocalRequest, ResolvedCredential, LocalProviderKind, ContentPart } from './types.js';
+import { lerUsoDeCache } from './cache-usage.js';
+import { systemOpenAiComCache } from './cache-breakpoint.js';
 
 const ATTRIBUTION_URL = 'https://github.com/hiperplano/aluy-cli';
 const ATTRIBUTION_TITLE = 'aluy-cli';
@@ -58,7 +60,11 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
     // `system` vira a 1ª mensagem `role:system` (OpenAI não tem campo separado).
     const messages: Record<string, unknown>[] = [];
     if (request.system !== undefined && request.system !== '') {
-      messages.push({ role: 'system', content: request.system });
+      // CACHE DE PROMPT — o `content` vira array de partes SÓ quando há o que ganhar (ver
+      // `cache-breakpoint.ts`). Quem não conhece `cache_control` ignora o campo extra; quem
+      // conhece (OpenRouter repassando p/ Anthropic/Gemini) passa a cachear o system, que
+      // hoje era reprocessado inteiro a cada turno.
+      messages.push({ role: 'system', content: systemOpenAiComCache(request.system) });
     }
     for (const m of request.messages) messages.push(serializeMessage(m));
 
@@ -222,6 +228,12 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
     if (inTok !== undefined) out.tokens_in = inTok;
     const outTok = num(raw, 'completion_tokens');
     if (outTok !== undefined) out.tokens_out = outTok;
+    // CACHE DE PROMPT — até 10/09/2026 este trailer era lido pela metade: pegávamos os dois
+    // totais e descartávamos quanto do prompt veio do cache. Nos providers de cache
+    // IMPLÍCITO isso já vinha acontecendo e sendo cobrado mais barato, sem ninguém ver.
+    const cache = lerUsoDeCache(raw);
+    if (cache.lidos !== undefined) out.tokens_cached = cache.lidos;
+    if (cache.gravados !== undefined) out.tokens_cache_write = cache.gravados;
     return out;
   }
 }

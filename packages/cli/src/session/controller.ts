@@ -151,6 +151,7 @@ import {
   groupMcpServers,
 } from './capabilities-snapshot.js';
 import { runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
+import { pctDeCache } from '@hiperplano/aluy-cli-core';
 // F191 — primitivo de EXPEDITE ("acelerar o encaixe"): o controller o POSSUI e o passa
 // ao loop; `controller.expedite()` toca o sino p/ cortar a chamada de modelo em voo.
 import { ExpediteSignal } from '@hiperplano/aluy-cli-core';
@@ -4436,6 +4437,7 @@ export class SessionController {
       toolCalls: agg.toolCalls,
       durationMs: this.rootFlow.accounting().durationMs,
       live: !this.rootFlow.isTerminal(),
+      ...(this.cachePctDoUltimoTurno !== undefined ? { cachePct: this.cachePctDoUltimoTurno } : {}),
     };
   }
 
@@ -5049,11 +5051,19 @@ export class SessionController {
       };
     }
     const result = await this.switchLocalProviderPort(name);
-    if (!result.ok || result.client === undefined || result.defaultModel === undefined) {
+    // `defaultModel` AUSENTE não é falha — é a porta dizendo "o provider listou o que tem e
+    // o palpite do catálogo não estava lá; não ative nada". O dono, em 10/09: "esses modelos
+    // default estão todos furados, não vamos usá-los". Tratar isso como erro seria RECUSAR
+    // a troca por causa de um palpite nosso vencido, que é o defeito de 08/09 de volta.
+    if (!result.ok || result.client === undefined) {
       return { ok: false, detail: result.detail };
     }
     this.tierControl?.setClient?.(result.client);
-    if (this.tierControl && typeof this.tierControl.setTier === 'function') {
+    if (
+      result.defaultModel !== undefined &&
+      this.tierControl &&
+      typeof this.tierControl.setTier === 'function'
+    ) {
       this.tierControl.setTier('custom', result.defaultModel);
     }
     if (this.tierControl && typeof this.tierControl.setProvider === 'function') {
@@ -5064,11 +5074,18 @@ export class SessionController {
     // provider NOVO nunca era encontrado — o aviso "o provider não informa a janela"
     // continuava, com a auto-compactação inerte.
     this.activeProviderId = name;
+    // Sem modelo confirmado, o campo é REMOVIDO em vez de carregar o slug do provider
+    // ANTERIOR — que seria uma mentira pior que a ausência (o rodapé mostraria o provider
+    // novo ao lado do modelo velho). O picker que abre em seguida o preenche.
+    const metaSemModelo: Omit<SessionMeta, 'model'> & { model?: string } = {
+      ...this.state.meta,
+    };
+    delete metaSemModelo.model;
     this.patch({
       meta: {
-        ...this.state.meta,
+        ...metaSemModelo,
         tier: 'custom',
-        model: result.defaultModel,
+        ...(result.defaultModel !== undefined ? { model: result.defaultModel } : {}),
         provider: name,
       },
     });
@@ -6513,8 +6530,20 @@ export class SessionController {
     }
   }
 
+  /**
+   * % do prompt servida do CACHE na última resposta. `undefined` ⇒ o provider não reportou.
+   *
+   * Guardado aqui porque é a ÚNICA passagem por onde o número transita: o `usage` chega,
+   * é somado em tokens, e o resto é descartado. Sem reter, a resposta à pergunta do dono
+   * ("a gente usa prompt caching?") continuaria sendo "não sei" — agora com o dado tendo
+   * passado pela mão e sido jogado fora.
+   */
+  private cachePctDoUltimoTurno: number | undefined;
+
   private applyUsage(usage: ModelUsage): void {
     const total = (usage.tokens_in ?? 0) + (usage.tokens_out ?? 0);
+    const pct = pctDeCache(usage.tokens_in, usage.tokens_cached);
+    if (pct !== undefined) this.cachePctDoUltimoTurno = pct;
     const tokens = this.state.meta.tokens + total;
     // F11 (dogfooding) — a `% janela` é a OCUPAÇÃO do contexto ATUAL = `tokens_in`
     // (prompt enviado ao modelo neste turno), NÃO o acumulado da sessão. Espelha o

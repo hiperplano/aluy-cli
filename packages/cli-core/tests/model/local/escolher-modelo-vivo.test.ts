@@ -33,19 +33,18 @@ describe('escolherModeloVivo', () => {
     });
   });
 
-  it('default MORTO ⇒ o primeiro curado que o provider anuncia (o caso real de 08/09)', () => {
+  it('default MORTO + HÁ lista ⇒ NÃO ativa nada (quem escolhe é o dono, no picker)', () => {
+    // Emenda de 10/09 — o dono: "esses modelos default estão todos furados, não vamos
+    // usá-los". A versão anterior caía no primeiro CURADO que ainda existisse; mas a lista
+    // curada é a MESMA foto que envelheceu (2 dos 5 do OpenRouter já estavam mortos). Se o
+    // provider sabe dizer o que tem, o catálogo não opina.
     expect(
       escolherModeloVivo(ENTRY, ['openai/gpt-4o', 'meta-llama/llama-3.3-70b-instruct']),
-    ).toEqual({ model: 'openai/gpt-4o', doCatalogo: false });
+    ).toEqual({ model: undefined, doCatalogo: false });
   });
 
-  it('o substituto NÃO conta como default do catálogo — palpite não vira padrão gravado', () => {
-    expect(escolherModeloVivo(ENTRY, ['openai/gpt-4o']).doCatalogo).toBe(false);
-  });
-
-  it('respeita a ORDEM da curadoria, não a do provider', () => {
-    const r = escolherModeloVivo(ENTRY, ['meta-llama/llama-3.3-70b-instruct', 'openai/gpt-4o']);
-    expect(r.model).toBe('openai/gpt-4o');
+  it('nem um curado VIVO é ativado no lugar do default — é palpite igual', () => {
+    expect(escolherModeloVivo(ENTRY, ['openai/gpt-4o']).model).toBeUndefined();
   });
 
   it('listagem VAZIA não muda nada — não se troca um slug bom por uma listagem ausente', () => {
@@ -57,11 +56,9 @@ describe('escolherModeloVivo', () => {
     });
   });
 
-  it('nenhum curado vivo ⇒ devolve o default mesmo, mas marcado como NÃO-catálogo', () => {
-    // Não há alternativa melhor; quem chama usa o `doCatalogo:false` para não persistir e
-    // a nota manda escolher na lista.
+  it('lista sem nada nosso dentro ⇒ tampouco ativa — a lista existe para ser usada', () => {
     expect(escolherModeloVivo(ENTRY, ['coisa/nenhuma'])).toEqual({
-      model: 'anthropic/claude-3.5-sonnet',
+      model: undefined,
       doCatalogo: false,
     });
   });
@@ -75,8 +72,17 @@ describe('escolherModeloVivo', () => {
 
   it('entrada sem lista curada não quebra', () => {
     expect(escolherModeloVivo({ defaultModel: 'x/y' }, ['a/b'])).toEqual({
-      model: 'x/y',
+      model: undefined,
       doCatalogo: false,
+    });
+  });
+
+  it('o default CONFIRMADO pela lista passa — e conta como catálogo (pode virar padrão)', () => {
+    // A exceção deliberada: não é que confiemos no catálogo, é que o provider acabou de
+    // confirmá-lo. Poupar um passo a quem só quer entrar e usar vale mais que a pureza.
+    expect(escolherModeloVivo({ defaultModel: 'a/b' }, ['a/b', 'c/d'])).toEqual({
+      model: 'a/b',
+      doCatalogo: true,
     });
   });
 });
