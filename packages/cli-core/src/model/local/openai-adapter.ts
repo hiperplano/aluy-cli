@@ -29,6 +29,24 @@ import { systemOpenAiComCache } from './cache-breakpoint.js';
  * agregador: gate só por id perderia esse caso, e é justamente quem tem provider custom que
  * fica sem o número sem entender por quê. A baseURL é o que de fato decide quem atende.
  */
+/**
+ * Um identificador OPACO de sessão, gerado uma vez por adaptador.
+ *
+ * O adaptador é construído uma vez por sessão (`buildLocalModelClient`), então a vida dele é
+ * exatamente o escopo que o roteamento pegajoso precisa.
+ *
+ * PRIVACIDADE: aleatório, não carrega nada — nem caminho, nem usuário, nem máquina. O
+ * agregador já correlaciona requisições pela credencial; isto não conta nada novo sobre quem
+ * está do lado de cá.
+ */
+function novoIdDeSessao(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (typeof c?.randomUUID === 'function') return `aluy-${c.randomUUID()}`;
+  // Sem `crypto` (runtime exótico): um id fraco ainda serve — ele não protege nada, só
+  // AGRUPA. O que não pode é ficar sem id e perder o cache.
+  return `aluy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function ehOpenRouter(provider: string, baseUrl: string): boolean {
   if (provider === 'openrouter') return true;
   try {
@@ -53,6 +71,20 @@ export interface OpenAiCompatAdapterOptions {
 }
 
 export class OpenAiCompatAdapter implements ProviderAdapter {
+  /**
+   * ROTEAMENTO PEGAJOSO — o achado que explica "o cache não pega" no OpenRouter.
+   *
+   * Ele roteia cada requisição para um provedor UPSTREAM, e cada upstream tem o PRÓPRIO
+   * cache. Sem fixar a sessão, o turno 2 pode cair num endpoint diferente do turno 1 e o
+   * cache nunca acerta — por mais que o `cache_control` esteja perfeito e o prefixo seja
+   * byte-idêntico (os dois estão; eu medi). A doc é explícita: sem `session_id` a fixação só
+   * liga DEPOIS de detectar um acerto, que é o ovo e a galinha.
+   *
+   * Uma vez por adaptador = uma vez por sessão, que é o escopo certo: trocar de provider
+   * reconstrói o client e gera outro, e aí o cache anterior não valia mesmo.
+   */
+  private readonly sessionId = novoIdDeSessao();
+
   readonly kind: string;
   readonly defaultBaseUrl: string;
   readonly allowsBaseUrlOverride = true;
@@ -80,7 +112,10 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
       // `cache-breakpoint.ts`). Quem não conhece `cache_control` ignora o campo extra; quem
       // conhece (OpenRouter repassando p/ Anthropic/Gemini) passa a cachear o system, que
       // hoje era reprocessado inteiro a cada turno.
-      messages.push({ role: 'system', content: systemOpenAiComCache(request.system) });
+      messages.push({
+        role: 'system',
+        content: systemOpenAiComCache(request.system, request.model),
+      });
     }
     for (const m of request.messages) messages.push(serializeMessage(m));
 
@@ -101,6 +136,12 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
     // corpo é ignorado pela maioria dos compatíveis, mas alguns respondem 400 — e uma troca
     // de provider não pode virar erro de requisição por causa de um extra de observabilidade.
     if (ehOpenRouter(this.provider, base)) {
+      // Ver `sessionId`: sem isto o cache pode nunca acertar, porque cada turno pode cair
+      // num upstream diferente — cada um com o próprio cache.
+      body.session_id = this.sessionId;
+      // A doc diz que os campos de cache vêm automaticamente, então isto é REDUNDANTE hoje.
+      // Mantido porque é barato, é ignorado quando redundante, e cobre o caso de a
+      // contabilidade detalhada voltar a ser opt-in.
       body.usage = { include: true };
     }
     if (request.temperature !== undefined) body.temperature = request.temperature;

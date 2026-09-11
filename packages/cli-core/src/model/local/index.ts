@@ -22,6 +22,7 @@ export {
   systemOpenAiComCache,
   systemAnthropicComCache,
   MIN_TOKENS_P_CACHE,
+  pisoDeCachePara,
 } from './cache-breakpoint.js';
 export { OpenAiCompatAdapter, type OpenAiCompatAdapterOptions } from './openai-adapter.js';
 export { LocalModelClient, type LocalModelClientOptions } from './local-client.js';

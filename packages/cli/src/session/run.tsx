@@ -38,6 +38,7 @@ import { readUpdateNote, refreshUpdateCheck } from '../io/update-check.js';
 import { readAutoUpdateNote, runAutoUpdate } from '../io/auto-update.js';
 import { PluginStore } from '../io/plugin-store.js';
 import { carregarAgentesDePlugins } from '../io/plugin-agents.js';
+import { linhasDaListaDePlugins } from '@hiperplano/aluy-cli-core';
 import { ThemeRoot } from './ThemeRoot.js';
 import { buildSession, type BuildSessionOptions } from './wiring.js';
 // F-PROV-FIX — lógica PURA (sem I/O) do ato explícito `/provider save`: decide o
@@ -3706,6 +3707,62 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       return;
     }
 
+    // ADR-plugins — `/plugin`: lista os bundles instalados e liga/desliga.
+    //
+    // Roteado AQUI, e não no `buildSlashEffect`, pelo mesmo motivo do `/agents` logo abaixo:
+    // precisa do `pluginStore`/`pluginsLidos` do BOOT. Reler o disco a cada `/plugin list`
+    // daria uma segunda fonte de verdade, e as duas divergiriam no primeiro enable.
+    if (command.id === 'plugin') {
+      const arg = args.trim();
+      const [sub, ...resto] = arg.split(/\s+/);
+      const alvo = resto.join(' ').trim();
+
+      if (sub === 'enable' || sub === 'disable') {
+        if (alvo === '') {
+          built.controller.pushNote('plugin', [`uso: /plugin ${sub} <nome>`]);
+          return;
+        }
+        const existe = pluginsLidos.plugins.some((p) => p.manifest.name === alvo);
+        if (!existe) {
+          // Recusar nome que não existe evita gravar lixo na config — e diz o que há.
+          built.controller.pushNote('plugin', [
+            `não há plugin instalado chamado "${alvo}".`,
+            ...(pluginsLidos.plugins.length > 0
+              ? [`instalados: ${pluginsLidos.plugins.map((p) => p.manifest.name).join(', ')}`]
+              : ['nenhum plugin instalado.']),
+          ]);
+          return;
+        }
+        const atuais = new Set(savedConfig.pluginsDesligados ?? []);
+        if (sub === 'disable') atuais.add(alvo);
+        else atuais.delete(alvo);
+        const gravou = configStore.savePluginsDesligados([...atuais]);
+        built.controller.pushNote('plugin', [
+          gravou
+            ? `plugin "${alvo}" ${sub === 'disable' ? 'DESLIGADO' : 'LIGADO'}.`
+            : `não deu p/ gravar em ~/.aluy/config.json — "${alvo}" segue como estava.`,
+          // A carga acontece no BOOT: mudar agora não desfaz o que já está registrado.
+          ...(gravou ? ['vale a partir da PRÓXIMA sessão (a carga acontece no boot).'] : []),
+        ]);
+        return;
+      }
+
+      // Bare e `list` são a mesma coisa: quem digita `/plugin` quer ver o que tem.
+      built.controller.pushNote(
+        'plugin',
+        linhasDaListaDePlugins(
+          pluginsLidos.plugins.map((p) => ({
+            manifest: p.manifest,
+            extensoes: Object.keys(p.extensoes),
+            ativo: p.ativo,
+          })),
+          pluginsLidos.erros.map((e) => ({ dir: e.dir, motivo: e.motivo })),
+          pluginStore.pluginsDir,
+        ),
+      );
+      return;
+    }
+
     // EST-0977 · ADR-0061 — `/agents`: lista os perfis de sub-agente .md que o aluy
     // MAPEOU. Read-only, sem modelo, sem rede: reusa o resultado dos MESMOS loaders do
     // boot (`globalAgents`/`projectAgents` já carregados acima, idênticos ao que o
@@ -3733,7 +3790,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         agentRegistryLive = new AgentRegistry(globalAgents.profiles, projectAgents.profiles);
         built.controller.setAgentRegistry(agentRegistryLive);
         const note = buildAgentsNote({
-          profiles: [...globalAgents.profiles, ...projectAgents.profiles],
+          profiles: [...globalAgents.profiles, ...projectAgents.profiles, ...pluginAgents.profiles],
           errors: agentLoadErrors,
         });
         built.controller.pushNote(`${note.title} · refresh`, [
@@ -3743,7 +3800,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         return;
       }
       const note = buildAgentsNote({
-        profiles: [...globalAgents.profiles, ...projectAgents.profiles],
+        profiles: [...globalAgents.profiles, ...projectAgents.profiles, ...pluginAgents.profiles],
         errors: agentLoadErrors,
       });
       built.controller.pushNote(note.title, note.lines);

@@ -1194,6 +1194,20 @@ export class UserConfigStore {
    * não fixa?". `model` ausente/vazio ⇒ preserva o `localModel` já salvo (não apaga
    * um valor bom só porque esta chamada não o trouxe).
    */
+  /**
+   * ADR-plugins — persiste a lista de plugins DESLIGADOS (`/plugin disable`).
+   *
+   * Guardamos os DESLIGADOS, não os ligados: instalar já é o ato de consentimento, então um
+   * plugin recém-instalado tem de funcionar sem precisar ser habilitado. E a lista envelhece
+   * bem — desinstalar deixa um nome órfão aqui, que é inócuo, enquanto uma lista de LIGADOS
+   * que perdesse uma entrada desligaria em silêncio algo que o dono instalou.
+   */
+  savePluginsDesligados(nomes: readonly string[]): boolean {
+    return this.save({
+      pluginsDesligados: [...new Set(nomes.map((n) => n.trim()))].filter((n) => n !== ''),
+    });
+  }
+
   saveLocalProvider(provider: string, model?: string): boolean {
     const p = provider.trim();
     if (p === '') return false;

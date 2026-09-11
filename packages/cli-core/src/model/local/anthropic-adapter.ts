@@ -59,7 +59,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     // quando vale. Sem o marcador o desconto aqui é ZERO, por mais estável que o prefixo
     // seja (dialeto de cache EXPLÍCITO — ver `cache-breakpoint.ts`).
     if (request.system !== undefined && request.system !== '') {
-      body.system = systemAnthropicComCache(request.system);
+      body.system = systemAnthropicComCache(request.system, request.model);
     }
     if (request.temperature !== undefined) body.temperature = request.temperature;
     if (request.tools !== undefined && request.tools.length > 0) {

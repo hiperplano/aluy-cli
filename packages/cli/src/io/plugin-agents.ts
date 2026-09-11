@@ -57,7 +57,23 @@ export function carregarAgentesDePlugins(
     // caminho que ele monta é exatamente `p.extensoes.agents`.
     const carga = new UserAgentsLoader({ baseDir: p.raiz }).load();
     for (const perfil of carga.profiles) {
-      profiles.push({ ...perfil, name: rotuloDeItem(p.manifest.name, perfil.name) });
+      profiles.push({
+        ...perfil,
+        name: rotuloDeItem(p.manifest.name, perfil.name),
+        // `origin` REESCRITO — e este é o ponto mais importante do arquivo.
+        //
+        // Reusar o `UserAgentsLoader` traz de brinde o carimbo dele: `origin:'global'`, que
+        // significa CONFIG DO DONO — confiável, entra na auto-seleção. Passar o perfil no
+        // array de projeto NÃO basta: o `AgentRegistry` re-filtra PELO CAMPO
+        // (`if (p.origin !== 'project') continue`), justamente para que a camada não dependa
+        // de quem chamou.
+        //
+        // Sem esta linha acontecia o pior dos dois mundos, e eu medi na tela: o agente
+        // aparecia na listagem como `escopo: global` (mentira — código de terceiro com a
+        // etiqueta de confiança do dono) e NÃO era registrado (a defesa do construtor o
+        // descartava). Listagem mentindo e funcionalidade ausente, ao mesmo tempo.
+        origin: 'project' as const,
+      });
     }
     // O erro guarda o nome do ARQUIVO, não do agente — prefixá-lo daria um caminho que não
     // existe. O que falta ali é dizer de QUAL plugin veio, e isso vai no texto.

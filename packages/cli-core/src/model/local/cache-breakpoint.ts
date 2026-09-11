@@ -36,12 +36,52 @@
  * disso o marcador é ignorado pelo provider, então mandá-lo é só ruído no payload.
  */
 export const MIN_TOKENS_P_CACHE = 1024;
+
+/** Estimativa grosseira de caracteres por token — a decisão é "é grande?", não exata. */
 const CHARS_POR_TOKEN = 4;
 
-/** `true` quando o texto é grande o bastante para um breakpoint valer o custo de escrita. */
-export function valeCachear(texto: string | undefined): boolean {
+/**
+ * Pisos MAIORES, por FAMÍLIA de modelo. Medido na documentação do OpenRouter (11/09/2026).
+ *
+ * A primeira versão cravou 1024 para todos, que é o piso da OpenAI e de parte da linha
+ * Anthropic — mas NÃO de todos. Nos modelos abaixo o marcador é simplesmente IGNORADO
+ * quando o bloco é menor, e o efeito é o pior possível: o payload muda (vira array de
+ * partes), nada é cacheado, e nada avisa. Um conserto que não conserta e não reclama.
+ *
+ * Casamento por FRAGMENTO do slug, não por igualdade: o mesmo modelo aparece como
+ * `claude-opus-4-8`, `anthropic/claude-opus-4-8` e `anthropic/claude-opus-4-8:batch`
+ * dependendo de quem roteia. Igualdade exata perderia os dois últimos.
+ */
+const PISOS_POR_FRAGMENTO: readonly (readonly [string, number])[] = [
+  ['claude-opus-4-8', 4096],
+  ['claude-opus-4-6', 4096],
+  ['claude-opus-4-5', 4096],
+  ['claude-haiku-4-5', 4096],
+  ['claude-haiku-4.5', 4096],
+  ['claude-opus-4.8', 4096],
+  ['claude-opus-4.6', 4096],
+  ['claude-opus-4.5', 4096],
+  ['gemini-2.5-pro', 4096],
+  ['claude-haiku-3.5', 2048],
+  ['claude-3-5-haiku', 2048],
+];
+
+/** O piso EFETIVO em tokens para um slug. PURO. Default: `MIN_TOKENS_P_CACHE`. */
+export function pisoDeCachePara(model: string | undefined): number {
+  const m = (model ?? '').trim().toLowerCase();
+  if (m === '') return MIN_TOKENS_P_CACHE;
+  let piso = MIN_TOKENS_P_CACHE;
+  // MAIOR piso que casa vence: um slug que case duas famílias (raro, mas possível num
+  // agregador) tem de respeitar a exigência mais estrita, nunca a mais frouxa.
+  for (const [frag, valor] of PISOS_POR_FRAGMENTO) {
+    if (m.includes(frag) && valor > piso) piso = valor;
+  }
+  return piso;
+}
+
+export function valeCachear(texto: string | undefined, model?: string): boolean {
   if (texto === undefined || texto === '') return false;
-  return texto.length >= MIN_TOKENS_P_CACHE * CHARS_POR_TOKEN;
+  return texto.length >= pisoDeCachePara(model) * CHARS_POR_TOKEN;
 }
 
 /**
@@ -51,8 +91,11 @@ export function valeCachear(texto: string | undefined): boolean {
  * inclusive os que nunca ouviram falar de `cache_control`. Só promovemos para o array de
  * partes quando há o que ganhar, para não mudar o payload de quem não usa cache explícito.
  */
-export function systemOpenAiComCache(system: string): string | readonly Record<string, unknown>[] {
-  if (!valeCachear(system)) return system;
+export function systemOpenAiComCache(
+  system: string,
+  model?: string,
+): string | readonly Record<string, unknown>[] {
+  if (!valeCachear(system, model)) return system;
   return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
 }
 
@@ -64,7 +107,8 @@ export function systemOpenAiComCache(system: string): string | readonly Record<s
  */
 export function systemAnthropicComCache(
   system: string,
+  model?: string,
 ): string | readonly Record<string, unknown>[] {
-  if (!valeCachear(system)) return system;
+  if (!valeCachear(system, model)) return system;
   return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
 }

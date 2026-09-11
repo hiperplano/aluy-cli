@@ -82,3 +82,65 @@ describe('o que já existia segue igual', () => {
     }
   });
 });
+
+describe('ROTEAMENTO PEGAJOSO — o session_id é o que faz o cache ter chance', () => {
+  it('OpenRouter recebe um session_id', () => {
+    // Ele roteia cada requisição para um provedor UPSTREAM, e cada um tem o PRÓPRIO cache.
+    // Sem fixar, o turno 2 cai num endpoint diferente do turno 1 e o cache nunca acerta —
+    // por mais que o `cache_control` esteja certo e o prefixo seja byte-idêntico.
+    const b = corpo('openrouter', 'https://openrouter.ai/api/v1');
+    expect(typeof b.session_id).toBe('string');
+    expect((b.session_id as string).length).toBeGreaterThan(8);
+    expect((b.session_id as string).length).toBeLessThanOrEqual(256);
+  });
+
+  it('é ESTÁVEL entre turnos do mesmo adaptador — senão não fixa nada', () => {
+    const a = new OpenAiCompatAdapter({
+      provider: 'openrouter' as never,
+      defaultBaseUrl: 'https://openrouter.ai/api/v1',
+    });
+    const um = (): Record<string, unknown> =>
+      JSON.parse(
+        a.buildRequest({
+          request: REQ as never,
+          baseUrl: 'https://openrouter.ai/api/v1',
+          credential: { secret: 'k', kind: 'apikey' } as never,
+        }).body,
+      ) as Record<string, unknown>;
+    expect(um().session_id).toBe(um().session_id);
+  });
+
+  it('DIFERE entre adaptadores — sessão nova, cache novo', () => {
+    const novo = () =>
+      JSON.parse(
+        new OpenAiCompatAdapter({
+          provider: 'openrouter' as never,
+          defaultBaseUrl: 'https://openrouter.ai/api/v1',
+        }).buildRequest({
+          request: REQ as never,
+          baseUrl: 'https://openrouter.ai/api/v1',
+          credential: { secret: 'k', kind: 'apikey' } as never,
+        }).body,
+      ).session_id as string;
+    expect(novo()).not.toBe(novo());
+  });
+
+  it('os demais NÃO recebem — é parâmetro do agregador', () => {
+    expect(corpo('openai', 'https://api.openai.com/v1').session_id).toBeUndefined();
+    expect(corpo('deepseek', 'https://api.deepseek.com/v1').session_id).toBeUndefined();
+  });
+
+  it('o id é OPACO — não carrega usuário, caminho nem máquina', () => {
+    const id = corpo('openrouter', 'https://openrouter.ai/api/v1').session_id as string;
+    expect(id.startsWith('aluy-')).toBe(true);
+    // O corpo DEPOIS do prefixo é o que precisa ser opaco. Comparar o id inteiro dava falso
+    // positivo nesta máquina, onde o usuário se chama `aluy` — coincidência com o prefixo do
+    // produto, não vazamento. Contagem de texto precisa separar o que é nosso do que é dado.
+    const corpoDoId = id.slice('aluy-'.length);
+    for (const vazamento of [process.cwd(), process.env.USER ?? '@@', process.env.HOME ?? '@@']) {
+      if (vazamento.length >= 3) expect(corpoDoId).not.toContain(vazamento);
+    }
+    // E é só hex/hífen — nada de texto humano.
+    expect(/^[0-9a-f-]+$|^[0-9a-z-]+$/.test(corpoDoId)).toBe(true);
+  });
+});

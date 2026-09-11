@@ -19,6 +19,7 @@ import {
   systemOpenAiComCache,
   systemAnthropicComCache,
   MIN_TOKENS_P_CACHE,
+  pisoDeCachePara,
 } from '../../../src/model/local/cache-breakpoint.js';
 
 const GRANDE = 'x'.repeat(MIN_TOKENS_P_CACHE * 4);
@@ -110,5 +111,62 @@ describe('TODO adaptador participa do cache de prompt', () => {
       .filter(({ fonte }) => !fonte.includes('lerUsoDeCache('))
       .map(({ arquivo }) => `${arquivo}: não lê os tokens reaproveitados do usage`);
     expect(sem).toEqual([]);
+  });
+});
+
+describe('PISO POR MODELO — medido na doc do OpenRouter (11/09/2026)', () => {
+  it('o default segue 1024 (OpenAI e parte da linha Anthropic)', () => {
+    expect(pisoDeCachePara('gpt-4o')).toBe(1024);
+    expect(pisoDeCachePara('anthropic/claude-sonnet-5')).toBe(1024);
+    expect(pisoDeCachePara(undefined)).toBe(1024);
+  });
+
+  it('Opus e Haiku 4.5 exigem 4096 — abaixo disso o marcador é IGNORADO', () => {
+    // A primeira versão cravou 1024 para todos. Nestes o efeito era o pior possível: o
+    // payload mudava (virava array de partes), nada era cacheado, e nada avisava.
+    for (const m of ['claude-opus-4-8', 'anthropic/claude-opus-4-5', 'claude-haiku-4-5']) {
+      expect(pisoDeCachePara(m), m).toBe(4096);
+    }
+  });
+
+  it('Gemini 2.5 Pro exige 4096; o Flash fica no default', () => {
+    expect(pisoDeCachePara('google/gemini-2.5-pro')).toBe(4096);
+    expect(pisoDeCachePara('google/gemini-2.5-flash')).toBe(1024);
+  });
+
+  it('Haiku 3.5 exige 2048', () => {
+    expect(pisoDeCachePara('anthropic/claude-3-5-haiku')).toBe(2048);
+  });
+
+  it('casa por FRAGMENTO — o mesmo modelo chega com prefixo e sufixo diferentes', () => {
+    // `claude-opus-4-8`, `anthropic/claude-opus-4-8` e `...:batch` são o mesmo modelo;
+    // igualdade exata perderia os dois últimos.
+    for (const m of [
+      'claude-opus-4-8',
+      'anthropic/claude-opus-4-8',
+      'anthropic/claude-opus-4-8:batch',
+      'ANTHROPIC/Claude-Opus-4-8',
+    ]) {
+      expect(pisoDeCachePara(m), m).toBe(4096);
+    }
+  });
+
+  it('o piso MAIOR vence quando dois casam', () => {
+    // Um slug exótico de agregador pode casar duas famílias; respeitar a exigência mais
+    // estrita é o único desfecho seguro.
+    expect(pisoDeCachePara('claude-3-5-haiku-e-claude-opus-4-8')).toBe(4096);
+  });
+
+  it('valeCachear RESPEITA o piso do modelo', () => {
+    const doisMil = 'x'.repeat(2048 * 4);
+    expect(valeCachear(doisMil, 'gpt-4o'), 'acima do piso de 1024').toBe(true);
+    expect(valeCachear(doisMil, 'claude-opus-4-8'), 'abaixo do piso de 4096').toBe(false);
+  });
+
+  it('e o marcador SÓ sai quando vale — nos dois adaptadores', () => {
+    const doisMil = 'y'.repeat(2048 * 4);
+    expect(typeof systemOpenAiComCache(doisMil, 'claude-opus-4-8')).toBe('string');
+    expect(Array.isArray(systemOpenAiComCache(doisMil, 'gpt-4o'))).toBe(true);
+    expect(typeof systemAnthropicComCache(doisMil, 'claude-opus-4-8')).toBe('string');
   });
 });

@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PluginStore } from '../../src/io/plugin-store.js';
 import { carregarAgentesDePlugins } from '../../src/io/plugin-agents.js';
+import { AgentRegistry } from '@hiperplano/aluy-cli-core';
 
 let base: string;
 beforeEach(() => {
@@ -94,5 +95,34 @@ describe('agentes de plugin', () => {
 
   it('sem plugin nenhum ⇒ vazio (zero mudança para quem não usa)', () => {
     expect(carrega().profiles).toEqual([]);
+  });
+});
+
+describe('PROVENIÊNCIA — o carimbo é o que decide, não o array em que passamos', () => {
+  it('agente de plugin é `project`, NUNCA `global`', () => {
+    // Reusar o `UserAgentsLoader` traz de brinde o carimbo dele (`origin:'global'` = config
+    // do dono, confiável, entra na auto-seleção). Passar no array de projeto não basta: o
+    // `AgentRegistry` re-filtra PELO CAMPO.
+    //
+    // MEDIDO na tela antes do conserto: o agente aparecia como `escopo: global` (código de
+    // terceiro com a etiqueta de confiança do dono) e NÃO era registrado (a defesa do
+    // construtor o descartava). Listagem mentindo e funcionalidade ausente ao mesmo tempo.
+    comAgente('meu-plugin', 'revisor');
+    const p = carrega().profiles[0];
+    expect(p?.origin).toBe('project');
+  });
+
+  it('o AgentRegistry de fato o REGISTRA na camada de projeto', () => {
+    comAgente('meu-plugin', 'revisor');
+    const reg = new AgentRegistry([], carrega().profiles);
+    expect(reg.list().map((a) => a.name)).toContain('meu-plugin:revisor');
+  });
+
+  it('e NÃO entra na camada global nem sendo passado lá', () => {
+    // A defesa do construtor é a última linha: mesmo um chamador errado não consegue
+    // promover código de terceiro a confiável.
+    comAgente('meu-plugin', 'revisor');
+    const reg = new AgentRegistry(carrega().profiles, []);
+    expect(reg.list()).toEqual([]);
   });
 });
