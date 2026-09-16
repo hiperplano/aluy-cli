@@ -43,6 +43,8 @@ __pycache__/
 
 # Artefatos do `npm pack` (empacotamento local p/ instalar e publicar) — nunca versionados.
 packages/*/hiperplano-aluy-cli-*.tgz
+# … e na raiz (um `aluy-cli-1.0.0-rc.1.tgz` de 1 MB ficou versionado aqui até a rc.180).
+/*.tgz
 
 # Estado do aluy escrito DENTRO do projeto. O lugar dele é `~/.aluy/`; quando aparece aqui
 # é um teste (ou uma execução) resolvendo o caminho a partir do CWD em vez do HOME.

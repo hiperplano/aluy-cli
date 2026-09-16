@@ -74,7 +74,16 @@ function fingePlataforma(p: string): void {
   Object.defineProperty(process, 'platform', { value: p });
 }
 
-const base = { scriptPath: GLOBAL, realpath: (p: string) => p, aluyDir: dir };
+// `aluyDir` é GETTER: `dir` só existe depois do `beforeEach`. Como valor, era avaliado ao
+// carregar o arquivo (`undefined`) e o `runUpgrade` gravava o estado no `~/.aluy` REAL de quem
+// rodava a suíte — o "atualizado para rc.200" que o dono viu no aluy dele (16/09).
+const base = {
+  scriptPath: GLOBAL,
+  realpath: (p: string) => p,
+  get aluyDir(): string {
+    return dir;
+  },
+};
 
 describe('o executável do npm por plataforma', () => {
   it('WINDOWS ⇒ chama o `cmd.exe` COM o `npm.cmd` na linha (nunca o `npm` cru)', async () => {

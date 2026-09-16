@@ -2218,7 +2218,9 @@ export function App(props: AppProps): React.ReactElement {
       // ANTES se há turno vivo. Fora dele, devolvemos `false` e o caller ENFILEIRA — visível
       // no staging e drenado no repouso, que é o comportamento que ele esperava.
       if (!controller.turnoVivo) return false;
-      return controller.injectInput('root', route.text);
+      const injected = controller.injectInput('root', route.text);
+      if (injected) controller.markLastInjectFromComposer();
+      return injected;
     },
     [controller, userCommands, picker],
   );
@@ -2545,6 +2547,20 @@ export function App(props: AppProps): React.ReactElement {
     // closure obsoleto. `atRest`/`queue` são as dependências reais do gatilho.
   }, [atRest, queue, submit, userCommands, clearQueue]);
 
+  // ENCAIXE ÓRFÃO (relato do dono, 16/09: "só processa quando eu repito e envio de novo").
+  // O texto encaixado no turno vivo que o loop NÃO chegou a consumir — o turno acabou logo
+  // depois do Enter — volta para ESTA fila, na frente (foi digitado antes de tudo que ainda
+  // está nela). Daí o dreno de repouso acima o envia como fala do dono, com os mesmos freios
+  // de qualquer item (picker, `!comando`, `/clear`, FIFO). O controller só avisa (contador
+  // `orphanInjects`); o turno nasce aqui, no único ponto que já faz isso.
+  useEffect(() => {
+    if (state.orphanInjects === undefined) return;
+    const returned = controller.takeOrphanInjects();
+    if (returned.length === 0) return;
+    queueRef.current = [...returned, ...queueRef.current];
+    setQueue((q) => [...returned, ...q]);
+  }, [state.orphanInjects, controller]);
+
   // DRENO MID-TURN (achado GRAVE do dono — "as mensagens na fila ficam infinitamente esperando o
   // turno acabar"). O efeito acima só drena a fila no REPOUSO TOTAL (e por `submit` = novo turno).
   // Aqui, enquanto há turno VIVO (thinking/streaming), drenamos os itens de TEXTO PURO da FRENTE
@@ -2859,7 +2875,9 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       if (char === 'P') {
-        controller.cancelAllFlows();
+        // A nota de parada diz QUEM parou (F8 × painel) — o "✘ parado" sem explicação que o
+        // dono viu em 16/09 não tinha como ser atribuído.
+        controller.cancelAllFlows('panel');
         return;
       }
       if (char === 'i') {
@@ -3282,6 +3300,7 @@ export function App(props: AppProps): React.ReactElement {
             const action = decideEscAction(composer);
             if (action.kind === 'redirect') {
               controller.injectInput('root', action.inject);
+              controller.markLastInjectFromComposer();
               setHistory((h) => [...h, action.inject]);
               injectedSomething = true;
             }
@@ -3340,6 +3359,7 @@ export function App(props: AppProps): React.ReactElement {
         const line = expandAndReset(input).trim();
         if (line !== '') {
           controller.injectInput('root', line);
+          controller.markLastInjectFromComposer();
           setText('');
           setHistory((h) => [...h, line]);
           setHistIdx(-1);
@@ -3419,8 +3439,10 @@ export function App(props: AppProps): React.ReactElement {
               // `\n` (LF/Ctrl+Enter) é o ENCAIXAR explícito ⇒ injeta a linha como está. `\r`
               // (Enter) segue o type-ahead: TEXTO PURO ENCAIXA mid-turn (EST-0982), COMANDO
               // PARALELO-SEGURO (`/ask`) RODA JÁ, `/slash` mutador/`!bang`/anexos ENFILEIRA.
-              if (r.newline === '\n') controller.injectInput('root', line);
-              else enqueueOrInject(line);
+              if (r.newline === '\n') {
+                controller.injectInput('root', line);
+                controller.markLastInjectFromComposer();
+              } else enqueueOrInject(line);
               setHistory((h) => [...h, line]);
             }
             setHistIdx(-1);
@@ -5204,6 +5226,7 @@ export function App(props: AppProps): React.ReactElement {
                 frame={0}
                 columns={columns}
                 prevKind={done[blockIndex - 1]?.kind}
+                settled
               />
             </Box>
           );
@@ -5557,10 +5580,13 @@ export function App(props: AppProps): React.ReactElement {
           footer de turno EXISTA. O orçamento anti-flicker não muda: `respiroOverhead`
           continua reservando a linha (over-reserva é sempre segura; o que não pode é
           faltar). */}
-      {columns >= 60 &&
-        rows >= RESPIRO_MIN_ROWS &&
-        state.turnAccounting !== undefined &&
-        (state.phase === 'done' || state.phase === 'budget') && <Box height={1} />}
+      {/* COMPOSER PARADO (16/09) — o respiro valia só em `done`/`budget`: ao começar um turno
+          ele sumia e o composer descia 1 linha; ao terminar, voltava e o composer subia. Agora
+          basta ter havido turno (a regra do F-COMPOSER-BARRA acima continua: sessão sem turno
+          não ganha a linha morta). */}
+      {columns >= 60 && rows >= RESPIRO_MIN_ROWS && state.turnAccounting !== undefined && (
+        <Box height={1} />
+      )}
 
       {/* F-RECUO (pedido do dono: "a mesma afastadinha que você deu na lateral do
           composer para todas as outras linhas") — o bloco do composer tem a barra `┃` +
@@ -5656,6 +5682,12 @@ export function App(props: AppProps): React.ReactElement {
             {...(showSuggestion ? { suggesting: true } : {})}
           />
         )}
+        {/* COMPOSER PARADO (16/09) — a linha das dicas sai durante o ask, mas o LUGAR dela
+            fica: sem isto a pilha abaixo do composer perdia 1 linha e ele descia a cada
+            aprovação (medido no tmux: 47 → 48 → 47). */}
+        {showHints && (hintState === 'ask' || hintState === 'ask-destructive') && (
+          <Box height={1} />
+        )}
       </Box>
     </Box>
   );
@@ -5687,6 +5719,11 @@ export function BlockView(props: {
   // `| undefined` EXPLÍCITO (exactOptionalPropertyTypes): os call-sites passam o
   // resultado de um índice que pode não existir (`blocks[i-1]?.kind`) direto.
   readonly prevKind?: SessionState['blocks'][number]['kind'] | undefined;
+  /**
+   * O bloco já está no `<Static>` (histórico, nunca repintado). Hoje só muda o lote de
+   * sub-agentes que desceu com filhos em segundo plano (ver `liveStartIndex`).
+   */
+  readonly settled?: boolean;
 }): React.ReactElement {
   const b = props.block;
   switch (b.kind) {
@@ -5769,7 +5806,7 @@ export function BlockView(props: {
       // EST-0969 (display) — indicador compacto dos sub-agentes paralelos: status
       // por filho, NUNCA os tokens crus de cada um (que interleavariam). Bloco
       // estável (sem jitter): só muda na transição de um filho (início/fim).
-      return <SubAgents childrenStatus={b.children} />;
+      return <SubAgents childrenStatus={b.children} settled={props.settled === true} />;
     case 'doctor':
       // EST-0970 (ticks AO VIVO) — checklist progressiva do `/doctor`: cada item
       // `pending` (spinner ⠋) "acende" p/ ✓/⚠/✗ quando o probe resolve aquele check.

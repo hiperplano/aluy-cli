@@ -58,7 +58,13 @@ const fakeBroker = {
 };
 
 const baseOpts = {
-  env: { HOME, USERPROFILE: HOME, ALUY_BROKER_URL: 'http://127.0.0.1:1/unused' },
+  env: {
+    HOME,
+    USERPROFILE: HOME,
+    ALUY_BROKER_URL: 'http://127.0.0.1:1/unused',
+    // Este smoke é da memória NATIVA; o mem0 real não pode receber nada (16/09).
+    ALUY_MEM0_URL: 'http://127.0.0.1:1',
+  },
   workspaceRoot: WS,
   memoryBaseDir: BASE,
   journalBaseDir: `${HOME}/.aluy`,

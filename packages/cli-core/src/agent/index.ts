@@ -303,6 +303,7 @@ export {
   type AuditClock,
 } from './control-audit.js';
 export { injectedInputItem, INJECTED_INPUT_LABEL } from './input-injection.js';
+export { closeInterruptedHistory, INTERRUPTED_TOOL_RESULT } from './interrupted-history.js';
 
 // EST-0977/0978 · ADR-0061 · CLI-SEC-11 (reaplicado) — AGENTES definidos em `.md`:
 // parser PURO do perfil (frontmatter name/description/tools/model + corpo=system

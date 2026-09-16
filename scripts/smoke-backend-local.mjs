@@ -96,6 +96,8 @@ function runBinaryAntiSsrf(port) {
         env: {
           ...process.env,
           HOME: TMP_HOME,
+          // Sem mem0 real: o smoke não pode gravar na memória do dono (16/09).
+          ALUY_MEM0_URL: 'http://127.0.0.1:1',
           OPENROUTER_API_KEY: EXPECTED_KEY,
           ALUY_TOKEN: '',
           NO_COLOR: '1',

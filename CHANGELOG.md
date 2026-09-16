@@ -14,6 +14,24 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.180] — 2026-09-16
+
+### Corrigido
+
+- ↩️ **Mensagem enviada durante o trabalho sumia depois de uma interrupção:** o texto encaixado no turno vivo ficava órfão quando o dono parava tudo (ESC/F8), e só era processado quando reenviado. Agora os encaixes que o agente não chegou a ler voltam para a frente da fila da TUI e entram sozinhos no próximo turno.
+- 🧠 **O agente esquecia o que fazia depois do ESC:** o turno interrompido era descartado do histórico. As chamadas de ferramenta sem resposta são fechadas (`closeInterruptedHistory`) e o turno fica na conversa com uma observação de interrupção.
+- 🧯 **ESC com sub-agentes rodando estourava erro** e um `human-cancel` antigo do barramento matava o turno seguinte. O cancelamento velho é descartado no início do loop, e o filho que segue em segundo plano devolve um resultado honesto ("segue em segundo plano") em vez de falha.
+- ⏱️ **Timeout de sub-agente:** o prazo passa a ser de INATIVIDADE (5 min). Cada evento do stream renova o relógio, e ele fica pausado enquanto o filho espera aprovação do dono. Com modelo lento, o filho não morre mais no meio de uma resposta que ainda está chegando.
+- 🙋 **Dois pedidos de aprovação simultâneos:** o segundo sobrescrevia o primeiro, que ficava pendurado. O resolvedor agora mantém uma fila.
+- 📌 **Composer subindo e descendo com a tela cheia:** uma âncora na escrita completa o quadro vivo quando ele encolhe (`ALUY_COMPOSER_ANCHOR=0` desliga). O turno abre num único estado, e o rodapé mantém a altura durante o ask. Um lote de sub-agentes em segundo plano deixou de prender o resto da conversa na região viva, o que fazia o Ink repintar a tela inteira (flicker).
+- 🎨 O raciocínio ("pensando…"/"pensou") ficou alinhado com a fala do aluy.
+- 🧑‍✈️ Quando o supervisor (Maestro) encerra o turno, uma nota passa a dizer isso.
+- 🔢 Os contadores de sub-agentes batem com o que está rodando. "N sub-agentes parados" agora diz a origem (F8, painel ou saída).
+- 📢 O aviso de headroom virou nota na TUI, em vez de uma linha solta no terminal.
+- 🗂️ A memória recuperada não repete itens nem traz a própria sessão, e vem rotulada como de sessões anteriores. Os testes e smokes não gravam mais no mem0 real.
+- 🧪 `upgrade-windows.test.ts` não depende mais do `HOME` no momento do import.
+- 🧹 Tarball `aluy-cli-1.0.0-rc.1.tgz` removido do repo (`/*.tgz` no `.gitignore`).
+
 ## [1.0.0-rc.138] — 2026-08-19
 
 ### Corrigido

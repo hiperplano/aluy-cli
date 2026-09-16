@@ -233,6 +233,15 @@ function floorAtLeast(v: string | undefined, floor: number, def: number): number
  *
  * @returns `{ memory, memoryScope }` se ligado, `undefined` se desligado.
  */
+/** Chaves que decidem SE e ONDE a memória fala com o sidecar (ver `resolveMemory`). */
+const MEMORY_ENV_KEYS = [
+  'ALUY_MEM_OFF',
+  'ALUY_MAESTRO_MEM0',
+  'ALUY_MEM0_URL',
+  'ALUY_MEM0_HOST',
+  'ALUY_MEM0_PORT',
+] as const;
+
 export function resolveMemory(opts?: {
   env?: Record<string, string | undefined>;
   memory?: MemoryEngine;
@@ -247,7 +256,25 @@ export function resolveMemory(opts?: {
 }):
   | { memory: MemoryEngine; memoryScope: string; memoryRecallScopes: readonly string[] }
   | undefined {
-  const e = opts?.env ?? process.env;
+  const injected = opts?.env ?? process.env;
+  // ISOLAMENTO DE TESTE (16/09) — um `env` injetado (HOME temporário, NO_COLOR…) SUBSTITUI o
+  // `process.env` e não carregava o `ALUY_MEM0_URL`/`ALUY_MEM_OFF` que o `vitest.config` põe
+  // no processo: a URL caía no sidecar REAL e a suíte gravava na memória do dono (802 itens
+  // no escopo do repo, quase todos literais de teste, que o recall devolvia como se fossem
+  // da conversa). As chaves de memória do processo valem sempre que o env injetado não as
+  // declara — quem quer um sidecar específico passa a URL no próprio env.
+  const e: Record<string, string | undefined> =
+    injected === process.env
+      ? injected
+      : {
+          ...injected,
+          ...Object.fromEntries(
+            MEMORY_ENV_KEYS.filter((k) => injected[k] === undefined).map((k) => [
+              k,
+              process.env[k],
+            ]),
+          ),
+        };
   const kill = e['ALUY_MEM_OFF'];
   if (kill && kill !== '0' && kill !== 'false') return undefined;
   // Amarrado ao TOGGLE do sidecar mem0 (mesmo do boot). Mem0 é a memória do modo

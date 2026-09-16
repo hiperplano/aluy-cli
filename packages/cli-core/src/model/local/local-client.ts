@@ -182,6 +182,8 @@ export class LocalModelClient implements ModelClient {
     let capped = false;
 
     for await (const ev of this.stream(args)) {
+      // Todo evento conta como sinal de vida (ver `StreamCallArgs.onActivity`).
+      args.onActivity?.();
       switch (ev.type) {
         case 'start':
           requestId = ev.request_id;

@@ -2080,6 +2080,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       });
       return hru !== undefined ? { headroomUrl: hru } : {};
     })(),
+    // TUI ⇒ avisos do headroom não vão crus para o TTY do Ink (ver `interactive` no wiring).
+    interactive: isTty,
     // F-SIDECAR-USO — PERFIL ativo p/ o chip de uso dos sidecars na StatusBar (só o
     // TURBO os sobe ⇒ só ele mostra o chip). MESMO default do headroom acima.
     profile: savedConfig.profile ?? 'turbo',
@@ -4598,6 +4600,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // limpo via clearScreen (cursor ao HOME ⇒ o eraseLines obsoleto fica inócuo). O
           // holder `clearScreenFn` é preenchido no `registerClearScreen` da App (após o mount).
           onOverflowRegimeExit: () => clearScreenFn?.(),
+          // Âncora do composer (16/09): com a tela cheia, o quadro vivo não encolhe — o composer
+          // para de subir e descer quando algo vivo some. `ALUY_COMPOSER_ANCHOR=0` desliga.
+          anchor: env.ALUY_COMPOSER_ANCHOR !== '0',
         })
       : undefined;
   const renderStdout = sync?.stdout ?? baseStdout;

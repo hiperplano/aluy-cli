@@ -86,7 +86,7 @@ import {
 import { AttachReader } from '../attach/index.js';
 import { TuiAskResolver } from '../ask/ask-resolver.js';
 import { TuiQuestionResolver } from '../ask/question-resolver.js';
-import { StreamingModelCaller, delegatingSink } from './streaming-caller.js';
+import { StreamingModelCaller, delegatingSink, type HeadroomNotice } from './streaming-caller.js';
 import { SessionController } from './controller.js';
 import { HooksConfigStore } from '../io/index.js';
 import { FileRoomStore } from './rooms/file-room-store.js';
@@ -146,6 +146,13 @@ export interface BuildSessionOptions {
    * Substitui a leitura env-only de antes (o proxy subia mas não era consumido).
    */
   readonly headroomUrl?: string;
+  /**
+   * Sessão INTERATIVA (TUI Ink montada). Os avisos do headroom viram NOTA (`refused`) ou só
+   * aparecem com `ALUY_DEBUG` (`savings`, que o chip `hdr` já mostra), em vez de irem crus
+   * para o stderr — que escreve no mesmo TTY do Ink e desloca o frame (16/09). Ausente ⇒
+   * stderr (headless/serviço, onde ele é o canal de diagnóstico).
+   */
+  readonly interactive?: boolean;
   /**
    * F-SIDECAR-USO — PERFIL ativo (`~/.aluy/config.json`), resolvido em run.tsx. Só o
    * TURBO sobe os sidecars, então só ele ganha o chip de uso na StatusBar; em LEVE o
@@ -1158,6 +1165,16 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // HUMANO conta: os callers de sub-agente/compactação são o mesmo sidecar e inflar
     // o número com eles tornaria o indicador ruído em vez de sinal.
     onHeadroomUsed: (ok: boolean) => sidecarUsage.record('headroom', ok),
+    ...(opts.interactive === true
+      ? {
+          onHeadroomNotice: (n: HeadroomNotice): void => {
+            // `replaceNote` coalesce: uma nota por título, não uma por chamada ao modelo.
+            if (n.kind === 'refused') controllerRef?.replaceNote('headroom', [n.text]);
+            else if (env['ALUY_DEBUG'] !== undefined)
+              controllerRef?.replaceNote('headroom (debug)', [n.text]);
+          },
+        }
+      : {}),
     // EST-0972 (BUG Custom) — slug Custom retomado: só sob `tier:'custom'` (bootModel).
     // Sem isto, a 1ª chamada após retomar uma sessão Custom ia SEM model ⇒ 422.
     ...(bootModel !== undefined ? { model: bootModel } : {}),

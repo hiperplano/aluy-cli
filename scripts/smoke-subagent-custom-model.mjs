@@ -106,6 +106,8 @@ async function main() {
     mode: 'unsafe',
     subAgents: { enabled: true, maxConcurrency: 1 },
     env: {
+      // Sem mem0 real: o smoke não pode gravar na memória do dono (16/09).
+      ALUY_MEM0_URL: 'http://127.0.0.1:1',
       ALUY_BROKER_URL: 'https://broker.mock.local',
       ALUY_IDENTITY_URL: 'https://id.mock.local',
     },

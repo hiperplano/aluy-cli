@@ -105,6 +105,14 @@ export interface StreamCallArgs {
    * gerar nem mutar. `undefined` ⇒ sem header (compat com chamadas não-loop).
    */
   readonly idempotencyKey?: string;
+  /**
+   * Chamado a cada evento recebido do stream (fala, raciocínio, tool-call, uso…) pela
+   * conveniência `call()`, que agrega o stream e só devolve no fim. Quem espera a chamada
+   * inteira (o heartbeat do sub-agente) usa isto para saber que ela está VIVA — sem ele,
+   * uma resposta longa era indistinguível de um modelo travado. Barato por contrato: o
+   * receptor não pode fazer trabalho pesado aqui.
+   */
+  readonly onActivity?: () => void;
 }
 
 const CHAT_PATH = '/v1/chat';
@@ -222,6 +230,7 @@ export class BrokerModelClient implements ModelClient {
     let capped = false;
 
     for await (const ev of this.stream(args)) {
+      args.onActivity?.();
       switch (ev.type) {
         case 'start':
           requestId = ev.request_id;

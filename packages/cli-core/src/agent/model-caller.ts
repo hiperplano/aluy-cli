@@ -110,6 +110,7 @@ export class BrokerModelCaller implements ModelCaller {
     readonly messages: readonly ChatMessage[];
     readonly idempotencyKey: string;
     readonly signal?: AbortSignal;
+    readonly onActivity?: () => void;
   }): Promise<ModelCallResult> {
     const attempts = Math.max(1, this.opts.transportRetries ?? 1);
     // EST-0962 (Custom) — pista de modelo CORRENTE: se há `tierSource` (a do PAI),
@@ -152,6 +153,7 @@ export class BrokerModelCaller implements ModelCaller {
               // A MESMA key em TODAS as tentativas desta chamada lógica.
               idempotencyKey: args.idempotencyKey,
               ...(args.signal ? { signal: args.signal } : {}),
+              ...(args.onActivity ? { onActivity: args.onActivity } : {}),
             });
             if (result.session_id !== undefined) this.brokerSessionId = result.session_id;
             return result;
