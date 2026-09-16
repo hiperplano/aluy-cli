@@ -111,10 +111,16 @@ jobs:
         working-directory: ${{ steps.pack.outputs.stage }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # A captura é `&& rc=0 || rc=$?` DE PROPÓSITO (achado real, rc.166 → rc.179): o runner
+        # executa este bloco com `bash -e {0}`, e o `set -uo pipefail` abaixo NÃO desliga o `-e`.
+        # Com `out="$(…)"; rc=$?` o shell morria NA atribuição — sem imprimir o erro do npm e
+        # sem chegar no grep — e a "idempotência" nunca rodou: toda tag cuja versão já estava no
+        # registry derrubava o job e pulava o GitHub Release. Comando à esquerda de `&&`/`||`
+        # não dispara o `-e`. Prova: packages/cli/tests/release-workflow-publish.test.ts.
         run: |
           set -uo pipefail
           v='${{ steps.ver.outputs.version }}'
-          out="$(npm publish --access public --tag "${{ steps.ver.outputs.disttag }}" 2>&1)"; rc=$?
+          out="$(npm publish --access public --tag "${{ steps.ver.outputs.disttag }}" 2>&1)" && rc=0 || rc=$?
           printf '%s\n' "$out"
           if [ "$rc" -eq 0 ]; then exit 0; fi
           # Só engole o caso EXATO "já publicada"; qualquer outra falha propaga.
