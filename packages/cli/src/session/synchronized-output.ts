@@ -289,6 +289,123 @@ function appendEolEraseToEachLine(body: string): string {
 }
 
 /**
+ * ÂNCORA DO COMPOSER (relato do dono, 16/09: "ainda fica movimentando… ele não fica o composer
+ * embaixo", "principalmente quando eu mando um texto") — com a tela CHEIA, o quadro vivo do
+ * INLINE nunca encolhe.
+ *
+ * O `log-update` do Ink escreve cada quadro como `eraseLines(n) + saída`. Se a saída nova é
+ * mais baixa, as linhas de baixo ficam vazias e tudo SOBE — composer incluído; o próximo
+ * crescimento o faz DESCER. Medido no tmux: o pedido de aprovação (≈9 linhas) sumindo levava o
+ * composer de 48 para 42; o "↳ encaixando…" e o "processando" sumindo logo depois do Enter, de
+ * 47 para 44. Consertar elemento por elemento não fecha a classe — qualquer coisa viva que
+ * some faz o mesmo.
+ *
+ * O conserto fica na ESCRITA, onde a altura de cada quadro é exata e conhecida na hora (nada de
+ * medir depois do render e pintar um quadro intermediário):
+ *  · quadro que encolhe ⇒ completado com linhas em branco no TOPO (acima de tudo que é vivo),
+ *    até a altura que já ocupava;
+ *  · quadro que cresce ⇒ consome essa reserva primeiro, na mesma escrita;
+ *  · histórico (`<Static>`: `eraseLines` puro, o texto, e o quadro sem erase) ⇒ a reserva
+ *    desconta as linhas que o histórico ocupou — o fim do quadro fica no mesmo lugar;
+ *  · o próximo `eraseLines` é ampliado para apagar também a reserva (o `log-update` não sabe
+ *    dela).
+ * Só age com a tela cheia (histórico escrito ≥ altura do terminal); antes disso o composer
+ * acompanha o conteúdo, como sempre. Nunca passa da altura do terminal. Qualquer coisa fora do
+ * padrão (contagem inesperada, `clearTerminal`) zera a âncora e deixa o Ink seguir sozinho.
+ * PURO (estado por instância).
+ */
+export function createFrameAnchor(getRows: () => number | undefined): {
+  transform(body: string): string;
+  reset(): void;
+} {
+  // Mesmas unidades do `log-update`: `saída.split('\n').length` (linhas visíveis + a do cursor).
+  let known = 0; // o que o log-update acha que está na tela
+  let pad = 0; // linhas em branco que ESTA âncora acrescentou ao último quadro
+  let historyLines = 0; // linhas de histórico escritas desde o último repaint total
+  // Depois de um `eraseLines` puro o Ink escreve o histórico e, em seguida, o quadro.
+  let afterClear: 'none' | 'history' | 'frame' = 'none';
+  let heldOnScreen = 0;
+  let clearedHistory = 0;
+
+  const eraseLines = (n: number): string =>
+    n <= 0 ? '' : `${ERASE_LINE}${CURSOR_UP_1}`.repeat(n - 1) + `${ERASE_LINE}${CURSOR_COL1}`;
+  const countOf = (s: string): number => s.split('\n').length;
+  const isFull = (rows: number, visible: number): boolean => historyLines + visible >= rows - 1;
+
+  /** A altura final (em unidades do log-update) do quadro `real`, dada a que precisa manter. */
+  const targetFor = (real: number, keep: number): number => {
+    const rows = getRows();
+    if (rows === undefined || !Number.isFinite(rows) || rows <= 0) return real;
+    if (!isFull(rows, Math.max(real, keep) - 1)) return real;
+    return Math.max(real, Math.min(rows, keep));
+  };
+
+  const reset = (): void => {
+    known = 0;
+    pad = 0;
+    historyLines = 0;
+    afterClear = 'none';
+    heldOnScreen = 0;
+    clearedHistory = 0;
+  };
+
+  return {
+    reset,
+    transform(body: string): string {
+      if (body.startsWith(CLEAR_TERMINAL) || body.startsWith(HARD_CLEAR)) {
+        reset();
+        return body;
+      }
+      const m = matchEraseLines(body);
+      if (m !== undefined) {
+        const content = body.slice(m.bodyStart);
+        // Contagem fora do esperado: não arriscamos apagar o que não sabemos que existe, nem
+        // reservar em cima de uma conta que já não bate — o Ink segue sozinho neste quadro.
+        const inSync = m.lines === known;
+        const onScreen = inSync ? known + pad : m.lines;
+        if (!inSync) pad = 0;
+        if (content.length === 0) {
+          // Clear que antecede histórico (ou um `/clear`): apaga a reserva junto.
+          afterClear = 'history';
+          heldOnScreen = onScreen;
+          clearedHistory = 0;
+          known = 0;
+          pad = 0;
+          return eraseLines(onScreen);
+        }
+        afterClear = 'none';
+        const real = countOf(content);
+        const target = inSync ? targetFor(real, onScreen) : real;
+        known = real;
+        pad = target - real;
+        return eraseLines(onScreen) + '\n'.repeat(pad) + content;
+      }
+      // Sem erase: histórico, 1º quadro, ou escrita que não é quadro (título, sino…).
+      if (!body.endsWith('\n')) return body;
+      if (afterClear === 'history') {
+        const lines = countOf(body) - 1;
+        clearedHistory += lines;
+        historyLines += lines;
+        afterClear = 'frame';
+        return body;
+      }
+      const real = countOf(body);
+      if (afterClear === 'frame') {
+        afterClear = 'none';
+        const target = targetFor(real, heldOnScreen - clearedHistory);
+        known = real;
+        pad = target - real;
+        return '\n'.repeat(pad) + body;
+      }
+      // 1º quadro: é o que está na tela, sem reserva.
+      known = real;
+      pad = 0;
+      return body;
+    },
+  };
+}
+
+/**
  * O TRANSFORM. Recebe os bytes de UM write do Ink e devolve a versão sobrescreve-no-
  * lugar. Idempotência de segurança: se o chunk NÃO começa com o `eraseLines` do Ink
  * (1º frame, Static append, versão diferente do ansi-escapes), devolve o chunk CRU —
@@ -733,6 +850,11 @@ export interface WrapOptions {
    * em terminais onde a viva sempre cabe (o caso comum).
    */
   readonly onOverflowRegimeExit?: () => void;
+  /**
+   * Âncora do composer no INLINE (ver `createFrameAnchor`). Default ON; `ALUY_COMPOSER_ANCHOR=0`
+   * desliga (o caller resolve a env).
+   */
+  readonly anchor?: boolean;
 }
 
 /**
@@ -758,6 +880,8 @@ export function wrapStdoutWithSync(
   const useSync = options.sync ?? true;
   const useOverwrite = options.overwrite ?? true;
   const onOverflowRegimeExit = options.onOverflowRegimeExit;
+  const useAnchor = options.anchor ?? true;
+  const frameAnchor = createFrameAnchor(() => original.rows);
   // F198 — rastreia o regime clearTerminal (inline) pelos BYTES p/ sinalizar a borda de saída.
   const overflowRegime = createOverflowRegimeTracker();
   let cleanedUp = false;
@@ -837,11 +961,14 @@ export function wrapStdoutWithSync(
     //  #145); #150 deu ao cockpit um transform full-paint flicker-free do `\x1b[2J`; mas o
     //  full-paint repintava a tela TODA por frame ⇒ flicker residual no xterm-sem-2026. O
     //  diff por-linha repinta SÓ o que mudou ⇒ zera o flicker em QUALQUER terminal.)
+    // ÂNCORA DO COMPOSER — só no inline, ANTES do overwrite (que traduz o `eraseLines` já
+    // ampliado pela reserva).
+    const inlineBody = !cockpitActive && useAnchor ? frameAnchor.transform(body) : body;
     const transformed = !useOverwrite
-      ? body
+      ? inlineBody
       : cockpitActive
         ? cockpitDiffer.transform(body)
-        : overwriteInPlace(body);
+        : overwriteInPlace(inlineBody);
     // BURACO-NO-MEIO-RESIZE — se um `primeClearOnNextFrame()` está ARMADO, este É o
     // "próximo write de frame": prepende o `HARD_CLEAR` CRU (não passa pelo `overwriteInPlace`
     // — mesma lógica do F58, precisa casar os bytes exatos do `/clear` de sempre) ANTES do
@@ -898,6 +1025,8 @@ export function wrapStdoutWithSync(
   // Idempotente: chamar de novo enquanto já armado só re-arma o fallback (1 clear, não N).
   const primeClearOnNextFrame = (): void => {
     pendingHardClear = true;
+    // A tela vai ser limpa e o histórico re-emitido do topo: nenhuma reserva sobrevive.
+    frameAnchor.reset();
     clearPendingClearFallback();
     pendingClearFallback = setTimeout(flushPendingClearAlone, ARM_CLEAR_FALLBACK_MS);
     // `unref()` — o timer NUNCA deve, sozinho, manter o processo vivo (ex.: exit logo
@@ -916,6 +1045,8 @@ export function wrapStdoutWithSync(
   // o frame seguinte é idêntico ao que está na tela ⇒ repinta 1 vez, sem dano).
   const setCockpit = (active: boolean): void => {
     if (active) cockpitDiffer.reset();
+    // Entrar ou sair do alt-screen troca a superfície: a âncora recomeça do zero.
+    frameAnchor.reset();
     cockpitActive = active;
   };
 

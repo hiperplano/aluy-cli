@@ -37,11 +37,17 @@ export interface SubAgentsProps {
    * NÃO colidir com a prop `children` do React — aqui é DADO de status, não nós JSX.
    */
   readonly childrenStatus: readonly SubAgentChildView[];
+  /**
+   * O lote já está no HISTÓRICO (escrito uma vez, nunca repintado) com filhos ainda rodando em
+   * segundo plano. Aí "rodando" viraria mentira congelada no scrollback; a palavra é "em segundo
+   * plano" (o estado ao vivo mora no painel do rodapé).
+   */
+  readonly settled?: boolean;
 }
 
 /** Palavra do estado (a11y): glifo NUNCA sozinho. `timeout`/`limit` ⇒ palavra honesta. */
-function statusWord(child: SubAgentChildView): string {
-  if (child.status === 'running') return 'rodando';
+function statusWord(child: SubAgentChildView, settled = false): string {
+  if (child.status === 'running') return settled ? 'em segundo plano' : 'rodando';
   if (child.status === 'done') return 'pronto';
   // EST-0982 — PARADO pelo usuário: cessar≠falha (a11y honesta).
   if (child.status === 'cancelled') return 'parado';
@@ -57,10 +63,13 @@ function statusWord(child: SubAgentChildView): string {
 }
 
 /** UMA linha de filho: `  [rust] ◷ rodando` / `  [rust] ✓ pronto · 1.2k tokens · 3 tools`. */
-function ChildLine(props: { readonly child: SubAgentChildView }): React.ReactElement {
+function ChildLine(props: {
+  readonly child: SubAgentChildView;
+  readonly settled?: boolean;
+}): React.ReactElement {
   const theme = useTheme();
   const c = props.child;
-  const word = statusWord(c);
+  const word = statusWord(c, props.settled === true);
   const glyph =
     c.status === 'running' ? (
       <Glyph name="clock" role="depth" />
@@ -80,7 +89,13 @@ function ChildLine(props: { readonly child: SubAgentChildView }): React.ReactEle
   //
   // A célula do glifo passa a ter largura FIXA, medida pela conta do próprio Ink.
   const nomeGlifo =
-    c.status === 'running' ? 'clock' : c.status === 'done' ? 'ok' : c.status === 'cancelled' ? 'err' : 'err';
+    c.status === 'running'
+      ? 'clock'
+      : c.status === 'done'
+        ? 'ok'
+        : c.status === 'cancelled'
+          ? 'err'
+          : 'err';
   // A célula do glifo vale 2 colunas SEMPRE, e o separador é 1 espaço em cima disso.
   // (A primeira tentativa usava `max(1, 2 - largura)`, que dá 1 nos dois casos e não
   // compensa nada — o `✔` seguia uma coluna à frente do `✘`.)
@@ -108,7 +123,8 @@ export function SubAgents(props: SubAgentsProps): React.ReactElement {
   const total = items.length;
   const running = items.filter((c) => c.status === 'running').length;
   // Cabeçalho compacto: `⊕ 3 sub-agentes:` (com `(N rodando)` enquanto há vivos).
-  const headTail = running > 0 ? ` (${running} rodando)` : '';
+  const headTail =
+    running > 0 ? ` (${running} ${props.settled === true ? 'em segundo plano' : 'rodando'})` : '';
   return (
     <Box flexDirection="column" paddingLeft={2} paddingBottom={1}>
       <Box>
@@ -120,7 +136,7 @@ export function SubAgents(props: SubAgentsProps): React.ReactElement {
         {headTail !== '' && <Role name="fgDim">{headTail}</Role>}
       </Box>
       {items.map((c, i) => (
-        <ChildLine key={`${c.label}:${i}`} child={c} />
+        <ChildLine key={`${c.label}:${i}`} child={c} settled={props.settled === true} />
       ))}
     </Box>
   );

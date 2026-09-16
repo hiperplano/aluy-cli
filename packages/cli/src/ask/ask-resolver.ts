@@ -42,12 +42,16 @@ export interface TuiAskResolverOptions {
 
 /**
  * O resolver concreto. Liga o loop (que chama `resolve`) à UI (que observa o
- * `pending` e chama `entry.resolve(...)`). Uma confirmação por vez (o loop é
- * sequencial; o box de ask captura o foco — handoff §10 regra 3).
+ * `pending` e chama `entry.resolve(...)`). A TELA mostra uma confirmação por vez (o box de
+ * ask captura o foco — handoff §10 regra 3); pedidos que chegam juntos (sub-agentes em
+ * paralelo) esperam numa FILA, na ordem de chegada.
  */
 export class TuiAskResolver implements AskResolver {
   private observer: AskObserver | null = null;
-  private current: PendingAskEntry | null = null;
+  // FILA de pedidos (o 1º é o que a tela mostra). Era UM `current`, sob a premissa "o loop é
+  // sequencial" — que os sub-agentes paralelos quebram: o 2º pedido sobrescrevia o 1º, que
+  // nunca aparecia nem resolvia (dois filhos "rodando" por 26 min, visto pelo dono em 16/09).
+  private readonly queue: PendingAskEntry[] = [];
   private readonly timeoutMs: number;
   private readonly setTimeoutFn: typeof setTimeout;
   private readonly clearTimeoutFn: typeof clearTimeout;
@@ -75,12 +79,12 @@ export class TuiAskResolver implements AskResolver {
   /** A UI registra-se p/ observar a confirmação pendente. */
   subscribe(observer: AskObserver): void {
     this.observer = observer;
-    observer(this.current);
+    observer(this.pending);
   }
 
   /** A confirmação pendente atual (p/ render/teste). */
   get pending(): PendingAskEntry | null {
-    return this.current;
+    return this.queue[0] ?? null;
   }
 
   /**
@@ -107,8 +111,10 @@ export class TuiAskResolver implements AskResolver {
         settled = true;
         if (timer) this.clearTimeoutFn(timer);
         if (signal) signal.removeEventListener('abort', onAbort);
-        this.current = null;
-        this.notify();
+        // Sai da fila (esteja na tela ou esperando); se era o da tela, o próximo assume.
+        const at = this.queue.indexOf(entry);
+        if (at >= 0) this.queue.splice(at, 1);
+        if (at === 0) this.notify();
         resolvePromise(resolution);
       };
 
@@ -122,7 +128,8 @@ export class TuiAskResolver implements AskResolver {
         settle(sanitize(resolution, request));
       };
 
-      this.current = { request, resolve: userResolve };
+      const entry: PendingAskEntry = { request, resolve: userResolve };
+      this.queue.push(entry);
 
       if (signal) signal.addEventListener('abort', onAbort, { once: true });
 
@@ -135,12 +142,13 @@ export class TuiAskResolver implements AskResolver {
         (timer as { unref?: () => void }).unref?.();
       }
 
-      this.notify();
+      // Só avisa a tela se este pedido é o que ela vai mostrar agora.
+      if (this.queue[0] === entry) this.notify();
     });
   }
 
   private notify(): void {
-    this.observer?.(this.current);
+    this.observer?.(this.pending);
   }
 }
 

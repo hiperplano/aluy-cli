@@ -114,7 +114,11 @@ export function PendingInjects(props: PendingInjectsProps): React.ReactElement |
   // como adivinhar.
   //
   // Com ciclo vivo: fala em iteração (e ela agora começa NA HORA — a injeção acorda o
-  // descanso). Sem ciclo: fala em mensagem, que é o que de fato vai consumi-la.
+  // descanso). Sem ciclo: entra na próxima volta do agente e, se ele terminar antes, vira
+  // o PRÓXIMO TURNO sozinha. Até 16/09 dizia "entra na próxima mensagem que você enviar" —
+  // e era verdade: a mensagem esperava o dono REPETIR um envio. Agora o que o turno não
+  // consumiu volta sozinho para a fila da TUI (`takeOrphanInjects`) e é enviado no repouso;
+  // a frase antiga mandaria reenviar à toa.
   //
   // A palavra "encaixando…" FICA. Tentei trocá-la por "aguardando" e dois testes
   // existentes reprovaram, com razão: ela carrega o sentido sem depender de glifo (a11y)
@@ -123,7 +127,7 @@ export function PendingInjects(props: PendingInjectsProps): React.ReactElement |
   const destino =
     props.cycleActive === true
       ? 'entra na próxima iteração'
-      : 'entra na próxima mensagem que você enviar';
+      : 'entra assim que o agente puder, sem reenviar';
   const shown = items.slice(0, VISIBLE_QUEUED);
   const hidden = items.length - shown.length;
   return (

@@ -75,8 +75,14 @@ export const DEFAULT_MAX_CONCURRENCY = 4;
  *
  * Ideia do Tiago: o teto TOTAL punia quem trabalhava (filho produtivo morto aos
  * 2min no meio do trabalho); o heartbeat só mata quem TRAVA.
+ *
+ * 16/09 — duas mudanças depois do relato "rodou quase meia hora e estourou no final; com
+ * modelos piores estoura mais": (1) cada EVENTO do stream do modelo passou a contar como
+ * sinal de vida (antes só o fim da chamada contava, e uma resposta longa era "travamento");
+ * (2) o padrão subiu de 2 para 5 minutos, porque um provider lento pode passar um bom tempo
+ * até o PRIMEIRO token — e ali não há evento nenhum para contar.
  */
-export const DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS = 120_000;
+export const DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 /**
  * @deprecated EST-0969 — renomeado p/ {@link DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS}. O
  * teto deixou de ser TOTAL (relógio de parede) e virou INATIVIDADE (heartbeat).
@@ -370,6 +376,12 @@ export interface SubAgentOutcome {
   /** Como o filho terminou (p/ auditoria/UX). */
   readonly stop: 'final' | 'limit' | 'timeout' | 'error';
   readonly usage: { iterations: number; toolCalls: number; tokens: number };
+  /**
+   * O filho NÃO terminou: foi desacoplado (ESC no pai, ou injeção do dono) e segue rodando em
+   * segundo plano — o resultado real chega depois, como dado. Não é falha nem conclusão; o
+   * relatório ao pai (`formatSubAgentResults`) diz isso com todas as letras.
+   */
+  readonly detached?: boolean;
 }
 
 /** Observador OPCIONAL do ciclo de vida dos filhos (a UI do @hiperplano/aluy-cli pluga). */
@@ -687,6 +699,10 @@ class IdleTimer {
   private stopped = false;
   /** Generation: descarta o `.then` de um sleep já re-armado (corrida do bump). */
   private generation = 0;
+  /** Houve `touch()` desde o último arme (ver `touch`). */
+  private touched = false;
+  /** Esperas por HUMANO em curso (ver `hold`). */
+  private holds = 0;
 
   constructor(
     private readonly idleMs: number,
@@ -701,6 +717,36 @@ class IdleTimer {
   /** Resolve `true` se o filho ficou ocioso por `idleMs`; `false` se `stop()`. */
   get done(): Promise<boolean> {
     return this.fired;
+  }
+
+  /**
+   * Sinal de vida BARATO (um por evento do stream do modelo): só marca que houve atividade.
+   * Não re-arma na hora — quem re-arma é o próprio disparo do timer, se encontrar a marca.
+   * Assim milhares de tokens custam UM timer por janela, em vez de um por token. O preço é a
+   * precisão: um filho que para de falar é morto entre `idleMs` e `2 × idleMs` depois do
+   * último sinal, e não exatamente em `idleMs` — aceitável para um anti-deadlock.
+   */
+  touch(): void {
+    if (!this.stopped) this.touched = true;
+  }
+
+  /**
+   * Suspende o relógio enquanto o filho espera o DONO (aprovação de uma tool). Esperar uma
+   * pessoa não é travar: o `pesquisador-web` do dono morreu em 16/09 com zero tools, parado
+   * na fila de aprovações enquanto ele aprovava as do irmão. Devolve a função que encerra a
+   * espera; ao encerrar a última, a janela recomeça do zero (a resposta é progresso). Esperas
+   * aninhadas/paralelas contam por referência.
+   */
+  hold(): () => void {
+    if (this.stopped) return () => undefined;
+    this.holds += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.holds -= 1;
+      if (this.holds === 0) this.bump();
+    };
   }
 
   /** Sinal de PROGRESSO: re-arma o relógio (zera a inatividade). No-op após stop. */
@@ -723,12 +769,19 @@ class IdleTimer {
   private arm(): void {
     if (this.stopped) return;
     this.armSignal = new AbortController();
+    this.touched = false;
     const gen = ++this.generation;
     const signal = this.armSignal.signal;
     void this.sleep(this.idleMs, signal).then(() => {
       // Re-armado por um bump (gen mudou) OU já encerrado OU abortado ⇒ no-op.
       if (this.stopped || gen !== this.generation || signal.aborted) return;
-      // O intervalo passou SEM bump nem stop: o filho TRAVOU.
+      // Houve atividade de stream nesta janela, ou o filho está esperando o dono: não
+      // travou — abre outra janela.
+      if (this.touched || this.holds > 0) {
+        this.arm();
+        return;
+      }
+      // O intervalo passou SEM bump, touch nem stop: o filho TRAVOU.
       this.stopped = true;
       this.resolveFired(true);
     });
@@ -1089,6 +1142,20 @@ export class SubAgentSpawner {
     // 1ª iteração); até lá, o intervalo de inatividade já corre — um filho que nasce
     // e NUNCA progride (modelo trava no 1º call) é morto após `idleMs`, como esperado.
     const idle = new IdleTimer(this.idleTimeoutMs, this.sleep);
+    // A espera pela aprovação do dono suspende o relógio (ver `IdleTimer.hold`). O prazo da
+    // própria confirmação, quando existe, continua sendo do resolvedor.
+    const heldAsk: AskResolver | undefined = childAsk
+      ? {
+          async resolve(request: AskRequest, signal?: AbortSignal): Promise<AskResolution> {
+            const release = idle.hold();
+            try {
+              return await childAsk.resolve(request, signal);
+            } finally {
+              release();
+            }
+          },
+        }
+      : undefined;
 
     // EST-0982 — ÚLTIMO snapshot do uso PRÓPRIO deste filho. O loop o atualiza a cada
     // débito (via `onUsage`). Quando o filho TERMINA normalmente, o `usage` vem do
@@ -1162,6 +1229,10 @@ export class SubAgentSpawner {
       // filho NUNCA é morto por timeout. O `kind` do sinal é DADO de auditoria/UX que
       // não precisamos aqui — qualquer sinal basta p/ re-armar.
       onProgress: (): void => idle.bump(),
+      // Cada evento do stream do modelo: sinal de vida barato (ver `IdleTimer.touch`). Sem
+      // isto só o FIM de cada chamada contava, e uma resposta mais longa que o limite matava
+      // o filho como "travado" com os tokens ainda chegando.
+      onModelActivity: (): void => idle.touch(),
       // EST-0982 — captura o uso PRÓPRIO do filho a cada débito, p/ reportá-lo MESMO
       // se o loop for abortado (timeout/cancelamento) antes de retornar um resultado.
       onUsage: (u): void => {
@@ -1170,7 +1241,7 @@ export class SubAgentSpawner {
         // ele morria aqui dentro e só aparecia no `onChildEnd` — o total pulava de zero.
         this.observer?.onChildProgress?.(profile.label, u);
       },
-      ...(childAsk ? { askResolver: childAsk } : {}),
+      ...(heldAsk ? { askResolver: heldAsk } : {}),
       // EST-0977/0978 — o SYSTEM PROMPT do agente nomeado (persona, corpo do `.md`) +
       // o CONTEXTO recortado pelo pai entram no canal `system` do filho (instrução
       // confiável do dono, NÃO conteúdo ingerido). Ambos opcionais: a persona vem 1º

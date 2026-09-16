@@ -142,9 +142,18 @@ export function useLocalModelPicker(args: UseLocalModelPickerArgs): LocalModelPi
   const [open, setOpen] = useState(false);
   const [query, setQueryState] = useState('');
   const [selected, setSelected] = useState(0);
-  const [names, setNames] = useState<readonly string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [usingFallback, setUsingFallback] = useState<boolean | null>(null);
+  // F-MODEL-LIVE — `names`/`loading`/`usingFallback` mudam JUNTOS quando a busca ao vivo
+  // resolve, então vivem num ÚNICO estado. A Ink monta a árvore em modo LEGADO do React 18:
+  // um `setState` fora de handler/efeito (o `.then` abaixo) renderiza e COMMITA na hora,
+  // sem lote. Com três `setState` separados a TUI mostrava estados que não existem
+  // ("carregou, mas a lista viva ainda não entrou") — e o teste do picker falhava 5 em 10
+  // vezes com a CPU disputada (16/09). Uma atualização só = um commit só.
+  const [list, setList] = useState<{
+    readonly names: readonly string[];
+    readonly loading: boolean;
+    readonly usingFallback: boolean | null;
+  }>({ names: [], loading: false, usingFallback: null });
+  const { names, loading, usingFallback } = list;
   // F-MODEL-LIVE — geração da busca AO VIVO corrente: incrementada a CADA `openPicker`.
   // Uma resposta que chega DEPOIS de uma reabertura mais nova (ex.: o dono reabriu o
   // picker antes da 1ª busca terminar, ou um `/provider` trocou o provider ativo no
@@ -161,33 +170,29 @@ export function useLocalModelPicker(args: UseLocalModelPickerArgs): LocalModelPi
     // slugs curados do `openrouter` embutido) — resolve o "picker não mostra nem o
     // modelo que já está em uso" sem depender da busca de rede terminar.
     const withActive = unionNames(declared, args.currentModel ? [args.currentModel] : []);
-    setNames(withActive);
+    const gen = (genRef.current += 1);
+    setList({ names: withActive, loading: args.remoteNames !== undefined, usingFallback: null });
     setOpen(true);
     setQueryState('');
     setSelected(0);
-    setUsingFallback(null);
-    const gen = (genRef.current += 1);
-    if (args.remoteNames === undefined) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (args.remoteNames === undefined) return;
     void args
       .remoteNames()
       .then((res) => {
         if (gen !== genRef.current) return; // reaberto/trocado no meio do voo — descarta
-        setLoading(false);
-        setUsingFallback(!res.ok);
         // UNIÃO — nunca substituição: o que já estava mostrado (declarado + ativo)
         // continua presente mesmo quando a busca falha ou o provider omite o ativo.
-        setNames((prev) => unionNames(prev, res.names));
+        setList((prev) => ({
+          names: unionNames(prev.names, res.names),
+          loading: false,
+          usingFallback: !res.ok,
+        }));
       })
       .catch(() => {
         // `remoteNames` já não deveria lançar (contrato: falha vira `{ok:false}`), mas
         // um catch aqui garante que a UI nunca fica "carregando" pra sempre.
         if (gen !== genRef.current) return;
-        setLoading(false);
-        setUsingFallback(true);
+        setList((prev) => ({ ...prev, loading: false, usingFallback: true }));
       });
   }, [args.catalog, args.remoteNames, args.currentModel]);
 

@@ -115,6 +115,14 @@ export interface RetryNotice {
   readonly reason: string;
 }
 
+/** Aviso do headroom, roteado por `onHeadroomNotice` (ou stderr, sem sink). */
+export interface HeadroomNotice {
+  /** `savings`: compressão aplicada (informativo). `refused`: desligada nesta sessão. */
+  readonly kind: 'savings' | 'refused';
+  /** Linha pronta, sem o prefixo `[headroom]` e sem `\n`. */
+  readonly text: string;
+}
+
 export interface StreamingModelCallerOptions {
   // ADR-0120 — broker OU local: o caller de stream da TUI não distingue.
   readonly client: ModelClient;
@@ -160,6 +168,16 @@ export interface StreamingModelCallerOptions {
    * Ausente ⇒ nada é contado (baseline).
    */
   readonly onHeadroomUsed?: (ok: boolean) => void;
+  /**
+   * Avisos do headroom (economia medida / compressão desligada). Presente ⇒ o aviso vai
+   * SÓ p/ cá (a TUI o transforma em nota ou o descarta). Ausente ⇒ `process.stderr`
+   * (headless/serviço, onde o stderr é o canal de diagnóstico). Motivo: na TUI inline um
+   * `process.stderr.write` cru escreve no MESMO TTY que o Ink, fora do `log-update`; o
+   * cursor anda uma linha e o próximo frame é apagado/redesenhado no lugar errado. O
+   * `patchConsole` do Ink só intercepta `console.*`, nunca `process.stderr.write`.
+   * NUNCA carrega conteúdo de mensagem: só contagens ou o motivo da recusa.
+   */
+  readonly onHeadroomNotice?: (notice: HeadroomNotice) => void;
   /** Para onde os tokens são emitidos ao vivo (a UI). */
   readonly sink: StreamSink;
   /**
@@ -309,10 +327,29 @@ export class StreamingModelCaller implements ModelCaller {
     return this.reasoningEffort;
   }
 
+  /**
+   * Destino único dos avisos do headroom. Com sink ⇒ só o sink (TUI: nada cru no TTY).
+   * Sem sink ⇒ stderr, como antes (headless/serviço). Um sink que lança não derruba o
+   * turno: o headroom é fail-open e o aviso dele também.
+   */
+  private emitHeadroomNotice(notice: HeadroomNotice): void {
+    const sink = this.opts.onHeadroomNotice;
+    if (sink === undefined) {
+      process.stderr.write(`[headroom] ${notice.text}\n`);
+      return;
+    }
+    try {
+      sink(notice);
+    } catch {
+      /* aviso é observação; nunca quebra a chamada ao modelo */
+    }
+  }
+
   async call(argsIn: {
     readonly messages: readonly ChatMessage[];
     readonly idempotencyKey: string;
     readonly signal?: AbortSignal;
+    readonly onActivity?: () => void;
   }): Promise<ModelCallResult> {
     // EST-1015 (headroom) — quando há URL do headroom, comprime as mensagens via o proxy ANTES
     // do broker (economia de tokens em saídas de tool verbosas). FAIL-OPEN (erro ⇒ originais).
@@ -329,9 +366,10 @@ export class StreamingModelCaller implements ModelCaller {
               ...(argsIn.signal ? { signal: argsIn.signal } : {}),
               onSavings: ({ before, after }) => {
                 if (before > after) {
-                  process.stderr.write(
-                    `[headroom] mensagens comprimidas: ${before} → ${after} tokens (-${before - after})\n`,
-                  );
+                  this.emitHeadroomNotice({
+                    kind: 'savings',
+                    text: `mensagens comprimidas: ${before} → ${after} tokens (-${before - after})`,
+                  });
                 }
               },
               // F-SIDECAR-USO — marca USO (compressão APLICADA) vs FALHA (fail-open:
@@ -341,10 +379,12 @@ export class StreamingModelCaller implements ModelCaller {
               onRefused: (reason) => {
                 if (!this.headroomRefusedWarned) {
                   this.headroomRefusedWarned = true;
-                  process.stderr.write(
-                    `[headroom] compressão DESLIGADA nesta sessão — ${reason}. ` +
-                      `Rodando sem headroom (fail-open).\n`,
-                  );
+                  this.emitHeadroomNotice({
+                    kind: 'refused',
+                    text:
+                      `compressão DESLIGADA nesta sessão — ${reason}. ` +
+                      `Rodando sem headroom (fail-open).`,
+                  });
                 }
               },
             }),
@@ -392,6 +432,7 @@ export class StreamingModelCaller implements ModelCaller {
     readonly messages: readonly ChatMessage[];
     readonly idempotencyKey: string;
     readonly signal?: AbortSignal;
+    readonly onActivity?: () => void;
   }): Promise<ModelCallResult> {
     for (let nativeAttempt = 0; nativeAttempt < 2; nativeAttempt++) {
       const withTools = this.nativeTools?.shouldSendTools() ?? false;
@@ -420,6 +461,7 @@ export class StreamingModelCaller implements ModelCaller {
       readonly messages: readonly ChatMessage[];
       readonly idempotencyKey: string;
       readonly signal?: AbortSignal;
+      readonly onActivity?: () => void;
     },
     withTools: boolean,
   ): Promise<ModelCallResult> {
@@ -482,6 +524,8 @@ export class StreamingModelCaller implements ModelCaller {
     });
 
     for await (const ev of stream) {
+      // Sinal de vida por evento (ver `ModelCaller.call`'s `onActivity`).
+      args.onActivity?.();
       switch (ev.type) {
         case 'start':
           requestId = ev.request_id;

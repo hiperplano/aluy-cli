@@ -117,6 +117,12 @@ describe('PendingInjects — indicador "encaixando…" do mid-turn (EST-0982)', 
     expect(out).toContain('rode os testes');
   });
 
+  it('sem ciclo, NÃO manda o dono reenviar — a mensagem entra sozinha (relato de 16/09)', () => {
+    const out = renderPending(['PING-1']);
+    expect(out).toContain('sem reenviar');
+    expect(out).not.toContain('próxima mensagem que você enviar');
+  });
+
   it('rótulo é DISTINTO da fila de submit ("encaixando", não "na fila")', () => {
     const out = renderPending(['btw']);
     expect(out).toContain('encaixando');

@@ -24,6 +24,7 @@ import {
   BrokerError,
   BrokerTransportError,
   ModelCallAbortedError,
+  closeInterruptedHistory,
   AuthError,
   RefreshUnavailableError,
   isCompactable,
@@ -226,7 +227,7 @@ import { createSessionCommandPort } from './session-command-port.js';
 import { sessionCommandTool } from '@hiperplano/aluy-cli-core';
 import { FlushThrottle, type FlushThrottleOptions } from './flush-throttle.js';
 import { backoffDelayMs, DEFAULT_BACKOFF, type BackoffPolicy } from './retry-backoff.js';
-import { isLiveBlock, sanitizeOrphans } from './render-split.js';
+import { liveStartIndex, sanitizeOrphans } from './render-split.js';
 import {
   resolveContextWindow,
   modelWindowFromConfig,
@@ -1289,6 +1290,9 @@ export class SessionController {
   // do bang reusa a fila do resolver; este flag faz a resolução voltar ao composer
   // (idle) em vez de `streaming` (não há turno de modelo no atalho de shell).
   private bangInFlight = false;
+  // Fase em que a sessão estava quando um ask abriu — o repouso a devolver quando o ask se
+  // resolve SEM turno vivo (ask de sub-agente em segundo plano). Ver `onAskChange`.
+  private phaseBeforeAsk: SessionState['phase'] | undefined;
   // Anti-flicker — coalescedor de flush do stream: os deltas atualizam `state` em
   // silêncio e a notificação (re-render) sai no máx. 1×/janela. `flushNow()` esvazia
   // nas transições (fim de turno / tool / ask) p/ nunca atrasar o último token.
@@ -1425,6 +1429,16 @@ export class SessionController {
   // `pendingInjected` (próximo turno). A catraca é INTOCADA: um efeito derivado RE-PASSA
   // `decide()`. Esvaziada ao drenar e no `clear()`.
   private liveInjected: HistoryItem[] = [];
+  // ENCAIXE ÓRFÃO — encaixes vindos do COMPOSER (marcados por `markLastInjectFromComposer`)
+  // que entraram na fila VIVA. Se o turno acaba antes de o loop drená-los (resposta final logo
+  // depois do Enter, pump do fan-out), eles são DEVOLVIDOS à fila da TUI
+  // (`takeOrphanInjects`) em vez de esperarem, invisíveis, um `submit` que ninguém dispara.
+  // Relato do dono (16/09): "só processa quando eu repito e envio de novo". Encaixes de
+  // outras origens (Telegram) e os guardados pelo caminho PARADO ficam de fora.
+  private returnableInjects = new Set<HistoryItem>();
+  // O item que a ÚLTIMA chamada de `injectInput` pôs na fila viva (null se foi guardado pelo
+  // caminho PARADO ou recusado) — o alvo de `markLastInjectFromComposer`.
+  private lastLiveInject: HistoryItem | null = null;
   // EST-0982 (mid-turn UX) — ecos REDIGIDOS (CLI-SEC-6) dos inputs enfileirados na fila
   // viva, na MESMA ordem. Quando o loop confirma a incorporação (`onProgress` inject),
   // drena-se este eco p/ a nota "↳ encaixado" — sem re-exibir texto cru/segredo.
@@ -1856,7 +1870,11 @@ export class SessionController {
         // todos via a cascata da raiz. O esc (interrupt) NÃO dispara estes sinais —
         // `cancelRoot` não cascateia — então os filhos SEGUEM trabalhando pós-esc,
         // cercados pelos MESMOS tetos (SharedBudget/heartbeat — E-A2).
-        childSignalOf: (label) => this.flowTree?.ensureChild(label, 'subagent').signal,
+        // O nó vem do registro por rótulo (preso à árvore em que o filho NASCEU): um turno
+        // novo recria `flowTree`, e um filho enfileirado pela concorrência não pode ganhar o
+        // sinal de uma árvore que não é a dele.
+        childSignalOf: (label) =>
+          (this.childNodes.get(label) ?? this.flowTree?.ensureChild(label, 'subagent'))?.signal,
         // EST-ROOMS-4 · ADR-0081 §6 — fábrica dos tools de SALA POR FILHO: cada filho
         // posta como SI MESMO (writerId = label dele, NUNCA `ROOM_SELF_ID`). Reusa o
         // RoomStore + as policies da sessão; `policyFor` lê a policy da sala criada por
@@ -2511,6 +2529,7 @@ export class SessionController {
     if (this.pendingInjected.length > 0) {
       attachments = [...this.pendingInjected, ...attachments];
       this.pendingInjected = [];
+      this.returnableInjects.clear();
       // BUG A — o indicador "encaixando…" (pendingInjectEchoes) sobrevive ao pump do
       // fan-out p/ a msg do dono NÃO sumir da tela; aqui, ao INCORPORAR de fato esses
       // pendentes no novo turno, o indicador é limpo (a msg deixou de estar "pendente").
@@ -2771,6 +2790,8 @@ export class SessionController {
         // EST-0982 — fecha a contabilidade do turno (carimba a duração final, congela
         // o rodapé). Idempotente (cancel/erro já podem ter fechado).
         this.endTurnAccounting();
+        // ...e o que ficou órfão volta p/ a fila da TUI, que o envia no repouso.
+        this.publishOrphanInjects();
       }
     }
   }
@@ -3188,6 +3209,7 @@ export class SessionController {
       // o próximo submit a incorpora, e o indicador só se apaga quando ela for de fato
       // consumida. No-op quando a fila está vazia.
       this.drainLiveInjectsToPending();
+      this.publishOrphanInjects();
       // ADR-0137 (Fatia 3) — LIMPA a decisão do juiz e qualquer gate de teto pendente: nada
       // do ciclo que acabou pode vazar para o próximo (sem auto-aprovação herdada — C4).
       this.lastCycleContinuation = undefined;
@@ -3822,6 +3844,13 @@ export class SessionController {
       this.setPhase('done');
     } else {
       this.rootFlow?.finish('final');
+      // PARADA DO SUPERVISOR VISÍVEL (16/09) — quando o Maestro encerra o turno, a resposta é
+      // SINTÉTICA (não passou pelo stream): sem esta nota a tela não mostrava nada, e a fala
+      // do dono ficava sem resposta nenhuma ("mandei ola e não respondeu").
+      const last = result.history[result.history.length - 1];
+      if (last?.role === 'observation' && last.toolName === 'maestro') {
+        this.pushNote('turno encerrado pelo supervisor', [result.stop.answer]);
+      }
       this.setPhase('done');
     }
     // EST-0982 (mid-turn UX) — turno TERMINOU de fato (final/degenerate, não o pause de
@@ -3950,6 +3979,7 @@ export class SessionController {
    * efeito). O `this.abort` legado segue abortado p/ compat. Auditado (nó raiz).
    */
   interrupt(): void {
+    this.demoteInjectsOnStop();
     if (this.flowTree) {
       const live = this.flowTree.liveChildren().length;
       this.controlAudit.recordCancel('root', this.rootFlow?.label ?? 'aluy');
@@ -4029,6 +4059,13 @@ export class SessionController {
     if (!this.flowTree) return false;
     const node = this.flowTree.node(nodeId);
     if (!node) return false;
+    // "Parar ESTE" na linha do agente principal (a seleção padrão do painel) é parar o
+    // TURNO dele — o mesmo gesto do ESC. `cancelOne('root')` descia a subárvore e derrubava
+    // todos os filhos, sem o `hardStopped` do F8: o PARAR-TUDO só existe como gesto explícito.
+    if (node.kind === 'root') {
+      this.interrupt();
+      return true;
+    }
     this.controlAudit.recordCancel(node.id, node.label);
     this.flowTree.cancelOne(nodeId);
     // Reflete a parada no indicador de sub-agentes (status `cancelled` — a11y honesta),
@@ -4056,10 +4093,21 @@ export class SessionController {
    * cessar≠agir (só aborta; sem `decide()`, sem efeito); estado coerente (todo nó
    * vivo vira `cancelled`). Auditado `actor_type=cli` (`cancel-all`).
    */
-  cancelAllFlows(): void {
+  cancelAllFlows(origin: 'f8' | 'panel' | 'exit' = 'f8'): void {
+    this.demoteInjectsOnStop();
     const hasLive =
       (this.flowTree !== null && (this.isTurnLive() || this.flowTree.liveChildren().length > 0)) ||
       this.detachedTrees.size > 0;
+    // QUEM PAROU FICA NA TELA. Um PARAR-TUDO com filhos vivos deixava só "✘ parado" nas
+    // linhas, sem dizer de onde veio — e o relato "o ESC parou os agentes" não tinha como
+    // ser separado de um F8/Ctrl+T→P. Na saída não há tela para a nota.
+    const live = this.countLiveChildren();
+    if (live > 0 && origin !== 'exit') {
+      const gesture = origin === 'panel' ? 'Ctrl+T → P' : 'F8';
+      this.pushNote('sub-agentes parados', [
+        `${live} sub-agente${live > 1 ? 's' : ''} parado${live > 1 ? 's' : ''} por ${gesture}.`,
+      ]);
+    }
     if (this.flowTree || this.detachedTrees.size > 0) {
       this.controlAudit.recordCancelAll();
     }
@@ -4094,6 +4142,7 @@ export class SessionController {
    * Devolve `false` se o texto é vazio ou o nó não existe.
    */
   injectInput(nodeId: string, input: string): boolean {
+    this.lastLiveInject = null;
     if (!this.flowTree) return false;
     const node = this.flowTree.node(nodeId);
     if (!node) return false;
@@ -4131,6 +4180,7 @@ export class SessionController {
         }
       }
       this.liveInjected.push(item);
+      this.lastLiveInject = item;
       // Eco REDIGIDO (CLI-SEC-6) na MESMA ordem da fila — drenado p/ a nota "↳ encaixado"
       // quando o loop confirmar a incorporação. Sem texto cru.
       this.pendingInjectEchoes.push(event.inputDigest ?? '');
@@ -4221,6 +4271,7 @@ export class SessionController {
     if (this.liveInjected.length === 0) return [];
     const drained = this.liveInjected;
     this.liveInjected = [];
+    for (const i of drained) this.returnableInjects.delete(i);
     return drained;
   }
 
@@ -4484,6 +4535,7 @@ export class SessionController {
     // EST-0982 (mid-turn) — zera também a fila VIVA e seus ecos (sem turno, nada a
     // incorporar; `/clear` esquece o contexto de conversa por inteiro).
     this.liveInjected = [];
+    this.returnableInjects.clear();
     this.pendingInjectEchoes = [];
     // EST-0973 — zera o LOG DE ATIVIDADE (a FlowTree acumulada do(s) turno(s)). Em
     // repouso (sem turno vivo) ⇒ split/cockpit mostram "sem atividade ainda".
@@ -5263,13 +5315,8 @@ export class SessionController {
     const kept = this.state.blocks.filter((b) => !(b.kind === 'note' && b.title === title));
     // F145 — insere a nota coalescida ANTES do sufixo vivo (mesma razão do `pushNote`): no fim
     // ela desalojaria um stream/tool vivo do rabo ⇒ órfão piscando + flicker. Idle ⇒ fim.
-    let at = kept.length;
-    for (let i = 0; i < kept.length; i += 1) {
-      if (isLiveBlock(kept[i]!)) {
-        at = i;
-        break;
-      }
-    }
+    // Mesma fronteira do render (um lote em segundo plano não conta como sufixo vivo).
+    const at = liveStartIndex(kept);
     const blocks = [...kept];
     blocks.splice(at, 0, { kind: 'note', title, lines });
     this.patch({ blocks });
@@ -6303,18 +6350,24 @@ export class SessionController {
     // (com o label do turno) até o fim do trabalho. Só força a fase se ainda
     // estávamos pensando/streamando (um onStart de uma 2ª chamada do loop, já em
     // asking/budget, não regride a fase).
-    if (this.state.phase === 'thinking' || this.state.phase === 'streaming') {
-      this.patch({ phase: 'streaming' });
-    }
+    const enterStreaming = this.state.phase === 'thinking' || this.state.phase === 'streaming';
     // EST-0944 (refino #121) — se o loop avisou que esta é a passada de auto-verificação
     // (`selfCheckInFlight`), o turno é INTERNO: marca-o `selfCheck:true` p/ ser REMOVIDO
     // ao finalizar (ou despromovido se virar trabalho real — `startToolLine`). Assim a
     // tagarelice de verificação NÃO vira bloco `Λ aluy` visível.
-    this.pushBlock({
+    const block: SessionBlock = {
       kind: 'aluy',
       text: '',
       streaming: true,
       ...(this.selfCheckInFlight ? { selfCheck: true } : {}),
+    };
+    // COMPOSER PARADO (16/09) — fase e caixa entram no MESMO patch. Em dois, a TUI pintava
+    // um quadro com a fase já em `streaming` (o indicador "pensando" some) e a caixa ainda
+    // ausente: o frame encolhia 2 linhas por um instante e o composer piscava para cima com
+    // a tela cheia (o Ink renderiza cada notificação na hora; não há agrupamento).
+    this.patch({
+      ...(enterStreaming ? { phase: 'streaming' as const } : {}),
+      blocks: [...this.state.blocks, block],
     });
   }
 
@@ -6776,6 +6829,65 @@ export class SessionController {
   }
 
   /**
+   * ENCAIXE ÓRFÃO — avisa a TUI de que há encaixes do composer que o turno não chegou a
+   * consumir. Só marca o estado; quem os busca (`takeOrphanInjects`) é o efeito da fila da
+   * TUI, que é o ÚNICO ponto que transforma texto em turno no repouso — com os freios que já
+   * tem (picker aberto, `!comando`, `/clear`, FIFO, fases de pausa). Um dreno próprio aqui
+   * abriria turno por fora deles. No-op quando não há órfão.
+   */
+  private publishOrphanInjects(): void {
+    if (this.returnableInjects.size === 0) return;
+    const orphans = this.pendingInjected.filter((i) => this.returnableInjects.has(i)).length;
+    if (orphans === 0) return;
+    this.patch({ orphanInjects: (this.state.orphanInjects ?? 0) + 1 });
+  }
+
+  /**
+   * ENCAIXE ÓRFÃO — a TUI chama logo depois de um `injectInput('root', …)` do COMPOSER para
+   * dizer "este é do dono, digitado aqui": se o turno acabar sem consumi-lo, ele volta à fila
+   * dela. Separado do `injectInput` para a assinatura dele seguir a mesma para todo chamador
+   * (o sink do Telegram não chama isto — a mensagem de lá tem origem e caminho próprios).
+   * No-op se a última injeção não foi para a fila viva.
+   */
+  markLastInjectFromComposer(): void {
+    if (this.lastLiveInject !== null) this.returnableInjects.add(this.lastLiveInject);
+    this.lastLiveInject = null;
+  }
+
+  /**
+   * ENCAIXE ÓRFÃO — entrega à TUI (e remove de `pendingInjected`) os encaixes do composer
+   * que o turno não consumiu, na ordem em que foram mandados. A TUI os põe na FRENTE da
+   * fila dela (foram digitados antes de qualquer item que ainda esteja lá) e os envia como
+   * fala do dono, sem ele precisar repetir. Chamar com o turno vivo é seguro: o dreno mid-turn
+   * da TUI os encaixa de novo.
+   */
+  takeOrphanInjects(): string[] {
+    const orphans = this.pendingInjected.filter((i) => this.returnableInjects.has(i));
+    for (const i of orphans) this.returnableInjects.delete(i);
+    if (orphans.length === 0) return [];
+    this.pendingInjected = this.pendingInjected.filter((i) => !orphans.includes(i));
+    if (this.pendingInjected.length === 0 && this.pendingInjectEchoes.length > 0) {
+      this.pendingInjectEchoes = [];
+      this.syncPendingInjects();
+    }
+    return orphans.map((i) => (i.role === 'user_inject' ? i.text : '')).filter((t) => t !== '');
+  }
+
+  /**
+   * ENCAIXE ÓRFÃO — numa parada EXPLÍCITA (2º ESC seco, Ctrl-C, F8, Ctrl+T→P, dispose) o que
+   * esperava encaixe NÃO volta sozinho: rodar a mensagem logo depois contrariaria o pedido de
+   * parar (a TUI também descarta a fila dela nesses casos). Fica guardado p/ o próximo
+   * `submit`, como antes. O que for mandado DEPOIS da parada segue o caminho normal.
+   */
+  private demoteInjectsOnStop(): void {
+    if (this.liveInjected.length > 0) {
+      this.pendingInjected.push(...this.liveInjected);
+      this.liveInjected = [];
+    }
+    this.returnableInjects.clear();
+  }
+
+  /**
    * EST-0982 (mid-turn UX) — fecha a contabilidade de INJEÇÃO do turno: o turno
    * terminou (`afterRun`/`onError` — sucesso/limit/erro/abort), então o indicador
    * "encaixando…" NÃO PODE ghostar. Um inject que chegou tarde (Enter quase no fim do
@@ -6792,10 +6904,14 @@ export class SessionController {
     }
     this.pendingInjectEchoes = [];
     this.syncPendingInjects();
+    this.publishOrphanInjects();
   }
 
   private onAskChange(pending: PendingAskEntry | null): void {
     if (pending) {
+      // Guarda a fase de ANTES do ask (só na 1ª publicação — um ask que chega com outro
+      // já aberto não sobrescreve o repouso original com `asking`).
+      if (this.state.phase !== 'asking') this.phaseBeforeAsk = this.state.phase;
       // ORDEM: o aviso ANTES do `patch` — o `patch` notifica, e um observador pode
       // responder na mesma pilha (ver `onQuestionChange`).
       this.avisarAprovacaoNoCanal(pending.request);
@@ -6805,7 +6921,19 @@ export class SessionController {
       // ask resolvido ⇒ volta a streaming (o loop do agente continua) ou, se foi o
       // ask de um `!comando` (EST-0958), a `runBang` reassume a fase no `finally`
       // (idle/done) — então aqui só limpamos o pending sem forçar `streaming`.
-      const next: Partial<SessionState> = this.bangInFlight ? {} : { phase: 'streaming' };
+      //
+      // SEM TURNO VIVO não há loop para "continuar": quem perguntou foi um sub-agente em
+      // segundo plano (o pai já parou no ESC). Forçar `streaming` ali prendia a sessão em
+      // "ocupada" para sempre — a fila da TUI não drenava, cada ESC só repetia "turno
+      // interrompido" e o Ctrl-C não saía (visto pelo dono em 16/09). Volta ao repouso
+      // em que estava.
+      const restPhase = this.phaseBeforeAsk;
+      this.phaseBeforeAsk = undefined;
+      const next: Partial<SessionState> = this.bangInFlight
+        ? {}
+        : this.isTurnLive()
+          ? { phase: 'streaming' }
+          : { phase: restPhase === 'done' || restPhase === 'error' ? restPhase : 'idle' };
       this.patch({ ...next, pendingAsk: undefined });
     }
   }
@@ -7032,12 +7160,44 @@ export class SessionController {
     return true;
   }
 
+  /**
+   * TURNO INTERROMPIDO FICA NA CONVERSA — o ESC encerrava o turno sem guardar nada, e o
+   * seguinte continuava do histórico ANTERIOR a ele: o modelo não sabia do pedido, das tools
+   * já rodadas nem dos sub-agentes que seguiam em segundo plano ("o que vc fez" → "nada
+   * ainda", visto pelo dono em 16/09). O loop agora entrega o parcial no próprio erro; aqui ele
+   * vira a semente da conversa (como o `afterRun` faz com o turno completo), com as tool-calls
+   * pareadas e uma observação dizendo que houve interrupção. Sem parcial (cancelamento fora do
+   * loop), nada muda.
+   */
+  private keepInterruptedTurn(err: ModelCallAbortedError): void {
+    const partial = err.partialHistory;
+    if (partial === undefined || partial.length === 0) return;
+    const liveChildren = this.flowTree?.liveChildren().length ?? 0;
+    const history: HistoryItem[] = [
+      ...closeInterruptedHistory(partial),
+      {
+        role: 'observation',
+        toolName: 'interruption',
+        text:
+          'O usuário interrompeu este turno (ESC) antes de ele terminar; o que aparece acima é ' +
+          'tudo o que foi feito até ali.' +
+          (liveChildren > 0
+            ? ` ${liveChildren} sub-agente(s) seguiram rodando em segundo plano; os resultados chegam ` +
+              'como dado quando concluírem.'
+            : ''),
+      },
+    ];
+    if (this.focus) this.focus.history = history;
+    else this.lastRunHistory = history;
+  }
+
   private onError(err: unknown): void {
     if (err instanceof ModelCallAbortedError) {
       // Interrupção do usuário (Ctrl-C / PARAR) — volta ao composer, sem bloco de erro.
       // EST-0982 — a raiz já foi `cancelled` por `interrupt()`/`cancelAllFlows`; se o
       // abort veio por outra via, carimba `cancelled` aqui (estado coerente do pai).
       if (this.rootFlow && !this.rootFlow.isTerminal()) this.rootFlow.finish('cancelled');
+      this.keepInterruptedTurn(err);
       // EST-0965 (REGRESSÃO de render) — SELA o turno `aluy` PARCIAL ao interromper. Sem
       // isto, o bloco fica `streaming:true` para sempre: ele NUNCA migra p/ o `<Static>`
       // (isLiveBlock ⇒ vivo) e PERMANECE na região viva. Ao submeter a PRÓXIMA mensagem,
@@ -7952,6 +8112,21 @@ export class SessionController {
     return false;
   }
 
+  /**
+   * Nó de cada filho VIVO, preso à árvore em que ele NASCEU. O observador do spawner só
+   * recebe o rótulo; resolver o nó por `this.flowTree` no FIM errava de árvore sempre que um
+   * turno novo começava com filhos desacoplados vivos (submit, wake do monitor, auto-retry):
+   * o nó da árvore antiga nunca recebia `finish()`, `liveChildren()` seguia contando o filho
+   * que já tinha acabado e o aviso ficava preso em "2 sub-agente(s) trabalhando" até o lote
+   * INTEIRO terminar.
+   */
+  private readonly childNodes = new Map<string, FlowNode>();
+
+  /** O nó do filho: o registrado no início; na falta, o da árvore corrente (compat). */
+  private childNodeOf(label: string): FlowNode | undefined {
+    return this.childNodes.get(label) ?? this.flowTree?.node(`root/${label}`);
+  }
+
   private detachSpawn(run: Promise<readonly SubAgentOutcome[]>, count = 0): void {
     const tree = this.flowTree;
     if (tree) this.detachedTrees.add(tree);
@@ -7975,6 +8150,15 @@ export class SessionController {
   /** DETACH-FIX (item 4) — espelha o nº de desacoplados vivos no estado (undefined quando 0). */
   /** Timer da histerese — some junto com a sessão (ver `dispose`). */
   private timerSomeIndicador: ReturnType<typeof setTimeout> | null = null;
+
+  /** Filhos live em TODAS as árvores (a mesma conta do aviso do rodapé). */
+  private countLiveChildren(): number {
+    let live = 0;
+    for (const t of this.detachedTrees) live += t.liveChildren().length;
+    const current = this.flowTree;
+    if (current !== null && !this.detachedTrees.has(current)) live += current.liveChildren().length;
+    return live;
+  }
 
   private publishDetachedCount(): void {
     // CONTA A VERDADE — os filhos VIVOS em TODAS as árvores, não um contador à parte.
@@ -8223,6 +8407,7 @@ export class SessionController {
         // o signal do pai (cancelar pai → filho) e tem o SEU AbortController (PARAR este
         // filho sem tocar irmãos — RES-C-3). nodeId estável por (sessão, label).
         const node = this.flowTree?.ensureChild(label, 'subagent');
+        if (node) this.childNodes.set(label, node);
         this.upsertSubAgentChild(label, {
           label,
           status: 'running',
@@ -8241,9 +8426,9 @@ export class SessionController {
         // vi atualizando durante o trabalho do agente". Estava certo: o único `setUsage`
         // do nó do filho vivia no `onChildEnd`, então o número ficava em zero a corrida
         // inteira e saltava para o total no instante em que ele acabava.
-        const no = this.flowTree?.node(`root/${label}`);
-        if (no === undefined) return;
-        no.setUsage(usage);
+        const childNode = this.childNodeOf(label);
+        if (childNode === undefined) return;
+        childNode.setUsage(usage);
         // E o BLOCO da conversa acompanha: é ele que a tela desenha (e que o rodapé fixa),
         // então atualizar só o nó da árvore deixaria o número subindo onde ninguém vê.
         const atual = this.state.blocks[lastSubAgentsIndex([...this.state.blocks], label)];
@@ -8263,7 +8448,9 @@ export class SessionController {
         // EST-0982 — fecha a contabilidade do filho na árvore: espelha o usage (tokens/
         // tools) e carimba a duração (relógio). Se o filho já foi PARADO (nó cancelado),
         // o status é `cancelled` (cessar≠falha) — a11y honesta.
-        const node = this.flowTree?.node(`root/${label}`);
+        const node = this.childNodeOf(label);
+        if (node !== undefined && this.childNodes.get(label) === node)
+          this.childNodes.delete(label);
         const wasCancelled = node?.stop === 'cancelled' || (node?.aborted ?? false);
         if (node) {
           node.setUsage(outcome.usage);
@@ -8345,13 +8532,8 @@ export class SessionController {
    */
   private insertBeforeLiveTail(block: SessionBlock): void {
     const blocks = [...this.state.blocks];
-    let at = blocks.length;
-    for (let i = 0; i < blocks.length; i += 1) {
-      if (isLiveBlock(blocks[i]!)) {
-        at = i;
-        break;
-      }
-    }
+    // Mesma fronteira do render (um lote em segundo plano não conta como sufixo vivo).
+    const at = liveStartIndex(blocks);
     blocks.splice(at, 0, block);
     this.patch({ blocks });
   }
@@ -8425,7 +8607,7 @@ export class SessionController {
       (this.flowTree !== null && (this.isTurnLive() || this.flowTree.liveChildren().length > 0)) ||
       this.detachedTrees.size > 0
     ) {
-      this.cancelAllFlows();
+      this.cancelAllFlows('exit');
     }
     this.flush.cancel();
     // EST-1012 — para o monitor de pressão de memória (sem timer órfão após o unmount).
@@ -8931,17 +9113,25 @@ function detachedOutcome(label: string, motivo: 'esc' | 'inject' = 'esc'): SubAg
   // Nada falhou na injeção: os filhos seguem trabalhando e o resultado REAL chega como
   // dado quando concluírem (`onDetachedOutcomes`). Reportar falha era mentira — e mentira
   // que o modelo lê e repassa.
+  //
+  // E no ESC também (16/09): a premissa "ninguém lê" nunca valeu para a TELA — o bloco do
+  // `spawn_agent` saía vermelho, "(error, sem sucesso)", e a sugestão virava "tente outra
+  // abordagem — o erro foi…" ("quando eu dou um esc no meio da execução de agentes ele
+  // estoura um erro"). E desde que o turno interrompido fica na conversa, o modelo também lê.
+  // Os filhos seguem rodando nos dois casos; só o texto muda.
   const esc = motivo === 'esc';
   return {
     label,
-    ok: !esc,
+    ok: true,
+    detached: true,
     result: esc
-      ? `turno interrompido (esc): o sub-agente "${label}" SEGUE rodando em segundo ` +
-        `plano; o resultado dele entra como dado no próximo turno.`
+      ? `o sub-agente "${label}" segue rodando em segundo plano — o dono apertou ESC e ` +
+        `parou só o turno principal. O resultado dele chega como dado quando concluir. ` +
+        `NÃO afirme que ele terminou nem invente o conteúdo dele.`
       : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
         `Você foi liberado para responder agora; o resultado dele chega como dado ` +
         `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
-    stop: esc ? 'error' : 'final',
+    stop: 'final',
     usage: { iterations: 0, toolCalls: 0, tokens: 0 },
   };
 }

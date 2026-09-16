@@ -9,6 +9,8 @@
 // CLI-SEC-10: a mensagem NUNCA carrega segredo — o broker já garante que o corpo
 // problem+json não cita credencial/provider; aqui só repassamos `detail`.
 
+import type { HistoryItem } from '../agent/context.js';
+
 /**
  * Catálogo de `code` do broker que o cliente reconhece (`broker.md` §8). Mantido
  * como string-union ABERTA (`string & {}`) para não acoplar o release do CLI ao
@@ -136,6 +138,14 @@ export class BrokerTransportError extends Error {
  * broker/transporte. O loop trata como "usuário/teto interrompeu", não falha.
  */
 export class ModelCallAbortedError extends Error {
+  /**
+   * O histórico do turno até o ponto do cancelamento (objetivo, falas, tool-calls e
+   * resultados já obtidos). Preenchido pelo `AgentLoop` ao propagar o cancelamento, para que
+   * quem conduz a conversa guarde o turno interrompido em vez de esquecê-lo. Ausente quando o
+   * cancelamento não passou por um loop.
+   */
+  partialHistory?: readonly HistoryItem[];
+
   constructor() {
     super('chamada de modelo cancelada.');
     this.name = 'ModelCallAbortedError';

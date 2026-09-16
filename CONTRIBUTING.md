@@ -32,5 +32,7 @@ o binário `aluy` vivem em `@hiperplano/aluy-cli`.
 
 ## Segurança
 
-Nenhum segredo versionado — só `.env.example` com placeholders. Credenciais ficam
-no keychain do SO, nunca em arquivo, `.env` ou log. O `gitleaks` roda na CI.
+Nenhum segredo versionado — só `.env.example` com placeholders. Credencial nunca fica
+em texto claro (nem em `.env`, nem em log): vai para o keychain do SO ou, onde não há
+keychain utilizável, para `~/.aluy/credentials.enc` (AES-256-GCM, chave derivada da
+máquina — emenda ao CLI-SEC-2, ver `CLAUDE.md`). O `gitleaks` roda na CI.

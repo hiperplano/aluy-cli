@@ -116,6 +116,38 @@ export interface BlockSplit {
 }
 
 /**
+ * Onde começa a região VIVA: o primeiro bloco vivo — ignorando um lote de sub-agentes que já
+ * ficou PARA TRÁS, isto é, seguido de algum bloco JÁ CONCLUÍDO (uma fala do dono, a resposta
+ * assentada do pai, uma tool resolvida…): a conversa andou e o lote segue em segundo plano.
+ * (A 1ª versão só olhava para uma fala nova do dono; com um filho em segundo plano e a resposta
+ * LONGA do pai logo depois, a tela voltou a repintar inteira — 41 repinturas em 5 s, 16/09.)
+ *
+ * Esse lote segue "vivo" enquanto algum filho roda em segundo plano (ESC ou mensagem
+ * encaixada), mas mantê-lo na região viva prendia ali TUDO o que vinha depois — os turnos
+ * novos inteiros. A região crescia até passar da altura do terminal e o Ink repintava a tela
+ * inteira a cada quadro (82 repinturas medidas no tmux em 16/09, com o composer pulando). O
+ * estado vivo desses filhos já mora no painel do rodapé; no histórico o lote aparece como
+ * "em segundo plano" (`SubAgents` com `settled`). PURO.
+ */
+export function liveStartIndex(blocks: readonly SessionBlock[]): number {
+  // Último bloco CONCLUÍDO da lista: um lote vivo antes dele já ficou para trás.
+  let lastSettled = -1;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (!isLiveBlock(blocks[i]!)) {
+      lastSettled = i;
+      break;
+    }
+  }
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]!;
+    if (!isLiveBlock(b)) continue;
+    if (b.kind === 'subagents' && i < lastSettled) continue;
+    return i;
+  }
+  return blocks.length;
+}
+
+/**
  * Divide os blocos em `{ done, live }`. A região viva é o sufixo contíguo a partir
  * do PRIMEIRO bloco vivo (tool running / aluy streaming). Tudo antes é concluído.
  *
@@ -123,13 +155,7 @@ export interface BlockSplit {
  * — então quando o stream finaliza, o último bloco também desce p/ o `<Static>`.
  */
 export function splitBlocks(blocks: readonly SessionBlock[]): BlockSplit {
-  let liveStart = blocks.length;
-  for (let i = 0; i < blocks.length; i++) {
-    if (isLiveBlock(blocks[i]!)) {
-      liveStart = i;
-      break;
-    }
-  }
+  const liveStart = liveStartIndex(blocks);
   // #13 (ghost "rodando") — um bloco VIVO (tool/bang `running`, aluy `streaming`) é mantido
   // FORA do `<Static>` ATÉ resolver: a região viva é o sufixo contíguo a partir do PRIMEIRO
   // bloco vivo. Antes, a âncora F142 fazia o OPOSTO quando o RABO da lista era concluído

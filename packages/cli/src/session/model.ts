@@ -794,6 +794,12 @@ export interface SessionState {
    */
   readonly pendingInjects: readonly string[];
   /**
+   * ENCAIXE ÓRFÃO — contador que SOBE cada vez que um turno termina deixando encaixes do
+   * composer sem consumir. A TUI reage buscando-os (`controller.takeOrphanInjects()`) e
+   * devolvendo-os à fila dela, que os envia no repouso. Só o valor mudar importa.
+   */
+  readonly orphanInjects?: number;
+  /**
    * `/ask` em VOO — perguntas do canal lateral (read-only, paralelo) ainda SEM resposta.
    * Renderizadas numa área SEPARADA da fila do agente principal (a fila é só pedido sem `/ask`).
    * Some quando a resposta chega (vira nota `↗ /ask:`). `{id, question}` (head redigido/curto).

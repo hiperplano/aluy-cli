@@ -410,9 +410,13 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
           <Box flexDirection="column">
             {reasoningView.map((linha, i) =>
               aluyFundo !== undefined && speechCols > 0 ? (
+                // O ` ` inicial é o MESMO respiro pintado que o cabeçalho e a fala
+                // (`<Markdown>`) têm depois da barra. Sem ele, "⋯ pensando"/"⋯ pensou"
+                // ficavam uma coluna à esquerda de tudo ("desposicionados em relação ao
+                // aluy e ao texto da caixa", relato do dono em 16/09).
                 <Text key={i} backgroundColor={aluyFundo}>
                   <Role name="fgDim">
-                    {linha + ' '.repeat(Math.max(0, speechCols - displayWidth(linha)))}
+                    {' ' + linha + ' '.repeat(Math.max(0, speechCols - 1 - displayWidth(linha)))}
                   </Role>
                 </Text>
               ) : (
