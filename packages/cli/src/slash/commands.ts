@@ -484,7 +484,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
   {
     // ADR-0154 — conector Telegram: setup DENTRO da sessão. `status` (read-only),
     // `allow/deny <chat-id>` (allowlist no config), `logout` (apaga o token). `login` (token)
-    // aponta p/ o terminal (prompt sem eco). A bridge em si segue inerte até a ativação gated.
+    // aponta p/ o terminal (prompt sem eco). A BRIDGE JÁ É ATIVA — sobe no boot com
+    // `aluy --telegram` (long-poll do chat allowlistado + tool `telegram_send`); sem token
+    // no keychain ela não sobe, e aí sim fica inerte, sem egress nenhum.
     name: 'telegram',
     summary: 'conector Telegram · status/allow/deny/logout (setup na sessão)',
     summaryKey: 'cmd.telegram',

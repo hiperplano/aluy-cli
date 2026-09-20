@@ -1,5 +1,6 @@
 // ADR-0158 — testes para `aluy service`: parser (`parseServiceCommand`) + runner
-// (`runService`) — list/status/install/uninstall (fase 1, sem runner de verdade).
+// (`runService`) — list/status/install/uninstall. O runner (start/stop/logs/attach)
+// tem cobertura própria; aqui o foco é o parser e os caminhos sem processo.
 //
 // Cobertura:
 //   (1) parseServiceCommand: list/status/install/uninstall, "not-yet" (fase 2),
