@@ -1,0 +1,73 @@
+name: 🐛 Bug
+description: Algo não funciona como deveria
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Antes de abrir: rode `aluy doctor`. Ele testa credencial, backend, MCP e
+        config de verdade, e resolve boa parte dos casos sozinho.
+
+        **Vulnerabilidade de segurança não vai aqui** — use o
+        [canal privado](https://github.com/hiperplano/aluy-cli/security/advisories/new).
+
+  - type: textarea
+    id: oque
+    attributes:
+      label: O que aconteceu
+      description: O que você esperava, e o que apareceu no lugar.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Como reproduzir
+      description: O menor caminho que faz acontecer de novo.
+      placeholder: |
+        1. `aluy --plan "…"`
+        2. …
+        3. acontece X
+    validations:
+      required: true
+
+  - type: input
+    id: versao
+    attributes:
+      label: Versão
+      description: A saída de `aluy --version`.
+      placeholder: "aluy 1.0.0-rc.182 (@hiperplano/aluy-cli-core 1.0.0-rc.182)"
+    validations:
+      required: true
+
+  - type: input
+    id: ambiente
+    attributes:
+      label: Sistema e terminal
+      placeholder: "Ubuntu 24.04 · WezTerm · Node 20.20.2"
+    validations:
+      required: true
+
+  - type: input
+    id: modelo
+    attributes:
+      label: Provider e modelo
+      description: Sem a chave, por favor.
+      placeholder: "openrouter · anthropic/claude-sonnet-4"
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Saída do `aluy doctor`
+      description: Opcional, mas costuma encurtar o diagnóstico. Ele já sai redigido.
+      render: text
+
+  - type: checkboxes
+    id: confirma
+    attributes:
+      label: Confirmações
+      options:
+        - label: Estou na versão mais recente (`/upgrade` ou `npm i -g @hiperplano/aluy-cli`)
+          required: true
+        - label: Não há credencial nem dado privado no que eu colei
+          required: true

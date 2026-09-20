@@ -86,9 +86,10 @@ antes de usar:
 - Credencial **nunca** vai para arquivo em claro, log ou `.env`, e o `gitleaks` roda
   na CI para garantir que nenhuma vaze para o repositório.
 
-Encontrou uma vulnerabilidade? Abra uma
-[issue](https://github.com/hiperplano/aluy-cli/issues) marcando como sensível, ou
-fale com os mantenedores antes de divulgar.
+Encontrou uma vulnerabilidade? **Não abra issue pública** — use o
+[canal privado](https://github.com/hiperplano/aluy-cli/security/advisories/new).
+O que conta como vulnerabilidade aqui (e o que não conta) está em
+[SECURITY.md](SECURITY.md).
 
 ## Contribuir
 
