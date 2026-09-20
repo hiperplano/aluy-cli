@@ -14,6 +14,13 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.182] — 2026-09-20
+
+### Alterado
+
+- 📖 **README refeito como porta de entrada, não como ficha técnica.** A revisão anterior consertou o que era falso e, no caminho, virou catálogo: tabela com 46 slash-commands, 13 entradas de `~/.aluy/`, lista de tools nativas. Tudo verificado — e tudo no lugar errado. Agora o arquivo abre com o que o produto é, como instalar e quatro exemplos que o MOSTRAM, seguidos de "por que este, e não outro" e de uma seção de **segurança** que diz em voz alta o que o usuário precisa saber antes de instalar: um server MCP roda com os privilégios dele e sem sandbox, o `--yolo` aprova tudo, e a credencial mora em cofre. Isso importa fora do GitHub: o README vai DENTRO do tarball e é a página do pacote no npm.
+- 📚 **A referência mudou de lugar, não sumiu.** `docs/comandos.md` (subcomandos, flags, os 46 slash-commands por propósito, as tools nativas e as duas superfícies que não tinham documentação nenhuma — **serviços** e **Telegram**) e `docs/configuracao.md` (o `~/.aluy/` inteiro, precedência, os dois cofres de credencial e por que o cifrado não é plano B, os sete eventos de hook, os arquivos de projeto e as env `ALUY_*`). A saída do alias `AGENT.md` ficou documentada onde importa para quem usa, com a instrução de renomear.
+
 ## [1.0.0-rc.181] — 2026-09-20
 
 ### Corrigido
