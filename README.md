@@ -14,7 +14,7 @@
   <a href="https://www.npmjs.com/package/@hiperplano/aluy-cli"><img alt="npm" src="https://img.shields.io/npm/v/@hiperplano/aluy-cli?color=%23cc3534&label=npm"></a>
   <a href="LICENSE"><img alt="Licença MIT" src="https://img.shields.io/badge/licen%C3%A7a-MIT-blue"></a>
   <a href="https://github.com/hiperplano/aluy-cli/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/hiperplano/aluy-cli/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <img alt="Node >= 20" src="https://img.shields.io/node/v/@hiperplano/aluy-cli">
+  <img alt="Node 20+" src="https://img.shields.io/node/v/@hiperplano/aluy-cli">
   <img alt="Linux · macOS · Windows" src="https://img.shields.io/badge/-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-informational">
 </p>
 
