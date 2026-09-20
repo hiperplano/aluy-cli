@@ -4,7 +4,7 @@
   "private": true,
   "description": "Aluy CLI — um agente de terminal. Roda local com o seu próprio provider de LLM (BYO). Monorepo: @hiperplano/aluy-cli-core (engine portável) + @hiperplano/aluy-cli (TUI Ink + binário `aluy`).",
   "type": "module",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hiperplano/aluy-cli.git"

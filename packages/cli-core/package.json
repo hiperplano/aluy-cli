@@ -7,7 +7,7 @@
     "agent",
     "engine"
   ],
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "homepage": "https://github.com/hiperplano/aluy-cli#readme",
   "repository": {
     "type": "git",
