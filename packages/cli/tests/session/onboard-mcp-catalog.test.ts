@@ -27,6 +27,23 @@ describe('onboard — catálogo de MCPs', () => {
     }
   });
 
+  // ACHADO REAL: o catálogo oferecia `uvx aluy-mcp-rpa`, e o pacote NÃO existe no PyPI
+  // (`/pypi/aluy-mcp-rpa/json` ⇒ 404). Quem aceitava a oferta no onboard recebia um erro
+  // no PRIMEIRO contato com o produto. O teste acima passava: a entrada era BEM-FORMADA,
+  // só apontava para o nada. Bem-formado não é instalável — por isso este teste olha o
+  // ALVO, e não a forma. Quando o pacote for publicado, é só trocar a expectativa para o
+  // nome puro (e tirar o `--from`).
+  it('o RPA aponta para uma origem que EXISTE (git), não para um nome ausente no PyPI', () => {
+    const rpa = mcpCatalog().find((m) => m.id === 'rpa');
+    expect(rpa, 'a entrada rpa sumiu do catálogo').toBeDefined();
+    expect(rpa!.command).toBe('uvx');
+    expect(rpa!.args).toEqual([
+      '--from',
+      'git+https://github.com/hiperplano/aluy-mcp-rpa',
+      'aluy-mcp-rpa',
+    ]);
+  });
+
   it('cada entrada é ACEITA pelo writer real e vira um mcp.json válido', () => {
     const base = mkdtempSync(join(tmpdir(), 'aluy-onboard-mcp-'));
     try {
