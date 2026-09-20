@@ -11,31 +11,12 @@
 // valores e põe um `npm` falso no PATH — assim qualquer regressão no YAML reprova aqui.
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { extractRunScript, readWorkflow } from './workflow-script.js';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const STEP = 'npm publish (idempotente)';
-
-/** Extrai o bloco `run: |` do passo `name` (dedentado) de um workflow. */
-function extractRunScript(yml: string, name: string): string {
-  const lines = yml.split('\n');
-  const start = lines.findIndex((l) => l.trim() === `- name: ${name}`);
-  if (start < 0) throw new Error(`passo não encontrado: ${name}`);
-  const stepIndent = lines[start].indexOf('-');
-  let i = start + 1;
-  while (i < lines.length && lines[i].trim() !== 'run: |') i++;
-  const body: string[] = [];
-  for (i++; i < lines.length; i++) {
-    const l = lines[i];
-    if (l.trim() !== '' && l.search(/\S/) <= stepIndent) break; // próximo passo
-    body.push(l);
-  }
-  const indent = Math.min(...body.filter((l) => l.trim()).map((l) => l.search(/\S/)));
-  return body.map((l) => l.slice(indent)).join('\n');
-}
 
 interface Run {
   status: number | null;
@@ -45,8 +26,7 @@ interface Run {
 describe('release.yml — npm publish idempotente sob `bash -e` (como o runner roda)', () => {
   let script: string;
   beforeAll(() => {
-    const yml = readFileSync(join(repoRoot, '.github/workflows/release.yml'), 'utf8');
-    script = extractRunScript(yml, STEP)
+    script = extractRunScript(readWorkflow('release.yml'), STEP)
       .replaceAll('${{ steps.ver.outputs.version }}', '1.0.0-rc.999')
       .replaceAll('${{ steps.ver.outputs.disttag }}', 'rc');
     expect(script).not.toContain('${{');
