@@ -14,6 +14,8 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.181] — 2026-09-20
+
 ### Corrigido
 
 - 🏷️ **O GitHub anunciava uma versão e o npm, outra:** a rc.180 foi a primeira release criada pelo workflow depois do conserto do publish idempotente — e saiu marcada `prerelease=true`, como manda a regra local daquele passo ("tem `-` ⇒ `--prerelease`"). Só que o GitHub esconde pre-release do badge **Latest**, da barra lateral do repo e de `/releases/latest`: o repositório ficou anunciando a **rc.179** (a última criada à mão, sem a flag) enquanto o `latest` do npm já servia a rc.180. Eram **duas políticas de canal** para a mesma versão — a do dist-tag, dois passos acima, já dizia "enquanto não há stable, o rc é o release corrente". Agora a pergunta "já existe um stable publicado?" é respondida **uma vez** (saída `stable` do passo `versão + dist-tag`) e consumida pelos dois. Enquanto não houver um `1.0.0`, o rc sai como Latest nos dois lugares; quando houver, volta a ser pre-release aqui e a não mexer no `latest` lá. Os flags passaram a ser aplicados **também em release que já existe** — sem isso, uma release com o canal errado ficava errada para sempre, porque re-rodar o workflow só reanexava o tarball.
