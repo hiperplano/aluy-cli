@@ -153,25 +153,33 @@ export function resolveMaestro(opts: ResolveMaestroOptions = {}): MaestroPort | 
         });
 
         // Se o judge retornou com mode:'llm' (não degradou), pondera.
-        if (judgeResult.mode === 'llm' && judgeResult.confidence > 0.6) {
+        if (judgeResult.mode === 'llm') {
           // F76 — Inv. I FLUIDEZ (ADR-0123): o judge (qwen2.5:0.5b) é PEQUENO e
           // OVERCONFIANTE — ao vivo escolheu `parar`/`pausar` @ conf 1.0 p/ um estado
           // SAUDÁVEL (progredindo, 0 erros). Como a wiring confiava em QUALQUER discord
           // @ >0.8, ele PARAVA um agente sadio = o LIMBO da F54 por uma porta NOVA. Como
           // a confiança de um modelo 0.5b é RUÍDO (sempre 0.8-1.0), o gate de confiança
-          // não filtra. Regra: o judge SÓ pode override em direção a MAIS fluidez
+          // não filtra.
+          //
+          // 20/09/2026 — os dois limiares (>0.6 e >0.8) FORAM REMOVIDOS. O comentário
+          // acima já dizia que eles não filtravam; o que ele não dizia é que o número
+          // era INVENTADO pelo próprio modelo — o prompt pedia `"confidence": <0.0 a
+          // 1.0>` e um 0.5B respondia o que quisesse (medido: devolveu 100). Dois `if`
+          // de decisão de autonomia em cima disso eram teatro: davam aparência de
+          // evidência a um campo que ninguém mediu. Quem protege é a regra ABAIXO, que
+          // é estrutural e não depende de número nenhum.
+          // Regra: o judge SÓ pode override em direção a MAIS fluidez
           // (`continuar`), NUNCA escalar p/ pausar/parar/recuperar sobre o motor-a. Os
           // sinais CRÍTICOS já roteiam direto no motor-a (não chegam aqui), e os tetos
           // DUROS seguem cercando runaway — então restringir o judge à fluidez é seguro.
           if (
             judgeResult.chosen === 'continuar' &&
-            judgeResult.chosen !== motorResult.decision.action &&
-            judgeResult.confidence > 0.8
+            judgeResult.chosen !== motorResult.decision.action
           ) {
             return {
               action: 'continuar',
               signals,
-              reason: `motor-a:${motorResult.decision.action} + judge:continuar@${judgeResult.confidence.toFixed(2)} — judge preferiu FLUIR (Inv. I)`,
+              reason: `motor-a:${motorResult.decision.action} + judge:continuar — judge preferiu FLUIR (Inv. I)`,
               ts: Date.now(),
             };
           }
@@ -179,7 +187,7 @@ export function resolveMaestro(opts: ResolveMaestroOptions = {}): MaestroPort | 
           // travar agente sadio): segue motor-a, anotando o que o judge achou (auditoria).
           return {
             ...motorResult.decision,
-            reason: `${motorResult.decision.reason} | judge:${judgeResult.chosen}@${judgeResult.confidence.toFixed(2)}`,
+            reason: `${motorResult.decision.reason} | judge:${judgeResult.chosen}`,
           };
         }
         // Judge degradou (mode:'heuristic') → segue motor-a puro.

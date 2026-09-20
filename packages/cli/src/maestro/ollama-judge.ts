@@ -92,7 +92,7 @@ export const DEFAULT_OLLAMA_JUDGE_CONFIG: Readonly<OllamaJudgeConfig> = Object.f
  *
  * O prompt pede resposta JSON estruturada com os campos:
  *   chosen — id da opção escolhida
- *   confidence — 0.0 a 1.0
+ *   confidence — NÃO é pedida ao modelo (ver CONFIANCA_NAO_MEDIDA)
  *   reasoning — raciocínio curto (até 200 chars)
  *
  * O contexto é injetado como informação adicional.
@@ -116,10 +116,41 @@ Opções:
 ${optionsText}${hint}${ctx}
 
 Responda APENAS com JSON no formato:
-{"chosen": "<id da opção escolhida>", "confidence": <0.0 a 1.0>, "reasoning": "<raciocínio curto>"}`;
+{"chosen": "<id da opção escolhida>", "reasoning": "<raciocínio curto>"}`;
 }
 
 // ─── Parse do veredito ─────────────────────────────────────────────────────
+
+/**
+ * Schema da resposta do juiz — o `format` do Ollama (JSON schema) que TRAVA a forma
+ * no servidor. `chosen` é um `enum` com os ids REAIS das opções desta pergunta.
+ *
+ * NÃO pede `confidence`. Medido em 20/09/2026 contra o `qwen2.5:0.5b` desta máquina:
+ * com o campo no schema, o modelo devolveu `confidence: 100` — um número inventado,
+ * fora até da escala pedida. Um modelo de 0.5B não tem como estimar a própria
+ * acurácia, e o campo alimentava dois limiares de decisão (ver `maestro/wiring.ts`).
+ */
+export function judgeResponseSchema(options: readonly JudgeOption[]): unknown {
+  return {
+    type: 'object',
+    properties: {
+      chosen: { type: 'string', enum: options.map((o) => o.id) },
+      reasoning: { type: 'string' },
+    },
+    required: ['chosen'],
+  };
+}
+
+/**
+ * Valor de `confidence` quando ela NÃO foi medida — que é o único caso hoje.
+ *
+ * O contrato `JudgeResult` exige um número, e não há como um `number` dizer "não sei".
+ * Então este valor existe para ser EXPLÍCITO: não é estimativa, é marcador. Nada pode
+ * decidir com base nele — `maestro/wiring.ts` não o compara com limiar, e a TUI não o
+ * exibe. Se um dia houver medição real (probe de logprobs renormalizado sobre as
+ * opções legais), é aqui que ela entra.
+ */
+export const CONFIANCA_NAO_MEDIDA = 0.5;
 
 /** Resultado do parse da resposta do Ollama. */
 export interface ParsedVerdict {
@@ -139,7 +170,7 @@ export function parseVerdict(raw: string, options: readonly string[]): ParsedVer
   // Fallback default se nada der certo.
   const defaultVerdict: ParsedVerdict = {
     chosen: options[0] ?? 'continuar',
-    confidence: 0.0,
+    confidence: CONFIANCA_NAO_MEDIDA,
     reasoning: 'fallback: parse mal-sucedido, default primeira opção',
     fallback: true,
   };
@@ -174,7 +205,7 @@ export function parseVerdict(raw: string, options: readonly string[]): ParsedVer
     if (raw.includes(optId)) {
       return {
         chosen: optId,
-        confidence: 0.5,
+        confidence: CONFIANCA_NAO_MEDIDA,
         reasoning: 'fallback: id encontrado no texto',
         fallback: true,
       };
@@ -201,11 +232,12 @@ function isValidVerdict(obj: Record<string, unknown>, validOptions: readonly str
   const chosen = obj['chosen'];
   if (typeof chosen !== 'string' || !validOptions.includes(chosen)) return false;
 
-  const confidence = obj['confidence'];
-  if (typeof confidence !== 'number' || !Number.isFinite(confidence)) return false;
-
+  // `confidence` NÃO é mais exigida: o schema enviado ao Ollama não a pede, porque um
+  // modelo de 0.5B não tem como estimar a própria acurácia (medido: devolveu 100).
+  // Servidor antigo que ignore `format` ainda pode mandá-la; se vier, é DESCARTADA.
+  // `reasoning` é opcional pelo mesmo motivo — o schema marca só `chosen` como required.
   const reasoning = obj['reasoning'];
-  if (typeof reasoning !== 'string') return false;
+  if (reasoning !== undefined && typeof reasoning !== 'string') return false;
 
   return true;
 }
@@ -213,8 +245,9 @@ function isValidVerdict(obj: Record<string, unknown>, validOptions: readonly str
 function toParsedVerdict(obj: Record<string, unknown>, fallback: boolean): ParsedVerdict {
   return {
     chosen: String(obj['chosen']),
-    confidence: Number(obj['confidence']),
-    reasoning: String(obj['reasoning']),
+    // NUNCA lê `obj['confidence']` — ver CONFIANCA_NAO_MEDIDA.
+    confidence: CONFIANCA_NAO_MEDIDA,
+    reasoning: typeof obj['reasoning'] === 'string' ? String(obj['reasoning']) : '(sem justificativa)',
     fallback,
   };
 }
@@ -302,6 +335,13 @@ export class OllamaJudgeEngine implements JudgeEngine {
             model: this.model,
             messages: [{ role: 'user', content: prompt }],
             stream: false,
+            // O SERVIDOR garante a forma (Ollama `format` = JSON schema). Antes a
+            // resposta era texto livre e o parse tentava CINCO estratégias de regex,
+            // caindo num default silencioso que escolhia a PRIMEIRA opção — ou seja,
+            // uma falha de parse virava um VEREDITO. Com o enum dos ids, o modelo não
+            // tem como devolver algo fora da lista. O parse permanece como rede de
+            // segurança para servidor antigo que ignore `format`.
+            format: judgeResponseSchema(input.options),
           }),
           signal: controller.signal,
         });

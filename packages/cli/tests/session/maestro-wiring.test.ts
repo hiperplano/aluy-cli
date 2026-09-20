@@ -1,7 +1,8 @@
 // EST-1137 (C3) · ADR-0123 §8-E1 — PROVA DE FIO do resolveMaestro.
 //
 // Testes SEM placebo, SEM `|| true`:
-//   AC 1: ALUY_MAESTRO off (default) ⇒ resolveMaestro retorna undefined (baseline).
+//   AC 1: ALUY_MAESTRO=0 ⇒ resolveMaestro retorna undefined (baseline). O default
+//         é **ON** — este cabeçalho dizia "off (default)" e estava errado (20/09/2026).
 //   AC 2: ON sem sidecars ⇒ rege usa só motor-a (judge degrada); decisão = motor-a.
 //   AC 3: ON com JudgeEngine stub devolvendo veredito mode:'heuristic' ⇒ cai no motor-a.
 //   AC 4: ON com JudgeEngine stub devolvendo veredito mode:'llm' ⇒ judge pondera.
@@ -224,19 +225,40 @@ describe('EST-1137 · rege — motor-a sempre + judge opcional', () => {
     expect(decision.reason).toContain('judge:');
   });
 
-  it('AC 4 — judge com mode:llm confiança moderada discorda ⇒ motor-a mantido', async () => {
+  it('AC 4 — judge tenta ESCALAR (pausar) ⇒ motor-a mantido, qualquer que seja a confiança', async () => {
+    // 20/09/2026 — este teste se chamava "confiança moderada discorda" e creditava o
+    // resultado ao limiar `> 0.8`. Ele passava pela razão ERRADA: `pausar` é escalada,
+    // e a regra ESTRUTURAL (judge só override p/ mais fluidez) já o barrava sozinha.
+    // Os limiares foram removidos — eram teatro sobre um número que o modelo inventava
+    // — e o teste passa igual, agora dizendo a razão verdadeira.
     const m = resolveMaestro({
       env: { ALUY_MAESTRO: '1' },
       judge: stubLlmJudge('pausar', 0.6),
     });
-    // 2+ sinais ⇒ judge é consultado, mas confiança baixa ⇒ motor-a mantido.
     const sigs: SupervisorSignal[] = [
       memPressureSignal(),
       createSignal('budget', 'warning', Date.now(), { limitKind: 'tokens' }),
     ];
     const decision = await m!.rege(sigs);
-    // Confiança 0.6 < 0.8 ⇒ motor-a mantido.
     expect(decision.action).toBe('recuperar');
+  });
+
+  // 20/09/2026 — a MUDANÇA de comportamento da remoção dos limiares, fixada:
+  // `continuar` com confiança baixa ANTES era ignorado (< 0.6 nem entrava; < 0.8 não
+  // dava override). Agora vence, porque a direção é o que importa — e a confiança
+  // nunca foi medida para começo de conversa.
+  it('judge prefere FLUIR com confiança BAIXA ⇒ ainda vence (a direção é que decide)', async () => {
+    const m = resolveMaestro({
+      env: { ALUY_MAESTRO: '1' },
+      judge: stubLlmJudge('continuar', 0.1),
+    });
+    const sigs: SupervisorSignal[] = [
+      memPressureSignal(),
+      createSignal('budget', 'warning', Date.now(), { limitKind: 'tokens' }),
+    ];
+    const decision = await m!.rege(sigs);
+    expect(decision.action).toBe('continuar');
+    expect(decision.reason).toContain('preferiu FLUIR');
   });
 
   it('zero sinais ⇒ motor-a fallback continuar (CA-MA5)', async () => {

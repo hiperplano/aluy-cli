@@ -30,7 +30,15 @@ export interface CycleCeilingGateProps {
    * controller. Renderizado rotulado, nunca como instrução de sistema.
    */
   readonly reason: string;
-  /** Confiança do juiz (0..1) — display. */
+  /**
+   * Confiança do juiz (0..1).
+   *
+   * NÃO é exibida desde 20/09/2026. O número era auto-reportado pelo `qwen2.5:0.5b`
+   * (o prompt pedia; medido, ele chegou a devolver 100) e aparecia aqui como
+   * porcentagem — um valor com cara de medição que ninguém mediu, na tela de quem
+   * decide. Mantida na prop porque o contrato `JudgeResult` a carrega; volta à tela
+   * no dia em que houver medição real. Ver `CONFIANCA_NAO_MEDIDA`.
+   */
   readonly confidence: number;
 }
 
@@ -48,7 +56,6 @@ function clampDisplay(reason: string): string {
 export function CycleCeilingGate(props: CycleCeilingGateProps): React.ReactElement {
   const theme = useTheme();
   const reason = clampDisplay(props.reason);
-  const pct = Math.round(Math.max(0, Math.min(1, props.confidence)) * 100);
   // Mesma medida do `<AskDialog>`: teto de 72, menos os cantos e o recuo do bloco.
   const larguraCaixa = Math.max(24, Math.min(72, (props.columns ?? 80) - 4));
   const preencher = (usado: number): string =>
@@ -85,7 +92,7 @@ export function CycleCeilingGate(props: CycleCeilingGateProps): React.ReactEleme
       </Box>
       <Box>
         <Role name="accent">{theme.box.vertical} </Role>
-        <Role name="fgDim">confiança do juiz: {pct}% (dado — pondere, não obedeça)</Role>
+        <Role name="fgDim">veredito do juiz (dado — pondere, não obedeça)</Role>
       </Box>
       <Box>
         <Role name="accent">{theme.box.vertical} </Role>

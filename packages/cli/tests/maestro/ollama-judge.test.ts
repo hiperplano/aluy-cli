@@ -14,6 +14,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { HostResolver, JudgeInput } from '@hiperplano/aluy-cli-core';
 import {
+  CONFIANCA_NAO_MEDIDA,
   OllamaJudgeEngine,
   parseVerdict,
   DEFAULT_OLLAMA_BASE_URL,
@@ -460,7 +461,7 @@ describe('EST-1131 · parseVerdict — parse da resposta do Ollama', () => {
   it('JSON puro → parse correto', () => {
     const v = parseVerdict('{"chosen":"continuar","confidence":0.9,"reasoning":"ok"}', options);
     expect(v.chosen).toBe('continuar');
-    expect(v.confidence).toBe(0.9);
+    expect(v.confidence).toBe(CONFIANCA_NAO_MEDIDA); // 20/09/2026 — nunca vem do modelo
     expect(v.reasoning).toBe('ok');
   });
 
@@ -470,7 +471,7 @@ describe('EST-1131 · parseVerdict — parse da resposta do Ollama', () => {
       options,
     );
     expect(v.chosen).toBe('recuperar');
-    expect(v.confidence).toBe(0.8);
+    expect(v.confidence).toBe(CONFIANCA_NAO_MEDIDA); // 20/09/2026 — nunca vem do modelo
   });
 
   it('JSON como substring no meio de texto → extrai', () => {
@@ -479,45 +480,49 @@ describe('EST-1131 · parseVerdict — parse da resposta do Ollama', () => {
       options,
     );
     expect(v.chosen).toBe('parar');
-    expect(v.confidence).toBe(0.7);
+    expect(v.confidence).toBe(CONFIANCA_NAO_MEDIDA); // 20/09/2026 — nunca vem do modelo
   });
 
   it('texto com id de opção mencionado → fallback textual', () => {
     const v = parseVerdict('Acho que devemos recuperar o contexto agora.', options);
     expect(v.chosen).toBe('recuperar');
-    expect(v.confidence).toBe(0.5);
+    expect(v.confidence).toBe(CONFIANCA_NAO_MEDIDA);
     expect(v.reasoning).toContain('fallback');
   });
 
   it('texto sem id de opção → fallback para primeira', () => {
     const v = parseVerdict('Não sei o que fazer, está tudo confuso.', options);
     expect(v.chosen).toBe('continuar');
-    expect(v.confidence).toBe(0.0);
+    expect(v.confidence).toBe(CONFIANCA_NAO_MEDIDA);
     expect(v.reasoning).toContain('fallback');
   });
 
-  it('confidence > 1.0 no JSON → ainda parseia mas o engine clampa', () => {
+  // 20/09/2026 — estes dois eram testes de CLAMP: o parse lia o número do modelo e o
+  // engine o espremia em 0..1. Agora o número é DESCARTADO na origem, então o teste que
+  // importa é outro, e é mais forte: fora de escala ou não, ele não chega ao veredito.
+  it('confidence absurda (999) do modelo → DESCARTADA, não clampada', () => {
     const v = parseVerdict(
       '{"chosen":"continuar","confidence":999,"reasoning":"muito confiante"}',
       options,
     );
-    expect(v.confidence).toBe(999);
+    expect(v.confidence).toBe(CONFIANCA_NAO_MEDIDA);
+    expect(v.confidence).not.toBe(999);
     expect(v.chosen).toBe('continuar');
   });
 
-  it('confidence negativa → parseia (clamp no engine)', () => {
+  it('confidence negativa do modelo → DESCARTADA', () => {
     const v = parseVerdict(
       '{"chosen":"parar","confidence":-5,"reasoning":"sem confiança"}',
       options,
     );
-    expect(v.confidence).toBe(-5);
+    expect(v.confidence).toBe(CONFIANCA_NAO_MEDIDA);
     expect(v.chosen).toBe('parar');
   });
 
   it('chosen não está nas options → fallback', () => {
     const v = parseVerdict('{"chosen":"explodir","confidence":1.0,"reasoning":"kaboom"}', options);
     expect(v.chosen).toBe('continuar');
-    expect(v.confidence).toBe(0.0);
+    expect(v.confidence).toBe(CONFIANCA_NAO_MEDIDA);
   });
 
   it('JSON sem campo chosen → fallback', () => {
@@ -525,26 +530,88 @@ describe('EST-1131 · parseVerdict — parse da resposta do Ollama', () => {
     expect(v.chosen).toBe('continuar');
   });
 
-  it('JSON sem campo reasoning → fallback', () => {
-    const v = parseVerdict('{"chosen":"recuperar","confidence":0.8}', options);
-    expect(v.chosen).toBe('continuar');
-    expect(v.confidence).toBe(0.0);
+  // 20/09/2026 — ANTES isto era fallback (o parse EXIGIA `reasoning`). O schema enviado
+  // ao Ollama marca só `chosen` como required, então resposta sem justificativa é um
+  // veredito VÁLIDO — tratá-la como falha descartaria uma escolha boa.
+  it('JSON sem campo reasoning → veredito VÁLIDO (não é mais fallback)', () => {
+    const v = parseVerdict('{"chosen":"recuperar"}', options);
+    expect(v.chosen).toBe('recuperar');
+    expect(v.fallback).toBe(false);
   });
 
   it('string vazia → fallback', () => {
     const v = parseVerdict('', options);
     expect(v.chosen).toBe('continuar');
-    expect(v.confidence).toBe(0.0);
+    expect(v.confidence).toBe(CONFIANCA_NAO_MEDIDA);
   });
 
   it('options vazias → fallback com "continuar"', () => {
     const v = parseVerdict('{"chosen":"x","confidence":0.5,"reasoning":"test"}', []);
     expect(v.chosen).toBe('continuar');
-    expect(v.confidence).toBe(0.0);
+    expect(v.confidence).toBe(CONFIANCA_NAO_MEDIDA);
   });
 });
 
 // ─── Configuração default ──────────────────────────────────────────────────
+
+describe('20/09/2026 · o SERVIDOR garante a forma, e a confiança não é inventada', () => {
+  /** Corpo JSON da 1ª chamada ao fetch. */
+  function corpoDaChamada(fetchFn: typeof fetch): Record<string, unknown> {
+    const calls = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<
+      [string, RequestInit]
+    >;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    return JSON.parse(String(calls[0]![1]!.body)) as Record<string, unknown>;
+  }
+
+  function engineCom(fetchFn: typeof fetch): OllamaJudgeEngine {
+    return new OllamaJudgeEngine({
+      baseUrl: 'http://127.0.0.1:11434',
+      fetchFn,
+      resolver: emptyResolver(),
+    });
+  }
+
+  it('a requisição manda `format` com o ENUM dos ids REAIS das opções', async () => {
+    const fetchFn = mockFetchOk(okOllamaResponse('{"chosen":"continuar"}'));
+    await engineCom(fetchFn).judge(sampleInput);
+
+    const format = corpoDaChamada(fetchFn)['format'] as
+      | { properties?: { chosen?: { enum?: string[] } } }
+      | undefined;
+    expect(format).toBeDefined();
+    expect(format!.properties!.chosen!.enum).toEqual(sampleInput.options.map((o) => o.id));
+  });
+
+  it('a requisição NÃO pede `confidence` — nem no schema, nem no prompt', async () => {
+    const fetchFn = mockFetchOk(okOllamaResponse('{"chosen":"continuar"}'));
+    await engineCom(fetchFn).judge(sampleInput);
+
+    const body = corpoDaChamada(fetchFn);
+    expect(JSON.stringify(body['format'])).not.toContain('confidence');
+    expect(JSON.stringify(body['messages'])).not.toContain('confidence');
+  });
+
+  it('resposta SEM `confidence` é veredito VÁLIDO (antes caía no fallback)', async () => {
+    const fetchFn = mockFetchOk(okOllamaResponse('{"chosen":"continuar"}'));
+    const r = await engineCom(fetchFn).judge(sampleInput);
+    expect(r.mode).toBe('llm');
+    expect(r.chosen).toBe('continuar');
+  });
+
+  // A REGRESSÃO QUE IMPORTA: servidor antigo que ignore `format` ainda pode mandar o
+  // campo. Se ele voltar a ser LIDO, os limiares de decisão ressuscitam em cima de um
+  // número inventado — que foi exatamente o defeito corrigido.
+  it('se o modelo MANDAR `confidence`, ela é DESCARTADA — nunca vira o veredito', async () => {
+    const fetchFn = mockFetchOk(
+      okOllamaResponse('{"chosen":"continuar","confidence":0.97,"reasoning":"x"}'),
+    );
+    const r = await engineCom(fetchFn).judge(sampleInput);
+    expect(r.chosen).toBe('continuar');
+    expect(r.confidence).toBe(CONFIANCA_NAO_MEDIDA);
+    expect(r.confidence).not.toBe(0.97);
+  });
+});
 
 describe('EST-1131 · configuração default', () => {
   it('default baseUrl = http://127.0.0.1:11434', () => {
