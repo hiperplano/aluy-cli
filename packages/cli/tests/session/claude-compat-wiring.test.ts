@@ -102,8 +102,8 @@ describe('EST-0979 · runSession compat Claude Code/Codex (não-TTY)', () => {
     expect(systems[0]!).toContain('convenções do Codex no repo');
   });
 
-  it('precedência: AGENT.md + CLAUDE.md ⇒ ambos compõem, AGENT.md primeiro', async () => {
-    writeFileSync(join(workspaceRoot, 'AGENT.md'), 'PRIMARIO-NATIVO');
+  it('precedência: ALUY.md + CLAUDE.md ⇒ ambos compõem, ALUY.md primeiro', async () => {
+    writeFileSync(join(workspaceRoot, 'ALUY.md'), 'PRIMARIO-NATIVO');
     writeFileSync(join(workspaceRoot, 'CLAUDE.md'), 'COMPAT-CLAUDE');
     const systems = await run();
     const sys = systems[0]!;

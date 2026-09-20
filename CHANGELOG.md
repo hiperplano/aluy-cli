@@ -28,6 +28,9 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 ### Alterado
 
 - ⚖️ **Licença: MIT.** O repositório contava três histórias diferentes — o `LICENSE` dizia "Todos os direitos reservados", os `package.json` publicavam `SEE LICENSE IN LICENSE`, e o `termos.html` do site, que o **instalador obriga a aceitar**, afirmava MIT. A fonte que o usuário lê antes de instalar era justamente a que ninguém tinha conferido contra o repositório. Decisão do dono: vale **MIT**. Trocados o `LICENSE` e o campo `license` dos quatro manifestos — os três `package.json` e o `package.publish.json`, que é o que realmente vai ao npm e que o pedido original não listava. As versões já publicadas **não mudam**: elas seguem com o texto antigo no tarball, e a MIT passa a valer da próxima rc em diante. Um guard novo (`license-sync.test.ts`) exige que os quatro manifestos e o arquivo `LICENSE` concordem — trocar de licença pela metade passa a reprovar no gate.
+### Removido
+
+- 🗑️ **O alias `AGENT.md` saiu da precedência de instruções de projeto** (decisão do dono). O CLI lia QUATRO arquivos na raiz — `ALUY.md`, `AGENT.md`, `AGENTS.md`, `CLAUDE.md` — e todos COMPÕEM (concatenam) no canal `system`. O `AGENT.md` (singular) era o nome anterior do nativo, já tinha saído da documentação do site, e sobrevivia só no código: uma quarta fonte de INSTRUÇÃO que ninguém mais anunciava. Agora são três: `ALUY.md` > `AGENTS.md` > `CLAUDE.md`. **Quem tiver um `AGENT.md` na raiz do projeto precisa renomeá-lo para `ALUY.md`** — caso contrário as instruções dele deixam de ser carregadas, em silêncio. Não bastava tirar do array: um teste novo exige a AUSÊNCIA e prova que um `AGENT.md` presente é IGNORADO, porque sem isso uma reintrodução passaria despercebida e o arquivo voltaria a entrar num canal de instrução.
 
 ## [1.0.0-rc.180] — 2026-09-16
 

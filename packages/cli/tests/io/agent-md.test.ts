@@ -1,6 +1,6 @@
-// EST-0964 — loadAgentMd: leitura CONFINADA do AGENT.md (config de projeto).
+// EST-0964 — loadAgentMd: leitura CONFINADA do ALUY.md (config de projeto).
 //
-// Prova que o AGENT.md só é lido de DENTRO da raiz confinada, respeita path-deny e
+// Prova que o ALUY.md só é lido de DENTRO da raiz confinada, respeita path-deny e
 // o teto de tamanho, e é fail-safe (ausência/escape ⇒ undefined). É config
 // confiável — mas lida com as MESMAS travas do canal de leitura (defesa-em-prof.).
 
@@ -81,9 +81,9 @@ describe('EST-0964 · loadAgentMd — confinado ao workspace', () => {
 });
 
 // EST-0979 — loadProjectInstructions: amplia as FONTES de instrução de projeto p/ o
-// padrão Claude Code (CLAUDE.md) e Codex (AGENTS.md), além do nativo AGENT.md. Mesma
+// padrão Claude Code (CLAUDE.md) e Codex (AGENTS.md), além do nativo ALUY.md. Mesma
 // injeção confiável no `system`; precedência cravada; confinamento intacto.
-describe('EST-0979 · loadProjectInstructions — AGENT.md + AGENTS.md + CLAUDE.md', () => {
+describe('EST-0979 · loadProjectInstructions — ALUY.md + AGENTS.md + CLAUDE.md', () => {
   let base: string;
   let root: string;
 
@@ -94,16 +94,22 @@ describe('EST-0979 · loadProjectInstructions — AGENT.md + AGENTS.md + CLAUDE.
   });
   afterEach(() => rmSync(base, { recursive: true, force: true }));
 
-  it('precedência cravada: ALUY.md > AGENT.md > AGENTS.md > CLAUDE.md', () => {
-    expect([...PROJECT_INSTRUCTION_FILENAMES]).toEqual([
-      'ALUY.md',
-      'AGENT.md',
-      'AGENTS.md',
-      'CLAUDE.md',
-    ]);
+  it('precedência cravada: ALUY.md > AGENTS.md > CLAUDE.md', () => {
+    expect([...PROJECT_INSTRUCTION_FILENAMES]).toEqual(['ALUY.md', 'AGENTS.md', 'CLAUDE.md']);
   });
 
-  it('só CLAUDE.md presente ⇒ injetado como instrução (igual ao AGENT.md)', async () => {
+  // 20/09/2026 — o alias `AGENT.md` (singular) saiu da lista. NÃO basta remover do
+  // array: sem um teste que exija a AUSÊNCIA, uma reintrodução passaria despercebida,
+  // e o arquivo voltaria a entrar no canal `system` — que é canal de INSTRUÇÃO.
+  it('AGENT.md (singular) NÃO é mais lido — o alias saiu', async () => {
+    expect([...PROJECT_INSTRUCTION_FILENAMES]).not.toContain('AGENT.md');
+    writeFileSync(join(root, 'AGENT.md'), 'ALIAS-REMOVIDO');
+    const r = await loadProjectInstructions(makeLoaderCtx(root));
+    expect(r.sources).toEqual([]);
+    expect(r.instructions).toBeUndefined();
+  });
+
+  it('só CLAUDE.md presente ⇒ injetado como instrução (igual ao ALUY.md)', async () => {
     writeFileSync(join(root, 'CLAUDE.md'), '# claude\n\nrode pnpm test.\n');
     const r = await loadProjectInstructions(makeLoaderCtx(root));
     expect(r.instructions).toContain('rode pnpm test');
@@ -124,18 +130,18 @@ describe('EST-0979 · loadProjectInstructions — AGENT.md + AGENTS.md + CLAUDE.
     expect(r.instructions).not.toContain('fonte:');
   });
 
-  it('os TRÊS presentes ⇒ COMPÕEM na ordem de precedência (AGENT.md primeiro)', async () => {
-    writeFileSync(join(root, 'AGENT.md'), 'NATIVO-ALUY');
+  it('os TRÊS presentes ⇒ COMPÕEM na ordem de precedência (ALUY.md primeiro)', async () => {
+    writeFileSync(join(root, 'ALUY.md'), 'NATIVO-ALUY');
     writeFileSync(join(root, 'AGENTS.md'), 'CODEX-OPENAI');
     writeFileSync(join(root, 'CLAUDE.md'), 'CLAUDE-CODE');
     const r = await loadProjectInstructions(makeLoaderCtx(root));
-    expect(r.sources).toEqual(['AGENT.md', 'AGENTS.md', 'CLAUDE.md']);
+    expect(r.sources).toEqual(['ALUY.md', 'AGENTS.md', 'CLAUDE.md']);
     const text = r.instructions!;
     // ordem: o nativo lidera, depois Codex, depois Claude Code.
     expect(text.indexOf('NATIVO-ALUY')).toBeLessThan(text.indexOf('CODEX-OPENAI'));
     expect(text.indexOf('CODEX-OPENAI')).toBeLessThan(text.indexOf('CLAUDE-CODE'));
     // cabeçalho discreto por fonte (compõe, não escolhe um).
-    expect(text).toContain('fonte: AGENT.md');
+    expect(text).toContain('fonte: ALUY.md');
     expect(text).toContain('fonte: CLAUDE.md');
   });
 
@@ -149,10 +155,10 @@ describe('EST-0979 · loadProjectInstructions — AGENT.md + AGENTS.md + CLAUDE.
     const secret = join(base, 'secret.md');
     writeFileSync(secret, 'SEGREDO FORA');
     symlinkSync(secret, join(root, 'CLAUDE.md'));
-    // AGENT.md legítimo coexiste — só ele deve contribuir.
-    writeFileSync(join(root, 'AGENT.md'), 'LEGIT');
+    // ALUY.md legítimo coexiste — só ele deve contribuir.
+    writeFileSync(join(root, 'ALUY.md'), 'LEGIT');
     const r = await loadProjectInstructions(makeLoaderCtx(root));
-    expect(r.sources).toEqual(['AGENT.md']);
+    expect(r.sources).toEqual(['ALUY.md']);
     expect(r.instructions).not.toContain('SEGREDO FORA');
   });
 
