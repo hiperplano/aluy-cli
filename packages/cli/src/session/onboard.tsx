@@ -347,10 +347,15 @@ export function mcpCatalog(): McpEntry[] {
     {
       id: 'rpa',
       label: 'RPA (Aluy)',
-      hintPt: 'automação visual de desktop — OCR/clica/digita · via uvx',
-      hintEn: 'visual desktop automation — OCR/click/type · via uvx',
+      hintPt: 'automação visual de desktop — OCR/clica/digita · via uvx (do git)',
+      hintEn: 'visual desktop automation — OCR/click/type · via uvx (from git)',
       command: 'uvx',
-      args: ['aluy-mcp-rpa'],
+      // O pacote NÃO está no PyPI (medido: /pypi/aluy-mcp-rpa/json ⇒ 404), então
+      // `uvx aluy-mcp-rpa` falhava no PRIMEIRO contato de quem aceitava a oferta.
+      // `--from git+…` resolve o projeto direto do repositório; o console-script
+      // `aluy-mcp-rpa` existe no `[project.scripts]` de lá, então o nome do comando
+      // continua o mesmo. Trocar para o PyPI depois é só remover o `--from`.
+      args: ['--from', 'git+https://github.com/hiperplano/aluy-mcp-rpa', 'aluy-mcp-rpa'],
     },
   ];
 }
