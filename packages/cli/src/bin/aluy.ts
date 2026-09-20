@@ -463,8 +463,8 @@ async function main(): Promise<void> {
     }
     case 'service': {
       printCommandHeader(); // F-CMD-HEADER — cabeçalho de marca (TTY-only).
-      // ADR-0158 — `aluy service <sub>`: SERVIÇOS plugáveis, fase 1 (list/status/
-      // install/uninstall — sem runner ainda). Espelho do `/service` in-session.
+      // ADR-0158 — `aluy service <sub>`: SERVIÇOS plugáveis (list/status/install/
+      // uninstall/start/stop/logs/attach). Espelho do `/service` in-session.
       const { runService } = await import('../commands/service.js');
       process.exitCode = await runService(action.argv);
       return;

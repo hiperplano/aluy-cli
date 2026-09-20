@@ -87,9 +87,9 @@ export type CliAction =
   // EST-1150 · ADR-0128 — `aluy cron`: agendamento PERSISTENTE (jobs disparados
   // pelo cron do SO, sem daemon próprio na v1). 1ª fatia: Linux (crontab).
   | { kind: 'cron'; argv: readonly string[] }
-  // ADR-0158 (aceito, APR-0148) — `aluy service <sub>`: SERVIÇOS plugáveis, fase 1
-  // (fundação SEM runner — list/status/install/uninstall). O parser fino do
-  // subcomando (list/status/install/uninstall + os "not-yet" da fase 2) mora em
+  // ADR-0158 (aceito, APR-0148) — `aluy service <sub>`: SERVIÇOS plugáveis. O parser
+  // fino do subcomando (list/status/install/uninstall/start/stop/logs/attach, o
+  // `create` que REDIRECIONA p/ a sessão e o `run --runner` interno) mora em
   // `commands/service.ts` (espelha o `cron`: argv cru repassado, sem duplicar regra
   // de parsing aqui). O canal PRINCIPAL de gestão é `/service` DENTRO da sessão
   // (ADR-0158 §10, emenda de aprovação); este shell é o espelho.
@@ -297,6 +297,8 @@ Uso:
   aluy workflows
   aluy cron
   aluy service [list | status <nome> | install <path|url> | uninstall <nome>]
+  aluy service [start <nome> | stop <nome> | logs <nome> [-f] | attach <nome>]
+  aluy telegram [login | allow <chat-id> | deny <chat-id> | status | logout]
 
 Opções:
   -v, --version   Mostra a versão e sai
@@ -424,6 +426,10 @@ Opções:
                   padrão o agente pode delegar subtarefas independentes a sub-agentes
                   que rodam em PARALELO (profundidade ≤1; herdam suas permissões e o
                   MESMO teto agregado de sessão). Use p/ forçar o modo mono-agente.
+  --telegram      ATIVA a bridge Telegram no boot: long-poll do chat allowlistado e a
+                  tool \`telegram_send\` p/ o agente responder por lá. Sem token no
+                  keychain a bridge NÃO sobe (avisa e segue; zero egress). Configure
+                  antes com \`aluy telegram login\` + \`aluy telegram allow <chat-id>\`.
   --max-tokens N  Teto de tokens da sessão (fail-safe anti-runaway). Default
                   1.000.000 — uso agêntico consome muito (um sub-agente sozinho usa
                   200k+). Também via ALUY_MAX_TOKENS (a flag vence). Validado e CLAMPADO
@@ -513,13 +519,17 @@ Comandos de auth:
            e a ORIGEM (default / env ALUY_* / config.json), na precedência real. Mostra
            também os outros arquivos (mcp/hooks/estado) e seus papéis. --json p/ script.
 
-Conector Telegram (preparação — a bridge ainda NÃO está ativa):
-  telegram login [--token <t>]   Guarda o token do bot (@BotFather) no KEYCHAIN do SO
-                                 (nunca em arquivo). Sem --token, pede no prompt sem eco.
+Conector Telegram (ATIVO — suba a bridge com \`aluy --telegram\`):
+  Com o token no keychain, a bridge faz long-poll do chat allowlistado, entrega o que
+  chega ao agente e responde pela tool \`telegram_send\`. SEM token ela não sobe — o boot
+  não falha e nada é enviado (zero egress). Configure com os subcomandos abaixo:
+  telegram login [--token <t>]   Guarda o token do bot (@BotFather) CIFRADO: keychain do
+                                 SO quando responde, senão ~/.aluy/credentials.enc — nunca
+                                 em claro. Sem --token, pede no prompt sem eco.
   telegram allow <chat-id>       Autoriza um chat-id (a allowlist do dono — default fechado).
   telegram deny <chat-id>        Remove um chat-id da allowlist.
   telegram status                Mostra token (redigido), allowlist e o estado da bridge.
-  telegram logout                Apaga o token do bot do keychain.
+  telegram logout                Apaga o token do bot DOS DOIS (keychain e cofre cifrado).
 
 Agentes .md:
   agents   Lista os perfis de sub-agente .md que o aluy MAPEOU — GLOBAIS
@@ -543,9 +553,12 @@ Workflows .md:
              nome, escopo e descrição. Um workflow é uma sequência de passos
              reutilizável. Read-only, sem modelo, sem rede.
 
-Serviços plugáveis — fase 1: fundação SEM runner ainda:
-  service [list]                 Lista os serviços instalados (nome, estado — sempre
-                                  "parado" nesta fase —, próximo schedule, descrição).
+Serviços plugáveis (um diretório-manifesto que trabalha sozinho, no horário):
+  O \`start\` sobe um runner DESTACADO que dorme até o schedule, abre um turno headless
+  pela atividade do \`workflow:\` e respeita \`until:\`/\`budget:\`. Quando precisa decidir,
+  ele pergunta ao dono pelo \`channel:\` e ESPERA — nunca segue por suposição.
+  service [list]                 Lista os serviços instalados (nome, estado, próximo
+                                  schedule, descrição). --group <g> filtra o grupo.
   service status <nome>          Detalhe de um serviço + a validação (cron/workflow)
                                   já conferida pelo registry.
   service install <path|url>     Copia um diretório local OU clona um repo git p/
@@ -554,10 +567,18 @@ Serviços plugáveis — fase 1: fundação SEM runner ainda:
                                   script, mcp.json, canal, autonomia) — exige
                                   confirmação (--yes pula, p/ script/CI).
   service uninstall <nome>       Remove o diretório do serviço (pede confirmação).
+  service start <nome>           Sobe o runner DESTACADO (segue vivo depois que o
+                                  terminal fecha). --yes pula a confirmação;
+                                  --group <g> itera o grupo (cada um é um processo).
+  service stop <nome>            Para o runner. --group <g> itera o grupo.
+  service logs <nome>            Mostra o runner.log (últimas 50 linhas). -n <N> muda
+                                  quantas; -f/--follow acompanha ao vivo.
+  service attach <nome>          ENTRA no serviço VIVO: acompanha o que ele faz e
+                                  conversa com ele sem derrubar o runner.
   Um serviço é um diretório-manifesto (service.md + agents/workflows/skills/…, o
-  mesmo formato já existente) — nada de grafo/YAML aninhado. O canal PRINCIPAL de
-  gestão é "/service" DENTRO da sessão (create/start/stop/attach chegam na fase 2);
-  este shell é o espelho, útil p/ script/automação.
+  mesmo formato já existente) — nada de grafo/YAML aninhado. \`create\` é CONVERSACIONAL
+  e o shell não tem canal pra entrevista: use "/service create" DENTRO da sessão, que
+  segue sendo o canal principal de gestão; este shell é o espelho, p/ script/automação.
 
 Providers e modelos:
   models [--backend local|broker] [--json]
@@ -594,7 +615,9 @@ Servers MCP:
 
 Notas:
   - O modelo é chamado direto pelo seu provider (BYO); o backend broker é opcional.
-  - Credencial SÓ no keychain do SO — nunca em texto em claro.
+  - Credencial nunca em claro: keychain do SO quando existe e é estável, senão o
+    cofre em arquivo CIFRADO (~/.aluy/credentials.enc, AES-256-GCM, chave derivada
+    da máquina). Servidor headless sem Secret Service usa o cofre em arquivo.
   - Loop de agente + ferramentas nativas + controle de permissão integrados.`;
 
 /**
