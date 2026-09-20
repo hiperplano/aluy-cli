@@ -111,4 +111,4 @@ Ver [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Licença
 
-Ver [`LICENSE`](LICENSE).
+MIT — ver [`LICENSE`](LICENSE).
