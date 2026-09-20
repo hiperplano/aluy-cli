@@ -48,4 +48,22 @@ describe('version sync (guard de release)', () => {
     const cli = JSON.parse(readFileSync(resolve(ROOT, 'packages/cli/package.json'), 'utf-8'));
     expect(cli.dependencies['@hiperplano/aluy-cli-core']).toBe(cli.version);
   });
+
+  // O manifesto da RAIZ ficou 152 versões para trás (rc.28 enquanto os pacotes já eram
+  // rc.180): ele é `private:true`, não vai para o registry, e por isso ninguém o bumpava —
+  // mas é o número que o `npm ci`/`npm pack` da raiz imprime, o que o lockfile grava e o
+  // que qualquer pessoa lê primeiro ao abrir o repo. O guard existente cobria só os dois
+  // pacotes, então a divergência passava por TODA release sem uma luz vermelha.
+  it('o package.json da RAIZ está na mesma versão dos pacotes', () => {
+    expect(pkgVersion('package.json')).toBe(pkgVersion('packages/cli/package.json'));
+  });
+
+  // O lockfile guarda a versão da raiz em DOIS lugares (o topo e `packages['']`). Editar
+  // o package.json e esquecer o lock deixa `npm ci` reescrevendo o arquivo no meio do gate.
+  it('o package-lock.json repete a versão da raiz nos dois lugares', () => {
+    const lock = JSON.parse(readFileSync(resolve(ROOT, 'package-lock.json'), 'utf-8'));
+    const root = pkgVersion('package.json');
+    expect(lock.version).toBe(root);
+    expect(lock.packages[''].version).toBe(root);
+  });
 });

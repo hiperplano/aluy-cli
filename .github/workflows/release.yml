@@ -1,13 +1,18 @@
 # release — em tag `v*` (ou disparo manual): valida, empacota o bundle monolítico
-# (embute @aluy/cli-core), publica no npm e cria/atualiza o GitHub Release com o
-# tarball anexado.
+# (embute @hiperplano/aluy-cli-core), publica no npm e cria/atualiza o GitHub Release
+# com o tarball anexado.
 #
 # A versão publicada é a do `packages/cli/package.json` (fonte única). O dist-tag
 # do npm é derivado: prerelease (`1.0.0-rc.1`) → `rc`; estável → `latest`. Assim o
-# RC não vira o `latest` (quem faz `npm i -g @aluy/cli` pega o estável; o rc vem
-# com `@rc`).
+# RC não vira o `latest` (quem faz `npm i -g @hiperplano/aluy-cli` pega o estável;
+# o rc vem com `@rc`).
 #
-# Pré-requisito: secret `NPM_TOKEN` (Automation/Granular com write em `@aluy`).
+# CANAL — uma decisão SÓ, no passo `versão + dist-tag` (saída `stable`), consumida
+# pelo dist-tag do npm E pelo GitHub Release. ENQUANTO NÃO HÁ STABLE o rc é o release
+# corrente nos DOIS lugares; quando houver um `1.0.0` publicado, o prerelease para de
+# mexer no `latest` do npm e passa a sair marcado como pre-release no GitHub.
+#
+# Pré-requisito: secret `NPM_TOKEN` (Automation/Granular com write em `@hiperplano`).
 
 name: release
 
@@ -26,6 +31,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+          # histórico COMPLETO: o passo de procedência precisa comparar o commit da tag
+          # com `main`, e o clone raso (depth=1) do default não tem com o que comparar.
+          fetch-depth: 0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -70,6 +78,47 @@ jobs:
           fi
           echo "disttag=$t" >> "$GITHUB_OUTPUT"
           echo "::notice::publicando $version (dist-tag: $t)"
+          # JÁ EXISTE UM STABLE PUBLICADO? Esta é a pergunta que decide o CANAL, e ela é
+          # respondida UMA vez, aqui — o dist-tag do npm e o GitHub Release leem esta saída.
+          # Antes a resposta existia só no passo do dist-tag, e o GitHub Release decidia por
+          # conta própria ("tem `-` ⇒ --prerelease"). As duas políticas divergiam: o npm
+          # apontava o `latest` para o rc novo enquanto o GitHub escondia esse MESMO rc do
+          # badge "Latest" (achado real na rc.180, a 1ª release criada pelo workflow depois
+          # do conserto do publish — o badge do repo ficou parado na rc.179).
+          # A consulta roda ANTES do publish DE PROPÓSITO: publicar sob a dist-tag `rc` não
+          # mexe no `latest`, então o valor é o mesmo depois, e o canal fica decidido antes
+          # de qualquer efeito. O `|| true` aqui NÃO afrouxa gate nenhum — é uma CONSULTA, e
+          # "pacote ainda não publicado" é estado legítimo (resposta vazia ⇒ sem stable).
+          cur="$(npm view @hiperplano/aluy-cli@latest version 2>/dev/null || true)"
+          if [ -n "$cur" ] && [[ "$cur" != *-* ]]; then stable=1; else stable=0; fi
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+          echo "latest_cur=$cur" >> "$GITHUB_OUTPUT"
+          echo "::notice::latest atual no npm: '${cur:-<nenhum>}' (stable=$stable)"
+
+      # PROCEDÊNCIA (achado real: 17 tags, da rc.148 à rc.175, apontam para commits que NÃO
+      # estão em `main`). A tag era criada na branch do PR e o merge era SQUASH: o commit
+      # tagueado morre fora do histórico, então `git checkout v1.0.0-rc.170` devolve um código
+      # inalcançável por `main`, e ninguém consegue ligar a versão publicada ao histórico
+      # (bisect, blame, auditoria). MEDIDO, não suposto: só a ÚLTIMA tag de cada branch tem a
+      # árvore do squash (rc.151 == 053ecec, rc.175 == 294120c). As INTERMEDIÁRIAS publicaram
+      # árvores que NUNCA existiram em `main` — rc.149 difere do squash em 29 arquivos, rc.166
+      # em 43 — e o commit tagueado é o ÚNICO registro do que foi ao npm. Por isso a tag não
+      # pode ser reapontada (apontaria para outro código) nem removida (o commit fica
+      # inalcançável). Tagueie DEPOIS do merge, no commit de `main`.
+      - name: tag tem de estar em main (procedência)
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          # FETCH_HEAD, e não `origin/main`: o remote-tracking só é atualizado de forma
+          # OPORTUNÍSTICA num fetch de branch nomeada, e depende do refspec configurado.
+          git fetch --no-tags origin main
+          if git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "::notice::$GITHUB_REF_NAME está em main"
+            exit 0
+          fi
+          echo "::error::$GITHUB_REF_NAME aponta para um commit FORA de main ($GITHUB_SHA)."
+          echo "::error::Faça o merge primeiro e crie a tag no commit de main."
+          exit 1
 
       - name: bundle + publish-pkg (embute o cli-core; scan de segredo)
         working-directory: packages/cli
@@ -140,8 +189,10 @@ jobs:
           # com `-` ou inexistente), aponta o latest p/ a versão recém-publicada — assim
           # o bare-install pega o rc mais novo. Quando houver um stable (latest sem `-`),
           # prereleases NÃO mexem no latest (mantém o stable).
-          cur="$(npm view @hiperplano/aluy-cli@latest version 2>/dev/null || true)"
-          if [ -z "$cur" ] || printf '%s' "$cur" | grep -q '-'; then
+          # "Já há stable?" foi respondido no passo `versão + dist-tag` (saída `stable`) —
+          # a MESMA resposta que o GitHub Release consome. O canal é decidido num lugar só.
+          cur='${{ steps.ver.outputs.latest_cur }}'
+          if [ '${{ steps.ver.outputs.stable }}' != '1' ]; then
             # RETRY (achado real na rc.119): o registry devolveu 403 AQUI segundos depois
             # de o MESMO token ter publicado com sucesso — a versão recém-publicada ainda
             # não tinha propagado. Sem retry, um transitório de segundos deixa o `latest`
@@ -175,10 +226,24 @@ jobs:
         run: |
           set -euo pipefail
           v="v${{ steps.ver.outputs.version }}"
-          pre=""
-          if [[ "${{ steps.ver.outputs.version }}" == *-* ]]; then pre="--prerelease"; fi
+          # CANAL — a mesma regra do dist-tag do npm, lida da MESMA saída (`ver.stable`).
+          # O GitHub esconde pre-release do badge "Latest", da barra lateral do repo e de
+          # `/releases/latest`. Marcar todo `1.0.0-rc.N` como pre-release enquanto NÃO existe
+          # um stable deixava o badge preso na última release criada à mão (rc.179), enquanto
+          # o npm já servia a rc.180 no `latest` — o repo dizia uma versão e o registry, outra.
+          # Enquanto não há stable, o rc É o release corrente nos dois lugares. Quando houver
+          # um `1.0.0`, o prerelease volta a ser pre-release aqui e a parar de mexer no npm.
+          if [ '${{ steps.ver.outputs.stable }}' = '1' ] && [[ "${{ steps.ver.outputs.version }}" == *-* ]]; then
+            flags=(--prerelease=true --latest=false)
+          else
+            flags=(--prerelease=false --latest=true)
+          fi
+          # Os flags são aplicados TAMBÉM quando a release já existe: sem isso, uma release
+          # criada antes (à mão ou por uma política velha) ficava com o canal errado para
+          # sempre — re-rodar o workflow anexava o tarball e não corrigia nada.
           if gh release view "$v" >/dev/null 2>&1; then
             gh release upload "$v" "${{ steps.pack.outputs.tgz }}" --clobber
+            gh release edit "$v" "${flags[@]}"
           else
-            gh release create "$v" "${{ steps.pack.outputs.tgz }}" --title "$v" $pre --generate-notes
+            gh release create "$v" "${{ steps.pack.outputs.tgz }}" --title "$v" "${flags[@]}" --generate-notes
           fi

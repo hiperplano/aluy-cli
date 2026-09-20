@@ -1,4 +1,4 @@
-# CI — lint, type-check, build e testes do monorepo (@aluy/cli-core → @aluy/cli).
+# CI — lint, type-check, build e testes do monorepo (@hiperplano/aluy-cli-core → @hiperplano/aluy-cli).
 # Sem masking: nada de `|| true` / `continue-on-error` / `--exit-zero`. Gate
 # vermelho bloqueia o merge.
 

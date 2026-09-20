@@ -14,6 +14,14 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Corrigido
+
+- 🏷️ **O GitHub anunciava uma versão e o npm, outra:** a rc.180 foi a primeira release criada pelo workflow depois do conserto do publish idempotente — e saiu marcada `prerelease=true`, como manda a regra local daquele passo ("tem `-` ⇒ `--prerelease`"). Só que o GitHub esconde pre-release do badge **Latest**, da barra lateral do repo e de `/releases/latest`: o repositório ficou anunciando a **rc.179** (a última criada à mão, sem a flag) enquanto o `latest` do npm já servia a rc.180. Eram **duas políticas de canal** para a mesma versão — a do dist-tag, dois passos acima, já dizia "enquanto não há stable, o rc é o release corrente". Agora a pergunta "já existe um stable publicado?" é respondida **uma vez** (saída `stable` do passo `versão + dist-tag`) e consumida pelos dois. Enquanto não houver um `1.0.0`, o rc sai como Latest nos dois lugares; quando houver, volta a ser pre-release aqui e a não mexer no `latest` lá. Os flags passaram a ser aplicados **também em release que já existe** — sem isso, uma release com o canal errado ficava errada para sempre, porque re-rodar o workflow só reanexava o tarball.
+- 🔗 **Tag de release fora de `main`:** 17 tags (`rc.148`–`rc.175`) apontam para commits que não estão no histórico de `main` — a tag era criada na branch do PR e o merge era **squash**, então o commit tagueado morre fora da linha principal e `git checkout v1.0.0-rc.170` devolve código inalcançável por `main` (bisect, blame e auditoria param ali). Medido, não suposto: só a **última** tag de cada branch tem a árvore do squash (`rc.151` == `053ecec`, `rc.175` == `294120c`) — as intermediárias publicaram no npm árvores que **nunca existiram em `main`** (`rc.149` difere do squash em 29 arquivos, `rc.166` em 43). Para essas versões, o commit órfão é o **único** registro do que foi distribuído: a tag não pode ser reapontada (passaria a indicar outro código) nem removida (o commit ficaria inalcançável). Ficam como estão, documentadas. Daqui para a frente, um passo novo recusa a release quando a tag não é ancestral de `main`, e o checkout traz o histórico completo para conseguir comparar.
+- 🔢 **A versão da raiz do monorepo estava 152 versões atrás** (`1.0.0-rc.28` enquanto os pacotes já eram `1.0.0-rc.180`). Por ser `private:true`, ela nunca vai ao registry e ninguém a bumpava — mas é o número que o lockfile grava e o primeiro que se lê ao abrir o repo. O guard de release cobria só os dois pacotes; agora cobre a raiz e as duas cópias no `package-lock.json`.
+- 📓 **Um mês de releases fora do CHANGELOG:** o arquivo pulava da rc.138 (19/08) para a rc.180 (16/09). As 30 versões do intervalo foram reconstruídas das tags, dos PRs e dos commits, com nota explícita do que é reconstrução — e o registro passou a dizer quais números foram queimados e quais versões (`rc.161`, `rc.162`) estão no npm sem tag.
+- 🏷️ Os comentários do `release.yml` ainda falavam do escopo `@aluy`, abandonado quando os pacotes viraram `@hiperplano/*`.
+
 ## [1.0.0-rc.180] — 2026-09-16
 
 ### Corrigido
@@ -31,6 +39,209 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 - 🗂️ A memória recuperada não repete itens nem traz a própria sessão, e vem rotulada como de sessões anteriores. Os testes e smokes não gravam mais no mem0 real.
 - 🧪 `upgrade-windows.test.ts` não depende mais do `HOME` no momento do import.
 - 🧹 Tarball `aluy-cli-1.0.0-rc.1.tgz` removido do repo (`/*.tgz` no `.gitignore`).
+
+<!-- RECONSTRUÍDO -->
+
+> **Nota sobre o intervalo rc.139 → rc.179.** Estas 30 versões foram publicadas **sem
+> entrada no CHANGELOG**: o arquivo pulava da rc.138 (19/08) direto para a rc.180 (16/09),
+> quase um mês de releases fora do registro que este documento promete manter. As entradas
+> abaixo foram **reconstruídas** das tags, dos PRs e das mensagens de commit — são o
+> **título e o escopo** de cada versão, não a prosa detalhada das entradas escritas na
+> época. A descrição completa de cada achado está no corpo do commit citado. Nada aqui foi
+> inferido: toda linha sai de um commit que existe.
+>
+> **Números queimados:** `rc.144`, `rc.154`, `rc.155`, `rc.157`–`rc.160` e `rc.163`–`rc.165`
+> nunca foram publicados. **`rc.161` e `rc.162` estão no npm sem tag e sem GitHub Release** —
+> publicadas por disparo manual do workflow a partir da janela entre a rc.156 e a rc.166.
+>
+> **Procedência:** as tags `rc.148`–`rc.175` apontam para commits que **não estão em `main`**
+> (a tag era criada na branch do PR, e o merge era squash). Só a **última** tag de cada branch
+> tem a árvore do squash; as intermediárias publicaram árvores que nunca existiram em `main`,
+> e o commit tagueado é o único registro delas. Onde a entrada cita dois hashes, o primeiro é
+> o commit tagueado e o segundo, o squash que entrou em `main`.
+
+## [1.0.0-rc.179] — 2026-09-11
+
+### Nesta versão
+
+- 🧠 Cache: o que faltava era **roteamento pegajoso** — e o piso era baixo demais (`27d0ecc`).
+
+## [1.0.0-rc.178] — 2026-09-10
+
+### Nesta versão
+
+- 🧾 Cache: o OpenRouter só manda o detalhamento **se a gente pedir** (`9a0038d`).
+
+## [1.0.0-rc.177] — 2026-09-10
+
+### Nesta versão
+
+- 🔍 Cache: a rc.176 foi publicada mostrando **nada** — o componente certo era o terceiro (`216f73a`).
+
+## [1.0.0-rc.176] — 2026-09-10
+
+### Nesta versão
+
+- ⚡ Prompt caching nos **dois** adaptadores, visível no rodapé, e o catálogo parando de chutar modelo (#131, `3a11fe7`).
+
+## [1.0.0-rc.175] — 2026-09-09
+
+### Nesta versão
+
+- 🪟 Upgrade: o teto de 60s cortava install **bom** no Windows — e a falha se repetia sem fim (`a333d0b`).
+- Entregue em `main` pelo squash do #130 (`294120c`), que fecha a série rc.171–rc.175.
+
+## [1.0.0-rc.174] — 2026-09-09
+
+### Nesta versão
+
+- 🔌 Provider: o `setTier` apagava o provider **local** — o rodapé voltava ao do boot (`388fcbd`).
+
+## [1.0.0-rc.173] — 2026-09-08
+
+### Nesta versão
+
+- 🖥️ Boot: o `stderr` não pode disputar a tela com a TUI (a linha que aparecia e sumia) (`abdc947`).
+
+## [1.0.0-rc.172] — 2026-09-08
+
+### Nesta versão
+
+- 🪟 Upgrade: no Windows o `spawn` recusa `.cmd` sem shell — era o `EINVAL` na tela dele (`f1f3fd0`).
+- 🔌 Provider: o default do catálogo estava **morto** e travava a troca para o OpenRouter (`e23cfae`).
+
+## [1.0.0-rc.171] — 2026-09-08
+
+### Nesta versão
+
+- 📱 Telegram: as duas últimas pausas (travamento e orçamento) também avisam no canal (`5bf27c2`).
+- 📱 Telegram: a pergunta do agente vai para quem está no celular (`d20bea0`).
+
+## [1.0.0-rc.170] — 2026-09-07
+
+### Corrigido
+
+- 🪟 Upgrade: no Windows o npm é um shim `.cmd` — e a falha passa a dizer **por quê** (`d3dcdb1`).
+
+## [1.0.0-rc.169] — 2026-09-07
+
+### Corrigido
+
+- ⌨️ Composer: a mensagem digitada durante o trabalho parava de sumir (`d5bfd42`).
+
+## [1.0.0-rc.168] — 2026-09-04
+
+### Adicionado
+
+- ⬆️ `/upgrade` — a atualização passa a ser **pedida**, não imposta (`051a8c0`).
+
+## [1.0.0-rc.167] — 2026-09-02
+
+### Corrigido
+
+- 📱 Telegram: o ACK saía no vazio, o "digitando" não existia, e a dica de canal grudava (`9034e89`).
+
+## [1.0.0-rc.166] — 2026-09-02
+
+### Corrigido
+
+- 🎨 A capacidade de **cor** é declarada, não herdada do terminal (`cbed1da`).
+- 🧯 CI, `/doctor` e encerramento: destrava a pipeline e encerra o processo de verdade (`74aff69`).
+- 📱 Telegram, `/cycle` e autoupdate: consertos de dogfooding + observabilidade do ingresso (`abd63b1`).
+
+## [1.0.0-rc.156] — 2026-08-31
+
+### Nesta versão
+
+- 📌 O rodapé deixa de ter desenho próprio: é o bloco de cima, **fixado** (`67d2f09`; squash #129 = `3a3ba59`).
+
+## [1.0.0-rc.153] — 2026-08-26
+
+### Nesta versão
+
+- 🎨 O rodapé dos agentes ganha desenho, e o consumo passa a subir ao vivo (`73796bf`; squash #128 = `8838151`).
+
+## [1.0.0-rc.152] — 2026-08-26
+
+### Nesta versão
+
+- ⏳ O "processando" volta quando o pai responde e os agentes seguem (`9273dea`; squash #127 = `c5fecab`).
+
+## [1.0.0-rc.151] — 2026-08-25
+
+### Nesta versão
+
+- ✨ O brilho vai para a caixa da conversa e a barra âmbar sai (`86e42dd`).
+- 🔁 Retry numérico e concordância da nota de fan-out — dois achados de **medir**, não de ler.
+
+## [1.0.0-rc.150] — 2026-08-25
+
+### Nesta versão
+
+- 🦙 O Ollama destrava de verdade, e os agentes vivos ficam à vista no rodapé (`051a85c`).
+
+## [1.0.0-rc.149] — 2026-08-25
+
+### Nesta versão
+
+- 🧵 Um indicador de trabalho só, recuo das notas curto, e `/compact` que compacta (`5234d94`).
+
+## [1.0.0-rc.148] — 2026-08-25
+
+### Nesta versão
+
+- 🖼️ A tela para de tremer com agentes trabalhando, e as listagens ficam na mesma estética (`8d5816a`; squash #126 = `053ecec`).
+
+## [1.0.0-rc.147] — 2026-08-24
+
+### Nesta versão
+
+- 🧑‍🤝‍🧑 Ferramentas de gestão de sub-agentes, Ollama desbloqueado e sete correções (#125, `c2ed33b`).
+
+## [1.0.0-rc.146] — 2026-08-24
+
+### Corrigido
+
+- 🔢 A contagem de sub-agentes no rodapé vem da **árvore**, não de um contador à mão (#124, `e90e0be`).
+
+## [1.0.0-rc.145] — 2026-08-24
+
+### Corrigido
+
+- 🌐 Egress tenta **todos** os endereços validados, e diz em qual falhou (#123, `7ea2978`).
+
+## [1.0.0-rc.143] — 2026-08-24
+
+### Corrigido
+
+- 🧩 Desacoplar por injeção não é falha dos sub-agentes (#122, `f2b4f36`).
+
+## [1.0.0-rc.142] — 2026-08-22
+
+### Nesta versão
+
+- 🗜️ Compactação que dispara, agentes que não emudecem o Aluy, tools que aceitam o que o modelo manda (#121, `d989a67`).
+
+## [1.0.0-rc.141] — 2026-08-22
+
+### Corrigido
+
+- 🌍 O idioma é perguntado **uma** vez, não duas (#120, `45cb14b`).
+
+## [1.0.0-rc.140] — 2026-08-22
+
+### Corrigido
+
+- 🔐 O CLI para de mentir sobre credencial e configuração (#119, `b24f613`).
+- ⌨️ Composer multi-linha, onboarding sem modelo hardcoded e trava do `.npmrc` (#118, `7d7b1c9`).
+
+## [1.0.0-rc.139] — 2026-08-21
+
+### Nesta versão
+
+- 💬 Conversa em caixas, painel de status, e o fio provider→modelo religado (#117, `5e0730a`).
+
+<!-- /RECONSTRUÍDO -->
 
 ## [1.0.0-rc.138] — 2026-08-19
 
