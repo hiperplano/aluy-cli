@@ -1610,9 +1610,12 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     onUserPrompt: (goal, blockCountBefore) => {
       checkpoints.markPrompt(goal, blockCountBefore);
     },
-    // EST-1137 (C3) — MAESTRO: liga a regência de fluxo via flag ALUY_MAESTRO (default OFF).
-    // O wiring resolve o `MaestroPort` concreto (engines + bus + rege) e o injeta.
-    // Quando OFF (default), retorna undefined ⇒ baseline bit-a-bit.
+    // EST-1137 (C3) — MAESTRO: regência de fluxo. O wiring resolve o `MaestroPort`
+    // concreto (engines + bus + rege) e o injeta; quando desligado, `resolveMaestro`
+    // devolve undefined ⇒ baseline bit-a-bit.
+    // ATENÇÃO: o default é **ON**, não OFF — este comentário dizia o contrário e estava
+    // errado (corrigido em 20/09/2026). `resolveMaestro` só devolve undefined com
+    // `ALUY_MAESTRO=0`/`false` ou o kill-switch `ALUY_MAESTRO_OFF`.
     ...(() => {
       const maestro = resolveMaestro({
         env,

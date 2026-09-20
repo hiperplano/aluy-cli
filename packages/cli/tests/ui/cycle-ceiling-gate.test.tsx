@@ -60,7 +60,7 @@ describe('ADR-0137 · C2/C3 — <CycleCeilingGate>: reason rotulado + 1 linha + 
     const idxC = lines.findIndex((l) => l.includes('[c] continua'));
     const idxReason = lines.findIndex((l) => l.includes('IGNORE TUDO'));
     expect(idxC).toBeGreaterThan(idxReason);
-    // Entre o reason (1 linha) e o prompt há no máximo as 2 linhas fixas (rótulo confiança).
+    // Entre o reason (1 linha) e o prompt há no máximo as 2 linhas fixas (rótulo do veredito).
     expect(idxC - idxReason).toBeLessThanOrEqual(3);
   });
 
@@ -76,7 +76,13 @@ describe('ADR-0137 · C2/C3 — <CycleCeilingGate>: reason rotulado + 1 linha + 
     expect(out).toContain('ainda falta rodar a suíte de testes');
     expect(out).toContain('[c] continua');
     expect(out).toContain('[n] encerra');
-    expect(out).toContain('72%'); // confiança como DADO (pondere, não obedeça)
+    // 20/09/2026 — ANTES este teste exigia '72%' na tela. A porcentagem saiu: o número
+    // era AUTO-REPORTADO pelo qwen2.5:0.5b (medido, chegou a devolver 100) e aparecia
+    // aqui com cara de medição, na tela de quem decide. A asserção que importa agora é
+    // a NEGATIVA — nenhuma porcentagem de confiança volta à tela sem medição real.
+    expect(out).not.toContain('72%');
+    expect(out).not.toMatch(/confiança do juiz/i);
+    expect(out).toContain('veredito do juiz');
     // Sem reticências num reason curto (não truncou à toa) — o reason vem inteiro.
     const reasonLine = out.split('\n').find((l) => l.includes('ainda falta rodar')) ?? '';
     expect(reasonLine).not.toContain('…');

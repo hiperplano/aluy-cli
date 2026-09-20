@@ -14,6 +14,19 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Corrigido
+
+- 🎲 **O juiz do Maestro decidia com um número que o próprio modelo inventava.** O prompt pedia `"confidence": <0.0 a 1.0>` ao `qwen2.5:0.5b`, e `maestro/wiring.ts` tinha **dois limiares** em cima da resposta (`> 0.6` para considerar o juiz, `> 0.8` para deixar ele sobrepor o motor-a). O comentário do próprio arquivo já dizia que a confiança de um 0.5B é ruído e que "o gate não filtra" — o que ele não dizia é que o valor não era só ruim, era **fabricado**. Medido em 20/09/2026 contra o modelo real desta máquina: pedindo um número por JSON schema, ele devolveu **100**. A mesma quantidade era exibida ao dono como porcentagem no `CycleCeilingGate` — um valor com cara de medição, na tela de quem decide. Os dois limiares e a porcentagem saíram; quem protege continua sendo a regra estrutural (o juiz só pode sobrepor em direção a MAIS fluidez), que não depende de número nenhum. O campo `confidence` segue no contrato, agora com a constante explícita `CONFIANCA_NAO_MEDIDA` e um caminho documentado para o dia em que houver medição de verdade.
+- 🔒 **Falha de parse virava veredito.** A resposta do juiz vinha como texto livre e era garimpada por **cinco estratégias de regex**; quando todas falhavam, o default escolhia **a primeira opção** e seguia como se fosse uma decisão. Agora a requisição manda `format` (JSON schema do Ollama) com o **enum dos ids reais** da pergunta, e a forma passa a ser garantida pelo SERVIDOR — o modelo não tem como responder fora da lista. O parse antigo fica como rede de segurança para servidor que ignore `format`, e `reasoning` deixou de ser obrigatório (o schema exige só `chosen`): resposta sem justificativa era descartada como falha, jogando fora uma escolha boa.
+
+### Adicionado
+
+- 🧪 **Teste da matriz de disparo do juiz** (`quando-o-ollama-e-chamado.test.ts`), a partir da pergunta do dono *"pq quase não vejo chamadas ao ollama?"*. A resposta estava no `rege` e não tinha teste nenhum: o juiz LLM só é consultado com **dois ou mais sinais conflitantes no mesmo turno** — zero ou um sinal, o motor-a resolve sozinho. Sessão saudável não gera conflito, então o sidecar fica **ligado e ocioso**, que é desenho e não defeito. Confere no log real desta máquina (16–20/09): 57 chamadas a `/api/embeddings` (a memória) e **zero** a `/api/chat` (o juiz). Os 11 casos fixam o gate, o toggle `ALUY_MAESTRO_OLLAMA`, o kill-switch, uma chamada por turno (não uma por sinal) e a degradação sem derrubar o turno. Verificado por mutação: trocar `>= 2` por `>= 1` reprova.
+
+### Alterado
+
+- 📝 Dois comentários que afirmavam o contrário do código: `session/wiring.ts` dizia que o Maestro é "default OFF" (é **ON** — só desliga com `ALUY_MAESTRO=0` ou o kill-switch), e o cabeçalho do teste de wiring repetia o mesmo erro.
+
 ## [1.0.0-rc.182] — 2026-09-20
 
 ### Alterado
