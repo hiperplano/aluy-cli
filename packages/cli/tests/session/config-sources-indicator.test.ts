@@ -20,13 +20,13 @@ describe('EST-0979 · describeConfigSources — indicador de fontes', () => {
 
   it('instruções nativo+compat ⇒ lista as fontes na ordem de precedência', () => {
     const lines = describeConfigSources({
-      instructionSources: ['AGENT.md', 'CLAUDE.md'],
+      instructionSources: ['ALUY.md', 'CLAUDE.md'],
       globalCommands: 0,
       projectCommands: 0,
       mcpServers: 0,
       projectMcp: false,
     });
-    expect(lines.some((l) => l.includes('AGENT.md + CLAUDE.md'))).toBe(true);
+    expect(lines.some((l) => l.includes('ALUY.md + CLAUDE.md'))).toBe(true);
   });
 
   it('comandos global + projeto ⇒ ambas as origens com contagem', () => {

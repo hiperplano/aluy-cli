@@ -1,11 +1,12 @@
-// EST-0964 — LEITOR confinado do AGENT.md (instruções de projeto, análogo ao
-// CLAUDE.md do Claude Code/OpenCode).
-// EST-0979 — COMPAT: além do `AGENT.md` (nativo Aluy), lê também `AGENTS.md`
-// (Codex/OpenAI) e `CLAUDE.md` (Claude Code) — MESMA injeção confiável no `system`.
+// EST-0964 — LEITOR confinado das instruções de projeto (análogo ao CLAUDE.md do
+// Claude Code/OpenCode). O nativo é o `ALUY.md`.
+// EST-0979 — COMPAT: além do `ALUY.md`, lê também `AGENTS.md` (Codex/OpenAI) e
+// `CLAUDE.md` (Claude Code) — MESMA injeção confiável no `system`.
+// 20/09/2026 — o alias `AGENT.md` SAIU da lista (decisão do dono). Ver o CHANGELOG.
 //
 // FRONTEIRA DE PROVENIÊNCIA (a distinção que o seguranca-light reconfere):
 //
-//   AGENT.md/AGENTS.md/CLAUDE.md
+//   ALUY.md/AGENTS.md/CLAUDE.md
 //             → CONFIGURAÇÃO DO PROJETO, escrita pelo DONO do repo, lida UMA VEZ
 //               no startup do workspace confinado. É CONFIÁVEL: entra no canal
 //               `system` (instrução), exatamente como o prompt do agente que NÓS
@@ -44,8 +45,7 @@ import type { WorkspacePort } from './workspace.js';
 
 /**
  * Nome canônico (nativo Aluy) do arquivo de instruções de projeto (raiz). É o que o
- * `init`/onboard CRIA. `AGENT.md` segue aceito como compat (ver
- * `PROJECT_INSTRUCTION_FILENAMES`), mas o nome próprio da plataforma é `ALUY.md`.
+ * `init`/onboard CRIA, e o primeiro da lista de `PROJECT_INSTRUCTION_FILENAMES`.
  */
 export const AGENT_MD_FILENAME = 'ALUY.md';
 
@@ -58,16 +58,14 @@ export const AGENT_MD_FILENAME = 'ALUY.md';
  * (o nativo lidera) e o desempate quando precisa cortar pelo teto.
  *
  *   1. `ALUY.md`    — nativo Aluy (primário; o que o `init` cria).
- *   2. `AGENT.md`   — compat (nome anterior / convenção genérica de agente).
- *   3. `AGENTS.md`  — Codex/OpenAI.
- *   4. `CLAUDE.md`  — Claude Code/Anthropic.
+ *   2. `AGENTS.md`  — Codex/OpenAI.
+ *   3. `CLAUDE.md`  — Claude Code/Anthropic.
+ *
+ * O alias `AGENT.md` (singular) FOI REMOVIDO em 20/09/2026: era o nome anterior do
+ * nativo, já fora da documentação, e mantinha viva uma quarta fonte que ninguém mais
+ * anunciava. Quem ainda tiver um `AGENT.md` deve renomeá-lo para `ALUY.md`.
  */
-export const PROJECT_INSTRUCTION_FILENAMES = [
-  'ALUY.md',
-  'AGENT.md',
-  'AGENTS.md',
-  'CLAUDE.md',
-] as const;
+export const PROJECT_INSTRUCTION_FILENAMES = ['ALUY.md', 'AGENTS.md', 'CLAUDE.md'] as const;
 
 export interface LoadAgentMdOptions {
   readonly workspace: WorkspacePort;
@@ -167,9 +165,9 @@ export async function loadProjectInstructions(
 }
 
 /**
- * EST-0964 (compat) — Lê o `AGENT.md` da raiz do workspace, se existir, e devolve as
- * instruções de projeto CLAMPADAS. Mantido para compatibilidade: hoje delega ao
- * leitor de UM arquivo, restrito ao `AGENT.md`. Devolve `undefined` se
+ * EST-0964 (compat) — Lê o `ALUY.md` da raiz do workspace, se existir, e devolve as
+ * instruções de projeto CLAMPADAS. O nome da função é histórico: ela sempre leu o
+ * `AGENT_MD_FILENAME`, que é `ALUY.md`. Devolve `undefined` se
  * ausente/vazio/escapa/sensível. NUNCA lança.
  */
 export async function loadAgentMd(opts: LoadAgentMdOptions): Promise<string | undefined> {
