@@ -35,7 +35,13 @@ MCP TS · **monorepo (npm workspaces)**: `@hiperplano/aluy-cli-core` (engine mod
    então o arquivo copiado é um blob inútil. O keychain do SO passa a ser
    ACELERADOR (usado quando existe e não é volátil), nunca requisito.
 4. **Binário público limpo** — zero credencial de provider no repo/binário.
-5. **`main` protegido** — PR + review de CODEOWNERS, sem push direto.
+5. **Mudança entra por PR** — com a CI verde, e `CODEOWNERS` marcado para
+   revisão. A exceção combinada é o commit `chore(release)` do bump de versão,
+   que vai direto na `main` e é seguido da tag.
+   *Isto é CONVENÇÃO, não trava:* a `main` **não tem branch protection**
+   configurada (verificado — `branches/main/protection` devolve 404). O texto
+   anterior dizia "main protegido, sem push direto", o que era falso e dava uma
+   sensação de garantia que o repositório não oferece.
 
 ## Invariantes (não relaxar)
 

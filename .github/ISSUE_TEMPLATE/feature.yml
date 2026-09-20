@@ -1,0 +1,27 @@
+name: 💡 Ideia
+description: Sugerir uma capacidade ou uma mudança de comportamento
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Que problema isso resolve
+      description: |
+        Comece pelo problema, não pela solução. O que você estava tentando fazer
+        quando sentiu falta disso?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposta
+    attributes:
+      label: O que você imagina
+      description: Se já tiver uma forma em mente — um comando, uma flag, um fluxo.
+
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: O que você tentou no lugar
+      description: |
+        Inclusive fora do aluy. Saber o contorno atual ajuda a entender o tamanho
+        real do incômodo.
