@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Corrigido
+
+- 🪟 **O recap do rodapé estava quebrado no Windows e enchia o composer.** Reportado pelo dono com print da tela. A linha que resume o último turno cita arquivos e comandos, e `nomeCurto` só encurtava caminho com `/` — um caminho `C:\\Projects\\app\\src\\Card.tsx` não tem nenhuma barra normal e entrava **inteiro**. Medido no turno real dele: **308 caracteres no Windows contra 46 no POSIX**, para o mesmo turno. A linha quebrava no meio de um path e emendava com o item seguinte, virando a parede ilegível que ele viu. Três consertos: `nomeCurto` passa a cortar nos **dois** separadores; `comandoCurto` deixa de pegar cegamente as duas primeiras palavras — a segunda só entra quando a primeira é um runner conhecido (`npm`, `git`, `cargo`…) e o argumento não é caminho nem flag, então `type C:\\…\\Card.tsx` vira `type` e `npm test` continua `npm test`; e a linha ganhou **teto de 96 caracteres** com reticências, porque o `MAX_NOMES` limitava a quantidade de itens e nunca o comprimento deles. O mesmo turno agora sai com **82 caracteres**, e o caminho POSIX permanece byte a byte idêntico.
+
 ## [1.0.0-rc.183] — 2026-09-20
 
 ### Corrigido

@@ -9,6 +9,9 @@ import { describe, expect, it } from 'vitest';
 import { buildTurnRecap } from '../../src/session/turn-recap.js';
 import type { SessionBlock } from '../../src/session/model.js';
 
+/** Separador de caminho do Windows, sem barra invertida literal no fonte. */
+const BS = String.fromCharCode(92);
+
 const you = (text: string): SessionBlock => ({ kind: 'you', text });
 const tool = (verb: string, target: string, status: 'ok' | 'err' = 'ok'): SessionBlock =>
   ({ kind: 'tool', verb, target, result: '', status }) as SessionBlock;
@@ -76,5 +79,83 @@ describe('F-RECAP — a linha diz o que o turno FEZ', () => {
     expect(
       buildTurnRecap([you('oi'), { kind: 'aluy', text: 'olá', streaming: false }]),
     ).toBeUndefined();
+  });
+});
+
+// ── 21/09/2026 · o recap estava QUEBRADO NO WINDOWS ────────────────────────
+//
+// Reportado pelo dono ("esse log polui o composer"), com o print da tela. Medido no
+// turno real dele: 308 caracteres no Windows contra 46 no POSIX, para o MESMO turno.
+// Causa: `nomeCurto` só cortava em `/`, e um caminho `C:\\...` não tem nenhuma barra
+// normal — entrava INTEIRO. A linha então quebrava no meio de um path e emendava com o
+// próximo item, virando a parede que ele viu.
+//
+// Estes testes usam separador de Windows de propósito: são os que teriam pego o defeito.
+describe('F-RECAP — caminho de Windows encurta igual ao de POSIX', () => {
+  const W = 'C:' + BS + 'Projects' + BS + 'app' + BS;
+
+  it('caminho com barra INVERTIDA vira nome curto (antes vinha inteiro)', () => {
+    const r = buildTurnRecap([
+      you('faça'),
+      tool('edit_file', W + 'UX-AUDIT.md'),
+      tool('edit_file', W + 'src' + BS + 'components' + BS + 'core' + BS + 'Card.tsx'),
+    ]);
+    expect(r).toBe('editou UX-AUDIT.md e Card.tsx');
+    expect(r).not.toContain('C:');
+  });
+
+  it('o comando com caminho gigante no argumento não arrasta o caminho', () => {
+    const r = buildTurnRecap([
+      you('faça'),
+      tool('run_command', 'type ' + W + 'src' + BS + 'components' + BS + 'core' + BS + 'Card.tsx'),
+    ]);
+    // `type` não é runner ⇒ a 2ª palavra (que É o caminho) fica fora.
+    expect(r).toBe('rodou type');
+  });
+
+  it('runner com argumento útil MANTÉM as duas palavras (não pode regredir)', () => {
+    const r = buildTurnRecap([you('faça'), tool('run_command', 'npm test -- --run')]);
+    expect(r).toBe('rodou npm test');
+  });
+
+  it('runner com FLAG não vira "node -e" — a flag não informa nada', () => {
+    const r = buildTurnRecap([
+      you('faça'),
+      tool('run_command', 'node -e "console.log(1)"'),
+      tool('run_command', 'powershell -Command "Get-Content x"'),
+    ]);
+    expect(r).toBe('rodou node e powershell');
+  });
+
+  it('comando invocado por caminho absoluto vira o binário', () => {
+    const r = buildTurnRecap([
+      you('faça'),
+      tool('run_command', 'C:' + BS + 'Program' + BS + 'nodejs' + BS + 'node.exe server.js'),
+    ]);
+    expect(r).toBe('rodou node.exe server.js');
+  });
+
+  it('POSIX segue idêntico — a correção não pode mudar o que já funcionava', () => {
+    const r = buildTurnRecap([
+      you('faça'),
+      tool('edit', '/home/u/proj/UX-AUDIT.md'),
+      tool('edit', '/home/u/proj/src/Card.tsx'),
+      tool('run_command', 'npm test'),
+    ]);
+    expect(r).toBe('editou UX-AUDIT.md e Card.tsx · rodou npm test');
+  });
+});
+
+describe('F-RECAP — teto de comprimento da linha', () => {
+  it('nome de arquivo absurdo ⇒ a linha é cortada com reticências, não vaza', () => {
+    const enorme = 'x'.repeat(200) + '.ts';
+    const r = buildTurnRecap([you('faça'), tool('edit_file', '/a/' + enorme)]);
+    expect(r!.length).toBeLessThanOrEqual(96);
+    expect(r!.endsWith('…')).toBe(true);
+  });
+
+  it('linha que CABE não ganha reticências', () => {
+    const r = buildTurnRecap([you('faça'), tool('edit', '/a/b.ts')]);
+    expect(r).toBe('editou b.ts');
   });
 });
