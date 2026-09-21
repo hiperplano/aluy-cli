@@ -151,7 +151,7 @@ import {
   mapSkillsToCapabilityItems,
   groupMcpServers,
 } from './capabilities-snapshot.js';
-import { runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
+import { createSuggestEngine, runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
 import { pctDeCache, diagnosticoDeCache } from '@hiperplano/aluy-cli-core';
 // F191 — primitivo de EXPEDITE ("acelerar o encaixe"): o controller o POSSUI e o passa
 // ao loop; `controller.expedite()` toca o sino p/ cortar a chamada de modelo em voo.
@@ -5586,6 +5586,32 @@ export class SessionController {
     this.focus = null;
     this.patch({ meta: { ...this.state.meta, focus: undefined } });
     this.pushNote('/back', [`saiu do foco com "${label}" — de volta ao agente principal.`]);
+  }
+
+  /**
+   * F197-LLM (pedido do dono, 21/09/2026) — a SUGESTÃO de próximo prompt vinda do MODELO.
+   *
+   * Reusa o MESMO caller do `/ask` (`sideQueryModel`): sem tools, read-only por construção
+   * — a sugestão jamais pode produzir efeito. Mas NÃO reusa o `runSideQuery`, que injeta o
+   * snapshot inteiro do histórico: aqui vai só um digest (recap + objetivo), porque isto
+   * roda a CADA turno e numa sessão longa o snapshot custaria milhares de tokens por uma
+   * linha de ornamento.
+   *
+   * FIRE-AND-FORGET do ponto de vista do turno: quem chama (App.tsx) já pintou a sugestão
+   * heurística e troca se esta chegar. Qualquer falha vira `undefined` — ornamento não
+   * derruba, não atrasa e não avisa.
+   */
+  async suggestNext(
+    input: { readonly recap?: string; readonly lastGoal?: string; readonly lang: string },
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    if (this.sideQueryModel === undefined) return undefined;
+    try {
+      const engine = createSuggestEngine(this.sideQueryModel);
+      return await engine.suggest(input, signal);
+    } catch {
+      return undefined;
+    }
   }
 
   /**

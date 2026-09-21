@@ -747,10 +747,21 @@ export function App(props: AppProps): React.ReactElement {
   //   • `suggestionsOn` — a OPÇÃO está ligada? (default do wiring; `/suggest on|off` alterna).
   //   • `suggestion`    — o TEXTO da sugestão pendente (ghost no composer), ou `undefined`.
   // A sugestão é estado DERIVADO estável (anti-flicker EST-0965): computada UMA vez na
-  // BORDA de fim-de-turno (efeito abaixo), NÃO a cada render/token. A geração é heurística
-  // LOCAL (resolveSuggestionText → core, sem modelo/tokens) — não gasta o BYO do dono.
+  // BORDA de fim-de-turno (efeito abaixo), NÃO a cada render/token.
+  //
+  // F197-LLM (21/09/2026) — DUAS FONTES, nesta ordem:
+  //   1. heurística LOCAL (`resolveSuggestionText`), imediata e de graça — a linha nunca
+  //      nasce vazia;
+  //   2. o MODELO (`controller.suggestNext`), assíncrono — quando chega, SUBSTITUI.
+  // O dono pediu a troca porque as sete frases fixas erravam o momento ("rode os testes"
+  // depois de um turno de auditoria de UX). A heurística fica como FALLBACK: ela é o
+  // incômodo que originou a mudança, mas sugestão enlatada é melhor que linha vazia
+  // quando a rede cai. Custo aceito explicitamente pelo dono.
   const [suggestionsOn, setSuggestionsOn] = useState(props.initialSuggestions !== false);
   const [suggestion, setSuggestion] = useState<string | undefined>(undefined);
+  // Aborta a sugestão do modelo do turno ANTERIOR: se um turno novo começou, a resposta
+  // que ainda está vindo é sobre um contexto morto e não pode pintar por cima.
+  const suggestAbortRef = useRef<AbortController | undefined>(undefined);
   // Fase ANTERIOR (ref, não estado — não re-renderiza) p/ detectar a BORDA trabalho→idle:
   // a sugestão nasce só na TRANSIÇÃO p/ o repouso (não em cada render em idle).
   const prevPhaseRef = useRef<SessionState['phase']>(controller.current.phase);
@@ -1449,10 +1460,39 @@ export function App(props: AppProps): React.ReactElement {
       // Turno terminou. Só sugere com o composer VAZIO e SEM fila (type-ahead pendente):
       // se o dono já está digitando / há algo p/ auto-submeter, a sugestão só atrapalharia.
       if (suggestionsOn && input === '' && queue.length === 0) {
+        // (1) imediata e local — a linha não nasce vazia enquanto o modelo pensa.
         setSuggestion(resolveSuggestionText(state.blocks, t));
+        // (2) do modelo — fire-and-forget. `void` de propósito: o turno já acabou e esta
+        // chamada NÃO pode atrasar nem derrubar nada. Falhou/demorou ⇒ fica a heurística.
+        suggestAbortRef.current?.abort();
+        const ctl = new AbortController();
+        suggestAbortRef.current = ctl;
+        const ultimoObjetivo = [...state.blocks]
+          .reverse()
+          .find((b) => b.kind === 'you')?.text;
+        void controller
+          .suggestNext(
+            {
+              lang: activeLang,
+              ...(turnRecap !== undefined ? { recap: turnRecap } : {}),
+              ...(ultimoObjetivo !== undefined
+                ? { lastGoal: ultimoObjetivo.slice(0, 200) }
+                : {}),
+            },
+            ctl.signal,
+          )
+          .then((doModelo) => {
+            // SÓ substitui se ainda é deste turno E o dono não começou a digitar.
+            if (doModelo !== undefined && !ctl.signal.aborted) setSuggestion(doModelo);
+          })
+          .catch(() => {
+            /* ornamento nunca avisa falha */
+          });
       }
     } else if (!settled) {
-      // Novo trabalho (ou qualquer fase não-repouso): descarta a sugestão pendente.
+      // Novo trabalho (ou qualquer fase não-repouso): descarta a sugestão pendente — e
+      // ABORTA a do modelo que ainda pode estar vindo, senão ela pinta por cima do turno novo.
+      suggestAbortRef.current?.abort();
       setSuggestion(undefined);
     }
     // Deps: a BORDA é `state.phase`; os demais são lidos no instante da borda (mesmo render).
