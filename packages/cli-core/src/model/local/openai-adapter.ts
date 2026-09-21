@@ -225,8 +225,18 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
       }
       const finish = str(choice, 'finish_reason');
       if (finish !== undefined && finish !== null && finish !== '') {
-        // antes do done, emite as tool-calls acumuladas (se houver).
-        out.push(...this.flush(acc));
+        // BUG-ARGS-VAZIOS (medido com glm-5.3 na z.ai, 22/09/2026) — o flush NÃO sai mais
+        // aqui. Ele LATCHAVA (`emittedToolCalls`), então todo fragmento de `arguments` que
+        // chegasse num chunk DEPOIS do `finish_reason` era acumulado e nunca emitido: a
+        // call já tinha saído com `argsText === ''`, que `coerceArgs` converte em `{}` sem
+        // reclamar. O sintoma na tela era `run_command requer "command". Recebi: nenhum
+        // argumento` — nome certo, argumentos zerados, repetido até o supervisor encerrar
+        // o turno, porque do lado do modelo não havia o que corrigir.
+        //
+        // Emitir no fim do turno PRESERVA a ordem observável (`tool_call` antes de `done`):
+        // os três fechamentos — `[DONE]`, teto de trailer e `finalize` — fazem flush e
+        // SÓ DEPOIS `closeTurn`. O que muda é só o INSTANTE, e é justamente o instante que
+        // dava a janela para perder fragmento.
         // BUG-TRAILER (a raiz do "0 tokens") — o `done` NÃO sai mais aqui. No estilo
         // OpenAI com `stream_options:{include_usage:true}`, o `usage` REAL vem num
         // chunk SEPARADO (`choices: []`) DEPOIS deste; como o `LocalModelClient`
@@ -245,7 +255,11 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
     // BUG-TRAILER (anti-hang) — o provider excedeu o teto de eventos pós-`finish_reason`
     // sem mandar `[DONE]`: fecha o turno à força, com o `finish_reason` REAL anotado.
     if (acc.pendingFinish !== undefined && acc.afterFinish >= MAX_TRAILER_EVENTS) {
-      out.push(...this.closeTurn(acc));
+      // BUG-ARGS-VAZIOS — o flush vem ANTES do fechamento. Antes, este caminho só emitia o
+      // `done`; como o flush morava no `finish_reason`, isso passava despercebido. Com o
+      // flush movido para o fim, um provider que estoura o teto sem `[DONE]` perderia as
+      // tool-calls INTEIRAS se não as emitíssemos aqui.
+      out.push(...this.flush(acc), ...this.closeTurn(acc));
     }
     return out;
   }
@@ -311,14 +325,25 @@ function accumulateToolCalls(acc: SseAccumulator, deltas: unknown[]): void {
   for (const d of deltas) {
     if (!isRecord(d)) continue;
     const index = typeof d.index === 'number' ? d.index : 0;
-    const existing = acc.toolCalls.get(index) ?? { id: '', name: '', argsText: '' };
     const id = str(d, 'id');
+    let existing = acc.toolCalls.get(index) ?? { id: '', name: '', argsText: '' };
+    // BUG-ARGS-VAZIOS — COLISÃO de slot. Um provider que manda CADA call completa mas
+    // repete `index: 0` (ou omite o `index`, que cai no 0 pelo default acima) faria os
+    // argumentos de duas calls se CONCATENAREM — `{"a":1}{"b":2}` não parseia, e o
+    // resultado é o mesmo `{}` silencioso. `id` novo num slot ocupado ⇒ a call anterior
+    // ACABOU: guarda-se ela num slot livre e começa-se outra.
+    if (id !== undefined && id !== '' && existing.id !== '' && existing.id !== id) {
+      let livre = acc.toolCalls.size;
+      while (acc.toolCalls.has(livre)) livre += 1;
+      acc.toolCalls.set(livre, existing);
+      existing = { id: '', name: '', argsText: '' };
+    }
     if (id !== undefined && id !== '') existing.id = id;
     const fn = isRecord(d.function) ? d.function : undefined;
     if (fn !== undefined) {
+      const argsChunk = argumentoComoTexto(fn.arguments);
       const name = str(fn, 'name');
       if (name !== undefined && name !== '') existing.name = name;
-      const argsChunk = str(fn, 'arguments');
       if (argsChunk !== undefined) existing.argsText += argsChunk;
     }
     acc.toolCalls.set(index, existing);
@@ -372,6 +397,30 @@ function toBrokerError(err: Record<string, unknown>): BrokerError {
   const status = num(err, 'code') ?? num(err, 'status') ?? 502;
   const message = str(err, 'message') ?? 'provider error';
   return new BrokerError({ status, code: 'PROVIDER_ERROR', detail: message });
+}
+
+/**
+ * BUG-ARGS-VAZIOS — o `arguments` de um fragmento, como TEXTO.
+ *
+ * A spec da OpenAI diz que `function.arguments` é uma STRING com JSON dentro, e é o que
+ * a z.ai/glm-5.3, o OpenRouter e a OpenAI mandam (medido). Mas compatíveis existem que
+ * mandam o OBJETO já parseado — e aí o `str()` devolvia `undefined`, o fragmento era
+ * DESCARTADO, e a call saía com `{}`: "nenhum argumento", sem erro em lugar nenhum.
+ *
+ * Aceitar o objeto é tolerância de leitura barata (Postel) e NÃO afrouxa nada: o valor
+ * volta a ser texto JSON e segue pelo mesmo `coerceArgs` de sempre. `null` é ausência,
+ * não conteúdo — e um objeto só pode ser o argumento INTEIRO, nunca um fragmento, então
+ * concatená-lo com outro é impossível por construção do protocolo.
+ */
+function argumentoComoTexto(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw;
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw !== 'object') return undefined;
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return undefined; // cíclico/não-serializável ⇒ trata como ausente
+  }
 }
 
 function coerceArgs(argsText: string): Record<string, unknown> {
