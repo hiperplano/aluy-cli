@@ -84,6 +84,26 @@ export interface ToolResult {
 export interface ToolRunContext {
   /** O MESMO sinal de abort do loop/root-flow (EST-0944/0969/0982). */
   readonly signal?: AbortSignal;
+  /**
+   * F-BG (21/09/2026, pedido do dono: "quando ele começar uma task que prende, eu ter a
+   * opção de deixar rodando em background") — SOLTAR, que NÃO é matar.
+   *
+   * O `signal` acima MATA o processo. Faltava o oposto: o comando segue vivo e o TURNO
+   * deixa de esperar por ele. O sintoma que originou isto: o `timeoutMs` do shell é de
+   * INATIVIDADE (re-armado a cada chunk), então um comando longo e FALANTE — servidor,
+   * watcher, `tail -f` — nunca expira, e a tela fica "processando" para sempre.
+   *
+   * Ao disparar, a porta concreta: para o relógio de inatividade, redireciona o dreno do
+   * stdio para um arquivo de log (o pipe PRECISA continuar sendo drenado, senão o buffer
+   * do SO enche e o processo TRAVA — o oposto do pedido) e resolve com `detached: true`.
+   */
+  readonly detachSignal?: AbortSignal;
+  /**
+   * F-BG — chamado quando o comando foi SOLTO. Entrega o handle do processo ainda VIVO
+   * para quem sabe vigiá-lo: o chamador arma um monitor e o término chega como evento
+   * ENTRE turnos, no mesmo trilho do `watch_command`, sem parar o trabalho em curso.
+   */
+  readonly onDetached?: (info: DetachedShellInfo) => void;
   /** Saída ao vivo do shell, JÁ redigida (CLI-SEC-6) pela porta concreta. */
   readonly onShellChunk?: (chunk: ShellChunk) => void;
   /**
@@ -216,6 +236,14 @@ export interface ShellResult {
    * encerramento limpo p/ o turno cessar sem esperar o teto.
    */
   readonly aborted?: boolean;
+  /**
+   * F-BG — `true` quando o dono SOLTOU o comando (Ctrl+B) em vez de matá-lo. Distinto
+   * de `aborted` (morto) e do exit normal: o processo SEGUE VIVO, e o `exitCode` ainda
+   * não existe — ele chega depois, como evento de monitor.
+   */
+  readonly detached?: boolean;
+  /** F-BG — onde a saída passou a ser gravada depois de solto. */
+  readonly logPath?: string;
 }
 
 /**
@@ -239,6 +267,45 @@ export interface ShellChunk {
 export interface ShellExecOptions {
   readonly signal?: AbortSignal;
   readonly onChunk?: (chunk: ShellChunk) => void;
+  /** F-BG — SOLTAR (não matar): ver `ToolRunContext.detachSignal`. */
+  readonly detachSignal?: AbortSignal;
+  /** F-BG — entrega o handle do processo vivo a quem vai vigiá-lo. */
+  readonly onDetached?: (info: DetachedShellInfo) => void;
+}
+
+/**
+ * F-BG — o canal entre a TUI (que recebe o Ctrl+B) e a tool de shell em execução.
+ *
+ * O problema de fio: quem decide soltar é o DONO, na TUI; quem precisa do sinal é a PORTA,
+ * lá embaixo; e entre os dois está o loop, que monta o contexto de cada tool. O hub resolve
+ * isso sem o loop saber o que é "Ctrl+B" e sem a TUI saber o que é `ShellExecOptions`:
+ *
+ *   • `arm()` — o loop chama ao INÍCIO de cada tool e recebe o sinal daquela execução. Uma
+ *     por tool-call: soltar uma não pode soltar a próxima.
+ *   • `onDetached` — a porta chama quando soltou; o implementador (controller) adota o
+ *     processo vivo num monitor, e o término vira evento entre turnos.
+ */
+export interface DetachHub {
+  arm(): AbortSignal;
+  onDetached(info: DetachedShellInfo): void;
+}
+
+/**
+ * F-BG — o que a porta entrega quando um comando é SOLTO.
+ *
+ * `handle` é o MESMO `CommandSpawnHandle` que o `watch_command` já usa — de propósito:
+ * adotar um processo vivo reusa o trigger que existe, sem inventar um segundo caminho de
+ * "esperar comando terminar".
+ */
+export interface DetachedShellInfo {
+  /** Arquivo onde a saída passou a ser gravada. */
+  readonly logPath: string;
+  /** PID do processo solto, quando conhecido. */
+  readonly pid?: number;
+  /** O comando, para rótulo do monitor. */
+  readonly command: string;
+  /** Handle do processo VIVO — `onExit` + `kill`, a interface que o monitor consome. */
+  readonly handle: import('../monitor/triggers.js').CommandSpawnHandle;
 }
 
 /** Porta de shell (bash/run_command). O concreto aplica timeout/cwd reais. */

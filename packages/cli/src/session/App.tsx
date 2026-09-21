@@ -2727,6 +2727,19 @@ export function App(props: AppProps): React.ReactElement {
         setCockpitFocus((f) => (f === 'conversa' ? 'log' : 'conversa'));
         return;
       }
+      // F-BG (21/09/2026) — Ctrl+B: SOLTA a tool de shell em execução para segundo plano.
+      //
+      // O par do ESC/F8, e o oposto deles: aqueles MATAM, este SOLTA. Nasceu do relato do
+      // dono — "às vezes eu disparo algum pedido e a tela fica processando e travado".
+      // A causa é o timeout do shell ser de INATIVIDADE: um comando longo e FALANTE
+      // (servidor, watcher, `tail -f`) re-arma o relógio a cada chunk e nunca expira.
+      //
+      // Sem nada rodando, NÃO faz barulho: sem nota, sem beep. Uma tecla apertada à toa
+      // não deve poluir a conversa.
+      if (key.ctrl && (char === 'b' || char === '')) {
+        controller.soltarParaSegundoPlano();
+        return;
+      }
       // ctrl+s — EXPORTA o transcript redigido (ADR §4 / RES-C-1). Async; nota ao concluir.
       if (key.ctrl && (char === 's' || char === '\x13')) {
         if (props.onExportTranscript) {

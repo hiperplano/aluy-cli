@@ -28,6 +28,9 @@
 // o usuário vê o comando EXATO antes (CLI-SEC-9).
 
 import { spawn } from 'node:child_process';
+import { createWriteStream, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import type {
@@ -152,6 +155,25 @@ export class NodeShellPort implements ShellPort {
   // EST-1020 — decisão de egress (pura) p/ derivar `network` do sandbox. Ausente ⇒
   // SEMPRE nega (default-deny: igual ao `network:false` fixo do pré-P1).
   private readonly egressAllows: (command: string) => boolean;
+
+  /**
+   * F-BG — onde a saída de um comando SOLTO passa a ser gravada.
+   *
+   * `~/.aluy/logs/` é o mesmo lugar dos logs de sidecar (`aluy config` já o lista como
+   * "logs dos sidecars"), então o dono não ganha um diretório novo para aprender. O nome
+   * leva o PID: é o que identifica o processo enquanto ele vive, e é único o bastante
+   * para dois comandos soltos no mesmo segundo não se sobrescreverem.
+   */
+  private caminhoDoLogBg(pid: number | undefined): string {
+    const dir = join(homedir(), '.aluy', 'logs');
+    try {
+      mkdirSync(dir, { recursive: true });
+    } catch {
+      // Sem diretório, o `createWriteStream` falha e o `soltar` degrada sem log — o
+      // processo segue vivo, que é o que importa.
+    }
+    return join(dir, `bg-${pid ?? 'sem-pid'}.log`);
+  }
   /**
    * EST-1010 — o aviso de "sem piso de SO" (degrade/unsafe) é emitido UMA vez por
    * sessão (não por comando): numa máquina sem bwrap, repetir o aviso a cada
@@ -296,6 +318,33 @@ export class NodeShellPort implements ShellPort {
         resolvePromise(result);
       };
 
+      // ── F-BG (21/09/2026) — SOLTAR, que não é matar ──────────────────────────
+      //
+      // Pedido do dono: "quando ele começar uma task que prende, eu ter a opção de deixar
+      // rodando em background". O que existia era ESC/F8, que MATA. Faltava o oposto.
+      //
+      // O ponto delicado é o STDIO. O filho nasce com stdout/stderr em PIPE, drenados
+      // pelos listeners abaixo. Se o turno simplesmente parar de esperar e ninguém drenar,
+      // o buffer do SO enche e O PROCESSO TRAVA — exatamente o oposto do pedido. E não dá
+      // para re-apontar o stdio de um processo JÁ em execução. Então soltar = manter o
+      // dreno vivo, redirecionando-o para um ARQUIVO DE LOG.
+      let detached = false;
+      let logStream: import('node:fs').WriteStream | undefined;
+      const exitSubs: Array<(code: number | null, outTail: string) => void> = [];
+      /** Tail do que saiu DEPOIS de solto — o monitor mostra um pedaço no evento. */
+      let tailPosSolto = '';
+      const TAIL_MAX = 4096;
+
+      const escreverNoLog = (texto: string): void => {
+        if (texto === '') return;
+        if (tailPosSolto.length < TAIL_MAX) tailPosSolto += texto;
+        try {
+          logStream?.write(texto);
+        } catch {
+          // Log é conveniência: falhar ao gravar NÃO pode derrubar o processo solto.
+        }
+      };
+
       // Mata a ÁRVORE/GRUPO de processo do filho (sh + netos), cross-platform. Fail-safe
       // se o pid sumiu (ESRCH) ou o mecanismo falhou: cai p/ matar o filho direto.
       const killGroup = (sig: NodeJS.Signals): void => {
@@ -366,6 +415,54 @@ export class NodeShellPort implements ShellPort {
       };
       bumpExecIdle(); // arma o 1º intervalo (silêncio inicial conta como inatividade)
 
+      // F-BG — O ATO DE SOLTAR. Ordem importa: PARAR o relógio de inatividade primeiro
+      // (senão o anti-hang mataria o processo que acabamos de decidir manter vivo), abrir
+      // o log, e só então resolver o turno.
+      const soltar = (): void => {
+        if (settled || detached) return;
+        detached = true;
+        clearTimeout(timer);
+        const logPath = this.caminhoDoLogBg(child.pid);
+        try {
+          const ls = createWriteStream(logPath, { flags: 'a' });
+          logStream = ls;
+          ls.write(
+            `
+=== ${new Date().toISOString()} — solto para segundo plano ===
+$ ${command}
+`,
+          );
+          // O que JÁ tinha saído antes de soltar também vai pro log: o dono não perde o
+          // começo só porque decidiu soltar no meio.
+          if (stdout !== '') ls.write(stdout);
+          if (stderr !== '') ls.write(stderr);
+        } catch {
+          logStream = undefined; // sem log, o dreno abaixo ainda roda (anti-trava)
+        }
+        // O handle que o monitor consome — a MESMA interface do `watch_command`, para
+        // adotar um processo vivo sem inventar um segundo caminho de "esperar terminar".
+        options?.onDetached?.({
+          logPath,
+          command,
+          ...(child.pid !== undefined ? { pid: child.pid } : {}),
+          handle: {
+            onExit: (cb): void => {
+              exitSubs.push(cb);
+            },
+            kill: (): void => {
+              killGroup('SIGTERM');
+            },
+          },
+        });
+        finish({ stdout, stderr, exitCode: 0, detached: true, logPath });
+      };
+      const detachSignal = options?.detachSignal;
+      const onDetachReq = detachSignal ? (): void => soltar() : undefined;
+      if (detachSignal && onDetachReq) {
+        if (detachSignal.aborted) soltar();
+        else detachSignal.addEventListener('abort', onDetachReq, { once: true });
+      }
+
       // EST-0982 — ABORT: o MESMO sinal do loop/root-flow MATA o processo na hora
       // (esc/Ctrl-C/interrupt). Não espera o timeout: o turno cessa limpo em < grace.
       const onAbort = signal
@@ -427,16 +524,26 @@ export class NodeShellPort implements ShellPort {
       const errDecoder = new StringDecoder('utf8');
 
       child.stdout?.on('data', (chunk: Buffer) => {
-        bumpExecIdle(); // EST-0969 — saída = SINAL DE VIDA: zera o heartbeat de inatividade.
         const text = outDecoder.write(chunk);
         if (text.length === 0) return;
+        // F-BG — solto: o dreno CONTINUA (se parar, o pipe enche e o processo trava),
+        // mas vai para o log, não para a observação nem para a tela do turno já fechado.
+        if (detached) {
+          escreverNoLog(text);
+          return;
+        }
+        bumpExecIdle(); // EST-0969 — saída = SINAL DE VIDA: zera o heartbeat de inatividade.
         if (stdout.length < MAX_OUTPUT_BYTES) stdout += text;
         outEmitter.feed(text);
       });
       child.stderr?.on('data', (chunk: Buffer) => {
-        bumpExecIdle(); // EST-0969 — saída = SINAL DE VIDA: zera o heartbeat de inatividade.
         const text = errDecoder.write(chunk);
         if (text.length === 0) return;
+        if (detached) {
+          escreverNoLog(text);
+          return;
+        }
+        bumpExecIdle(); // EST-0969 — saída = SINAL DE VIDA: zera o heartbeat de inatividade.
         if (stderr.length < MAX_OUTPUT_BYTES) stderr += text;
         errEmitter.feed(text);
       });
@@ -507,8 +614,34 @@ export class NodeShellPort implements ShellPort {
         });
       };
 
+      // F-BG — o processo SOLTO terminou. Aqui o turno já foi resolvido há tempo
+      // (`finish` rodou no `soltar`), então `finalize` NÃO pode ser chamado: ele mexe num
+      // resultado que já foi entregue. O que acontece é outra coisa — fechar o log e
+      // avisar quem está vigiando, que transforma isto num evento entre turnos.
+      const encerrarSolto = (code: number | null): void => {
+        try {
+          logStream?.write(`
+=== fim — exit=${code ?? 'sinal'} ===
+`);
+          logStream?.end();
+        } catch {
+          /* log é conveniência */
+        }
+        for (const cb of exitSubs.splice(0)) {
+          try {
+            cb(code, tailPosSolto.slice(-TAIL_MAX));
+          } catch {
+            // Um assinante que explode não pode impedir os outros de serem avisados.
+          }
+        }
+      };
+
       // Caminho NORMAL: o processo saiu E o stdio deu EOF — flush limpo e finaliza.
       child.on('close', (code: number | null, sig: NodeJS.Signals | null) => {
+        if (detached) {
+          encerrarSolto(code);
+          return;
+        }
         finalize(code, sig);
       });
 
@@ -520,6 +653,13 @@ export class NodeShellPort implements ShellPort {
       // finalizamos com o que já temos. No caminho normal o `close` vence e cancela
       // este timer (via `finish`) ⇒ zero mudança de comportamento.
       child.on('exit', (code: number | null, sig: NodeJS.Signals | null) => {
+        // F-BG — solto: quem encerra é o `close` (com o log drenado). Se o `close` não
+        // vier (neto destacado segurando o pipe), o `exit` fecha assim mesmo — melhor um
+        // aviso com tail incompleto do que monitor pendurado para sempre.
+        if (detached) {
+          setTimeout(() => encerrarSolto(code), EXIT_DRAIN_MS).unref?.();
+          return;
+        }
         if (settled || exitDrainTimer) return;
         exited = { code, sig };
         exitDrainTimer = setTimeout(() => {

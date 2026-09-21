@@ -33,7 +33,7 @@ import {
 import type { AskResolver } from '../permission/ask.js';
 import { PolicyPermissionEngine } from '../permission/engine.js';
 import { runCommandTool } from './tools/native.js';
-import type { ShellChunk, ToolPorts, ToolRunContext } from './tools/types.js';
+import type { DetachHub, ShellChunk, ToolPorts, ToolRunContext } from './tools/types.js';
 import type { HistoryItem } from './context.js';
 
 /** O `name` da tool reusada — a MESMA do agente. NÃO é um caminho próprio de shell. */
@@ -70,6 +70,8 @@ export interface BangExecutorOptions {
   readonly permission: PermissionEngine;
   /** As MESMAS portas (shell confinado/cwd-preso/timeout — EST-0948). */
   readonly ports: ToolPorts;
+  /** F-BG — o canal do Ctrl+B. Ausente ⇒ soltar não existe no `!comando` (como antes). */
+  readonly detachHub?: DetachHub;
   /**
    * O MESMO `AskResolver` da TUI (EST-0948). Em `ask`, pergunta ao usuário com o
    * efeito EXATO (CLI-SEC-9). SEM resolver ⇒ fail-safe: `ask` vira BLOQUEIO (nunca
@@ -89,11 +91,20 @@ export class BangExecutor {
   private readonly permission: PermissionEngine;
   private readonly ports: ToolPorts;
   private readonly askResolver?: AskResolver;
+  /**
+   * F-BG — o canal do Ctrl+B, o MESMO que o loop do agente usa.
+   *
+   * O `!comando` é onde o dono mais provavelmente se prende: é ELE quem digita
+   * `!npm run dev`. Deixar o soltar só no caminho do agente faria a tecla parecer
+   * quebrada justamente no uso mais deliberado.
+   */
+  private readonly detachHub?: DetachHub;
 
   constructor(opts: BangExecutorOptions) {
     this.permission = opts.permission;
     this.ports = opts.ports;
     if (opts.askResolver) this.askResolver = opts.askResolver;
+    if (opts.detachHub) this.detachHub = opts.detachHub;
   }
 
   /**
@@ -127,9 +138,16 @@ export class BangExecutor {
     // usa a MESMA porta de shell confinada (cwd-preso + timeout, EST-0948). EST-0982:
     // o MESMO `signal` (abort/kill) e o `onShellChunk` (stream) passam pelo MESMO ctx
     // que o loop do agente injeta — o `!comando` ganha matar-ao-esc e stream idênticos.
+    // F-BG — o `!comando` ganha o SOLTAR pelo mesmo canal do agente: um sinal novo por
+    // execução, e o `onDetached` que adota o processo vivo num monitor.
+    const detachSignal = this.detachHub?.arm();
     const ctx: ToolRunContext = {
       ...(signal ? { signal } : {}),
       ...(onChunk ? { onShellChunk: onChunk } : {}),
+      ...(detachSignal ? { detachSignal } : {}),
+      ...(this.detachHub
+        ? { onDetached: (info): void => this.detachHub?.onDetached(info) }
+        : {}),
     };
     const result = await runCommandTool.run({ command }, this.ports, ctx);
     return {

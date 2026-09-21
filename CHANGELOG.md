@@ -14,6 +14,17 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Adicionado
+
+- ⏯️ **`Ctrl+B` — solta para segundo plano a tool de shell em execução.** Pedido do dono: *"às vezes eu disparo algum pedido e a tela fica processando e travado; queria a opção de deixar essa task rodando em background"*. O que existia era **ESC/F8, que MATA**; faltava o oposto — o comando segue vivo e o **turno** deixa de esperar por ele. A causa do travamento está medida: o `timeoutMs` do shell é de **inatividade**, re-armado a cada chunk de saída, então um comando longo e **falante** (servidor de dev, watcher, `tail -f`) nunca expira e o `run_command` nunca retorna. Sem nada rodando, a tecla não faz barulho — nem nota, nem beep.
+- 📝 A saída do comando solto passa a ser gravada em **`~/.aluy/logs/bg-<pid>.log`** — inclusive o que já tinha saído **antes** de soltar, para não perder o começo. Quando o processo termina, o exit code chega como **evento de monitor entre turnos**, no mesmo trilho do `watch_command`, sem parar o trabalho em curso. O `run_command` avisa o modelo de que a tarefa saiu do turno e que ele **não deve repetir o comando nem ficar esperando**.
+
+### Detalhes técnicos
+
+- 🔌 O ponto delicado é o **stdio**, e é onde está a maior parte do cuidado. O filho nasce com stdout/stderr em **pipe**; se o turno para de esperar e ninguém drena, o buffer do SO enche e **o processo trava** — o oposto do pedido. E não dá para re-apontar o stdio de um processo já em execução. Então soltar = manter o dreno vivo, redirecionando-o para o arquivo de log, e **parar o relógio de inatividade** (senão o anti-hang mataria justamente o processo que o dono mandou manter vivo). Há teste para os dois: um comando que cospe 200 linhas **depois** de solto termina com `exit=0`, e um silencioso por 3s sobrevive a um `timeoutMs` de 1,5s.
+- 🔁 A adoção do processo vivo **reusa o trigger que já existia**: o `CommandSpawnHandle` do `watch_command` é só `onExit` + `kill`, então o `spawnFn` do monitor passa a **adotar** em vez de spawnar — sem um segundo caminho de "esperar comando terminar". O `DetachHub` arma um sinal **novo por tool-call**: soltar um comando não pode soltar o próximo.
+- ⚠️ **Depois de solto, o ESC não mata mais aquele comando** — ele saiu do turno. Quem mata passa a ser o `monitor_cancel`, ou o F8, que derruba tudo.
+
 ### Alterado
 
 - 💡 **A sugestão de próximo prompt passa a vir do MODELO.** Ela era escolhida por heurística local entre **sete frases fixas** (`rode os testes…`, `resuma o que mudou…`, `explique o que você fez…`, …), traduzidas por i18n. O dono reportou "coisas nonsense" com print da tela: depois de um turno que auditou UX, rodou build e gerou relatório, a sugestão foi *"rode os testes e me mostre o resultado"* — frase correta, momento errado. Com sete opções fixas, acertar o turno é coincidência. Agora a TUI pinta a heurística **imediatamente** (a linha nunca nasce vazia) e pede uma sugestão ao modelo em paralelo; quando chega, substitui. Custo aceito explicitamente pelo dono — e contido: a chamada leva um **digest** (o recap do turno + o último objetivo), **nunca o histórico**, então são dezenas de tokens e não milhares. É por isso que ela não reusa o `runSideQuery`, que injeta o snapshot inteiro.
