@@ -132,6 +132,21 @@ export const KNOWN_MODEL_CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
   // ── Mistral ────────────────────────────────────────────────────────────────
   'mistral-large-2': 128_000,
   'mistral-large': 128_000,
+
+  // ── Z.AI GLM ───────────────────────────────────────────────────────────────
+  // A z.ai NÃO anuncia a janela em `/models` — medido em 21/09/2026 com o dono rodando
+  // `glm-5.3` no plano de coding: a sessão abria com "o provider não informa a janela de
+  // contexto", a auto-compactação ficava INERTE e o `⛁ %` não saía de 0. Fonte dos números:
+  // docs.z.ai, conferida em DUAS páginas independentes (a visão geral dos modelos e a página
+  // de cada modelo) — 5.3/5.2 = 1M; 5.1/5/4.7/4.6 = 200K; 4.5/4.5-air = 128K.
+  'glm-5.3': 1_000_000,
+  'glm-5.2': 1_000_000,
+  'glm-5.1': 200_000,
+  'glm-5': 200_000,
+  'glm-4.7': 200_000,
+  'glm-4.6': 200_000,
+  'glm-4.5': 128_000,
+  'glm-4.5-air': 128_000,
 };
 
 /**

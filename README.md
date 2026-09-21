@@ -38,8 +38,8 @@ aluy --continue                               # retoma de onde parou
 
 ## Por que este, e não outro
 
-**A chave é sua, e o caminho é direto.** Nove providers no catálogo — Anthropic,
-OpenAI, OpenRouter, Google, DeepSeek, Groq, Mistral, xAI e Ollama — ou qualquer
+**A chave é sua, e o caminho é direto.** Dez providers no catálogo — Anthropic,
+OpenAI, OpenRouter, Google, DeepSeek, Groq, Mistral, Z.AI, xAI e Ollama — ou qualquer
 endpoint compatível com a API da OpenAI. Não há servidor nosso no meio: o seu
 código e o seu prompt vão do seu terminal para o provider que **você** escolheu.
 A credencial nunca fica em claro — vai para o keychain do SO ou, onde ele não
