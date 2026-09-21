@@ -14,6 +14,8 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.183] — 2026-09-20
+
 ### Corrigido
 
 - 🎲 **O juiz do Maestro decidia com um número que o próprio modelo inventava.** O prompt pedia `"confidence": <0.0 a 1.0>` ao `qwen2.5:0.5b`, e `maestro/wiring.ts` tinha **dois limiares** em cima da resposta (`> 0.6` para considerar o juiz, `> 0.8` para deixar ele sobrepor o motor-a). O comentário do próprio arquivo já dizia que a confiança de um 0.5B é ruído e que "o gate não filtra" — o que ele não dizia é que o valor não era só ruim, era **fabricado**. Medido em 20/09/2026 contra o modelo real desta máquina: pedindo um número por JSON schema, ele devolveu **100**. A mesma quantidade era exibida ao dono como porcentagem no `CycleCeilingGate` — um valor com cara de medição, na tela de quem decide. Os dois limiares e a porcentagem saíram; quem protege continua sendo a regra estrutural (o juiz só pode sobrepor em direção a MAIS fluidez), que não depende de número nenhum. O campo `confidence` segue no contrato, agora com a constante explícita `CONFIANCA_NAO_MEDIDA` e um caminho documentado para o dia em que houver medição de verdade.
