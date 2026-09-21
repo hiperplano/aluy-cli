@@ -63,6 +63,17 @@ export function genericApiKeyEnvName(provider: string): string {
   return `ALUY_${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
 }
 
+/**
+ * A env var a CITAR numa mensagem ao dono: a dedicada do provider quando existe, senão a
+ * genérica — que é a que o resolvedor de fato lê p/ qualquer provider fora dos três
+ * originais. Sem este fallback a mensagem de "sem credencial" saía `undefined=...` para
+ * deepseek, groq, z.ai e todo provider custom: justo a primeira tela de quem acabou de
+ * escolher um provider novo, mandando configurar uma variável que não existe.
+ */
+function envDaChave(provider: LocalProviderKind): string {
+  return ENV_API_KEY[provider] ?? genericApiKeyEnvName(provider);
+}
+
 /** Conta do keychain p/ os tokens OAuth de um provider (EST-1114). */
 export function oauthAccount(provider: LocalProviderKind): string {
   return `${provider}:oauth`;
@@ -87,11 +98,11 @@ export class MissingLocalCredentialError extends Error {
     const hint =
       erroDoKeychain !== undefined
         ? `o keychain do SO NÃO respondeu (${erroDoKeychain}) — a chave pode estar lá e inacessível.` +
-          ` Verifique o Secret Service/DBus da sessão, ou passe \`${ENV_API_KEY[provider]}=...\` no ambiente.`
+          ` Verifique o Secret Service/DBus da sessão, ou passe \`${envDaChave(provider)}=...\` no ambiente.`
         : erroDoArquivo !== undefined
           ? `o cofre em arquivo NÃO pôde ser usado (${erroDoArquivo})`
           : auth === 'apikey'
-            ? `configure a chave: \`${ENV_API_KEY[provider]}=...\` (env) ou \`aluy login --provider ${provider}\` (keychain/cofre em arquivo)`
+            ? `configure a chave: \`${envDaChave(provider)}=...\` (env) ou \`aluy login --provider ${provider}\` (keychain/cofre em arquivo)`
             : `faça login por assinatura: \`aluy login --provider ${provider} --oauth\``;
     super(`backend local: sem credencial ${auth} p/ "${provider}". ${hint}`);
     this.name = 'MissingLocalCredentialError';
