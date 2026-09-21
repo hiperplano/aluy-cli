@@ -968,8 +968,12 @@ export type CycleStartResult =
 interface ActiveFanout {
   /** Labels do lote em curso (p/ o seed e p/ a nota). */
   readonly labels: readonly string[];
-  /** DESACOPLA o fan-out vivo (idempotente). Devolve `true` se desacoplou agora. */
-  detach(): boolean;
+  /**
+   * DESACOPLA o fan-out vivo (idempotente). Devolve `true` se desacoplou agora. O motivo
+   * vem de QUEM PEDE — injeção do dono (default) ou o Ctrl+B — porque é ele que decide o
+   * texto que o pai vai ler sobre os filhos.
+   */
+  detach(motivo?: 'inject' | 'solto'): boolean;
   /** `true` se já foi desacoplado (por esc OU por este caminho). */
   isDetached(): boolean;
   /**
@@ -1403,10 +1407,10 @@ export class SessionController {
   // gancho p/ DESACOPLAR o fan-out na hora (Fatia 2, atrás da flag) — em vez de a
   // injeção esperar o fan-out inteiro. `null` quando não há fan-out vivo.
   private activeFanout: ActiveFanout | null = null;
-  // FANOUT-17 — flag de produto (default OFF = comportamento atual, ZERO regressão).
-  // Fatia 2 (desacople-por-inject) SÓ acende com `ALUY_FANOUT_DETACH_ON_INJECT`
-  // truthy. Lida UMA vez no constructor (env injetável p/ teste). Default falso ⇒
-  // o `injectInput` durante fan-out cai SÓ na Fatia 1 (drena p/ pendingInjected).
+  // FANOUT-17 — Fatia 2 (desacople-por-inject). LIGADA por padrão desde a rc.142; a env
+  // `ALUY_FANOUT_DETACH_ON_INJECT` só serve para DESLIGAR (`0`/`false`/`no`/`off`). Lida
+  // UMA vez no constructor (env injetável p/ teste). Desligada, o `injectInput` durante
+  // fan-out cai SÓ na Fatia 1 (drena p/ pendingInjected).
   private readonly fanoutDetachOnInject: boolean;
   // EST-0982 · CLI-SEC-10 — trilha de auditoria do plano de controle (cancel/inject):
   // `actor_type=cli`, nó-alvo. A UI/persistência a LÊ. Vive pela sessão inteira.
@@ -5650,6 +5654,27 @@ export class SessionController {
    * inteiro desta feature.
    */
   soltarParaSegundoPlano(): boolean {
+    // FAN-OUT vivo primeiro. Pedido do dono: "quando ele dispara agentes, esses agentes
+    // ficam em estado processando e travam o turno" — o pai fica pendurado no
+    // `await port.spawn` até o último filho terminar. A máquina de desacoplar JÁ existia
+    // (é a do ESC e a da injeção); faltava a tecla. Mesma ordem da injeção: SEMEIA o
+    // estado vivo dos filhos ANTES de desacoplar, para o pai responder vendo o estado
+    // real. Os filhos seguem cercados pelos MESMOS tetos e ao alcance do parar-tudo.
+    const fanout = this.activeFanout;
+    if (fanout && !fanout.isDetached()) {
+      fanout.seedLiveState();
+      if (fanout.detach('solto')) {
+        // O loop arma o sinal de soltar para TODA tool-call — inclusive a do `spawn_agent`
+        // que acabou de ser liberada. Deixá-lo armado faria um 2º Ctrl+B "soltar" um sinal
+        // que ninguém escuta e consumir a tecla à toa.
+        this.detachAtual = undefined;
+        this.pushNoteSafe('segundo plano', [
+          `sub-agentes (${fanout.labels.join(', ')}) seguem trabalhando`,
+          'o resultado chega como dado quando concluírem · agents_status mostra o andamento',
+        ]);
+        return true;
+      }
+    }
     const ctl = this.detachAtual;
     if (ctl === undefined || ctl.signal.aborted) return false;
     ctl.abort();
@@ -7940,7 +7965,7 @@ export class SessionController {
     // conserto pela metade: o dono seguiu vendo "(error, sem sucesso) — turno
     // interrompido (esc)" com os filhos vivos e saudáveis.
     // Quem SABE o motivo é quem PEDE o desacople; então ele grava aqui.
-    let motivoDetach: 'esc' | 'inject' = 'esc';
+    let motivoDetach: 'esc' | 'inject' | 'solto' = 'esc';
     let onInjectDetach: (() => void) | null = null;
     const detachPromise = new Promise<'detach'>((res) => {
       onInjectDetach = () => res('detach');
@@ -7949,9 +7974,9 @@ export class SessionController {
     const labels = profiles.map((p) => p.label);
     const thisFanout: ActiveFanout = {
       labels,
-      detach: (): boolean => {
-        // `detach()` só é chamado pela INJEÇÃO (o ESC entra pelo abort do sinal).
-        motivoDetach = 'inject';
+      detach: (motivo: 'inject' | 'solto' = 'inject'): boolean => {
+        // Chamado pela INJEÇÃO ou pelo Ctrl+B (o ESC entra pelo abort do sinal).
+        motivoDetach = motivo;
         const did = doDetach();
         // Acorda a corrida abaixo p/ o pai responder JÁ (seed-vivo), sem esperar o run.
         onInjectDetach?.();
@@ -9177,7 +9202,10 @@ function errorOutcomeFor(label: string, message: string): SubAgentOutcome {
  * cessou (o loop abortado descarta isto); o desfecho REAL chega depois e vira DADO
  * do próximo turno (`onDetachedOutcomes`). Honesto se algo o ler: explica o estado.
  */
-function detachedOutcome(label: string, motivo: 'esc' | 'inject' = 'esc'): SubAgentOutcome {
+function detachedOutcome(
+  label: string,
+  motivo: 'esc' | 'inject' | 'solto' = 'esc',
+): SubAgentOutcome {
   // POR QUE O MOTIVO IMPORTA — e por que ignorá-lo virou um defeito publicado.
   //
   // Este marcador nasceu para o ESC: o turno do pai é ABORTADO, o loop DESCARTA o que
@@ -9209,9 +9237,14 @@ function detachedOutcome(label: string, motivo: 'esc' | 'inject' = 'esc'): SubAg
       ? `o sub-agente "${label}" segue rodando em segundo plano — o dono apertou ESC e ` +
         `parou só o turno principal. O resultado dele chega como dado quando concluir. ` +
         `NÃO afirme que ele terminou nem invente o conteúdo dele.`
-      : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
-        `Você foi liberado para responder agora; o resultado dele chega como dado ` +
-        `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
+      : motivo === 'solto'
+        ? `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. O dono ` +
+          `SOLTOU o fan-out (Ctrl+B) para liberar o turno. O resultado dele chega como dado ` +
+          `quando concluir: NÃO espere por ele, NÃO o dispare de novo, NÃO afirme que já ` +
+          `terminou nem invente o conteúdo dele. Diga ao dono que segue rodando e encerre.`
+        : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
+          `Você foi liberado para responder agora; o resultado dele chega como dado ` +
+          `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
     stop: 'final',
     usage: { iterations: 0, toolCalls: 0, tokens: 0 },
   };
