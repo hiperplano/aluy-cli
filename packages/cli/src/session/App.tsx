@@ -5070,6 +5070,7 @@ export function App(props: AppProps): React.ReactElement {
               // altura não pula no instante em que o bloco desce p/ o scrollback — que é
               // onde este repo já teve o "buraco no meio da tela".
               prevKind={i > 0 ? live[i - 1]?.kind : undefined}
+              nextKind={live[i + 1]?.kind}
             />
           ))}
 
@@ -5279,6 +5280,7 @@ export function App(props: AppProps): React.ReactElement {
                 frame={0}
                 columns={columns}
                 prevKind={done[blockIndex - 1]?.kind}
+                nextKind={done[blockIndex + 1]?.kind}
                 settled
               />
             </Box>
@@ -5773,6 +5775,11 @@ export function BlockView(props: {
   // resultado de um índice que pode não existir (`blocks[i-1]?.kind`) direto.
   readonly prevKind?: SessionState['blocks'][number]['kind'] | undefined;
   /**
+   * O tipo do bloco SEGUINTE — espelho do `prevKind`. Hoje só o `inject` consulta: dois
+   * "↳ encaixado" seguidos são UMA lista, e o respiro entre eles a quebrava ao meio.
+   */
+  readonly nextKind?: SessionState['blocks'][number]['kind'] | undefined;
+  /**
    * O bloco já está no `<Static>` (histórico, nunca repintado). Hoje só muda o lote de
    * sub-agentes que desceu com filhos em segundo plano (ver `liveStartIndex`).
    */
@@ -5908,7 +5915,7 @@ export function BlockView(props: {
       // EST-0982 (mid-turn) — confirmação "↳ encaixado": o "btw" do usuário ENTROU no
       // turno vivo (incorporado entre iterações). Nota leve/dim — feedback, não fala do
       // agente. O eco já vem REDIGIDO (CLI-SEC-6); vazio ⇒ só o rótulo.
-      return <InjectAck text={b.text} />;
+      return <InjectAck text={b.text} seguidoDeOutro={props.nextKind === 'inject'} />;
   }
 }
 
@@ -5917,11 +5924,17 @@ export function BlockView(props: {
  * eco REDIGIDO do que entrou (truncado p/ não inundar a região viva). Avisa o usuário
  * que o input foi incorporado no turno em curso (e não engolido / adiado).
  */
-function InjectAck(props: { readonly text: string }): React.ReactElement {
+function InjectAck(props: {
+  readonly text: string;
+  readonly seguidoDeOutro?: boolean;
+}): React.ReactElement {
   const echo = props.text.trim();
   const shown = echo.length > 80 ? `${echo.slice(0, 80)}…` : echo;
   return (
-    <Box paddingLeft={2} paddingBottom={1}>
+    // Relato do dono: mandar DUAS mensagens no meio do turno rendia dois "↳ encaixado" com
+    // uma linha em branco no meio — cada nota carregava o próprio respiro. Seguidas, elas
+    // são uma lista; o respiro fica só depois da ÚLTIMA.
+    <Box paddingLeft={2} paddingBottom={props.seguidoDeOutro === true ? 0 : 1}>
       <Role name="fgDim">↳ encaixado{shown ? `: ${shown}` : ''}</Role>
     </Box>
   );
