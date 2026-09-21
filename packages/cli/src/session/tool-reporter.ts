@@ -169,9 +169,17 @@ export function withToolReport(
   reporter: ToolReporter,
 ): NativeTool<ToolPorts> {
   return {
-    name: tool.name,
-    effect: tool.effect,
-    description: tool.description,
+    // BUG-SCHEMA-PERDIDO (22/09/2026) — ESPALHA a tool inteira; só o `run` é trocado.
+    // Antes este wrapper copiava campo a campo (`name`/`effect`/`description`) e o
+    // `parameters` FICAVA PARA TRÁS. Sem ele, `toToolFunctionSchema` cai no schema livre
+    // (`{type:'object', additionalProperties:true}`) — e TODA tool da TUI, nativa ou MCP,
+    // ia ao provider sem `properties` nem `required`. Provider tolerante (OpenRouter)
+    // se vira com o `Input: {…}` da descrição; a z.ai monta os argumentos A PARTIR do
+    // schema, e sem ele devolve `arguments: "{}"` — o `run_command requer "command".
+    // Recebi: nenhum argumento` que o dono via em 100% das chamadas, só na TUI (o
+    // headless não passa por este wrapper, por isso nunca reproduzia). Copiar campo a
+    // campo é a armadilha: o próximo campo novo de `NativeTool` sumiria do mesmo jeito.
+    ...tool,
     // EST-0982 — REPASSA o `ctx` (signal de abort + streaming `onShellChunk`) à tool
     // envolvida: sem isto, o wrapper engoliria o contexto e um `run_command` do AGENTE
     // perderia o abort dirigido e a saída ao vivo. O wrapper é transparente: só observa
