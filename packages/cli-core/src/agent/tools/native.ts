@@ -501,7 +501,30 @@ export const runCommandTool: NativeTool<ToolPorts> = {
       const r = await ports.shell.exec(command, {
         ...(ctx?.signal ? { signal: ctx.signal } : {}),
         ...(onChunk ? { onChunk } : {}),
+        // F-BG — SOLTAR: repassados sem interpretação. Quem decide é o dono (Ctrl+B),
+        // quem executa é a porta, e quem vigia o processo solto é o `onDetached`.
+        ...(ctx?.detachSignal ? { detachSignal: ctx.detachSignal } : {}),
+        ...(ctx?.onDetached ? { onDetached: ctx.onDetached } : {}),
       });
+
+      // F-BG — SOLTO pelo dono: o processo SEGUE VIVO e não há exit code ainda. Isto
+      // NÃO é sucesso nem falha do comando — é um desfecho novo, e precisa chegar ao
+      // modelo como tal. Dizer `exit=0` seria mentir (o comando pode falhar depois) e
+      // dizer `ok:false` faria o modelo tentar de novo um comando que está rodando.
+      // `ok:true` + observação explícita: a tarefa saiu do turno, o resultado vem como
+      // evento de monitor, e o modelo deve SEGUIR em vez de esperar.
+      if (r.detached === true) {
+        const onde = r.logPath !== undefined ? ` A saída está indo para ${r.logPath}.` : '';
+        return {
+          ok: true,
+          observation:
+            `[o dono SOLTOU este comando para segundo plano — ele segue rodando e o turno ` +
+            `não espera mais por ele].${onde} Você será avisado quando terminar, com o exit ` +
+            `code. NÃO rode o mesmo comando de novo e NÃO fique esperando: continue com o ` +
+            `que dá para fazer sem o resultado dele.`,
+          display: `$ ${command}`,
+        };
+      }
       // CLI-SEC-6 — redige o corpo agregado ANTES de virar observação (DADO ao
       // modelo) E antes de exibir. Idempotente com a redação por-chunk do stream.
       const stdout = redactOutputSecrets(r.stdout);

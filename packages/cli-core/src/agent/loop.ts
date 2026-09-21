@@ -86,7 +86,7 @@ import {
 import { EventQueue, formatMonitorEventAsData } from './monitor/event-queue.js';
 import { REMEMBER_TOOL_NAME } from './memory/contract.js';
 import type { ToolRegistry } from './tools/registry.js';
-import type { ShellChunk, ToolPorts, ToolRunContext } from './tools/types.js';
+import type { DetachHub, ShellChunk, ToolPorts, ToolRunContext } from './tools/types.js';
 import { valeMemorizar } from './memory/vale-memorizar.js';
 
 /**
@@ -498,6 +498,11 @@ export interface AgentLoopOptions {
    */
   readonly toolObserver?: ToolLifecycleObserver;
   /**
+   * F-BG — canal do "soltar para segundo plano" (Ctrl+B). Ausente ⇒ o loop se comporta
+   * exatamente como antes: nenhuma tool recebe `detachSignal` e soltar não existe.
+   */
+  readonly detachHub?: DetachHub;
+  /**
    * EST-0980 — GATE de pre-tool (hooks que podem VETAR a tool). Consultado SÓ no ramo
    * `allow` (após `decide()`), antes de rodar a tool. Compõe MONOTONICAMENTE (AND): a
    * tool só roda se a catraca permitiu E o gate não vetou. Sem porta ⇒ baseline (sem
@@ -696,6 +701,7 @@ export class AgentLoop {
   private readonly sessionId: string;
   private readonly askResolver?: AskResolver;
   private readonly toolObserver?: ToolLifecycleObserver;
+  private readonly detachHub?: DetachHub;
   // EST-0980 — gate de pre-tool (hooks que vetam). undefined ⇒ baseline (sem gate).
   private readonly preToolGate?: PreToolGate;
   // EST-0969 (heartbeat) — pinga progresso (iteração/modelo/tool). undefined ⇒ no-op.
@@ -770,6 +776,7 @@ export class AgentLoop {
     this.sessionId = opts.sessionId ?? newSessionId();
     if (opts.askResolver) this.askResolver = opts.askResolver;
     if (opts.toolObserver) this.toolObserver = opts.toolObserver;
+    if (opts.detachHub) this.detachHub = opts.detachHub;
     if (opts.preToolGate) this.preToolGate = opts.preToolGate;
     if (opts.onProgress) this.onProgress = opts.onProgress;
     if (opts.onModelActivity) this.onModelActivity = opts.onModelActivity;
@@ -1903,8 +1910,16 @@ export class AgentLoop {
     // a saída ao vivo (`onShellChunk`) ao observador da TUI (chunk JÁ redigido pela
     // tool — CLI-SEC-6). Ambos opcionais: sem observer de chunk, só não há stream.
     const observer = this.toolObserver;
+    // F-BG — arma o "soltar" DESTA tool-call. Uma por chamada: soltar um comando não pode
+    // soltar o próximo. O loop não sabe o que dispara o sinal (é o Ctrl+B, na TUI) nem o
+    // que acontece depois (o controller adota o processo num monitor) — só liga as pontas.
+    const detachSignal = this.detachHub?.arm();
     const ctx: ToolRunContext = {
       ...(signal ? { signal } : {}),
+      ...(detachSignal ? { detachSignal } : {}),
+      ...(this.detachHub
+        ? { onDetached: (info): void => this.detachHub?.onDetached(info) }
+        : {}),
       // EST-0969 (heartbeat) — cada chunk de stdout/stderr é um SINAL DE VIDA da
       // tool: zera a inatividade do filho mesmo que o observer da TUI não esteja
       // plugado (um `run_command` longo MAS produzindo saída NÃO está travado). Por

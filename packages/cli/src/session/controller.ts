@@ -1332,6 +1332,11 @@ export class SessionController {
   // EST-MON-5 · ADR-0079 — store dos monitores ativos (vigias file-watch/process-wait).
   // Cancelado por inteiro no encerramento (`cancelAllFlows`/dispose) — sem watcher/timer órfão.
   private readonly monitorStore: MonitorStore;
+  /**
+   * F-BG (21/09/2026) — o AbortController do "soltar" da tool-call em execução.
+   * Re-armado pelo `detachHub.arm()` a cada tool; `undefined` quando nada roda.
+   */
+  private detachAtual: AbortController | undefined;
   // EST-1103 · ADR-0079 — fila de eventos de monitor (compartilhada com o loop).
   // O callback onEnqueue acorda o agente quando ocioso (idle-wake).
   private readonly monitorQueue: EventQueue;
@@ -2239,6 +2244,39 @@ export class SessionController {
           onSkip: () => this.onAutoCompactSkip(),
         },
         ...(opts.maestro ? { maestro: opts.maestro } : {}),
+        // F-BG — o canal do Ctrl+B. `arm` dá um sinal NOVO por tool-call (soltar um
+        // comando não pode soltar o próximo); `onDetached` ADOTA o processo vivo num
+        // monitor, reusando o trigger do `watch_command` — o término chega como evento
+        // entre turnos, sem parar o trabalho em curso.
+        detachHub: {
+          arm: (): AbortSignal => {
+            this.detachAtual = new AbortController();
+            return this.detachAtual.signal;
+          },
+          onDetached: (info): void => {
+            this.detachAtual = undefined;
+            try {
+              this.monitorStore.arm({
+                type: 'command',
+                label: info.command.slice(0, 60),
+                command: info.command,
+                queue: monitorQueue,
+                now: () => new Date(this.clock()).toISOString(),
+                // O processo JÁ existe: o `spawnFn` não spawna — ADOTA. É o que permite
+                // reusar o CommandWaitTrigger sem inventar um segundo caminho de
+                // "esperar comando terminar".
+                spawnFn: () => info.handle,
+              });
+            } catch {
+              // Teto de monitores atingido: o processo segue vivo e gravando no log; o
+              // dono perde só o aviso automático. Nunca derruba o turno.
+            }
+            this.pushNoteSafe('segundo plano', [
+              `"${info.command.slice(0, 60)}" segue rodando`,
+              `saída em ${info.logPath}`,
+            ]);
+          },
+        },
         ...(opts.continuationConfig ? { continuationConfig: opts.continuationConfig } : {}),
         ...(opts.memoryEngine ? { memory: opts.memoryEngine } : {}),
         ...(opts.memoryScope !== undefined ? { memoryScope: opts.memoryScope } : {}),
@@ -5601,6 +5639,20 @@ export class SessionController {
    * heurística e troca se esta chegar. Qualquer falha vira `undefined` — ornamento não
    * derruba, não atrasa e não avisa.
    */
+  /**
+   * F-BG — SOLTAR a tool de shell em execução para segundo plano (Ctrl+B).
+   *
+   * Devolve `false` quando não há nada rodando — a TUI usa isso para não fazer barulho
+   * numa tecla apertada à toa. NÃO mata: quem mata é ESC/F8, e a distinção é o ponto
+   * inteiro desta feature.
+   */
+  soltarParaSegundoPlano(): boolean {
+    const ctl = this.detachAtual;
+    if (ctl === undefined || ctl.signal.aborted) return false;
+    ctl.abort();
+    return true;
+  }
+
   async suggestNext(
     input: { readonly recap?: string; readonly lastGoal?: string; readonly lang: string },
     signal?: AbortSignal,
