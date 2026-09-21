@@ -23,23 +23,59 @@ function nomeCurto(alvo: string): string {
   const limpo = alvo.trim();
   if (limpo === '') return '';
   // `path.basename` não serve: o alvo pode ser um comando (`npm test -- --run`) ou um
-  // padrão de busca, e cortar no `/` deles produziria lixo. Só encurtamos o que PARECE
-  // caminho (sem espaço e com barra).
-  if (!limpo.includes(' ') && limpo.includes('/')) {
-    const partes = limpo.split('/').filter((p) => p !== '');
+  // padrão de busca, e cortar no separador deles produziria lixo. Só encurtamos o que
+  // PARECE caminho (sem espaço e com barra).
+  //
+  // 21/09/2026 — antes isto olhava SÓ `/`, e o recap ficava QUEBRADO NO WINDOWS: um
+  // caminho como `C:\\Projects\\app\\src\\Card.tsx` não tem nenhuma barra normal, caía no
+  // `return limpo` e entrava INTEIRO na linha. Medido no turno real do dono: 308 chars
+  // no Windows contra 46 no POSIX, para o MESMO turno — a linha quebrava no meio de um
+  // path e emendava com o próximo, virando a parede que ele reportou. Agora corta nos
+  // dois separadores.
+  if (!limpo.includes(' ') && pareceCaminho(limpo)) {
+    const partes = limpo.split(SEPARADORES).filter((p) => p !== '');
     return partes[partes.length - 1] ?? limpo;
   }
   return limpo;
 }
 
 /** Primeira palavra de um comando (`npm test -- x` ⇒ `npm test` quando faz sentido). */
+/** Separadores de caminho dos dois mundos — POSIX e Windows. */
+const SEPARADORES = /[/\\]/;
+const pareceCaminho = (s: string): boolean => SEPARADORES.test(s);
+
+/**
+ * Comandos que, sozinhos, não dizem o que foi feito: são RUNNERS. Para eles vale citar o
+ * subcomando (`npm test`, `git status`). Para o resto, o primeiro token basta.
+ */
+const RUNNERS: ReadonlySet<string> = new Set([
+  'npm', 'npx', 'pnpm', 'yarn', 'bun', 'deno',
+  'git', 'cargo', 'go', 'make', 'docker', 'kubectl',
+  'node', 'python', 'python3', 'py', 'dotnet', 'mvn', 'gradle',
+]);
+
 function comandoCurto(alvo: string): string {
   const limpo = alvo.trim().replace(/\s+/g, ' ');
   if (limpo === '') return '';
   const palavras = limpo.split(' ');
-  // Duas palavras cobrem o caso comum (`npm test`, `git status`, `cargo build`) sem virar
-  // uma linha inteira; uma só seria ambígua demais (`npm` não diz nada).
-  return palavras.slice(0, 2).join(' ');
+  // O PRIMEIRO token passa pelo `nomeCurto`: um comando invocado por caminho absoluto
+  // (`C:\\Program Files\\nodejs\\node.exe`) vira `node.exe`, não a linha inteira.
+  const primeiro = nomeCurto(palavras[0] ?? '');
+  const segundo = palavras[1];
+  // 21/09/2026 — antes pegava as DUAS primeiras palavras SEMPRE. Funciona em `npm test`
+  // e `git status`; desmonta em `type C:\\caminho\\gigante\\Card.tsx`, onde a segunda
+  // palavra É o caminho, e não informa nada em `powershell -Command` ou `node -e`.
+  // A segunda palavra só entra quando AJUDA: a primeira é um runner conhecido (que
+  // sozinho não diz o que foi feito) e o argumento não é caminho nem flag.
+  if (
+    segundo !== undefined &&
+    RUNNERS.has(primeiro.replace(/\.exe$/i, '').toLowerCase()) &&
+    !pareceCaminho(segundo) &&
+    !segundo.startsWith('-')
+  ) {
+    return `${primeiro} ${segundo}`;
+  }
+  return primeiro;
 }
 
 /** Junta itens com vírgula e "e" no último — legível numa linha só. */
@@ -59,6 +95,16 @@ function blocosDoUltimoTurno(blocks: readonly SessionBlock[]): readonly SessionB
 
 /** Teto de nomes citados: além disso a linha deixa de caber e vira ruído. */
 const MAX_NOMES = 3;
+
+/**
+ * Teto de CARACTERES da linha inteira — rede de segurança, não o mecanismo principal.
+ *
+ * 21/09/2026 — o `MAX_NOMES` limita a QUANTIDADE de itens, nunca o COMPRIMENTO deles.
+ * Bastou um caminho longo para a linha passar de 300 chars e vazar por cima do composer.
+ * Encurtar bem (nomeCurto/comandoCurto) é o conserto; este teto é o que segura o caso
+ * que eu não previ — um nome de arquivo absurdo, um comando exótico.
+ */
+const MAX_LINHA = 96;
 
 /**
  * F-RECAP — a linha de recap do último turno, ou `undefined` quando não há nada de
@@ -113,5 +159,7 @@ export function buildTurnRecap(blocks: readonly SessionBlock[]): string | undefi
   }
   if (falhas > 0) partes.push(falhas === 1 ? '1 falhou' : `${falhas} falharam`);
 
-  return partes.length > 0 ? partes.join(' · ') : undefined;
+  if (partes.length === 0) return undefined;
+  const linha = partes.join(' · ');
+  return linha.length <= MAX_LINHA ? linha : `${linha.slice(0, MAX_LINHA - 1)}…`;
 }
