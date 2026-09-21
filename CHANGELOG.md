@@ -14,6 +14,8 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.184] — 2026-09-21
+
 ### Adicionado
 
 - ⏯️ **`Ctrl+B` — solta para segundo plano a tool de shell em execução.** Pedido do dono: *"às vezes eu disparo algum pedido e a tela fica processando e travado; queria a opção de deixar essa task rodando em background"*. O que existia era **ESC/F8, que MATA**; faltava o oposto — o comando segue vivo e o **turno** deixa de esperar por ele. A causa do travamento está medida: o `timeoutMs` do shell é de **inatividade**, re-armado a cada chunk de saída, então um comando longo e **falante** (servidor de dev, watcher, `tail -f`) nunca expira e o `run_command` nunca retorna. Sem nada rodando, a tecla não faz barulho — nem nota, nem beep.
@@ -36,6 +38,8 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ### Corrigido
 
+- 🧰 **Na TUI, toda tool ia ao provider SEM schema — e com a z.ai isso zerava 100% das tool-calls.** Reportado pelo dono: `run_command requer "command" (string não-vazia). Recebi: nenhum argumento`, em toda chamada, até o supervisor encerrar o turno — só na sessão interativa, só na z.ai. O `withToolReport` (o wrapper da linha `⏺`) reconstruía a tool campo a campo e o `parameters` ficava para trás; sem ele o schema enviado caía no objeto livre (`additionalProperties: true`), sem `properties` nem `required`. A z.ai monta os argumentos A PARTIR do schema e devolvia `arguments: "{}"`; o OpenRouter é tolerante e mascarava; o headless (`-p`) não passa pelo wrapper e nunca reproduzia. Isolado por replay do corpo exato da requisição, trocando uma parte por vez. Medido na TUI real contra a z.ai: **31/31 chamadas vazias antes, 0/63 depois**. O wrapper agora espalha a tool inteira — o próximo campo novo de `NativeTool` não some do mesmo jeito.
+- 🕳️ **O adapter OpenAI-compat tinha três caminhos que transformavam argumentos de tool-call em `{}` calado.** Fragmento de `arguments` que chegasse DEPOIS do `finish_reason` era descartado (o flush latchava); `arguments` vindo como objeto em vez de string JSON era ignorado; e duas calls completas no mesmo `index` se concatenavam e quebravam o parse. Os três desembocavam na mesma mensagem, indistinguível. Nenhum provider medido exercita esses caminhos hoje — é endurecimento, achado durante a investigação acima, e não era a causa dela.
 - 🪟 **O recap do rodapé estava quebrado no Windows e enchia o composer.** Reportado pelo dono com print da tela. A linha que resume o último turno cita arquivos e comandos, e `nomeCurto` só encurtava caminho com `/` — um caminho `C:\\Projects\\app\\src\\Card.tsx` não tem nenhuma barra normal e entrava **inteiro**. Medido no turno real dele: **308 caracteres no Windows contra 46 no POSIX**, para o mesmo turno. A linha quebrava no meio de um path e emendava com o item seguinte, virando a parede ilegível que ele viu. Três consertos: `nomeCurto` passa a cortar nos **dois** separadores; `comandoCurto` deixa de pegar cegamente as duas primeiras palavras — a segunda só entra quando a primeira é um runner conhecido (`npm`, `git`, `cargo`…) e o argumento não é caminho nem flag, então `type C:\\…\\Card.tsx` vira `type` e `npm test` continua `npm test`; e a linha ganhou **teto de 96 caracteres** com reticências, porque o `MAX_NOMES` limitava a quantidade de itens e nunca o comprimento deles. O mesmo turno agora sai com **82 caracteres**, e o caminho POSIX permanece byte a byte idêntico.
 
 ## [1.0.0-rc.183] — 2026-09-20
