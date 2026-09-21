@@ -14,10 +14,19 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.185] — 2026-09-21
+
 ### Adicionado
 
+- ⏯️ **O `Ctrl+B` passa a soltar também o FAN-OUT de sub-agentes.** Pedido do dono: *"quando ele dispara agentes, esses agentes ficam em estado processando e travam o turno — o correto não seria eles ficarem sendo monitorados e deixar o turno livre?"*. O pai fica pendurado no `await` do spawn até o ÚLTIMO filho terminar. A máquina de desacoplar já existia (a do ESC e a da injeção); faltava a tecla. O Ctrl+B agora solta **o que estiver prendendo o turno** — fan-out vivo primeiro, senão a tool de shell. Os filhos seguem vivos, cercados pelos mesmos tetos e ao alcance do F8/`agents_stop`; o pai lê que foi o dono quem soltou e é instruído a não esperar, não re-disparar o lote e não inventar o resultado. Verificado na TUI real com dois sub-agentes presos num comando de 90s: nota imediata e composer livre. `spawn_agent` assíncrono por padrão fica para um ADR — muda o contrato da tool com o modelo.
 - 🧭 **Z.AI entra no catálogo embutido — em DUAS entradas: `zai` (API geral, paga por uso) e `zai-coding` (GLM Coding Plan).** Pedido do dono, que vinha usando a z.ai por um provider custom montado à mão. São duas porque são dois produtos com credenciais que não se misturam: medido em 21/09/2026, a chave do Coding Plan apontada para o endpoint geral fez 16 requisições sem uma única resposta, e a doc da z.ai diz o mesmo pelo outro lado ("Incorrect endpoint configuration will result in inability to use GLM Coding Plan subscription quota"). Como a credencial é guardada por id de provider, os dois ids também deixam as duas chaves conviverem no cofre. Modelo default `glm-5.3`; a nota de cada entrada aponta para a outra.
 - 🪟 **Janelas de contexto da família GLM passam a ser conhecidas** (`glm-5.3`/`5.2` = 1M · `5.1`/`5`/`4.7`/`4.6` = 200K · `4.5`/`4.5-air` = 128K; fonte: docs.z.ai, conferida em duas páginas independentes). A z.ai não anuncia a janela em `/models`, então a sessão abria com "o provider não informa a janela de contexto", a auto-compactação ficava INERTE e o `⛁ %` não saía de 0 — até o dono digitar `/window` à mão.
+
+### Corrigido
+
+- 🎹 **O `Ctrl+B` da rc.184 só funcionava no `/fullscreen`.** Relato do dono: *"tentei usar o ctrl+b e nada, todas as minhas msgs depois ficaram esperando para serem encaixadas"*. O handler nasceu DENTRO do bloco `if (cockpitActive …)`, colado ao Ctrl+S — que é exclusivo do cockpit por desenho — e na TUI normal a tecla nunca chegava ao controller. Isolado por rastro em três pontos: a porta recebia o sinal, o `useInput` via `char="b" ctrl=true`, e o controller jamais era chamado. **Por que escapou:** os testes da rc.184 cobriam a porta de shell e o canal, e nenhum apertava a tecla na tela montada. Os novos apertam, e falham contra a versão anterior. A tecla só é consumida quando há o que soltar; sem nada rodando, o Ctrl+B segue sendo cursor-à-esquerda no composer.
+- ↳ **Duas notas "↳ encaixado" seguidas saíam com uma linha em branco no meio.** Reportado pelo dono com print. Cada nota carregava o próprio respiro; seguidas, elas são uma lista. O respiro agora fica só depois da ÚLTIMA.
+- 🔑 **A mensagem de "sem credencial" mandava configurar `undefined=...`** para todo provider fora dos três originais (deepseek, groq, z.ai, qualquer custom). O resolvedor sempre leu a env genérica `ALUY_<PROVIDER>_API_KEY`; só a mensagem consultava o mapa dos três e imprimia o buraco — justo na primeira tela de quem acabou de escolher um provider novo.
 
 ## [1.0.0-rc.184] — 2026-09-21
 
