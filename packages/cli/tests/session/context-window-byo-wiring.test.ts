@@ -90,7 +90,10 @@ describe('F-WIN — janela do MODELO (BYO) resolvida no boot (buildSession)', ()
     const s = bootByo({
       providerWindows: [{ id: 'tokenrouter', contextByModel: { 'outro/modelo': 128_000 } }],
       activeProviderId: 'tokenrouter',
-      activeModelSlug: 'zai/glm-4.6',
+      // Slug FICTÍCIO de propósito: o caso exige uma janela que NINGUÉM conhece. Era
+      // `zai/glm-4.6`, que deixou de servir quando a família GLM entrou no catálogo
+      // embutido — um slug real aqui quebra de novo no dia em que for catalogado.
+      activeModelSlug: 'acme/modelo-sem-janela-catalogada',
     });
     expect(windowOf(s.controller)).toBe(0);
   });

@@ -14,6 +14,11 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Adicionado
+
+- 🧭 **Z.AI entra no catálogo embutido — em DUAS entradas: `zai` (API geral, paga por uso) e `zai-coding` (GLM Coding Plan).** Pedido do dono, que vinha usando a z.ai por um provider custom montado à mão. São duas porque são dois produtos com credenciais que não se misturam: medido em 21/09/2026, a chave do Coding Plan apontada para o endpoint geral fez 16 requisições sem uma única resposta, e a doc da z.ai diz o mesmo pelo outro lado ("Incorrect endpoint configuration will result in inability to use GLM Coding Plan subscription quota"). Como a credencial é guardada por id de provider, os dois ids também deixam as duas chaves conviverem no cofre. Modelo default `glm-5.3`; a nota de cada entrada aponta para a outra.
+- 🪟 **Janelas de contexto da família GLM passam a ser conhecidas** (`glm-5.3`/`5.2` = 1M · `5.1`/`5`/`4.7`/`4.6` = 200K · `4.5`/`4.5-air` = 128K; fonte: docs.z.ai, conferida em duas páginas independentes). A z.ai não anuncia a janela em `/models`, então a sessão abria com "o provider não informa a janela de contexto", a auto-compactação ficava INERTE e o `⛁ %` não saía de 0 — até o dono digitar `/window` à mão.
+
 ## [1.0.0-rc.184] — 2026-09-21
 
 ### Adicionado

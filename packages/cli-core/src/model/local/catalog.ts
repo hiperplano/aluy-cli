@@ -148,6 +148,37 @@ const DEFAULT_ENTRIES: readonly LocalProviderEntry[] = [
     models: ['mistral-large-latest', 'mistral-small-latest', 'codestral-latest'],
     wave: 2,
   },
+  // Z.AI — DUAS entradas de propósito, porque são dois produtos com credenciais que NÃO se
+  // misturam. Medido em 21/09/2026: a chave do GLM Coding Plan, apontada para o endpoint
+  // geral, fez 16 requisições sem uma única resposta. A doc oficial diz o mesmo pelo outro
+  // lado: "Incorrect endpoint configuration will result in inability to use GLM Coding Plan
+  // subscription quota". Uma entrada só obrigaria metade dos donos a descobrir o
+  // `--local-base-url` sozinhos; e como a credencial é guardada POR id de provider, dois ids
+  // também deixam as duas chaves conviverem no cofre.
+  {
+    id: 'zai',
+    label: 'Z.AI (GLM)',
+    wireFormat: 'openai-compat',
+    baseUrl: 'https://api.z.ai/api/paas/v4',
+    auth: ['apikey'],
+    defaultModel: 'glm-5.3',
+    models: ['glm-5.3', 'glm-5.2', 'glm-5.1', 'glm-4.7', 'glm-4.6', 'glm-4.5-air'],
+    wave: 2,
+    notes: 'API geral, paga por uso. Assinante do GLM Coding Plan usa `zai-coding`.',
+  },
+  {
+    id: 'zai-coding',
+    label: 'Z.AI — GLM Coding Plan',
+    wireFormat: 'openai-compat',
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    auth: ['apikey'],
+    defaultModel: 'glm-5.3',
+    models: ['glm-5.3', 'glm-5.2', 'glm-5.1', 'glm-4.7', 'glm-4.6', 'glm-4.5-air'],
+    wave: 2,
+    notes:
+      'assinatura do GLM Coding Plan: a cota só vale NESTE endpoint, e a chave do plano ' +
+      'não funciona no endpoint geral (`zai`).',
+  },
   // ── Onda 3 — cauda / local ────────────────────────────────────────────────
   {
     id: 'xai',

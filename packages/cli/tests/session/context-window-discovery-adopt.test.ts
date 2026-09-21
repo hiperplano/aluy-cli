@@ -64,12 +64,17 @@ function bootByo(extra: Partial<BuildSessionOptions> = {}, tokensIn = 64_000) {
 
 describe('adoptDiscoveredModelWindow — a descoberta chegando na sessão viva', () => {
   it('janela DESCONHECIDA ⇒ adota, o ⛁ % passa a medir e o Compactor liga', async () => {
-    const s = bootByo({ activeProviderId: 'tokenrouter', activeModelSlug: 'zai/glm-4.6' });
+    // Slug FICTÍCIO de propósito: o caso exige uma janela que NINGUÉM conhece. Era
+    // `zai/glm-4.6`, que deixou de servir quando a família GLM entrou no catálogo embutido.
+    const s = bootByo({
+      activeProviderId: 'tokenrouter',
+      activeModelSlug: 'acme/modelo-sem-janela-catalogada',
+    });
     // O estado de HOJE p/ quem nunca editou o config: inerte.
     expect(windowOf(s.controller)).toBe(0);
     expect(maxRecentOf(s.controller)).toBe(0);
 
-    expect(s.controller.adoptDiscoveredModelWindow('zai/glm-4.6', 128_000)).toBe(true);
+    expect(s.controller.adoptDiscoveredModelWindow('acme/modelo-sem-janela-catalogada', 128_000)).toBe(true);
 
     expect(windowOf(s.controller)).toBe(128_000);
     // Os orçamentos window-relativos acompanham (senão a compactação dimensionaria por

@@ -29,6 +29,8 @@ describe('catálogo default EMBUTIDO (lista pré-carregada — ADR-0118 §4)', (
       'deepseek',
       'groq',
       'mistral',
+      'zai',
+      'zai-coding',
       'xai',
       'ollama',
     ]) {
