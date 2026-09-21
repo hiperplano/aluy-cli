@@ -74,7 +74,7 @@ function scriptedCaller(text: string, sink: StreamSink): ModelCaller {
   };
 }
 
-function buildController(text: string): SessionController {
+function buildController(text: string, sideQueryModel?: ModelCaller): SessionController {
   let ctrl: SessionController | null = null;
   const sink: StreamSink = {
     onStart: () => ctrl?.sink.onStart?.(),
@@ -89,6 +89,7 @@ function buildController(text: string): SessionController {
     askResolver: new TuiAskResolver(),
     meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
     flush: { intervalMs: 0 },
+    ...(sideQueryModel ? { sideQueryModel } : {}),
   });
   ctrl = controller;
   return controller;
@@ -102,8 +103,8 @@ async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
   }
 }
 
-function mountApp(opts: { suggestions?: boolean } = {}) {
-  const controller = buildController('pronto.');
+function mountApp(opts: { suggestions?: boolean; sideQueryModel?: ModelCaller } = {}) {
+  const controller = buildController('pronto.', opts.sideQueryModel);
   const theme = resolveTheme({ env: ENV });
   const r = render(
     <ThemeProvider theme={theme}>
@@ -199,6 +200,55 @@ describe('F197 · App — sugestão de próximo prompt (ghost + Tab)', () => {
     // o placeholder padrão segue valendo (composer vazio, sem sugestão).
     expect(plain(lastFrame())).toContain(PLACEHOLDER);
     unmount();
+  });
+
+  // ── F197-LLM (21/09/2026) — a sugestão DINÂMICA ────────────────────────────
+  //
+  // O dono pediu a troca porque as SETE frases fixas erravam o momento: depois de um
+  // turno que auditou UX e rodou build, a sugestão foi "rode os testes e me mostre o
+  // resultado". Frase correta, momento errado — com sete opções, acertar é coincidência.
+  //
+  // O DoD aqui é a SUBSTITUIÇÃO: a heurística pinta primeiro (a linha nunca nasce vazia)
+  // e o modelo troca quando chega. E o fallback: sem caller, tudo segue como antes.
+  it('a sugestão do MODELO substitui a heurística quando chega', async () => {
+    const doModelo = 'corrija o P1-3 do relatório de UX';
+    const sideQueryModel: ModelCaller = {
+      call: async () =>
+        ({ request_id: 'r', content: doModelo, finish_reason: 'stop' }) as ModelCallResult,
+    };
+    const { controller, lastFrame, unmount } = mountApp({ sideQueryModel });
+    try {
+      // espera a App MONTAR antes de rodar o turno: sem isto a borda trabalho→idle
+      // acontece antes de o efeito estar observando, e a sugestão nunca nasce.
+      await waitFor(() => plain(lastFrame()).includes(PLACEHOLDER));
+      await runTurn(controller);
+      await waitFor(() => plain(lastFrame()).includes(doModelo), 3000);
+      const tela = plain(lastFrame());
+      expect(tela).toContain(doModelo);
+      // e a enlatada saiu de cena
+      expect(tela).not.toContain(SUGGESTION);
+    } finally {
+      unmount();
+    }
+  });
+
+  it('modelo que FALHA ⇒ fica a heurística (ornamento nunca quebra a tela)', async () => {
+    const sideQueryModel: ModelCaller = {
+      call: async () => {
+        throw new Error('provider fora do ar');
+      },
+    };
+    const { controller, lastFrame, unmount } = mountApp({ sideQueryModel });
+    try {
+      // espera a App MONTAR antes de rodar o turno: sem isto a borda trabalho→idle
+      // acontece antes de o efeito estar observando, e a sugestão nunca nasce.
+      await waitFor(() => plain(lastFrame()).includes(PLACEHOLDER));
+      await runTurn(controller);
+      await waitFor(() => plain(lastFrame()).includes(SUGGESTION));
+      expect(plain(lastFrame())).toContain(SUGGESTION);
+    } finally {
+      unmount();
+    }
   });
 
   it('Tab com o composer NÃO-vazio mantém o comportamento ANTIGO (cicla o modo)', async () => {

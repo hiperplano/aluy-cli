@@ -7,6 +7,7 @@ export * from './limits.js';
 export * from './idempotency.js';
 // F197 — sugestão de PRÓXIMO PROMPT (heurística local, sem modelo/tokens; portável).
 export * from './next-suggest.js';
+export * from './suggest-engine.js';
 // EST-ASK (ADR-0080) — side-query do /ask (pergunta paralela read-only).
 export {
   runSideQuery,
