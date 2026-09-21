@@ -2703,6 +2703,25 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
+    // F-BG (21/09/2026) — Ctrl+B: SOLTA a tool de shell em execução para segundo plano.
+    //
+    // O par do ESC/F8, e o oposto deles: aqueles MATAM, este SOLTA. Nasceu do relato do
+    // dono — "às vezes eu disparo algum pedido e a tela fica processando e travado".
+    // A causa é o timeout do shell ser de INATIVIDADE: um comando longo e FALANTE
+    // (servidor, watcher, `tail -f`) re-arma o relógio a cada chunk e nunca expira.
+    //
+    // FORA do bloco do cockpit, de propósito. Na rc.184 este handler nasceu DENTRO do
+    // `if (cockpitActive …)` logo abaixo, colado ao Ctrl+S — que é exclusivo do cockpit por
+    // desenho. Resultado: o Ctrl+B só existia em `/fullscreen`, e na TUI normal a tecla
+    // nunca chegava aqui. Medido por rastro na TUI real: a porta recebia o `detachSignal`,
+    // o `useInput` via `char="b" ctrl=true`, e o controller jamais era chamado.
+    //
+    // Só CONSOME a tecla quando havia o que soltar: sem nada rodando, o Ctrl+B segue sendo
+    // o que sempre foi no composer (cursor à esquerda), sem nota e sem beep.
+    if (key.ctrl && (char === 'b' || char === '\x02')) {
+      if (controller.soltarParaSegundoPlano()) return;
+    }
+
     // ── EST-1000 · ADR-0076 §4 — MODO COCKPIT: foco (Tab) + scroll próprio + export ──
     // Quando o cockpit está ATIVO, a captura de Tab/scroll/ctrl+s tem prioridade (sem
     // overlay aberto). Tab alterna conversa↔log; pgup/pgdn/↑↓ rolam a região FOCADA (sem
@@ -2725,19 +2744,6 @@ export function App(props: AppProps): React.ReactElement {
       // Tab — alterna o foco da região de scroll (conversa↔log).
       if (key.tab && !key.shift) {
         setCockpitFocus((f) => (f === 'conversa' ? 'log' : 'conversa'));
-        return;
-      }
-      // F-BG (21/09/2026) — Ctrl+B: SOLTA a tool de shell em execução para segundo plano.
-      //
-      // O par do ESC/F8, e o oposto deles: aqueles MATAM, este SOLTA. Nasceu do relato do
-      // dono — "às vezes eu disparo algum pedido e a tela fica processando e travado".
-      // A causa é o timeout do shell ser de INATIVIDADE: um comando longo e FALANTE
-      // (servidor, watcher, `tail -f`) re-arma o relógio a cada chunk e nunca expira.
-      //
-      // Sem nada rodando, NÃO faz barulho: sem nota, sem beep. Uma tecla apertada à toa
-      // não deve poluir a conversa.
-      if (key.ctrl && (char === 'b' || char === '')) {
-        controller.soltarParaSegundoPlano();
         return;
       }
       // ctrl+s — EXPORTA o transcript redigido (ADR §4 / RES-C-1). Async; nota ao concluir.
