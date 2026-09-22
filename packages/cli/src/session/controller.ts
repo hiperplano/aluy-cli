@@ -1407,6 +1407,15 @@ export class SessionController {
   // gancho p/ DESACOPLAR o fan-out na hora (Fatia 2, atrás da flag) — em vez de a
   // injeção esperar o fan-out inteiro. `null` quando não há fan-out vivo.
   private activeFanout: ActiveFanout | null = null;
+  /**
+   * F-RETRY-MEIO-DO-STREAM — o caller avisou retry com um bloco `Λluy` PARCIAL em voo.
+   * O parcial fica na tela (fala não se perde — ver `retry-visivel.test.ts`), mas a
+   * tentativa seguinte tem de REUSAR esse bloco, não anexar outro: cada `onStart` novo
+   * era um `Λluy` a mais, e com o teto de 20 tentativas a região viva cruzava `rows` e
+   * o Ink reescrevia a tela inteira a cada frame — a "caixa duplicada" e a "tela
+   * tremendo" que o dono relatou em 22/09 são o mesmo defeito.
+   */
+  private retryComParcialEmVoo = false;
   // FANOUT-17 — Fatia 2 (desacople-por-inject). LIGADA por padrão desde a rc.142; a env
   // `ALUY_FANOUT_DETACH_ON_INJECT` só serve para DESLIGAR (`0`/`false`/`no`/`off`). Lida
   // UMA vez no constructor (env injetável p/ teste). Desligada, o `injectInput` durante
@@ -2389,6 +2398,9 @@ export class SessionController {
         !(b.kind === 'aluy' && b.streaming === true && b.text.trim() === '') &&
         !(b.kind === 'broker-error' && b.retrying === true),
     );
+    const ultimo = limpos[limpos.length - 1];
+    this.retryComParcialEmVoo =
+      ultimo !== undefined && ultimo.kind === 'aluy' && ultimo.streaming === true;
     const onde = this.state.meta.backend === 'local' ? 'provider local' : 'broker';
     const motivo = n.reason !== undefined && n.reason !== '' ? ` (${n.reason})` : '';
     this.patch({
@@ -6471,9 +6483,25 @@ export class SessionController {
     // um quadro com a fase já em `streaming` (o indicador "pensando" some) e a caixa ainda
     // ausente: o frame encolhia 2 linhas por um instante e o composer piscava para cima com
     // a tela cheia (o Ink renderiza cada notificação na hora; não há agrupamento).
+    // F-RETRY-MEIO-DO-STREAM — tentativa nova depois de uma queda no meio: o bloco parcial
+    // da anterior ainda está em voo (é o que o dono via até agora), e o aviso de retry foi
+    // anexado DEPOIS dele — então o parcial não é o último. Procura-o de trás para frente,
+    // tira-o, e abre o bloco novo no fim (abaixo do aviso), em vez de empilhar mais um.
+    const blocks = [...this.state.blocks];
+    if (this.retryComParcialEmVoo) {
+      for (let i = blocks.length - 1; i >= 0; i -= 1) {
+        const b = blocks[i];
+        if (b !== undefined && b.kind === 'aluy' && b.streaming === true) {
+          blocks.splice(i, 1);
+          break;
+        }
+      }
+    }
+    blocks.push(block);
+    this.retryComParcialEmVoo = false;
     this.patch({
       ...(enterStreaming ? { phase: 'streaming' as const } : {}),
-      blocks: [...this.state.blocks, block],
+      blocks,
     });
   }
 
