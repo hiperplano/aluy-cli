@@ -4352,6 +4352,15 @@ export class SessionController {
     // "↳ encaixado" que virá quando o inject drenar na próxima volta. Só de display —
     // não toca catraca/budget/histórico do loop (o loop já descartou o `result`).
     else if (signal.kind === 'expedite') this.discardStreamingAluyTurn();
+    // F-TETO-DE-SAÍDA — a resposta acima foi CORTADA no `max_tokens`. O caso sem fala
+    // nenhuma vira a própria resposta final do loop (`stopByOutputCeiling`); aqui é só o
+    // parcial, que sem aviso passa por resposta completa.
+    else if (signal.kind === 'truncated' && signal.hadContent) {
+      this.pushNoteSafe('teto de saída', [
+        'a resposta foi cortada no teto de saída (max_tokens) — o texto acima está incompleto',
+        'aumente com `--max-output-tokens N` (ou `ALUY_MAX_OUTPUT_TOKENS`)',
+      ]);
+    }
   }
 
   /**
