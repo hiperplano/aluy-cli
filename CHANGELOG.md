@@ -14,6 +14,19 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.187] — 2026-09-22
+
+### Adicionado
+
+- 🧵 **`spawn_agent` ganha `"wait": false` — despacha e segue (ADR 0001, aceito pelo dono em 22/09).** Pedido do dono: *"quando ele dispara agentes, esses agentes ficam em estado processando e travam o turno"*. O default `true` preserva o contrato de hoje byte a byte. Com `wait:false` a chamada retorna na hora com o mesmo desfecho `detached` que o Ctrl+B produz (quarto motivo, `despachado`); os filhos seguem cercados pelos mesmos tetos e o resultado chega como dado num turno seguinte. `wait:false` + `room:true` é recusado antes de spawnar (é a corrida produtor-consumidor que a prosa da tool já proíbe). É o primeiro registro de decisão dentro do próprio `aluy-cli`, em `docs/decisions/`.
+- 🎛️ **O rodapé passa a anunciar `ctrl-b soltar`** onde a tecla age (pensando, falando, trabalho com sub-agentes vivos). Funcionava desde a rc.185, mas o rodapé mostrava só `esc para o pai · F8 para tudo · ctrl-t ver/parar` — afordância não anunciada não existe para quem usa.
+
+### Corrigido
+
+- 🪟 **Tremor a cada tentativa de reconexão, e um tremor que PERMANECIA depois que a conexão voltava.** Relato do dono no Windows (22/09): *"tá flicando a cada xx segundos quando estoura um erro de conectividade"* e depois *"o flicker permanece mesmo não dando mais problema de conexão"*. Duas causas. (1) O `sink.onStart` dispara ANTES de a requisição sair: pintar ali (fase → `streaming`, caixa `Λluy` vazia) mudava a altura do frame por uma tentativa que nem conectava, e a cada retry a tela crescia e encolhia — o visível agora espera o PRIMEIRO byte. (2) O aviso `tentando de novo` (vivo) só era removido pelo `r`/`esc` da fase de erro FINAL; após um retry bem-sucedido ninguém o tirava, ele pinava a região viva, nada mais migrava para o scrollback e o relógio do rodapé reescrevia uma tela crescente a cada segundo — agora sai no primeiro byte e no fim do turno. Quatro testes que codificavam o mecanismo antigo (a caixa nascia no `onStart`) foram adaptados. A camada de bytes anti-flicker (Mode 2026 + overwrite-in-place) segue igual: ela não esconde conteúdo se MOVENDO, e era a altura que mudava.
+- 📏 **O teto de saída estourado ficava invisível e o turno vazio realimentava o modelo.** Medido em 21/09 (glm-5.3 na z.ai): `finish_reason: 'length'` com 8189 de 8192 tokens gastos em raciocínio e nada de resposta. Ninguém lia o `finish_reason`; o turno vazio entrava como mensagem em branco, o loop rodava de novo e o modelo degenerava a partir dali. O loop passa a emitir o sinal `truncated`: fala cortada vira nota na TUI ("o texto acima está incompleto"), turno vazio vira fim limpo com nota acionável (`--max-output-tokens`). E o client local usa o teto de saída conhecido da família GLM (131 072; fonte docs.z.ai) quando o dono não configurou nada — em vez do 8192 herdado da exigência da Anthropic. Só entra família com fonte.
+- 📐 **A caixa de retry era orçada em 5 linhas fixas e quebrava em 80 colunas.** A mensagem tem ~80 colunas e o `<BrokerError>` a pinta com recuo de 6; em terminal de 80 ela quebra e a caixa fica com 6 linhas — uma fora do orçamento anti-flicker. Passa a contar as linhas visuais da mensagem.
+
 ## [1.0.0-rc.186] — 2026-09-22
 
 ### Corrigido
