@@ -166,7 +166,7 @@ describe('EST-0965 — esc no streaming SELA o turno aluy parcial', () => {
     const gate = new Promise<void>((r) => (resolveGate = r));
     const controller = build({
       async call({ signal }): Promise<ModelCallResult> {
-        controller.sink.onStart(); // cria o bloco aluy vazio
+        controller.sink.onStart(); // abre o turno — SEM byte, nada é pintado ainda
         await new Promise<void>((res, rej) => {
           signal?.addEventListener('abort', () => rej(new ModelCallAbortedError()), { once: true });
           void gate.then(() => res());
@@ -176,7 +176,12 @@ describe('EST-0965 — esc no streaming SELA o turno aluy parcial', () => {
     });
     controller.dismissBoot();
     void controller.submit('pergunta');
-    await waitFor(() => controller.current.blocks.some((b) => b.kind === 'aluy'));
+    // F-TREMOR-DE-RETRY (22/09): a caixa `aluy` passou a esperar o PRIMEIRO byte — antes
+    // dele NÃO existe bloco (é o que impede a altura do frame de oscilar a cada tentativa).
+    // O esc chega com o turno vivo e pensando; a garantia deste teste (nenhum fantasma
+    // vazio na região viva) fica ainda mais forte: nem chega a nascer.
+    await waitFor(() => controller.current.phase === 'thinking');
+    expect(controller.current.blocks.some((b) => b.kind === 'aluy')).toBe(false);
     controller.interrupt();
     await waitFor(() => controller.current.phase === 'idle');
     // bloco aluy VAZIO é removido (não vira fantasma vazio na região viva).
