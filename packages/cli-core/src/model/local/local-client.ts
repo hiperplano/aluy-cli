@@ -36,6 +36,7 @@ import type {
 } from '../types.js';
 import type { ProviderAdapter, SseAccumulator } from './adapter.js';
 import { newSseAccumulator } from './adapter.js';
+import { builtinMaxOutputForSlug } from './known-context-windows.js';
 import type {
   CredentialProvider,
   LocalProviderConfig,
@@ -270,7 +271,10 @@ export class LocalModelClient implements ModelClient {
     } = {
       model,
       messages,
-      maxTokens: request.max_tokens ?? this.maxTokens,
+      // F-TETO-DE-SAÍDA — o que o dono configurou vence; senão o teto CONHECIDO da família
+      // do modelo; senão o default de sempre. Um modelo de raciocínio com 8192 gasta tudo
+      // pensando (medido) — e o número conhecido é dado público, não chute.
+      maxTokens: request.max_tokens ?? builtinMaxOutputForSlug(model) ?? this.maxTokens,
     };
     // FRAGMENTO DE UPSTREAM do slug ATIVO (`providers[].upstreamByModel` no config do
     // dono → `LocalProviderConfig.upstreamByModel`). A consulta é AQUI, por request, e

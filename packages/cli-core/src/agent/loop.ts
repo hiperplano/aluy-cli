@@ -167,6 +167,10 @@ export interface ToolLifecycleObserver {
 export type ProgressSignal =
   | { readonly kind: 'iteration'; readonly iteration: number }
   | { readonly kind: 'model'; readonly tokens: number }
+  // F-TETO-DE-SAÍDA — o provider cortou o turno no `max_tokens` (`finish_reason:
+  // 'length'`). `hadContent` diz se sobrou fala parcial (cortada) ou se o turno saiu
+  // VAZIO — o caso de um modelo de raciocínio que gastou o orçamento inteiro pensando.
+  | { readonly kind: 'truncated'; readonly hadContent: boolean }
   | { readonly kind: 'tool-start'; readonly tool: string }
   | { readonly kind: 'tool-end'; readonly tool: string }
   | { readonly kind: 'tool-chunk'; readonly tool: string }
@@ -1394,6 +1398,20 @@ export class AgentLoop {
       // `{name,input}` nem a catraca (só o handle de pareamento).
       const nativeCalls =
         result.tool_calls !== undefined ? ensureUniqueToolCallIds(result.tool_calls) : undefined;
+      // F-TETO-DE-SAÍDA (medido em 21/09/2026 com glm-5.3 na z.ai): o provider devolveu
+      // `finish_reason: 'length'` com 8189 de 8192 tokens gastos em RACIOCÍNIO e nada de
+      // resposta. Ninguém lia o `finish_reason`: o turno vazio entrava no histórico como
+      // uma mensagem de assistente em branco, o loop rodava de novo, e a partir dali o
+      // modelo degenerava (tool-calls sem argumento, turnos de 50 tokens) — sem uma palavra
+      // ao dono sobre o que tinha acontecido. O sinal vai à UX nos DOIS casos; a PARADA só
+      // quando não sobrou nada (nem fala, nem tool-call): continuar seria alimentar o
+      // modelo com o próprio silêncio.
+      if (result.finish_reason === 'length') {
+        this.onProgress?.({ kind: 'truncated', hadContent: hasContent });
+        if (!hasContent && (nativeCalls === undefined || nativeCalls.length === 0)) {
+          return this.stopByOutputCeiling(own, history, sessionId);
+        }
+      }
       if (nativeCalls !== undefined && nativeCalls.length > 0) {
         // O turno `assistant` ECOA as tool-calls propostas (pareamento p/ o `role:"tool"`).
         history.push({ role: 'model_tool_calls', text: result.content, calls: nativeCalls });
@@ -2135,6 +2153,29 @@ export class AgentLoop {
    * O Maestro decidiu que o turno deve parar — empurra uma observação-DADO
    * p/ auditoria/resume saber por quê, e devolve `final`.
    */
+  /**
+   * F-TETO-DE-SAÍDA — fim LIMPO (≠ `degenerate`/`limit`): o provider cortou o turno no
+   * `max_tokens` e não sobrou resposta nem tool-call. A nota diz o que aconteceu e o que
+   * o dono pode fazer — o teto é dele (`--max-output-tokens`), não do modelo.
+   */
+  private stopByOutputCeiling(
+    own: OwnUsage,
+    history: HistoryItem[],
+    sessionId: string = this.sessionId,
+  ): AgentRunResult {
+    const note =
+      'Turno encerrado: o modelo estourou o teto de saída (max_tokens) sem produzir resposta ' +
+      'nem tool-call — provavelmente gastou o orçamento inteiro em raciocínio. Aumente o teto ' +
+      'com `--max-output-tokens N` (ou `ALUY_MAX_OUTPUT_TOKENS`) e repita o pedido.';
+    history.push({ role: 'observation', toolName: 'model', text: note });
+    return {
+      sessionId,
+      stop: { kind: 'final', answer: note },
+      history,
+      usage: { ...own },
+    };
+  }
+
   private stopByMaestro(
     own: OwnUsage,
     history: HistoryItem[],

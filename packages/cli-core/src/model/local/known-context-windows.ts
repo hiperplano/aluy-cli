@@ -184,6 +184,38 @@ export function normalizeModelFamily(slug: string): string {
  * lança). É a peça que `resolveContextWindow` consulta ABAIXO de declarado/descoberto
  * e ACIMA do fail-safe de `0` — ver o comentário de topo do arquivo.
  */
+/**
+ * F-TETO-DE-SAÍDA — teto de SAÍDA (`max_tokens`) conhecido por família de slug. Mesma
+ * disciplina do catálogo de janelas: só entra número com fonte pública, e família sem
+ * fonte fica de fora. O porquê de existir: o client local manda `max_tokens: 8192` quando
+ * o dono não configurou nada — um default escolhido porque a Anthropic exige o campo. Um
+ * modelo de raciocínio conta o pensamento DENTRO desse teto e pode gastá-lo inteiro sem
+ * responder (medido: glm-5.3, 8189/8192 em raciocínio, `finish_reason: 'length'`).
+ *
+ * Fonte GLM: docs.z.ai (API reference, chat completions) — "GLM-5.3, 5.2, 5.1, 5, 4.7,
+ * 4.6 series supports 128K maximum output" (o parâmetro aceita até 131 072); "GLM-4.5
+ * series supports 96K maximum output".
+ */
+export const KNOWN_MODEL_MAX_OUTPUT: Readonly<Record<string, number>> = {
+  'glm-5.3': 131_072,
+  'glm-5.2': 131_072,
+  'glm-5.1': 131_072,
+  'glm-5': 131_072,
+  'glm-4.7': 131_072,
+  'glm-4.6': 131_072,
+  'glm-4.5': 98_304,
+  'glm-4.5-air': 98_304,
+};
+
+/** Teto de saída conhecido p/ o slug (mesma normalização de família), ou `undefined`. */
+export function builtinMaxOutputForSlug(slug: string | undefined): number | undefined {
+  const raw = (slug ?? '').trim();
+  if (raw === '') return undefined;
+  const family = normalizeModelFamily(raw);
+  const max = KNOWN_MODEL_MAX_OUTPUT[family];
+  return max !== undefined && Number.isInteger(max) && max > 0 ? max : undefined;
+}
+
 export function builtinContextWindowForSlug(slug: string | undefined): number | undefined {
   const raw = (slug ?? '').trim();
   if (raw === '') return undefined;
