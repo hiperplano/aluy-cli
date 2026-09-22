@@ -438,10 +438,20 @@ function nonSpeechBlockLines(
     return 2 + childVisualLines;
   }
   // EST-0948 (auto-retry) — o bloco `broker-error` em BACKOFF (`retrying`) é VIVO
-  // (countdown re-renderiza a cada segundo): a caixa tem cabeçalho + mensagem +
-  // status/countdown + afordância + régua de fundo ≈ 5 linhas. Orçá-lo evita que a
-  // região viva estoure `rows-1` e dispare o redesenho de frame inteiro (anti-flicker).
-  if (block.kind === 'broker-error') return block.retrying === true ? 5 : 0;
+  // (countdown re-renderiza a cada segundo): cabeçalho + MENSAGEM + status/countdown +
+  // afordância + régua de fundo. Era orçado em 5 FIXAS, mas a mensagem ("não consegui
+  // falar com o provider local (falha de rede) — tentando de novo.", ~80 colunas) quebra
+  // em terminal de 80: o <BrokerError> a pinta com `paddingLeft={4}` + `┃ ` (2), então a
+  // largura útil é `columns - 6` e a caixa fica com 6 linhas — uma fora do orçamento, e
+  // é assim que a região viva estoura `rows-1` e o Ink redesenha o frame inteiro
+  // (anti-flicker). Conta as linhas VISUAIS da mensagem; over-contar é seguro.
+  if (block.kind === 'broker-error') {
+    if (block.retrying !== true) return 0;
+    const largura = columns > 6 ? columns - 6 : 0;
+    const linhasDaMensagem =
+      largura > 0 ? Math.max(1, Math.ceil(displayWidth(block.message) / largura)) : 1;
+    return 4 + linhasDaMensagem;
+  }
   // Qualquer outro bloco vivo (não esperado) — conservador: 1 linha.
   if (block.kind === 'aluy') return 0; // a fala viva é orçada à parte.
   return 1;
