@@ -31,6 +31,7 @@ export const ptBR: FullCatalog = {
   'hints.budget': 'c continua · n encerra',
   'hints.error': 'r tentar · esc cancela',
   'hints.workSubagents': 'esc para o pai · ctrl-b soltar · F8 para tudo · ctrl-t ver/parar · ctrl-c×2 sair',
+  'hints.detachInline': 'ctrl-b solta',
   'hints.idleSubagents': 'enter envia · F8 para os sub-agentes · ctrl-t ver/parar · ctrl-c×2 sair',
   'hints.ctrlcAgain': 'pressione ctrl-c de novo para sair',
   'hints.cockpit': 'tab foca · pgup/pgdn rola · ctrl-s exporta · /fullscreen sai · ctrl-c×2 sair',

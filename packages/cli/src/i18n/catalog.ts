@@ -44,6 +44,8 @@ export interface Catalog {
   'hints.error': string;
   'hints.workSubagents': string;
   'hints.idleSubagents': string;
+  /** F-BG — sufixo da linha viva de um comando de shell: onde o Ctrl+B age. */
+  'hints.detachInline': string;
   // EST-1015 — duplo Ctrl+C p/ sair: confirmação após o 1º Ctrl+C no composer vazio.
   'hints.ctrlcAgain': string;
   // EST-1000 · ADR-0076 §3/§4 — atalhos do MODO COCKPIT (alt-screen, 6 regiões).
