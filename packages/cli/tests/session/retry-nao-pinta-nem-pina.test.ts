@@ -69,14 +69,8 @@ describe('1 · onStart sem byte NÃO pinta nada (a altura do frame não oscila)'
       const c = buildController();
       c.dismissBoot();
       c.sink.onStart?.();
-      let patches = 0;
-      const off = c.subscribe(() => {
-        patches += 1;
-      });
-      patches = 0; // o subscribe entrega o estado corrente uma vez
       if (canal === 'delta') c.sink.onDelta?.('oi');
       else c.sink.onReasoning?.('pensando…');
-      off();
       expect(kinds(c), canal).toContain('aluy');
       expect(c.current.blocks.at(-1)?.kind, canal).toBe('aluy');
     }
