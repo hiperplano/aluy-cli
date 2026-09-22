@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.186] — 2026-09-22
+
+### Corrigido
+
+- 🪟 **Queda de conexão no MEIO do stream empilhava um bloco `Λluy` por tentativa de retry — e fazia a tela tremer.** Relato do dono em 22/09: *"quando dá um erro de conexão com o modelo ele duplica depois a caixa de texto do aluy pensando... a tela tremendo absurdamente"*. O laço de retry do caller envolve o stream inteiro; uma queda já com texto parcial na tela passava pelo `noteCallerRetry`, cujo filtro de órfãos só descarta o bloco VAZIO, e a tentativa seguinte anexava outro bloco no `onStart`. Com o teto de 20 tentativas a região viva cruzava `rows`, e aí o Ink reescrevia a tela inteira a cada frame — a caixa duplicada e o tremor são o mesmo defeito (medido: quatro `Λluy` após três quedas). A tentativa nova agora SUBSTITUI o parcial em voo. A queda ANTES do primeiro byte nunca teve o problema — medido na TUI real por PTY: zero redesenhos a 40/30/24/20 linhas e 120/100/80 colunas.
+
 ## [1.0.0-rc.185] — 2026-09-21
 
 ### Adicionado
