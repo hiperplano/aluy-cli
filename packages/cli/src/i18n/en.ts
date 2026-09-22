@@ -20,15 +20,15 @@ export const en: PartialCatalog = {
 
   // ── FooterHints ───────────────────────────────────────────────────────────
   'hints.idle': '{enter} send · / commands · {up} history',
-  'hints.thinking': 'esc interrupt · ctrl-c×2 quit',
-  'hints.streaming': 'esc interrupt · ctrl-c×2 quit',
+  'hints.thinking': 'esc interrupt · ctrl-b detach · ctrl-c×2 quit',
+  'hints.streaming': 'esc interrupt · ctrl-b detach · ctrl-c×2 quit',
   'hints.ask': 'a approve · s always · n deny · e edit · esc cancel',
   'hints.askDestructive': 'n deny (recommended) · a approve anyway · esc cancel',
   'hints.slash': '↑↓ navigate · enter run · esc close',
   'hints.palette': 'type to search · ↑↓ navigate · enter run · esc close',
   'hints.budget': 'c continue · n end',
   'hints.error': 'r retry · esc cancel',
-  'hints.workSubagents': 'esc stops the parent · F8 stops all · ctrl-t view/stop · ctrl-c×2 quit',
+  'hints.workSubagents': 'esc stops the parent · ctrl-b detach · F8 stops all · ctrl-t view/stop · ctrl-c×2 quit',
   'hints.idleSubagents': 'enter sends · F8 stops the sub-agents · ctrl-t view/stop · ctrl-c×2 quit',
   'hints.ctrlcAgain': 'press ctrl-c again to quit',
   'hints.cockpit':
