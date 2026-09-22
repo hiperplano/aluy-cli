@@ -22,15 +22,15 @@ export const ptBR: FullCatalog = {
   // `ctrl-p` que o `/` já abre). Sobra o que o dono ainda não sabe de cor. O símbolo `⏎`
   // no lugar da palavra "enter" é o padrão de teclado — lê-se sem traduzir.
   'hints.idle': '{enter} enviar · / comandos · {up} histórico',
-  'hints.thinking': 'esc interromper · ctrl-c×2 sair',
-  'hints.streaming': 'esc interromper · ctrl-c×2 sair',
+  'hints.thinking': 'esc interromper · ctrl-b soltar · ctrl-c×2 sair',
+  'hints.streaming': 'esc interromper · ctrl-b soltar · ctrl-c×2 sair',
   'hints.ask': 'a aprova · s sempre · n nega · e edita · esc cancela',
   'hints.askDestructive': 'n nega (recomendado) · a aprova mesmo assim · esc cancela',
   'hints.slash': '↑↓ navega · enter executa · esc fecha',
   'hints.palette': 'digite p/ buscar · ↑↓ navega · enter executa · esc fecha',
   'hints.budget': 'c continua · n encerra',
   'hints.error': 'r tentar · esc cancela',
-  'hints.workSubagents': 'esc para o pai · F8 para tudo · ctrl-t ver/parar · ctrl-c×2 sair',
+  'hints.workSubagents': 'esc para o pai · ctrl-b soltar · F8 para tudo · ctrl-t ver/parar · ctrl-c×2 sair',
   'hints.idleSubagents': 'enter envia · F8 para os sub-agentes · ctrl-t ver/parar · ctrl-c×2 sair',
   'hints.ctrlcAgain': 'pressione ctrl-c de novo para sair',
   'hints.cockpit': 'tab foca · pgup/pgdn rola · ctrl-s exporta · /fullscreen sai · ctrl-c×2 sair',

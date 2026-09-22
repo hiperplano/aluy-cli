@@ -38,7 +38,7 @@ describe('FooterHints — indicador de atividade (elapsed) EST-0965', () => {
   it('SEM elapsed (undefined) ⇒ só a dica base, sem "·" pendurado', () => {
     const { lastFrame } = wrap(<FooterHints state="streaming" />);
     const f = plain(lastFrame());
-    expect(f).toContain('esc interromper · ctrl-c×2 sair');
+    expect(f).toContain('esc interromper · ctrl-b soltar · ctrl-c×2 sair');
     expect(f).not.toMatch(/·\s*\d+:\d\d/);
   });
 
