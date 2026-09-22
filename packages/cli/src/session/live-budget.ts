@@ -414,15 +414,18 @@ function nonSpeechBlockLines(
     // F163 — a linha `◌ <gerúndio> <alvo>` era contada como 1 FIXA, mas o alvo
     // (clampado a ~100 chars) QUEBRA p/ 2+ visuais em terminal estreito.
     return block.status === 'running'
-      ? runningHeaderVisualLines(`${block.verbGerund ?? 'rodando'} ${block.target}`, columns) +
-          liveShellOutputLines(block.liveOutput, columns, tailMax)
+      ? runningHeaderVisualLines(
+          `${block.verbGerund ?? 'rodando'} ${block.target}`,
+          columns,
+          block.verb === 'bash' ? DETACH_HINT_COLS : 0,
+        ) + liveShellOutputLines(block.liveOutput, columns, tailMax)
       : 0;
   }
   // EST-0982 — o `!comando` (bang) em `running` também streama: mesma conta.
   // F163 — idem: o cabeçalho `! <comando>` largo quebra em terminal estreito.
   if (block.kind === 'bang') {
     return block.status === 'running'
-      ? runningHeaderVisualLines(block.command, columns) +
+      ? runningHeaderVisualLines(block.command, columns, DETACH_HINT_COLS) +
           liveShellOutputLines(block.liveOutput, columns, tailMax)
       : 0;
   }
@@ -480,9 +483,18 @@ function nonSpeechBlockLines(
  * `columns ≤ 0` ⇒ 1 (linha-fonte, degradação graciosa).
  */
 const RUNNING_HEADER_CHROME_COLS = 14;
-function runningHeaderVisualLines(label: string, columns: number): number {
+/**
+ * F-BG — colunas do sufixo `· ctrl-b solta` / `· ctrl-b detach` na linha viva de um comando
+ * de shell (ToolLine `bash` e BangBlock). Teto que cobre os dois idiomas + o espaço;
+ * over-contar é seguro (anti-flicker), sub-contar é a linha quebrar fora da conta.
+ */
+export const DETACH_HINT_COLS = 16;
+function runningHeaderVisualLines(label: string, columns: number, extraCols = 0): number {
   if (!(columns > 0)) return 1;
-  return Math.max(1, Math.ceil((displayWidth(label) + RUNNING_HEADER_CHROME_COLS) / columns));
+  return Math.max(
+    1,
+    Math.ceil((displayWidth(label) + RUNNING_HEADER_CHROME_COLS + extraCols) / columns),
+  );
 }
 
 function liveShellOutputLines(

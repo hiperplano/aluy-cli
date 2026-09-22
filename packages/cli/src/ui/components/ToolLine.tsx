@@ -11,6 +11,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
+import { useI18n } from '../../i18n/index.js';
 import { Working } from './Working.js';
 import { windowTailVisual, capLongSourceLines } from '../../session/visual-lines.js';
 import { clampLiveOutputChars, MAX_LIVE_OUTPUT_CHARS } from '../../session/live-budget.js';
@@ -71,6 +72,7 @@ export interface ToolLineProps {
 
 export function ToolLine(props: ToolLineProps): React.ReactElement {
   const theme = useTheme();
+  const { t } = useI18n();
 
   // ── in-flight (§2.6): ◌ + verbo + alvo + onda + gerúndio (via <Working>) ──────
   if (props.status === 'running') {
@@ -85,10 +87,15 @@ export function ToolLine(props: ToolLineProps): React.ReactElement {
     const { text: liveText, hidden } = windowTailVisual(live, props.maxLines, liveCols);
     return (
       <Box flexDirection="column" paddingLeft={2}>
+        {/* F-BG (pedido do dono, 22/09) — a dica do Ctrl+B NA linha, como o Claude Code:
+            quem olha é a linha `◌ rodando <comando>…`, não o rodapé. Só onde a tecla age
+            (comando de shell); uma leitura em voo não solta nada e não promete. A largura
+            entra no orçamento anti-flicker (`DETACH_HINT_COLS` em live-budget). */}
         <Working
           glyph="toolInflight"
           glyphRole="depth"
           label={label}
+          {...(props.verb === 'bash' ? { suffix: `· ${t('hints.detachInline')}` } : {})}
           {...(props.frame !== undefined ? { frame: props.frame } : {})}
         />
         {liveText.length > 0 && (

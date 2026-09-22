@@ -29,6 +29,7 @@ export const en: PartialCatalog = {
   'hints.budget': 'c continue · n end',
   'hints.error': 'r retry · esc cancel',
   'hints.workSubagents': 'esc stops the parent · ctrl-b detach · F8 stops all · ctrl-t view/stop · ctrl-c×2 quit',
+  'hints.detachInline': 'ctrl-b detach',
   'hints.idleSubagents': 'enter sends · F8 stops the sub-agents · ctrl-t view/stop · ctrl-c×2 quit',
   'hints.ctrlcAgain': 'press ctrl-c again to quit',
   'hints.cockpit':

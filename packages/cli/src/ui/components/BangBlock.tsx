@@ -14,6 +14,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { Working } from './Working.js';
+import { useI18n } from '../../i18n/index.js';
 import { windowTailVisual, capLongSourceLines } from '../../session/visual-lines.js';
 import { clampLiveOutputChars, MAX_LIVE_OUTPUT_CHARS } from '../../session/live-budget.js';
 
@@ -54,6 +55,7 @@ export function BangBlock(props: BangBlockProps): React.ReactElement {
   const theme = useTheme();
 
   // ── in-flight (§2.6): ◌ + shell + comando + onda + gerúndio ──────────────────
+  const { t } = useI18n();
   if (props.status === 'running') {
     // EST-0982 — saída ao vivo bounded (cauda) sob o in-flight, quando há.
     // HUNT-RENDER: cap o RAW string ANTES de processar — `windowTailVisual` varre o
@@ -64,10 +66,12 @@ export function BangBlock(props: BangBlockProps): React.ReactElement {
     const { text: liveText, hidden } = windowTailVisual(live, props.maxLines, liveCols);
     return (
       <Box flexDirection="column" paddingLeft={2}>
+        {/* F-BG — o `!comando` também solta com Ctrl+B; a dica vai na própria linha. */}
         <Working
           glyph="toolInflight"
           glyphRole="depth"
           label={`rodando $ ${props.command}`}
+          suffix={`· ${t('hints.detachInline')}`}
           {...(props.frame !== undefined ? { frame: props.frame } : {})}
         />
         {liveText.length > 0 && (
