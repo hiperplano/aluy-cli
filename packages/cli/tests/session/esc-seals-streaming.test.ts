@@ -164,9 +164,14 @@ describe('EST-0965 — esc no streaming SELA o turno aluy parcial', () => {
     // Caller que abre o aluy (onStart) mas NÃO emite delta antes do esc.
     let resolveGate!: () => void;
     const gate = new Promise<void>((r) => (resolveGate = r));
+    // Sincroniza pelo que EXISTE antes do 1º byte: a chamada em voo (o bloco `aluy` só
+    // nasce com byte — esperar a fase `thinking` seria cedo demais, o abort do turno
+    // ainda não está armado e o esc não cortaria nada).
+    let emVoo = false;
     const controller = build({
       async call({ signal }): Promise<ModelCallResult> {
         controller.sink.onStart(); // abre o turno — SEM byte, nada é pintado ainda
+        emVoo = true;
         await new Promise<void>((res, rej) => {
           signal?.addEventListener('abort', () => rej(new ModelCallAbortedError()), { once: true });
           void gate.then(() => res());
@@ -180,7 +185,7 @@ describe('EST-0965 — esc no streaming SELA o turno aluy parcial', () => {
     // dele NÃO existe bloco (é o que impede a altura do frame de oscilar a cada tentativa).
     // O esc chega com o turno vivo e pensando; a garantia deste teste (nenhum fantasma
     // vazio na região viva) fica ainda mais forte: nem chega a nascer.
-    await waitFor(() => controller.current.phase === 'thinking');
+    await waitFor(() => emVoo);
     expect(controller.current.blocks.some((b) => b.kind === 'aluy')).toBe(false);
     controller.interrupt();
     await waitFor(() => controller.current.phase === 'idle');
