@@ -66,8 +66,10 @@ const aluys = (c: SessionController) => c.state.blocks.filter((b) => b.kind === 
 describe('F-RETRY-VISÍVEL — o aviso de retentativa do caller', () => {
   it('A ORIGEM — descarta o turno em voo VAZIO em vez de empilhar bloco mudo', () => {
     const c = makeController();
-    c.sink.onStart?.(); // tentativa 1 abriu um bloco e não veio nada
-    expect(aluys(c)).toHaveLength(1);
+    c.sink.onStart?.(); // tentativa 1 começou e não veio nada
+    // F-TREMOR-DE-RETRY (22/09): a caixa passou a esperar o PRIMEIRO byte — sem byte, nem
+    // nasce (antes nascia vazia aqui e o filtro abaixo a tirava).
+    expect(aluys(c)).toHaveLength(0);
     c.noteCallerRetry({ attempt: 1, max: 20, waitMs: 5000, reason: 'HTTP 429' });
     expect(aluys(c)).toHaveLength(0);
   });

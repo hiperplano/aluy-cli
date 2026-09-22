@@ -98,6 +98,8 @@ function buildSession(opts: {
     async call(): Promise<ModelCallResult> {
       const sink = controllerRef!.sink;
       sink.onStart?.();
+      // F-TREMOR-DE-RETRY: a fase só vira `streaming` no PRIMEIRO byte — o mock manda um.
+      sink.onDelta?.('');
       const t = turn++;
       const g = opts.gates?.(t);
       if (g) await g;

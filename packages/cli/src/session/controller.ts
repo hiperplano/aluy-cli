@@ -1416,6 +1416,15 @@ export class SessionController {
    * tremendo" que o dono relatou em 22/09 são o mesmo defeito.
    */
   private retryComParcialEmVoo = false;
+  /**
+   * F-TREMOR-DE-RETRY — o `sink.onStart` dispara ANTES de a requisição sair (antes de
+   * qualquer byte). Pintar algo nesse instante — trocar a fase para `streaming`, abrir a
+   * caixa `Λluy` — muda a altura do frame por uma tentativa que pode nem conectar; a cada
+   * retry a tela crescia e encolhia ("tá flicando a cada xx segundos quando estoura um
+   * erro de conectividade"). O turno fica só ANOTADO aqui; o que é visível espera o
+   * PRIMEIRO byte (delta ou raciocínio). Sem byte, nada mudou na tela — e nada some.
+   */
+  private turnoAluyPendente = false;
   // FANOUT-17 — Fatia 2 (desacople-por-inject). LIGADA por padrão desde a rc.142; a env
   // `ALUY_FANOUT_DETACH_ON_INJECT` só serve para DESLIGAR (`0`/`false`/`no`/`off`). Lida
   // UMA vez no constructor (env injetável p/ teste). Desligada, o `injectInput` durante
@@ -4370,6 +4379,7 @@ export class SessionController {
    * na fase `thinking`, antes do 1º delta). O próximo `startAluyTurn` abre um turno novo.
    */
   private discardStreamingAluyTurn(): void {
+    this.turnoAluyPendente = false;
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
     if (last && last.kind === 'aluy' && last.streaming) {
@@ -6472,31 +6482,47 @@ export class SessionController {
   // ── transições de estado ────────────────────────────────────────────────────
 
   private startAluyTurn(): void {
-    // F55 — 1º token recebido (§2.4→§2.5): sai de `thinking` p/ `streaming` e
-    // abre o turno do aluy. O `workingLabel` NÃO é limpo: o Λ continua visível
-    // (com o label do turno) até o fim do trabalho. Só força a fase se ainda
-    // estávamos pensando/streamando (um onStart de uma 2ª chamada do loop, já em
-    // asking/budget, não regride a fase).
-    const enterStreaming = this.state.phase === 'thinking' || this.state.phase === 'streaming';
-    // EST-0944 (refino #121) — se o loop avisou que esta é a passada de auto-verificação
-    // (`selfCheckInFlight`), o turno é INTERNO: marca-o `selfCheck:true` p/ ser REMOVIDO
-    // ao finalizar (ou despromovido se virar trabalho real — `startToolLine`). Assim a
-    // tagarelice de verificação NÃO vira bloco `Λ aluy` visível.
+    // F-TREMOR-DE-RETRY — ver `turnoAluyPendente`: aqui NÃO se pinta nada. A fase e a
+    // caixa entram no primeiro byte (`abrirTurnoAluy`), no MESMO patch — a razão de 16/09
+    // (fase e caixa num patch só, senão o composer pisca) continua valendo lá.
+    this.turnoAluyPendente = true;
+  }
+
+  /**
+   * Abre a caixa `Λluy` do turno anotado em `startAluyTurn`, no PRIMEIRO byte. Idempotente:
+   * só age enquanto `turnoAluyPendente`. F55 — 1º token recebido (§2.4→§2.5): sai de
+   * `thinking`/`retrying` p/ `streaming`. O `workingLabel` NÃO é limpo. Só força a fase se
+   * ainda estávamos pensando/retentando/streamando (um onStart de uma 2ª chamada do loop,
+   * já em asking/budget, não regride a fase). EST-0944 (refino #121) — na passada de
+   * auto-verificação a caixa nasce `selfCheck:true` p/ ser removida ao finalizar.
+   */
+  private abrirTurnoAluy(): void {
+    if (!this.turnoAluyPendente) return;
+    this.turnoAluyPendente = false;
+    const enterStreaming =
+      this.state.phase === 'thinking' ||
+      this.state.phase === 'streaming' ||
+      this.state.phase === 'retrying';
     const block: SessionBlock = {
       kind: 'aluy',
       text: '',
       streaming: true,
       ...(this.selfCheckInFlight ? { selfCheck: true } : {}),
     };
-    // COMPOSER PARADO (16/09) — fase e caixa entram no MESMO patch. Em dois, a TUI pintava
-    // um quadro com a fase já em `streaming` (o indicador "pensando" some) e a caixa ainda
-    // ausente: o frame encolhia 2 linhas por um instante e o composer piscava para cima com
-    // a tela cheia (o Ink renderiza cada notificação na hora; não há agrupamento).
     // F-RETRY-MEIO-DO-STREAM — tentativa nova depois de uma queda no meio: o bloco parcial
-    // da anterior ainda está em voo (é o que o dono via até agora), e o aviso de retry foi
-    // anexado DEPOIS dele — então o parcial não é o último. Procura-o de trás para frente,
-    // tira-o, e abre o bloco novo no fim (abaixo do aviso), em vez de empilhar mais um.
-    const blocks = [...this.state.blocks];
+    // da anterior ainda está em voo, e o aviso de retry foi anexado DEPOIS dele — então o
+    // parcial não é o último. Procura-o de trás para frente, tira-o, e abre o bloco novo no
+    // fim (abaixo do aviso), em vez de empilhar mais um.
+    // F-CAIXA-DE-RETRY-ÓRFÃ — chegou byte: a retentativa deu certo, e o aviso `tentando de
+    // novo` (vivo, `retrying:true`) tem de sair AQUI, no mesmo patch. Ninguém o removia: o
+    // comentário do `noteCallerRetry` prometia que o `finishAluyTurn` limpava, e não limpava.
+    // Um bloco vivo que nunca assenta PINA a região viva — tudo depois dele deixa de migrar
+    // para o scrollback, a região cresce a cada turno e o relógio do rodapé (1×/s) passa a
+    // reescrever uma tela inteira todo segundo. É o "flicker que permanece mesmo sem
+    // problema de conexão" do relato do dono (22/09/2026).
+    const blocks = this.state.blocks.filter(
+      (b) => !(b.kind === 'broker-error' && b.retrying === true),
+    );
     if (this.retryComParcialEmVoo) {
       for (let i = blocks.length - 1; i >= 0; i -= 1) {
         const b = blocks[i];
@@ -6506,8 +6532,9 @@ export class SessionController {
         }
       }
     }
-    blocks.push(block);
     this.retryComParcialEmVoo = false;
+    blocks.push(block);
+    // COMPOSER PARADO (16/09) — fase e caixa entram no MESMO patch.
     this.patch({
       ...(enterStreaming ? { phase: 'streaming' as const } : {}),
       blocks,
@@ -6529,6 +6556,7 @@ export class SessionController {
    * frequência de pintura é limitada.
    */
   private appendAluyReasoning(content: string): void {
+    this.abrirTurnoAluy();
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
     if (last && last.kind === 'aluy') {
@@ -6543,6 +6571,7 @@ export class SessionController {
   }
 
   private appendAluyDelta(content: string): void {
+    this.abrirTurnoAluy();
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
     if (last && last.kind === 'aluy') {
@@ -6642,8 +6671,17 @@ export class SessionController {
    * migrou para o `<Static>` e não é mais redesenhado. Quem chama sabe; basta dizer.
    */
   private finishAluyTurn(motivo: 'done' | 'cancelled' | 'error' = 'done'): void {
-    const blocks = [...this.state.blocks];
+    this.turnoAluyPendente = false;
+    // F-CAIXA-DE-RETRY-ÓRFÃ — rede de segurança: um aviso de retry vivo não sobrevive ao
+    // fim do turno (o caminho normal já o tira no primeiro byte, em `abrirTurnoAluy`).
+    const blocks = this.state.blocks.filter(
+      (b) => !(b.kind === 'broker-error' && b.retrying === true),
+    );
+    const tirouAviso = blocks.length !== this.state.blocks.length;
     const last = blocks[blocks.length - 1];
+    // Sem caixa `aluy` em voo (turno só de tool-call, ou que morreu antes do 1º byte) o
+    // ramo abaixo não patcha — e o aviso filtrado ficaria na tela. Patcha aqui.
+    if (tirouAviso && !(last && last.kind === 'aluy')) this.patch({ blocks });
     if (last && last.kind === 'aluy') {
       // EST-0944 (refino #121) — turno de AUTO-VERIFICAÇÃO interna: NÃO é resposta ao
       // usuário (é o modelo reconferindo a evidência p/ o loop decidir continuar/
