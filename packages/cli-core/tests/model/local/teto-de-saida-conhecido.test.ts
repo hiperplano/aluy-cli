@@ -34,7 +34,8 @@ async function corpoEnviado(model: string, over: Partial<ModelCallRequest> = {})
   const gen = client.stream({
     request: { tier: 'aluy-flux', messages: [{ role: 'user', content: 'oi' }], ...over },
   });
-  for await (const _ev of gen as AsyncGenerator<ModelStreamEvent>) {
+  const it = gen as AsyncGenerator<ModelStreamEvent>;
+  while (!(await it.next()).done) {
     /* drena */
   }
   return calls[0]?.body as Record<string, unknown>;
