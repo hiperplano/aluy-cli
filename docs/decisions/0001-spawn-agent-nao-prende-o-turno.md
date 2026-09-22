@@ -1,6 +1,6 @@
 # 0001 — O `spawn_agent` deixa de prender o turno: o pai escolhe esperar ou despachar
 
-- **Status:** Proposto
+- **Status:** Aceito — aprovado pelo dono em 2026-09-22
 - **Data:** 2026-09-22
 - **Origem:** pedido do dono em 21/09/2026 — *"quando ele dispara agentes, esses agentes
   ficam em estado processando e travam o turno — o correto não seria eles ficarem sendo

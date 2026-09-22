@@ -1957,7 +1957,14 @@ export class SessionController {
         subAgents: {
           // EST-ROOMS-4 — thread o opt-in de SALA do lote (`opts.room`) até o spawner.
           spawn: (profiles, signal, opts) =>
-            this.spawnNamed(spawner, registry, profiles, signal, opts?.room === true),
+            this.spawnNamed(
+              spawner,
+              registry,
+              profiles,
+              signal,
+              opts?.room === true,
+              opts?.wait === false,
+            ),
         },
         agentsControl: {
           // A ÁRVORE é a fonte: ela já registra fase, tokens, tools, duração e a tool em
@@ -7692,6 +7699,7 @@ export class SessionController {
     profiles: readonly SubAgentProfile[],
     signal?: AbortSignal,
     roomRequested = false,
+    despachar = false,
   ): Promise<readonly SubAgentOutcome[]> {
     // EST-ROOMS-4 · ADR-0081 §6 — quando o lote pediu SALA, o ORQUESTRADOR a CRIA
     // (porta gateada §13.1 — NÃO um `room_create` do modelo), registra a policy
@@ -7906,7 +7914,7 @@ export class SessionController {
     }
     // Dispara só os resolvidos; reinsere os desfechos na ordem original dos perfis.
     if (resolved.length > 0) {
-      const ran = await this.spawnDetachable(spawner, resolved, signal, roomActive);
+      const ran = await this.spawnDetachable(spawner, resolved, signal, roomActive, despachar);
       ran.forEach((o, k) => {
         outcomes[resolvedIndex[k]!] = o;
       });
@@ -7949,10 +7957,23 @@ export class SessionController {
     profiles: readonly SubAgentProfile[],
     signal?: AbortSignal,
     roomActive = false,
+    despachar = false,
   ): Promise<readonly SubAgentOutcome[]> {
     // EST-ROOMS-4 — thread o opt-in de SALA até o spawner (cada filho ganha os tools
     // de sala postando como SI; a sala/policy já foram criadas em `spawnNamed`).
     const run = spawner.spawn(profiles, signal, { room: roomActive });
+    // ADR aluy-cli 0001 — DESPACHAR (`wait:false`): o pai pediu para não esperar. É o MESMO
+    // desacople do ESC/injeção/Ctrl+B, decidido na origem em vez de por uma tecla: os filhos
+    // seguem cercados pelos mesmos tetos (E-A2) e o resultado chega como dado por
+    // `onDetachedOutcomes`. Nada novo de máquina — só um quarto motivo no desfecho.
+    if (despachar) {
+      this.detachSpawn(run, profiles.length);
+      this.pushNoteSafe('segundo plano', [
+        `sub-agentes (${profiles.map((p) => p.label).join(', ')}) despachados — seguem trabalhando`,
+        'o resultado chega como dado quando concluírem · agents_status mostra o andamento',
+      ]);
+      return profiles.map((p) => detachedOutcome(p.label, 'despachado'));
+    }
     const rootSignal = this.rootFlow?.signal;
     if (!rootSignal) return run;
 
@@ -9232,7 +9253,7 @@ function errorOutcomeFor(label: string, message: string): SubAgentOutcome {
  */
 function detachedOutcome(
   label: string,
-  motivo: 'esc' | 'inject' | 'solto' = 'esc',
+  motivo: 'esc' | 'inject' | 'solto' | 'despachado' = 'esc',
 ): SubAgentOutcome {
   // POR QUE O MOTIVO IMPORTA — e por que ignorá-lo virou um defeito publicado.
   //
@@ -9265,6 +9286,11 @@ function detachedOutcome(
       ? `o sub-agente "${label}" segue rodando em segundo plano — o dono apertou ESC e ` +
         `parou só o turno principal. O resultado dele chega como dado quando concluir. ` +
         `NÃO afirme que ele terminou nem invente o conteúdo dele.`
+      : motivo === 'despachado'
+        ? `o sub-agente "${label}" foi DESPACHADO em segundo plano (wait:false), como você pediu — ` +
+          `nada falhou. O resultado dele chega como dado num turno seguinte: NÃO espere por ele, ` +
+          `NÃO o dispare de novo, NÃO afirme que terminou nem invente o conteúdo dele. Diga ao ` +
+          `dono o que despachou e encerre o turno; agents_status mostra o andamento.`
       : motivo === 'solto'
         ? `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. O dono ` +
           `SOLTOU o fan-out (Ctrl+B) para liberar o turno. O resultado dele chega como dado ` +

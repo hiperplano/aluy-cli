@@ -55,7 +55,7 @@ export interface SubAgentPort {
   spawn(
     profiles: readonly SubAgentProfile[],
     signal?: AbortSignal,
-    opts?: { room?: boolean; pattern?: string },
+    opts?: { room?: boolean; pattern?: string; wait?: boolean },
   ): Promise<readonly SubAgentOutcome[]>;
 }
 
@@ -269,6 +269,17 @@ const SPAWN_AGENT_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
       },
     },
     // EST-ROOMS-4 · ADR-0081 §6 — abre uma SALA compartilhada para o lote.
+    // ADR aluy-cli 0001 — `wait:false` = DESPACHAR: o spawn_agent retorna na hora com o
+    // mesmo desfecho `detached` que o Ctrl+B produz; o resultado chega como dado depois.
+    // Default `true` preserva o contrato de hoje byte a byte.
+    wait: {
+      type: 'boolean',
+      description:
+        'OPCIONAL, default true. false = DESPACHA e segue: a chamada retorna na hora, os sub-agentes ' +
+        'seguem trabalhando em segundo plano e o resultado chega como DADO num turno seguinte. Use ' +
+        'quando você NÃO precisa do resultado neste turno (auditoria longa, suíte demorada). ' +
+        'Com wait:false você deve encerrar o turno dizendo o que despachou. NÃO combine com room:true.',
+    },
     room: {
       type: 'boolean',
       description:
@@ -321,7 +332,14 @@ export const spawnAgentTool: NativeTool<ToolPorts> = {
     'COORDENADOR (ou leia/resuma você mesmo). NÃO spawne produtores e coordenador juntos: o ' +
     'coordenador leria antes deles produzirem (corrida produtor-consumidor). Se eles se comunicam por ' +
     'SALA e você precisa correr em paralelo, o leitor deve usar room_read com wait_for_writers=[labels] ' +
-    'para bloquear até cada produtor postar (com teto de tempo).',
+    'para bloquear até cada produtor postar (com teto de tempo). ' +
+    // ADR aluy-cli 0001 — o modo despacha-e-segue, na PROSA (o `?` do schema não é lido como
+    // opcional; a frase é). Regra 1 do ADR: não serve para escapar de um fan-in.
+    'DESPACHAR (`"wait": false`): a chamada RETORNA NA HORA e os sub-agentes seguem em segundo plano; ' +
+    'o resultado chega como DADO num turno seguinte (você é avisado). Use SÓ quando o resultado ' +
+    'NÃO é necessário neste turno; encerre o turno dizendo o que despachou, NÃO espere e NÃO ' +
+    'dispare o mesmo lote de novo. Incompatível com sala (`room:true`): quem precisa consumir o ' +
+    'que os filhos produzem espera (`wait` default).',
   async run(input, ports): Promise<ToolResult> {
     const parsed = asProfiles(input);
     if (typeof parsed === 'string') return { ok: false, observation: parsed };
@@ -337,6 +355,17 @@ export const spawnAgentTool: NativeTool<ToolPorts> = {
 
     // EST-ROOMS-4 — opt-in de SALA do lote (input do modelo = não-confiável: só `true`).
     const room = input['room'] === true;
+    // ADR aluy-cli 0001, regra 1 — despachar + sala é a corrida produtor-consumidor que a
+    // prosa proíbe: o leitor bloquearia num turno que já encerrou. Recusa ANTES de spawnar.
+    const wait = input['wait'] !== false;
+    if (!wait && room) {
+      return {
+        ok: false,
+        observation:
+          'spawn_agent: "wait": false não combina com "room": true — quem precisa consumir o que os ' +
+          'filhos produzem espera (omita "wait"). Nenhum sub-agente foi disparado.',
+      };
+    }
     // EST-1121 — padrão de articulação (opcional, só válido quando room:true). O
     // `pattern` é uma convenção SOBRE a sala (quem lê o quê) — sem sala ele não tem
     // significado. HUNT-SUBAGENT — só o ENCAMINHAMOS à porta quando `room` está ON:
@@ -357,7 +386,7 @@ export const spawnAgentTool: NativeTool<ToolPorts> = {
       const outcomes = await port.spawn(
         parsed,
         undefined,
-        pattern !== undefined ? { room, pattern } : { room },
+        { room, ...(pattern !== undefined ? { pattern } : {}), ...(wait ? {} : { wait: false }) },
       );
       const anyOk = outcomes.some((o) => o.ok);
       return {
