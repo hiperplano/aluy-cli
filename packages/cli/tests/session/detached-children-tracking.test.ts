@@ -273,7 +273,7 @@ describe('parada de filhos: só um PARAR-TUDO explícito', () => {
     ).listaFilhosParaGestao();
     expect(subAgentsBlock(c)!.children.every((x) => x.status === 'cancelled')).toBe(true);
     expect(lista).toHaveLength(0);
-    expect(notes(c)).not.toMatch(/concluíram|fan-out concluído/);
+    expect(notes(c)).not.toMatch(/terminou|terminaram/);
   });
 
   it('p na raiz = ESC (filhos seguem)', async () => {

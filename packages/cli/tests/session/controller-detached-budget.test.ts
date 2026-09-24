@@ -183,13 +183,14 @@ describe('HUNT-SUBAGENT (E-A2) — submit é ACEITO com desacoplados vivos, mas 
       (b) => b.kind === 'you' && (b as { text?: string }).text === 'e aí, outra tarefa',
     );
     expect(youBlocks).toHaveLength(1);
-    // Nota informativa (não bloqueante) sobre os sub-agentes em segundo plano.
-    expect(notesText(controller)).toMatch(/segundo plano|orçamento/i);
+    // Nota informativa (não bloqueante): quantos agentes seguem trabalhando e como parar.
+    // O texto deixou de citar o orçamento agregado (mecânica interna) em 22/09.
+    expect(notesText(controller)).toMatch(/agentes? ainda trabalhando/i);
 
     // Os filhos terminam (libera os gates) ⇒ viram dado pendente do próximo turno.
     release('a');
     release('b');
-    await waitFor(() => notesText(controller).includes('sub-agentes concluíram'));
+    await waitFor(() => /termin(ou|aram)/.test(notesText(controller)));
     // item 4 — terminaram ⇒ o contador zera (aviso some).
     await waitFor(() => (controller.current.detachedSubagents ?? 0) === 0);
 

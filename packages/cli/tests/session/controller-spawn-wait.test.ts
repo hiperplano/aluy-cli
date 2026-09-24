@@ -186,7 +186,7 @@ describe('ADR 0001 · spawn_agent wait:false', () => {
     expect(visto).toContain('NÃO o dispare de novo');
 
     // O dono vê o que aconteceu.
-    expect(notesText(controller)).toContain('despachados');
+    expect(notesText(controller)).toContain('segundo plano');
 
     // E-A2 é sobre o PRÓXIMO turno: com desacoplados vivos, o `budget.reset()` do início de
     // turno tem de ser PULADO. Espiona depois do reset legítimo do 1º turno e abre outro.
@@ -200,7 +200,7 @@ describe('ADR 0001 · spawn_agent wait:false', () => {
     // Os filhos terminam ⇒ o resultado REAL chega como dado.
     release('a');
     release('b');
-    await waitFor(() => notesText(controller).includes('sub-agentes concluíram'));
+    await waitFor(() => /termin(ou|aram)/.test(notesText(controller)));
     await waitFor(() => (controller.current.detachedSubagents ?? 0) === 0);
   });
 });
