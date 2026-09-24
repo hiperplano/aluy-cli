@@ -11,7 +11,7 @@
 //
 // CLI-SEC-4 intacto: os resultados são DADO, nunca instrução.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   PolicyPermissionEngine,
   type ModelCaller,
@@ -157,13 +157,17 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
     // Aproveitamos um spy indireto: a nota "fan-out concluído" aparece nos
     // blocos quando onFanoutCompleted é chamado. Isso prova que o completionPort
     // interno disparou.
+    const wakeSpy = vi.spyOn(
+      controller as unknown as { onFanoutCompleted(o: unknown): void },
+      'onFanoutCompleted',
+    );
     await controller.submit('delegue a e b');
 
     // O fan-out normal terminou ⇒ onFanoutCompleted foi chamado ⇒ a nota
-    // A nota "fan-out concluído" SAIU (22/09): um término mostrava DUAS notas do mesmo
-    // evento. O término continua anunciado por UMA nota, a de `onDetachedOutcomes`.
-    const notes = notesText(controller);
-    expect(notes).toContain('terminou');
+    // A nota "fan-out concluído" SAIU (22/09): era a 2ª nota do MESMO evento. O espião
+    // passa a ser o próprio handler que o completionPort dispara — que é o que este teste
+    // quer provar (o port interno rodou), sem depender de um texto de tela.
+    expect(wakeSpy).toHaveBeenCalled();
 
     // O pai terminou com sucesso (não erro).
     expect(['idle', 'done']).toContain(controller.current.phase);
@@ -223,14 +227,16 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
       subAgents: { enabled: true, maxConcurrency: 1 },
     });
 
+    const wakeSpy = vi.spyOn(
+      controller as unknown as { onFanoutCompleted(o: unknown): void },
+      'onFanoutCompleted',
+    );
     await controller.submit('delegue');
 
     // O fan-out normal terminou bem.
     expect(['idle', 'done']).toContain(controller.current.phase);
 
-    // Uma nota só, com o término (ver acima).
-    const notes = notesText(controller);
-    expect(notes).toContain('terminou');
+    expect(wakeSpy).toHaveBeenCalled();
   });
 
   // ─── F158 (c): guarda detachedTrees>0 SEM fanout-completion SEGUE bloqueando ───
@@ -412,12 +418,16 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
 // ESTADO DO TURNO, não pelo número de resultados — "1 sub-agente terminou — resultado
 // entram" era alcançável. Nenhum teste travava a frase, e é por isso que ela pôde sair
 // assim e ficar.
-describe('nota de fan-out — singular e plural concordam', () => {
+describe('nota de término — singular e plural concordam', () => {
   /** Chama o emissor direto, com N desfechos, e devolve o texto da nota. */
   function noteDe(n: number): string {
     const { ports } = fakePorts();
     const controller = new SessionController({
-      model: { async call() { return { request_id: 'r', content: 'ok', finish_reason: 'stop' }; } },
+      model: {
+        async call() {
+          return { request_id: 'r', content: 'ok', finish_reason: 'stop' };
+        },
+      },
       permission: new PolicyPermissionEngine(),
       ports,
       askResolver: approveAll,
@@ -430,24 +440,31 @@ describe('nota de fan-out — singular e plural concordam', () => {
       stop: 'final' as const,
       usage: { tokens: 1 },
     }));
-    (controller as unknown as { onFanoutCompleted(o: unknown): void }).onFanoutCompleted(outcomes);
+    (controller as unknown as { onDetachedOutcomes(o: unknown): void }).onDetachedOutcomes(
+      outcomes,
+    );
     const texto = notesText(controller);
     controller.dispose();
     return texto;
   }
 
-  it('UM sub-agente ⇒ tudo no singular', () => {
+  it('UM agente ⇒ tudo no singular', () => {
     const t = noteDe(1);
-    expect(t).toContain('1 sub-agente terminou');
-    expect(t).toContain('o resultado entra como dado');
+    expect(t).toContain('o agente "a0" terminou');
     expect(t).not.toContain('terminaram');
   });
 
-  it('TRÊS sub-agentes ⇒ tudo no plural (era "3 sub-agentes terminou")', () => {
+  it('TRÊS agentes ⇒ tudo no plural (era "3 sub-agentes terminou")', () => {
     const t = noteDe(3);
-    expect(t).toContain('3 sub-agentes terminaram');
-    expect(t).toContain('os resultados entram como dado');
-    expect(t).not.toMatch(/sub-agentes terminou/);
+    expect(t).toContain('os agentes "a0", "a1" e "a2" terminaram');
+    expect(t).not.toMatch(/agentes "[^"]+" terminou/);
+  });
+
+  // A nota diz o que ACONTECEU; a mecânica ("entra como dado", "neste turno") saiu.
+  it('nenhuma nota explica o mecanismo', () => {
+    const t = noteDe(2);
+    expect(t).not.toContain('como dado');
+    expect(t).not.toContain('fan-out');
   });
 });
 

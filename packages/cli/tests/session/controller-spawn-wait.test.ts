@@ -200,7 +200,7 @@ describe('ADR 0001 · spawn_agent wait:false', () => {
     // Os filhos terminam ⇒ o resultado REAL chega como dado.
     release('a');
     release('b');
-    await waitFor(() => notesText(controller).includes('terminou'));
+    await waitFor(() => /termin(ou|aram)/.test(notesText(controller)));
     await waitFor(() => (controller.current.detachedSubagents ?? 0) === 0);
   });
 });

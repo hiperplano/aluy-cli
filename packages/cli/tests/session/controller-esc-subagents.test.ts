@@ -204,7 +204,7 @@ describe('EST-0982 — esc para SÓ o pai: os sub-agentes CONTINUAM e o desfecho
       return b !== undefined && b.children.every((c) => c.status === 'done');
     });
     // …e o desfecho vira DADO PENDENTE (nota + pendingSeed).
-    await waitFor(() => notesText(controller).includes('terminou'));
+    await waitFor(() => /termin(ou|aram)/.test(notesText(controller)));
 
     // PRÓXIMO turno: o agente VÊ os resultados como OBSERVAÇÃO (dado), nunca system.
     captured.length = 0;
@@ -312,7 +312,7 @@ describe('EST-0982 — F8 / PARAR-TUDO / exit derrubam TUDO (pai + filhos + desa
     ).toBe(true);
     // PARAR-TUDO explícito NÃO vira semente do próximo turno.
     await new Promise((r) => setTimeout(r, 20));
-    expect(notesText(controller)).not.toContain('terminou');
+    expect(notesText(controller)).not.toMatch(/termin(ou|aram)/);
   });
 
   it('F8 PÓS-esc alcança os filhos DESACOPLADOS (sem órfão imune ao freio)', async () => {
@@ -335,7 +335,7 @@ describe('EST-0982 — F8 / PARAR-TUDO / exit derrubam TUDO (pai + filhos + desa
     });
     // E o desfecho pós-F8 NÃO semeia o próximo turno (o usuário mandou parar tudo).
     await new Promise((r) => setTimeout(r, 20));
-    expect(notesText(controller)).not.toContain('terminou');
+    expect(notesText(controller)).not.toMatch(/termin(ou|aram)/);
   });
 
   it('encerrar a sessão (dispose, o caminho do Ctrl+C×2 / unmount) MATA tudo — sem órfão', async () => {
