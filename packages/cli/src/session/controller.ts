@@ -1081,6 +1081,25 @@ const FANOUT_INJECT_DRAIN_MS = 150;
 /** Signal que NUNCA aborta — p/ o `this.sleep` do watch (sem freio externo amarrado). */
 const NEVER_ABORT = new AbortController().signal;
 
+/**
+ * "o agente \"x\" terminou" / "x e y terminaram" — o que o dono precisa saber de um
+ * término, e nada da mecânica. Com falha, diz qual falhou.
+ */
+function quemTerminou(outcomes: readonly SubAgentOutcome[]): string {
+  const nomes = outcomes.map((o) => `"${o.label}"`);
+  const falhas = outcomes.filter((o) => !o.ok).map((o) => `"${o.label}"`);
+  const base =
+    nomes.length === 1
+      ? `o agente ${nomes[0]} terminou`
+      : `os agentes ${nomes.slice(0, -1).join(', ')} e ${nomes[nomes.length - 1]} terminaram`;
+  return falhas.length === 0 ? base : `${base} (com falha: ${falhas.join(', ')})`;
+}
+
+/** "1 agente ainda trabalhando" / "3 agentes ainda trabalhando". */
+function agentesAindaTrabalhando(n: number): string {
+  return n === 1 ? '1 agente ainda trabalhando' : `${n} agentes ainda trabalhando`;
+}
+
 /** Quantos filhos soltos já concluídos o `agents_status` lembra. */
 const MAX_FILHOS_CONCLUIDOS = 10;
 
@@ -2631,8 +2650,7 @@ export class SessionController {
     if (this.detachedTrees.size > 0) {
       const n = this.detachedTrees.size;
       this.pushNote('sub-agentes', [
-        `${n} sub-agente(s) em segundo plano (esc) — este turno SOMA no orçamento agregado.`,
-        'os resultados deles entram como dado quando concluírem; F8 (ou Ctrl+T → P) para parar.',
+        `${agentesAindaTrabalhando(this.detachedSubagentCount)} — F8 para parar.`,
       ]);
       // segue o fluxo normal do submit (sem return) — o dono pode interagir.
     }
@@ -4134,8 +4152,7 @@ export class SessionController {
       // UX honesta: o usuário VÊ que o esc só parou o pai e como parar tudo.
       if (live > 0) {
         this.pushNote('turno interrompido', [
-          `${live} sub-agente${live > 1 ? 's' : ''} segue${live > 1 ? 'm' : ''} rodando — ` +
-            `os resultados entram como dado no próximo turno (F8 para tudo).`,
+          `${agentesAindaTrabalhando(live)} — F8 para parar tudo.`,
         ]);
       }
     }
@@ -4319,10 +4336,8 @@ export class SessionController {
         // o loop o drena no MESMO ponto do `user_inject` abaixo.
         fanout.seedLiveState();
         if (fanout.detach()) {
-          this.pushNote('sub-agentes em segundo plano', [
-            `o fan-out (${fanout.labels.join(', ')}) foi desacoplado p/ ` +
-              `responder você JÁ — eles seguem trabalhando e o resultado final chega ` +
-              `quando concluírem.`,
+          this.pushNote('segundo plano', [
+            `${fanout.labels.join(', ')} seguem trabalhando em segundo plano.`,
           ]);
         }
       }
@@ -5781,8 +5796,7 @@ export class SessionController {
         // que ninguém escuta e consumir a tecla à toa.
         this.detachAtual = undefined;
         this.pushNoteSafe('segundo plano', [
-          `sub-agentes (${fanout.labels.join(', ')}) seguem trabalhando`,
-          'o resultado chega como dado quando concluírem · agents_status mostra o andamento',
+          `${fanout.labels.join(', ')} seguem em segundo plano — Ctrl+T para acompanhar.`,
         ]);
         return true;
       }
@@ -8090,8 +8104,7 @@ export class SessionController {
     if (despachar) {
       this.detachSpawn(run, profiles.length);
       this.pushNoteSafe('segundo plano', [
-        `sub-agentes (${profiles.map((p) => p.label).join(', ')}) despachados — seguem trabalhando`,
-        'o resultado chega como dado quando concluírem · agents_status mostra o andamento',
+        `${profiles.map((p) => p.label).join(', ')} foram para segundo plano — Ctrl+T para acompanhar.`,
       ]);
       return profiles.map((p) => detachedOutcome(p.label, 'despachado'));
     }
@@ -8429,7 +8442,7 @@ export class SessionController {
       .then((outcomes) => this.onDetachedOutcomes(outcomes))
       .catch((err: unknown) => {
         this.pushNote('sub-agentes', [
-          `o fan-out em segundo plano falhou: ${err instanceof Error ? err.message : String(err)}`,
+          `os agentes em segundo plano falharam: ${err instanceof Error ? err.message : String(err)}`,
         ]);
       })
       .finally(() => {
@@ -8517,10 +8530,7 @@ export class SessionController {
     const devolvidos = this.tiraResultadosEmTransito();
     if (devolvidos.length === 0) return;
     this.pendingSeed = [...(this.pendingSeed ?? []), ...devolvidos];
-    this.pushNote('sub-agentes', [
-      'o turno terminou antes de processar o resultado do sub-agente — ele NÃO se perdeu:',
-      'entra como dado no próximo turno.',
-    ]);
+    this.pushNote('sub-agentes', ['o resultado do agente fica para a próxima mensagem.']);
   }
 
   /** Registra, dos eventos drenados, os que carregam RESULTADO de sub-agente. */
@@ -8564,7 +8574,6 @@ export class SessionController {
     if (this.filhosConcluidos.length > MAX_FILHOS_CONCLUIDOS) {
       this.filhosConcluidos = this.filhosConcluidos.slice(-MAX_FILHOS_CONCLUIDOS);
     }
-    const n = outcomes.length;
     const text = formatSubAgentResults(outcomes);
     // FANOUT-17 (Fatia 2) — ESCOLHE O CANAL por `isTurnLive()`. Se o desacople foi por
     // INJEÇÃO (a flag) e o turno-RESPOSTA do pai AINDA está vivo (ele respondeu em
@@ -8582,20 +8591,14 @@ export class SessionController {
         payload: text,
         firedAt: new Date(this.clock()).toISOString(),
       });
-      this.pushNote('sub-agentes concluíram', [
-        `${n} resultado${n > 1 ? 's' : ''} pronto${n > 1 ? 's' : ''} — ` +
-          `entra${n > 1 ? 'm' : ''} como dado NESTE turno.`,
-      ]);
+      this.pushNote('sub-agentes', [quemTerminou(outcomes)]);
       return;
     }
     this.pendingSeed = [
       ...(this.pendingSeed ?? []),
       { role: 'observation', toolName: 'spawn_agent', text },
     ];
-    this.pushNote('sub-agentes concluíram', [
-      `${n} resultado${n > 1 ? 's' : ''} pronto${n > 1 ? 's' : ''} — entra${n > 1 ? 'm' : ''} ` +
-        `como dado — retomo a tarefa com ele agora.`,
-    ]);
+    this.pushNote('sub-agentes', [`${quemTerminou(outcomes)} — continuando a tarefa.`]);
     // EST-F158 — ACORDA o turn-loop IMEDIATAMENTE: enfileira no canal mid-turn e
     // dispara maybeWakeForMonitor. O flag fura a guarda detachedTrees>0 (F158).
     this.monitorQueue.enqueue({
@@ -8625,7 +8628,6 @@ export class SessionController {
   private onFanoutCompleted(outcomes: readonly SubAgentOutcome[]): void {
     if (outcomes.length === 0 || this.hardStopped) return;
     const text = formatSubAgentResults(outcomes);
-    const n = outcomes.length;
     // Fan-out NORMAL terminou enquanto o pai está no turno (não-desacoplado):
     // os resultados JÁ chegam como tool-result do spawn_agent — este enfileiramento
     // é redundância de segurança p/ o caso raro de o pai já ter saído do await.
@@ -8643,11 +8645,10 @@ export class SessionController {
     // ternário `isTurnLive()` escolhia entre "entra" e "entram" pelo ESTADO DO TURNO, não
     // pelo número de resultados, então "1 sub-agente terminou — resultado entram" era
     // alcançável. Texto que o dono lê a cada fan-out não pode ser desleixado assim.
-    const plural = n > 1;
-    this.pushNote('fan-out concluído', [
-      `${n} sub-agente${plural ? 's' : ''} ${plural ? 'terminaram' : 'terminou'} — ` +
-        `${plural ? 'os resultados entram' : 'o resultado entra'} como dado.`,
-    ]);
+    // Sem nota aqui (relato do dono, 22/09/2026: um término mostrava DUAS notas — esta e a
+    // de `onDetachedOutcomes` — e ambas com jargão: "o resultado entra como dado"). Quem
+    // avisa o dono é UMA nota, em `onDetachedOutcomes`; num fan-out esperado, o próprio
+    // bloco do `spawn_agent` já mostra o resultado.
     // EST-F158 — acorda o turn-loop: se o pai está ocioso (ex.: terminou enquanto
     // aguardava), processa IMEDIATAMENTE. O flag fura a guarda detachedTrees>0.
     this.pendingFanoutCompletion = true;

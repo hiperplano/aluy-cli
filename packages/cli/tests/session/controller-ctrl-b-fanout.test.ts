@@ -219,7 +219,7 @@ describe('F-BG — Ctrl+B com fan-out VIVO', () => {
     // Os filhos terminam em segundo plano ⇒ o resultado REAL chega como dado.
     release('a');
     release('b');
-    await waitFor(() => notesText(controller).includes('sub-agentes concluíram'));
+    await waitFor(() => notesText(controller).includes('terminou'));
     await waitFor(() => (controller.current.detachedSubagents ?? 0) === 0);
   });
 

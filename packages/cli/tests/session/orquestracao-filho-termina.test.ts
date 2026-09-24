@@ -148,7 +148,7 @@ describe('orquestração — o pai incorpora o filho que terminou SEM o dono ped
     await waitFor(() => s.chamadasDoPai.length === 2);
     s.liberarFilho();
     await waitFor(() => s.filhoTerminou());
-    await waitFor(() => notesText(controller).includes('sub-agentes concluíram'));
+    await waitFor(() => notesText(controller).includes('terminou'));
     s.liberarFinalDoPai();
     await done;
     // O pai tem de voltar ao modelo SOZINHO, vendo o relatório do filho.

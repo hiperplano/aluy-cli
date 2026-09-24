@@ -160,9 +160,10 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
     await controller.submit('delegue a e b');
 
     // O fan-out normal terminou ⇒ onFanoutCompleted foi chamado ⇒ a nota
-    // "fan-out concluído" DEVE estar presente nos blocos.
+    // A nota "fan-out concluído" SAIU (22/09): um término mostrava DUAS notas do mesmo
+    // evento. O término continua anunciado por UMA nota, a de `onDetachedOutcomes`.
     const notes = notesText(controller);
-    expect(notes).toContain('fan-out concluído');
+    expect(notes).toContain('terminou');
 
     // O pai terminou com sucesso (não erro).
     expect(['idle', 'done']).toContain(controller.current.phase);
@@ -227,9 +228,9 @@ describe('F158 — SubAgentCompletionPort (unidade)', () => {
     // O fan-out normal terminou bem.
     expect(['idle', 'done']).toContain(controller.current.phase);
 
-    // A nota "fan-out concluído" DEVE estar presente (completionPort padrão).
+    // Uma nota só, com o término (ver acima).
     const notes = notesText(controller);
-    expect(notes).toContain('fan-out concluído');
+    expect(notes).toContain('terminou');
   });
 
   // ─── F158 (c): guarda detachedTrees>0 SEM fanout-completion SEGUE bloqueando ───

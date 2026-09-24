@@ -253,7 +253,7 @@ describe('FANOUT-17 (Fatia 2, flag ON) — inject DESACOPLA o fan-out e o pai re
     // Os filhos TERMINAM em segundo plano ⇒ o resultado REAL vira dado pendente.
     release('a');
     release('b');
-    await waitFor(() => notesText(controller).includes('sub-agentes concluíram'));
+    await waitFor(() => notesText(controller).includes('terminou'));
     await waitFor(() => (controller.current.detachedSubagents ?? 0) === 0);
 
     // O resultado real é semeado (pendingSeed) — o próximo turno o vê como observação.

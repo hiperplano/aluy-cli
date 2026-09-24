@@ -189,7 +189,7 @@ describe('HUNT-SUBAGENT (E-A2) — submit é ACEITO com desacoplados vivos, mas 
     // Os filhos terminam (libera os gates) ⇒ viram dado pendente do próximo turno.
     release('a');
     release('b');
-    await waitFor(() => notesText(controller).includes('sub-agentes concluíram'));
+    await waitFor(() => notesText(controller).includes('terminou'));
     // item 4 — terminaram ⇒ o contador zera (aviso some).
     await waitFor(() => (controller.current.detachedSubagents ?? 0) === 0);
 
