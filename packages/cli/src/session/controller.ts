@@ -2648,7 +2648,6 @@ export class SessionController {
     // e SOMA no `SharedBudget` agregado vivo (o `budget.reset()` é pulado em `runResolvedTurn`
     // enquanto `detachedTrees>0`), então o E-A2 segue cercado. Nota informativa, NÃO bloqueante.
     if (this.detachedTrees.size > 0) {
-      const n = this.detachedTrees.size;
       this.pushNote('sub-agentes', [
         `${agentesAindaTrabalhando(this.detachedSubagentCount)} — F8 para parar.`,
       ]);
