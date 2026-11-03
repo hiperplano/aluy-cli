@@ -57,6 +57,11 @@ export class ToolRegistry<Ports = ToolPorts> {
    * (assentou OU estourou) CONGELA a ordem (`freezeMcpOrder`): o que conectar depois vai
    * para o fim. Devolve os servers que ficaram de fora (vazio ⇒ assentou).
    */
+  /** Servers MCP ainda conectando agora (síncrono; p/ a UI rotular a espera como honesta). */
+  pendingMcp(): readonly string[] {
+    return [...this.pendingMcpServers];
+  }
+
   async awaitMcpSettled(timeoutMs: number): Promise<readonly string[]> {
     if (this.pendingMcpServers.size > 0 && timeoutMs > 0) {
       await new Promise<void>((resolve) => {
