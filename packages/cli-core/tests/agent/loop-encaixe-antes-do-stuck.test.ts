@@ -17,7 +17,7 @@ import { ToolRegistry } from '../../src/agent/tools/registry.js';
 import { NATIVE_TOOLS } from '../../src/agent/tools/native.js';
 import type { HistoryItem } from '../../src/agent/context.js';
 import type { ToolPorts } from '../../src/agent/tools/types.js';
-import type { StuckAlert, StuckResolution, StuckResolver } from '../../src/agent/stuck-watchdog.js';
+import type { StuckResolution, StuckResolver } from '../../src/agent/stuck-watchdog.js';
 import {
   MemoryFs,
   ScriptedModelCaller,
@@ -47,7 +47,7 @@ function fila(eventos: string[]): { port: InjectedInputPort; liberar: () => void
 
 function resolverQueRegistra(eventos: string[]): StuckResolver {
   return {
-    async resolve(_alerta: StuckAlert): Promise<StuckResolution> {
+    async resolve(): Promise<StuckResolution> {
       eventos.push('pausou');
       return { kind: 'end' };
     },

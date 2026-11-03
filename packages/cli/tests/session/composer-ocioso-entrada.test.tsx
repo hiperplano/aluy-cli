@@ -133,10 +133,7 @@ describe('composer em repouso · lote multi-linha num chunk só', () => {
     r.stdin.write('um\rdois\r');
     await esperar(() => objetivos.length >= 1 && falas().length >= 1);
     // a 1ª linha é o objetivo; a 2ª chega com o turno vivo (encaixa/enfileira) — ambas aparecem.
-    await esperar(
-      () => objetivos.join('|').includes('dois') || falas().includes('dois'),
-      5000,
-    );
+    await esperar(() => objetivos.join('|').includes('dois') || falas().includes('dois'), 5000);
     expect(falas()[0]).toBe('um');
     const todas = objetivos.join('|') + '|' + falas().join('|');
     expect(todas).toContain('dois');
