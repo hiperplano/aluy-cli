@@ -131,9 +131,16 @@ function buildController(): SessionController {
       },
     },
   };
+  // F15 — o `!cmd` do usuário não abre mais caixa; o ask vem de um run_command DO MODELO.
+  let n = 0;
   const model: ModelCaller = {
     async call(): Promise<ModelCallResult> {
-      return { request_id: 'r', content: '', finish_reason: 'stop' };
+      n += 1;
+      const content =
+        n === 1
+          ? '<<<ALUY_TOOL_CALL\n{"name":"run_command","input":{"command":"ls"}}\nALUY_TOOL_CALL>>>'
+          : 'pronto.';
+      return { request_id: 'r', content, finish_reason: 'stop' };
     },
   };
   return new SessionController({
@@ -157,7 +164,7 @@ describe('F6 — caixa de permissão: type-ahead sem resposta acidental', () => 
     );
     controller.dismissBoot();
     await sleep(30);
-    void controller.runBang('ls');
+    void controller.submit('liste');
     await waitFor(() => controller.current.phase === 'asking');
     await sleep(30);
 

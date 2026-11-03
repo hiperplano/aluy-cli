@@ -122,7 +122,6 @@ describe('<Working> — o wordmark Λluy no papel do Aluy', () => {
   });
 
   it('LARGURA CONSTANTE entre frames — nenhuma letra some (anti-jitter EST-0956)', () => {
-    // eslint-disable-next-line no-control-regex
     const semCor = (s: string): string =>
       s.replace(new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'), '');
     // As duas medidas vêm de fontes DIFERENTES de propósito: a largura do texto SEM cor
