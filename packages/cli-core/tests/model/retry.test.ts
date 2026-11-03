@@ -77,9 +77,14 @@ describe('F-RETRY · decideRetry — veredito e espera', () => {
     expect(v.reason).toContain('Retry-After');
   });
 
-  it('CLAMPA um `Retry-After` hostil (não pendura a sessão por horas)', () => {
-    const v = decideRetry(httpErr(429, { retry_after: 99_999 }), 1, CFG);
+  it('CLAMPA a espera no teto do retry curto (`Retry-After` no limite)', () => {
+    const v = decideRetry(httpErr(429, { retry_after: 60 }), 1, CFG);
     expect(v.waitMs).toBe(MAX_RETRY_WAIT_MS);
+  });
+
+  it('`Retry-After` longo (hostil ou janela de cota) NÃO é retry: sobe p/ a PAUSA por cota', () => {
+    const v = decideRetry(httpErr(429, { retry_after: 99_999 }), 1, CFG);
+    expect(v.retry).toBe(false);
   });
 
   it('para no TETO de tentativas (anti-runaway)', () => {

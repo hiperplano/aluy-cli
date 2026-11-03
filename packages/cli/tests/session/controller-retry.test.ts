@@ -11,7 +11,7 @@
 //   (d) esc durante o backoff ⇒ cancela (não retenta, volta ao composer);
 //   (e) idempotency-key IGUAL entre as tentativas (broker deduplica — não duplica billing).
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   PolicyPermissionEngine,
   BrokerError,
@@ -154,6 +154,10 @@ function brokerErrorBlocksSeen(snapshots: SessionState[]): BrokerErrorBlock[] {
   return out;
 }
 
+afterEach(() => {
+  delete process.env.ALUY_QUOTA_PAUSE;
+});
+
 describe('SessionController — AUTO-RETRY de broker (EST-0948)', () => {
   it('(a) retryable 2× depois 200 ⇒ 2 retries com backoff, mostra "tentativa 2/3", depois sucesso', async () => {
     const cap = { calls: () => 0, keys: () => [] as string[] };
@@ -226,6 +230,8 @@ describe('SessionController — AUTO-RETRY de broker (EST-0948)', () => {
   });
 
   it('(c) retryable:false (402 crédito) ⇒ ZERO retries, broker-error IMEDIATO com a causa', async () => {
+    // Este teste cobre a classificação/retry SEM a pausa por cota (que, ligada, pausaria o 402).
+    process.env.ALUY_QUOTA_PAUSE = 'off';
     const cap = { calls: () => 0 };
     const { controller, snapshots } = buildController({
       model: (sink) => {
@@ -472,6 +478,7 @@ describe('SessionController — TRANSPORTE retentável (EST-0948, BUG 1)', () =>
   });
 
   it('402/401 (BrokerError não-retryable) seguem SEM retry mesmo com o transporte agora retentável', async () => {
+    process.env.ALUY_QUOTA_PAUSE = 'off'; // cobre o retry SEM a pausa por cota
     const cap = { calls: () => 0 };
     const { controller, snapshots } = buildController({
       model: (sink) => {

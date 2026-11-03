@@ -162,6 +162,7 @@ import {
   loadProjectInstructions,
   UserConfigStore,
   SessionStore,
+  PausaStore,
   // ADR-0150 (balde b) — resolve `session.gcMaxAgeMs`/`gcMaxCount` do config único.
   resolveSessionGcOptions,
   blocksToHistory,
@@ -2365,6 +2366,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // vezes ele se perde no que estava fazendo antes quando fechei e reabri"). "Às
   // vezes" porque é CORRIDA: quem digita rápido perde. A memória PREPENDA depois.
   if (resumedHistory.length > 0) built.controller.seedHistory(resumedHistory);
+  // PAUSA POR COTA — liga a persistência da pausa a ESTA sessão e, se a sessão retomada foi
+  // fechada (ou parada) com agentes pausados por cota, continua o trabalho de onde parou.
+  {
+    const pausaStore = new PausaStore({ disabled: opts.anonymous === true });
+    built.controller.attachPausaStore(pausaStore, activeSession.id);
+    const pausa = resumedRecord ? pausaStore.load(activeSession.id) : null;
+    if (pausa) void built.controller.resumeFromPausa(pausa);
+  }
   // EST-0972 (rename) — RESTAURA o RÓTULO + COR de identificação da sessão retomada
   // (boot via --continue/--resume/auto-oferta) ⇒ o ●+nome reaparece no composer de cara.
   // DADO DE UI (HG-2). Só quando há rótulo (sem label ⇒ controller fica sem rótulo).

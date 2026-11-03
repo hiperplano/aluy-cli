@@ -27,6 +27,7 @@ import { parseSse } from './sse.js';
 import { newDegenerationSink } from '../agent/degeneration.js';
 import { newStreamByteCap, STREAM_CAP_FINISH_REASON } from '../agent/stream-cap.js';
 import { parseQuotaFromUsage, type Quota } from './quota.js';
+import { resetAtFromHeaders } from './quota-pause.js';
 import type {
   ModelCallRequest,
   ModelCallResult,
@@ -322,13 +323,16 @@ export class BrokerModelClient implements ModelClient {
     } catch {
       parsed = undefined;
     }
-    const problem = toProblemDetails(res.status, parsed);
+    let problem = toProblemDetails(res.status, parsed);
     // `Retry-After` do header complementa o corpo quando o broker o usa (429/502).
     if (problem.retry_after === undefined) {
       const secs = parseRetryAfter(res.headers.get('retry-after'), Date.now());
-      if (secs !== undefined) {
-        return new BrokerError({ ...problem, retry_after: secs });
-      }
+      if (secs !== undefined) problem = { ...problem, retry_after: secs };
+    }
+    // Pausa por cota: horário de reset a partir dos headers (só em 429/402).
+    if (problem.reset_at_ms === undefined && (res.status === 429 || res.status === 402)) {
+      const at = resetAtFromHeaders(res.headers, Date.now());
+      if (at !== undefined) problem = { ...problem, reset_at_ms: at };
     }
     return new BrokerError(problem);
   }

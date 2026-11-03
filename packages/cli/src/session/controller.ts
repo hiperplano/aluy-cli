@@ -24,6 +24,7 @@ import {
   BrokerError,
   BrokerTransportError,
   ModelCallAbortedError,
+  QuotaPauseStoppedError,
   closeInterruptedHistory,
   AuthError,
   RefreshUnavailableError,
@@ -154,6 +155,8 @@ import {
   mapSkillsToCapabilityItems,
   groupMcpServers,
 } from './capabilities-snapshot.js';
+import { QuotaPauseSession, quotaPauseConfigFromEnv } from './quota-pause-session.js';
+import type { PausaRecord, PausaStore } from '../io/pausa-store.js';
 import { createSuggestEngine, runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
 import { pctDeCache, diagnosticoDeCache } from '@hiperplano/aluy-cli-core';
 // F191 — primitivo de EXPEDITE ("acelerar o encaixe"): o controller o POSSUI e o passa
@@ -1608,6 +1611,10 @@ export class SessionController {
   // EST-1107 — SPAWNER de sub-agentes (construído no constructor quando subAgents habilitado).
   // Reusado pelo modo ATIVO de workflow p/ delegar atividades com [agente].
   private spawner: SubAgentSpawner | null = null;
+  /** PAUSA POR COTA — coordenador compartilhado (principal + sub-agentes) e persistência. */
+  private readonly quotaPauseSession: QuotaPauseSession;
+  private pausaStore: PausaStore | null = null;
+  private pausaSessionId = 'sessao';
   // EST-F158 — completionPort do spawner: chamado quando o fan-out termina. ACORDA o
   // turn-loop do Maestro via onFanoutCompleted(), que enfileira os resultados no
   // monitorQueue e dispara maybeWakeForMonitor() — o pai processa na hora.
@@ -1645,6 +1652,15 @@ export class SessionController {
 
   constructor(opts: SessionControllerOptions) {
     this.onRememberTool = opts.onRememberTool;
+    // PAUSA POR COTA — criada ANTES de qualquer loop/spawner (ambos recebem a porta dela).
+    this.quotaPauseSession = new QuotaPauseSession({
+      config: quotaPauseConfigFromEnv(opts.subAgents?.env ?? process.env),
+      store: () => this.pausaStore,
+      sessionId: () => this.pausaSessionId,
+      onView: (v) => this.patch({ quotaPause: v }),
+      note: (t, l) => this.pushNoteSafe(t, [...l]),
+      now: () => this.clock(),
+    });
     this.permissionEngine = opts.permission; // ADR-0126(A·PR2)
     this.subagentRegistry = opts.agentRegistry; // ADR-0126(A·PR2)
     this.reloadProjectAgents = opts.reloadProjectAgents; // GS-MD7 fix: registry segue o cwd
@@ -2039,6 +2055,8 @@ export class SessionController {
         // e o controller ACORDA o turn-loop do Maestro IMEDIATAMENTE (orientado a
         // evento) — sem polling, sem esperar o próximo submit do usuário.
         completionPort: this.spawnerCompletionPort,
+        // PAUSA POR COTA — os filhos pausam no MESMO coordenador (pausa compartilhada).
+        quotaPause: this.quotaPauseSession.coordinator,
       });
       // EST-1107 — guarda o spawner p/ o modo ATIVO de workflow delegar etapas.
       this.spawner = spawner;
@@ -2310,6 +2328,11 @@ export class SessionController {
         // (vs. o loop criar um interno por execução) é o que torna o `[c]` capaz de
         // retomar o MESMO turno com o teto estendido.
         budget: this.budget,
+        // PAUSA POR COTA — cota esgotada pausa o agente principal em vez de matar o turno.
+        quotaPause: this.quotaPauseSession.coordinator.forAgent({
+          label: 'principal',
+          kind: 'principal',
+        }),
         // EST-0982 · ADR-0063 (GS-C5) — porta de INJEÇÃO MID-TURN ("btw"): o loop a
         // CONSULTA entre iterações e DRENA a fila viva (`liveInjected`). Os itens (já
         // `user_inject` — canal `user`, INSTRUÇÃO do dono) entram no histórico DESTE
@@ -2778,6 +2801,82 @@ export class SessionController {
    * desloga, não toca o contexto/credencial — só dispensa o aviso. No-op fora da fase
    * de erro (idempotente).
    */
+  /** PAUSA POR COTA — liga o store e o id da sessão (o `run.tsx` sabe o id; o controller não). */
+  attachPausaStore(store: PausaStore | null, sessionId: string): void {
+    this.pausaStore = store;
+    this.pausaSessionId = sessionId;
+  }
+
+  /** PAUSA POR COTA — "tentar agora": antecipa a sondagem sem esperar o horário. */
+  quotaResumeNow(): void {
+    this.quotaPauseSession.coordinator.resumeNow();
+  }
+
+  /** PAUSA POR COTA — "parar salvando": encerra a espera; o trabalho fica salvo p/ retomar. */
+  quotaStopSaving(): void {
+    this.quotaPauseSession.coordinator.stop('usuario');
+  }
+
+  /**
+   * PAUSA POR COTA — retoma o trabalho pausado de uma sessão reaberta (`--resume`/`--continue`).
+   * Os sub-agentes continuam do histórico guardado, em segundo plano (resultado chega como dado,
+   * pelo mesmo canal dos desacoplados); o agente principal, se estava pausado, retoma o turno.
+   * Se a cota ainda estiver esgotada, pausa de novo — sem perder nada.
+   */
+  async resumeFromPausa(record: PausaRecord): Promise<void> {
+    const kids = record.agents.filter((a) => a.kind === 'subagente' && a.profile !== undefined);
+    const principal = record.agents.find((a) => a.kind === 'principal');
+    this.pushNote('retomando trabalho pausado', [
+      `a sessão foi pausada por cota esgotada (${record.reason || record.scope}).`,
+      `retomando: ${record.agents.map((a) => a.label).join(', ')} — de onde pararam.`,
+    ]);
+    // O arquivo some ao retomar; se pausar de novo, é regravado.
+    this.pausaStore?.remove(this.pausaSessionId);
+    this.quotaPauseSession.coordinator.rearm();
+    const spawner = this.spawner;
+    if (kids.length > 0 && spawner) {
+      const registry = this.rescanAgents(this.subagentRegistry);
+      const bound: SubAgentProfile[] = [];
+      for (const k of kids) {
+        let profile: SubAgentProfile = k.profile as SubAgentProfile;
+        if (registry !== undefined && profile.agent !== undefined) {
+          const b = bindNamedAgent(registry, profile);
+          // Agente nomeado que sumiu do disco: NÃO roda sem a restrição dele (GS-MD7).
+          if (!b.ok) {
+            this.pushNote('sub-agentes', [`${profile.label}: ${b.error}`]);
+            continue;
+          }
+          profile = b.profile;
+        }
+        bound.push(profile);
+      }
+      if (bound.length > 0) {
+        const resume = new Map(kids.map((k) => [k.label, k.history] as const));
+        this.detachSpawn(spawner.spawn(bound, undefined, { resume }), bound.length);
+      }
+    }
+    if (principal) await this.resumePausedMain(principal.history);
+  }
+
+  /** Retoma o turno do agente principal a partir do histórico guardado na pausa. */
+  private async resumePausedMain(history: readonly HistoryItem[]): Promise<void> {
+    // A semente da sessão retomada já está DENTRO do histórico guardado: não a repete.
+    this.pendingSeed = null;
+    this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+    this.beginTurn();
+    this.startTurnAccounting();
+    const rootSignal = this.rootFlow!.signal;
+    try {
+      const run = await this.loop.resume(history, rootSignal);
+      this.afterRun(run);
+    } catch (err) {
+      this.onError(err);
+    } finally {
+      this.abort = null;
+      this.endTurnAccounting();
+    }
+  }
+
   dismissError(): void {
     if (this.state.phase !== 'error') return;
     this.patch({
@@ -2904,6 +3003,8 @@ export class SessionController {
     // o dono SUBMETER um novo turno (perguntar status, etc.) com destacados vivos, em vez de o
     // submit ser RECUSADO (o "CLI travado").
     if (this.detachedTrees.size === 0) this.budget.reset();
+    // PAUSA POR COTA — um turno NOVO do dono sai do estado "parado" (volta a pausar/sondar).
+    this.quotaPauseSession.coordinator.rearm();
     // `attempt` é 1-based: a 1ª chamada é a `attempt=1`; cada `BrokerError` retryable
     // (com tentativas restantes) incrementa e dispara o backoff antes da próxima.
     let attempt = 1;
@@ -7579,6 +7680,22 @@ export class SessionController {
   }
 
   private onError(err: unknown): void {
+    if (err instanceof QuotaPauseStoppedError) {
+      // PAUSA POR COTA — "parar salvando" (ou espera máxima): NÃO é falha. Guarda o histórico
+      // do turno como contexto, salva a foto retomável e volta ao repouso.
+      if (this.rootFlow && !this.rootFlow.isTerminal()) this.rootFlow.finish('paused');
+      const partial = err.partialHistory ?? [];
+      if (partial.length > 0) {
+        const history = closeInterruptedHistory(partial);
+        if (this.focus) this.focus.history = history;
+        else this.lastRunHistory = history;
+        this.quotaPauseSession.attachPrincipal(history);
+      }
+      this.finishAluyTurn('cancelled');
+      this.endTurnInjects();
+      this.setPhase('idle');
+      return;
+    }
     if (err instanceof ModelCallAbortedError) {
       // Interrupção do usuário (Ctrl-C / PARAR) — volta ao composer, sem bloco de erro.
       // EST-0982 — a raiz já foi `cancelled` por `interrupt()`/`cancelAllFlows`; se o
@@ -8981,7 +9098,9 @@ export class SessionController {
         const acc = node?.accounting();
         this.upsertSubAgentChild(label, {
           label,
-          status: wasCancelled ? 'cancelled' : outcome.ok ? 'done' : 'fail',
+          // PAUSA POR COTA — pausado não é falha: usa o status neutro (dim) com stop:'paused'.
+          status:
+            wasCancelled || outcome.stop === 'paused' ? 'cancelled' : outcome.ok ? 'done' : 'fail',
           summary: subAgentSummary(outcome, acc?.durationMs),
           stop: wasCancelled ? 'cancelled' : outcome.stop,
           // ADR-0146 (D5) — mantido no resumo final (mesmo rótulo do início).

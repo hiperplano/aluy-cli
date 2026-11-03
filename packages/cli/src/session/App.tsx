@@ -30,6 +30,7 @@ import {
   OTHER_INDEX,
   BrokerError,
   BudgetGate,
+  QuotaPauseBanner,
   StuckGate,
   CycleCeilingGate,
   SlashMenu,
@@ -3176,6 +3177,20 @@ export function App(props: AppProps): React.ReactElement {
       }
     }
 
+    // ── PAUSA POR COTA — escolhas do banner (o ESC segue sendo o freio de sempre) ──
+    // ↵ com o composer VAZIO = tentar agora; Ctrl+G = parar salvando. Não rouba letras
+    // da digitação (type-ahead/injeção seguem funcionando durante a pausa).
+    if (state.quotaPause !== undefined) {
+      if (key.ctrl && char === 'g') {
+        controller.quotaStopSaving();
+        return;
+      }
+      if (key.return && !key.shift && composer.text === '') {
+        controller.quotaResumeNow();
+        return;
+      }
+    }
+
     // ── EST-0982 — `!comando` EM CURSO: esc/Ctrl-C MATA o comando ───────────────
     // Um `!comando` (atalho de shell do usuário) roda sem entrar em `thinking`/
     // `streaming` (não há turno de modelo) — a fase fica idle/done com o BLOCO `bang`
@@ -5154,6 +5169,12 @@ export function App(props: AppProps): React.ReactElement {
             editing={qEditing}
             draft={qDraft}
           />
+        </Box>
+      )}
+
+      {state.quotaPause !== undefined && (
+        <Box paddingTop={1}>
+          <QuotaPauseBanner view={state.quotaPause} />
         </Box>
       )}
 

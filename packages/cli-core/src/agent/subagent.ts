@@ -73,6 +73,9 @@ import {
 import { PolicyPermissionEngine } from '../permission/engine.js';
 import type { AskResolver, AskRequest, AskResolution } from '../permission/ask.js';
 import { ROOM_POST_TOOL_NAME, ROOM_READ_TOOL_NAME } from './rooms/room-tools.js';
+import { QuotaPauseStoppedError } from '../model/errors.js';
+import type { QuotaPauseCoordinator, PausedAgentSnapshot } from './quota-pause.js';
+import type { HistoryItem } from './context.js';
 
 /** Defaults anti-runaway do fan-out (CLI-SEC-8 / E-A2). */
 export const DEFAULT_MAX_CONCURRENCY = 4;
@@ -385,7 +388,7 @@ export interface SubAgentOutcome {
   /** O texto que o filho produziu (resposta final OU motivo da parada). */
   readonly result: string;
   /** Como o filho terminou (p/ auditoria/UX). */
-  readonly stop: 'final' | 'limit' | 'timeout' | 'error';
+  readonly stop: 'final' | 'limit' | 'timeout' | 'error' | 'paused';
   readonly usage: { iterations: number; toolCalls: number; tokens: number };
   /**
    * O filho NÃO terminou: foi desacoplado (ESC no pai, ou injeção do dono) e segue rodando em
@@ -393,6 +396,12 @@ export interface SubAgentOutcome {
    * relatório ao pai (`formatSubAgentResults`) diz isso com todas as letras.
    */
   readonly detached?: boolean;
+  /**
+   * PAUSA POR COTA — o filho NÃO falhou: parou por cota esgotada (e o dono mandou "parar
+   * salvando" ou a espera máxima estourou). Carrega a foto dele (histórico + perfil) para
+   * ser retomado depois de onde parou. O pai o trata como PAUSADO, não como erro.
+   */
+  readonly paused?: PausedAgentSnapshot;
 }
 
 /** Observador OPCIONAL do ciclo de vida dos filhos (a UI do @hiperplano/aluy-cli pluga). */
@@ -433,6 +442,12 @@ export interface SubAgentCompletionPort {
 }
 
 export interface SubAgentSpawnerOptions {
+  /**
+   * PAUSA POR COTA — coordenador compartilhado da sessão (o MESMO do agente principal).
+   * Cada filho ganha uma porta própria; o relógio de inatividade dele é suspenso durante a
+   * pausa (esperar a cota não é travar). Ausente ⇒ baseline (cota esgotada = filho falha).
+   */
+  readonly quotaPause?: QuotaPauseCoordinator;
   /** O MESMO ModelCaller do pai (toda llm_call pelo broker — CLI-SEC-7). */
   readonly model: ModelCaller;
   /**
@@ -999,6 +1014,8 @@ export class SubAgentSpawner {
   private readonly worktree?: import('./worktree-port.js').WorktreePort;
   /** EST-F158 — porta de completion: acordar o Maestro quando o fan-out termina. */
   private readonly completionPort?: SubAgentCompletionPort;
+  /** PAUSA POR COTA — coordenador compartilhado (ausente ⇒ sem pausa). */
+  private readonly quotaPause?: QuotaPauseCoordinator;
 
   constructor(opts: SubAgentSpawnerOptions) {
     // display: os filhos usam o caller DEDICADO (sem o sink ao vivo do pai) — se
@@ -1080,6 +1097,7 @@ export class SubAgentSpawner {
     if (opts.roomCode) this.roomCode = opts.roomCode;
     if (opts.worktree) this.worktree = opts.worktree;
     if (opts.completionPort) this.completionPort = opts.completionPort;
+    if (opts.quotaPause) this.quotaPause = opts.quotaPause;
   }
 
   /** O budget compartilhado (p/ o pai contabilizar/auditar — E-A2). */
@@ -1098,7 +1116,12 @@ export class SubAgentSpawner {
   async spawn(
     profiles: readonly SubAgentProfile[],
     signal?: AbortSignal,
-    opts?: { room?: boolean; pattern?: string },
+    opts?: {
+      room?: boolean;
+      pattern?: string;
+      /** PAUSA POR COTA — retomada: histórico a continuar, por label do filho. */
+      resume?: ReadonlyMap<string, readonly HistoryItem[]>;
+    },
   ): Promise<readonly SubAgentOutcome[]> {
     if (profiles.length === 0) return [];
     if (profiles.length > this.maxSubagentsPerCall) {
@@ -1147,6 +1170,7 @@ export class SubAgentSpawner {
           profiles.length,
           i,
           roomCode,
+          opts?.resume?.get(profile.label),
         );
         outcomes[i] = outcome;
         this.observer?.onChildEnd?.(profile.label, outcome, profile.model);
@@ -1171,6 +1195,7 @@ export class SubAgentSpawner {
     total = 0,
     index = 0,
     roomCode = '',
+    resumeHistory?: readonly HistoryItem[],
   ): Promise<SubAgentOutcome> {
     // E-A1 + E-A3 + não-bypass: a engine do filho é DERIVADA da do pai —
     // `forSubAgent()` herda o modo (Plan/normal/`--unsafe`) e a política (escopo
@@ -1366,6 +1391,23 @@ export class SubAgentSpawner {
         this.observer?.onChildProgress?.(profile.label, u);
       },
       ...(heldAsk ? { askResolver: heldAsk } : {}),
+      // PAUSA POR COTA — porta própria deste filho (label + perfil p/ retomar + hold do idle).
+      ...(this.quotaPause
+        ? {
+            quotaPause: this.quotaPause.forAgent({
+              label: profile.label,
+              kind: 'subagente',
+              profile: {
+                label: profile.label,
+                goal: profile.goal,
+                ...(profile.agent !== undefined ? { agent: profile.agent } : {}),
+                ...(profile.context !== undefined ? { context: profile.context } : {}),
+                ...(profile.model !== undefined ? { model: profile.model } : {}),
+              },
+              hold: () => idle.hold(),
+            }),
+          }
+        : {}),
       // EST-0977/0978 — o SYSTEM PROMPT do agente nomeado (persona, corpo do `.md`) +
       // o CONTEXTO recortado pelo pai entram no canal `system` do filho (instrução
       // confiável do dono, NÃO conteúdo ingerido). Ambos opcionais: a persona vem 1º
@@ -1404,7 +1446,10 @@ export class SubAgentSpawner {
     });
 
     try {
-      const run = loop.run(profile.goal, childAbort.signal);
+      const run =
+        resumeHistory !== undefined && resumeHistory.length > 0
+          ? loop.resume(resumeHistory, childAbort.signal)
+          : loop.run(profile.goal, childAbort.signal);
       const result = await Promise.race([run, idlePromise]);
       // Se o heartbeat perdeu a corrida, `result` é o AgentRunResult; se a inatividade
       // disparou (`result === undefined`), o filho foi morto por estar travado.
@@ -1430,6 +1475,33 @@ export class SubAgentSpawner {
           stop: 'timeout',
           // EST-0982 — uso PRÓPRIO até o kill (não o agregado).
           usage: ownUsage,
+        };
+      }
+      // PAUSA POR COTA — não é falha: o filho está PAUSADO, com o trabalho guardado.
+      if (err instanceof QuotaPauseStoppedError) {
+        const history = err.partialHistory ?? resumeHistory ?? [];
+        return {
+          label: profile.label,
+          ok: false,
+          result:
+            `sub-agente "${profile.label}" PAUSADO por cota esgotada (${err.message}) — o trabalho ` +
+            `foi guardado e ele continua de onde parou quando a sessão for retomada. NÃO é falha: ` +
+            `não o dispare de novo nem refaça o trabalho dele.`,
+          stop: 'paused',
+          usage: ownUsage,
+          paused: {
+            label: profile.label,
+            kind: 'subagente',
+            history,
+            profile: {
+              label: profile.label,
+              goal: profile.goal,
+              ...(profile.agent !== undefined ? { agent: profile.agent } : {}),
+              ...(profile.context !== undefined ? { context: profile.context } : {}),
+              ...(profile.model !== undefined ? { model: profile.model } : {}),
+            },
+            pausedAt: Date.now(),
+          },
         };
       }
       return {

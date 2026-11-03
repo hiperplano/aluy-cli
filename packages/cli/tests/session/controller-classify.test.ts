@@ -12,7 +12,7 @@
 // Broker MOCKADO (sem rede, sem modelo real — FRUGAL). O token jamais aparece: os
 // erros sintéticos nunca o carregam, e a função só compõe literais + status numérico.
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   PolicyPermissionEngine,
   BrokerError,
@@ -112,6 +112,10 @@ const terminalBrokerError = (
 };
 
 // ── (1) função pura: causa → headline + message ───────────────────────────────
+afterEach(() => {
+  delete process.env.ALUY_QUOTA_PAUSE;
+});
+
 describe('classifyBrokerError — causa → mensagem ACIONÁVEL (EST-0942)', () => {
   it('SEM credencial / sessão expirada ⇒ "rode aluy login" (NÃO "indisponível")', () => {
     const c = classifyBrokerError(new SessionExpiredError());
@@ -456,6 +460,8 @@ describe('SessionController.onError — bloco classificado + (não-)retry (EST-0
   });
 
   it('402 ⇒ "sem crédito", SEM auto-retry', async () => {
+    // Este teste cobre a classificação/retry SEM a pausa por cota (que, ligada, pausaria o 402).
+    process.env.ALUY_QUOTA_PAUSE = 'off';
     const err = new BrokerError({
       status: 402,
       code: 'INSUFFICIENT_CREDIT',

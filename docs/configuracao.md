@@ -22,6 +22,7 @@ flag de CLI  >  env ALUY_*  >  ~/.aluy/config.json  >  default
 | `hooks.json` | hooks. O agente **nunca** escreve aqui |
 | `credentials.enc` | cofre cifrado (AES-256-GCM), quando não há keychain utilizável |
 | `sessions/` | histórico das conversas (retomável com `--resume`) |
+| `pausas/` | trabalho pausado por cota esgotada, retomado junto com a sessão |
 | `audit.jsonl` | trilha append-only dos efeitos |
 | `services/` | serviços instalados |
 | `cron/` | tarefas agendadas |
@@ -93,6 +94,7 @@ As `ALUY_*` sobrescrevem o `config.json`. As mais usadas:
 | `ALUY_LOCAL_AUTH` | `apikey` ou `oauth` |
 | `ALUY_LOCAL_BASE_URL` | endpoint próprio (validado por anti-SSRF) |
 | `ALUY_RETRY` | `off` desliga a retentativa automática |
+| `ALUY_QUOTA_PAUSE` · `ALUY_QUOTA_MAX_WAIT` | pausa por cota esgotada: `off` desliga; espera máxima (`90m`, `6h`) — ver [pausa por cota](pausa-por-cota.md) |
 | `ANTHROPIC_API_KEY` · `OPENAI_API_KEY` · `OPENROUTER_API_KEY` | credencial do provider |
 
 `aluy config` lista todas, com o valor efetivo e de onde ele veio.

@@ -22,7 +22,7 @@ export interface SubAgentChildView {
   // EST-0982 — `cancelled` quando o usuário PAROU este filho (cessar≠falha).
   readonly status: 'running' | 'done' | 'fail' | 'cancelled';
   readonly summary?: string;
-  readonly stop?: 'final' | 'limit' | 'timeout' | 'error' | 'cancelled';
+  readonly stop?: 'final' | 'limit' | 'timeout' | 'error' | 'cancelled' | 'paused';
   /**
    * ADR-0146 (D5) — NOME do tier/modelo RESOLVIDO deste filho (`aluy-strata`,
    * `custom · <slug>`, `herdado (...)`). NUNCA provider/base_url/credencial
@@ -50,6 +50,8 @@ function statusWord(child: SubAgentChildView, settled = false): string {
   if (child.status === 'running') return settled ? 'em segundo plano' : 'rodando';
   if (child.status === 'done') return 'pronto';
   // EST-0982 — PARADO pelo usuário: cessar≠falha (a11y honesta).
+  // PAUSA POR COTA — pausado não é parado nem falhou: o trabalho está guardado e retoma.
+  if (child.status === 'cancelled' && child.stop === 'paused') return 'pausado (cota)';
   if (child.status === 'cancelled') return 'parado';
   // fail: distingue o motivo p/ o usuário (teto vs timeout vs erro).
   switch (child.stop) {

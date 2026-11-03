@@ -205,6 +205,9 @@ export function collectSettings(
       String(DEFAULT_SUBAGENT_IDLE_TIMEOUT_MS),
       'config.subagents.idleTimeoutMs',
     ),
+    // PAUSA POR COTA — só por env (como o ALUY_RETRY): liga/desliga e espera máxima total.
+    pickEnvConfig('quota.pause', 'ALUY_QUOTA_PAUSE', env.ALUY_QUOTA_PAUSE, undefined, 'on'),
+    pickEnvConfig('quota.maxWait', 'ALUY_QUOTA_MAX_WAIT', env.ALUY_QUOTA_MAX_WAIT, undefined, '6h'),
     pickConfig(
       'cycle.defaultDurationMs',
       config.cycle?.defaultDurationMs,

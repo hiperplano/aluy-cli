@@ -183,7 +183,7 @@ export interface SubAgentChild {
    */
   readonly summary?: string;
   /** Motivo da parada (`final`/`limit`/`timeout`/`error`/`cancelled`) — a11y/auditoria. */
-  readonly stop?: 'final' | 'limit' | 'timeout' | 'error' | 'cancelled';
+  readonly stop?: 'final' | 'limit' | 'timeout' | 'error' | 'cancelled' | 'paused';
   /**
    * ADR-0146 (D5) — o NOME do tier/modelo RESOLVIDO deste filho (`aluy-strata`,
    * `custom · <slug>`, `herdado (aluy-flux)`, `herdado (custom · <slug-do-pai>)`).
@@ -679,6 +679,13 @@ export interface SessionState {
    * ([r]/[c]/[n]). Mesma mecânica de campo `| undefined` do `pendingBudget`.
    */
   readonly pendingStuck?: PendingStuck | undefined;
+  /**
+   * PAUSA POR COTA — o episódio de pausa em curso (`undefined` fora dele). A cota do modelo
+   * acabou; os agentes listados estão PAUSADOS (não mortos) e voltam sozinhos quando a cota
+   * liberar. A TUI mostra o banner com contagem regressiva e as escolhas (tentar agora /
+   * parar salvando). Não é uma fase: o composer e o ESC seguem como no trabalho normal.
+   */
+  readonly quotaPause?: import('@hiperplano/aluy-cli-core').QuotaPauseView | undefined;
   /**
    * EST-0982 · ADR-0063 — contabilidade do TURNO do agente principal (tokens +
    * tempo), exibida no rodapé estilo Claude Code. `undefined` antes do 1º turno.
