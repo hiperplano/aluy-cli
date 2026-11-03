@@ -14,24 +14,24 @@ flag de CLI  >  env ALUY_*  >  ~/.aluy/config.json  >  default
 
 ## `~/.aluy/`
 
-| Arquivo / pasta | Conteúdo |
-| --- | --- |
-| `config.json` | preferências duráveis: idioma, tema, provider/modelo, perfil, limites |
-| `providers.json` | seus providers BYO (override do catálogo) |
-| `mcp.json` | servers MCP globais — ver [MCP](mcp.md) |
-| `hooks.json` | hooks. O agente **nunca** escreve aqui |
-| `credentials.enc` | cofre cifrado (AES-256-GCM), quando não há keychain utilizável |
-| `sessions/` | histórico das conversas (retomável com `--resume`) |
-| `pausas/` | trabalho pausado por cota esgotada, retomado junto com a sessão |
-| `audit.jsonl` | trilha append-only dos efeitos |
-| `services/` | serviços instalados |
-| `cron/` | tarefas agendadas |
-| `agents/` · `skills/` · `workflows/` · `plugins/` | o que você instalou, global |
-| `memory/` | store da memória persistente (modo turbo) |
-| `exports/` | transcrições do `/export` |
-| `undo/` | pilha de undo das edições do agente |
-| `logs/` | logs dos sidecars |
-| `update-check.json` | cache do verificador de versão |
+| Arquivo / pasta                                   | Conteúdo                                                              |
+| ------------------------------------------------- | --------------------------------------------------------------------- |
+| `config.json`                                     | preferências duráveis: idioma, tema, provider/modelo, perfil, limites |
+| `providers.json`                                  | seus providers BYO (override do catálogo)                             |
+| `mcp.json`                                        | servers MCP globais — ver [MCP](mcp.md)                               |
+| `hooks.json`                                      | hooks. O agente **nunca** escreve aqui                                |
+| `credentials.enc`                                 | cofre cifrado (AES-256-GCM), quando não há keychain utilizável        |
+| `sessions/`                                       | histórico das conversas (retomável com `--resume`)                    |
+| `pausas/`                                         | trabalho pausado por cota esgotada, retomado junto com a sessão       |
+| `audit.jsonl`                                     | trilha append-only dos efeitos                                        |
+| `services/`                                       | serviços instalados                                                   |
+| `cron/`                                           | tarefas agendadas                                                     |
+| `agents/` · `skills/` · `workflows/` · `plugins/` | o que você instalou, global                                           |
+| `memory/`                                         | store da memória persistente (modo turbo)                             |
+| `exports/`                                        | transcrições do `/export`                                             |
+| `undo/`                                           | pilha de undo das edições do agente                                   |
+| `logs/`                                           | logs dos sidecars                                                     |
+| `update-check.json`                               | cache do verificador de versão                                        |
 
 ## Credencial
 
@@ -62,11 +62,11 @@ hooks no formato do Claude Code, veja [compatibilidade](config-compat.md).
 
 ## No projeto
 
-| | |
-| --- | --- |
-| `ALUY.md` | instruções do projeto para o agente. É o que o `/init` cria |
-| `.aluy/agents/` · `commands/` · `skills/` · `workflows/` | extensões versionadas junto com o repo |
-| `.mcp.json` | servers MCP do projeto |
+|                                                          |                                                             |
+| -------------------------------------------------------- | ----------------------------------------------------------- |
+| `ALUY.md`                                                | instruções do projeto para o agente. É o que o `/init` cria |
+| `.aluy/agents/` · `commands/` · `skills/` · `workflows/` | extensões versionadas junto com o repo                      |
+| `.mcp.json`                                              | servers MCP do projeto                                      |
 
 O aluy lê **três** arquivos de instrução na raiz e eles **compõem** — são
 concatenados, na ordem, sem que nenhum vença o outro:
@@ -87,15 +87,16 @@ preciso cortar pelo teto de contexto.
 
 As `ALUY_*` sobrescrevem o `config.json`. As mais usadas:
 
-| | |
-| --- | --- |
-| `ALUY_BACKEND` | `local` (padrão) ou `broker` |
-| `ALUY_LOCAL_PROVIDER` · `ALUY_LOCAL_MODEL` | provider e modelo do backend local |
-| `ALUY_LOCAL_AUTH` | `apikey` ou `oauth` |
-| `ALUY_LOCAL_BASE_URL` | endpoint próprio (validado por anti-SSRF) |
-| `ALUY_RETRY` | `off` desliga a retentativa automática |
-| `ALUY_VERBOS` | `simples` troca os verbos de espera brincalhões (`Garimpando…`, `Matutando…`) pelos rótulos planos (`pensando…`). Padrão: verbos. `ALUY_VERBOS_SEED` fixa o sorteio (testes) |
-| `ALUY_QUOTA_PAUSE` · `ALUY_QUOTA_MAX_WAIT` | pausa por cota esgotada: `off` desliga; espera máxima (`90m`, `6h`) — ver [pausa por cota](pausa-por-cota.md) |
-| `ANTHROPIC_API_KEY` · `OPENAI_API_KEY` · `OPENROUTER_API_KEY` | credencial do provider |
+|                                                               |                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ALUY_BACKEND`                                                | `local` (padrão) ou `broker`                                                                                                                                                                                                                                                             |
+| `ALUY_LOCAL_PROVIDER` · `ALUY_LOCAL_MODEL`                    | provider e modelo do backend local                                                                                                                                                                                                                                                       |
+| `ALUY_LOCAL_AUTH`                                             | `apikey` ou `oauth`                                                                                                                                                                                                                                                                      |
+| `ALUY_LOCAL_BASE_URL`                                         | endpoint próprio (validado por anti-SSRF)                                                                                                                                                                                                                                                |
+| `ALUY_RETRY`                                                  | `off` desliga a retentativa automática                                                                                                                                                                                                                                                   |
+| `ALUY_VERBOS`                                                 | `simples` troca os verbos de espera brincalhões (`Garimpando…`, `Matutando…`) pelos rótulos planos (`pensando…`). Padrão: verbos. `ALUY_VERBOS_SEED` fixa o sorteio (testes)                                                                                                             |
+| `ALUY_RODAPE`                                                 | `completo` · `parcial` · `oculto` — o que aparece abaixo do composer (vence a pref salva). Sem valor: `completo`, ou `parcial` em terminal de até 30 linhas. `F2` alterna e `/rodape` (alias `/statusline`) escolhe; a escolha vai para `rodape` no `config.json`. O `⚠ yolo` nunca some |
+| `ALUY_QUOTA_PAUSE` · `ALUY_QUOTA_MAX_WAIT`                    | pausa por cota esgotada: `off` desliga; espera máxima (`90m`, `6h`) — ver [pausa por cota](pausa-por-cota.md)                                                                                                                                                                            |
+| `ANTHROPIC_API_KEY` · `OPENAI_API_KEY` · `OPENROUTER_API_KEY` | credencial do provider                                                                                                                                                                                                                                                                   |
 
 `aluy config` lista todas, com o valor efetivo e de onde ele veio.

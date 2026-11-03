@@ -164,6 +164,16 @@ import { isUnrecognizedEscapeTail } from './escape-leak.js';
 import { resolveSuggestionText } from './suggest.js';
 import { buildTurnRecap } from './turn-recap.js';
 import { ROTULOS_GENERICOS, detalheDeEspera, rotuloExibido } from './verbos.js';
+import { homedir } from 'node:os';
+import { buildSidecarChip } from '@hiperplano/aluy-cli-core';
+import {
+  rodapeEfetivo,
+  proximoRodape,
+  isRodapeModo,
+  RODAPE_LINHAS_CURTAS,
+  type RodapeModo,
+} from '../io/user-config.js';
+import { RodapeParcial } from '../ui/components/RodapeParcial.js';
 import {
   createPasteRegistry,
   shouldCollapse,
@@ -580,6 +590,15 @@ export interface AppProps {
    * segura; testes). É pref de UI (booleano) — nunca segredo (CLI-SEC-7).
    */
   readonly onSuggestionsChange?: (on: boolean) => void;
+  /** F21 — janela (ms) p/ a sugestão do modelo chegar antes da heurística (default 2500; teste). */
+  readonly suggestModelWindowMs?: number;
+  /**
+   * RODAPÉ — modo ESCOLHIDO na partida (`ALUY_RODAPE` > `config.rodape`); ausente ⇒ automático
+   * (`completo`, ou `parcial` em terminal ≤ 30 linhas). `/rodape` e F2 mudam em sessão.
+   */
+  readonly initialRodape?: RodapeModo;
+  /** RODAPÉ — persiste a escolha (`store.saveRodape`). Só UI — nunca segredo. */
+  readonly onRodapeChange?: (modo: RodapeModo) => void;
   /**
    * EST-1000 · ADR-0076 §4 / CLI-SEC-6 / RES-C-1 — exporta o transcript REDIGIDO p/
    * arquivo (`/export` / ctrl+s). O wiring injeta o gravador (passa pela catraca +
@@ -634,6 +653,9 @@ function safeDim(value: number | undefined, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value) && value >= 1) return Math.floor(value);
   return fallback;
 }
+
+/** F21 — janela (ms) p/ a sugestão do modelo chegar antes de entrar a heurística. */
+const SUGGEST_MODEL_WINDOW_MS = 2500;
 
 export function App(props: AppProps): React.ReactElement {
   const { controller } = props;
@@ -760,9 +782,37 @@ export function App(props: AppProps): React.ReactElement {
   // quando a rede cai. Custo aceito explicitamente pelo dono.
   const [suggestionsOn, setSuggestionsOn] = useState(props.initialSuggestions !== false);
   const [suggestion, setSuggestion] = useState<string | undefined>(undefined);
+  // RODAPÉ — `undefined` = automático (parcial em tela baixa); escolha explícita vence.
+  const [rodapeEscolhido, setRodapeEscolhido] = useState<RodapeModo | undefined>(
+    props.initialRodape,
+  );
+  // 1ª vez em `oculto`: uma dica mínima de como voltar, até o próximo envio.
+  const [dicaOculto, setDicaOculto] = useState(false);
+  // `stdout.rows` ausente (pipe/teste) ⇒ altura desconhecida ⇒ NÃO força o modo compacto.
+  const rodapeModo: RodapeModo = rodapeEfetivo(rodapeEscolhido, stdout?.rows ?? 0);
+  const rodapeModoRef = useRef<RodapeModo>(rodapeModo);
+  rodapeModoRef.current = rodapeModo;
+  const aplicarRodape = useCallback(
+    (modo: RodapeModo) => {
+      setRodapeEscolhido(modo);
+      setDicaOculto(modo === 'oculto');
+      props.onRodapeChange?.(modo);
+    },
+    [props],
+  );
+  // A dica "como voltar" some quando o próximo turno começa.
+  useEffect(() => {
+    if (state.phase === 'thinking') setDicaOculto(false);
+  }, [state.phase]);
+  const ciclarRodape = useCallback(
+    () => aplicarRodape(proximoRodape(rodapeModoRef.current)),
+    [aplicarRodape],
+  );
   // Aborta a sugestão do modelo do turno ANTERIOR: se um turno novo começou, a resposta
   // que ainda está vindo é sobre um contexto morto e não pode pintar por cima.
   const suggestAbortRef = useRef<AbortController | undefined>(undefined);
+  // F21 — timer do fallback heurístico (a sugestão do modelo tem uma janela p/ chegar antes).
+  const suggestFallbackRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Fase ANTERIOR (ref, não estado — não re-renderiza) p/ detectar a BORDA trabalho→idle:
   // a sugestão nasce só na TRANSIÇÃO p/ o repouso (não em cada render em idle).
   const prevPhaseRef = useRef<SessionState['phase']>(controller.current.phase);
@@ -1432,6 +1482,11 @@ export function App(props: AppProps): React.ReactElement {
     if (!stdin) return;
     const onData = (data: Buffer | string): void => {
       const s = typeof data === 'string' ? data : data.toString('utf8');
+      // RODAPÉ — F2 cicla completo → parcial → oculto (SS3 `\x1bOQ` ou CSI `\x1b[12~`).
+      if (s === '\x1bOQ' || s === '\x1b[12~') {
+        ciclarRodape();
+        return;
+      }
       if (s.includes('\x1b[19~') || s.includes('\x1bOW')) {
         controller.cancelAllFlows();
         // EST-0982 (P1-2) — F8 = PARAR TUDO: descarta também a fila do type-ahead (os itens
@@ -1450,7 +1505,7 @@ export function App(props: AppProps): React.ReactElement {
     return () => {
       stdin.removeListener('data', onData);
     };
-  }, [stdin, controller, clearQueue, setComposer]);
+  }, [stdin, controller, clearQueue, setComposer, ciclarRodape]);
 
   // Auto-dismiss do splash (spec §2.1: <1s). Some sozinho após `bootMs` mesmo
   // sem tecla — mas a 1ª tecla/objetivo já o dispensa antes (ver useInput/submit).
@@ -1503,8 +1558,16 @@ export function App(props: AppProps): React.ReactElement {
       // Turno terminou. Só sugere com o composer VAZIO e SEM fila (type-ahead pendente):
       // se o dono já está digitando / há algo p/ auto-submeter, a sugestão só atrapalharia.
       if (suggestionsOn && input === '' && queue.length === 0) {
-        // (1) imediata e local — a linha não nasce vazia enquanto o modelo pensa.
-        setSuggestion(resolveSuggestionText(state.blocks, t));
+        // F21 — ESTÁVEL: uma vez mostrada, a sugestão NÃO muda no turno. Antes a heurística
+        // aparecia na hora e o modelo a trocava ~3 s depois (o ghost "mudava sozinho"). Agora o
+        // modelo tem uma janela curta para responder; se não vier, entra a heurística — e quem
+        // chegar depois é descartado (só vale se o ghost ainda está vazio).
+        if (suggestFallbackRef.current !== undefined) clearTimeout(suggestFallbackRef.current);
+        const heuristica = resolveSuggestionText(state.blocks, t);
+        suggestFallbackRef.current = setTimeout(() => {
+          suggestFallbackRef.current = undefined;
+          setSuggestion((cur) => cur ?? heuristica);
+        }, props.suggestModelWindowMs ?? SUGGEST_MODEL_WINDOW_MS);
         // (2) do modelo — fire-and-forget. `void` de propósito: o turno já acabou e esta
         // chamada NÃO pode atrasar nem derrubar nada. Falhou/demorou ⇒ fica a heurística.
         suggestAbortRef.current?.abort();
@@ -1522,7 +1585,10 @@ export function App(props: AppProps): React.ReactElement {
           )
           .then((doModelo) => {
             // SÓ substitui se ainda é deste turno E o dono não começou a digitar.
-            if (doModelo !== undefined && !ctl.signal.aborted) setSuggestion(doModelo);
+            if (doModelo !== undefined && !ctl.signal.aborted) {
+              // chegou DENTRO da janela ⇒ vence a heurística; depois de mostrada, não troca.
+              setSuggestion((cur) => cur ?? doModelo);
+            }
           })
           .catch(() => {
             /* ornamento nunca avisa falha */
@@ -1532,6 +1598,8 @@ export function App(props: AppProps): React.ReactElement {
       // Novo trabalho (ou qualquer fase não-repouso): descarta a sugestão pendente — e
       // ABORTA a do modelo que ainda pode estar vindo, senão ela pinta por cima do turno novo.
       suggestAbortRef.current?.abort();
+      if (suggestFallbackRef.current !== undefined) clearTimeout(suggestFallbackRef.current);
+      suggestFallbackRef.current = undefined;
       setSuggestion(undefined);
     }
     // Deps: a BORDA é `state.phase`; os demais são lidos no instante da borda (mesmo render).
@@ -1544,7 +1612,11 @@ export function App(props: AppProps): React.ReactElement {
   // ela não RESSURJA se o dono apagar o que digitou (o descarte é definitivo p/ este turno).
   // `setSuggestion(undefined)` com valor já `undefined` é no-op no React (bail-out) ⇒ barato.
   useEffect(() => {
-    if (input !== '') setSuggestion(undefined);
+    if (input !== '') {
+      if (suggestFallbackRef.current !== undefined) clearTimeout(suggestFallbackRef.current);
+      suggestFallbackRef.current = undefined;
+      setSuggestion(undefined);
+    }
   }, [input]);
 
   /**
@@ -1942,6 +2014,23 @@ export function App(props: AppProps): React.ReactElement {
         toggleFullscreen();
         return;
       }
+      // RODAPÉ — `/rodape [completo|parcial|oculto]` (alias `/statusline`): sem arg cicla (como
+      // o F2). UI pura — persiste a pref e confirma com uma nota curta.
+      if (command.id === 'rodape') {
+        const arg = args.trim().toLowerCase();
+        if (arg !== '' && !isRodapeModo(arg)) {
+          controller.replaceNote('rodapé', [
+            `modo desconhecido: ${arg} — use completo, parcial ou oculto.`,
+          ]);
+          return;
+        }
+        const next = isRodapeModo(arg) ? arg : proximoRodape(rodapeModoRef.current);
+        aplicarRodape(next);
+        controller.replaceNote('rodapé', [
+          `rodapé: ${next}` + (next === 'oculto' ? ' — F2 ou /rodape voltam.' : ' (F2 alterna).'),
+        ]);
+        return;
+      }
       // F197 — `/suggest [on|off]`: alterna a SUGESTÃO DE PRÓXIMO PROMPT. Sem arg = toggle;
       // `on`/`off` forçam. UI pura (não toca turno/contexto): persiste a pref (best-effort)
       // e empurra uma nota honesta. Ao DESLIGAR, some com o ghost pendente na hora.
@@ -2135,6 +2224,7 @@ export function App(props: AppProps): React.ReactElement {
       props.onCommand?.(command, args);
     },
     [
+      aplicarRodape,
       props,
       modelPicker,
       permPanel,
@@ -4877,6 +4967,7 @@ export function App(props: AppProps): React.ReactElement {
           selected={qSelected}
           editing={qEditing}
           draft={qDraft}
+          columns={columns}
         />
       );
     }
@@ -5121,6 +5212,14 @@ export function App(props: AppProps): React.ReactElement {
   // extra acima); sem ela (tool-line, pensando) mantém o respiro de sempre.
   const previaDeFalaViva =
     state.phase === 'streaming' && live.some((b) => b.kind === 'aluy' && b.streaming);
+  const telaBaixa =
+    stdout?.rows !== undefined && stdout.rows > 0 && stdout.rows <= RODAPE_LINHAS_CURTAS;
+  // F17 — nada vivo na coluna do chat (repouso): usado p/ enxugar o respiro em tela baixa.
+  const regiaoVivaVazia =
+    (state.phase === 'idle' || state.phase === 'done') &&
+    live.length === 0 &&
+    !haFilhoVivo &&
+    state.quotaPause === undefined;
   const liveChatColumn = (
     <>
       {/* F-SEM-SAUDACAO (decisão do dono: "eu não pedi essas msgs") — a tela de sessão
@@ -5220,6 +5319,7 @@ export function App(props: AppProps): React.ReactElement {
             selected={qSelected}
             editing={qEditing}
             draft={qDraft}
+            columns={columns}
           />
         </Box>
       )}
@@ -5400,7 +5500,15 @@ export function App(props: AppProps): React.ReactElement {
       )}
 
       {splitLayout === 'single' ? (
-        <Box flexDirection="column" paddingY={1}>
+        // F17 — em terminal BAIXO (≤ 30 linhas) o respiro é enxuto: sem o `paddingTop` (o bloco
+        // de cima já paga a linha em branco) e, em repouso (nada vivo), sem o `paddingBottom`.
+        // Eram 3 linhas em branco entre o fim da resposta e o composer; ficam 1. O orçamento
+        // (`LIVE_CHROME_BASE_ROWS`) segue contando o respiro cheio ⇒ só sobra folga.
+        <Box
+          flexDirection="column"
+          paddingTop={telaBaixa ? 0 : 1}
+          paddingBottom={telaBaixa && regiaoVivaVazia ? 0 : 1}
+        >
           {liveChatColumn}
         </Box>
       ) : splitLayout === 'side' ? (
@@ -5692,7 +5800,8 @@ export function App(props: AppProps): React.ReactElement {
           também DUPLICAVA o número numa linha órfã logo acima do rodapé — foi o que ele
           viu na tela. No BROKER nada muda: lá o footer carrega janela + reset, que a
           linha primária não comporta. */}
-      {state.meta.backend !== 'local' &&
+      {rodapeModo === 'completo' &&
+        state.meta.backend !== 'local' &&
         (state.phase === 'done' ||
           state.phase === 'budget' ||
           state.phase === 'idle' ||
@@ -5721,86 +5830,124 @@ export function App(props: AppProps): React.ReactElement {
           ele sumia e o composer descia 1 linha; ao terminar, voltava e o composer subia. Agora
           basta ter havido turno (a regra do F-COMPOSER-BARRA acima continua: sessão sem turno
           não ganha a linha morta). */}
-      {columns >= 60 && rows >= RESPIRO_MIN_ROWS && state.turnAccounting !== undefined && (
-        <Box height={1} />
-      )}
+      {rodapeModo === 'completo' &&
+        columns >= 60 &&
+        rows >= RESPIRO_MIN_ROWS &&
+        state.turnAccounting !== undefined && <Box height={1} />}
 
       {/* F-RECUO (pedido do dono: "a mesma afastadinha que você deu na lateral do
           composer para todas as outras linhas") — o bloco do composer tem a barra `┃` +
           1 coluna, então o texto dele começa na coluna 2. O rodapé começava na 0 e ficava
           desalinhado com o campo logo acima. `paddingLeft={2}` alinha os dois. */}
-      <Box paddingLeft={2} flexDirection="column">
-        {/* FOOTER-AGENTES — os sub-agentes VIVOS ganham uma coluna À ESQUERDA do painel,
+      {rodapeModo === 'parcial' && (
+        <Box paddingLeft={2}>
+          <RodapeParcial
+            model={displayModel ?? tierDisplay}
+            cwd={state.meta.cwd}
+            home={homedir()}
+            windowPct={state.meta.windowPct}
+            tokens={state.meta.tokens}
+            unsafe={state.mode === 'unsafe'}
+            sidecarCaido={
+              state.sidecarUsage !== undefined &&
+              (buildSidecarChip(state.sidecarUsage) ?? []).some((e) => e.state === 'down')
+            }
+            cotaPausada={state.quotaPause !== undefined}
+            dicas={
+              state.phase === 'asking' || state.phase === 'questioning'
+                ? undefined
+                : state.phase === 'thinking' ||
+                    state.phase === 'streaming' ||
+                    state.phase === 'retrying'
+                  ? 'esc interrompe · F2 rodapé'
+                  : '/ comandos · F2 rodapé'
+            }
+            columns={Math.max(20, columns - 2)}
+          />
+        </Box>
+      )}
+      {/* RODAPÉ oculto — nada além do necessário: o `⚠ yolo` NUNCA some (catraca desligada) e,
+          na 1ª vez, uma dica mínima de como voltar. */}
+      {rodapeModo === 'oculto' && (state.mode === 'unsafe' || dicaOculto) && (
+        <Box paddingLeft={2}>
+          {state.mode === 'unsafe' && <Role name="danger">⚠ yolo</Role>}
+          {state.mode === 'unsafe' && dicaOculto && <Role name="fgDim">{' · '}</Role>}
+          {dicaOculto && <Role name="fgDim">rodapé oculto — F2 ou /rodape voltam</Role>}
+        </Box>
+      )}
+      {rodapeModo === 'completo' && (
+        <Box paddingLeft={2} flexDirection="column">
+          {/* FOOTER-AGENTES — os sub-agentes VIVOS ganham uma coluna À ESQUERDA do painel,
             separados por uma barra vertical (pedido do dono). Sem agentes vivos o
             <FooterAgents> é passagem direta: a tela de quem não dispara agente não muda. */}
-        <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
-          {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
+          <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
+            {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
             pulso âmbar, que saiu. Continuar passando faria o painel re-renderizar a cada
             quadro sem desenhar nada diferente, e deixaria dois campos aceitos-e-ignorados
             na interface — a armadilha que já custou o `maxWidths` hoje. */}
-          <StatusPanel
-            mode={state.mode}
-            {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
-            {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
-            cwd={state.meta.cwd}
-            tier={tierDisplay}
-            isDefaultTier={isDefaultTier}
-            {...(displayModel !== undefined
-              ? // HG-2/CLI-SEC-7: o `model` da via Custom (slug que o USUÁRIO escolheu) SEMPRE
-                // exibe. O `activeModel` (=usage.model resolvido do tier) só entra com o OPT-IN
-                // `ALUY_SHOW_MODEL` (default OFF — o binário público NÃO revela o mapa tier→
-                // provider; gate AG-0008). `displayModel` já aplicou essa regra acima. A redação
-                // server-side do trailer (broker) segue como o caminho p/ expor por default.
-                { model: displayModel }
-              : {})}
-            tokens={state.meta.tokens}
-            {...(state.meta.budgetPct !== undefined ? { budgetPct: state.meta.budgetPct } : {})}
-            windowPct={state.meta.windowPct}
-            {...(dominantQuota !== undefined
-              ? { quotaPct: dominantQuota.pct, quotaLevel: dominantQuota.level }
-              : {})}
-            // F-SALDO-BYO — saldo do provider BYO na linha PRIMÁRIA, colado no par
-            // provider·modelo (pedido do dono: "deveria ficar após o provedor"). Antes caía
-            // no <QuotaFooter>, numa linha própria e órfã acima do rodapé.
-            {...(state.meta.quota?.credit?.balance !== undefined
-              ? { credit: state.meta.quota.credit.balance }
-              : {})}
-            // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
-            // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
-            // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
-            columns={Math.max(20, columns - 2)}
-            error={state.phase === 'error'}
-            {...(state.governance !== undefined ? { governance: state.governance } : {})}
-            {...(!cycleUiOff && state.cycleProgress !== undefined
-              ? { cycleProgress: state.cycleProgress }
-              : {})}
-            {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
-            {...(state.sidecarUsage !== undefined
-              ? // F-SIDECAR-USO — USO REAL dos sidecars (headroom/ollama/mem0). O wiring arma
-                // o medidor e o controller espelha as contagens aqui; o chip só aparece no
-                // perfil TURBO (em leve o `buildSidecarChip` devolve `undefined` e a barra
-                // nem ganha o campo). Responde "estão sendo USADOS?", não "estão de pé?".
-                { sidecarUsage: state.sidecarUsage }
-              : {})}
-          />
-        </FooterAgents>
-        {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
+            <StatusPanel
+              mode={state.mode}
+              {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
+              {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
+              cwd={state.meta.cwd}
+              tier={tierDisplay}
+              isDefaultTier={isDefaultTier}
+              {...(displayModel !== undefined
+                ? // HG-2/CLI-SEC-7: o `model` da via Custom (slug que o USUÁRIO escolheu) SEMPRE
+                  // exibe. O `activeModel` (=usage.model resolvido do tier) só entra com o OPT-IN
+                  // `ALUY_SHOW_MODEL` (default OFF — o binário público NÃO revela o mapa tier→
+                  // provider; gate AG-0008). `displayModel` já aplicou essa regra acima. A redação
+                  // server-side do trailer (broker) segue como o caminho p/ expor por default.
+                  { model: displayModel }
+                : {})}
+              tokens={state.meta.tokens}
+              {...(state.meta.budgetPct !== undefined ? { budgetPct: state.meta.budgetPct } : {})}
+              windowPct={state.meta.windowPct}
+              {...(dominantQuota !== undefined
+                ? { quotaPct: dominantQuota.pct, quotaLevel: dominantQuota.level }
+                : {})}
+              // F-SALDO-BYO — saldo do provider BYO na linha PRIMÁRIA, colado no par
+              // provider·modelo (pedido do dono: "deveria ficar após o provedor"). Antes caía
+              // no <QuotaFooter>, numa linha própria e órfã acima do rodapé.
+              {...(state.meta.quota?.credit?.balance !== undefined
+                ? { credit: state.meta.quota.credit.balance }
+                : {})}
+              // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
+              // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
+              // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
+              columns={Math.max(20, columns - 2)}
+              error={state.phase === 'error'}
+              {...(state.governance !== undefined ? { governance: state.governance } : {})}
+              {...(!cycleUiOff && state.cycleProgress !== undefined
+                ? { cycleProgress: state.cycleProgress }
+                : {})}
+              {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
+              {...(state.sidecarUsage !== undefined
+                ? // F-SIDECAR-USO — USO REAL dos sidecars (headroom/ollama/mem0). O wiring arma
+                  // o medidor e o controller espelha as contagens aqui; o chip só aparece no
+                  // perfil TURBO (em leve o `buildSidecarChip` devolve `undefined` e a barra
+                  // nem ganha o campo). Responde "estão sendo USADOS?", não "estão de pé?".
+                  { sidecarUsage: state.sidecarUsage }
+                : {})}
+            />
+          </FooterAgents>
+          {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
           descansa). Sempre visível (glifo+palavra, a11y): plan=read-only (petrol),
           normal=catraca (neutro), unsafe=BANNER gritante e persistente (CLI-SEC-3 —
           o aviso loud NÃO regride; o usuário PRECISA ver que a catraca está
           desligada). Reativo: o Tab cicla `normal→plan→unsafe` (invertido) — fica VIVO (fora do
           Static, na região viva do rodapé, já dentro do LIVE_CHROME_ROWS), só mudou
           de lugar (topo→rodapé), sem flicker. */}
-        {/* A linha amarela de sub-agentes SAIU daqui: virou sufixo do indicador único de
+          {/* A linha amarela de sub-agentes SAIU daqui: virou sufixo do indicador único de
             trabalho (ver o <Working> acima). Manter as duas desenhava a mesma informação
             duas vezes, em dois lugares, com gatilhos diferentes — e era a segunda que
             fazia a altura da região viva oscilar. */}
-        {/* F-PAINEL — o <ModeIndicator> foi ABSORVIDO: modo e catraca são a linha `estado`
+          {/* F-PAINEL — o <ModeIndicator> foi ABSORVIDO: modo e catraca são a linha `estado`
           do painel. Manter os dois desenharia a mesma informação duas vezes, uma dentro da
           caixa e outra fora. O banner do modo `unsafe` continua existindo — o próprio
           <StatusPanel> o emite, porque um aviso de modo perigoso não pode virar linha de
           tabela cinza. */}
-        {/* fix(footer-bleed) — durante uma APROVAÇÃO ATIVA (`asking`) o <AskDialog> JÁ
+          {/* fix(footer-bleed) — durante uma APROVAÇÃO ATIVA (`asking`) o <AskDialog> JÁ
           renderiza seu PRÓPRIO footer de atalhos (`a aprova · s sempre · …`), em
           contexto, colado ao diálogo (AskDialog.footerOf, mesmas strings de
           `hints.ask`/`hints.askDestructive`). Repetir o footer AQUI no rodapé —
@@ -5811,21 +5958,22 @@ export function App(props: AppProps): React.ReactElement {
           o rodapé NÃO deve duplicar a dica de ask. Suprimimos os estados de ask aqui; o
           AskDialog é a única fonte da dica durante a catraca. Ao resolver, `hintState`
           volta a `idle`/etc. e o rodapé reaparece — transição limpa ask→composer. */}
-        {showHints && hintState && hintState !== 'ask' && hintState !== 'ask-destructive' && (
-          <FooterHints
-            state={hintState}
-            {...(elapsed !== undefined ? { elapsed } : {})}
-            {...(ctrlCArmed ? { armedExit: true } : {})}
-            {...(showSuggestion ? { suggesting: true } : {})}
-          />
-        )}
-        {/* COMPOSER PARADO (16/09) — a linha das dicas sai durante o ask, mas o LUGAR dela
+          {showHints && hintState && hintState !== 'ask' && hintState !== 'ask-destructive' && (
+            <FooterHints
+              state={hintState}
+              {...(elapsed !== undefined ? { elapsed } : {})}
+              {...(ctrlCArmed ? { armedExit: true } : {})}
+              {...(showSuggestion ? { suggesting: true } : {})}
+            />
+          )}
+          {/* COMPOSER PARADO (16/09) — a linha das dicas sai durante o ask, mas o LUGAR dela
             fica: sem isto a pilha abaixo do composer perdia 1 linha e ele descia a cada
             aprovação (medido no tmux: 47 → 48 → 47). */}
-        {showHints && (hintState === 'ask' || hintState === 'ask-destructive') && (
-          <Box height={1} />
-        )}
-      </Box>
+          {showHints && (hintState === 'ask' || hintState === 'ask-destructive') && (
+            <Box height={1} />
+          )}
+        </Box>
+      )}
     </Box>
   );
 }

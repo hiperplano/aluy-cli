@@ -755,6 +755,20 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           ],
         },
       };
+    case 'rodape':
+      // RODAPÉ — a App intercepta no `runCommand` (UI pura). Cair aqui só sem TUI.
+      return {
+        kind: 'note',
+        note: {
+          title: 'rodapé',
+          lines: [
+            '/rodape completo|parcial|oculto — o que aparece abaixo do composer.',
+            'completo: painel inteiro + dicas · parcial: 1 linha com o essencial e os avisos ·',
+            'oculto: nada (o `⚠ yolo` fica ao lado do prompt). F2 alterna; a pref PERSISTE (rodape).',
+            'terminal baixo (≤ 30 linhas) usa parcial sozinho, a menos que você escolha. ALUY_RODAPE força.',
+          ],
+        },
+      };
     case 'fullscreen':
       // EST-1000 · ADR-0076 — o `/fullscreen` (alias `/cockpit`) é UI PURA: a App o
       // intercepta no `runCommand` e alterna o MODO COCKPIT AO VIVO, SEM chegar aqui.

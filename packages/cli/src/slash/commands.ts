@@ -57,6 +57,7 @@ export type NativeCommandId =
   | 'split'
   | 'fullscreen'
   | 'suggest'
+  | 'rodape'
   | 'export'
   | 'tools'
   | 'quit'
@@ -695,6 +696,18 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     id: 'suggest',
     section: 'sessão',
     // ADR-0147 — ghost-text é DICA VISUAL pro humano digitar: sem sentido p/ o agente.
+    agentEffect: 'human-only',
+  },
+  {
+    // RODAPÉ — 3 modos p/ tudo abaixo do composer: completo | parcial | oculto. Sem arg alterna
+    // (o mesmo ciclo do F2); persiste a pref (ui.rodape). Alias `/statusline`.
+    name: 'rodape',
+    summary: 'rodapé: completo | parcial | oculto (F2 alterna · /statusline)',
+    usage: '[completo|parcial|oculto]',
+    source: 'native',
+    id: 'rodape',
+    section: 'sessão',
+    // ADR-0147 — layout do terminal do humano: sem sentido p/ o agente.
     agentEffect: 'human-only',
   },
   {
@@ -1403,7 +1416,14 @@ export function routeInput(line: string, userCommands: readonly SlashCommand[] =
   const rawName = (spaceIdx === -1 ? withoutSlash : withoutSlash.slice(0, spaceIdx)).toLowerCase();
   // EST-0990 — `/view` é ALIAS de `/split` (mesmo toggle do modo view avançado).
   // EST-1000 · ADR-0076 — `/cockpit` é ALIAS de `/fullscreen` (mesmo toggle do cockpit).
-  const name = rawName === 'view' ? 'split' : rawName === 'cockpit' ? 'fullscreen' : rawName;
+  const name =
+    rawName === 'view'
+      ? 'split'
+      : rawName === 'cockpit'
+        ? 'fullscreen'
+        : rawName === 'statusline'
+          ? 'rodape'
+          : rawName;
   const args = spaceIdx === -1 ? '' : withoutSlash.slice(spaceIdx + 1).trim();
   const all = [...NATIVE_COMMANDS, ...userCommands];
   const command = all.find((c) => c.name === name);

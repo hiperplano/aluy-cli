@@ -199,6 +199,7 @@ import {
   resolveInitialSplitView,
   resolveInitialFullscreen,
   resolveInitialSuggestions,
+  resolveInitialRodape,
   configuredLang,
   type UserConfig,
   type UserProviderEntry,
@@ -779,6 +780,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // (env, 0/1) > `config.suggestions` (pref do `/suggest`) > default ON. É uma OPÇÃO
   // default-LIGADA (decisão do dono); o toggle em sessão grava de volta p/ a próxima.
   const initialSuggestions = resolveInitialSuggestions(savedConfig, env);
+  // RODAPÉ — `ALUY_RODAPE` > `config.rodape` > automático (parcial em terminal ≤ 30 linhas).
+  const initialRodape = resolveInitialRodape(savedConfig, env);
 
   // EST-0972 — PERSISTÊNCIA de SESSÃO (`--continue`/`--resume`). Resolve a retomada
   // ANTES de fiar a sessão (precisa do id p/ reusar o MESMO arquivo de sessão E o
@@ -4989,6 +4992,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         }}
         // F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab). Estado inicial + persistência.
         initialSuggestions={initialSuggestions}
+        {...(initialRodape !== undefined ? { initialRodape } : {})}
+        onRodapeChange={(modo) => {
+          // RODAPÉ — persiste a escolha de `/rodape`/F2 (best-effort). Só UI — nunca segredo.
+          configStore.saveRodape(modo);
+        }}
         onSuggestionsChange={(on) => {
           // F197 — persiste a pref do `/suggest` p/ a próxima sessão (best-effort). Só UI
           // (booleano) — jamais segredo (CLI-SEC-7).
