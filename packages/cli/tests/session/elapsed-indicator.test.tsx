@@ -120,10 +120,12 @@ describe('App — INDICADOR DE ATIVIDADE / elapsed (EST-0965)', () => {
     // como o tick de 1s faria na TUI real). O elapsed lido é o VIVO: 12s ⇒ 0:12.
     clk.advance(12_000);
     controller.sink.onDelta(' mais');
-    await waitFor(() => plain(r.lastFrame()).includes('0:12'));
+    await waitFor(() => plain(r.lastFrame()).includes('12s'));
     const f = plain(r.lastFrame());
     expect(f).toContain('esc interromper'); // a dica base segue
-    expect(f).toContain('· 0:12'); // + o relógio anexado
+    // F19: UM relógio só — os segundos moram na linha de trabalho; o rodapé fica só nas dicas.
+    expect(f).toMatch(/\([^)]*12s\)/);
+    expect(f).not.toContain('· 0:12');
 
     gate.resolve();
     r.unmount();
@@ -138,12 +140,12 @@ describe('App — INDICADOR DE ATIVIDADE / elapsed (EST-0965)', () => {
 
     clk.advance(3_000);
     controller.sink.onDelta(' a');
-    await waitFor(() => plain(r.lastFrame()).includes('0:03'));
+    await waitFor(() => plain(r.lastFrame()).includes('3s)'));
 
     clk.advance(4_000); // total 7s
     controller.sink.onDelta(' b');
-    await waitFor(() => plain(r.lastFrame()).includes('0:07'));
-    expect(plain(r.lastFrame())).toContain('0:07');
+    await waitFor(() => plain(r.lastFrame()).includes('7s)'));
+    expect(plain(r.lastFrame())).toContain('7s)');
 
     gate.resolve();
     r.unmount();
@@ -155,7 +157,7 @@ describe('App — INDICADOR DE ATIVIDADE / elapsed (EST-0965)', () => {
     await waitFor(() => controller.current.phase === 'streaming');
     clk.advance(5_000);
     controller.sink.onDelta(' x');
-    await waitFor(() => plain(r.lastFrame()).includes('0:05'));
+    await waitFor(() => plain(r.lastFrame()).includes('5s)'));
 
     gate.resolve();
     await waitFor(() => controller.current.phase === 'done');

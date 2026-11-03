@@ -91,10 +91,10 @@ const HELP_LINES: readonly string[] = [
   '  /memory                  lista os fatos (global + projeto)',
   '  /memory forget <id>      remove um fato',
   '  /memory edit <id> …      corrige o texto de um fato',
-  '  /memory pin <id>         fixa (retenção — NÃO vira instrução)',
+  '  /memory pin <id>         fixa o fato (ele fica guardado)',
   '  /memory unpin <id>       desfixa',
   '',
-  'a memória é relembrada como DADO (nunca instrução); fixar é só retenção.',
+  'o agente usa a memória como contexto, nunca como ordem; fixar só mantém o fato guardado.',
 ];
 
 /**
@@ -165,7 +165,7 @@ export async function runMemoryCommand(
       ? [
           `fato ${cmd.id} ${cmd.pinned ? 'fixado' : 'desfixado'}.`,
           ...(cmd.pinned
-            ? ['(fixar é retenção — o fato continua DADO no recall, nunca vira instrução)']
+            ? ['(fixar só mantém o fato guardado — ele continua sendo contexto, não uma ordem)']
             : []),
         ]
       : [`id não encontrado: ${cmd.id}.`],

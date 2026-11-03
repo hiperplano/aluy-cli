@@ -365,7 +365,12 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
         kind: 'note',
         note: {
           title: 'comandos',
-          lines: NATIVE_COMMANDS.map((c) => `/${c.name.padEnd(12)} ${c.summary}`),
+          lines: [
+            ...NATIVE_COMMANDS.map((c) => `/${c.name.padEnd(12)} ${c.summary}`),
+            '',
+            'atalhos: esc interrompe o pai · F8 para tudo · ctrl-t ver/parar sub-agentes ·',
+            '         ctrl-b solta o comando/agente em segundo plano · ctrl-c×2 sai',
+          ],
         },
       };
     case 'model':
@@ -565,8 +570,8 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           title: 'memory',
           lines: [
             'vejo/edito/esqueço/fixo os fatos que o agente lembra entre sessões',
-            '(global + projeto), pela mecânica interna — nunca por `cat` (read-deny).',
-            'a memória é relembrada como DADO, nunca instrução.',
+            '(global + projeto), por este comando — o agente não lê esses arquivos direto.',
+            'o agente usa a memória como contexto, nunca como ordem.',
             'uso: /memory [forget|edit|pin|unpin <id>]',
           ],
         },
@@ -685,7 +690,7 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           lines: [
             'resumo a conversa até aqui num sumário denso (decisões, estado, arquivos',
             'tocados) e continuo a sessão com o contexto reduzido — libera a janela.',
-            'o resumo é gerado pelo modelo via broker; nada sai do dado para instrução.',
+            'o resumo é gerado pelo modelo.',
           ],
         },
       };
@@ -767,6 +772,20 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
             'vazio, aparece um ghost (dim) do que pedir a seguir; Tab o aceita no composer.',
             'a geração é heurística LOCAL (sem modelo/tokens — não gasta seu provider).',
             'default LIGADO. `/suggest on|off` força; a preferência PERSISTE (ui.suggestions).',
+          ],
+        },
+      };
+    case 'rodape':
+      // RODAPÉ — a App intercepta no `runCommand` (UI pura). Cair aqui só sem TUI.
+      return {
+        kind: 'note',
+        note: {
+          title: 'rodapé',
+          lines: [
+            '/rodape completo|parcial|oculto — o que aparece abaixo do composer.',
+            'completo: painel inteiro + dicas · parcial: 1 linha com o essencial e os avisos ·',
+            'oculto: nada (o `⚠ yolo` fica ao lado do prompt). F2 alterna; a pref PERSISTE (rodape).',
+            'terminal baixo (≤ 30 linhas) usa parcial sozinho, a menos que você escolha. ALUY_RODAPE força.',
           ],
         },
       };

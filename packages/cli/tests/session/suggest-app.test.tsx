@@ -103,7 +103,9 @@ async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
   }
 }
 
-function mountApp(opts: { suggestions?: boolean; sideQueryModel?: ModelCaller } = {}) {
+function mountApp(
+  opts: { suggestions?: boolean; sideQueryModel?: ModelCaller; janelaMs?: number } = {},
+) {
   const controller = buildController('pronto.', opts.sideQueryModel);
   const theme = resolveTheme({ env: ENV });
   const r = render(
@@ -112,6 +114,7 @@ function mountApp(opts: { suggestions?: boolean; sideQueryModel?: ModelCaller } 
         controller={controller}
         animate={false}
         bootMs={0}
+        suggestModelWindowMs={opts.janelaMs ?? 300}
         {...(opts.suggestions !== undefined ? { initialSuggestions: opts.suggestions } : {})}
       />
     </ThemeProvider>,
@@ -227,6 +230,30 @@ describe('F197 · App — sugestão de próximo prompt (ghost + Tab)', () => {
       expect(tela).toContain(doModelo);
       // e a enlatada saiu de cena
       expect(tela).not.toContain(SUGGESTION);
+    } finally {
+      unmount();
+    }
+  });
+
+  it('F21: modelo que chega DEPOIS da janela NÃO troca o ghost já mostrado (estável no turno)', async () => {
+    const sideQueryModel: ModelCaller = {
+      call: async () => {
+        await new Promise((r) => setTimeout(r, 700));
+        return {
+          request_id: 'r',
+          content: 'sugestão tardia',
+          finish_reason: 'stop',
+        } as ModelCallResult;
+      },
+    };
+    const { controller, lastFrame, unmount } = mountApp({ sideQueryModel, janelaMs: 100 });
+    try {
+      await waitFor(() => plain(lastFrame()).includes(PLACEHOLDER));
+      await runTurn(controller);
+      await waitFor(() => plain(lastFrame()).includes(SUGGESTION));
+      await new Promise((r) => setTimeout(r, 1200)); // a do modelo chega nesse intervalo
+      expect(plain(lastFrame())).toContain(SUGGESTION);
+      expect(plain(lastFrame())).not.toContain('sugestão tardia');
     } finally {
       unmount();
     }

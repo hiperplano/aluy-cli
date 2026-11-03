@@ -7,40 +7,40 @@ Referência dos subcomandos, das flags de sessão e dos 46 slash-commands.
 
 Todos read-only, salvo onde dito.
 
-| Comando | O que faz |
-| --- | --- |
-| `aluy onboard` | instalador guiado: idioma, provider (com teste de conectividade real), modelo e os complementos opcionais |
-| `aluy bootstrap [--no-agent]` | provisiona os complementos do modo turbo. `--no-agent` pula a rota pelo agente |
-| `aluy uninstall [--agent]` | remove os complementos. `--agent` tira também o ollama de sistema |
-| `aluy doctor [--deep]` | health-check que **testa de verdade**: autentica a credencial, conecta nos servers MCP (handshake + conta tools), valida perfis e config. Sai com código ≠ 0 se houver ✗, útil em CI. `--deep` adiciona uma chamada mínima ao modelo (opt-in, porque gasta) |
-| `aluy config [--json]` | configuração efetiva: cada chave, o valor e a **origem** (default / env / `config.json`), na precedência real |
-| `aluy login` · `logout` · `whoami` | credencial (guardada cifrada, nunca em claro) |
-| `aluy models` · `providers` | o que está disponível para usar, com `--json` para script |
-| `aluy agents` · `skills` · `workflows` | o que o aluy mapeou em `~/.aluy/` e no projeto, com os **rejeitados** e o motivo |
-| `aluy cron` | tarefas agendadas pelo cron do SO |
-| `aluy mcp …` | gerencia servers MCP sem editar JSON à mão — ver [MCP](mcp.md) |
-| `aluy service …` | serviços contínuos — ver abaixo |
-| `aluy telegram …` | ponte do Telegram — ver abaixo |
+| Comando                                | O que faz                                                                                                                                                                                                                                                   |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `aluy onboard`                         | instalador guiado: idioma, provider (com teste de conectividade real), modelo e os complementos opcionais                                                                                                                                                   |
+| `aluy bootstrap [--no-agent]`          | provisiona os complementos do modo turbo. `--no-agent` pula a rota pelo agente                                                                                                                                                                              |
+| `aluy uninstall [--agent]`             | remove os complementos. `--agent` tira também o ollama de sistema                                                                                                                                                                                           |
+| `aluy doctor [--deep]`                 | health-check que **testa de verdade**: autentica a credencial, conecta nos servers MCP (handshake + conta tools), valida perfis e config. Sai com código ≠ 0 se houver ✗, útil em CI. `--deep` adiciona uma chamada mínima ao modelo (opt-in, porque gasta) |
+| `aluy config [--json]`                 | configuração efetiva: cada chave, o valor e a **origem** (default / env / `config.json`), na precedência real                                                                                                                                               |
+| `aluy login` · `logout` · `whoami`     | credencial (guardada cifrada, nunca em claro)                                                                                                                                                                                                               |
+| `aluy models` · `providers`            | o que está disponível para usar, com `--json` para script                                                                                                                                                                                                   |
+| `aluy agents` · `skills` · `workflows` | o que o aluy mapeou em `~/.aluy/` e no projeto, com os **rejeitados** e o motivo                                                                                                                                                                            |
+| `aluy cron`                            | tarefas agendadas pelo cron do SO                                                                                                                                                                                                                           |
+| `aluy mcp …`                           | gerencia servers MCP sem editar JSON à mão — ver [MCP](mcp.md)                                                                                                                                                                                              |
+| `aluy service …`                       | serviços contínuos — ver abaixo                                                                                                                                                                                                                             |
+| `aluy telegram …`                      | ponte do Telegram — ver abaixo                                                                                                                                                                                                                              |
 
 ## Flags de sessão
 
 As principais. A lista completa, com todas as regras de precedência, está no `--help`.
 
-| Flag | O que faz |
-| --- | --- |
-| `-p, --print "prompt"` | modo headless (one-shot). Combina com `--output-format text\|json\|stream-json` e `--quiet` |
-| `--plan` | modo Plan: o agente **lê e analisa**, sem efeito nenhum |
-| `--yolo` | ⚠️ auto-aprova tudo. Permissão completa na máquina, por sua conta e risco |
-| `--model <slug>` · `--provider <nome>` · `--tier <tier>` | escolhe o modelo desta sessão |
-| `--backend local\|broker` | `local` é o **padrão**: fala direto com o seu provider |
-| `--image <path>` | anexa imagem ao objetivo (repetível). No composer, `@caminho.png` |
-| `--telegram` | sobe a ponte do Telegram junto com a sessão |
-| `--continue` · `--resume [<id\|nome>]` · `--new` | retomar ou começar do zero |
-| `--anonymous` | não grava transcrição nem memória. Incompatível com `--continue`/`--resume` |
-| `--max-tokens N` · `--max-iterations N` · `--budget`/`--no-budget` | tetos anti-runaway |
-| `--cycle` · `--cycles N` · `--cycle-for <dur>` | (com `-p`) roda o objetivo em ciclos autônomos |
-| `--lang pt-BR\|en` · `--theme` · `--dense` · `--split` · `--fullscreen` · `--ascii` | interface |
-| `--no-subagents` | desliga os sub-agentes paralelos (força mono-agente) |
+| Flag                                                                                | O que faz                                                                                   |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `-p, --print "prompt"`                                                              | modo headless (one-shot). Combina com `--output-format text\|json\|stream-json` e `--quiet` |
+| `--plan`                                                                            | modo Plan: o agente **lê e analisa**, sem efeito nenhum                                     |
+| `--yolo`                                                                            | ⚠️ auto-aprova tudo. Permissão completa na máquina, por sua conta e risco                   |
+| `--model <slug>` · `--provider <nome>` · `--tier <tier>`                            | escolhe o modelo desta sessão                                                               |
+| `--backend local\|broker`                                                           | `local` é o **padrão**: fala direto com o seu provider                                      |
+| `--image <path>`                                                                    | anexa imagem ao objetivo (repetível). No composer, `@caminho.png`                           |
+| `--telegram`                                                                        | sobe a ponte do Telegram junto com a sessão                                                 |
+| `--continue` · `--resume [<id\|nome>]` · `--new`                                    | retomar ou começar do zero                                                                  |
+| `--anonymous`                                                                       | não grava transcrição nem memória. Incompatível com `--continue`/`--resume`                 |
+| `--max-tokens N` · `--max-iterations N` · `--budget`/`--no-budget`                  | tetos anti-runaway                                                                          |
+| `--cycle` · `--cycles N` · `--cycle-for <dur>`                                      | (com `-p`) roda o objetivo em ciclos autônomos                                              |
+| `--lang pt-BR\|en` · `--theme` · `--dense` · `--split` · `--fullscreen` · `--ascii` | interface                                                                                   |
+| `--no-subagents`                                                                    | desliga os sub-agentes paralelos (força mono-agente)                                        |
 
 Precedência: **flag > env `ALUY_*` > `config.json` > default**.
 
@@ -50,57 +50,57 @@ Dentro da sessão, sem sair do fluxo.
 
 ### Modelo e sessão
 
-| | |
-| --- | --- |
-| `/model` | trocar o tier |
-| `/provider` | seta o provider do modelo Custom · `save` fixa como padrão |
-| `/effort` | seta o `reasoning_effort` (low/medium/high/custom) |
-| `/window` | informa a janela de contexto do modelo ativo (ex.: `/window 128k`) |
-| `/usage` | tokens e janela desta sessão |
-| `/compact` | compacta o contexto (resume a conversa e continua) |
-| `/clear` | limpa a sessão · `full` também apaga a memória do agente |
-| `/history` | navega e retoma uma sessão anterior, sem sair do aluy |
-| `/rename` | dá nome + cor à sessão |
-| `/export` | exporta o transcript **redigido** para `~/.aluy/exports/` (0600) |
-| `/ask` | pergunta paralela (read-only) sem parar o trabalho em curso |
+|             |                                                                    |
+| ----------- | ------------------------------------------------------------------ |
+| `/model`    | trocar o tier                                                      |
+| `/provider` | seta o provider do modelo Custom · `save` fixa como padrão         |
+| `/effort`   | seta o `reasoning_effort` (low/medium/high/custom)                 |
+| `/window`   | informa a janela de contexto do modelo ativo (ex.: `/window 128k`) |
+| `/usage`    | tokens e janela desta sessão                                       |
+| `/compact`  | compacta o contexto (resume a conversa e continua)                 |
+| `/clear`    | limpa a sessão · `full` também apaga a memória do agente           |
+| `/history`  | navega e retoma uma sessão anterior, sem sair do aluy              |
+| `/rename`   | dá nome + cor à sessão                                             |
+| `/export`   | exporta o transcript **redigido** para `~/.aluy/exports/` (0600)   |
+| `/ask`      | pergunta paralela (read-only) sem parar o trabalho em curso        |
 
 ### Permissão e workspace
 
-| | |
-| --- | --- |
-| `/permissions` | painel: modo, grants e tools seguras |
-| `/tools` | inventário unificado — nativas, MCP e o que a catraca diz de cada uma |
-| `/add-dir` | autoriza um diretório **extra** para o agente nesta sessão |
-| `/init` | cria o `ALUY.md` e a estrutura `.aluy/` do projeto |
-| `/inventory` | o que foi carregado da `.aluy/` (agentes · comandos · skills · workflows · memória) |
-| `/memory` | vê, edita, esquece e fixa a memória do agente |
-| `/todo` | backlog de tarefas anotadas |
-| `/undo` · `/redo` · `/rewind` | desfaz edições do agente; `/rewind` volta a um ponto da sessão (Esc Esc) |
+|                               |                                                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| `/permissions`                | painel: modo, grants e tools seguras                                                |
+| `/tools`                      | inventário unificado — nativas, MCP e o que a catraca diz de cada uma               |
+| `/add-dir`                    | autoriza um diretório **extra** para o agente nesta sessão                          |
+| `/init`                       | cria o `ALUY.md` e a estrutura `.aluy/` do projeto                                  |
+| `/inventory`                  | o que foi carregado da `.aluy/` (agentes · comandos · skills · workflows · memória) |
+| `/memory`                     | vê, edita, esquece e fixa a memória do agente                                       |
+| `/todo`                       | backlog de tarefas anotadas                                                         |
+| `/undo` · `/redo` · `/rewind` | desfaz edições do agente; `/rewind` volta a um ponto da sessão (Esc Esc)            |
 
 ### Frota e extensões
 
-| | |
-| --- | --- |
-| `/agents` | perfis `.md` de sub-agente mapeados (válidos **e** rejeitados, com o motivo) |
-| `/subagent` · `/back` | conversa 1:1 com um sub-agente numa sub-sessão focada, e volta |
-| `/rooms` | salas entre agentes — cria, lê e observa ao vivo a conversa da frota |
-| `/skills` | skills `SKILL.md` mapeadas |
-| `/workflows` | fluxos de atividades — lista, executa e ativa |
-| `/plugin` | plugins instalados (bundles em `~/.aluy/plugins`) |
-| `/mcp` | lista e gerencia servers MCP · `search <termo>` |
-| `/service` | serviços plugáveis — ver abaixo |
-| `/cycle` · `/cron` | ciclos autônomos com teto duro; agendamento persistente |
-| `/telegram` | status, allowlist e logout do conector |
+|                       |                                                                              |
+| --------------------- | ---------------------------------------------------------------------------- |
+| `/agents`             | perfis `.md` de sub-agente mapeados (válidos **e** rejeitados, com o motivo) |
+| `/subagent` · `/back` | conversa 1:1 com um sub-agente numa sub-sessão focada, e volta               |
+| `/rooms`              | salas entre agentes — cria, lê e observa ao vivo a conversa da frota         |
+| `/skills`             | skills `SKILL.md` mapeadas                                                   |
+| `/workflows`          | fluxos de atividades — lista, executa e ativa                                |
+| `/plugin`             | plugins instalados (bundles em `~/.aluy/plugins`)                            |
+| `/mcp`                | lista e gerencia servers MCP · `search <termo>`                              |
+| `/service`            | serviços plugáveis — ver abaixo                                              |
+| `/cycle` · `/cron`    | ciclos autônomos com teto duro; agendamento persistente                      |
+| `/telegram`           | status, allowlist e logout do conector                                       |
 
 ### Instalação e aparência
 
-| | |
-| --- | --- |
-| `/doctor` | diagnóstico da instalação |
-| `/upgrade` | atualiza para a versão mais nova do canal |
-| `/login` · `/logout` · `/whoami` | conta |
-| `/theme` · `/lang` · `/split` · `/fullscreen` · `/notify` · `/suggest` | interface |
-| `/help` · `/quit` | |
+|                                                                                    |                                           |
+| ---------------------------------------------------------------------------------- | ----------------------------------------- |
+| `/doctor`                                                                          | diagnóstico da instalação                 |
+| `/upgrade`                                                                         | atualiza para a versão mais nova do canal |
+| `/login` · `/logout` · `/whoami`                                                   | conta                                     |
+| `/theme` · `/lang` · `/split` · `/fullscreen` · `/notify` · `/suggest` · `/rodape` | interface                                 |
+| `/help` · `/quit`                                                                  |                                           |
 
 ## Ferramentas nativas
 

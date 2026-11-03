@@ -320,6 +320,6 @@ describe('orquestração — auto-retry e agents_status', () => {
     const visual = lista.find((x) => x.label === 'visual');
     expect(visual, 'o filho concluído sumiu do agents_status').toBeDefined();
     expect(visual!.phase).toBe('concluído');
-    expect(visual!.note).toContain('NÃO está morto');
+    expect(visual!.note).toContain('já foi entregue');
   });
 });

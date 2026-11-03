@@ -89,6 +89,44 @@ export function quotaPauseLines(view: QuotaPauseView, nowMs: number): string[] {
   return lines;
 }
 
+/**
+ * F9 — a linha ÚNICA e estática que SUBSTITUI a linha de trabalho durante a pausa (sem
+ * shimmer, sem relógio de turno): `pausado — cota esgotada · volta às 08:39 (em 4h 24min) ·
+ * ↵ tentar agora · ctrl+g parar salvando`. Saldo esgotado diz "recarregue". Cabe em
+ * `larguraMax`: perde primeiro as teclas, depois o horário. PURO.
+ */
+export function quotaPauseLinha(
+  view: QuotaPauseView,
+  nowMs: number,
+  larguraMax = Number.POSITIVE_INFINITY,
+): string {
+  const teclas = '↵ tentar agora · ctrl+g parar salvando';
+  let titulo: string;
+  let detalhe: string;
+  if (view.manual) {
+    titulo = 'pausado — saldo esgotado';
+    detalhe = view.probing
+      ? 'tentando retomar agora…'
+      : `recarregue no provedor (nova checagem em ${formatCountdown(view.nextProbeAtMs - nowMs)})`;
+  } else {
+    titulo = 'pausado — cota esgotada';
+    if (view.probing) detalhe = 'tentando retomar agora…';
+    else if (view.resetAtMs !== undefined && view.resetAtMs > nowMs)
+      detalhe = `volta às ${formatClock(view.resetAtMs, nowMs)} (em ${formatCountdown(view.resetAtMs - nowMs)})`;
+    else detalhe = `nova tentativa em ${formatCountdown(view.nextProbeAtMs - nowMs)}`;
+  }
+  for (const partes of [
+    [titulo, detalhe, teclas],
+    [titulo, detalhe, '↵ tentar agora'],
+    [titulo, detalhe],
+    [titulo],
+  ]) {
+    const t = partes.join(' · ');
+    if (t.length <= larguraMax) return t;
+  }
+  return titulo;
+}
+
 /** A linha das escolhas (afordância). */
 export const QUOTA_PAUSE_CHOICES =
   'esperar (automático) · ↵ tentar agora · ctrl+g parar salvando · esc cancela o turno';

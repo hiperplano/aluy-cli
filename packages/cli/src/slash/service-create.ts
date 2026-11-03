@@ -136,7 +136,7 @@ export function buildServiceCreateSystemPrompt(descricao: string): string {
     '   `.aluy/agents/*.md`: frontmatter `name`/`description`/`tools`/`model`',
     '   opcional + corpo = system prompt da persona). `tools:` (quando presente)',
     '   ACEITA DUAS formas EQUIVALENTES — use a que for mais natural, nunca deixe',
-    '   a chave presente mas vazia (isso é rejeitado, fail-closed):',
+    '   a chave presente mas vazia (isso é rejeitado por segurança):',
     '   ```',
     '   tools: read_file, grep          # 1) uma linha, separado por vírgula',
     '   ```',

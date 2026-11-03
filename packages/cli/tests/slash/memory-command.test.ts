@@ -130,7 +130,7 @@ describe('runMemoryCommand — Plan-deny nas mutações; lista em qualquer modo'
     );
     expect(store.facts.find((f) => f.id === 'abc1234')!.pinned).toBe(true);
     // GS-M6 — fixar é retenção, não promoção: a nota deixa explícito
-    expect(pinNote.lines.some((l) => l.includes('continua DADO'))).toBe(true);
+    expect(pinNote.lines.some((l) => l.includes('só mantém o fato guardado'))).toBe(true);
 
     await runMemoryCommand({ kind: 'forget', id: 'def5678' }, memory, false);
     expect(store.facts.some((f) => f.id === 'def5678')).toBe(false);

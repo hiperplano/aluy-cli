@@ -96,10 +96,10 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
 
   const tag = destructive ? 'destrutivo · ask' : 'ask';
 
-  // Teto de 72 para a caixa não virar uma faixa gigante em terminal largo (a decisão é
+  // Teto de 100 (F21: era 72 fixo — pequeno demais num terminal de 160) para a caixa não virar uma faixa gigante em terminal largo (a decisão é
   // curta; uma moldura de 200 colunas afasta o olho do que importa). `-4`: o recuo de 2 do
   // bloco mais os dois cantos.
-  const larguraCaixa = Math.max(24, Math.min(72, (props.columns ?? 80) - 4));
+  const larguraCaixa = Math.max(24, Math.min(100, (props.columns ?? 80) - 4));
   /** Traço que completa uma linha da moldura até fechar na largura única. */
   const preencher = (usado: number, glifo: string): string =>
     glifo.repeat(Math.max(1, larguraCaixa - usado));

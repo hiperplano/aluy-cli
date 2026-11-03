@@ -196,13 +196,13 @@ function aluySpeechRegion(s: { lastFrame: () => string | undefined }): string {
 }
 
 describe('App — UM CURSOR SÓ: composer ▏ suprimido durante o trabalho (EST-0965)', () => {
-  it('STREAMING + composer vazio ⇒ mostra o ● de trabalho e NÃO o ▏ do composer', async () => {
+  it('STREAMING + composer vazio ⇒ a linha de trabalho é o indicador (F3) e NÃO o ▏ do composer', async () => {
     const s = buildSession();
     void s.controller.submit('objetivo');
     await waitFor(() => s.controller.current.phase === 'streaming');
-    // o cursor de trabalho ● aparece NA REGIÃO DE FALA (pisca calmo: espera um frame aceso).
-    await waitFor(() => aluySpeechRegion(s).includes(WORK_CURSOR));
-    expect(aluySpeechRegion(s)).toContain(WORK_CURSOR);
+    // F3: o ● piscante saiu da caixa da fala; quem indica trabalho é a linha `Λ Verbo… (…)`.
+    await waitFor(() => /…\s*\(/.test(plain(s.lastFrame() ?? '')));
+    expect(aluySpeechRegion(s)).not.toContain(WORK_CURSOR);
     // … e a barra do composer está SUPRIMIDA — só UM cursor na tela.
     expect(composerLine(s)).not.toContain(COMPOSER_CURSOR);
     s.resolveGate(0);

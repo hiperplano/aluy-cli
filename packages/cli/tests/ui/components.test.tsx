@@ -580,8 +580,8 @@ describe('ToolLine — bloco de DIFF compacto no histórico (edit_file/write_fil
     );
     const out = plain(lastFrame() ?? '');
     expect(out).toContain('diff'); // rótulo do bloco compacto
-    expect(out).toContain('‹ import { httpClient } from "../net/http"');
-    expect(out).toContain('› import { broker } from "@hiperplano/aluy-cli-core"');
+    expect(out).toContain('- import { httpClient } from "../net/http"');
+    expect(out).toContain('+ import { broker } from "@hiperplano/aluy-cli-core"');
     expect(out).not.toContain('linhas ocultas'); // curto ⇒ sem janela/marcador
   });
 
@@ -691,8 +691,8 @@ describe('AskDialog — efeito EXATO + ações (CLI-SEC-9/3)', () => {
     // O CONTEÚDO do diff agora ganha syntax-highlight (papéis do DS), que fragmenta
     // a linha com ANSI; removemos a cor p/ afirmar o efeito EXATO contíguo.
     const p = plain(out);
-    expect(p).toContain('‹ import { httpClient } from "../net/http"');
-    expect(p).toContain('› import { broker } from "@hiperplano/aluy-cli-core"');
+    expect(p).toContain('- import { httpClient } from "../net/http"');
+    expect(p).toContain('+ import { broker } from "@hiperplano/aluy-cli-core"');
     expect(out).toContain('[a] aprovar');
     expect(out).toContain('[s] sempre nesta sessão'); // alwaysAsk=false ⇒ oferece
     expect(out).toContain('[n] negar');
@@ -994,7 +994,7 @@ describe('SlashMenu — lista filtrável (CA-3)', () => {
     const out = lastFrame() ?? '';
     expect(out).toContain('/help');
     expect(out).toContain('/model');
-    expect(out).toContain('›'); // prefixo do selecionado (a11y)
+    expect(out).toContain('+ '); // prefixo do selecionado (a11y)
   });
   it('comando do usuário aparece sob a régua "seus comandos" (§2.15)', () => {
     const { lastFrame } = wrap(

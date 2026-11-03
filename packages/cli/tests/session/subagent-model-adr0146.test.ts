@@ -414,6 +414,30 @@ describe('ADR-0152 (D5-bis) — backend local: filho herdado mostra o modelo CON
     expect(block?.children.find((c) => c.label === 'x')?.model).toBe('herdado (deepseek-v4-pro)');
   });
 
+  it('F12: backend "local" com meta.model (rodapé) ≠ activeModel (eco velho) ⇒ rótulo usa meta.model', async () => {
+    const model = parentDelegates({ agents: [{ label: 'x', goal: 'g' }] });
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: fakePorts(),
+      askResolver: askAutoApprove,
+      meta: {
+        cwd: '/proj',
+        tier: 'custom',
+        backend: 'local',
+        model: 'glm-5.2',
+        activeModel: 'glm-5.3',
+        tokens: 0,
+        windowPct: 0,
+      },
+      subAgents: { enabled: true },
+    });
+    await controller.submit('spawn herdado');
+    const block = subAgentsBlock(controller.current.blocks);
+    expect(block?.children.find((c) => c.label === 'x')?.model).toContain('glm-5.2');
+    expect(block?.children.find((c) => c.label === 'x')?.model).not.toContain('glm-5.3');
+  });
+
   it('backend "broker" (hospedado) + meta.activeModel ⇒ MANTÉM o tier — ignora activeModel', async () => {
     const model = parentDelegates({ agents: [{ label: 'x', goal: 'g' }] }); // SEM model ⇒ inherit
     const controller = new SessionController({

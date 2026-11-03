@@ -104,6 +104,12 @@ export interface UserConfig {
    * Precedência: `ALUY_NOTIFY` (env) > este campo > default. Só pref de UI (CLI-SEC-7).
    */
   readonly notify?: NotifyMode;
+   * RODAPÉ (tudo abaixo do composer) — `completo` (painel inteiro + dicas), `parcial` (1 linha
+   * com o essencial + avisos) ou `oculto` (nada além do funcionalmente necessário; o `⚠ yolo`
+   * nunca some). Ausente ⇒ automático: `completo`, ou `parcial` em terminal baixo (≤ 30 linhas).
+   * Precedência: `ALUY_RODAPE` (env) > este campo (`/rodape`, F2) > automático. Só UI.
+   */
+  readonly rodape?: RodapeModo;
   /**
    * F-AUTOUPDATE (pedido do dono: "quando tiver update no npm, instalar automaticamente")
    * — liga/desliga a atualização automática. Ausente ⇒ LIGADO (a decisão dele).
@@ -886,6 +892,7 @@ function sanitize(raw: unknown): UserConfig {
     fullscreen?: boolean;
     suggestions?: boolean;
     notify?: NotifyMode;
+    rodape?: RodapeModo;
     autoUpdate?: boolean;
     backend?: 'broker' | 'local';
     localProvider?: string;
@@ -947,6 +954,8 @@ function sanitize(raw: unknown): UserConfig {
     const m = parseNotifyMode(obj.notify);
     if (m !== undefined) out.notify = m;
   }
+  // RODAPÉ — só os 3 modos conhecidos sobrevivem; lixo some ⇒ automático.
+  if (isRodapeModo(obj.rodape)) out.rodape = obj.rodape;
   // F-AUTOUPDATE — booleano de comportamento, MESMA disciplina dos de UI acima: só
   // boolean genuíno entra (string "true" do disco não vira `true` por acidente).
   if (typeof obj.autoUpdate === 'boolean') out.autoUpdate = obj.autoUpdate;
@@ -1227,6 +1236,11 @@ export class UserConfigStore {
     return this.save({ suggestions });
   }
 
+  /** RODAPÉ — persiste o modo escolhido (`/rodape` / F2), preservando as demais prefs. */
+  saveRodape(rodape: RodapeModo): boolean {
+    return this.save({ rodape });
+  }
+
   /**
    * EST-1112 · ADR-0119 — Açúcar: persiste a preferência de budget local
    * (`/budget`/`--budget`), preservando as demais. `true` ⇒ a próxima sessão
@@ -1475,6 +1489,41 @@ export function resolveInitialSplitView(flag: boolean | undefined, config: UserC
 export function resolveInitialFullscreen(flag: boolean | undefined, config: UserConfig): boolean {
   if (flag === true) return true;
   return config.fullscreen ?? false;
+}
+
+/** Os 3 modos do rodapé (tudo abaixo do composer). */
+export type RodapeModo = 'completo' | 'parcial' | 'oculto';
+export const RODAPE_MODOS: readonly RodapeModo[] = ['completo', 'parcial', 'oculto'];
+export function isRodapeModo(v: unknown): v is RodapeModo {
+  return v === 'completo' || v === 'parcial' || v === 'oculto';
+}
+
+/** Terminal BAIXO: até esta altura o rodapé automático é `parcial`. */
+export const RODAPE_LINHAS_CURTAS = 30;
+
+/**
+ * Modo do rodapé NA PARTIDA. `escolhido` = o que o dono fixou (env `ALUY_RODAPE` > config);
+ * `undefined` ⇒ automático (`completo`, ou `parcial` em terminal ≤ 30 linhas — ver
+ * `rodapeEfetivo`). PURO.
+ */
+export function resolveInitialRodape(
+  config: UserConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): RodapeModo | undefined {
+  const raw = env['ALUY_RODAPE']?.trim().toLowerCase();
+  if (isRodapeModo(raw)) return raw;
+  return config.rodape;
+}
+
+/** O modo EFETIVO: escolha explícita vence; senão `parcial` em tela baixa, `completo` no resto. */
+export function rodapeEfetivo(escolhido: RodapeModo | undefined, rows: number): RodapeModo {
+  if (escolhido !== undefined) return escolhido;
+  return rows > 0 && rows <= RODAPE_LINHAS_CURTAS ? 'parcial' : 'completo';
+}
+
+/** Próximo modo do ciclo F2: completo → parcial → oculto → completo. */
+export function proximoRodape(atual: RodapeModo): RodapeModo {
+  return atual === 'completo' ? 'parcial' : atual === 'parcial' ? 'oculto' : 'completo';
 }
 
 /**

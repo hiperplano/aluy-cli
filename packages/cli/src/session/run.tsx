@@ -200,6 +200,7 @@ import {
   resolveInitialSplitView,
   resolveInitialFullscreen,
   resolveInitialSuggestions,
+  resolveInitialRodape,
   configuredLang,
   type UserConfig,
   type UserProviderEntry,
@@ -780,6 +781,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // (env, 0/1) > `config.suggestions` (pref do `/suggest`) > default ON. É uma OPÇÃO
   // default-LIGADA (decisão do dono); o toggle em sessão grava de volta p/ a próxima.
   const initialSuggestions = resolveInitialSuggestions(savedConfig, env);
+  // RODAPÉ — `ALUY_RODAPE` > `config.rodape` > automático (parcial em terminal ≤ 30 linhas).
+  const initialRodape = resolveInitialRodape(savedConfig, env);
 
   // EST-0972 — PERSISTÊNCIA de SESSÃO (`--continue`/`--resume`). Resolve a retomada
   // ANTES de fiar a sessão (precisa do id p/ reusar o MESMO arquivo de sessão E o
@@ -1850,7 +1853,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                 ok: false,
                 detail:
                   `provider "${entry.id}" NÃO respondeu ao teste: ${prova.detail}. ` +
-                  'nada mudou — o provider ativo continua o mesmo (fail-closed). ' +
+                  'nada mudou — o provider ativo continua o mesmo. ' +
                   (hasStoredApiKey(entry.id)
                     ? 'se a chave está velha, rode `aluy login --provider ' + entry.id + '`.'
                     : 'grave a chave com `aluy login --provider ' + entry.id + '`.'),
@@ -2358,7 +2361,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // dele mantém o envelope (blocksToHistory → observation, envelopada por
   // buildMessages como DADO_NAO_CONFIAVEL). NADA ingerido vira instrução (CLI-SEC-4).
   const resumedHistory: HistoryItem[] = resumedRecord ? blocksToHistory(resumedRecord.blocks) : [];
-  if (resumedRecord) built.controller.restoreBlocks(resumedRecord.blocks);
+  if (resumedRecord) {
+    built.controller.restoreBlocks(resumedRecord.blocks);
+    built.controller.restoreUsage(resumedRecord.usage, resumedRecord.blocks);
+  }
   // HUNT-RESUME-RACE — semeia o contexto do modelo AQUI, no MESMO ponto em que a tela
   // é restaurada, e não lá embaixo depois do `await memory.recall()`. O histórico já
   // está pronto (linha acima, síncrono); prendê-lo ao I/O da memória abria uma janela
@@ -2414,6 +2420,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       ...(built.controller.labelColor !== undefined
         ? { labelColor: built.controller.labelColor }
         : {}),
+      // F14 — uso da sessão (rodapé `◉ N% janela · M sessão`) volta certo na retomada.
+      usage: {
+        tokens: built.controller.current.meta.tokens,
+        windowPct: built.controller.current.meta.windowPct,
+      },
       blocks: built.controller.blocks,
     });
   };
@@ -2860,6 +2871,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // ANTES de semear a retomada (a conversa anterior não vaza na retomada).
           built.controller.resetResumeContext();
           built.controller.restoreBlocks(record.blocks);
+          built.controller.restoreUsage(record.usage, record.blocks);
           const seed = blocksToHistory(record.blocks);
           if (seed.length > 0) built.controller.seedHistory(seed);
           saveNow();
@@ -3338,7 +3350,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           if (!r.ok) {
             built.controller.pushNote('model', [
               `o modelo "${alvo}" não respondeu no provider ativo: ${r.detail}`,
-              'nada mudou (fail-closed) — o modelo anterior continua em uso.',
+              'nada mudou — o modelo anterior continua em uso.',
             ]);
             return;
           }
@@ -5004,6 +5016,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         }}
         // F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab). Estado inicial + persistência.
         initialSuggestions={initialSuggestions}
+        {...(initialRodape !== undefined ? { initialRodape } : {})}
+        onRodapeChange={(modo) => {
+          // RODAPÉ — persiste a escolha de `/rodape`/F2 (best-effort). Só UI — nunca segredo.
+          configStore.saveRodape(modo);
+        }}
         onSuggestionsChange={(on) => {
           // F197 — persiste a pref do `/suggest` p/ a próxima sessão (best-effort). Só UI
           // (booleano) — jamais segredo (CLI-SEC-7).
@@ -5082,7 +5099,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                   if (!r.ok) {
                     built.controller.pushNote('model', [
                       `modelo "${slug}" recusado: ${r.detail}`,
-                      'nada mudou — o modelo ativo continua o mesmo (fail-closed).',
+                      'nada mudou — o modelo ativo continua o mesmo.',
                     ]);
                     return;
                   }
@@ -5159,7 +5176,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                         ? 'gravado como padrão para as próximas sessões.'
                         : 'vale só nesta sessão — no próximo boot volta o provider anterior.',
                     ]
-                  : [`falha ao trocar p/ "${provider}": ${r.detail}`, 'nada mudou (fail-closed).'],
+                  : [`falha ao trocar p/ "${provider}": ${r.detail}`, 'nada mudou.'],
               );
               // F-PROV-RETRY — na falha devolve o MOTIVO junto, não só `false`: o App usa
               // o `detail` para REABRIR o campo de chave (chave velha/errada ⇒ "cole

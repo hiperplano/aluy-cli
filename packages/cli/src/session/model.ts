@@ -200,6 +200,8 @@ export interface SubAgentChild {
    * mostra. Visível enquanto `status==='running'` e mantido no resumo final.
    */
   readonly model?: string;
+  /** F13 — início (epoch ms) do filho em `running`: a linha mostra os SEGUNDOS ao vivo. */
+  readonly startedAt?: number;
 }
 
 /**

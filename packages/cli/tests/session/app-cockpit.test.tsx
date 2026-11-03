@@ -207,9 +207,7 @@ describe('App — cockpit: notas de boot RELOCADAS expandem o LOG (EST-1015)', (
       initialFullscreen: true,
       cockpitScreen: { enter: vi.fn(), leave: vi.fn() },
     });
-    controller.restoreBlocks([
-      { kind: 'note', title: 'config', lines: ['instruções: CLAUDE.md', '2 servers MCP'] },
-    ]);
+    controller.pushNote('config', ['instruções: CLAUDE.md', '2 servers MCP']);
     await flush();
     const frame = plain(lastFrame() ?? '');
     // as DUAS linhas da nota estão visíveis no frame do cockpit (nenhum `…` as comeu).

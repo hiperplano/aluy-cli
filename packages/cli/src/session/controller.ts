@@ -1141,6 +1141,11 @@ const ROTULOS_DE_PREPARO: ReadonlySet<string> = new Set([
   'conectando MCP',
 ]);
 
+/** O texto é só o eco do probe de auto-verificação (`AUTO-VERIFICAÇÃO (passada 2/2)…`)? */
+export function ehEcoDeAutoVerificacao(texto: string): boolean {
+  return /^\s*AUTO-VERIFICA[ÇC][ÃA]O\b/i.test(texto);
+}
+
 export class SessionController {
   private state: SessionState;
   private readonly observers = new Set<StateObserver>();
@@ -1639,11 +1644,12 @@ export class SessionController {
   // anterior, já visível). Limpo quando a verificação finaliza OU quando o modelo, em
   // vez de confirmar, ACHA UM GAP e volta a AGIR (uma tool dispara — trabalho real).
   private selfCheckInFlight = false;
+  // F22 — a caixa de permissão acabou de mostrar o diff do próximo edit (não repetir no bloco).
+  private diffJaMostradoNoAsk = false;
   // TOKENS GERADOS no turno (saída do PAI; os do filho só chegam somados com os de entrada, então
   // não entram). `saidaConfirmada` = soma dos `tokens_out` que o provider REPORTOU; `saidaChars` =
   // texto streamado da chamada em voo, ainda sem uso reportado (estimativa ~4 chars/token).
-  // VERBO POR PASSO (fonte única do `Costurando…` — ver `SessionState.workingVerb`).
-  private verboDoPasso: number | undefined;
+  // VERBO POR TURNO (fonte única do `Costurando…` — ver `SessionState.workingVerb`).
   private readonly listaDeVerbos = parseVerbos(resolveText('pt-BR', 'working.verbs'));
   private readonly rngDeVerbos = criarRng(seedPadrao());
   // TOKENS ENVIADOS (↑) na requisição do passo: estimativa (chars/4 das mensagens) até o
@@ -1686,7 +1692,17 @@ export class SessionController {
       config: quotaPauseConfigFromEnv(opts.subAgents?.env ?? process.env),
       store: () => this.pausaStore,
       sessionId: () => this.pausaSessionId,
-      onView: (v) => this.patch({ quotaPause: v }),
+      onView: (v) => {
+        // F9 — o rótulo funcional `pausado` tira o verbo genérico da linha de trabalho; ao fim da
+        // pausa volta o `pensando` (a fase do loop segue `thinking`: o turno continua vivo).
+        const atual = this.state.workingLabel;
+        if (v !== undefined) this.patch({ quotaPause: v, workingLabel: 'pausado' });
+        else
+          this.patch({
+            quotaPause: v,
+            ...(atual === 'pausado' ? { workingLabel: 'pensando' } : {}),
+          });
+      },
       note: (t, l) => this.pushNoteSafe(t, [...l]),
       now: () => this.clock(),
     });
@@ -3062,6 +3078,7 @@ export class SessionController {
       // compactação, montagem do prompt: passos que rodam ANTES do modelo) e só vira
       // `pensando` quando o loop sinaliza `model-call` (ver `onParentProgress`). Assim o
       // indicador reflete a fase real, sem fingir que o modelo já está pensando.
+      this.sortearVerboDoTurno();
       this.patch({ phase: 'thinking', workingLabel: 'preparando', workingSince: this.clock() });
       // EST-0982 · ADR-0063 — abre a ÁRVORE DE FLUXOS do turno: o pai é a raiz; o seu
       // AbortSignal É o do loop (PARAR-todos = abortar a raiz, que desce a subárvore).
@@ -4173,6 +4190,7 @@ export class SessionController {
     // se, houver um probe). Sem isto, um flag preso esconderia a resposta do turno novo.
     this.selfCheckInFlight = false;
     this.selfCheckPassDone = false;
+    this.diffJaMostradoNoAsk = false;
   }
 
   /**
@@ -4370,6 +4388,9 @@ export class SessionController {
         this.pushNote('turno interrompido', [
           `${agentesAindaTrabalhando(live)} — F8 para parar tudo.`,
         ]);
+      } else if (this.isBusyPhase()) {
+        // F11 — confirmação curta: o esc cortava em ≤ 0.15 s sem dizer nada.
+        this.pushNote('turno', ['↳ interrompido (esc)']);
       }
     }
     // F-TURNO-CORTADO — registra que ESTE turno terminou por interrupção; o cabeçalho do
@@ -4385,6 +4406,12 @@ export class SessionController {
     // Ctrl-C durante a espera cancela a re-tentativa). O abort da raiz já propaga p/ cá
     // (subscrição em `runBackoff`); abortar direto é defensivo/idempotente.
     this.retryAbort?.abort();
+  }
+
+  /** O turno está ocupado (pensando/escrevendo/re-tentando)? */
+  private isBusyPhase(): boolean {
+    const f = this.state.phase;
+    return f === 'thinking' || f === 'streaming' || f === 'retrying';
   }
 
   /**
@@ -5070,7 +5097,37 @@ export class SessionController {
     // qualquer bloco `running`/`streaming` corrente FORA do `<Static>` até resolver in-place
     // (sem a âncora coarse que congelava a linha "rodando" viva no scrollback). A demoção é
     // HONESTA (running→err/cancelled = "interrompido", nunca finge sucesso).
-    this.patch({ blocks: sanitizeOrphans(blocks), phase: 'idle' });
+    // F14 — NOTAS são efêmeras (resposta de slash-command: `comando desconhecido: /xyz`, `/help`,
+    // avisos de boot…): não voltam como ruído na retomada. A conversa (você/aluy/tool) fica.
+    const semNotas = blocks.filter((b) => b.kind !== 'note');
+    if (semNotas.length === 0) return;
+    this.patch({ blocks: sanitizeOrphans(semNotas), phase: 'idle' });
+  }
+
+  /**
+   * F14 — restaura os contadores de uso da sessão retomada (`◉ N% janela · M sessão`). Usa o
+   * `usage` persistido; em record antigo (sem ele) ESTIMA os tokens pelo texto da conversa
+   * (~4 chars/token) e a janela pela janela do modelo, quando conhecida. Só display.
+   */
+  restoreUsage(
+    usage: { readonly tokens: number; readonly windowPct: number } | undefined,
+    blocks: readonly SessionBlock[],
+  ): void {
+    if (usage !== undefined) {
+      this.patch({
+        meta: { ...this.state.meta, tokens: usage.tokens, windowPct: usage.windowPct },
+      });
+      return;
+    }
+    let chars = 0;
+    for (const b of blocks) {
+      if (b.kind === 'you' || b.kind === 'aluy') chars += b.text.length;
+    }
+    if (chars === 0) return;
+    const tokens = Math.round(chars / 4);
+    const windowPct =
+      this.contextWindow > 0 ? Math.min(100, Math.round((tokens / this.contextWindow) * 100)) : 0;
+    this.patch({ meta: { ...this.state.meta, tokens, windowPct } });
   }
 
   /** EST-0972 — os blocos correntes da sessão (p/ o auto-save persistir). */
@@ -7159,8 +7216,9 @@ export class SessionController {
         }
         return;
       }
-      // Turno vazio (só tool-call, sem fala) ⇒ remove o bloco vazio.
-      if (last.text.trim() === '') {
+      // Turno vazio (só tool-call, sem fala) ⇒ remove o bloco vazio. O ECO do probe de
+      // auto-verificação (`AUTO-VERIFICAÇÃO …`) também nunca é resposta: sai como vazio.
+      if (last.text.trim() === '' || ehEcoDeAutoVerificacao(last.text)) {
         blocks.pop();
       } else {
         // F-CONTA-NO-BLOCO — carimba o custo AQUI, no mesmo ponto em que o turno deixa de
@@ -7197,6 +7255,20 @@ export class SessionController {
           ...(conta !== undefined ? { accounting: conta } : {}),
           ...(motivo === 'cancelled' ? { interrupted: true } : {}),
         };
+        // O custo do turno é CUMULATIVO: só o ÚLTIMO bloco `Λluy` do turno o carrega. Sem isto, uma
+        // resposta + o bloco que a auto-verificação promoveu mostravam `✔ 110.4k tokens · 1m34s`
+        // duas vezes (a 2ª já incluía a 1ª).
+        if (conta !== undefined) {
+          for (let i = blocks.length - 2; i >= 0; i -= 1) {
+            const b = blocks[i];
+            if (b === undefined || b.kind === 'you') break;
+            if (b.kind === 'aluy' && b.accounting !== undefined) {
+              const { accounting: _anterior, ...semConta } = b;
+              void _anterior;
+              blocks[i] = semConta;
+            }
+          }
+        }
       }
       this.patch({ blocks });
     }
@@ -7213,6 +7285,12 @@ export class SessionController {
   private demoteSelfCheckBlock(): void {
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
+    if (last && last.kind === 'aluy' && last.selfCheck && ehEcoDeAutoVerificacao(last.text)) {
+      // O modelo só ecoou o probe: nada a promover — o bloco some.
+      blocks.pop();
+      this.patch({ blocks });
+      return;
+    }
     if (last && last.kind === 'aluy' && last.selfCheck) {
       // Re-cria o bloco SEM a marca `selfCheck` (vira turno normal/visível).
       blocks[blocks.length - 1] = {
@@ -7568,6 +7646,8 @@ export class SessionController {
       // ORDEM: o aviso ANTES do `patch` — o `patch` notifica, e um observador pode
       // responder na mesma pilha (ver `onQuestionChange`).
       this.avisarAprovacaoNoCanal(pending.request);
+      // F22 — o diff já foi MOSTRADO na caixa de permissão: o bloco da tool não o repete.
+      if (pending.request.effect.kind === 'diff') this.diffJaMostradoNoAsk = true;
       this.patch({ phase: 'asking', pendingAsk: { request: pending.request } });
     } else if (this.state.phase === 'asking') {
       this.aprovacaoNoCanal = undefined;
@@ -7597,6 +7677,7 @@ export class SessionController {
     if (!pending) return;
     // Registra um bloco de deny p/ o histórico (efeito recusado fica visível §2.9).
     if (resolution.kind === 'deny') {
+      this.diffJaMostradoNoAsk = false;
       this.pushBlock({
         kind: 'deny',
         verb: verbOfTool(pending.request.call.name),
@@ -7973,7 +8054,16 @@ export class SessionController {
    * `running` (ex.: tool instantânea sem onToolStart, ou teste com resolver direto),
    * empurra a linha já resolvida — preserva o comportamento antigo (compatível).
    */
-  private resolveToolLine(line: ToolLineBlock): void {
+  private resolveToolLine(rawLine: ToolLineBlock): void {
+    // F22 — mostra o diff UMA vez: se a caixa de permissão já o exibiu, tira do bloco da tool
+    // (auto-aprovado/yolo não passa pela caixa ⇒ o bloco é a única vez e fica).
+    let line = rawLine;
+    if (rawLine.diff !== undefined && this.diffJaMostradoNoAsk) {
+      const { diff: _omitido, ...semDiff } = rawLine;
+      void _omitido;
+      line = semDiff;
+      this.diffJaMostradoNoAsk = false;
+    }
     const blocks = [...this.state.blocks];
     const idx = lastRunningToolIndex(blocks);
     if (idx >= 0) {
@@ -8742,7 +8832,7 @@ export class SessionController {
         phase: c.ok ? 'concluído' : 'concluído com falha',
         tokens: c.tokens,
         toolCalls: c.toolCalls,
-        note: 'terminou — o resultado veio como dado (nota "sub-agentes concluíram"); NÃO está morto',
+        note: 'terminou — o resultado já foi entregue ao agente principal',
       });
     }
     for (const t of arvores) {
@@ -9212,7 +9302,11 @@ export class SessionController {
    */
   private childModelLabel(model: string | undefined): string {
     const meta = this.state.meta;
-    const activeModel = meta.backend === 'local' ? meta.activeModel : undefined;
+    // F12 — o filho `inherit` usa o modelo que o PAI tem selecionado AGORA (o mesmo do rodapé:
+    // `meta.model`, mantido pelo /model). `meta.activeModel` é o eco do `usage.model` da última
+    // resposta e pode estar velho/diferente após um /model — rotular o filho com ele mentia
+    // (`herdado (glm-5.3)` com `glm-5.2` no rodapé).
+    const activeModel = meta.backend === 'local' ? (meta.model ?? meta.activeModel) : undefined;
     return formatResolvedModelLabel(resolveModelTier(model), {
       tier: this.tier,
       ...(this.model !== undefined ? { model: this.model } : {}),
@@ -9233,6 +9327,7 @@ export class SessionController {
           status: 'running',
           // ADR-0146 (D5) — tier/modelo RESOLVIDO deste filho, visível ENQUANTO roda.
           model: this.childModelLabel(model),
+          startedAt: Date.now(),
           ...(node ? { nodeId: node.id } : {}),
         });
         // O nº de filhos vivos mudou — republica p/ o aviso do rodapé acompanhar
@@ -9369,6 +9464,17 @@ export class SessionController {
     this.pushNote(title, lines);
   }
 
+  /**
+   * VERBO POR TURNO — sorteia o verbo UMA vez quando o turno nasce (fica o mesmo em todos os
+   * passos, auto-verificação inclusa); o turno seguinte sorteia outro, nunca repetindo o
+   * anterior. Chamado ANTES do 1º `patch` do turno, para o 1º frame já sair com o verbo.
+   */
+  private sortearVerboDoTurno(): void {
+    if (verbosSimples()) return;
+    const v = sortearVerbo(this.listaDeVerbos, this.rngDeVerbos, this.state.workingVerb);
+    if (v !== undefined) this.state = { ...this.state, workingVerb: v };
+  }
+
   private setPhase(phase: SessionState['phase']): void {
     this.patch({ phase });
     // F168 — o "te aviso quando terminar" que NUNCA chegava: um evento de conclusão
@@ -9397,18 +9503,6 @@ export class SessionController {
    */
   private patch(partial: Partial<SessionState>): void {
     this.state = { ...this.state, ...partial };
-    // VERBO POR PASSO — cada novo `workingSince` é um passo novo ⇒ sorteia o verbo (fonte única).
-    if (
-      partial.workingSince !== undefined &&
-      partial.workingSince !== this.verboDoPasso &&
-      partial.workingVerb === undefined
-    ) {
-      this.verboDoPasso = partial.workingSince;
-      if (!verbosSimples()) {
-        const v = sortearVerbo(this.listaDeVerbos, this.rngDeVerbos, this.state.workingVerb);
-        if (v !== undefined) this.state = { ...this.state, workingVerb: v };
-      }
-    }
     this.flush.flushNow();
     this.notify();
   }

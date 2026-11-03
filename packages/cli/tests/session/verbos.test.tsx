@@ -39,8 +39,9 @@ describe('lista de verbos (catálogo)', () => {
   });
 });
 
-describe('sorteio por passo (fonte única: estado do controller)', () => {
+describe('sorteio por TURNO (fonte única: estado do controller)', () => {
   const comPasso = (c: SessionController, since: number): string | undefined => {
+    // passo novo dentro do turno: só o relógio muda (o verbo NÃO é re-sorteado)
     (c as unknown as { patch(p: Record<string, unknown>): void }).patch({
       phase: 'thinking',
       workingLabel: 'pensando',
@@ -66,14 +67,21 @@ describe('sorteio por passo (fonte única: estado do controller)', () => {
       flush: { intervalMs: 0 },
     });
 
-  it('estável dentro do passo, novo e diferente do anterior a cada passo', () => {
+  const novoTurno = (c: SessionController): void =>
+    (c as unknown as { sortearVerboDoTurno(): void }).sortearVerboDoTurno();
+
+  it('um verbo por TURNO: estável entre passos, novo e diferente a cada turno', () => {
     const c = novo();
+    novoTurno(c);
     let anterior = comPasso(c, 1000);
     expect(verbos).toContain(anterior);
-    expect(comPasso(c, 1000)).toBe(anterior); // mesmo passo ⇒ mesmo verbo
+    for (let passo = 2000; passo < 8000; passo += 1000) {
+      expect(comPasso(c, passo)).toBe(anterior); // passos do mesmo turno ⇒ mesmo verbo
+    }
     const vistos = new Set<string>([anterior!]);
-    for (let passo = 2000; passo < 2000 + 40 * 1000; passo += 1000) {
-      const v = comPasso(c, passo)!;
+    for (let turno = 0; turno < 40; turno++) {
+      novoTurno(c);
+      const v = comPasso(c, 100000 + turno)!;
       expect(v).not.toBe(anterior);
       anterior = v;
       vistos.add(v);
@@ -87,6 +95,7 @@ describe('sorteio por passo (fonte única: estado do controller)', () => {
     process.env.ALUY_VERBOS = 'simples';
     try {
       const c = novo();
+      novoTurno(c);
       expect(comPasso(c, 1000)).toBeUndefined();
       c.dispose();
     } finally {
