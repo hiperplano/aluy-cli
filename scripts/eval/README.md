@@ -21,7 +21,7 @@ npm run eval -- --entry /outro/checkout/packages/cli/dist/bin/aluy.js --label fe
 
 Opções principais: `--entry` (qualquer build do `aluy.js`), `--scenarios a,b`, `--reps N`,
 `--timeout-s N` (600), `--max-iterations N` (40), `--max-tokens N`, `--model/--provider`
-(default: a config local), `--label`, `--out`, `--keep`, `--yolo`, `--dry-run`.
+(default: a config local), `--label`, `--out`, `--keep`, `--sandbox`/`--no-yolo`, `--dry-run`.
 
 Saída em `scripts/eval/results/` (gitignored): `<label>-<data>.json` e `.md` (tabela PT-BR).
 
@@ -64,15 +64,52 @@ Outros desfechos: `ok`, `timeout`, `erro_provider`, `falha`.
 
 ## Segurança / permissões
 
-Em headless não há como confirmar permissão, então no modo **normal (default)** os efeitos
-(edit/write/bash) são **negados**: o agente é medido pelo que _tenta_ fazer (as chamadas
-aparecem no stream), mas pode não concluir a tarefa. Efeitos negados NÃO aparecem como tool-call no stream (efeitos = 0); por isso, sem efeito
-visível, `planBeforeEffect` usa "chamou `update_plan`" como proxy, e cenários grandes podem
-estourar o timeout (o agente fica sem poder agir). `--yolo` auto-aprova tudo, porém o
-`--yolo` do aluy **derruba a cerca de workspace** (disco inteiro) — não dá para confinar ao
-diretório temporário. Use `--yolo` por sua conta e risco, de preferência em VM/container.
+Em headless não há como confirmar permissão, então no modo **normal** os efeitos
+(edit/write/bash) são **negados** (o agente não conclui as tarefas; só mede o que _tenta_).
+O `--yolo` do aluy resolve isso mas **derruba a cerca de workspace** (disco inteiro). Por isso
+o harness só aceita `--yolo` **dentro do sandbox**: `--yolo` sem `--sandbox` é recusado, e
+`--sandbox` liga o yolo por padrão (`--no-yolo` para voltar ao modo normal).
+
+### Sandbox (`--sandbox`, bubblewrap, Linux)
+
+Cada `aluy` roda sob `/usr/bin/bwrap`:
+
+```
+bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp
+      --tmpfs ~/.aluy --ro-bind ~/.aluy/{config.json,credentials.enc,mcp.json} (os que existirem)
+      --bind <dir-do-cenário> <dir-do-cenário>
+      --die-with-parent --new-session --chdir <dir-do-cenário> -- node aluy.js ...
+```
+
+- Disco inteiro somente-leitura; **só** o diretório temporário do cenário é gravável.
+- `~/.aluy` real nunca é gravável: um tmpfs descartável o cobre (logs, sessões, undo,
+  todos, memória vão para lá e somem) e só config/credencial/mcp são montadas **read-only**
+  para o provider autenticar (a chave deriva de `/etc/machine-id` + usuário, legível).
+- Rede liberada (o provider precisa); sem `--unshare-net`.
+
+Prova do confinamento, antes de qualquer rodada real:
+
+```bash
+npm run eval -- --self-test-sandbox
+```
+
+Dentro do mesmo wrapper tenta escrever em `$HOME/eval-escape-probe` e `/home/aluy/projects/x`
+(devem falhar), em `~/.aluy/config.json` (ro, deve falhar), e confere que o `~/.aluy/x` real
+não aparece; escrever no diretório do cenário deve funcionar. Depois faz uma sonda ao vivo:
+`aluy --yolo -p` pedindo `touch $HOME/eval-escape-probe` e verifica que o arquivo NÃO existe.
+
 Por segurança o harness sempre usa `--new --anonymous` (sem retomar sessão, sem gravar
 transcrição nem memória) e `cwd` na cópia temporária.
+
+### Reavaliar resultados salvos
+
+```bash
+npm run eval -- --rescore scripts/eval/results/main-<data>.json
+```
+
+Reaplica as expectativas sobre as métricas salvas e reescreve o `.md`. "Plano antes do efeito"
+só é sim/não quando há efeito visível no stream; sem efeito (modo normal) aparece `n/a` e a
+checagem usa "chamou `update_plan`" como proxy.
 
 ## Custo
 
