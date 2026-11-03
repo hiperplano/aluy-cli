@@ -33,6 +33,7 @@
     "prebuild": "node scripts/gen-version.mjs",
     "postbuild": "node -e \"require('fs').chmodSync('packages/cli/dist/bin/aluy.js', 0o755)\"",
     "aluy": "node packages/cli/dist/bin/aluy.js",
+    "eval": "node scripts/eval/run.mjs",
     "smoke": "npm run build && node scripts/smoke-e2e.mjs",
     "smoke:subagents": "npm run build && node scripts/smoke-subagents.mjs",
     "smoke:fanout-inject": "npm run build && node scripts/smoke-fanout-inject.mjs",
