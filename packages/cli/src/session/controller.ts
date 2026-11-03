@@ -2688,7 +2688,7 @@ export class SessionController {
   async submit(
     goal: string,
     attachments: readonly HistoryItem[] = [],
-    opts: { readonly origem?: string } = {},
+    opts: { readonly origem?: string; readonly display?: string } = {},
   ): Promise<void> {
     if (goal.trim() === '') return;
     // EST-0980 — `user-prompt-submit` (Claude: UserPromptSubmit): o usuário submeteu um
@@ -2790,6 +2790,9 @@ export class SessionController {
       kind: 'you',
       text: goal,
       ...(opts.origem !== undefined && opts.origem !== '' ? { origem: opts.origem } : {}),
+      ...(opts.display !== undefined && opts.display !== '' && opts.display !== goal
+        ? { display: opts.display }
+        : {}),
     });
     // DESGRUDA A DICA DE CANAL. Um turno do Telegram injeta uma observação dizendo
     // "responda com `telegram_send`", e observação NÃO se apaga do histórico: nos turnos

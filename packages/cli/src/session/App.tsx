@@ -152,7 +152,11 @@ import {
   decideCtrlC,
   CTRL_C_WINDOW_MS,
   type EditState,
+  isNewlineKey,
+  backslashNewline,
+  drainTypedChunk,
 } from './composer-edit.js';
+import { buildSentDisplay } from './sent-display.js';
 import {
   createBracketedPasteMachine,
   gateInputPaste,
@@ -186,7 +190,12 @@ import {
   type SlashCommand,
   type PaletteHit,
 } from '../slash/commands.js';
-import { trailingMention, stripTrailingMention, parseAtMentions } from '../attach/index.js';
+import {
+  trailingMention,
+  stripTrailingMention,
+  parseAtMentions,
+  stripMentions,
+} from '../attach/index.js';
 import { resolveLinearMentions } from './linear.js';
 import type { FileIndexPort, SessionStore } from '../io/index.js';
 import type { AttachReader } from '../attach/index.js';
@@ -213,6 +222,8 @@ export interface ProviderSwitchFailure {
 
 export interface AppProps {
   readonly controller: SessionController;
+  /** F6 — rascunho inicial do composer (o que foi digitado durante o splash/pergunta de boot). */
+  readonly initialInput?: string;
   /** Comandos do usuário (DADO de ~/.aluy/commands/). */
   readonly userCommands?: readonly SlashCommand[];
   /**
@@ -700,10 +711,27 @@ export function App(props: AppProps): React.ReactElement {
   // o atalho readline ser o canal confiável), Alt+←/→ (e Alt+b/Alt+f) movem por PALAVRA.
   // O char é INSERIDO em `cursor` (não append); backspace apaga em `cursor-1`.
   // INVARIANTE: `0 <= cursor <= text.length` SEMPRE (clampCursor).
-  const [composer, setComposer] = useState<{ text: string; cursor: number }>({
-    text: '',
-    cursor: 0,
+  const [composer, setComposerState] = useState<{ text: string; cursor: number }>({
+    text: props.initialInput ?? '',
+    cursor: (props.initialInput ?? '').length,
   });
+  // F5 — `composerRef` é a VERDADE-DO-INSTANTE do composer: atualizado SINCRONAMENTE em cada
+  // escrita (não só no render). Várias teclas num mesmo tick (tmux send-keys, xrdp, digitador
+  // rápido) liam `input` do closure VELHO e o submit levava texto defasado — a linha digitada
+  // entre dois Enter sumia. O wrapper aplica o updater sobre o ref (1× só, sem efeito duplo).
+  const composerRef = useRef(composer);
+  const setComposer = useCallback(
+    (
+      u:
+        | { text: string; cursor: number }
+        | ((c: { text: string; cursor: number }) => { text: string; cursor: number }),
+    ): void => {
+      const next = typeof u === 'function' ? u(composerRef.current) : u;
+      composerRef.current = next;
+      setComposerState(next);
+    },
+    [],
+  );
   const input = composer.text;
   const cursorPos = composer.cursor;
   // EST-0969 (watchdog) — `true` quando o usuário escolheu `[r]` na pausa-pede-direção
@@ -774,8 +802,6 @@ export function App(props: AppProps): React.ReactElement {
   // consulta p/ decidir aceitar (e p/ o gate "composer VAZIO" ser confiável mesmo em burst).
   const suggestionRef = useRef<string | undefined>(undefined);
   suggestionRef.current = suggestion;
-  const composerRef = useRef(composer);
-  composerRef.current = composer;
 
   // EST-0982 (type-ahead) — FILA de mensagens digitadas ENQUANTO o agente trabalha
   // (`thinking`/`streaming`/`retrying`): Enter no composer durante o trabalho NÃO
@@ -2169,8 +2195,10 @@ export function App(props: AppProps): React.ReactElement {
     [runCommand, controller],
   );
 
+  // F16 — linha cujo `@arquivo` inexistente JÁ foi avisado: reenviar a MESMA linha envia assim mesmo.
+  const unresolvedAckRef = useRef<string>('');
   const submit = useCallback(
-    (line: string) => {
+    (line: string, rawLine?: string) => {
       // EST-1015 (cockpit) — SNAP p/ a cauda ao SUBMETER: se o usuário rolou a conversa/
       // log p/ cima e então envia algo (objetivo//comando/!bang), a resposta nasce na
       // CAUDA — fora da janela rolada, invisível. Submeter é "quero ver o agora" ⇒ volta
@@ -2197,20 +2225,51 @@ export function App(props: AppProps): React.ReactElement {
           // abrir o picker mid-turn. Sem menções, é o caminho de antes (zero custo).
           if (parseAtMentions(route.text).length > 0 && props.attachReader) {
             const beforeChips = picker.attachments.map((a) => a.item);
+            const chipPaths = picker.attachments.map((a) => a.path);
             void resolveLinearMentions(route.text, props.attachReader).then(
-              ({ goal, items: resolved }) => {
+              ({ goal, items: resolved, attached, refused }) => {
+                // F16 — `@naoexiste.txt oi` NÃO pode virar só "oi" em silêncio: AVISA (PT-BR) e
+                // DEVOLVE o texto ao composer p/ o usuário corrigir. Reenviar a MESMA linha
+                // (Enter de novo) envia assim mesmo, com a menção literal (ex.: `@alguem`).
+                if (refused.length > 0 && unresolvedAckRef.current !== route.text) {
+                  unresolvedAckRef.current = route.text;
+                  controller.pushNote('anexo', [
+                    ...refused.map(
+                      (r) => `arquivo não encontrado ou recusado: @${r.path} — ${r.reason}`,
+                    ),
+                    'a mensagem NÃO foi enviada — corrija o caminho (Enter de novo envia assim mesmo).',
+                  ]);
+                  setComposer((c) =>
+                    c.text === ''
+                      ? { text: route.text, cursor: route.text.length }
+                      : {
+                          text: `${route.text} ${c.text}`,
+                          cursor: route.text.length + 1 + c.text.length,
+                        },
+                  );
+                  return;
+                }
+                const forced = refused.length > 0; // 2º Enter: envia como está.
+                unresolvedAckRef.current = '';
                 // STRIP pode esvaziar o texto (a linha era só `@arquivo`): preservamos a
                 // regra "anexo sozinho NÃO é pedido" — sem goal E sem nada resolvido, não
                 // submete. Com anexo resolvido mas goal vazio, mandamos o texto original
                 // (ainda carrega a intenção `@…`) como objetivo, com o DADO rotulado.
-                if (goal === '' && resolved.length === 0) {
+                if (goal === '' && resolved.length === 0 && !forced) {
                   picker.clear();
                   return;
                 }
                 const items = [...beforeChips, ...resolved];
-                const outGoal = goal !== '' ? goal : route.text;
+                const outGoal = forced || goal === '' ? route.text : goal;
                 setHistory((h) => [...h, outGoal]);
-                void controller.submit(outGoal, items);
+                void controller.submit(outGoal, items, {
+                  display: buildSentDisplay(
+                    forced
+                      ? route.text
+                      : stripMentions(rawLine ?? goal, parseAtMentions(rawLine ?? goal)),
+                    [...chipPaths, ...attached],
+                  ),
+                });
                 picker.clear();
               },
             );
@@ -2218,7 +2277,12 @@ export function App(props: AppProps): React.ReactElement {
           }
           const items = picker.attachments.map((a) => a.item);
           setHistory((h) => [...h, route.text]);
-          void controller.submit(route.text, items);
+          void controller.submit(route.text, items, {
+            display: buildSentDisplay(
+              rawLine ?? route.text,
+              picker.attachments.map((a) => a.path),
+            ),
+          });
           picker.clear();
         }
         return;
@@ -2237,7 +2301,7 @@ export function App(props: AppProps): React.ReactElement {
       }
       // unknown-command: ignora silenciosamente (o menu já guia o usuário).
     },
-    [controller, userCommands, picker, runCommand, props.attachReader],
+    [controller, userCommands, picker, runCommand, props.attachReader, setComposer],
   );
 
   // ── EST-0982 (type-ahead mid-turn) — ENFILEIRAR vs ENCAIXAR uma linha do composer ──
@@ -2662,6 +2726,13 @@ export function App(props: AppProps): React.ReactElement {
   }, [atRest, queue, state.phase, injectIfPlainText]);
 
   useInput((char, key) => {
+    // F5 — FONTE FRESCA: o closure do `useInput` pode estar VELHO quando várias teclas chegam
+    // no mesmo tick (o React ainda não re-renderizou). `input` (texto do composer) e `state`
+    // (fase: idle/trabalhando) lidos do closure faziam o submit levar texto defasado, ou
+    // rotear a tecla pro ramo errado (idle enquanto o turno já começou) — a linha digitada
+    // entre dois Enter sumia. Sombreamos ambos com a verdade-do-instante.
+    const input = composerRef.current.text;
+    const state = controller.current;
     // ── EST-0948 — BRACKETED PASTE: SUPRIME os bytes do paste no `useInput` ──────────
     // Com o `?2004` ligado, o Ink entrega ao `useInput` o chunk do paste MANGLED (`[200~
     // …conteúdo…\x1b[201~`). O composer é alimentado pelo CANAL CRU (`onPasteData`, que
@@ -2993,6 +3064,34 @@ export function App(props: AppProps): React.ReactElement {
     // ── ask pendente CAPTURA o foco (handoff §10 regra 3) ───────────────────
     if (state.phase === 'asking' && state.pendingAsk) {
       const alwaysAsk = state.pendingAsk.request.alwaysAsk;
+      // F6 — TYPE-AHEAD sob a caixa de permissão. REGRA: as teclas de resposta (a/s/l/n/e/Esc)
+      // só RESPONDEM como PRIMEIRA tecla (composer vazio). Qualquer outra tecla imprimível
+      // começa um RASCUNHO no composer; com rascunho em curso, TUDO que é imprimível (inclusive
+      // a/s/l/n/e) é texto, Enter é ignorado, Backspace edita e Esc APAGA o rascunho (não
+      // responde) — depois disso as teclas voltam a responder. Digitar "aprovar tudo" jamais
+      // aprova por acidente, e o texto digitado não some.
+      if (input !== '') {
+        if (key.escape) {
+          setText('');
+          return;
+        }
+        if (key.backspace || key.delete) {
+          setComposer((c) => composerDeleteBackward(c));
+          return;
+        }
+        if (char && !key.ctrl && !key.meta) {
+          setComposer((c) => applyTypedChunk(c, char).state);
+          return;
+        }
+        if (handleReadlineKey(char, key)) return;
+        return;
+      }
+      const isAnswerKey =
+        key.escape || char === 'a' || char === 's' || char === 'l' || char === 'n' || char === 'e';
+      if (!isAnswerKey && char && !key.ctrl && !key.meta && !key.return) {
+        setComposer((c) => applyTypedChunk(c, char).state);
+        return;
+      }
       if (char === 'a') return controller.resolveAsk({ kind: 'approve-once' });
       if (char === 's' && alwaysAsk === false)
         return controller.resolveAsk({ kind: 'approve-session' });
@@ -3472,8 +3571,13 @@ export function App(props: AppProps): React.ReactElement {
       // robusta entre terminais: `key.return && key.ctrl` (CSI-u/kitty) OU um LF cru
       // (`\n`, Ctrl+J — muitos terminais mapeiam Ctrl+Enter p/ LF) chegando como char.
       // Vazio ⇒ no-op (nada a injetar). Reusa o `pendingInjected` (não duplica catraca).
-      const isCtrlEnter =
-        (key.return && key.ctrl) || (!key.return && char === '\n' && !key.ctrl && !key.meta);
+      // F2 — Ctrl+J (LF cru) agora é NOVA LINHA (igual ao repouso); o ENCAIXAR fica no
+      // Ctrl+Enter de terminais com CSI-u (`key.return && key.ctrl`).
+      if (isNewlineKey(char, key)) {
+        setComposer((c) => insertAt(c, '\n'));
+        return;
+      }
+      const isCtrlEnter = key.return && key.ctrl;
       if (isCtrlEnter) {
         // EST-PASTE-COLLAPSE — expande chips antes de injetar no agente vivo (conteúdo cheio).
         const line = expandAndReset(input).trim();
@@ -3493,6 +3597,11 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       if (key.return) {
+        const bs = backslashNewline(composerRef.current);
+        if (bs) {
+          setComposer(bs);
+          return;
+        }
         // EST-PASTE-COLLAPSE — expande chips antes de enfileirar (a fila guarda o texto cheio).
         const line = expandAndReset(input).trim();
         if (line !== '') {
@@ -3532,14 +3641,8 @@ export function App(props: AppProps): React.ReactElement {
         setComposer((c) => ({ ...c, cursor: key.meta ? moveWordRight(c) : moveRight(c) }));
         return;
       }
-      if (key.ctrl && char === 'a') {
-        setComposer((c) => ({ ...c, cursor: 0 }));
-        return;
-      }
-      if (key.ctrl && char === 'e') {
-        setComposer((c) => ({ ...c, cursor: c.text.length }));
-        return;
-      }
+      // F4 — atalhos readline IGUAIS ao repouso (Ctrl-A/E/U/K/W, Alt-B/F): fonte única.
+      if (handleReadlineKey(char, key)) return;
       // Digitação: aplica o chunk pela FONTE ÚNICA `applyTypedChunk` (EST-0965) — insere
       // na posição do cursor E honra backspace EMBUTIDO (`\x7f`/`\x08`) num chunk MISTO
       // (xrdp/SSH/paste entregam texto+edição grudados; o `key.backspace` só vem quando
@@ -3548,26 +3651,23 @@ export function App(props: AppProps): React.ReactElement {
       // agora). A LINHA já vem com os backspaces aplicados (não o texto cru).
       if (char && !key.ctrl && !key.meta) {
         if (char.search(/[\r\n]/) !== -1) {
-          // updater funcional: a linha sai do estado ATUAL (+ o chunk até a quebra),
-          // robusto a teclas síncronas. Os efeitos (fila/inject/histórico) leem o
-          // resultado puro de `applyTypedChunk` sobre o composer corrente.
-          setComposer((c) => {
-            const r = applyTypedChunk(c, char);
+          // F5 — TODAS as linhas do lote (não só a 1ª): `a\rb\rc\r` num chunk só enfileira/encaixa
+          // as três, na ordem; o texto depois da última quebra FICA no composer.
+          const drained = drainTypedChunk(composerRef.current, char);
+          for (const l of drained.lines) {
             // EST-PASTE-COLLAPSE — expande chips antes de injetar/enfileirar (texto cheio).
-            const line = expandAndReset(r.state.text).trim();
-            if (line !== '') {
-              // `\n` (LF/Ctrl+Enter) é o ENCAIXAR explícito ⇒ injeta a linha como está. `\r`
-              // (Enter) segue o type-ahead: TEXTO PURO ENCAIXA mid-turn (EST-0982), COMANDO
-              // PARALELO-SEGURO (`/ask`) RODA JÁ, `/slash` mutador/`!bang`/anexos ENFILEIRA.
-              if (r.newline === '\n') {
-                controller.injectInput('root', line);
-                controller.markLastInjectFromComposer();
-              } else enqueueOrInject(line);
-              setHistory((h) => [...h, line]);
-            }
-            setHistIdx(-1);
-            return { text: '', cursor: 0 };
-          });
+            const line = expandAndReset(l.text).trim();
+            if (line === '') continue;
+            // `\n` (LF) é o ENCAIXAR explícito; `\r` (Enter) segue o type-ahead: TEXTO PURO
+            // ENCAIXA mid-turn (EST-0982), PARALELO-SEGURO roda já, o resto ENFILEIRA.
+            if (l.term === '\n') {
+              controller.injectInput('root', line);
+              controller.markLastInjectFromComposer();
+            } else enqueueOrInject(line);
+            setHistory((h) => [...h, line]);
+          }
+          setComposer(drained.rest);
+          setHistIdx(-1);
           // O composer esvaziou (enfileirou/encaixou a linha) ⇒ fecha o menu.
           setSlashOpen(false);
           setSlashSel(0);
@@ -4132,10 +4232,6 @@ export function App(props: AppProps): React.ReactElement {
           // argumento; nunca executa direto). Comando-PAI (com subs) no TAB: drilla os subs
           // (`/<name> `). Caso contrário (comando-folha, ou Enter no pai): EXECUTA — mesmo
           // caminho de sempre (`runCommand`, abre o picker do /model//theme se couber).
-          const isParent =
-            entry.kind === 'command' &&
-            entry.command.subcommands !== undefined &&
-            entry.command.subcommands.length > 0;
           // EST-0983 (#157 fix) — SUBcomando TERMINAL (`/clear full`, `/clear memory`):
           // verbo SEM argumento ⇒ o Enter SUBMETE direto (`runCommand` do pai com o verbo
           // como arg), em vez de re-completar e ficar preso. O Tab segue só completando
@@ -4148,7 +4244,9 @@ export function App(props: AppProps): React.ReactElement {
             runCommand(entry.parent, entry.sub.name);
             return;
           }
-          if (entry.kind === 'subcommand' || (isParent && key.tab)) {
+          // F18 — TAB só COMPLETA (`/mo` ⇒ `/model`); quem EXECUTA é o Enter. Antes o Tab num
+          // comando-folha rodava o comando (abria o picker do /model sem querer).
+          if (entry.kind === 'subcommand' || key.tab) {
             const completion = entryCompletion(entry);
             setText(completion);
             syncSlashMenu(completion);
@@ -4347,39 +4445,21 @@ export function App(props: AppProps): React.ReactElement {
       setComposer((c) => ({ ...c, cursor: key.meta ? moveWordRight(c) : moveRight(c) }));
       return;
     }
-    // Alt+b / Alt+f (readline word-move por letra, p/ terminais sem Alt+seta).
-    if (key.meta && (char === 'b' || char === 'f')) {
-      setComposer((c) => ({ ...c, cursor: char === 'b' ? moveWordLeft(c) : moveWordRight(c) }));
-      return;
-    }
-    // Ctrl+A → início (Home); Ctrl+E → fim (End) — estilo readline.
-    if (key.ctrl && char === 'a') {
-      setComposer((c) => ({ ...c, cursor: 0 }));
-      return;
-    }
-    if (key.ctrl && char === 'e') {
-      setComposer((c) => ({ ...c, cursor: c.text.length }));
-      return;
-    }
-    // EST-1015 — Ctrl+U (apaga até o início) · Ctrl+K (apaga até o fim) · Ctrl+W (apaga a
-    // palavra à esquerda) — readline padrão. Sincroniza o slash-menu (o texto mudou).
-    if (key.ctrl && (char === 'u' || char === 'k' || char === 'w')) {
-      setComposer((c) => {
-        const next =
-          char === 'u' ? deleteToStart(c) : char === 'k' ? deleteToEnd(c) : deleteWordBack(c);
-        syncSlashMenu(next.text);
-        return next;
-      });
-      setHistIdx(-1);
-      return;
-    }
+    // Alt+b/Alt+f · Ctrl+A/E · Ctrl+U/K/W — readline; FONTE ÚNICA com o ramo de trabalho (F4).
+    if (handleReadlineKey(char, key)) return;
 
     // multilinha: shift+enter insere `\n` NA POSIÇÃO do cursor (§4.2); enter puro envia.
-    if (key.return && key.shift) {
+    // F2 — Alt+Enter / Ctrl+J / Shift+Enter ⇒ NOVA LINHA; `\`+Enter ⇒ a barra vira `\n`.
+    if (isNewlineKey(char, key)) {
       setComposer((c) => insertAt(c, '\n'));
       return;
     }
     if (key.return) {
+      const bs = backslashNewline(composerRef.current);
+      if (bs) {
+        setComposer(bs);
+        return;
+      }
       // EST-PASTE-COLLAPSE — EXPANDE os chips de paste no submit: o modelo recebe o conteúdo
       // COMPLETO original (fiel byte-a-byte) no lugar de cada `[texto colado #N, …]`. Sem
       // chips, é o `input` inalterado. Esvazia o registro depois (sessão de composição nova).
@@ -4389,7 +4469,7 @@ export function App(props: AppProps): React.ReactElement {
       setSlashSel(0);
       setHistIdx(-1);
       picker.closePicker();
-      submit(line);
+      submit(line, input);
       return;
     }
     // BACKSPACE apaga em `pos-1`; DELETE (forward) apaga em `pos`. Ambas as físicas
@@ -4430,19 +4510,25 @@ export function App(props: AppProps): React.ReactElement {
       // EMBUTIDO no chunk, igual ao type-ahead): `abc\x7f\r` submete `ab`, não `abc`.
       if (char.search(/[\r\n]/) !== -1) {
         picker.dismissNotice();
-        const typed = applyTypedChunk({ text: input, cursor: input.length }, char).state.text;
-        // EST-PASTE-COLLAPSE — expande chips de paste antes de submeter (igual ao Enter limpo).
-        const line = expandAndReset(typed);
-        // Limpa o composer e fecha overlays de digitação ANTES de rotear (mesma
-        // sequência do Enter limpo). `submit` → `routeInput` trata objetivo, `/slash`
-        // (com/sem args) e `!bang` de forma uniforme — o paste literal é o que o
-        // usuário digitou, então roteamos o texto, não a seleção do menu.
-        setText('');
+        // F5 — TODAS as linhas do lote: a 1ª é o objetivo (submit); as seguintes chegam com o
+        // turno já vivo ⇒ seguem o type-ahead (encaixa/enfileira, ordem FIFO). Antes só a 1ª
+        // era tratada e o RESTO do chunk era descartado em silêncio. O que vier depois da
+        // última quebra fica no composer.
+        const drained = drainTypedChunk({ text: input, cursor: input.length }, char);
+        setComposer(drained.rest);
         setSlashOpen(false);
         setSlashSel(0);
         setHistIdx(-1);
         picker.closePicker();
-        submit(line);
+        drained.lines.forEach((l, idx) => {
+          // EST-PASTE-COLLAPSE — expande chips de paste antes de submeter (igual ao Enter limpo).
+          const line = expandAndReset(l.text);
+          if (idx === 0) submit(line, l.text);
+          else if (line.trim() !== '') {
+            enqueueOrInject(line.trim());
+            setHistory((h) => [...h, line.trim()]);
+          }
+        });
         return;
       }
       // O aviso de recusa de anexo (revisor #3) some na próxima digitação (ação nova).
@@ -4460,6 +4546,37 @@ export function App(props: AppProps): React.ReactElement {
       setHistIdx(-1);
     }
   });
+
+  /**
+   * F4 — atalhos readline do composer, FONTE ÚNICA p/ repouso e trabalho (antes o ramo de
+   * trabalho só tinha Ctrl-A/E e engolia Ctrl-U/K/W/Alt-B/F: o texto "apagado" ficava e se
+   * fundia com o próximo). Devolve `true` se a tecla foi tratada.
+   */
+  function handleReadlineKey(char: string, key: { ctrl: boolean; meta: boolean }): boolean {
+    if (key.meta && !key.ctrl && (char === 'b' || char === 'f')) {
+      setComposer((c) => ({ ...c, cursor: char === 'b' ? moveWordLeft(c) : moveWordRight(c) }));
+      return true;
+    }
+    if (key.ctrl && char === 'a') {
+      setComposer((c) => ({ ...c, cursor: 0 }));
+      return true;
+    }
+    if (key.ctrl && char === 'e') {
+      setComposer((c) => ({ ...c, cursor: c.text.length }));
+      return true;
+    }
+    if (key.ctrl && (char === 'u' || char === 'k' || char === 'w')) {
+      setComposer((c) => {
+        const next =
+          char === 'u' ? deleteToStart(c) : char === 'k' ? deleteToEnd(c) : deleteWordBack(c);
+        syncSlashMenu(next.text);
+        return next;
+      });
+      setHistIdx(-1);
+      return true;
+    }
+    return false;
+  }
 
   /**
    * EST-0957 — re-sincroniza o picker `@` com o input corrente: abre/fecha e
@@ -4518,7 +4635,12 @@ export function App(props: AppProps): React.ReactElement {
   // A dica do composer: em trabalho o composer está ATIVO ⇒ sem `hint` (a dica só
   // aparece quando inativo). Em `ask`/`budget` (composer dim) explica que a decisão
   // acima tem o foco. (O `<Composer>` só mostra `hint` quando `active === false`.)
-  const composerHint = state.phase === 'asking' ? 'aguardando sua decisão acima' : undefined;
+  const composerHint =
+    state.phase === 'asking'
+      ? input !== ''
+        ? 'rascunho guardado · esc apaga e volta a responder a caixa'
+        : 'aguardando sua decisão acima'
+      : undefined;
 
   // EST-0965 — UM CURSOR SÓ NA TELA. Enquanto o agente TRABALHA (isWorkPhase), o
   // <AluyBlock> pinta o cursor AMARELO de trabalho (●) na ponta do stream — ELE é o
@@ -5866,7 +5988,7 @@ export function BlockView(props: {
       return (
         <Box paddingBottom={1}>
           <YouBlock
-            text={b.text}
+            text={b.display ?? b.text}
             isCurrent={props.isCurrent}
             {...(props.columns !== undefined ? { columns: props.columns } : {})}
             {...(b.origem !== undefined ? { origem: b.origem } : {})}

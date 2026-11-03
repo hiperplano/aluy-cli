@@ -362,35 +362,95 @@ describe('App — TYPE-AHEAD: digitar enquanto o agente trabalha (EST-0982)', ()
     s.unmount();
   });
 
-  it('Ctrl+Enter (LF cru) ⇒ ENCAIXA AGORA (chama injectInput, NÃO enfileira)', async () => {
+  it('F2: LF cru (Ctrl+J) durante o trabalho ⇒ NOVA LINHA no composer (não encaixa, não envia)', async () => {
     const s = buildSession();
     const injectSpy = vi.spyOn(s.controller, 'injectInput');
-    const submitSpy = vi.spyOn(s.controller, 'submit');
 
     void s.controller.submit('objetivo inicial');
     await waitFor(() => s.controller.current.phase === 'streaming');
 
-    // Digita e ENCAIXA com LF cru (Ctrl+J / Ctrl+Enter): injeta AGORA no agente vivo.
     await pressUntil(
-      () => s.stdin.write('corrija o rumo'),
-      () => plain(s.lastFrame()).includes('corrija o rumo'),
+      () => s.stdin.write('linha um'),
+      () => plain(s.lastFrame()).includes('linha um'),
     );
+    s.stdin.write(LF);
     await pressUntil(
-      () => s.stdin.write(LF),
-      () => injectSpy.mock.calls.length > 0,
+      () => s.stdin.write('x'),
+      () => plain(s.lastFrame()).includes('x'),
     );
-
-    expect(injectSpy).toHaveBeenCalledWith('root', 'corrija o rumo');
-    // NÃO virou fila (o composer limpou e não há chrome "na fila").
-    expect(plain(s.lastFrame())).not.toContain('na fila');
-    // E NÃO submeteu um NOVO objetivo: encaixar é injetar no turno corrente, não criar
-    // outro (o único `submit` é o `objetivo inicial` que abriu o turno, não `corrija…`).
-    expect(submitSpy.mock.calls.some((c) => c[0] === 'corrija o rumo')).toBe(false);
+    expect(injectSpy).not.toHaveBeenCalled();
+    const frame = plain(s.lastFrame());
+    expect(frame).toContain('linha um');
+    // `x` caiu numa linha PRÓPRIA (abaixo de "linha um"), não colado nela.
+    expect(frame).not.toContain('linha umx');
     expect(s.controller.current.phase).toBe('streaming');
 
     s.resolveGate(0);
     injectSpy.mockRestore();
-    submitSpy.mockRestore();
+    s.unmount();
+  });
+
+  it('F4: Ctrl-U durante o trabalho LIMPA o composer (readline igual ao repouso)', async () => {
+    const s = buildSession();
+    void s.controller.submit('objetivo inicial');
+    await waitFor(() => s.controller.current.phase === 'streaming');
+
+    await pressUntil(
+      () => s.stdin.write('bbb'),
+      () => plain(s.lastFrame()).includes('bbb'),
+    );
+    s.stdin.write('\x15'); // Ctrl-U
+    await waitFor(() => !plain(s.lastFrame()).includes('bbb'));
+    await pressUntil(
+      () => s.stdin.write('ccc'),
+      () => plain(s.lastFrame()).includes('ccc'),
+    );
+    expect(plain(s.lastFrame())).not.toContain('bbbccc');
+
+    s.resolveGate(0);
+    s.unmount();
+  });
+
+  it('F5: lote `a\\rb\\rc\\r` num chunk só NÃO perde linhas (todas encaixam/enfileiram)', async () => {
+    const s = buildSession();
+    const injectSpy = vi.spyOn(s.controller, 'injectInput');
+    void s.controller.submit('objetivo inicial');
+    await waitFor(() => s.controller.current.phase === 'streaming');
+
+    s.stdin.write('dois\rtres\rquatro');
+    await waitFor(() => injectSpy.mock.calls.length >= 2);
+    const injected = injectSpy.mock.calls.map((c) => c[1]);
+    expect(injected).toEqual(['dois', 'tres']);
+    // o resto sem quebra fica no composer
+    await waitFor(() => plain(s.lastFrame()).includes('quatro'));
+
+    s.resolveGate(0);
+    injectSpy.mockRestore();
+    s.unmount();
+  });
+
+  it('F2: `\\`+Enter durante o trabalho vira nova linha (não envia)', async () => {
+    const s = buildSession();
+    const injectSpy = vi.spyOn(s.controller, 'injectInput');
+    void s.controller.submit('objetivo inicial');
+    await waitFor(() => s.controller.current.phase === 'streaming');
+
+    await pressUntil(
+      () => s.stdin.write('abc\\'),
+      () => plain(s.lastFrame()).includes('abc'),
+    );
+    s.stdin.write(CR);
+    await pressUntil(
+      () => s.stdin.write('def'),
+      () => plain(s.lastFrame()).includes('def'),
+    );
+    expect(injectSpy).not.toHaveBeenCalled();
+    const frame = plain(s.lastFrame());
+    expect(frame).not.toContain('abc\\');
+    expect(frame).not.toContain('abcdef');
+
+    s.resolveGate(0);
+    injectSpy.mockRestore();
     s.unmount();
   });
 

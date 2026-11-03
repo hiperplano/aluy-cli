@@ -69,6 +69,11 @@ interface SplashState {
   readonly resolveResume: ((choice: ResumeChoice) => void) | null;
   /** Sinaliza que o splash terminou (a App vai montar) — o <SplashApp> desmonta. */
   readonly done: boolean;
+  /**
+   * F6 — TYPE-AHEAD do boot: o texto digitado ENQUANTO o splash/pergunta está na tela. Antes
+   * era descartado sem aviso; agora vira o rascunho inicial do composer da App.
+   */
+  readonly typed: string;
 }
 
 export interface ResumeState {
@@ -99,6 +104,12 @@ export function buildResumeOfferPrompt(info: ResumeOfferInfo): BootPrompt {
       ? { session: { label, ...(info.labelColor ? { color: info.labelColor } : {}) } }
       : {}),
   };
+}
+
+/** F6 — a tecla é de RESPOSTA da pergunta de boot (vale só como 1ª tecla)? */
+function isAnswerKey(input: string, asking: boolean): boolean {
+  if (!asking) return false;
+  return /^[synl]$/i.test(input);
 }
 
 /** Sessões da lista (só o que o picker precisa). */
@@ -202,6 +213,14 @@ export class BootSplash {
     return this.skipPromise;
   }
 
+  /**
+   * F6 — o que o usuário digitou durante o splash/pergunta de boot (rascunho p/ o composer).
+   * Chamar ANTES do `finish()`.
+   */
+  typedAhead(): string {
+    return this.store.get().typed;
+  }
+
   /** Atualiza o verbo de carga ("carregando" → "descobrindo MCP" → …). */
   setStatus(status: string): void {
     this.store.set((s) => ({ ...s, status }));
@@ -293,6 +312,7 @@ export function createSplashStore(): SplashStore {
     resume: undefined,
     resolveResume: null,
     done: false,
+    typed: '',
   };
   const listeners = new Set<() => void>();
   return {
@@ -343,6 +363,38 @@ export function SplashApp(props: {
   // ⇒ retorna). Antes da 1ª pergunta / depois de resolver ⇒ no-op.
   useInput((input, key) => {
     const cur = props.store.get();
+    // F6 — TYPE-AHEAD do boot. REGRA (documentada): com uma pergunta aberta, as teclas de
+    // resposta (Enter/s/y/n/l/Esc) só RESPONDEM se forem a PRIMEIRA tecla — isto é, enquanto
+    // nada foi digitado. Qualquer outra tecla imprimível começa um rascunho; daí em diante
+    // TUDO que é imprimível (inclusive s/n/l) é texto, Enter é ignorado, Backspace edita e
+    // Esc APAGA o rascunho (e só então as teclas voltam a responder). Assim digitar "nova
+    // mensagem" no boot nunca responde "n" por acidente. Sem pergunta: o texto é guardado e
+    // a tecla segue pulando o piso do splash.
+    const asking = cur.resume !== undefined || cur.resolve !== null;
+    const inList = cur.resume?.view === 'list';
+    // (o Ink marca `meta` no Esc — por isso o Esc é tratado ANTES do filtro de meta/ctrl.)
+    if (!inList && cur.typed !== '' && key.escape) {
+      props.store.set((s) => ({ ...s, typed: '' }));
+      return;
+    }
+    if (!inList && !key.ctrl && !key.meta) {
+      const printable = input !== '' && !key.return && !key.escape && !key.tab;
+      const hasDraft = cur.typed !== '';
+      if (hasDraft && (key.backspace || key.delete)) {
+        props.store.set((s) => ({ ...s, typed: [...s.typed].slice(0, -1).join('') }));
+        return;
+      }
+      if (hasDraft && key.return) return; // Enter não responde com rascunho em curso.
+      if (printable && (hasDraft || !isAnswerKey(input, asking))) {
+        // só a parte antes de uma quebra (Enter grudado no lote não vira texto).
+        const text = input.split(/[\r\n]/)[0]!;
+        // eslint-disable-next-line no-control-regex
+        const clean = text.replace(/[\x00-\x1f\x7f]/g, '');
+        if (clean !== '') props.store.set((s) => ({ ...s, typed: s.typed + clean }));
+        if (!asking && !state.done) props.onSkip?.();
+        return;
+      }
+    }
     // Oferta de retomada RICA (nome+cor / lista): Enter retoma · l lista · n/Esc nova;
     // na lista ↑↓ navega · Enter retoma a escolhida · Esc volta à oferta.
     if (cur.resolveResume && cur.resume) {
@@ -397,8 +449,14 @@ export function SplashApp(props: {
   if (state.done) return null;
 
   // Oferta rica: a caixa (nome+cor) OU a lista de sessões (HistoryPicker reaproveitado).
+  const withDraft = (p: BootPrompt): BootPrompt =>
+    state.typed === ''
+      ? p
+      : { ...p, options: `digitando: «${state.typed}» · esc apaga e volta a responder` };
   const richPrompt =
-    state.resume?.view === 'offer' ? buildResumeOfferPrompt(state.resume.info) : undefined;
+    state.resume?.view === 'offer'
+      ? withDraft(buildResumeOfferPrompt(state.resume.info))
+      : undefined;
   const picker = state.resume?.view === 'list' ? pickerOf(state.resume) : undefined;
 
   return (
@@ -407,7 +465,7 @@ export function SplashApp(props: {
       frame={frame}
       {...(picker !== undefined ? { picker } : {})}
       {...(richPrompt !== undefined ? { richPrompt } : {})}
-      {...(state.prompt !== undefined ? { prompt: state.prompt } : {})}
+      {...(state.prompt !== undefined ? { prompt: withDraft(state.prompt) } : {})}
     />
   );
 }

@@ -80,21 +80,34 @@ export interface RunLinearOptions {
 export async function resolveLinearMentions(
   goal: string,
   reader: AttachReader | undefined,
-): Promise<{ goal: string; items: readonly HistoryItem[]; notes: readonly string[] }> {
+): Promise<{
+  goal: string;
+  items: readonly HistoryItem[];
+  notes: readonly string[];
+  /** F16 — caminhos efetivamente anexados (p/ o chip no transcript). */
+  attached: readonly string[];
+  /** F16 — menções que NÃO resolveram (arquivo inexistente/negado), com o motivo. */
+  refused: readonly { readonly path: string; readonly reason: string }[];
+}> {
   const mentions = parseAtMentions(goal);
-  if (!reader || mentions.length === 0) return { goal, items: [], notes: [] };
+  if (!reader || mentions.length === 0)
+    return { goal, items: [], notes: [], attached: [], refused: [] };
   const items: HistoryItem[] = [];
   const notes: string[] = [];
+  const attached: string[] = [];
+  const refused: { path: string; reason: string }[] = [];
   for (const m of mentions) {
     const res = await reader.attach(m.path);
     if (res.kind === 'ok') {
       items.push(res.item);
+      attached.push(res.path);
       notes.push(`[anexo] @${res.path}${res.truncated ? ' (truncado)' : ''}`);
     } else {
+      refused.push({ path: m.path, reason: res.reason });
       notes.push(`[anexo recusado] @${m.path} — ${res.reason}`);
     }
   }
-  return { goal: stripMentions(goal, mentions), items, notes };
+  return { goal: stripMentions(goal, mentions), items, notes, attached, refused };
 }
 
 /**

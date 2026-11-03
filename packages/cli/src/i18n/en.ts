@@ -19,7 +19,7 @@ export const en: PartialCatalog = {
   'composer.moreLines': 'lines',
 
   // ── FooterHints ───────────────────────────────────────────────────────────
-  'hints.idle': '{enter} send · / commands · {up} history',
+  'hints.idle': '{enter} send · \\⏎ new line · / commands · {up} history',
   'hints.thinking': 'esc interrupt · ctrl-b detach · ctrl-c×2 quit',
   'hints.streaming': 'esc interrupt · ctrl-b detach · ctrl-c×2 quit',
   'hints.ask': 'a approve · s always · n deny · e edit · esc cancel',
@@ -28,7 +28,8 @@ export const en: PartialCatalog = {
   'hints.palette': 'type to search · ↑↓ navigate · enter run · esc close',
   'hints.budget': 'c continue · n end',
   'hints.error': 'r retry · esc cancel',
-  'hints.workSubagents': 'esc stops the parent · ctrl-b detach · F8 stops all · ctrl-t view/stop · ctrl-c×2 quit',
+  'hints.workSubagents':
+    'esc stops the parent · ctrl-b detach · F8 stops all · ctrl-t view/stop · ctrl-c×2 quit',
   'hints.detachInline': 'ctrl-b detach',
   'hints.idleSubagents': 'enter sends · F8 stops the sub-agents · ctrl-t view/stop · ctrl-c×2 quit',
   'hints.ctrlcAgain': 'press ctrl-c again to quit',
@@ -120,7 +121,8 @@ export const en: PartialCatalog = {
   // (masked with •). See pt-BR.ts for the owner-reported motivation.
   'picker.provider.credential.label': '{provider} API key (hidden) — enter saves and applies',
   'picker.provider.credential.help': 'esc goes back to the list · the key is NEVER shown in clear',
-  'picker.provider.credential.retryTitle': '✗ the key failed the connection test — paste another one',
+  'picker.provider.credential.retryTitle':
+    '✗ the key failed the connection test — paste another one',
 
   // ── ModelPicker (/model) ──────────────────────────────────────────────────
   'picker.model.help': 'change model · ↑↓ navigate · enter select · esc close',

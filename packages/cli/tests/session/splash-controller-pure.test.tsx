@@ -72,6 +72,7 @@ describe('createSplashStore — store observável fininho', () => {
       resume: undefined,
       resolveResume: null,
       done: false,
+      typed: '',
     });
   });
 
