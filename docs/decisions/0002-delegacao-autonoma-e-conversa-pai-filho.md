@@ -121,3 +121,14 @@ conversou. O diálogo de permissão mostra `[l] lembrar` apenas onde é permitid
 - Quem usava o `ask` do `spawn_agent` como freio precisa configurá-lo (uma linha de config).
 - O config ganha `permissions.alwaysAllow`; arquivos antigos continuam válidos.
 - Nenhum teste de comportamento de filho muda: o canal novo só existe se alguém escreve nele.
+
+## Adendo — dica de delegação no loop
+
+A regra de prompt sozinha não fez o modelo (glm) delegar: só o cenário `auditoria-ampla` delegou.
+Agora o loop do agente PRINCIPAL injeta **uma** dica curta (`reanchor`, canal `assistant` de
+auto-lembrete, o mesmo do self-check; nunca `user_inject` nem `system`) quando: o `update_plan`
+tem >= 3 passos abertos independentes (marcados `parallel: true`/`owner: 'subagente'`, ou com
+arquivos/áreas próprios sem alvo em comum) e o modelo então executa uma tool de efeito sem ter
+chamado `spawn_agent`. No máximo uma vez por execução, nunca para plano pequeno, e desligada com
+`ALUY_DELEGATION_NUDGE=0`. Sub-agentes nunca recebem. É só uma sugestão: `spawn_agent` segue por
+`decide()`. Código: `cli-core/src/agent/delegation-nudge.ts`.
