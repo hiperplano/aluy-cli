@@ -22,13 +22,13 @@ import { SessionController } from '../../src/session/controller.js';
 import { buildTurnRecap } from '../../src/session/turn-recap.js';
 
 // rótulos planos: o teste trava a PRESENÇA/continuidade do indicador, não o verbo sorteado.
-const verbosAntes = process.env.ALUY_VERBOS;
+const verbosAntes = process.env.ALUY_SPINNER_VERBS;
 beforeAll(() => {
-  process.env.ALUY_VERBOS = 'simples';
+  process.env.ALUY_SPINNER_VERBS = 'plain';
 });
 afterAll(() => {
-  if (verbosAntes === undefined) delete process.env.ALUY_VERBOS;
-  else process.env.ALUY_VERBOS = verbosAntes;
+  if (verbosAntes === undefined) delete process.env.ALUY_SPINNER_VERBS;
+  else process.env.ALUY_SPINNER_VERBS = verbosAntes;
 });
 
 const ESC = String.fromCharCode(27);

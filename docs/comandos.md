@@ -94,13 +94,13 @@ Dentro da sessão, sem sair do fluxo.
 
 ### Instalação e aparência
 
-|                                                                                    |                                           |
-| ---------------------------------------------------------------------------------- | ----------------------------------------- |
-| `/doctor`                                                                          | diagnóstico da instalação                 |
-| `/upgrade`                                                                         | atualiza para a versão mais nova do canal |
-| `/login` · `/logout` · `/whoami`                                                   | conta                                     |
-| `/theme` · `/lang` · `/split` · `/fullscreen` · `/notify` · `/suggest` · `/rodape` | interface                                 |
-| `/help` · `/quit`                                                                  |                                           |
+|                                                                                        |                                           |
+| -------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `/doctor`                                                                              | diagnóstico da instalação                 |
+| `/upgrade`                                                                             | atualiza para a versão mais nova do canal |
+| `/login` · `/logout` · `/whoami`                                                       | conta                                     |
+| `/theme` · `/lang` · `/split` · `/fullscreen` · `/notify` · `/suggest` · `/statusline` | interface                                 |
+| `/help` · `/quit`                                                                      |                                           |
 
 ## Ferramentas nativas
 
@@ -160,4 +160,4 @@ falha, e nada é enviado para `api.telegram.org`.
 
 ### `/notify`
 
-`/notify tudo | atencao | nada` escolhe quando o Aluy avisa (som + notificação de desktop): `tudo` (padrão) avisa quando precisa de você e quando conclui um turno longo (5 s ou mais); `atencao` avisa só quando precisa de você; `nada` silencia. `on` = `tudo`, `off` = `nada`. Sem argumento mostra o modo atual. A escolha fica em `~/.aluy/config.json`; `ALUY_NOTIFY` sobrescreve.
+`/notify all | attention | off` escolhe quando o Aluy avisa (som + notificação de desktop): `all` (padrão) avisa quando precisa de você e quando conclui um turno longo (5 s ou mais); `attention` avisa só quando precisa de você; `off` silencia. `on` = `all`. Sem argumento mostra o modo atual. A escolha fica em `~/.aluy/config.json`; `ALUY_NOTIFY` sobrescreve.

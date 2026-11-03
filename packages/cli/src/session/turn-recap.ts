@@ -49,9 +49,25 @@ const pareceCaminho = (s: string): boolean => SEPARADORES.test(s);
  * subcomando (`npm test`, `git status`). Para o resto, o primeiro token basta.
  */
 const RUNNERS: ReadonlySet<string> = new Set([
-  'npm', 'npx', 'pnpm', 'yarn', 'bun', 'deno',
-  'git', 'cargo', 'go', 'make', 'docker', 'kubectl',
-  'node', 'python', 'python3', 'py', 'dotnet', 'mvn', 'gradle',
+  'npm',
+  'npx',
+  'pnpm',
+  'yarn',
+  'bun',
+  'deno',
+  'git',
+  'cargo',
+  'go',
+  'make',
+  'docker',
+  'kubectl',
+  'node',
+  'python',
+  'python3',
+  'py',
+  'dotnet',
+  'mvn',
+  'gradle',
 ]);
 
 function comandoCurto(alvo: string): string {

@@ -104,20 +104,21 @@ export interface NotifyState {
 }
 
 const NOTIFY_MODE_DESC: Readonly<Record<NotifyMode, string>> = {
-  tudo: 'tudo — avisa quando precisa de você (aprovação/pergunta) e quando conclui um turno longo',
-  atencao: 'atencao — avisa só quando precisa de você; turno concluído fica em silêncio',
-  nada: 'nada — sem som nem notificação de desktop',
+  all: 'all (tudo) — avisa quando precisa de você (aprovação/pergunta) e quando conclui um turno longo',
+  attention:
+    'attention (atenção) — avisa só quando precisa de você; turno concluído fica em silêncio',
+  off: 'off (nada) — sem som nem notificação de desktop',
 };
 
 /**
- * EST-0963 — decide o EFEITO do `/notify`. `args`: `tudo` | `atencao` | `nada`
- * (legados: `on` ⇒ tudo, `off` ⇒ nada). Sem argumento (ou inválido) NÃO muda nada:
+ * EST-0963 — decide o EFEITO do `/notify`. `args`: `all` | `attention` | `off`
+ * (`on` ⇒ all). Sem argumento (ou inválido) NÃO muda nada:
  * mostra o modo atual e as opções. PURO. Texto neutro — nunca conteúdo da conversa.
  */
 export function buildNotifyEffect(args: string, state: NotifyState): SlashEffect {
   const arg = args.trim();
   const parsed = parseNotifyMode(arg);
-  const current: NotifyMode = state.mode ?? (state.enabled ? 'tudo' : 'nada');
+  const current: NotifyMode = state.mode ?? (state.enabled ? 'all' : 'off');
   const ttyWarn = state.tty
     ? []
     : ['⚠ sem TTY (saída piped/CI) — o sino não soa aqui; a preferência vale num terminal.'];
@@ -126,8 +127,8 @@ export function buildNotifyEffect(args: string, state: NotifyState): SlashEffect
     const lines = [
       ...(arg === '' ? [] : [`modo desconhecido: "${arg}"`]),
       `notificações: ${current}`,
-      'uso: /notify tudo | atencao | nada   (on = tudo, off = nada)',
-      ...(['tudo', 'atencao', 'nada'] as const).map(
+      'uso: /notify all | attention | off   (on = all)',
+      ...(['all', 'attention', 'off'] as const).map(
         (m) => `  ${m === current ? '●' : '○'} ${NOTIFY_MODE_DESC[m]}`,
       ),
       'texto neutro — nunca o conteúdo da conversa. Salvo em ~/.aluy/config.json.',
@@ -775,17 +776,17 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           ],
         },
       };
-    case 'rodape':
+    case 'statusline':
       // RODAPÉ — a App intercepta no `runCommand` (UI pura). Cair aqui só sem TUI.
       return {
         kind: 'note',
         note: {
           title: 'rodapé',
           lines: [
-            '/rodape completo|parcial|oculto — o que aparece abaixo do composer.',
-            'completo: painel inteiro + dicas · parcial: 1 linha com o essencial e os avisos ·',
-            'oculto: nada (o `⚠ yolo` fica ao lado do prompt). F2 alterna; a pref PERSISTE (rodape).',
-            'terminal baixo (≤ 30 linhas) usa parcial sozinho, a menos que você escolha. ALUY_RODAPE força.',
+            '/statusline full|compact|hidden — o que aparece abaixo do composer.',
+            'full: painel inteiro + dicas · compact: 1 linha com o essencial e os avisos ·',
+            'hidden: nada (o `⚠ yolo` fica ao lado do prompt). F2 alterna; a pref PERSISTE (statusline).',
+            'terminal baixo (≤ 30 linhas) usa compact sozinho, a menos que você escolha. ALUY_STATUSLINE força.',
           ],
         },
       };

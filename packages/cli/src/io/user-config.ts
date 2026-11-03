@@ -100,17 +100,17 @@ export interface UserConfig {
    */
   readonly suggestions?: boolean;
   /**
-   * Modo das notificações (`/notify`): `tudo` | `atencao` | `nada`. Ausente ⇒ `tudo`.
+   * Modo das notificações (`/notify`): `all` | `attention` | `off`. Ausente ⇒ `all`.
    * Precedência: `ALUY_NOTIFY` (env) > este campo > default. Só pref de UI (CLI-SEC-7).
    */
   readonly notify?: NotifyMode;
   /**
-   * RODAPÉ (tudo abaixo do composer) — `completo` (painel inteiro + dicas), `parcial` (1 linha
-   * com o essencial + avisos) ou `oculto` (nada além do funcionalmente necessário; o `⚠ yolo`
-   * nunca some). Ausente ⇒ automático: `completo`, ou `parcial` em terminal baixo (≤ 30 linhas).
-   * Precedência: `ALUY_RODAPE` (env) > este campo (`/rodape`, F2) > automático. Só UI.
+   * RODAPÉ (tudo abaixo do composer) — `full` (painel inteiro + dicas), `compact` (1 linha
+   * com o essencial + avisos) ou `hidden` (nada além do funcionalmente necessário; o `⚠ yolo`
+   * nunca some). Ausente ⇒ automático: `full`, ou `compact` em terminal baixo (≤ 30 linhas).
+   * Precedência: `ALUY_STATUSLINE` (env) > este campo (`/statusline`, F2) > automático. Só UI.
    */
-  readonly rodape?: RodapeModo;
+  readonly statusline?: StatuslineMode;
   /**
    * F-AUTOUPDATE (pedido do dono: "quando tiver update no npm, instalar automaticamente")
    * — liga/desliga a atualização automática. Ausente ⇒ LIGADO (a decisão dele).
@@ -893,7 +893,7 @@ function sanitize(raw: unknown): UserConfig {
     fullscreen?: boolean;
     suggestions?: boolean;
     notify?: NotifyMode;
-    rodape?: RodapeModo;
+    statusline?: StatuslineMode;
     autoUpdate?: boolean;
     backend?: 'broker' | 'local';
     localProvider?: string;
@@ -950,13 +950,13 @@ function sanitize(raw: unknown): UserConfig {
   // fullscreen. Só sobrevive como boolean genuíno; lixo/ausente ⇒ default ON (resolvido
   // em `resolveInitialSuggestions`, não aqui — aqui só preservamos o que foi salvo). NUNCA lança.
   if (typeof obj.suggestions === 'boolean') out.suggestions = obj.suggestions;
-  // notify — só os 3 modos canônicos sobrevivem (lixo ⇒ descartado ⇒ default `tudo`).
+  // notify — só os 3 modos canônicos sobrevivem (lixo ⇒ descartado ⇒ default `all`).
   if (typeof obj.notify === 'string') {
     const m = parseNotifyMode(obj.notify);
     if (m !== undefined) out.notify = m;
   }
   // RODAPÉ — só os 3 modos conhecidos sobrevivem; lixo some ⇒ automático.
-  if (isRodapeModo(obj.rodape)) out.rodape = obj.rodape;
+  if (isStatuslineMode(obj.statusline)) out.statusline = obj.statusline;
   // F-AUTOUPDATE — booleano de comportamento, MESMA disciplina dos de UI acima: só
   // boolean genuíno entra (string "true" do disco não vira `true` por acidente).
   if (typeof obj.autoUpdate === 'boolean') out.autoUpdate = obj.autoUpdate;
@@ -1237,9 +1237,9 @@ export class UserConfigStore {
     return this.save({ suggestions });
   }
 
-  /** RODAPÉ — persiste o modo escolhido (`/rodape` / F2), preservando as demais prefs. */
-  saveRodape(rodape: RodapeModo): boolean {
-    return this.save({ rodape });
+  /** RODAPÉ — persiste o modo escolhido (`/statusline` / F2), preservando as demais prefs. */
+  saveStatusline(statusline: StatuslineMode): boolean {
+    return this.save({ statusline });
   }
 
   /**
@@ -1493,38 +1493,41 @@ export function resolveInitialFullscreen(flag: boolean | undefined, config: User
 }
 
 /** Os 3 modos do rodapé (tudo abaixo do composer). */
-export type RodapeModo = 'completo' | 'parcial' | 'oculto';
-export const RODAPE_MODOS: readonly RodapeModo[] = ['completo', 'parcial', 'oculto'];
-export function isRodapeModo(v: unknown): v is RodapeModo {
-  return v === 'completo' || v === 'parcial' || v === 'oculto';
+export type StatuslineMode = 'full' | 'compact' | 'hidden';
+export const STATUSLINE_MODES: readonly StatuslineMode[] = ['full', 'compact', 'hidden'];
+export function isStatuslineMode(v: unknown): v is StatuslineMode {
+  return v === 'full' || v === 'compact' || v === 'hidden';
 }
 
-/** Terminal BAIXO: até esta altura o rodapé automático é `parcial`. */
-export const RODAPE_LINHAS_CURTAS = 30;
+/** Terminal BAIXO: até esta altura o rodapé automático é `compact`. */
+export const STATUSLINE_SHORT_ROWS = 30;
 
 /**
- * Modo do rodapé NA PARTIDA. `escolhido` = o que o dono fixou (env `ALUY_RODAPE` > config);
- * `undefined` ⇒ automático (`completo`, ou `parcial` em terminal ≤ 30 linhas — ver
- * `rodapeEfetivo`). PURO.
+ * Modo do rodapé NA PARTIDA. `escolhido` = o que o dono fixou (env `ALUY_STATUSLINE` > config);
+ * `undefined` ⇒ automático (`full`, ou `compact` em terminal ≤ 30 linhas — ver
+ * `effectiveStatusline`). PURO.
  */
-export function resolveInitialRodape(
+export function resolveInitialStatusline(
   config: UserConfig,
   env: NodeJS.ProcessEnv = process.env,
-): RodapeModo | undefined {
-  const raw = env['ALUY_RODAPE']?.trim().toLowerCase();
-  if (isRodapeModo(raw)) return raw;
-  return config.rodape;
+): StatuslineMode | undefined {
+  const raw = env['ALUY_STATUSLINE']?.trim().toLowerCase();
+  if (isStatuslineMode(raw)) return raw;
+  return config.statusline;
 }
 
-/** O modo EFETIVO: escolha explícita vence; senão `parcial` em tela baixa, `completo` no resto. */
-export function rodapeEfetivo(escolhido: RodapeModo | undefined, rows: number): RodapeModo {
+/** O modo EFETIVO: escolha explícita vence; senão `compact` em tela baixa, `full` no resto. */
+export function effectiveStatusline(
+  escolhido: StatuslineMode | undefined,
+  rows: number,
+): StatuslineMode {
   if (escolhido !== undefined) return escolhido;
-  return rows > 0 && rows <= RODAPE_LINHAS_CURTAS ? 'parcial' : 'completo';
+  return rows > 0 && rows <= STATUSLINE_SHORT_ROWS ? 'compact' : 'full';
 }
 
-/** Próximo modo do ciclo F2: completo → parcial → oculto → completo. */
-export function proximoRodape(atual: RodapeModo): RodapeModo {
-  return atual === 'completo' ? 'parcial' : atual === 'parcial' ? 'oculto' : 'completo';
+/** Próximo modo do ciclo F2: full → compact → hidden → full. */
+export function nextStatusline(atual: StatuslineMode): StatuslineMode {
+  return atual === 'full' ? 'compact' : atual === 'compact' ? 'hidden' : 'full';
 }
 
 /**

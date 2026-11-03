@@ -30,34 +30,43 @@ export type NotifyReason = 'attention' | 'done';
 
 /**
  * Modo de notificação (preferência do usuário):
- *  - `tudo`    — atenção ("precisa de você") + turno concluído (o padrão);
- *  - `atencao` — só quando o Aluy precisa de você; turno concluído fica mudo;
- *  - `nada`    — silêncio total.
+ *  - `all`       — atenção ("precisa de você") + turno concluído (o padrão);
+ *  - `attention` — só quando o Aluy precisa de você; turno concluído fica mudo;
+ *  - `off`       — silêncio total.
  */
-export type NotifyMode = 'tudo' | 'atencao' | 'nada';
+export type NotifyMode = 'all' | 'attention' | 'off';
 
-export const NOTIFY_MODES: readonly NotifyMode[] = ['tudo', 'atencao', 'nada'];
+export const NOTIFY_MODES: readonly NotifyMode[] = ['all', 'attention', 'off'];
 
 /**
- * Interpreta um texto como modo. Aceita os 3 modos (com/sem acento) e os legados:
- * on/1/true/yes/ligar ⇒ `tudo`; off/0/false/no/desligar ⇒ `nada`. Desconhecido ⇒
+ * Interpreta um texto como modo. Aceita os 3 modos e os legados: on/1/true/yes/ligar ⇒
+ * `all`; 0/false/no/desligar ⇒ `off`; e os nomes PT antigos (`tudo|atencao|nada`, migração
+ * de configs já gravadas) ⇒ `all|attention|off`. Desconhecido ⇒
  * `undefined` (quem chama decide o fallback).
  */
 export function parseNotifyMode(v: string | undefined): NotifyMode | undefined {
   if (v === undefined) return undefined;
   const s = v.trim().toLowerCase();
-  if (s === 'tudo' || s === 'on' || s === '1' || s === 'true' || s === 'yes' || s === 'ligar')
-    return 'tudo';
-  if (s === 'atencao' || s === 'atenção') return 'atencao';
-  if (s === 'nada' || s === 'off' || s === '0' || s === 'false' || s === 'no' || s === 'desligar')
-    return 'nada';
+  if (
+    s === 'all' ||
+    s === 'tudo' ||
+    s === 'on' ||
+    s === '1' ||
+    s === 'true' ||
+    s === 'yes' ||
+    s === 'ligar'
+  )
+    return 'all';
+  if (s === 'attention' || s === 'atencao' || s === 'atenção') return 'attention';
+  if (s === 'off' || s === 'nada' || s === '0' || s === 'false' || s === 'no' || s === 'desligar')
+    return 'off';
   return undefined;
 }
 
-/** O modo deixa passar este motivo? (`done` só no `tudo`; `attention` salvo no `nada`.) */
+/** O modo deixa passar este motivo? (`done` só no `all`; `attention` salvo no `off`.) */
 export function modeAllows(mode: NotifyMode, reason: NotifyReason): boolean {
-  if (mode === 'nada') return false;
-  return reason === 'attention' || mode === 'tudo';
+  if (mode === 'off') return false;
+  return reason === 'attention' || mode === 'all';
 }
 
 /** Rótulos FIXOS por motivo. Nunca interpolam dado da sessão (texto neutro). */
@@ -79,7 +88,7 @@ export interface NotificationPort {
   readonly enabled: boolean;
   /** Modo corrente (preferência), independente de TTY. */
   readonly mode: NotifyMode;
-  /** Liga (`tudo`) / desliga (`nada`) em runtime. Sem efeito fora de TTY. */
+  /** Liga (`all`) / desliga (`off`) em runtime. Sem efeito fora de TTY. */
   setEnabled(on: boolean): void;
   /** Troca o modo em runtime (comando `/notify`). */
   setMode(mode: NotifyMode): void;
@@ -121,14 +130,14 @@ export class TerminalNotificationPort implements NotificationPort {
     this.write = opts.write;
     this.isTty = opts.isTty ?? false;
     this.desktop = opts.desktop ?? true;
-    this.modeValue = opts.mode ?? (opts.enabled === false ? 'nada' : 'tudo');
+    this.modeValue = opts.mode ?? (opts.enabled === false ? 'off' : 'all');
   }
 
   get enabled(): boolean {
     // Fora de TTY a porta está SEMPRE efetivamente desligada (nunca emite), mesmo
     // que o toggle do usuário esteja "on" — o gate de TTY vence. Isso mantém o
     // contrato "/notify on não faz nada num pipe" honesto na própria leitura.
-    return this.modeValue !== 'nada' && this.isTty;
+    return this.modeValue !== 'off' && this.isTty;
   }
 
   get mode(): NotifyMode {
@@ -136,7 +145,7 @@ export class TerminalNotificationPort implements NotificationPort {
   }
 
   setEnabled(on: boolean): void {
-    this.modeValue = on ? 'tudo' : 'nada';
+    this.modeValue = on ? 'all' : 'off';
   }
 
   setMode(mode: NotifyMode): void {
@@ -167,7 +176,7 @@ export class TerminalNotificationPort implements NotificationPort {
 export const NO_OP_NOTIFICATION_PORT: NotificationPort = {
   notify: () => {},
   enabled: false,
-  mode: 'nada',
+  mode: 'off',
   setEnabled: () => {},
   setMode: () => {},
 };
@@ -176,7 +185,7 @@ export const NO_OP_NOTIFICATION_PORT: NotificationPort = {
 export interface NotifyConfig {
   /** Estado inicial do toggle. `ALUY_NOTIFY=0` (ou false/off/no) ⇒ desligado. */
   readonly enabled: boolean;
-  /** Modo efetivo: env `ALUY_NOTIFY` > config salva > `tudo`. */
+  /** Modo efetivo: env `ALUY_NOTIFY` > config salva > `all`. */
   readonly mode: NotifyMode;
   /** Emitir OSC 9 (desktop)? `NO_COLOR` desliga o OSC (é sequência de escape). */
   readonly desktop: boolean;
@@ -184,15 +193,15 @@ export interface NotifyConfig {
 
 /**
  * Resolve a config de notificação. Precedência: env `ALUY_NOTIFY` (3 modos ou
- * legados on/off/0/1) > `saved` (config.json `notify`) > `tudo`. `NO_COLOR` desliga
+ * legados on/off/0/1) > `saved` (config.json `notify`) > `all`. `NO_COLOR` desliga
  * o OSC (desktop) mas NÃO o BEL — o sino não é cor. Puro: recebe o `env`.
  */
 export function loadNotifyConfig(
   env: NodeJS.ProcessEnv = process.env,
   saved?: NotifyMode,
 ): NotifyConfig {
-  const mode = parseNotifyMode(env.ALUY_NOTIFY) ?? saved ?? 'tudo';
+  const mode = parseNotifyMode(env.ALUY_NOTIFY) ?? saved ?? 'all';
   // NO_COLOR (qualquer valor, até vazio) desliga o canal de escape OSC 9.
   const desktop = env.NO_COLOR === undefined;
-  return { enabled: mode !== 'nada', mode, desktop };
+  return { enabled: mode !== 'off', mode, desktop };
 }
