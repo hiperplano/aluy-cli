@@ -125,11 +125,17 @@ function argvDoAluy(o, prompt) {
   return a;
 }
 
+/** Se o build do aluy mora sob /tmp (escondido pelo tmpfs), monta o checkout em ro. */
+function roExtraDe(entry) {
+  if (!entry.startsWith('/tmp/')) return [];
+  return [resolve(entry, '..', '..', '..', '..', '..')];
+}
+
 function executar(o, cwd, prompt) {
   return new Promise((res) => {
     const t0 = Date.now();
     const cmd = [process.execPath, ...argvDoAluy(o, prompt)];
-    const [bin, ...args] = o.sandbox ? confinar(cwd, cmd) : cmd;
+    const [bin, ...args] = o.sandbox ? confinar(cwd, cmd, { roExtra: roExtraDe(o.entry) }) : cmd;
     const filho = spawn(bin, args, {
       cwd,
       env: { ...process.env, NO_COLOR: '1' },

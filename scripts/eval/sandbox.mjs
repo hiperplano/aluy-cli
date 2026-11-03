@@ -23,7 +23,7 @@ export function bwrapDisponivel() {
  * Prefixo do comando: `bwrap <flags> --chdir <workDir> --`. `workDir` é o ÚNICO
  * caminho gravável (além do tmpfs /tmp e do tmpfs ~/.aluy, ambos descartáveis).
  */
-export function bwrapArgs(workDir, { home = homedir(), existe = existsSync } = {}) {
+export function bwrapArgs(workDir, { home = homedir(), existe = existsSync, roExtra = [] } = {}) {
   const aluyHome = join(home, '.aluy');
   const a = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp'];
   // ~/.aluy descartável + só leitura do que a autenticação precisa.
@@ -32,6 +32,9 @@ export function bwrapArgs(workDir, { home = homedir(), existe = existsSync } = {
     const p = join(aluyHome, f);
     if (existe(p)) a.push('--ro-bind', p, p);
   }
+  // Diretórios extras SOMENTE-LEITURA (ex.: um checkout do aluy que more sob /tmp,
+  // que o tmpfs esconderia).
+  for (const d of roExtra) a.push('--ro-bind', d, d);
   // Único ponto gravável de verdade (montado DEPOIS do tmpfs /tmp, pode morar sob ele).
   a.push('--bind', workDir, workDir);
   a.push('--die-with-parent', '--new-session', '--chdir', workDir, '--');
