@@ -2016,6 +2016,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   void _lbu;
   const built = buildSession({
     ...optsForBuild,
+    // ADR aluy-cli 0002 — "sempre permitir" lembrado (lê/grava no config do usuário).
+    rememberedAllow: savedConfig.permissions?.alwaysAllow ?? [],
+    onRememberTool: (tool: string) => {
+      configStore.saveAlwaysAllowTool(tool);
+    },
     // ADR-0120 / EST-1113 — sob `backend:'local'`, injeta o LocalModelClient como o
     // `ModelClient` da sessão (mesmo contrato do broker). O wiring o usa p/ o caller
     // de stream/loop sem mudar nada. `undefined` (modo broker) ⇒ o wiring cria o

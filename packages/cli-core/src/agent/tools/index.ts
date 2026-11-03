@@ -76,6 +76,22 @@ export {
   type AgentsControlPort,
 } from './agents-manage.js';
 
+// CONVERSA PAI ⇄ FILHO (ADR aluy-cli 0002) — `agent_send` (só pai) e `ask_parent` (só filho).
+export {
+  agentSendTool,
+  askParentTool,
+  AGENT_SEND_TOOL_NAME,
+  ASK_PARENT_TOOL_NAME,
+  MESSAGING_LIMITS,
+  PARENT_INSTRUCTION_ORIGIN,
+  parentInstructionItem,
+  childNoteText,
+  clampMessage,
+  type AgentMessagingPort,
+  type MessagingAck,
+  type ParentNoteKind,
+} from './agent-messaging.js';
+
 // EST-1110 · ADR-0114 — `perguntar`: tipos + tool de PERGUNTA ao usuário (PORTÁVEL). A
 // porta `QuestionPort` é injetada pelo @hiperplano/aluy-cli (TuiQuestionResolver); a tool entra em
 // NATIVE_TOOLS (effect:'read'). Os tipos/normalizadores são consumidos pelos testes e

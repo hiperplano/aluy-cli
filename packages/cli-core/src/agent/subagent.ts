@@ -51,6 +51,17 @@ import { DEFAULT_LIMITS, type SessionLimits } from './limits.js';
 import { ToolRegistry } from './tools/registry.js';
 import { reportStatusTool, REPORT_STATUS_TOOL_NAME } from './tools/agents-manage.js';
 import { SPAWN_AGENT_TOOL_NAME } from './tools/spawn-agent.js';
+import {
+  AGENT_SEND_TOOL_NAME,
+  ASK_PARENT_TOOL_NAME,
+  MESSAGING_LIMITS,
+  askParentTool,
+  clampMessage,
+  parentInstructionItem,
+  type MessagingAck,
+  type ParentNoteKind,
+} from './tools/agent-messaging.js';
+import type { HistoryItem } from './context.js';
 import { QUESTION_TOOL_NAME } from './tools/question.js';
 import type { NativeTool, ToolPorts } from './tools/types.js';
 import { resolveChildWorktree, type WorktreeHandle } from './worktree-port.js';
@@ -611,7 +622,7 @@ export function childEngineOf(
   return {
     decide(call: ToolCall): PermissionVerdict {
       // E-A1/GS-MD2: `spawn_agent` SEMPRE negado no filho (acima do toolScope).
-      if (call.name === SPAWN_AGENT_TOOL_NAME) {
+      if (call.name === SPAWN_AGENT_TOOL_NAME || call.name === AGENT_SEND_TOOL_NAME) {
         return {
           decision: 'deny',
           reason:
@@ -881,6 +892,91 @@ export class SubAgentSpawner {
    * "indisponível" em vez de fingir que anotou.
    */
   onChildReport?: (label: string, nota: string) => boolean;
+  /**
+   * Gancho de NOTA do filho ao pai (`ask_parent`). O locus entrega ao pai como OBSERVAÇÃO
+   * (dado não-confiável). Os tetos (quantidade/tamanho) já foram aplicados aqui. Ausente ⇒
+   * `ask_parent` responde que não há canal.
+   */
+  onChildNote?: (label: string, message: string, kind: ParentNoteKind) => boolean;
+  /**
+   * Gancho de ENTREGA ao filho (UI/auditoria): chamado depois que uma mensagem entrou na fila
+   * viva dele. `from` é a origem rotulada ("do orquestrador" | "usuário").
+   */
+  onInjectedToChild?: (label: string, message: string, from: string) => void;
+  /**
+   * CANAIS VIVOS: label → fila de entrada do filho em execução. Existe só enquanto o
+   * `runChild` corre (inclui filhos desacoplados — o spawner segue dono deles).
+   */
+  private readonly liveChannels = new Map<
+    string,
+    { queue: HistoryItem[]; sentByParent: number; notesToParent: number }
+  >();
+
+  /** O filho `label` está rodando e aceita mensagens? */
+  hasLiveChild(label: string): boolean {
+    return this.liveChannels.has(label);
+  }
+
+  /**
+   * Entrega `item` (um `user_inject`) na fila VIVA do filho `label` — o loop dele a drena no
+   * topo da próxima iteração (`pollInjected`). NÃO muda a engine do filho (escopo ⊆ pai; toda
+   * tool derivada re-passa `decide()`). Usado pelo `agent_send` e pela injeção do dono.
+   */
+  injectIntoChild(label: string, item: HistoryItem): boolean {
+    const ch = this.liveChannels.get(label);
+    if (!ch || item.role !== 'user_inject') return false;
+    ch.queue.push(item);
+    return true;
+  }
+
+  /** PAI → filho (`agent_send`), com os tetos anti-runaway. A origem é carimbada AQUI. */
+  sendFromParent(label: string, message: string): MessagingAck {
+    const ch = this.liveChannels.get(label);
+    if (!ch) {
+      return {
+        ok: false,
+        error:
+          `sub-agente "${label}" não está rodando (não existe, já terminou ou ainda espera vaga na fila). ` +
+          'Veja os rótulos vivos com `agents_status`; se ele já terminou, spawne um novo com o contexto necessário.',
+      };
+    }
+    if (ch.sentByParent >= MESSAGING_LIMITS.parentToChildPerChild) {
+      return {
+        ok: false,
+        error: `teto de ${MESSAGING_LIMITS.parentToChildPerChild} mensagens para "${label}" atingido (anti-runaway). Deixe-o terminar ou pare-o e spawne outro.`,
+      };
+    }
+    if (ch.queue.length >= MESSAGING_LIMITS.parentToChildPending) {
+      return {
+        ok: false,
+        error: `"${label}" ainda não leu as ${ch.queue.length} mensagens anteriores — aguarde ele consumir antes de mandar outra.`,
+      };
+    }
+    const item = parentInstructionItem(message);
+    ch.queue.push(item);
+    ch.sentByParent += 1;
+    if (item.role === 'user_inject') this.onInjectedToChild?.(label, item.text, item.origin);
+    return { ok: true };
+  }
+
+  /** FILHO → pai (`ask_parent`), com os tetos. Entrega pelo gancho do locus. */
+  private noteToParent(label: string, message: string, kind: ParentNoteKind): MessagingAck {
+    const ch = this.liveChannels.get(label);
+    if (!ch) return { ok: false, error: 'canal encerrado.' };
+    if (!this.onChildNote) {
+      return { ok: false, error: 'não há canal para o orquestrador neste locus.' };
+    }
+    if (ch.notesToParent >= MESSAGING_LIMITS.childToParentPerChild) {
+      return {
+        ok: false,
+        error: `teto de ${MESSAGING_LIMITS.childToParentPerChild} mensagens ao orquestrador atingido (anti-runaway). Siga com sua melhor suposição e entregue o resultado final.`,
+      };
+    }
+    const ok = this.onChildNote(label, clampMessage(message), kind);
+    if (!ok) return { ok: false, error: 'o orquestrador não pôde receber a mensagem agora.' };
+    ch.notesToParent += 1;
+    return { ok: true };
+  }
   private readonly childTools: readonly NativeTool<ToolPorts>[];
   private readonly askResolver?: AskResolver;
   private readonly budget: SharedBudget;
@@ -928,15 +1024,22 @@ export class SubAgentSpawner {
         t.name !== SPAWN_AGENT_TOOL_NAME &&
         t.name !== QUESTION_TOOL_NAME &&
         t.name !== 'agents_status' &&
-        t.name !== 'agents_stop',
+        t.name !== 'agents_stop' &&
+        // Conversa PAI ⇄ FILHO (ADR 0002): o filho NÃO manda mensagem a irmãos nem ao pai
+        // por `agent_send` — só ao orquestrador, por `ask_parent`.
+        t.name !== AGENT_SEND_TOOL_NAME,
     );
     // RELATAR, sim. A árvore sabe o mecânico ("rodando run_command: npm test"); o que o
     // filho está fazendo CONCEITUALMENTE só ele sabe, e sem isso o `agents_status` do
     // pai responde metade da pergunta do dono ("eu quero que vc veja o que ele está
     // fazendo"). Sem efeito no mundo: escreve um rótulo curto no nó dele.
-    this.childTools = semDelegar.some((t) => t.name === REPORT_STATUS_TOOL_NAME)
+    const comRelato = semDelegar.some((t) => t.name === REPORT_STATUS_TOOL_NAME)
       ? semDelegar
       : [...semDelegar, reportStatusTool];
+    // FALAR COM O PAI (`ask_parent`) — só o filho tem; chega ao pai como DADO (CLI-SEC-4).
+    this.childTools = comRelato.some((t) => t.name === ASK_PARENT_TOOL_NAME)
+      ? comRelato
+      : [...comRelato, askParentTool];
     if (opts.askResolver) this.askResolver = opts.askResolver;
     this.budget = opts.sharedBudget ?? new SharedBudget(opts.limits ?? DEFAULT_LIMITS);
     // ADR-0150 (balde b) — precedência opção(flag) > env > config > default, clampada
@@ -1082,7 +1185,13 @@ export class SubAgentSpawner {
     const childEngine = childEngineOf(
       this.permission,
       profile.toolScope,
-      effectiveRoomActive ? ROOM_COORD_TOOLS : undefined,
+      // `ask_parent`/`report_status` são comunicação, não capacidade nova: isentas do
+      // `toolScope` do `.md` (senão um agente com `tools:` restrito não conseguiria falar).
+      new Set<string>([
+        ASK_PARENT_TOOL_NAME,
+        REPORT_STATUS_TOOL_NAME,
+        ...(effectiveRoomActive ? ROOM_COORD_TOOLS : []),
+      ]),
     );
 
     // EST-SUBAGENT-MODEL — qual CALLER este filho usa: se o `.md` dele declara `model:`
@@ -1201,6 +1310,10 @@ export class SubAgentSpawner {
           ? articulationNote
           : baseInstructions;
 
+    // Canal vivo deste filho (mensagens do pai/dono). Removido no `finally` abaixo.
+    const channel = { queue: [] as HistoryItem[], sentByParent: 0, notesToParent: 0 };
+    this.liveChannels.set(profile.label, channel);
+
     const loop = new AgentLoop({
       // EST-SUBAGENT-MODEL — o caller POR FILHO (tier do `.md` dele, ou o do pai como
       // fallback). Era `this.model` (UM caller p/ TODOS); agora cada filho roteia ao
@@ -1220,6 +1333,17 @@ export class SubAgentSpawner {
           stop: () => false,
           report: (nota: string) => this.onChildReport?.(profile.label, nota) ?? false,
         },
+        // O filho só enxerga a metade `notifyParent`; a origem (label) é carimbada aqui.
+        agentMessaging: {
+          notifyParent: (message: string, kind: ParentNoteKind) =>
+            this.noteToParent(profile.label, message, kind),
+        },
+      },
+      // MENSAGENS VIVAS (do pai ou do dono): drenadas no topo de cada iteração do filho —
+      // mesmo mecanismo da injeção mid-turn do pai. Só `user_inject` passa (o loop filtra).
+      pollInjected: (): readonly HistoryItem[] => {
+        const q = channel.queue;
+        return q.length === 0 ? [] : q.splice(0, q.length);
       },
       // E-A2: o MESMO SharedBudget — a reserva atômica no loop garante a soma ≤ teto.
       budget: this.budget,
@@ -1320,6 +1444,7 @@ export class SubAgentSpawner {
       // Encerra o relógio de inatividade (resolve `idle.done` como `false` ⇒ o
       // `idlePromise` vira no-op; evita timer pendurado) e desliga o listener do pai.
       idle.stop();
+      if (this.liveChannels.get(profile.label) === channel) this.liveChannels.delete(profile.label);
       parentSignal?.removeEventListener('abort', onParentAbort);
       nodeSignal?.removeEventListener('abort', onNodeAbort);
       // EST-1098 (WT-1) — remove o worktree do filho em TODO caminho de saída (sucesso/

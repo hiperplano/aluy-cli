@@ -34,7 +34,7 @@ import {
 } from 'node:fs';
 import { themeByName, type ThemeName } from '../ui/theme/themes.js';
 import { langByCode, type Lang } from '../i18n/lang.js';
-import { embedderSpec, DEFAULT_EMBEDDER_MODEL } from '@hiperplano/aluy-cli-core';
+import { embedderSpec, DEFAULT_EMBEDDER_MODEL, canRememberTool } from '@hiperplano/aluy-cli-core';
 
 /** Permissões restritas: dir `0700`, arquivo `0600` (espelha o journal-store). */
 const DIR_MODE = 0o700;
@@ -276,6 +276,12 @@ export interface UserConfig {
    * padrão" — precedência env > este campo > default, MESMO teto-teto (intocado).
    */
   readonly mcp?: UserMcpConfig;
+  /**
+   * ADR aluy-cli 0002 — tools que o dono mandou LEMBRAR no diálogo de permissão
+   * ("sempre permitir"). Só NOMES de tool (nunca comando/caminho). `run_command`/`edit_file`/
+   * `write_file` são descartados na leitura (piso de CLI-SEC-3 — nunca permanentes).
+   */
+  readonly permissions?: { readonly alwaysAllow?: readonly string[] };
   /**
    * ADR-0150 — retenção/GC das sessões (`~/.aluy/sessions/`) e janela da AUTO-OFERTA
    * de retomada no boot. Sem env hoje; precedência config > default, com sanidade
@@ -589,6 +595,23 @@ function sanitizeMcp(raw: unknown): UserMcpConfig | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** ADR aluy-cli 0002 — sanitiza `permissions.alwaysAllow` (nomes de tool; piso CLI-SEC-3). */
+function sanitizePermissions(raw: unknown): { alwaysAllow: string[] } | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const list = (raw as Record<string, unknown>).alwaysAllow;
+  if (!Array.isArray(list)) return undefined;
+  const out: string[] = [];
+  for (const v of list) {
+    if (typeof v !== 'string') continue;
+    const name = v.trim();
+    if (name === '' || name.length > 128 || [...name].some((c) => c.charCodeAt(0) < 32)) continue;
+    if (!canRememberTool(name) || out.includes(name)) continue;
+    out.push(name);
+    if (out.length >= 64) break;
+  }
+  return out.length > 0 ? { alwaysAllow: out } : undefined;
+}
+
 /**
  * ADR-0150 (balde b) — sanitiza `session`. Só inteiros positivos; o `cli` aplica a
  * sanidade MÍNIMA (não anti-runaway) no uso (`resolveSessionGcOptions`/
@@ -876,6 +899,7 @@ function sanitize(raw: unknown): UserConfig {
     subagents?: UserSubagentsConfig;
     cycle?: UserCycleConfig;
     mcp?: UserMcpConfig;
+    permissions?: { readonly alwaysAllow?: readonly string[] };
     session?: UserSessionConfig;
     advanced?: UserAdvancedConfig;
   } = {};
@@ -1025,6 +1049,9 @@ function sanitize(raw: unknown): UserConfig {
   const session = sanitizeSession(obj.session);
   if (session) out.session = session;
 
+  const permissions = sanitizePermissions(obj.permissions);
+  if (permissions) out.permissions = permissions;
+
   // ADR-0150 (Tier 2) — advanced (self-check/mem-pressure/web-fetch): tunables que
   // já tinham override por env+clamp; config só "termina o padrão".
   const advanced = sanitizeAdvanced(obj.advanced);
@@ -1108,6 +1135,14 @@ export class UserConfigStore {
       // QoL não-crítica: persistência best-effort. Falha = silêncio (não derruba).
       return false;
     }
+  }
+
+  /** ADR aluy-cli 0002 — açúcar: acrescenta `tool` ao "sempre permitir" persistido (dedup). */
+  saveAlwaysAllowTool(tool: string): boolean {
+    const cur = this.load().permissions?.alwaysAllow ?? [];
+    if (!canRememberTool(tool)) return false;
+    if (cur.includes(tool)) return true;
+    return this.save({ permissions: { alwaysAllow: [...cur, tool] } });
   }
 
   /** Açúcar: persiste só o tema (preserva o tier salvo). */

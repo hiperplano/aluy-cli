@@ -17,7 +17,7 @@ export {
   type ToolCall,
 } from './gate.js';
 
-export { PolicyPermissionEngine, type PermissionEngineOptions } from './engine.js';
+export { PolicyPermissionEngine, canRememberTool, type PermissionEngineOptions } from './engine.js';
 
 // EST-0959 · ADR-0055 — allow-list FECHADA de leitura local do modo Plan (R1/R2).
 export { PLAN_READ_ALLOWLIST, isPlanReadAllowed, looksRemote } from './plan.js';

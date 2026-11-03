@@ -101,7 +101,7 @@ import type {
   EffortChoice,
   LocalProviderEntry,
 } from '@hiperplano/aluy-cli-core';
-import { formatQuota } from '@hiperplano/aluy-cli-core';
+import { formatQuota, canRememberTool } from '@hiperplano/aluy-cli-core';
 import { DEFAULT_TIER } from './wiring.js';
 import { tierDisplayName } from '../model/catalog.js';
 import type { SessionController } from './controller.js';
@@ -2954,6 +2954,13 @@ export function App(props: AppProps): React.ReactElement {
       if (char === 'a') return controller.resolveAsk({ kind: 'approve-once' });
       if (char === 's' && alwaysAsk === false)
         return controller.resolveAsk({ kind: 'approve-session' });
+      // ADR aluy-cli 0002 — `l` = lembrar esta decisão (persiste; nunca p/ run_command/edit/write).
+      if (
+        char === 'l' &&
+        alwaysAsk === false &&
+        canRememberTool(state.pendingAsk.request.call.name)
+      )
+        return controller.resolveAsk({ kind: 'approve-always' });
       if (char === 'n')
         return controller.resolveAsk({ kind: 'deny', reason: 'negado pelo usuário' });
       if (key.escape) {

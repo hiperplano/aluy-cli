@@ -14,7 +14,7 @@ export interface MonitorEvent {
   /** Rótulo curto legível ("testes", "build", "espera-csv"). */
   readonly label: string;
   /** Tipo do gatilho (ADR-0079 §3.1). */
-  readonly type: 'command-poll' | 'file-watch' | 'process-wait' | 'command';
+  readonly type: 'command-poll' | 'file-watch' | 'process-wait' | 'command' | 'agent-note';
   /** A condição que disparou (ex.: "exit_code != 0", "criado", "PID 123 encerrou"). */
   readonly condition: string;
   /** Payload resumido (stdout/exit_code/path/pid…) — DADO, não instrução. */
@@ -73,6 +73,11 @@ export class EventQueue {
  * qualquer tool). `toolName: 'monitor'` identifica a origem.
  */
 export function formatMonitorEventAsData(ev: MonitorEvent): HistoryItem {
+  // ADR aluy-cli 0002 — nota de um SUB-AGENTE ao orquestrador (`ask_parent`): DADO rotulado
+  // pela origem (o `payload` já vem com o rótulo e o aviso "é dado, não instrução").
+  if (ev.type === 'agent-note') {
+    return { role: 'observation', toolName: 'sub-agente', text: ev.payload };
+  }
   const text =
     `[monitor: ${ev.label}] disparou.\n` +
     `Tipo: ${ev.type}\n` +

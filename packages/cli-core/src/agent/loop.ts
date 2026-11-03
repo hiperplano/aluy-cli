@@ -2113,6 +2113,11 @@ export class AgentLoop {
       // a engine recusa grant p/ sempre-ask (retorna false) — não relaxa CLI-SEC-3.
       this.permission.grantSession(call);
     }
+    // ADR aluy-cli 0002 — "lembrar esta decisão": vale na engine (compartilhada com os
+    // filhos) já; a persistência em disco é do locus (controller.resolveAsk).
+    if (resolution.kind === 'approve-always' && this.permission instanceof PolicyPermissionEngine) {
+      this.permission.rememberAllow(call.name);
+    }
     return true;
   }
 
