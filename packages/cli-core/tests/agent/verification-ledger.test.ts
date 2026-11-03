@@ -138,3 +138,16 @@ describe('loop · 1 vs 2 passadas e skip', () => {
     expect(probes(model)).toBe(1);
   });
 });
+
+describe('VerificationLedger.isEffect (F1)', () => {
+  it('leitura/busca/teste não são efeito; escrita e comando opaco são', () => {
+    expect(VerificationLedger.isEffect('read_file', { path: 'a' })).toBe(false);
+    expect(VerificationLedger.isEffect('grep', { pattern: 'x' })).toBe(false);
+    expect(VerificationLedger.isEffect('run_tests', {})).toBe(false);
+    expect(VerificationLedger.isEffect('run_command', { command: 'cat a.txt' })).toBe(false);
+    expect(VerificationLedger.isEffect('run_command', { command: 'npm test' })).toBe(false);
+    expect(VerificationLedger.isEffect('edit_file', { path: 'a' })).toBe(true);
+    expect(VerificationLedger.isEffect('run_command', { command: 'rm a' })).toBe(true);
+    expect(VerificationLedger.isEffect('mcp__x__y', {})).toBe(true);
+  });
+});

@@ -48,6 +48,11 @@ export interface PlanStep {
   readonly title: string;
   readonly status: PlanStepStatus;
   readonly substeps?: readonly PlanStep[];
+  /**
+   * OPCIONAL: o passo é INDEPENDENTE dos demais e pode ir a um sub-agente em paralelo
+   * (`parallel: true` ou `owner: 'subagente'` no input). Alimenta a dica de delegação do loop.
+   */
+  readonly parallel?: boolean;
 }
 
 /** Um passo achatado para render/painel: o passo + sua profundidade (0 = topo). */
@@ -104,6 +109,7 @@ function parseStepItem(item: unknown, allowSubsteps: boolean): PlanStep | string
   let title: string | undefined;
   let status: PlanStepStatus = 'pending';
   let substeps: PlanStep[] | undefined;
+  let parallel = false;
   if (typeof item === 'string') {
     title = item;
   } else if (item !== null && typeof item === 'object') {
@@ -113,6 +119,7 @@ function parseStepItem(item: unknown, allowSubsteps: boolean): PlanStep | string
     if (typeof o.status === 'string' && VALID_STATUS.has(o.status)) {
       status = o.status as PlanStepStatus;
     }
+    parallel = o.parallel === true || (typeof o.owner === 'string' && /sub-?agen/i.test(o.owner));
     if (allowSubsteps) {
       const subRaw = o.substeps ?? o.subtasks ?? o.subpassos ?? o.children;
       if (Array.isArray(subRaw) && subRaw.length > 0) {
@@ -128,7 +135,10 @@ function parseStepItem(item: unknown, allowSubsteps: boolean): PlanStep | string
   }
   if (title === undefined || title.trim() === '') return NO_TITLE_ERR;
   const clipped = title.trim().slice(0, MAX_STEP_TITLE);
-  return substeps ? { title: clipped, status, substeps } : { title: clipped, status };
+  const base: PlanStep = substeps
+    ? { title: clipped, status, substeps }
+    : { title: clipped, status };
+  return parallel ? { ...base, parallel: true } : base;
 }
 
 /**
@@ -465,6 +475,16 @@ const UPDATE_PLAN_SCHEMA = Object.freeze({
         properties: {
           title: { type: 'string', description: 'O passo, curto e no imperativo.' },
           status: STEP_STATUS_PROP,
+          parallel: {
+            type: 'boolean',
+            description:
+              'OPCIONAL: true se este passo é INDEPENDENTE dos outros (arquivos/área própria) e ' +
+              'pode ir a um sub-agente em paralelo (spawn_agent).',
+          },
+          owner: {
+            type: 'string',
+            description: "OPCIONAL: 'subagente' para marcar o passo como delegável em paralelo.",
+          },
           substeps: {
             type: 'array',
             description:

@@ -26,6 +26,7 @@ import {
   resolveMaxObservationChars,
   resolveMaxMemoryWritesPerSession,
   resolveSelfCheck,
+  delegationNudgeEnabled,
   LoginService,
   PolicyPermissionEngine,
   SnapshotJournal,
@@ -1436,6 +1437,8 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // EST-0944 — SELF-CHECK de atenção resolvido (flag>env>tier fraco). Só repassado
     // quando ENABLED (`SELF_CHECK_OFF` ⇒ baseline, nem passa — o loop ignora de todo jeito).
     ...(selfCheck.enabled ? { selfCheck } : {}),
+    // Dica de delegação do agente PRINCIPAL (ALUY_DELEGATION_NUDGE=0 desliga). Ver delegation-nudge.ts.
+    delegationNudge: delegationNudgeEnabled(env.ALUY_DELEGATION_NUDGE),
     // EST-0973 — AUTO-COMPACTAÇÃO da janela: repassa o limiar CRU de `--autocompact-at`
     // (a flag vence o env). O controller resolve flag>env>default 0.85 com a janela do
     // modelo (`contextWindow`). Sem a flag, cai no env/default (ligada por padrão).

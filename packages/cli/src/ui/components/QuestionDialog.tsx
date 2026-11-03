@@ -219,11 +219,11 @@ function TextField(props: {
 /** Footer linear de atalhos (a11y §4.3), por tipo de pergunta. */
 function footerOf(spec: QuestionSpec, editing: boolean): string {
   if (editing) return 'enter confirma · esc cancela a digitação';
-  if (spec.kind === 'text') return 'digite a resposta · enter confirma · esc cancela';
+  if (spec.kind === 'text') return 'digite a resposta · enter confirma · esc interrompe';
   if (spec.kind === 'multi') {
-    return '↑↓ navega · espaço marca · enter confirma · esc cancela';
+    return '↑↓ navega · espaço marca · enter confirma · esc interrompe';
   }
-  return '↑↓ navega · enter escolhe · esc cancela';
+  return '↑↓ navega · enter escolhe · esc interrompe';
 }
 
 export default QuestionDialog;

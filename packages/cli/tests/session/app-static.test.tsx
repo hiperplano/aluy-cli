@@ -306,11 +306,9 @@ describe('#13 — bang running + nota depois NÃO congela no Static (resolve in-
 
     // dispara o `!comando` (fica `running` no gate) e, ENQUANTO roda, empurra uma nota —
     // exatamente o que `interrupt()`/`flushInjectNotes` fazem (bloco não-vivo após o vivo).
-    // `!ls` ⇒ a catraca abre o AskDialog (phase `asking`); aprovar (como o `a` do dono)
-    // executa — e o shell GATEADO o mantém `running` p/ inspeção determinística.
+    // F15: `!ls` do usuário executa direto (sem caixa); o shell GATEADO o mantém `running`
+    // p/ inspeção determinística.
     void controller.runBang('ls');
-    await waitFor(() => controller.current.phase === 'asking');
-    controller.resolveAsk({ kind: 'approve-once' });
     await waitFor(() =>
       controller.current.blocks.some((b) => b.kind === 'bang' && b.status === 'running'),
     );

@@ -14,6 +14,7 @@ import {
   type YoloEntryVerdict,
 } from '@hiperplano/aluy-cli-core';
 import { applyHeapLimit } from './heap-limit.js';
+import { installFatalLogger, logChildExit } from './fatal-log.js';
 
 // EST-1012 — HEAP-LIMIT EXPLÍCITO (backstop de OOM). Re-executa ESTE binário UMA vez
 // com `--max-old-space-size` no NODE_OPTIONS (se faltava), p/ o V8 lançar erro de heap
@@ -69,6 +70,8 @@ async function ensureHeapLimit(): Promise<boolean> {
         });
         child.on('close', (code, signal) => {
           cleanup();
+          // Rede de segurança: filho morto por sinal / OOM nativo não deixa log próprio.
+          logChildExit(code, signal);
           // Propaga o código do filho (ou o sinal → 128+n, convenção shell).
           resolve(code ?? (signal !== null ? 128 : 0));
         });
@@ -192,6 +195,8 @@ function activateTerminalCapabilities(): void {
 // (session/run.tsx) — carregada dinamicamente para não puxar Ink no caminho de
 // --version/--help (CI/smoke headless).
 async function main(): Promise<void> {
+  // Rede de segurança: todo término fatal deixa rastro em ~/.aluy/logs/crash.log.
+  installFatalLogger();
   activateTerminalCapabilities();
 
   // BUG-WIN · ÚLTIMO RECURSO: restaura o terminal quando o processo PAI sai após o

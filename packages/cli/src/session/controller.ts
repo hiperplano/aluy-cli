@@ -120,6 +120,7 @@ import {
   type PermissionEngine,
   type SessionLimits,
   type SelfCheckConfig,
+  VerificationLedger,
   type SessionMode,
   type SubAgentObserver,
   type SubAgentOutcome,
@@ -406,6 +407,8 @@ export interface SessionControllerOptions {
    * baseline do loop deles (são curtos/dirigidos; a re-âncora foca o agente PRINCIPAL).
    */
   readonly selfCheck?: SelfCheckConfig;
+  /** Dica de delegação do agente principal (ver cli-core delegation-nudge.ts). */
+  readonly delegationNudge?: boolean;
   /**
    * EST-0980 — GATE de pre-tool (hooks `gate:true` que podem VETAR uma tool). O wiring
    * o constrói a partir do `HookRunner` + a config de hooks (`makePreToolGate`) e o
@@ -2401,6 +2404,7 @@ export class SessionController {
         // auto-verificação pré-"pronto". Já resolvido pelo gating no wiring (flag/env/
         // tier fraco). Ausente ⇒ baseline (o loop ignora — sem overhead).
         ...(opts.selfCheck ? { selfCheck: opts.selfCheck } : {}),
+        ...(opts.delegationNudge ? { delegationNudge: true } : {}),
         // EST-SEC-HARDEN (F21) · AG-0008 — GUARDRAIL do combo perigoso (yolo + tier-fraco
         // + conteúdo não-confiável no contexto) no agente PRINCIPAL. O loop lê o YOLO de
         // `permission.isUnsafe` (dinâmico); aqui damos o `tier` corrente (THUNK — o
@@ -4412,6 +4416,18 @@ export class SessionController {
   private isBusyPhase(): boolean {
     const f = this.state.phase;
     return f === 'thinking' || f === 'streaming' || f === 'retrying';
+  }
+
+  /**
+   * F10 — ESC numa caixa de PERMISSÃO ou PERGUNTA = INTERROMPER o turno (como o ESC em
+   * qualquer outro lugar): para o loop sem novas chamadas de modelo. O abort faz o resolver
+   * pendente liquidar sozinho (ask ⇒ deny, pergunta ⇒ unavailable), sem a tool correr e sem
+   * texto interno chegar ao transcript. `n` (negar e seguir) NÃO passa por aqui. Não limpa a
+   * fila do dono (a fila drena no repouso). Só cessa — sem `decide()`, sem efeito.
+   */
+  interruptFromPrompt(): void {
+    this.interrupt();
+    this.pushNote('interrompido', ['↳ interrompido (esc) — nada foi executado']);
   }
 
   /**
@@ -8019,7 +8035,12 @@ export class SessionController {
     // o modelo NÃO confirmou — ACHOU UM GAP e voltou a AGIR. Esse trabalho (e a resposta
     // que vier depois) é REAL ⇒ desarma a supressão e DESPROMOVE o turno `aluy` em voo
     // (se marcado `selfCheck`), p/ não esconder a resposta nova por engano.
-    if (this.selfCheckInFlight || this.selfCheckPassDone) {
+    // F1 — só é "gap" quando a passada AGE (efeito novo). Ler/buscar/rodar teste e reconfirmar
+    // é CONFIRMAÇÃO: não desarma a supressão nem afirma "achou pendências".
+    if (
+      (this.selfCheckInFlight || this.selfCheckPassDone) &&
+      VerificationLedger.isEffect(call.name, call.input)
+    ) {
       if (this.selfCheckInFlight) this.demoteSelfCheckBlock();
       this.selfCheckInFlight = false;
       this.selfCheckPassDone = false;

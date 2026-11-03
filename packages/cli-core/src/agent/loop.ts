@@ -51,6 +51,7 @@ import {
   awaitsUserDecision,
 } from './self-check.js';
 import { VerificationLedger } from './verification-ledger.js';
+import { DelegationNudger } from './delegation-nudge.js';
 import {
   detectWeakYoloUntrusted,
   buildWeakYoloWarning,
@@ -665,6 +666,12 @@ export interface AgentLoopOptions {
    */
   readonly selfCheck?: SelfCheckConfig;
   /**
+   * Dica de delegação (delegation-nudge.ts): quando o plano tem >= 3 passos independentes e o
+   * modelo começa a executá-los em série, injeta UMA dica curta (`reanchor`) sugerindo
+   * `spawn_agent`. Ausente/false ⇒ desligada (sub-agentes nunca recebem). Não toca a catraca.
+   */
+  readonly delegationNudge?: boolean;
+  /**
    * EST-SEC-HARDEN (F21) · AG-0008 — GUARDRAIL do combo perigoso `yolo + tier-fraco +
    * conteúdo não-confiável no contexto`. O estado de YOLO é DINÂMICO (lido de
    * `permission.isUnsafe` a cada iteração — pega o Tab); aqui passamos só o `tier`
@@ -791,6 +798,7 @@ export class AgentLoop {
   // EST-0944 — config do self-check de atenção (re-âncora + auto-verificação).
   // SELF_CHECK_OFF ⇒ baseline (sem overhead). Já vem resolvida pelo gating externo.
   private readonly selfCheck: SelfCheckConfig;
+  private readonly delegationNudge: boolean;
   // EST-SEC-HARDEN (F21) — config do guardrail do combo perigoso (yolo+tier-fraco+
   // untrusted). undefined ⇒ inerte (baseline). O YOLO é lido de permission.isUnsafe.
   private readonly weakYoloGuardrail?: WeakYoloGuardrailConfig;
@@ -843,6 +851,7 @@ export class AgentLoop {
     if (opts.expedite) this.expedite = opts.expedite;
     if (opts.monitorQueue) this.monitorQueue = opts.monitorQueue;
     this.selfCheck = opts.selfCheck ?? SELF_CHECK_OFF;
+    this.delegationNudge = opts.delegationNudge === true;
     if (opts.weakYoloGuardrail) this.weakYoloGuardrail = opts.weakYoloGuardrail;
     if (opts.stuckResolver) this.stuckResolver = opts.stuckResolver;
     if (opts.env) this.watchdogEnv = opts.env;
@@ -1141,6 +1150,8 @@ export class AgentLoop {
     // ativos quando `this.selfCheck.enabled` — fora disso, código morto (baseline).
     const goalText = originalGoal(history);
     let verifications = 0;
+    const nudger = this.delegationNudge ? new DelegationNudger() : undefined;
+    let pendingNudge: string | undefined;
     // Livro-caixa do "pula a sonda se já verificou" (opt-in `skipWhenVerified`). Sempre
     // alimentado (barato, puro); só CONSULTADO quando a opção está ligada.
     const ledger = new VerificationLedger();
@@ -1620,6 +1631,8 @@ export class AgentLoop {
             successfulToolCalls += 1;
           }
           ledger.record(call.name, call.input, outcome.ok === true);
+          const nudge = nudger?.note(call.name, call.input, outcome.ok === true);
+          if (nudge !== undefined) pendingNudge = nudge;
           // RESULTADO no canal `tool` (pareado por `tool_call_id`). O conteúdo segue
           // DADO NÃO-CONFIÁVEL (envelopado em buildMessages) — anti-injeção intacta.
           history.push({
@@ -1628,6 +1641,11 @@ export class AgentLoop {
             toolName: call.name,
             text: outcome.observation,
           });
+        }
+        // Dica de delegação: DEPOIS de todos os `tool_result` do batch (não quebra o pareamento).
+        if (pendingNudge !== undefined) {
+          history.push({ role: 'reanchor', text: pendingNudge });
+          pendingNudge = undefined;
         }
         // ENCAIXE FLUIDO — a mensagem que chegou DURANTE a ÚLTIMA tool do batch entra já
         // aqui (todos os `tool_result` estão pareados), e não só no topo da próxima volta
@@ -1848,6 +1866,8 @@ export class AgentLoop {
       }
       ledger.record(turn.call.name, turn.call.input, outcome.ok === true);
       history.push({ role: 'observation', toolName: turn.call.name, text: outcome.observation });
+      const nudgeT = nudger?.note(turn.call.name, turn.call.input, outcome.ok === true);
+      if (nudgeT !== undefined) history.push({ role: 'reanchor', text: nudgeT });
       // ENCAIXE FLUIDO — idem ao caminho nativo: o "btw" que chegou durante a tool entra
       // logo após a observação (1 tool por turno aqui ⇒ o par já está fechado).
       this.appendInjected(history, this.takeInjected(), watchdog);

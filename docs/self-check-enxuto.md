@@ -1,9 +1,9 @@
 # Self-check enxuto: menos passadas e "pula se já verificou"
 
 O self-check (EST-0944) liga sozinho no tier `custom`. Antes de aceitar um "pronto", o loop
-injeta uma sonda e o modelo reconfere o trabalho (até `maxVerifications` passadas, padrão 2).
+injeta uma sonda e o modelo reconfere o trabalho (até `maxVerifications` passadas, **padrão 1**).
 No provider medido (zai-coding/glm-5.3) cada passada custa ~10-15 s. Esta página descreve
-duas opções, ambas **desligadas por padrão** (o padrão continua sendo 2 passadas).
+duas opções. O número de passadas passou a **1 por padrão** (decisão do dono, F1); o "pula se já verificou" segue **opt-in**.
 
 ## Opções
 
@@ -14,6 +14,15 @@ duas opções, ambas **desligadas por padrão** (o padrão continua sendo 2 pass
 | Liga/desliga tudo            | `ALUY_SELF_CHECK=0/1` ou `--self-check` | —                                            |
 
 Precedência: flag/env > config > padrão.
+
+## Padrão 1 passada e sinal honesto (F1)
+
+Medido numa edição trivial: 1m34s / 110k tokens contra 20 s / 65k do trabalho em si, com 2 passadas.
+O padrão agora é `maxVerifications = 1`; quem quer mais sobe com `ALUY_SELF_CHECK_MAX=2`.
+
+A TUI só diz "a verificação achou pendências — corrigindo" quando a passada executa um EFEITO novo
+(`VerificationLedger.isEffect`: escrita, comando não só-leitura, tool não auditável). Uma passada
+que só relê/busca/roda teste passante e reconfirma é CONFIRMAÇÃO ("✓ auto-verificado").
 
 ## Regra exata do "pula se já verificou"
 
