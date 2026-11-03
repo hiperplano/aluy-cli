@@ -4,6 +4,9 @@
 // stdout + um mini-emulador de terminal cuja tabela de largura DISCORDA do Ink (como o tmux:
 // tom de pele = 2+2 colunas), com e sem o auto-wrap desligado.
 
+// Scrub das marcas de CI ANTES do `ink` (is-in-ci congela no import): com `CI=true` o Ink não
+// pinta o loop vivo e o cenário do bug não existe. Tem que ser o PRIMEIRO import.
+import './session/_scrub-ci-env.js';
 import React from 'react';
 import { Box, Static, Text, render } from 'ink';
 import { describe, expect, it } from 'vitest';
