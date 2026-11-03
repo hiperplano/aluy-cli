@@ -21,7 +21,7 @@ export const ptBR: FullCatalog = {
   // CINCO itens competindo, e três deles se aprendem no primeiro uso (`ctrl-c` p/ sair,
   // `ctrl-p` que o `/` já abre). Sobra o que o dono ainda não sabe de cor. O símbolo `⏎`
   // no lugar da palavra "enter" é o padrão de teclado — lê-se sem traduzir.
-  'hints.idle': '{enter} enviar · / comandos · {up} histórico',
+  'hints.idle': '{enter} enviar · \\⏎ nova linha · / comandos · {up} histórico',
   'hints.thinking': 'esc interromper · ctrl-b soltar · ctrl-c×2 sair',
   'hints.streaming': 'esc interromper · ctrl-b soltar · ctrl-c×2 sair',
   'hints.ask': 'a aprova · s sempre · n nega · e edita · esc cancela',

@@ -28,8 +28,8 @@ describe('createCsiUFilter — strippa CSI-u do byte stream antes do Ink', () =>
     expect(f.feed(`${ESC}[57414;1:2u`)).toBe('');
   });
 
-  it('REMOVE o shift+enter CSI-u (`\\x1b[13;2u`) — equivale ao suprimir de hoje (sem newline)', () => {
-    expect(createCsiUFilter().feed(`${ESC}[13;2u`)).toBe('');
+  it('F2: shift+enter CSI-u (`\\x1b[13;2u`) vira Alt+Enter (nova linha), não é mais suprimido', () => {
+    expect(createCsiUFilter().feed(`${ESC}[13;2u`)).toBe(`${ESC}\r`);
   });
 
   it('PRESERVA texto digitado em volta da sequência (`a` + crash + `b` ⇒ `ab`)', () => {
@@ -37,7 +37,7 @@ describe('createCsiUFilter — strippa CSI-u do byte stream antes do Ink', () =>
   });
 
   it('REMOVE várias CSI-u num só chunk, preservando o resto', () => {
-    expect(createCsiUFilter().feed(`x${ESC}[57414uy${ESC}[13;2uz`)).toBe('xyz');
+    expect(createCsiUFilter().feed(`x${ESC}[57414uy${ESC}[13;2uz`)).toBe(`xy${ESC}\rz`);
   });
 
   it('NÃO toca CSI comuns (setas `\\x1b[A`, F-keys `\\x1b[19~`, `\\x1b[1;5C`)', () => {
@@ -64,7 +64,7 @@ describe('createCsiUFilter — strippa CSI-u do byte stream antes do Ink', () =>
   it('boundary: texto + parcial num chunk ⇒ entrega o texto, segura a parcial', () => {
     const f = createCsiUFilter();
     expect(f.feed(`hi${ESC}[13`)).toBe('hi'); // `\x1b[13` retido (parcial)
-    expect(f.feed(';2ubye')).toBe('bye'); // completa o `\x1b[13;2u` e o some; `bye` passa
+    expect(f.feed(';2ubye')).toBe(`${ESC}\rbye`); // completa o `\x1b[13;2u` e o some; `bye` passa
   });
 
   it('um `\\x1b` solto no fim do chunk é retido (pode iniciar CSI-u); não vira texto', () => {

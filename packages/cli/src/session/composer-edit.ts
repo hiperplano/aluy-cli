@@ -457,3 +457,76 @@ export function moveWordRight(state: EditState): number {
   while (i < n && WORD_CHAR.test(state.text[i] as string)) i++;
   return i;
 }
+
+// ── F2 — NOVA LINHA no composer ───────────────────────────────────────────────────────────
+// Enter puro ENVIA. Para quebrar linha sem enviar: Alt+Enter (ESC CR), Ctrl+J (LF cru),
+// Shift+Enter (quando o terminal o entrega — kitty/CSI-u vira ESC CR no `csi-u-guard`) e
+// `\` + Enter (barra invertida logo antes do cursor: a barra some e vira `\n`, como no
+// Claude Code). Funções PURAS.
+
+/** Subconjunto das flags do `useInput` do Ink de que a classificação precisa. */
+export interface EnterKeyFlags {
+  readonly return?: boolean;
+  readonly ctrl?: boolean;
+  readonly meta?: boolean;
+  readonly shift?: boolean;
+}
+
+/**
+ * A tecla é um pedido de NOVA LINHA (e não de envio)? O Ink entrega Alt+Enter (`\x1b\r`) como
+ * `char='\r'` SEM `key.return` (ele só marca `return` p/ o `\r` nu) e Ctrl+J como `char='\n'`.
+ * Um chunk em lote (`abc\r`) NÃO casa: só o `char` EXATAMENTE `\r`/`\n`.
+ */
+export function isNewlineKey(char: string, key: EnterKeyFlags): boolean {
+  if (key.return === true && (key.shift === true || key.meta === true) && key.ctrl !== true) {
+    return true;
+  }
+  if (char === '\n' && key.ctrl !== true && key.meta !== true) return true; // Ctrl+J
+  if (char === '\r' && key.return !== true) return true; // Alt+Enter
+  return false;
+}
+
+/**
+ * `\`+Enter: se o char logo ANTES do cursor é `\`, devolve o estado com a barra TROCADA por
+ * `\n` (cursor logo após); senão `undefined` (Enter segue o caminho normal de envio).
+ */
+export function backslashNewline(state: EditState): EditState | undefined {
+  const pos = clampCursor(state.text, state.cursor);
+  if (pos === 0 || state.text[pos - 1] !== '\\') return undefined;
+  return {
+    text: state.text.slice(0, pos - 1) + '\n' + state.text.slice(pos),
+    cursor: pos,
+  };
+}
+
+// ── F5 — CHUNK EM LOTE com VÁRIAS linhas ──────────────────────────────────────────────────
+// Digitadores rápidos, xrdp/SSH com latência e envio automatizado de teclas entregam
+// `a\rb\rc\r` num ÚNICO chunk. O tratamento antigo submetia só até a 1ª quebra e DESCARTAVA o
+// resto — as linhas do meio sumiam sem aviso. `drainTypedChunk` devolve TODAS as linhas
+// completas (com o terminador de cada uma) e o resto sem quebra (que fica no composer).
+
+export interface DrainedLine {
+  readonly text: string;
+  /** Terminador que fechou a linha (`\r` = Enter; `\n` = LF). `\r\n` conta como `\r`. */
+  readonly term: '\r' | '\n';
+}
+
+export interface DrainedChunk {
+  readonly lines: readonly DrainedLine[];
+  /** O que sobrou depois da última quebra (ou o próprio estado editado, se não houve quebra). */
+  readonly rest: EditState;
+}
+
+export function drainTypedChunk(state: EditState, chunk: string): DrainedChunk {
+  const lines: DrainedLine[] = [];
+  let acc = state;
+  let remaining = chunk;
+  for (;;) {
+    const r = applyTypedChunk(acc, remaining);
+    if (r.newlineIndex < 0) return { lines, rest: r.state };
+    lines.push({ text: r.state.text, term: r.newline === '\n' ? '\n' : '\r' });
+    remaining = remaining.slice(r.newlineIndex + 1);
+    if (r.newline === '\r' && remaining[0] === '\n') remaining = remaining.slice(1);
+    acc = { text: '', cursor: 0 };
+  }
+}
