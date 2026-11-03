@@ -1032,6 +1032,8 @@ const DEFAULT_MEM_SAMPLE_MS = 2000;
  * de conectar"; a barra não deve virar chrome permanente.
  */
 const MCP_PROGRESS_CLEAR_MS = 2000;
+/** PROMPT-ENXUTO — teto da espera do boot MCP antes da 1ª chamada ao modelo (ms). */
+const MCP_SETTLE_TIMEOUT_MS = 4000;
 
 /**
  * EST-0948 — teto NOMEADO de tentativas do auto-retry (1ª + re-tentativas). "Fácil de
@@ -1146,6 +1148,8 @@ export class SessionController {
   // hooks `pre-tool`/`post-tool`, espelhando o que `attachHooksObserver` faz p/ `turn-end`.
   private readonly toolObservers = new Set<ToolLifecycleObserver>();
   private readonly loop: AgentLoop;
+  /** PROMPT-ENXUTO — espera única do boot MCP antes da 1ª chamada ao modelo. */
+  private mcpSettlePromise: Promise<void> | undefined;
   // ADR-0126(A·PR2) — FÁBRICA do loop (PR1) promovida a campo: o `/subagent` a reusa p/
   // construir o loop FOCADO com {permission: forSubAgent, projectInstructions: persona}.
   private readonly makeLoop: (overrides?: Partial<AgentLoopOptions>) => AgentLoop;
@@ -2245,7 +2249,10 @@ export class SessionController {
     this.onToolsReadyCb = opts.onToolsReady;
     this.nativeToolsDisabled = opts.disableNativeTools === true;
     if (!this.nativeToolsDisabled && this.onToolsReadyCb) {
-      this.onToolsReadyCb(new NativeToolsCapability({ tools: toToolFunctionSchemas(allTools) }));
+      // PROMPT-ENXUTO — via `toolRegistry.list()` (ordem ESTÁVEL: nativas, MCP por server/nome).
+      this.onToolsReadyCb(
+        new NativeToolsCapability({ tools: toToolFunctionSchemas(this.toolRegistry.list()) }),
+      );
     }
 
     // Observador do ciclo de vida (EST-0948 in-flight): início ⇒ linha `◌ running`
@@ -2400,6 +2407,10 @@ export class SessionController {
         // F-SABER-O-MODELO — quem atende a sessão, resolvido a CADA chamada (o `/model` e o
         // `/provider` trocam no meio dela). SÓ sob backend local: no broker o mapa
         // tier→provider é segredo do produto e não pode vazar pelo system prompt.
+        // PROMPT-ENXUTO — antes da 1ª chamada ao modelo, espera o boot MCP assentar (teto
+        // `MCP_SETTLE_TIMEOUT_MS`; server lento/quebrado não trava a sessão). Depois de
+        // assentar é imediato.
+        beforeModelCall: () => this.awaitMcpSettledForPrompt(),
         runtimeInfoProvider: () =>
           this.state.meta.backend === 'local'
             ? {
@@ -6677,6 +6688,25 @@ export class SessionController {
     }, MCP_PROGRESS_CLEAR_MS);
     // Não segura o event-loop vivo só por causa do auto-clear (sem timer-zumbi no exit).
     if (typeof this.mcpProgressClearTimer.unref === 'function') this.mcpProgressClearTimer.unref();
+  }
+
+  /**
+   * PROMPT-ENXUTO — aguarda (até `MCP_SETTLE_TIMEOUT_MS`) os servers MCP ainda conectando,
+   * p/ o catálogo de tools da 1ª chamada ao modelo sair completo e na ordem estável (prefix
+   * cache). Server que estoura o teto fica de fora e, ao conectar, é anexado no FIM do
+   * catálogo (registry congelado) — registrado em `ALUY_DEBUG`. Executa uma vez de fato.
+   */
+  private awaitMcpSettledForPrompt(): Promise<void> {
+    this.mcpSettlePromise ??= this.toolRegistry
+      .awaitMcpSettled(MCP_SETTLE_TIMEOUT_MS)
+      .then((pending) => {
+        if (pending.length > 0 && process.env.ALUY_DEBUG !== undefined) {
+          process.stderr.write(
+            `aluy: MCP — 1ª chamada sem esperar mais: ${pending.join(', ')} (entram no fim do catálogo ao conectar)\n`,
+          );
+        }
+      });
+    return this.mcpSettlePromise;
   }
 
   /**

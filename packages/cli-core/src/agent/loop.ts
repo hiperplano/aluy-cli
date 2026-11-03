@@ -99,6 +99,14 @@ import { valeMemorizar } from './memory/vale-memorizar.js';
 export interface ModelCaller {
   call(args: {
     readonly messages: ReturnType<typeof buildMessages>;
+    /**
+     * PROMPT-ENXUTO — a MESMA conversa, mas com o `system` SEM o catálogo de tools em texto
+     * (variante p/ quando o request manda o campo nativo `tools`). `messages` é sempre a
+     * variante COMPLETA (fallback). O caller escolhe por request, com a MESMA flag que decide
+     * se `tools` vai no body (`NativeToolsCapability.shouldSendTools()`): nativo ⇒
+     * `messagesNative ?? messages`; senão ⇒ `messages`. Ausente ⇒ só há a completa.
+     */
+    readonly messagesNative?: ReturnType<typeof buildMessages>;
     readonly idempotencyKey: string;
     readonly signal?: AbortSignal;
     /**
@@ -603,6 +611,13 @@ export interface AgentLoopOptions {
    */
   readonly runtimeInfoProvider?: () => { readonly provider?: string; readonly model?: string };
   /**
+   * PROMPT-ENXUTO — gancho aguardado ANTES de montar o prompt de cada chamada ao modelo
+   * (barato quando já assentou). O controller o usa p/ esperar o boot MCP assentar (com
+   * teto de tempo) e a 1ª mensagem já sair com o catálogo de tools completo e ESTÁVEL.
+   * Nunca deve rejeitar; erro aqui é ignorado.
+   */
+  readonly beforeModelCall?: () => Promise<void>;
+  /**
    * EST-0969 · ADR-0057 (E-A2) — CONTADOR INJETADO. Default: o loop cria um
    * `SessionBudget` PRÓPRIO por execução (mono-loop, idêntico ao baseline). Mas
    * um SUB-AGENTE recebe aqui o `SharedBudget` COMPARTILHADO do pai — assim a
@@ -753,6 +768,7 @@ export class AgentLoop {
   // ADR-0145 (frente c) — thunk do tier corrente (gateia o few-shot no `system`).
   // undefined ⇒ sem few-shot (baseline).
   private readonly tierProvider?: () => string | undefined;
+  private readonly beforeModelCall?: () => Promise<void>;
   private readonly runtimeInfoProvider?: () => {
     readonly provider?: string;
     readonly model?: string;
@@ -817,6 +833,7 @@ export class AgentLoop {
     if (opts.sessionCommands !== undefined) this.sessionCommands = opts.sessionCommands;
     if (opts.tierProvider) this.tierProvider = opts.tierProvider;
     if (opts.runtimeInfoProvider) this.runtimeInfoProvider = opts.runtimeInfoProvider;
+    if (opts.beforeModelCall) this.beforeModelCall = opts.beforeModelCall;
     if (opts.budget) this.sharedBudget = opts.budget;
     if (opts.pollInjected) this.pollInjected = opts.pollInjected;
     if (opts.expedite) this.expedite = opts.expedite;
@@ -1094,7 +1111,6 @@ export class AgentLoop {
     // EST-0981 — a sessão DESTA execução: override (um por ciclo de `/cycle`, p/ keys
     // únicas entre ciclos) OU a sessão do loop (baseline). NÃO muda a do loop.
     const sessionId = sessionIdOverride ?? this.sessionId;
-    const toolList = this.tools.list();
     // EST-0969 (watchdog de TRAVAMENTO) — UM detector por execução (estado = as
     // séries recentes de tool/erro/turno). Só nasce quando há `stuckResolver` E o
     // env não o desliga (`ALUY_STUCK_OFF`) — senão `undefined` e o loop roda
@@ -1350,19 +1366,31 @@ export class AgentLoop {
       // ADR-0145 (frente c) — tier LIDO A CADA iteração (o `/model` pode trocar
       // mid-sessão, igual ao YOLO do weakYoloGuardrail): o few-shot aparece/some
       // conforme o tier corrente, sem exigir reconstruir o loop.
-      const messages = buildMessages(
-        toolList,
-        history,
-        this.projectInstructions,
-        roots,
-        this.availableAgents,
-        this.sessionCommands,
-        this.tierProvider?.(),
-        // F-SABER-O-MODELO — quem atende esta sessão. Resolvido a CADA chamada (o `/model` e
-        // o `/provider` trocam no meio da sessão), e ausente sob broker, onde o mapa
-        // tier→provider é segredo do produto.
-        this.runtimeInfoProvider?.(),
-      );
+      // PROMPT-ENXUTO — espera o boot MCP assentar (teto no gancho) ANTES de listar as tools.
+      try {
+        await this.beforeModelCall?.();
+      } catch {
+        /* best-effort: nunca derruba o turno. */
+      }
+      const toolList = this.tools.list();
+      const buildFor = (nativeToolsActive: boolean) =>
+        buildMessages(
+          toolList,
+          history,
+          this.projectInstructions,
+          roots,
+          this.availableAgents,
+          this.sessionCommands,
+          this.tierProvider?.(),
+          // F-SABER-O-MODELO — quem atende esta sessão. Resolvido a CADA chamada (o `/model` e
+          // o `/provider` trocam no meio da sessão), e ausente sob broker, onde o mapa
+          // tier→provider é segredo do produto.
+          this.runtimeInfoProvider?.(),
+          nativeToolsActive,
+        );
+      const messages = buildFor(false);
+      const messagesNative = buildFor(true);
+
       // F191 — EXPEDITE ("acelerar o encaixe"): subscreve um ouvinte SÓ pela duração
       // desta chamada de modelo. Ao disparar (o dono aperta ESC com um `user_inject`
       // esperando), aborta um controller PRÓPRIO da iteração — DISTINTO do hard-abort
@@ -1383,6 +1411,7 @@ export class AgentLoop {
         result = await this.callModelPausable(
           {
             messages,
+            messagesNative,
             idempotencyKey,
             ...(callSignal ? { signal: callSignal } : {}),
             ...(this.onModelActivity ? { onActivity: this.onModelActivity } : {}),

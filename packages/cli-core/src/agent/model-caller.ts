@@ -108,6 +108,8 @@ export class BrokerModelCaller implements ModelCaller {
 
   async call(args: {
     readonly messages: readonly ChatMessage[];
+    /** PROMPT-ENXUTO — variante sem o catálogo em texto (usada quando `tools` nativo vai no body). */
+    readonly messagesNative?: readonly ChatMessage[];
     readonly idempotencyKey: string;
     readonly signal?: AbortSignal;
     readonly onActivity?: () => void;
@@ -141,7 +143,8 @@ export class BrokerModelCaller implements ModelCaller {
                 tier,
                 ...(customModel !== undefined ? { model: customModel } : {}),
                 ...(customProvider !== undefined ? { provider: customProvider } : {}),
-                messages: args.messages,
+                // PROMPT-ENXUTO — mesma flag (`withTools`) decide `tools` no body E a variante do prompt.
+                messages: withTools ? (args.messagesNative ?? args.messages) : args.messages,
                 ...(this.brokerSessionId !== undefined ? { session_id: this.brokerSessionId } : {}),
                 ...(this.opts.maxTokens !== undefined ? { max_tokens: this.opts.maxTokens } : {}),
                 ...(this.opts.temperature !== undefined
