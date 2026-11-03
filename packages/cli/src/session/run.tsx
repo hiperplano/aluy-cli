@@ -2941,6 +2941,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // montar do ZERO, sem deixar fantasma do splash no scrollback (anti-flicker #118).
   // Feito ANTES da auto-detecção OSC 11 (que lê stdin) — o splash solta o raw-mode do
   // stdin ao desmontar, então não há disputa de stdin.
+  // F6 — o que o usuário digitou durante o splash/pergunta de boot vira o rascunho do composer.
+  const bootTypedAhead = splash?.typedAhead() ?? '';
   if (splash) {
     await splash.finish();
   } else {
@@ -4795,6 +4797,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           ]);
         }}
         controller={built.controller}
+        {...(bootTypedAhead !== '' ? { initialInput: bootTypedAhead } : {})}
         egress={built.egress}
         userCommands={userCommandList}
         animate={theme.animate}

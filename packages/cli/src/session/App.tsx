@@ -216,6 +216,8 @@ export interface ProviderSwitchFailure {
 
 export interface AppProps {
   readonly controller: SessionController;
+  /** F6 — rascunho inicial do composer (o que foi digitado durante o splash/pergunta de boot). */
+  readonly initialInput?: string;
   /** Comandos do usuário (DADO de ~/.aluy/commands/). */
   readonly userCommands?: readonly SlashCommand[];
   /**
@@ -704,8 +706,8 @@ export function App(props: AppProps): React.ReactElement {
   // O char é INSERIDO em `cursor` (não append); backspace apaga em `cursor-1`.
   // INVARIANTE: `0 <= cursor <= text.length` SEMPRE (clampCursor).
   const [composer, setComposerState] = useState<{ text: string; cursor: number }>({
-    text: '',
-    cursor: 0,
+    text: props.initialInput ?? '',
+    cursor: (props.initialInput ?? '').length,
   });
   // F5 — `composerRef` é a VERDADE-DO-INSTANTE do composer: atualizado SINCRONAMENTE em cada
   // escrita (não só no render). Várias teclas num mesmo tick (tmux send-keys, xrdp, digitador
@@ -3018,6 +3020,34 @@ export function App(props: AppProps): React.ReactElement {
     // ── ask pendente CAPTURA o foco (handoff §10 regra 3) ───────────────────
     if (state.phase === 'asking' && state.pendingAsk) {
       const alwaysAsk = state.pendingAsk.request.alwaysAsk;
+      // F6 — TYPE-AHEAD sob a caixa de permissão. REGRA: as teclas de resposta (a/s/l/n/e/Esc)
+      // só RESPONDEM como PRIMEIRA tecla (composer vazio). Qualquer outra tecla imprimível
+      // começa um RASCUNHO no composer; com rascunho em curso, TUDO que é imprimível (inclusive
+      // a/s/l/n/e) é texto, Enter é ignorado, Backspace edita e Esc APAGA o rascunho (não
+      // responde) — depois disso as teclas voltam a responder. Digitar "aprovar tudo" jamais
+      // aprova por acidente, e o texto digitado não some.
+      if (input !== '') {
+        if (key.escape) {
+          setText('');
+          return;
+        }
+        if (key.backspace || key.delete) {
+          setComposer((c) => composerDeleteBackward(c));
+          return;
+        }
+        if (char && !key.ctrl && !key.meta) {
+          setComposer((c) => applyTypedChunk(c, char).state);
+          return;
+        }
+        if (handleReadlineKey(char, key)) return;
+        return;
+      }
+      const isAnswerKey =
+        key.escape || char === 'a' || char === 's' || char === 'l' || char === 'n' || char === 'e';
+      if (!isAnswerKey && char && !key.ctrl && !key.meta && !key.return) {
+        setComposer((c) => applyTypedChunk(c, char).state);
+        return;
+      }
       if (char === 'a') return controller.resolveAsk({ kind: 'approve-once' });
       if (char === 's' && alwaysAsk === false)
         return controller.resolveAsk({ kind: 'approve-session' });
@@ -4563,7 +4593,12 @@ export function App(props: AppProps): React.ReactElement {
   // A dica do composer: em trabalho o composer está ATIVO ⇒ sem `hint` (a dica só
   // aparece quando inativo). Em `ask`/`budget` (composer dim) explica que a decisão
   // acima tem o foco. (O `<Composer>` só mostra `hint` quando `active === false`.)
-  const composerHint = state.phase === 'asking' ? 'aguardando sua decisão acima' : undefined;
+  const composerHint =
+    state.phase === 'asking'
+      ? input !== ''
+        ? 'rascunho guardado · esc apaga e volta a responder a caixa'
+        : 'aguardando sua decisão acima'
+      : undefined;
 
   // EST-0965 — UM CURSOR SÓ NA TELA. Enquanto o agente TRABALHA (isWorkPhase), o
   // <AluyBlock> pinta o cursor AMARELO de trabalho (●) na ponta do stream — ELE é o
