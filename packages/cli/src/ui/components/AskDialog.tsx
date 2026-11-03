@@ -229,12 +229,12 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
 
 /** Footer linear de atalhos (§4.3), por tipo de ask. */
 function footerOf(req: AskRequest, destructive: boolean): string {
-  if (destructive) return 'n nega (recomendado) · a aprova mesmo assim · esc cancela';
+  if (destructive) return 'n nega (recomendado) · a aprova mesmo assim · esc interrompe';
   if (req.alwaysAsk === false && canRememberTool(req.call.name)) {
-    return 'a aprova · s sessão · l lembra (não pergunta mais) · n nega · e edita · esc cancela';
+    return 'a aprova · s sessão · l lembra (não pergunta mais) · n nega · esc interrompe';
   }
-  if (req.alwaysAsk === false) return 'a aprova · s sempre · n nega · e edita · esc cancela';
-  return 'a aprova · n nega · e edita · esc cancela';
+  if (req.alwaysAsk === false) return 'a aprova · s sempre · n nega · esc interrompe';
+  return 'a aprova · n nega · esc interrompe';
 }
 
 /** O pedido em linguagem natural (edit vs bash). */

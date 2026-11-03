@@ -91,7 +91,7 @@ function approveHintLines(frame: string): string[] {
   return plain(frame)
     .split('\n')
     .map((ln) => ln.trim())
-    .filter((ln) => /a aprova/.test(ln) && /n nega/.test(ln) && /esc cancela/.test(ln));
+    .filter((ln) => /a aprova/.test(ln) && /n nega/.test(ln) && /esc interrompe/.test(ln));
 }
 
 /** Conta as linhas com a dica de IDLE — o rodapé "normal".

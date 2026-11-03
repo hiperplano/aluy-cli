@@ -3006,37 +3006,12 @@ export function App(props: AppProps): React.ReactElement {
       if (char === 'n')
         return controller.resolveAsk({ kind: 'deny', reason: 'negado pelo usuário' });
       if (key.escape) {
-        // BUG #2/#13 (QA) — o modal "comia" o ESC (deny + return), então o handler principal
-        // com double-ESC+interrupt NUNCA era alcançado: um `!cmd` de fundo (ex.: `!sleep 30`
-        // já aprovado e rodando atrás deste modal) seguia VIVO; ele terminava DEPOIS do bloco
-        // virar Static e a linha "rodando" ficava FANTASMA até um resize re-emitir (#13).
-        //
-        // BUG B (achado do dono) — REGRA EXPLÍCITA: "o ESC só pode parar se eu der ESC DEPOIS
-        // de ter encaixado todas as msgs". Com uma msg JÁ na FILA, o double-ESC sob o ask
-        // chamava interrupt()+clearQueue() ⇒ ABORTAVA O TRABALHO E LIMPAVA A FILA ("aborta
-        // tudo"). Isso é PROIBIDO: o ESC sob ask com fila pendente cancela SÓ o ask — NUNCA
-        // descarta a fila nem interrompe o turno. O hard-stop (double-ESC ⇒ interrupt+clear)
-        // só vale quando a FILA JÁ ESTÁ VAZIA (nada a preservar): aí o double-ESC é o gesto
-        // explícito de parar tudo (alinhado ao handler principal). Com fila não-vazia, o
-        // single-ESC nega o ask e a fila SOBREVIVE (drena no repouso, como sempre).
-        const now = Date.now();
-        const hasQueue = queueRef.current.length > 0;
-        const isDoubleEsc = now - lastEscRef.current < 500;
-        controller.resolveAsk({ kind: 'deny', reason: 'cancelado (esc)' });
-        // Só faz o hard-stop (interrupt + clear) quando NÃO há fila pendente. Com fila,
-        // o double-ESC NÃO aborta nem limpa: a fila é a intenção do dono, preservada.
-        if (isDoubleEsc && !hasQueue) {
-          controller.interrupt();
-          clearQueue();
-        }
-        // BUG B (vazamento entre handlers) — `lastEscRef` é COMPARTILHADO com o handler
-        // principal. Se o deste ESC armasse o "double-ESC" (lastEscRef = now), o PRÓXIMO
-        // ESC — que, após o deny, a fase já saiu de `asking` e cai no HANDLER PRINCIPAL —
-        // seria lido como double-ESC e ABORTARIA + LIMPARIA a fila (o bug que o tmux
-        // pegou). Com FILA pendente, NEGAR o ask é gesto ISOLADO: reseta o relógio (=0)
-        // p/ o ESC seguinte ser um SINGLE-ESC fresco (caminho que PRESERVA a fila). Sem
-        // fila, mantém o relógio armado p/ o double-ESC (hard-stop) seguir funcionando.
-        lastEscRef.current = hasQueue ? 0 : now;
+        // F10 — ESC na caixa de permissão INTERROMPE o turno (como em qualquer outro lugar):
+        // o agente não segue "explicando" nem abre `Pergunta`. `n` continua sendo o
+        // "nega e segue" (o modelo é avisado). A fila do dono NÃO é limpa (single-ESC
+        // preserva a fila — drena no repouso).
+        lastEscRef.current = 0;
+        controller.interruptFromPrompt();
         return;
       }
       // `e` (editar) cai p/ deny em v1 (abrir $EDITOR é evolução; nunca executa por inação).
@@ -3058,7 +3033,8 @@ export function App(props: AppProps): React.ReactElement {
           setQDraft('');
           return;
         }
-        return controller.resolveQuestion({ kind: 'unavailable', reason: 'cancelado (esc)' });
+        // F10 — ESC na pergunta interrompe o turno (não vira "sem resposta" + novo turno).
+        return controller.interruptFromPrompt();
       }
 
       // Digitação da resposta LIVRE (campo `text` OU "Outro" de single/multi).

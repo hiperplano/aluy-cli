@@ -4385,6 +4385,18 @@ export class SessionController {
   }
 
   /**
+   * F10 — ESC numa caixa de PERMISSÃO ou PERGUNTA = INTERROMPER o turno (como o ESC em
+   * qualquer outro lugar): para o loop sem novas chamadas de modelo. O abort faz o resolver
+   * pendente liquidar sozinho (ask ⇒ deny, pergunta ⇒ unavailable), sem a tool correr e sem
+   * texto interno chegar ao transcript. `n` (negar e seguir) NÃO passa por aqui. Não limpa a
+   * fila do dono (a fila drena no repouso). Só cessa — sem `decide()`, sem efeito.
+   */
+  interruptFromPrompt(): void {
+    this.interrupt();
+    this.pushNote('interrompido', ['↳ interrompido (esc) — nada foi executado']);
+  }
+
+  /**
    * F191 — EXPEDITE ("acelerar o encaixe"): o dono aperta ESC com uma mensagem JÁ
    * ESPERANDO encaixe (`pendingInjects`) e quer que ela entre RÁPIDO — corta a geração
    * de modelo EM VOO e SEGUE (drena o `user_inject` na próxima volta do loop), SEM
