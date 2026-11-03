@@ -34,6 +34,8 @@ import { Role, useTheme } from '../theme/index.js';
 import { Wordmark, MIN_WORDMARK_COLS } from './Wordmark.js';
 import { ShadowedWordmark } from './ShadowedWordmark.js';
 import { splashQuip } from './splash-quips.js';
+import { HistoryPicker } from './HistoryPicker.js';
+import type { SessionSummary } from '../../io/index.js';
 
 /** Quantidade de estados da cauda de pontinhos do "carregando" (`` → `.` → `..` → `...`). */
 const LOADING_DOTS_CYCLE = 4;
@@ -78,6 +80,11 @@ export interface SplashScreenProps {
    */
   readonly prompt?: BootPrompt;
   /**
+   * Lista de sessões anteriores do projeto (tecla `l` na oferta de retomada). Quando
+   * presente SUBSTITUI a pergunta/"carregando": reusa o <HistoryPicker> do `/history`.
+   */
+  readonly picker?: { readonly sessions: readonly SessionSummary[]; readonly selected: number };
+  /**
    * F195 — versão do binário (`CLI_VERSION`), passada pelo splash-controller. Renderizada
    * DISCRETA no rodapé do card (`Aluy CLI · v<versão>`, papel `depth`). Ausente ⇒ a linha
    * de versão some (degradação graciosa; tela mais limpa ainda).
@@ -101,6 +108,11 @@ export interface BootPrompt {
   readonly body: readonly string[];
   /** Linha de opções (ex.: "[s] retomar · [n] nova sessão"). */
   readonly options: string;
+  /**
+   * Nome (`/rename`) + cor da sessão oferecida: pintado `● nome` na cor da sessão (papel do
+   * DS; NO_COLOR degrada p/ texto sem cor, o ● e o nome seguem legíveis). Ausente ⇒ sem linha.
+   */
+  readonly session?: { readonly label: string; readonly color?: string };
 }
 
 /**
@@ -121,6 +133,28 @@ export function SplashScreen(props: SplashScreenProps): React.ReactElement {
   // marca (F198). Senão, a marca ESTÁTICA <Wordmark> (idêntica ao header) — fallback fiel, sem efeito.
   const wants3d = theme.animate && theme.unicode && columns >= MIN_WORDMARK_COLS;
   const mark = wants3d ? <ShadowedWordmark frame={frame} /> : <Wordmark columns={columns} />;
+
+  if (props.picker !== undefined) {
+    return (
+      <Box
+        width={columns}
+        height={rows}
+        flexDirection="column"
+        alignItems="center"
+        justifyContent="center"
+      >
+        {mark}
+        <Box paddingTop={1} width={Math.max(MIN_WORDMARK_COLS, Math.min(columns - 2, 100))}>
+          <HistoryPicker
+            sessions={props.picker.sessions}
+            selected={props.picker.selected}
+            rows={Math.max(8, rows - 12)}
+            columns={Math.min(columns, 100)}
+          />
+        </Box>
+      </Box>
+    );
+  }
 
   // F195 — quando há PERGUNTA de boot, a tela é a DECISÃO: marca + <BootPromptBox>
   // focada (comportamento herdado, sem card em volta — evita moldura dentro de moldura).
@@ -265,6 +299,7 @@ export function BootPromptBox(props: {
       <Box paddingBottom={1}>
         <Role name="accent">{props.prompt.title}</Role>
       </Box>
+      {props.prompt.session !== undefined && <SessionNameLine session={props.prompt.session} />}
       {props.prompt.body.map((line, i) => (
         <Box key={i}>
           <Text>{line}</Text>
@@ -273,6 +308,24 @@ export function BootPromptBox(props: {
       <Box paddingTop={1}>
         <Role name="fgDim">{props.prompt.options}</Role>
       </Box>
+    </Box>
+  );
+}
+
+/** `● nome` na cor de identificação da sessão (mesma paleta do composer/HistoryPicker). */
+function SessionNameLine(props: {
+  readonly session: { readonly label: string; readonly color?: string };
+}): React.ReactElement {
+  const theme = useTheme();
+  const style = theme.sessionColor(props.session.color ?? props.session.label);
+  const textProps: { color?: string; bold?: boolean } = {};
+  if (style.color !== undefined) textProps.color = style.color;
+  if (style.bold !== undefined) textProps.bold = style.bold;
+  return (
+    <Box>
+      <Text {...textProps}>
+        {theme.glyph('sessionDot')} {props.session.label}
+      </Text>
     </Box>
   );
 }

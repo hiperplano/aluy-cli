@@ -65,7 +65,14 @@ describe('parseBootPrompt — os 3 ramos (título/opções por conteúdo)', () =
 describe('createSplashStore — store observável fininho', () => {
   it('get() inicial: carregando, sem prompt, não done', () => {
     const s = createSplashStore();
-    expect(s.get()).toEqual({ status: 'carregando', prompt: undefined, resolve: null, done: false });
+    expect(s.get()).toEqual({
+      status: 'carregando',
+      prompt: undefined,
+      resolve: null,
+      resume: undefined,
+      resolveResume: null,
+      done: false,
+    });
   });
 
   it('set() atualiza o estado e NOTIFICA os listeners inscritos', () => {
