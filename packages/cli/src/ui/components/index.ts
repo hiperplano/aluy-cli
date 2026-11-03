@@ -34,14 +34,20 @@ export { AskDialog } from './AskDialog.js';
 export type { AskDialogProps } from './AskDialog.js';
 // F164 — janela cabeça+cauda + render de linha de diff, REUSADA pelo <AskDialog>
 // (ask) e pelo <ToolLine> (histórico/scrollback pós-execução).
-export { DiffLine, windowEffectLines, ASK_EFFECT_MAX_LINES, langFromPath, diffLangOf } from './DiffView.js';
+export {
+  DiffLine,
+  windowEffectLines,
+  ASK_EFFECT_MAX_LINES,
+  langFromPath,
+  diffLangOf,
+} from './DiffView.js';
 export type { EffectWindow } from './DiffView.js';
 // EST-1110 · ADR-0114 — <QuestionDialog>: a UI da tool `perguntar` (single/multi/text + "Outro").
 export { QuestionDialog, OTHER_INDEX } from './QuestionDialog.js';
 export type { QuestionDialogProps } from './QuestionDialog.js';
 export { BrokerError } from './BrokerError.js';
 export type { BrokerErrorProps } from './BrokerError.js';
-export { QuotaPauseBanner } from './QuotaPauseBanner.js';
+export { QuotaPauseBanner, QuotaPauseLine } from './QuotaPauseBanner.js';
 export type { QuotaPauseBannerProps } from './QuotaPauseBanner.js';
 export { BudgetGate } from './BudgetGate.js';
 export type { BudgetGateProps } from './BudgetGate.js';

@@ -1684,7 +1684,17 @@ export class SessionController {
       config: quotaPauseConfigFromEnv(opts.subAgents?.env ?? process.env),
       store: () => this.pausaStore,
       sessionId: () => this.pausaSessionId,
-      onView: (v) => this.patch({ quotaPause: v }),
+      onView: (v) => {
+        // F9 — o rótulo funcional `pausado` tira o verbo genérico da linha de trabalho; ao fim da
+        // pausa volta o `pensando` (a fase do loop segue `thinking`: o turno continua vivo).
+        const atual = this.state.workingLabel;
+        if (v !== undefined) this.patch({ quotaPause: v, workingLabel: 'pausado' });
+        else
+          this.patch({
+            quotaPause: v,
+            ...(atual === 'pausado' ? { workingLabel: 'pensando' } : {}),
+          });
+      },
       note: (t, l) => this.pushNoteSafe(t, [...l]),
       now: () => this.clock(),
     });
@@ -4366,6 +4376,9 @@ export class SessionController {
         this.pushNote('turno interrompido', [
           `${agentesAindaTrabalhando(live)} — F8 para parar tudo.`,
         ]);
+      } else if (this.isBusyPhase()) {
+        // F11 — confirmação curta: o esc cortava em ≤ 0.15 s sem dizer nada.
+        this.pushNote('turno', ['↳ interrompido (esc)']);
       }
     }
     // F-TURNO-CORTADO — registra que ESTE turno terminou por interrupção; o cabeçalho do
@@ -4381,6 +4394,12 @@ export class SessionController {
     // Ctrl-C durante a espera cancela a re-tentativa). O abort da raiz já propaga p/ cá
     // (subscrição em `runBackoff`); abortar direto é defensivo/idempotente.
     this.retryAbort?.abort();
+  }
+
+  /** O turno está ocupado (pensando/escrevendo/re-tentando)? */
+  private isBusyPhase(): boolean {
+    const f = this.state.phase;
+    return f === 'thinking' || f === 'streaming' || f === 'retrying';
   }
 
   /**
@@ -9199,7 +9218,11 @@ export class SessionController {
    */
   private childModelLabel(model: string | undefined): string {
     const meta = this.state.meta;
-    const activeModel = meta.backend === 'local' ? meta.activeModel : undefined;
+    // F12 — o filho `inherit` usa o modelo que o PAI tem selecionado AGORA (o mesmo do rodapé:
+    // `meta.model`, mantido pelo /model). `meta.activeModel` é o eco do `usage.model` da última
+    // resposta e pode estar velho/diferente após um /model — rotular o filho com ele mentia
+    // (`herdado (glm-5.3)` com `glm-5.2` no rodapé).
+    const activeModel = meta.backend === 'local' ? (meta.model ?? meta.activeModel) : undefined;
     return formatResolvedModelLabel(resolveModelTier(model), {
       tier: this.tier,
       ...(this.model !== undefined ? { model: this.model } : {}),

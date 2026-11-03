@@ -30,7 +30,7 @@ import {
   OTHER_INDEX,
   BrokerError,
   BudgetGate,
-  QuotaPauseBanner,
+  QuotaPauseLine,
   StuckGate,
   CycleCeilingGate,
   SlashMenu,
@@ -1291,7 +1291,8 @@ export function App(props: AppProps): React.ReactElement {
         })
       : undefined;
   const phaseAnimates =
-    animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo }) ||
+    (animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo }) &&
+      state.quotaPause === undefined) ||
     doctorRunning(state.blocks);
   const frame = useTick({ enabled: theme.animate && phaseAnimates });
 
@@ -4558,7 +4559,14 @@ export function App(props: AppProps): React.ReactElement {
   // `theme.animate`: com `ALUY_NO_ANIM` o número segue subindo (é informativo, não
   // decorativo). Formato `M:SS` (`0:12`) via `formatElapsed`.
   const acc = busy ? controller.turnAccounting() : undefined;
-  const elapsed = acc && acc.live ? formatElapsed(acc.durationMs) : undefined;
+  // F19 — UM relógio só: com a linha de trabalho mostrando os segundos (`Λ Verbo… (… · 32s)`),
+  // o rodapé NÃO repete `· 0:32`; ele mantém só as dicas de tecla.
+  const linhaDeTrabalhoMostraSegundos =
+    mostraIndicadorTrabalho(state.phase, haFilhoVivo) && detalheEspera !== undefined;
+  const elapsed =
+    acc && acc.live && !linhaDeTrabalhoMostraSegundos && state.quotaPause === undefined
+      ? formatElapsed(acc.durationMs)
+      : undefined;
 
   // EST-0973 — ELAPSED do <ProgressBar> indeterminado (fase `compacting`): `now() −
   // startedAt`. Como `compacting` arma o tick de 1s (elapsedTickEnabled), este valor é
@@ -5111,7 +5119,8 @@ export function App(props: AppProps): React.ReactElement {
   // colunas em side/tabs), mantendo a região viva em `rows-1` (anti-flicker).
   // F3 — com a prévia de fala viva a linha de trabalho assume o lugar do cursor `●` (sem respiro
   // extra acima); sem ela (tool-line, pensando) mantém o respiro de sempre.
-  const previaDeFalaViva = state.phase === 'streaming' && live.some((b) => b.kind === 'aluy' && b.streaming);
+  const previaDeFalaViva =
+    state.phase === 'streaming' && live.some((b) => b.kind === 'aluy' && b.streaming);
   const liveChatColumn = (
     <>
       {/* F-SEM-SAUDACAO (decisão do dono: "eu não pedi essas msgs") — a tela de sessão
@@ -5166,7 +5175,7 @@ export function App(props: AppProps): React.ReactElement {
             inteiro: "depois que ele me responde ele para de mostrar o processando" — com
             os agentes ainda trabalhando. Redundante era mostrar os DOIS juntos, não
             mostrar este quando o outro não existe. */}
-      {mostraIndicadorTrabalho(state.phase, haFilhoVivo) && (
+      {mostraIndicadorTrabalho(state.phase, haFilhoVivo) && state.quotaPause === undefined && (
         <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
           <Working
             glyph="aluy"
@@ -5216,8 +5225,8 @@ export function App(props: AppProps): React.ReactElement {
       )}
 
       {state.quotaPause !== undefined && (
-        <Box paddingTop={1}>
-          <QuotaPauseBanner view={state.quotaPause} />
+        <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
+          <QuotaPauseLine view={state.quotaPause} columns={columns} />
         </Box>
       )}
 
@@ -6084,6 +6093,8 @@ function hintStateOf(
   // EST-0961 — a palette é modal: seu hint tem prioridade quando aberta.
   if (paletteOpen) return 'palette';
   if (slashOpen) return 'slash';
+  // F9 — pausa por cota: dicas próprias (nada de `esc interromper · 0:32` fingindo que roda).
+  if (state.quotaPause !== undefined && state.phase !== 'asking') return 'quota-pause';
   switch (state.phase) {
     // EST-0948 (auto-retry) — durante o backoff (`retrying`) o footer mostra o mesmo
     // hint do `thinking` ("esc para interromper"): esc cancela a re-tentativa.

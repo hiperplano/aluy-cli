@@ -345,7 +345,12 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
         kind: 'note',
         note: {
           title: 'comandos',
-          lines: NATIVE_COMMANDS.map((c) => `/${c.name.padEnd(12)} ${c.summary}`),
+          lines: [
+            ...NATIVE_COMMANDS.map((c) => `/${c.name.padEnd(12)} ${c.summary}`),
+            '',
+            'atalhos: esc interrompe o pai · F8 para tudo · ctrl-t ver/parar sub-agentes ·',
+            '         ctrl-b solta o comando/agente em segundo plano · ctrl-c×2 sai',
+          ],
         },
       };
     case 'model':

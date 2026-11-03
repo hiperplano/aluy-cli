@@ -43,6 +43,7 @@ export interface Catalog {
   'hints.budget': string;
   'hints.error': string;
   'hints.workSubagents': string;
+  'hints.quotaPause': string;
   'hints.idleSubagents': string;
   /** F-BG — sufixo da linha viva de um comando de shell: onde o Ctrl+B age. */
   'hints.detachInline': string;
