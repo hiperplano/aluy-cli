@@ -556,10 +556,11 @@ describe('F87 — bloco de sub-agentes é WRAP-AWARE (label longo / terminal est
   });
 
   it('label que QUEBRA conta 2 linhas visuais por filho (não estoura o orçamento)', () => {
-    // `  [abcdefghij] x rodando` = 24 colunas visuais. columns=12 ⇒ 2 visuais/filho.
+    // `  [abcdefghij] x rodando · 59s` = 30 colunas visuais (F13: filho vivo leva o relógio).
+    // columns=12 ⇒ 3 visuais/filho.
     const live = [subWithLabels(['abcdefghij'])];
-    // overhead = cabeçalho(1) + paddingBottom(1) + 2 (filho quebrado) = 4.
-    expect(liveOverheadLines({ live, phase: 'done', hasBlocks: true, columns: 12 })).toBe(4);
+    // overhead = cabeçalho(1) + paddingBottom(1) + 3 (filho quebrado) = 5.
+    expect(liveOverheadLines({ live, phase: 'done', hasBlocks: true, columns: 12 })).toBe(5);
     // largo o bastante p/ caber em 1 visual ⇒ 1 + 1 + 1 = 3 (sem over-contar).
     expect(liveOverheadLines({ live, phase: 'done', hasBlocks: true, columns: 40 })).toBe(3);
     // sem columns ⇒ degrada p/ linha-fonte (comportamento antigo): 2 + 1 = 3.

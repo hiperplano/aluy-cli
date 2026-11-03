@@ -127,3 +127,26 @@ describe('SubAgents — rótulo de tier/modelo resolvido (ADR-0146 D5)', () => {
     expect(out).toContain('rodando');
   });
 });
+
+describe('SubAgents — F13: filho vivo mostra os segundos', () => {
+  it('running com startedAt => "· 7s" (nao fica mudo em 0 tokens)', () => {
+    const { lastFrame } = wrap(
+      <SubAgents
+        childrenStatus={[{ label: 'rust', status: 'running', startedAt: Date.now() - 7_200 }]}
+      />,
+      UTF8,
+    );
+    expect(plain(lastFrame() ?? '')).toMatch(/rodando.* · 7s/);
+  });
+  it('terminado nao mostra o relogio', () => {
+    const { lastFrame } = wrap(
+      <SubAgents
+        childrenStatus={[
+          { label: 'rust', status: 'done', startedAt: Date.now() - 7_000, summary: '1k tokens' },
+        ]}
+      />,
+      UTF8,
+    );
+    expect(plain(lastFrame() ?? '')).not.toMatch(/ · \d+s$/m);
+  });
+});

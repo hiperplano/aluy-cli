@@ -16,6 +16,7 @@ import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import stringWidth from 'string-width';
 import { ShimmerText } from './ShimmerText.js';
+import { formatSegundos } from '../../session/verbos.js';
 
 /** Espelha `SubAgentChild` do model (sem importar o tipo p/ manter o componente puro). */
 export interface SubAgentChildView {
@@ -30,6 +31,8 @@ export interface SubAgentChildView {
    * (HG-2/CLI-SEC-7) — mesmo filtro da status bar do pai.
    */
   readonly model?: string;
+  /** F13 — início (epoch ms) do filho vivo: a linha mostra `· 7s` mesmo sem tokens ainda. */
+  readonly startedAt?: number;
 }
 
 export interface SubAgentsProps {
@@ -139,6 +142,11 @@ function ChildLine(props: {
           época, o número só existia no fim; desde que o uso do filho passou a subir a cada
           débito (`onChildProgress`), esconder o resumo é esconder justamente o que muda. */}
       {c.summary !== undefined && <Role name="fgDim"> · {c.summary}</Role>}
+      {/* F13 — sem o relógio, um filho esperando a 1ª resposta do modelo ficava em "0 tokens"
+          por segundos, indistinguível de travado. */}
+      {viva && c.startedAt !== undefined && (
+        <Role name="fgDim"> · {formatSegundos(Date.now() - c.startedAt)}</Role>
+      )}
     </Box>
   );
 }

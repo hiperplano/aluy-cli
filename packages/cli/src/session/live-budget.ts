@@ -546,7 +546,12 @@ function subAgentChildVisualLines(
   const summaryPart =
     child.summary !== undefined && child.status !== 'running' ? ` · ${child.summary}` : '';
   // `  [label] G word…` — `G` (glifo) ocupa 1 coluna; representado por 1 char.
-  const line = `  [${child.label}] x ${word}${modelPart}${summaryPart}`;
+  // F13 — filho vivo mostra o resumo (tokens) e `· 59s`: mede o caso comum (minutos quebram em 1 coluna a mais, raro).
+  const livePart =
+    child.status === 'running'
+      ? `${child.summary !== undefined ? ` · ${child.summary}` : ''} · 59s`
+      : '';
+  const line = `  [${child.label}] x ${word}${modelPart}${summaryPart}${livePart}`;
   return Math.max(1, visualLines(line, columns));
 }
 

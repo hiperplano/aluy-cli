@@ -9243,6 +9243,7 @@ export class SessionController {
           status: 'running',
           // ADR-0146 (D5) — tier/modelo RESOLVIDO deste filho, visível ENQUANTO roda.
           model: this.childModelLabel(model),
+          startedAt: Date.now(),
           ...(node ? { nodeId: node.id } : {}),
         });
         // O nº de filhos vivos mudou — republica p/ o aviso do rodapé acompanhar
