@@ -34,6 +34,7 @@ import {
 } from 'node:fs';
 import { themeByName, type ThemeName } from '../ui/theme/themes.js';
 import { langByCode, type Lang } from '../i18n/lang.js';
+import { parseNotifyMode, type NotifyMode } from './notify-port.js';
 import { embedderSpec, DEFAULT_EMBEDDER_MODEL, canRememberTool } from '@hiperplano/aluy-cli-core';
 
 /** Permissões restritas: dir `0700`, arquivo `0600` (espelha o journal-store). */
@@ -98,6 +99,11 @@ export interface UserConfig {
    * segredo (CLI-SEC-7). A heurística é LOCAL (sem modelo/tokens) — não gasta o BYO.
    */
   readonly suggestions?: boolean;
+  /**
+   * Modo das notificações (`/notify`): `tudo` | `atencao` | `nada`. Ausente ⇒ `tudo`.
+   * Precedência: `ALUY_NOTIFY` (env) > este campo > default. Só pref de UI (CLI-SEC-7).
+   */
+  readonly notify?: NotifyMode;
   /**
    * F-AUTOUPDATE (pedido do dono: "quando tiver update no npm, instalar automaticamente")
    * — liga/desliga a atualização automática. Ausente ⇒ LIGADO (a decisão dele).
@@ -879,6 +885,7 @@ function sanitize(raw: unknown): UserConfig {
     lang?: Lang;
     fullscreen?: boolean;
     suggestions?: boolean;
+    notify?: NotifyMode;
     autoUpdate?: boolean;
     backend?: 'broker' | 'local';
     localProvider?: string;
@@ -935,6 +942,11 @@ function sanitize(raw: unknown): UserConfig {
   // fullscreen. Só sobrevive como boolean genuíno; lixo/ausente ⇒ default ON (resolvido
   // em `resolveInitialSuggestions`, não aqui — aqui só preservamos o que foi salvo). NUNCA lança.
   if (typeof obj.suggestions === 'boolean') out.suggestions = obj.suggestions;
+  // notify — só os 3 modos canônicos sobrevivem (lixo ⇒ descartado ⇒ default `tudo`).
+  if (typeof obj.notify === 'string') {
+    const m = parseNotifyMode(obj.notify);
+    if (m !== undefined) out.notify = m;
+  }
   // F-AUTOUPDATE — booleano de comportamento, MESMA disciplina dos de UI acima: só
   // boolean genuíno entra (string "true" do disco não vira `true` por acidente).
   if (typeof obj.autoUpdate === 'boolean') out.autoUpdate = obj.autoUpdate;
@@ -1204,6 +1216,11 @@ export class UserConfigStore {
   /** F-AUTOUPDATE — açúcar: persiste só o liga/desliga da atualização automática. */
   saveAutoUpdate(autoUpdate: boolean): boolean {
     return this.save({ autoUpdate });
+  }
+
+  /** Persiste o modo de notificação (`/notify`), preservando as demais. */
+  saveNotify(notify: NotifyMode): boolean {
+    return this.save({ notify });
   }
 
   saveSuggestions(suggestions: boolean): boolean {

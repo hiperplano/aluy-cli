@@ -157,3 +157,7 @@ aluy --telegram                     # sobe a ponte junto com a sessão
 Com token e allowlist, a ponte faz long-poll do chat autorizado e o agente responde
 pela tool `telegram_send`. **Sem token no keychain a ponte não sobe** — o boot não
 falha, e nada é enviado para `api.telegram.org`.
+
+### `/notify`
+
+`/notify tudo | atencao | nada` escolhe quando o Aluy avisa (som + notificação de desktop): `tudo` (padrão) avisa quando precisa de você e quando conclui um turno longo (5 s ou mais); `atencao` avisa só quando precisa de você; `nada` silencia. `on` = `tudo`, `off` = `nada`. Sem argumento mostra o modo atual. A escolha fica em `~/.aluy/config.json`; `ALUY_NOTIFY` sobrescreve.

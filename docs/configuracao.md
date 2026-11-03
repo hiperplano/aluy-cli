@@ -93,6 +93,7 @@ As `ALUY_*` sobrescrevem o `config.json`. As mais usadas:
 | `ALUY_LOCAL_PROVIDER` · `ALUY_LOCAL_MODEL` | provider e modelo do backend local |
 | `ALUY_LOCAL_AUTH` | `apikey` ou `oauth` |
 | `ALUY_LOCAL_BASE_URL` | endpoint próprio (validado por anti-SSRF) |
+| `ALUY_NOTIFY` | notificações: `tudo` (padrão), `atencao` (só quando o Aluy precisa de você; sem aviso de turno concluído) ou `nada`. `on`/`1` = tudo; `off`/`0` = nada. O `/notify` também grava a escolha em `config.json` (`"notify"`) |
 | `ALUY_RETRY` | `off` desliga a retentativa automática |
 | `ALUY_VERBOS` | `simples` troca os verbos de espera brincalhões (`Garimpando…`, `Matutando…`) pelos rótulos planos (`pensando…`). Padrão: verbos. `ALUY_VERBOS_SEED` fixa o sorteio (testes) |
 | `ALUY_QUOTA_PAUSE` · `ALUY_QUOTA_MAX_WAIT` | pausa por cota esgotada: `off` desliga; espera máxima (`90m`, `6h`) — ver [pausa por cota](pausa-por-cota.md) |

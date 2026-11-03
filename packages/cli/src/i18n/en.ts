@@ -209,7 +209,7 @@ export const en: PartialCatalog = {
   'cmd.usage': 'tokens and window for this session',
   'cmd.rename': 'name + color-tag the session · ●name in the composer',
   'cmd.history': 'browse and RESUME a previous session · without leaving aluy',
-  'cmd.notify': 'toggle the attention bell (on/off)',
+  'cmd.notify': 'notifications: tudo | atencao | nada (all | attention | off)',
   'cmd.undo': "undo the agent's last file edit",
   'cmd.redo': 'redo the last undone edit',
   'cmd.rewind': 'rewind the session to a point (code and/or conversation) · Esc Esc',

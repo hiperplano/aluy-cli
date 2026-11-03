@@ -655,7 +655,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
   },
   {
     name: 'notify',
-    summary: 'liga/desliga o sino de atenção (on/off)',
+    summary: 'notificações: tudo | atencao | nada',
     summaryKey: 'cmd.notify',
     source: 'native',
     id: 'notify',

@@ -32,6 +32,7 @@ import {
 } from '../io/user-config.js';
 import { runMcpSearch } from '../mcp/registry-search.js';
 import type { SessionController } from '../session/controller.js';
+import { parseNotifyMode, type NotifyMode } from '../io/notify-port.js';
 import { NATIVE_COMMANDS, type NativeCommandId } from './commands.js';
 import { THEMES, resolveThemeName, type ThemeName } from '../ui/theme/themes.js';
 import { tableLines } from '../ui/table-lines.js';
@@ -59,7 +60,12 @@ export type SlashEffect =
   // EST-0963 — `/notify on|off|toggle`: liga/desliga o sino. O run.tsx aplica o
   // `enable` na NotificationPort e empurra a `note`. Mantido como efeito (não
   // `note` direto) p/ o run.tsx ter o booleano a aplicar sem re-parsear o arg.
-  | { readonly kind: 'notify'; readonly enable: boolean; readonly note: SlashNote }
+  | {
+      readonly kind: 'notify';
+      /** Novo modo; `undefined` ⇒ só consulta (sem argumento) ou argumento inválido. */
+      readonly mode: NotifyMode | undefined;
+      readonly note: SlashNote;
+    }
   // EST-0966 — `/theme <nome>` LITERAL: troca o tema da sessão (o run.tsx re-resolve
   // o Theme e re-renderiza). `theme` undefined ⇒ nome inválido: a `note` explica e
   // o tema NÃO muda. Sem arg, a App abre o PICKER (não chega aqui com TTY+picker).
@@ -89,35 +95,49 @@ export interface SlashContext {
 
 /** Estado do sino p/ o `/notify` decidir o novo valor + a nota. */
 export interface NotifyState {
-  /** Sino habilitado AGORA (toggle + TTY). */
+  /** Sino habilitado AGORA (modo != nada + TTY). */
   readonly enabled: boolean;
-  /** Há TTY? Sem TTY o sino é inerte e o `/notify on` é um no-op honesto. */
+  /** Modo corrente. Ausente ⇒ derivado de `enabled`. */
+  readonly mode?: NotifyMode;
+  /** Há TTY? Sem TTY o sino é inerte e o `/notify` é um no-op honesto. */
   readonly tty: boolean;
 }
 
+const NOTIFY_MODE_DESC: Readonly<Record<NotifyMode, string>> = {
+  tudo: 'tudo — avisa quando precisa de você (aprovação/pergunta) e quando conclui um turno longo',
+  atencao: 'atencao — avisa só quando precisa de você; turno concluído fica em silêncio',
+  nada: 'nada — sem som nem notificação de desktop',
+};
+
 /**
- * EST-0963 — decide o EFEITO do `/notify`. `args`: `on` | `off` | (vazio = toggle).
- * PURO: recebe o estado atual do sino e devolve o novo `enable` + a nota NEUTRA a
- * exibir. Sem TTY, deixa explícito que o sino não soa naquele contexto (mas ainda
- * registra a preferência — ao voltar p/ um TTY ela vale). Nunca vaza conteúdo.
+ * EST-0963 — decide o EFEITO do `/notify`. `args`: `tudo` | `atencao` | `nada`
+ * (legados: `on` ⇒ tudo, `off` ⇒ nada). Sem argumento (ou inválido) NÃO muda nada:
+ * mostra o modo atual e as opções. PURO. Texto neutro — nunca conteúdo da conversa.
  */
 export function buildNotifyEffect(args: string, state: NotifyState): SlashEffect {
-  const arg = args.trim().toLowerCase();
-  let enable: boolean;
-  if (arg === 'on' || arg === 'ligar') enable = true;
-  else if (arg === 'off' || arg === 'desligar') enable = false;
-  else enable = !state.enabled; // toggle (sem arg ou arg desconhecido)
+  const arg = args.trim();
+  const parsed = parseNotifyMode(arg);
+  const current: NotifyMode = state.mode ?? (state.enabled ? 'tudo' : 'nada');
+  const ttyWarn = state.tty
+    ? []
+    : ['⚠ sem TTY (saída piped/CI) — o sino não soa aqui; a preferência vale num terminal.'];
 
-  const status = enable ? 'ligado' : 'desligado';
-  const lines = [
-    `sino de atenção: ${status}`,
-    'avisa quando o Aluy pede aprovação ou conclui um turno longo (BEL + notificação',
-    'de desktop best-effort). texto neutro — nunca o conteúdo da conversa.',
-    ...(state.tty
-      ? []
-      : ['⚠ sem TTY (saída piped/CI) — o sino não soa aqui; a preferência vale num terminal.']),
-  ];
-  return { kind: 'notify', enable, note: { title: 'notify', lines } };
+  if (parsed === undefined) {
+    const lines = [
+      ...(arg === '' ? [] : [`modo desconhecido: "${arg}"`]),
+      `notificações: ${current}`,
+      'uso: /notify tudo | atencao | nada   (on = tudo, off = nada)',
+      ...(['tudo', 'atencao', 'nada'] as const).map(
+        (m) => `  ${m === current ? '●' : '○'} ${NOTIFY_MODE_DESC[m]}`,
+      ),
+      'texto neutro — nunca o conteúdo da conversa. Salvo em ~/.aluy/config.json.',
+      ...ttyWarn,
+    ];
+    return { kind: 'notify', mode: undefined, note: { title: 'notify', lines } };
+  }
+
+  const lines = [`notificações: ${NOTIFY_MODE_DESC[parsed]}`, ...ttyWarn];
+  return { kind: 'notify', mode: parsed, note: { title: 'notify', lines } };
 }
 
 /**
