@@ -84,7 +84,7 @@ describe('EST-0958 · CA-2 — `!rm -rf` cai em ask (sempre-ask), NÃO executa s
     const shell = new RecordingShell();
     const { ports } = makePorts({ shell });
     const engine = new PolicyPermissionEngine();
-    const bang = new BangExecutor({ permission: engine, ports }); // SEM resolver
+    const bang = new BangExecutor({ permission: engine, ports, userExplicit: false }); // SEM resolver
 
     const out = await bang.run('rm -rf build');
     expect(out.kind).toBe('blocked');
@@ -103,6 +103,7 @@ describe('EST-0958 · CA-2 — `!rm -rf` cai em ask (sempre-ask), NÃO executa s
       permission: new PolicyPermissionEngine(),
       ports,
       askResolver: resolver,
+      userExplicit: false,
     });
     const out = await bang.run('rm -rf build');
     expect(out.kind).toBe('blocked');
@@ -117,6 +118,7 @@ describe('EST-0958 · CA-2 — `!rm -rf` cai em ask (sempre-ask), NÃO executa s
       permission: new PolicyPermissionEngine(),
       ports,
       askResolver: new ScriptedResolver(() => ({ kind: 'approve-once' })),
+      userExplicit: false,
     });
     const out = await bang.run('rm -rf build');
     expect(out.kind).toBe('ran');
@@ -199,7 +201,11 @@ describe('EST-0958 · CLI-SEC-4 — a saída realimentada é DADO_NAO_CONFIAVEL'
   it('comando bloqueado também produz observação ACIONÁVEL (não erro técnico)', async () => {
     const shell = new RecordingShell();
     const { ports } = makePorts({ shell });
-    const bang = new BangExecutor({ permission: new PolicyPermissionEngine(), ports });
+    const bang = new BangExecutor({
+      permission: new PolicyPermissionEngine(),
+      ports,
+      userExplicit: false,
+    });
     const out = await bang.run('rm -rf build');
     expect(out.kind).toBe('blocked');
     if (out.kind !== 'blocked') return;
@@ -222,5 +228,41 @@ describe('EST-0958 · confinamento/timeout — herda o shell port da sessão (ES
     await bang.run('pwd');
     await bang.run('whoami');
     expect(shell.executed).toEqual(['pwd', 'whoami']); // tudo pela porta confinada
+  });
+});
+
+describe('F15 (ADR 0003) — `!comando` do USUÁRIO é ação explícita: ask não abre caixa', () => {
+  it('`!rm -rf build` roda direto, SEM consultar o resolver (default)', async () => {
+    const shell = new RecordingShell(() => ({ stdout: '', stderr: '', exitCode: 0 }));
+    const { ports } = makePorts({ shell });
+    const resolver = new ScriptedResolver(() => ({ kind: 'deny' }));
+    const bang = new BangExecutor({
+      permission: new PolicyPermissionEngine(),
+      ports,
+      askResolver: resolver,
+    });
+    const out = await bang.run('rm -rf build');
+    expect(out.kind).toBe('ran');
+    expect(shell.executed).toEqual(['rm -rf build']);
+    expect(resolver.seen.length).toBe(0);
+  });
+
+  it('pisos duros continuam: Plan e leitura do journal ~/.aluy seguem NEGADOS', async () => {
+    const shell = new RecordingShell();
+    const { ports } = makePorts({ shell });
+    const plan = new BangExecutor({
+      permission: new PolicyPermissionEngine({ mode: 'plan' }),
+      ports,
+    });
+    expect((await plan.run('rm -rf build')).kind).toBe('blocked');
+    const normal = new BangExecutor({ permission: new PolicyPermissionEngine(), ports });
+    expect((await normal.run('cat ~/.aluy/journal/x')).kind).toBe('blocked');
+    expect(shell.executed).toEqual([]);
+  });
+
+  it('NÃO é caminho do modelo: decide() do run_command do agente segue em ask', () => {
+    const engine = new PolicyPermissionEngine();
+    const v = engine.decide({ name: 'run_command', input: { command: 'rm -rf build' } });
+    expect(v.decision).toBe('ask');
   });
 });

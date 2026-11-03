@@ -55,10 +55,17 @@ function fakePorts(gate?: Promise<void>): ToolPorts {
   return { fs, shell, search };
 }
 
+// F15 — o `!cmd` do usuário não abre mais caixa; o ask vem de um run_command DO MODELO.
 function inertCaller(): ModelCaller {
+  let n = 0;
   return {
     async call(): Promise<ModelCallResult> {
-      return { request_id: 'r', content: '', finish_reason: 'stop' };
+      n += 1;
+      const content =
+        n === 1
+          ? '<<<ALUY_TOOL_CALL\n{"name":"run_command","input":{"command":"ls"}}\nALUY_TOOL_CALL>>>'
+          : 'pronto.';
+      return { request_id: 'r', content, finish_reason: 'stop' };
     },
   };
 }
@@ -127,8 +134,8 @@ describe('App — footer de aprovação NÃO vaza no composer durante o ask (fix
     controller.dismissBoot();
     await flush();
 
-    // `!ls` ⇒ a catraca abre o AskDialog (phase `asking`).
-    void controller.runBang('ls');
+    // run_command do modelo ⇒ a catraca abre o AskDialog (phase `asking`).
+    void controller.submit('liste');
     await waitFor(() => controller.current.phase === 'asking');
     await flush();
 
@@ -159,7 +166,7 @@ describe('App — footer de aprovação NÃO vaza no composer durante o ask (fix
     controller.dismissBoot();
     await flush();
 
-    void controller.runBang('ls');
+    void controller.submit('liste');
     await waitFor(() => controller.current.phase === 'asking');
     await flush();
 
@@ -187,7 +194,7 @@ describe('App — footer de aprovação NÃO vaza no composer durante o ask (fix
     controller.dismissBoot();
     await flush();
 
-    void controller.runBang('ls');
+    void controller.submit('liste');
     await waitFor(() => controller.current.phase === 'asking');
     controller.resolveAsk({ kind: 'approve-once' });
     // o bang executa e o turno fecha ⇒ volta a idle/done.
