@@ -388,6 +388,7 @@ export async function runHeadlessStreamJson(
   // Rastreador de blocos já emitidos: chave = `${index}::${kind}::${status||streaming}`
   const emitted = new Set<string>();
   let lastPhase: string | undefined;
+  let lastSelfCheckLabel: string | undefined;
 
   /** Emite um evento NDJSON se ainda não foi emitido (pela chave). */
   const emitIfNew = (block: SessionBlock, index: number): void => {
@@ -465,6 +466,15 @@ export async function runHeadlessStreamJson(
       lastPhase = state.phase;
       if (state.phase !== 'idle' && state.phase !== 'boot') {
         out.write(JSON.stringify({ type: 'phase', phase: state.phase }) + '\n');
+      }
+    }
+    // Passada de auto-verificação (self-check): evento aditivo p/ medir custo/benefício
+    // em headless (scripts/experiments/self-check). Um por mudança de rótulo "(n/m)".
+    const wl = state.workingLabel;
+    if (wl !== lastSelfCheckLabel) {
+      lastSelfCheckLabel = wl;
+      if (wl !== undefined && wl.startsWith('conferindo o trabalho')) {
+        out.write(JSON.stringify({ type: 'self_check', label: wl }) + '\n');
       }
     }
     // Diff dos blocks: emite blocos novos ou com status alterado

@@ -39,6 +39,12 @@ export interface SelfCheckConfig {
    * mesmo que o modelo "ainda ache gaps". `>=1`. Só vale com `enabled:true`.
    */
   readonly maxVerifications: number;
+  /**
+   * OPT-IN: quando `true`, o loop NÃO sonda se o próprio agente já deixou EVIDÊNCIA de
+   * verificação DEPOIS do último efeito (ver `VerificationLedger`). Ausente/`false` ⇒
+   * comportamento clássico (sempre sonda até o cap).
+   */
+  readonly skipWhenVerified?: boolean;
 }
 
 /** RE-ÂNCORA default: a cada 8 iterações (barato — só contexto). */
@@ -133,6 +139,10 @@ export interface SelfCheckInputs {
    * ENTRE env e default (env > config > default); MESMO clamp de `maxVerificationsEnv`.
    */
   readonly maxVerificationsConfig?: number | undefined;
+  /** `ALUY_SELF_CHECK_SKIP_VERIFIED` (env) — liga o "pula a sonda se já verificou". */
+  readonly skipWhenVerifiedEnv?: string | boolean | undefined;
+  /** `config.advanced.selfCheck.skipWhenVerified` — nível ENTRE env e default (OFF). */
+  readonly skipWhenVerifiedConfig?: boolean | undefined;
 }
 
 /**
@@ -171,6 +181,9 @@ export function resolveSelfCheck(inputs: SelfCheckInputs): SelfCheckConfig {
         MAX_MAX_VERIFICATIONS,
       ) ??
       DEFAULT_MAX_VERIFICATIONS,
+    // Opt-in (default OFF até haver evidência — ver docs/self-check-enxuto.md).
+    skipWhenVerified:
+      parseBoolSetting(inputs.skipWhenVerifiedEnv) ?? inputs.skipWhenVerifiedConfig ?? false,
   };
 }
 

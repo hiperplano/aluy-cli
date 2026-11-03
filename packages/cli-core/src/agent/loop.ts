@@ -50,6 +50,7 @@ import {
   buildVerificationCapNote,
   awaitsUserDecision,
 } from './self-check.js';
+import { VerificationLedger } from './verification-ledger.js';
 import {
   detectWeakYoloUntrusted,
   buildWeakYoloWarning,
@@ -1119,6 +1120,9 @@ export class AgentLoop {
     // ativos quando `this.selfCheck.enabled` — fora disso, código morto (baseline).
     const goalText = originalGoal(history);
     let verifications = 0;
+    // Livro-caixa do "pula a sonda se já verificou" (opt-in `skipWhenVerified`). Sempre
+    // alimentado (barato, puro); só CONSULTADO quando a opção está ligada.
+    const ledger = new VerificationLedger();
     // EST-SEC-HARDEN (F21) — estado ONE-SHOT do guardrail do combo perigoso (yolo +
     // tier-fraco + untrusted). `true` depois que JÁ avisamos+reforçamos: o WARN no stderr
     // é uma vez por sessão (não polui a cada iteração) e o REFORÇO do envelope (um
@@ -1568,6 +1572,7 @@ export class AgentLoop {
           if (outcome.ok) {
             successfulToolCalls += 1;
           }
+          ledger.record(call.name, call.input, outcome.ok === true);
           // RESULTADO no canal `tool` (pareado por `tool_call_id`). O conteúdo segue
           // DADO NÃO-CONFIÁVEL (envelopado em buildMessages) — anti-injeção intacta.
           history.push({
@@ -1626,7 +1631,11 @@ export class AgentLoop {
         // por não haver evidência a conferir; aqui não se sonda porque o que falta NÃO É
         // TRABALHO NOSSO. Aceitar o final é o baseline (idêntico a self-check off).
         const awaitingUser = awaitsUserDecision(turn.text);
-        const verifiable = this.selfCheck.enabled && successfulToolCalls > 0 && !awaitingUser;
+        // Opt-in `skipWhenVerified`: o agente JÁ conferiu o que fez depois do último
+        // efeito (releu o arquivo / teste passou) ⇒ a sonda é redundante; aceita o final.
+        const alreadyVerified = this.selfCheck.skipWhenVerified === true && ledger.canSkip();
+        const verifiable =
+          this.selfCheck.enabled && successfulToolCalls > 0 && !awaitingUser && !alreadyVerified;
         if (verifiable && verifications < this.selfCheck.maxVerifications) {
           verifications += 1;
           // Segura o CANDIDATO REAL a entregar ao usuário no fim. ATUALIZA-o SÓ quando
@@ -1790,6 +1799,7 @@ export class AgentLoop {
       if (outcome.ok) {
         successfulToolCalls += 1;
       }
+      ledger.record(turn.call.name, turn.call.input, outcome.ok === true);
       history.push({ role: 'observation', toolName: turn.call.name, text: outcome.observation });
       // ENCAIXE FLUIDO — idem ao caminho nativo: o "btw" que chegou durante a tool entra
       // logo após a observação (1 tool por turno aqui ⇒ o par já está fechado).
