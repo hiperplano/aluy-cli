@@ -1467,17 +1467,13 @@ export function App(props: AppProps): React.ReactElement {
         suggestAbortRef.current?.abort();
         const ctl = new AbortController();
         suggestAbortRef.current = ctl;
-        const ultimoObjetivo = [...state.blocks]
-          .reverse()
-          .find((b) => b.kind === 'you')?.text;
+        const ultimoObjetivo = [...state.blocks].reverse().find((b) => b.kind === 'you')?.text;
         void controller
           .suggestNext(
             {
               lang: activeLang,
               ...(turnRecap !== undefined ? { recap: turnRecap } : {}),
-              ...(ultimoObjetivo !== undefined
-                ? { lastGoal: ultimoObjetivo.slice(0, 200) }
-                : {}),
+              ...(ultimoObjetivo !== undefined ? { lastGoal: ultimoObjetivo.slice(0, 200) } : {}),
             },
             ctl.signal,
           )
@@ -2607,11 +2603,13 @@ export function App(props: AppProps): React.ReactElement {
   // da fila INJETANDO-os no agente vivo (`injectInput` ⇒ processam na PRÓXIMA iteração do loop, não
   // no fim de TUDO). PARA no 1º item não-injetável (bang/slash/anexo) p/ PRESERVAR A ORDEM — esses
   // seguem esperando o repouso/submit. Assim "como está?" digitado durante o trabalho entra logo,
-  // sem esperar o turno inteiro. (Limite honesto: se o pai está bloqueado num sub-agente/tool longo,
-  // a próxima iteração — e o drain — só vem quando aquele efeito termina; é o mais cedo possível.)
+  // sem esperar o turno inteiro. (O loop agora também drena ENTRE as tools de um batch e logo após
+  // cada tool — ver `AgentLoop` —; o que resta esperando é uma ÚNICA tool/geração em voo.)
   useEffect(() => {
     if (atRest || queue.length === 0) return;
-    if (state.phase !== 'thinking' && state.phase !== 'streaming') return;
+    if (state.phase !== 'thinking' && state.phase !== 'streaming' && state.phase !== 'retrying') {
+      return;
+    }
     let drained = 0;
     for (const item of queue) {
       if (!injectIfPlainText(item)) break; // bang/slash/anexo ⇒ para (ordem preservada)
