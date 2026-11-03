@@ -502,7 +502,10 @@ describe('OpenAiCompatAdapter — BUG-TRAILER (usage no chunk trailer, pós fini
       fetch: fetchDone,
     });
     const eventsDone = await drain(clientDone.stream({ request: req() }));
-    expect(eventsDone.map((e) => e.type)).toEqual(['tool_call', 'done']);
+    expect(eventsDone.filter((e) => e.type !== 'progress').map((e) => e.type)).toEqual([
+      'tool_call',
+      'done',
+    ]);
 
     // finalize (sem [DONE]) — mesma garantia.
     const sseNoDone =
@@ -530,6 +533,9 @@ describe('OpenAiCompatAdapter — BUG-TRAILER (usage no chunk trailer, pós fini
       fetch: fetchNoDone,
     });
     const eventsNoDone = await drain(clientNoDone.stream({ request: req() }));
-    expect(eventsNoDone.map((e) => e.type)).toEqual(['tool_call', 'done']);
+    expect(eventsNoDone.filter((e) => e.type !== 'progress').map((e) => e.type)).toEqual([
+      'tool_call',
+      'done',
+    ]);
   });
 });

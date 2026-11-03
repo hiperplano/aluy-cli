@@ -73,7 +73,8 @@ describe('turnOutputTokens', () => {
     const controller = monta(async (c, k) => {
       if (k === 0) {
         c.sink.onStart();
-        c.sink.onDelta('x'.repeat(400)); // ~100 tokens estimados
+        c.sink.onDelta('x'.repeat(400));
+        c.sink.onGenerated?.('text', 400); // ~100 tokens estimados
         vistos.push(c.turnOutputTokens());
         c.sink.onUsage?.(usage(120, 30_000)); // real: 120 (o prompt de 30k NÃO entra)
         vistos.push(c.turnOutputTokens());
@@ -86,7 +87,8 @@ describe('turnOutputTokens', () => {
         } as ModelCallResult;
       }
       c.sink.onStart();
-      c.sink.onDelta('y'.repeat(200)); // +50 estimados no 2º passo
+      c.sink.onDelta('y'.repeat(200));
+      c.sink.onGenerated?.('text', 200); // +50 estimados no 2º passo
       if (k === 1) vistos.push(c.turnOutputTokens());
       c.sink.onUsage?.(usage(60, 35_000));
       if (k === 1) vistos.push(c.turnOutputTokens());
@@ -102,7 +104,8 @@ describe('turnOutputTokens', () => {
     const vistos: number[] = [];
     const controller = monta(async (c, k) => {
       c.sink.onStart();
-      c.sink.onDelta('x'.repeat(80)); // 20
+      c.sink.onDelta('x'.repeat(80));
+      c.sink.onGenerated?.('text', 80); // 20
       if (k === 0) {
         c.sink.onDone();
         return {
@@ -125,6 +128,7 @@ describe('turnOutputTokens', () => {
     const controller = monta(async (c) => {
       c.sink.onStart();
       c.sink.onDelta('x'.repeat(40));
+      c.sink.onGenerated?.('text', 40);
       c.sink.onUsage?.(usage(10));
       c.sink.onDone();
       return { request_id: 'a', content: 'x', finish_reason: 'stop' };

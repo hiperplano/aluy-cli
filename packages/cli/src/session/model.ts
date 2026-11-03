@@ -656,6 +656,13 @@ export interface SessionState {
    * que o relógio anda desde o Enter, antes de qualquer atividade do modelo.
    */
   readonly workingSince?: number | undefined;
+  /**
+   * VERBO do passo corrente (`Costurando`) — FONTE ÚNICA: o controller sorteia um novo a cada
+   * mudança de `workingSince` (cada passo) e a linha de trabalho e o `⋯ Costurando…` da caixa
+   * da resposta leem o MESMO valor, então nunca divergem. Ausente (`ALUY_VERBOS=simples`) ⇒
+   * rótulos planos (`pensando`).
+   */
+  readonly workingVerb?: string | undefined;
   // `| undefined` explícito (exactOptionalPropertyTypes): o controlador LIMPA
   // estes campos com `undefined` ao resolver o ask/budget — então o tipo precisa
   // admitir a ausência por atribuição, não só por omissão da chave.

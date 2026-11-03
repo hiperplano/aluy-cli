@@ -209,6 +209,8 @@ import {
   type ToolLineBlock,
   type LiveSubagent,
 } from './model.js';
+import { criarRng, parseVerbos, seedPadrao, sortearVerbo, verbosSimples } from './verbos.js';
+import { resolveText } from '../i18n/translate.js';
 
 /** EST-0958 — estados do bloco `!comando` (running → ok/err/blocked). */
 type BangStatus = BangBlock['status'];
@@ -1639,9 +1641,25 @@ export class SessionController {
   // TOKENS GERADOS no turno (saída do PAI; os do filho só chegam somados com os de entrada, então
   // não entram). `saidaConfirmada` = soma dos `tokens_out` que o provider REPORTOU; `saidaChars` =
   // texto streamado da chamada em voo, ainda sem uso reportado (estimativa ~4 chars/token).
+  // VERBO POR PASSO (fonte única do `Costurando…` — ver `SessionState.workingVerb`).
+  private verboDoPasso: number | undefined;
+  private readonly listaDeVerbos = parseVerbos(resolveText('pt-BR', 'working.verbs'));
+  private readonly rngDeVerbos = criarRng(seedPadrao());
+  // TOKENS ENVIADOS (↑) na requisição do passo: estimativa (chars/4 das mensagens) até o
+  // `tokens_in` real chegar. `undefined` fora de um passo.
+  private entradaPasso: { tokens: number; estimado: boolean } | undefined;
+  private promptCharsDoPasso: number | undefined;
+  // diferença (real − chars/4) medida na última chamada: schema de tools etc. Calibra o ↑.
+  private sobrecargaDeEntrada = 0;
   private saidaConfirmada = 0;
   private saidaChars = 0;
   private usageDaChamadaRecebido = false;
+  // diagnóstico (ALUY_DEBUG): quanto cada canal gerou na chamada corrente
+  private geracaoDaChamada = {
+    reasoning: { chunks: 0, chars: 0 },
+    text: { chunks: 0, chars: 0 },
+    tool_args: { chunks: 0, chars: 0 },
+  };
   // SELF-CHECK — uma passada de verificação TERMINOU sem que nenhuma tool tenha disparado
   // depois dela (o modelo conferiu e confirmou). A nota "✓ auto-verificado" só é empurrada
   // no fim do turno (`afterRun`): a tool da correção vem DEPOIS do fim do stream da passada,
@@ -2582,6 +2600,13 @@ export class SessionController {
       onStart: () => this.startAluyTurn(),
       onDelta: (content) => this.appendAluyDelta(content),
       onReasoning: (content) => this.appendAluyReasoning(content),
+      // contador normalizado de geração (reasoning | text | tool_args) — igual p/ todo backend
+      onGenerated: (kind, chars) => {
+        this.saidaChars += chars;
+        const c = this.geracaoDaChamada[kind];
+        c.chunks += 1;
+        c.chars += chars;
+      },
       onUsage: (usage) => this.applyUsage(usage),
       onQuota: (quota) => this.applyQuota(quota),
       onDone: () => {
@@ -2891,6 +2916,7 @@ export class SessionController {
     } finally {
       this.abort = null;
       this.endTurnAccounting();
+      this.garantirRepousoSemTurno();
     }
   }
 
@@ -3037,10 +3063,13 @@ export class SessionController {
       // AbortSignal É o do loop (PARAR-todos = abortar a raiz, que desce a subárvore).
       // `interrupt()` (Ctrl-C) e `cancelAllFlows()` convergem no MESMO abort — sem 2º
       // mecanismo de parada (ADR-0063 §3: reusa o abort/signal existente).
-      this.beginTurn();
-      const rootSignal = this.rootFlow!.signal;
-      this.startTurnAccounting();
       try {
+        // BEGIN DENTRO DO TRY — se abrir o turno falhar (árvore de fluxos/contabilidade), o erro
+        // cai no `catch` e a fase é resolvida; antes a exceção escapava com a fase presa em
+        // `thinking` (linha de trabalho eterna, sem turno vivo).
+        this.beginTurn();
+        const rootSignal = this.rootFlow!.signal;
+        this.startTurnAccounting();
         // EST-0973 — CONTINUIDADE MULTI-TURNO: cada turno CONTINUA a conversa a
         // partir do histórico dos turnos anteriores (`lastRunHistory` — goals +
         // respostas + observações de tools já acumulados), prependando-o ao novo
@@ -3085,7 +3114,11 @@ export class SessionController {
         // — repassado a `onError` p/ virar cancelamento limpo (idle), não broker-error.
         let retry = false;
         try {
-          retry = await this.shouldAutoRetry(err, attempt, this.rootFlow!.signal);
+          retry = await this.shouldAutoRetry(
+            err,
+            attempt,
+            this.rootFlow?.signal ?? new AbortController().signal,
+          );
         } catch (backoffErr) {
           this.devolveResultadosAoProximoTurno();
           this.onError(backoffErr);
@@ -3111,8 +3144,23 @@ export class SessionController {
         this.endTurnAccounting();
         // ...e o que ficou órfão volta p/ a fila da TUI, que o envia no repouso.
         this.publishOrphanInjects();
+        this.garantirRepousoSemTurno();
       }
     }
+  }
+
+  /**
+   * REDE DE SEGURANÇA — o turno acabou (qualquer desfecho) mas a fase seguiu `thinking`/
+   * `retrying`/`streaming`: a linha de trabalho ficaria na tela para sempre, com o relógio
+   * parado e nada a produzir. Nenhum caminho conhecido deveria deixar isso, mas o custo de
+   * errar é uma linha mentirosa eterna; o custo da rede é um no-op. Não mexe em fases de
+   * decisão (asking/budget/stuck/…) nem com ciclo/workflow ativo.
+   */
+  private garantirRepousoSemTurno(): void {
+    const f = this.state.phase;
+    if (f !== 'thinking' && f !== 'retrying' && f !== 'streaming') return;
+    if (this.abort !== null || this.cycleActive || this.state.workflowActive === true) return;
+    this.patch({ phase: 'idle', workingLabel: undefined });
   }
 
   /**
@@ -4112,6 +4160,7 @@ export class SessionController {
     this.saidaConfirmada = 0;
     this.saidaChars = 0;
     this.usageDaChamadaRecebido = false;
+    this.entradaPasso = undefined;
     // EST-0982 (semântica do esc) — turno novo re-arma o discriminante do PARAR-TUDO:
     // um F8 antigo não silencia os desfechos desacoplados do turno que COMEÇA agora.
     this.hardStopped = false;
@@ -4627,6 +4676,14 @@ export class SessionController {
    * já é coberto pelo `toolObserver`. NÃO toca catraca/budget.
    */
   private onParentProgress(signal: ProgressSignal): void {
+    // ↑ ESTIMADO do passo: chars das mensagens montadas / 4, igual p/ qualquer provider.
+    if (signal.kind === 'model-call' && signal.promptChars !== undefined) {
+      // chars/4 não vê o que vai FORA das mensagens (o schema das tools nativas, ~constante na
+      // sessão): a sobrecarga medida na chamada anterior (real − estimado) é somada à próxima.
+      const base = Math.ceil(signal.promptChars / 4);
+      this.promptCharsDoPasso = signal.promptChars;
+      this.entradaPasso = { tokens: base + this.sobrecargaDeEntrada, estimado: true };
+    }
     // FEEDBACK-IMEDIATO — fim do preparo: o modelo vai ser chamado. `preparando` → `pensando`
     // (só se ainda estamos no rótulo de preparo; rótulos de ciclo/workflow não são tocados).
     if (signal.kind === 'model-call' || signal.kind === 'preparing') {
@@ -4879,19 +4936,28 @@ export class SessionController {
   }
 
   /**
-   * CONTABILIDADE — o resumo do TURNO do agente principal (tokens + tempo), estilo
-   * Claude Code. Leitura/display — não dispara efeito, não vaza segredo. `undefined`
-   * antes do 1º turno.
+   * Tokens ENVIADOS (↑) na requisição do passo corrente: estimativa (chars das mensagens
+   * montadas / 4 — a mesma p/ qualquer provider) até o `tokens_in` real chegar no uso.
    */
+  turnInputTokens(): { tokens: number; estimado: boolean } | undefined {
+    return this.entradaPasso;
+  }
+
   /**
-   * Tokens GERADOS (saída) pelo PAI neste turno, para o `↓ N tokens` da linha de trabalho:
-   * os `tokens_out` já reportados + uma ESTIMATIVA (~4 chars/token) do que a chamada em voo
-   * streamou. Quando o uso da chamada chega, a estimativa é trocada pelo número real.
+   * Tokens GERADOS (↓) pelo PAI neste turno: os `tokens_out` já reportados + uma ESTIMATIVA
+   * (~4 chars/token) do que a chamada em voo gerou (raciocínio, texto e argumentos de tool —
+   * sinal normalizado `onGenerated`). Quando o uso da chamada chega, a estimativa é trocada
+   * pelo número real. Independe do provider.
    */
   turnOutputTokens(): number {
     return this.saidaConfirmada + Math.ceil(this.saidaChars / 4);
   }
 
+  /**
+   * CONTABILIDADE — o resumo do TURNO do agente principal (tokens + tempo), estilo
+   * Claude Code. Leitura/display — não dispara efeito, não vaza segredo. `undefined`
+   * antes do 1º turno.
+   */
   turnAccounting(): TurnAccountingView | undefined {
     if (!this.rootFlow || !this.flowTree) return undefined;
     // EST-0973 (hunt-budget) — AGREGADO pai+filhos via `totalAccounting()` (sem dobra);
@@ -6853,6 +6919,11 @@ export class SessionController {
     }
     this.saidaChars = 0;
     this.usageDaChamadaRecebido = false;
+    this.geracaoDaChamada = {
+      reasoning: { chunks: 0, chars: 0 },
+      text: { chunks: 0, chars: 0 },
+      tool_args: { chunks: 0, chars: 0 },
+    };
   }
 
   /**
@@ -6926,7 +6997,6 @@ export class SessionController {
    * frequência de pintura é limitada.
    */
   private appendAluyReasoning(content: string): void {
-    this.saidaChars += content.length;
     this.abrirTurnoAluy();
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
@@ -6942,7 +7012,6 @@ export class SessionController {
   }
 
   private appendAluyDelta(content: string): void {
-    this.saidaChars += content.length;
     this.abrirTurnoAluy();
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
@@ -7156,9 +7225,22 @@ export class SessionController {
     const total = (usage.tokens_in ?? 0) + (usage.tokens_out ?? 0);
     // reconcilia: o número REAL da chamada substitui a estimativa do que foi streamado
     if (usage.tokens_out !== undefined) {
-      this.saidaConfirmada += usage.tokens_out;
+      // raciocínio reportado à parte: na maioria dos providers já está em `tokens_out`; se
+      // `tokens_out` é menor que ele, o provider o reporta FORA e os dois se somam.
+      const raz = usage.tokens_reasoning ?? 0;
+      this.saidaConfirmada += raz > usage.tokens_out ? usage.tokens_out + raz : usage.tokens_out;
       this.saidaChars = 0;
       this.usageDaChamadaRecebido = true;
+    }
+    // ↑ real do passo (substitui a estimativa feita a partir das mensagens montadas)
+    if (usage.tokens_in !== undefined && usage.tokens_in > 0) {
+      this.entradaPasso = { tokens: usage.tokens_in, estimado: false };
+      if (this.promptCharsDoPasso !== undefined) {
+        this.sobrecargaDeEntrada = Math.max(
+          0,
+          usage.tokens_in - Math.ceil(this.promptCharsDoPasso / 4),
+        );
+      }
     }
     const pct = pctDeCache(usage.tokens_in, usage.tokens_cached);
     if (pct !== undefined) this.cachePctDoUltimoTurno = pct;
@@ -7179,6 +7261,7 @@ export class SessionController {
             : {}),
         }),
         `provider: ${usage.provider ?? '?'} · modelo: ${usage.model ?? '?'}`,
+        `geração: raciocínio ${String(this.geracaoDaChamada.reasoning.chunks)} chunks/${String(this.geracaoDaChamada.reasoning.chars)} chars · texto ${String(this.geracaoDaChamada.text.chunks)}/${String(this.geracaoDaChamada.text.chars)} · tool_args ${String(this.geracaoDaChamada.tool_args.chunks)}/${String(this.geracaoDaChamada.tool_args.chars)} · tokens_in ${String(usage.tokens_in)} tokens_out ${String(usage.tokens_out)} reasoning ${String(usage.tokens_reasoning)}`,
       ]);
     }
     const tokens = this.state.meta.tokens + total;
@@ -9301,6 +9384,18 @@ export class SessionController {
    */
   private patch(partial: Partial<SessionState>): void {
     this.state = { ...this.state, ...partial };
+    // VERBO POR PASSO — cada novo `workingSince` é um passo novo ⇒ sorteia o verbo (fonte única).
+    if (
+      partial.workingSince !== undefined &&
+      partial.workingSince !== this.verboDoPasso &&
+      partial.workingVerb === undefined
+    ) {
+      this.verboDoPasso = partial.workingSince;
+      if (!verbosSimples()) {
+        const v = sortearVerbo(this.listaDeVerbos, this.rngDeVerbos, this.state.workingVerb);
+        if (v !== undefined) this.state = { ...this.state, workingVerb: v };
+      }
+    }
     this.flush.flushNow();
     this.notify();
   }

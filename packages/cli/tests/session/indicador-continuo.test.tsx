@@ -165,9 +165,7 @@ describe('indicador contínuo entre passos (App renderizada)', () => {
     while (seen.length < 3 && Date.now() < fim) await sleep(20);
     expect(seen).toHaveLength(3);
     for (const [i, s] of seen.entries()) {
-      expect(s.tela, `passo ${i}`).toMatch(
-        /pensando… \(pensando · (↓ [\d,.k]+ tokens · )?(\d+s|\d+m \d\ds)\)/,
-      );
+      expect(s.tela, `passo ${i}`).toMatch(/pensando… \(pensando · [^)]*(\d+s|\d+m \d\ds)\)/);
     }
     // Fim do turno: o RECAP (`✔ leu a0.txt…`) não é mais desenhado dentro do composer.
     const fim2 = Date.now() + 5000;

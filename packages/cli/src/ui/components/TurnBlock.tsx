@@ -17,6 +17,7 @@ import { cleanAluyForDisplay } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { Markdown } from '../markdown/index.js';
 import { AluyLoader } from './AluyLoader.js';
+import { ShimmerText } from './ShimmerText.js';
 import wrapAnsi from 'wrap-ansi';
 import { windowTailVisual, capSourceLineChars, displayWidth } from '../../session/visual-lines.js';
 import { abbreviateCount, formatDuration, type TurnAccountingView } from '../../session/model.js';
@@ -190,6 +191,14 @@ export interface AluyBlockProps {
    * raciocínio (`finish_reason: 'length'`) — vazio PARA SEMPRE, sem explicação.
    */
   readonly reasoning?: string;
+  /**
+   * VERBO do passo (`Costurando`) — o MESMO da linha de trabalho (fonte única no controller).
+   * Troca o `⋯ pensando` do raciocínio ao vivo por `⋯ Costurando…` com o brilho. Ausente
+   * (modo `simples` / cockpit) ⇒ o texto de sempre.
+   */
+  readonly verbo?: string;
+  /** Parêntese dim após o verbo no raciocínio ao vivo (`(pensando · ↓ 394 tokens · 9s)`). */
+  readonly detalhe?: string;
 }
 
 /** Indentação (colunas) da FALA do aluy — `<Box paddingLeft={2}>`. */
@@ -289,7 +298,11 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
       const linhas = windowTailVisual(cru, REASONING_LIVE_LINES, speechCols).text.split('\n');
       return ['⋯ o modelo só produziu raciocínio', ...linhas];
     }
-    if (props.streaming) return ['⋯ pensando'];
+    if (props.streaming) {
+      return props.verbo !== undefined
+        ? [`⋯ ${props.verbo}…${props.detalhe !== undefined ? ' ' + props.detalhe : ''}`]
+        : ['⋯ pensando'];
+    }
     return [`⋯ pensou ${cru.length} caracteres`];
   })();
 
@@ -409,7 +422,20 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
         {reasoningView !== undefined && (
           <Box flexDirection="column">
             {reasoningView.map((linha, i) =>
-              aluyFundo !== undefined && speechCols > 0 ? (
+              props.streaming && props.verbo !== undefined && i === 0 ? (
+                // VIVA: `⋯ ` dim + o verbo com o brilho (mesmo ShimmerText da linha de trabalho).
+                <Text key={i} {...(aluyFundo !== undefined ? { backgroundColor: aluyFundo } : {})}>
+                  {aluyFundo !== undefined && speechCols > 0 ? <Text> </Text> : null}
+                  <Role name="fgDim">{'⋯ '}</Role>
+                  <ShimmerText text={`${props.verbo}…`} frame={props.frame ?? 0} />
+                  {props.detalhe !== undefined ? (
+                    <Role name="fgDim">{' ' + props.detalhe}</Role>
+                  ) : null}
+                  {aluyFundo !== undefined && speechCols > 0 ? (
+                    <Text>{' '.repeat(Math.max(0, speechCols - 1 - displayWidth(linha)))}</Text>
+                  ) : null}
+                </Text>
+              ) : aluyFundo !== undefined && speechCols > 0 ? (
                 // O ` ` inicial é o MESMO respiro pintado que o cabeçalho e a fala
                 // (`<Markdown>`) têm depois da barra. Sem ele, "⋯ pensando"/"⋯ pensou"
                 // ficavam uma coluna à esquerda de tudo ("desposicionados em relação ao

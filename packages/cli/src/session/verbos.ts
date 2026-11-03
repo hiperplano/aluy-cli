@@ -71,35 +71,53 @@ export function formatSegundos(ms: number): string {
   return `${String(Math.floor(total / 60))}m ${String(total % 60).padStart(2, '0')}s`;
 }
 
+/** Contagem compacta pt-BR sem unidade: `850`, `1,2k`, `33k`. `<= 0`/inválido ⇒ undefined. */
+export function formatContagemPtBr(n: number): string | undefined {
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  if (n < 1000) return String(Math.round(n));
+  const k = n / 1000;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace('.', ',')}M`;
+  return `${k < 10 ? k.toFixed(1).replace(/\.0$/, '').replace('.', ',') : String(Math.round(k))}k`;
+}
+
 /** Tokens compactos em pt-BR: `850 tokens`, `1,2k tokens`, `33k tokens`. `<= 0` ⇒ undefined. */
 export function formatTokensPtBr(n: number): string | undefined {
-  if (!Number.isFinite(n) || n <= 0) return undefined;
-  if (n < 1000) return `${String(Math.round(n))} tokens`;
-  const k = n / 1000;
-  const txt = k < 10 ? k.toFixed(1).replace(/\.0$/, '').replace('.', ',') : String(Math.round(k));
-  return n < 1_000_000
-    ? `${txt}k tokens`
-    : `${(n / 1_000_000).toFixed(1).replace('.', ',')}M tokens`;
+  const c = formatContagemPtBr(n);
+  return c === undefined ? undefined : `${c} tokens`;
 }
 
 /**
- * O parêntese dim depois do verbo: `(pensando · 1,2k tokens · 12s)`. Cabe em `larguraMax`
- * colunas ou perde segmentos pela direita de prioridade: PRIMEIRO os tokens, depois a fase;
- * os segundos são o último a sair. `fase` ausente (rótulo funcional já diz a fase) ⇒ omitida.
+ * O parêntese dim depois do verbo: `(pensando · ↑ 21k ↓ 394 tokens · 9s)`.
+ *   ↑ = tokens ENVIADOS na requisição do passo (estimativa `~` até o uso real chegar);
+ *   ↓ = tokens GERADOS no turno. Antes do 1º delta só há ↑; depois, ambos.
+ * Cabe em `larguraMax` colunas ou perde segmentos: PRIMEIRO o ↑, depois o ↓, depois a fase; os
+ * segundos são o último a sair. `fase` ausente (rótulo funcional já diz a fase) ⇒ omitida.
  */
 export function detalheDeEspera(args: {
   readonly fase?: string | undefined;
+  /** Tokens gerados (↓) no turno. */
   readonly tokens?: number | undefined;
+  /** Tokens enviados (↑) na requisição do passo; `estimado` ⇒ prefixo `~`. */
+  readonly entrada?: { readonly tokens: number; readonly estimado: boolean } | undefined;
   readonly ms: number;
   readonly larguraMax?: number | undefined;
 }): string {
   const secs = formatSegundos(args.ms);
-  const tokTxt = args.tokens !== undefined ? formatTokensPtBr(args.tokens) : undefined;
-  // `↓ 1,2k tokens` — tokens GERADOS (saída) no turno, como o Claude Code
-  const tok = tokTxt !== undefined ? `↓ ${tokTxt}` : undefined;
+  const saida = args.tokens !== undefined ? formatContagemPtBr(args.tokens) : undefined;
+  const ent = args.entrada !== undefined ? formatContagemPtBr(args.entrada.tokens) : undefined;
+  const up =
+    ent !== undefined ? `↑ ${args.entrada?.estimado === true ? '~' : ''}${ent}` : undefined;
+  const down = saida !== undefined ? `↓ ${saida}` : undefined;
+  const io = (a?: string, b?: string): string | undefined => {
+    const t = [a, b].filter((x): x is string => x !== undefined).join(' ');
+    return t === '' ? undefined : `${t} tokens`;
+  };
+  const alvo = (...p: (string | undefined)[]): string[] =>
+    p.filter((x): x is string => x !== undefined);
   const candidatos: string[][] = [
-    [args.fase, tok, secs].filter((x): x is string => x !== undefined),
-    [args.fase, secs].filter((x): x is string => x !== undefined),
+    alvo(args.fase, io(up, down), secs),
+    alvo(args.fase, io(undefined, down), secs),
+    alvo(args.fase, secs),
     [secs],
   ];
   const max = args.larguraMax ?? Number.POSITIVE_INFINITY;
@@ -111,39 +129,15 @@ export function detalheDeEspera(args: {
 }
 
 /**
- * O estado do sorteio de UMA sessão da UI: guarda o verbo do passo corrente. `passo` é a
- * identidade do passo (o `workingSince`, que o controller zera a cada chamada de modelo).
- */
-export class SeletorDeVerbo {
-  private passo: number | undefined;
-  private verbo: string | undefined;
-  private readonly rng: () => number;
-  constructor(seed: number = seedPadrao()) {
-    this.rng = criarRng(seed);
-  }
-  /** O verbo do passo (estável enquanto `passo` não muda). */
-  para(passo: number | undefined, verbos: readonly string[]): string | undefined {
-    if (this.verbo === undefined || this.passo !== passo) {
-      this.verbo = sortearVerbo(verbos, this.rng, this.verbo);
-      this.passo = passo;
-    }
-    return this.verbo;
-  }
-}
-
-/**
- * O rótulo exibido: verbo sorteado quando o `workingLabel` é genérico; senão o próprio rótulo
- * (funcional). Capitalizado como o catálogo o escreve.
+ * O rótulo exibido na linha de trabalho: o verbo do passo (fonte única no estado do controller)
+ * quando o `workingLabel` é genérico; senão o próprio rótulo (funcional).
  */
 export function rotuloExibido(args: {
   readonly label: string | undefined;
-  readonly passo: number | undefined;
-  readonly verbos: readonly string[];
-  readonly seletor: SeletorDeVerbo;
-  readonly simples: boolean;
+  readonly verbo: string | undefined;
 }): string | undefined {
   const { label } = args;
   if (label === undefined) return undefined;
-  if (args.simples || !ROTULOS_GENERICOS.has(label)) return label;
-  return args.seletor.para(args.passo, args.verbos) ?? label;
+  if (args.verbo === undefined || !ROTULOS_GENERICOS.has(label)) return label;
+  return args.verbo;
 }

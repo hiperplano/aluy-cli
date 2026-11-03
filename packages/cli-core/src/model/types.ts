@@ -197,6 +197,12 @@ export interface ModelUsage {
   readonly tokens_in?: number;
   readonly tokens_out?: number;
   /**
+   * Tokens de RACIOCÍNIO reportados à parte no uso (`completion_tokens_details.reasoning_tokens`
+   * do OpenAI-compat). Na maioria dos providers já estão DENTRO de `tokens_out`; o consumidor
+   * reconcilia (`tokens_out` < raciocínio ⇒ o provider os reporta fora e eles se somam).
+   */
+  readonly tokens_reasoning?: number;
+  /**
    * Quantos dos `tokens_in` vieram do CACHE DE PROMPT do provider, em vez de serem
    * processados de novo.
    *
@@ -302,6 +308,11 @@ export type ModelStreamEvent =
   // o CLI só LÊ e mostra (HG-3/HG-4). Emitido no MÁXIMO uma vez por turno, ANTES do
   // `done`. AUSENTE quando o broker não reporta ⇒ a TUI degrada (footer oculto).
   | { readonly type: 'quota'; readonly quota: Quota }
+  // PROGRESSO NORMALIZADO — o modelo está GERANDO argumentos de tool-call (um passo só de
+  // tool-call não streama prosa nem raciocínio, mas gera tokens). `chars` = tamanho do
+  // fragmento de argumentos que acabou de chegar. Só observação (contador `↓` da TUI);
+  // adapters que agregam a call (broker) não emitem — a call inteira chega em `tool_call`.
+  | { readonly type: 'progress'; readonly kind: 'tool_args'; readonly chars: number }
   | { readonly type: 'done'; readonly finish_reason: string };
 
 /**
