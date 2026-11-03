@@ -1140,6 +1140,11 @@ const ROTULOS_DE_PREPARO: ReadonlySet<string> = new Set([
   'maestro avaliando',
 ]);
 
+/** O texto é só o eco do probe de auto-verificação (`AUTO-VERIFICAÇÃO (passada 2/2)…`)? */
+export function ehEcoDeAutoVerificacao(texto: string): boolean {
+  return /^\s*AUTO-VERIFICA[ÇC][ÃA]O\b/i.test(texto);
+}
+
 export class SessionController {
   private state: SessionState;
   private readonly observers = new Set<StateObserver>();
@@ -1638,6 +1643,8 @@ export class SessionController {
   // anterior, já visível). Limpo quando a verificação finaliza OU quando o modelo, em
   // vez de confirmar, ACHA UM GAP e volta a AGIR (uma tool dispara — trabalho real).
   private selfCheckInFlight = false;
+  // F22 — a caixa de permissão acabou de mostrar o diff do próximo edit (não repetir no bloco).
+  private diffJaMostradoNoAsk = false;
   // TOKENS GERADOS no turno (saída do PAI; os do filho só chegam somados com os de entrada, então
   // não entram). `saidaConfirmada` = soma dos `tokens_out` que o provider REPORTOU; `saidaChars` =
   // texto streamado da chamada em voo, ainda sem uso reportado (estimativa ~4 chars/token).
@@ -4179,6 +4186,7 @@ export class SessionController {
     // se, houver um probe). Sem isto, um flag preso esconderia a resposta do turno novo.
     this.selfCheckInFlight = false;
     this.selfCheckPassDone = false;
+    this.diffJaMostradoNoAsk = false;
   }
 
   /**
@@ -7195,8 +7203,9 @@ export class SessionController {
         }
         return;
       }
-      // Turno vazio (só tool-call, sem fala) ⇒ remove o bloco vazio.
-      if (last.text.trim() === '') {
+      // Turno vazio (só tool-call, sem fala) ⇒ remove o bloco vazio. O ECO do probe de
+      // auto-verificação (`AUTO-VERIFICAÇÃO …`) também nunca é resposta: sai como vazio.
+      if (last.text.trim() === '' || ehEcoDeAutoVerificacao(last.text)) {
         blocks.pop();
       } else {
         // F-CONTA-NO-BLOCO — carimba o custo AQUI, no mesmo ponto em que o turno deixa de
@@ -7233,6 +7242,20 @@ export class SessionController {
           ...(conta !== undefined ? { accounting: conta } : {}),
           ...(motivo === 'cancelled' ? { interrupted: true } : {}),
         };
+        // O custo do turno é CUMULATIVO: só o ÚLTIMO bloco `Λluy` do turno o carrega. Sem isto, uma
+        // resposta + o bloco que a auto-verificação promoveu mostravam `✔ 110.4k tokens · 1m34s`
+        // duas vezes (a 2ª já incluía a 1ª).
+        if (conta !== undefined) {
+          for (let i = blocks.length - 2; i >= 0; i -= 1) {
+            const b = blocks[i];
+            if (b === undefined || b.kind === 'you') break;
+            if (b.kind === 'aluy' && b.accounting !== undefined) {
+              const { accounting: _anterior, ...semConta } = b;
+              void _anterior;
+              blocks[i] = semConta;
+            }
+          }
+        }
       }
       this.patch({ blocks });
     }
@@ -7249,6 +7272,12 @@ export class SessionController {
   private demoteSelfCheckBlock(): void {
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
+    if (last && last.kind === 'aluy' && last.selfCheck && ehEcoDeAutoVerificacao(last.text)) {
+      // O modelo só ecoou o probe: nada a promover — o bloco some.
+      blocks.pop();
+      this.patch({ blocks });
+      return;
+    }
     if (last && last.kind === 'aluy' && last.selfCheck) {
       // Re-cria o bloco SEM a marca `selfCheck` (vira turno normal/visível).
       blocks[blocks.length - 1] = {
@@ -7604,6 +7633,8 @@ export class SessionController {
       // ORDEM: o aviso ANTES do `patch` — o `patch` notifica, e um observador pode
       // responder na mesma pilha (ver `onQuestionChange`).
       this.avisarAprovacaoNoCanal(pending.request);
+      // F22 — o diff já foi MOSTRADO na caixa de permissão: o bloco da tool não o repete.
+      if (pending.request.effect.kind === 'diff') this.diffJaMostradoNoAsk = true;
       this.patch({ phase: 'asking', pendingAsk: { request: pending.request } });
     } else if (this.state.phase === 'asking') {
       this.aprovacaoNoCanal = undefined;
@@ -7633,6 +7664,7 @@ export class SessionController {
     if (!pending) return;
     // Registra um bloco de deny p/ o histórico (efeito recusado fica visível §2.9).
     if (resolution.kind === 'deny') {
+      this.diffJaMostradoNoAsk = false;
       this.pushBlock({
         kind: 'deny',
         verb: verbOfTool(pending.request.call.name),
@@ -8009,7 +8041,16 @@ export class SessionController {
    * `running` (ex.: tool instantânea sem onToolStart, ou teste com resolver direto),
    * empurra a linha já resolvida — preserva o comportamento antigo (compatível).
    */
-  private resolveToolLine(line: ToolLineBlock): void {
+  private resolveToolLine(rawLine: ToolLineBlock): void {
+    // F22 — mostra o diff UMA vez: se a caixa de permissão já o exibiu, tira do bloco da tool
+    // (auto-aprovado/yolo não passa pela caixa ⇒ o bloco é a única vez e fica).
+    let line = rawLine;
+    if (rawLine.diff !== undefined && this.diffJaMostradoNoAsk) {
+      const { diff: _omitido, ...semDiff } = rawLine;
+      void _omitido;
+      line = semDiff;
+      this.diffJaMostradoNoAsk = false;
+    }
     const blocks = [...this.state.blocks];
     const idx = lastRunningToolIndex(blocks);
     if (idx >= 0) {

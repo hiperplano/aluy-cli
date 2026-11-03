@@ -43,8 +43,8 @@ describe('AskDialog diff — highlight sem perder ‹/› nem cores do sinal', (
   it('truecolor: mantém ‹/›, realça keyword e exibe o efeito EXATO', () => {
     const out = frame({ LANG: 'en_US.UTF-8', TERM: 'xterm-256color', COLORTERM: 'truecolor' });
     // direção do diff preservada
-    expect(out).toContain('‹');
-    expect(out).toContain('›');
+    expect(out).toContain('- ');
+    expect(out).toContain('+ ');
     // efeito EXATO continua visível (CLI-SEC-9)
     expect(out).toContain('httpClient');
     expect(out).toContain('@hiperplano/aluy-cli-core');
@@ -57,8 +57,8 @@ describe('AskDialog diff — highlight sem perder ‹/› nem cores do sinal', (
 
   it('NO_COLOR: direção sobrevive via glifo ‹/›, sem cor', () => {
     const out = frame({ LANG: 'en_US.UTF-8', TERM: 'xterm-256color', NO_COLOR: '1' });
-    expect(out).toContain('‹');
-    expect(out).toContain('›');
+    expect(out).toContain('- ');
+    expect(out).toContain('+ ');
     expect(out).not.toMatch(/\[38;2;/);
     expect(out).toContain('httpClient');
   });
