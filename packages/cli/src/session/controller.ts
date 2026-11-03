@@ -8819,7 +8819,7 @@ export class SessionController {
         phase: c.ok ? 'concluído' : 'concluído com falha',
         tokens: c.tokens,
         toolCalls: c.toolCalls,
-        note: 'terminou — o resultado veio como dado (nota "sub-agentes concluíram"); NÃO está morto',
+        note: 'terminou — o resultado já foi entregue ao agente principal',
       });
     }
     for (const t of arvores) {

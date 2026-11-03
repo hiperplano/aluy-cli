@@ -1852,7 +1852,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                 ok: false,
                 detail:
                   `provider "${entry.id}" NÃO respondeu ao teste: ${prova.detail}. ` +
-                  'nada mudou — o provider ativo continua o mesmo (fail-closed). ' +
+                  'nada mudou — o provider ativo continua o mesmo. ' +
                   (hasStoredApiKey(entry.id)
                     ? 'se a chave está velha, rode `aluy login --provider ' + entry.id + '`.'
                     : 'grave a chave com `aluy login --provider ' + entry.id + '`.'),
@@ -3347,7 +3347,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           if (!r.ok) {
             built.controller.pushNote('model', [
               `o modelo "${alvo}" não respondeu no provider ativo: ${r.detail}`,
-              'nada mudou (fail-closed) — o modelo anterior continua em uso.',
+              'nada mudou — o modelo anterior continua em uso.',
             ]);
             return;
           }
@@ -5075,7 +5075,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                   if (!r.ok) {
                     built.controller.pushNote('model', [
                       `modelo "${slug}" recusado: ${r.detail}`,
-                      'nada mudou — o modelo ativo continua o mesmo (fail-closed).',
+                      'nada mudou — o modelo ativo continua o mesmo.',
                     ]);
                     return;
                   }
@@ -5152,7 +5152,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                         ? 'gravado como padrão para as próximas sessões.'
                         : 'vale só nesta sessão — no próximo boot volta o provider anterior.',
                     ]
-                  : [`falha ao trocar p/ "${provider}": ${r.detail}`, 'nada mudou (fail-closed).'],
+                  : [`falha ao trocar p/ "${provider}": ${r.detail}`, 'nada mudou.'],
               );
               // F-PROV-RETRY — na falha devolve o MOTIVO junto, não só `false`: o App usa
               // o `detail` para REABRIR o campo de chave (chave velha/errada ⇒ "cole

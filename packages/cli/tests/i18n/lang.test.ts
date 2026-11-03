@@ -146,7 +146,9 @@ describe('i18n · resolveInitialLang — degrau ALUY_LANG', () => {
 
   it('env VENCE o auto-detect do locale', () => {
     expect(resolveInitialLang(undefined, undefined, { ...ptLocale, ALUY_LANG: 'en' })).toBe('en');
-    expect(resolveInitialLang(undefined, undefined, { ...enLocale, ALUY_LANG: 'pt-BR' })).toBe('pt-BR');
+    expect(resolveInitialLang(undefined, undefined, { ...enLocale, ALUY_LANG: 'pt-BR' })).toBe(
+      'pt-BR',
+    );
   });
 
   it('a FLAG ainda vence o env (quem digitou --lang mandou mais que quem exportou)', () => {

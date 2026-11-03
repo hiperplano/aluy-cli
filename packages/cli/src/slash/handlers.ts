@@ -550,8 +550,8 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           title: 'memory',
           lines: [
             'vejo/edito/esqueço/fixo os fatos que o agente lembra entre sessões',
-            '(global + projeto), pela mecânica interna — nunca por `cat` (read-deny).',
-            'a memória é relembrada como DADO, nunca instrução.',
+            '(global + projeto), por este comando — o agente não lê esses arquivos direto.',
+            'o agente usa a memória como contexto, nunca como ordem.',
             'uso: /memory [forget|edit|pin|unpin <id>]',
           ],
         },
@@ -670,7 +670,7 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           lines: [
             'resumo a conversa até aqui num sumário denso (decisões, estado, arquivos',
             'tocados) e continuo a sessão com o contexto reduzido — libera a janela.',
-            'o resumo é gerado pelo modelo via broker; nada sai do dado para instrução.',
+            'o resumo é gerado pelo modelo.',
           ],
         },
       };
