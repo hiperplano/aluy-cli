@@ -3012,11 +3012,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // já retornou). O config vem do env (ALUY_NOTIFY/NO_COLOR). A escrita vai p/ o
   // MESMO stdout do render — sequências de controle curtas, nunca conteúdo.
   const notifyOut = opts.stdout ?? process.stdout;
-  const notifyConfig = loadNotifyConfig(env);
+  const notifyConfig = loadNotifyConfig(env, savedConfig.notify);
   const notifyPort = new TerminalNotificationPort({
     write: (s) => notifyOut.write(s),
     isTty: true, // este ramo só roda com TTY (o não-TTY retornou acima).
-    enabled: notifyConfig.enabled,
+    mode: notifyConfig.mode,
     desktop: notifyConfig.desktop,
   });
   // Gancho ESTREITO: observa as transições de fase do controller (stream público)
@@ -3545,9 +3545,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     }
     // EST-0963 — `/notify on|off|toggle`: aplica o estado na porta e empurra a nota.
     if (command.id === 'notify') {
-      const effect = buildNotifyEffect(args, { enabled: notifyPort.enabled, tty: true });
+      const effect = buildNotifyEffect(args, {
+        enabled: notifyPort.enabled,
+        mode: notifyPort.mode,
+        tty: true,
+      });
       if (effect.kind === 'notify') {
-        notifyPort.setEnabled(effect.enable);
+        if (effect.mode !== undefined) {
+          notifyPort.setMode(effect.mode);
+          configStore.saveNotify(effect.mode);
+        }
         built.controller.pushNote(effect.note.title, effect.note.lines);
       }
       return;

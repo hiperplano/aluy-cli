@@ -55,10 +55,14 @@ export {
   NO_OP_NOTIFICATION_PORT,
   NOTIFY_LABELS,
   loadNotifyConfig,
+  parseNotifyMode,
+  modeAllows,
+  NOTIFY_MODES,
 } from './notify-port.js';
 export type {
   NotificationPort,
   NotifyReason,
+  NotifyMode,
   NotifyConfig,
   TerminalNotificationPortOptions,
 } from './notify-port.js';

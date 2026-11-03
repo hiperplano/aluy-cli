@@ -227,7 +227,7 @@ export const ptBR: FullCatalog = {
   'cmd.usage': 'tokens e janela desta sessão',
   'cmd.rename': 'dá um nome + cor de identificação à sessão · ●nome no composer',
   'cmd.history': 'navega e RETOMA uma sessão anterior · sem sair do aluy',
-  'cmd.notify': 'liga/desliga o sino de atenção (on/off)',
+  'cmd.notify': 'notificações: tudo | atencao | nada',
   'cmd.undo': 'desfaz a última edição de arquivo do agente',
   'cmd.redo': 'refaz a última edição desfeita',
   'cmd.rewind': 'volta a um ponto da sessão (código e/ou conversa) · Esc Esc',
