@@ -196,7 +196,12 @@ export type ProgressSignal =
   // (o dono apertou ESC com um `user_inject` esperando). O parcial foi DESCARTADO e a
   // próxima volta drena o inject. É o gancho p/ a TUI descartar o bloco `aluy` parcial
   // (o inject supersede). NÃO é `stop` — o loop segue. NÃO toca a catraca/budget.
-  | { readonly kind: 'expedite' };
+  | { readonly kind: 'expedite' }
+  // FEEDBACK-IMEDIATO — o loop terminou os passos de PREPARO da iteração (recall de memória,
+  // regência, auto-compactação, montagem das mensagens) e vai AGORA chamar o modelo. É o
+  // marco honesto que separa "preparando" de "pensando" (esperando o modelo) na UX. Só
+  // observação — não toca a catraca/budget.
+  | { readonly kind: 'model-call' };
 
 /** Callback de progresso (heartbeat). Ver {@link ProgressSignal}. */
 export type ProgressObserver = (signal: ProgressSignal) => void;
@@ -1318,6 +1323,8 @@ export class AgentLoop {
       });
       const callSignal = this.expedite ? combineAbort(signal, expediteAc.signal) : signal;
       let result: ModelCallResult;
+      // FEEDBACK-IMEDIATO — fim do preparo: a próxima coisa é a chamada ao modelo.
+      this.onProgress?.({ kind: 'model-call' });
       try {
         result = await this.model.call({
           messages,

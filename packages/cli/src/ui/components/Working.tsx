@@ -17,6 +17,7 @@ import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import type { GlyphName } from '../theme/glyphs.js';
 import { AluyLoader } from './AluyLoader.js';
+import { formatElapsed } from '../../session/model.js';
 
 /** Largura da banda de onda (nº de `～`). 3 em telas normais (spec §3.6). */
 const WAVE_WIDTH = 3;
@@ -43,6 +44,12 @@ export interface WorkingProps {
    * aparece embaixo (ele deveria ficar do lado)". Um elemento só, altura constante.
    */
   readonly suffix?: string;
+  /**
+   * FEEDBACK-IMEDIATO — tempo decorrido (ms) desde que o turno começou, exibido `M:SS` logo
+   * após o verbo (`preparando… 0:03`). Ausente ⇒ não mostra. Ignorado quando há `suffix`
+   * (a linha já é longa — somar o relógio poderia quebrá-la e inflar a região viva).
+   */
+  readonly elapsedMs?: number;
 }
 
 /**
@@ -100,6 +107,9 @@ export function Working(props: WorkingProps): React.ReactElement {
       )}
       <Text> </Text>
       <Role name="fgDim">{props.label}…</Role>
+      {props.elapsedMs !== undefined && (props.suffix === undefined || props.suffix === '') && (
+        <Role name="fgDim"> {formatElapsed(props.elapsedMs)}</Role>
+      )}
       {props.suffix !== undefined && props.suffix !== '' && (
         <>
           <Text> </Text>

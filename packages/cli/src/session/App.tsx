@@ -5107,6 +5107,9 @@ export function App(props: AppProps): React.ReactElement {
             glyph="aluy"
             glyphRole="accent"
             label={indicadorTrabalho.label}
+            {...(state.phase === 'thinking' && state.workingSince !== undefined
+              ? { elapsedMs: Math.max(0, (props.now ?? Date.now)() - state.workingSince) }
+              : {})}
             {...(indicadorTrabalho.suffix !== undefined
               ? { suffix: indicadorTrabalho.suffix }
               : {})}

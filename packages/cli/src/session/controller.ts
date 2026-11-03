@@ -2877,7 +2877,11 @@ export class SessionController {
     for (;;) {
       // Entra em `thinking` (§2.4): o vácuo pré-1º-token ganha o `<Working>` âmbar
       // (`◇ ～～› pensando…`). Quando o 1º delta chega (sink.onStart), vira `streaming`.
-      this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+      // FEEDBACK-IMEDIATO — o rótulo nasce `preparando` (recall de memória, regência,
+      // compactação, montagem do prompt: passos que rodam ANTES do modelo) e só vira
+      // `pensando` quando o loop sinaliza `model-call` (ver `onParentProgress`). Assim o
+      // indicador reflete a fase real, sem fingir que o modelo já está pensando.
+      this.patch({ phase: 'thinking', workingLabel: 'preparando', workingSince: this.clock() });
       // EST-0982 · ADR-0063 — abre a ÁRVORE DE FLUXOS do turno: o pai é a raiz; o seu
       // AbortSignal É o do loop (PARAR-todos = abortar a raiz, que desce a subárvore).
       // `interrupt()` (Ctrl-C) e `cancelAllFlows()` convergem no MESMO abort — sem 2º
@@ -4444,6 +4448,14 @@ export class SessionController {
    * já é coberto pelo `toolObserver`. NÃO toca catraca/budget.
    */
   private onParentProgress(signal: ProgressSignal): void {
+    // FEEDBACK-IMEDIATO — fim do preparo: o modelo vai ser chamado. `preparando` → `pensando`
+    // (só se ainda estamos no rótulo de preparo; rótulos de ciclo/workflow não são tocados).
+    if (signal.kind === 'model-call') {
+      if (this.state.phase === 'thinking' && this.state.workingLabel === 'preparando') {
+        this.patch({ workingLabel: 'pensando' });
+      }
+      return;
+    }
     if (signal.kind === 'inject') this.flushInjectNotes(signal.count);
     // EST-0944 (refino #121) — começou uma passada INTERNA de auto-verificação: o
     // PRÓXIMO turno do modelo é máquina do loop (reconferir a evidência), NÃO resposta.
