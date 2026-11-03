@@ -3,7 +3,7 @@
 // provider configurado do dono e mede planejamento/delegação. NÃO roda na CI nem
 // no `npm test`. Uso: `npm run eval -- --help`. Docs: scripts/eval/README.md.
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -14,7 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -26,6 +26,7 @@ import {
   renderSummary,
   scoreExpectations,
 } from './lib.mjs';
+import { bwrapDisponivel, confinar } from './sandbox.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const RAIZ = resolve(AQUI, '..', '..');
@@ -43,7 +44,12 @@ Opções:
   --max-iterations <N>    teto de iterações do agente por execução (default 40)
   --max-tokens <N>        teto de tokens da sessão por execução (default: o do aluy)
   --model <slug> --provider <nome>   repassa ao aluy (default: a config local do dono)
-  --yolo                  auto-aprova efeitos (⚠ NÃO é confinado ao diretório; ver README)
+  --sandbox               roda cada aluy dentro do bubblewrap (disco read-only, só o diretório
+                          do cenário gravável) e LIGA --yolo (default dentro do sandbox)
+  --no-yolo               com --sandbox, mantém o modo normal (efeitos negados em headless)
+  --yolo                  auto-aprova efeitos; RECUSADO sem --sandbox (derruba a cerca do aluy)
+  --self-test-sandbox     prova o confinamento (escritas fora falham + sonda ao vivo) e sai
+  --rescore <json>        reavalia e re-renderiza um resultado salvo (sem rodar nada)
   --label <nome>          rótulo do resultado (ex.: main, feat-x)
   --out <dir>             saída (default scripts/eval/results/, gitignored)
   --keep                  não apaga os diretórios temporários
@@ -52,7 +58,16 @@ Opções:
 `;
 
 function parseArgs(argv) {
-  const o = { reps: 1, timeoutS: 600, maxIterations: 40, yolo: false, keep: false, dry: false };
+  const o = {
+    reps: 1,
+    timeoutS: 600,
+    maxIterations: 40,
+    yolo: false,
+    sandbox: false,
+    noYolo: false,
+    keep: false,
+    dry: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => argv[++i];
@@ -66,6 +81,10 @@ function parseArgs(argv) {
     else if (a === '--model') o.model = v();
     else if (a === '--provider') o.provider = v();
     else if (a === '--yolo') o.yolo = true;
+    else if (a === '--sandbox') o.sandbox = true;
+    else if (a === '--no-yolo') o.noYolo = true;
+    else if (a === '--self-test-sandbox') o.selfTest = true;
+    else if (a === '--rescore') o.rescore = v();
     else if (a === '--label') o.label = v();
     else if (a === '--out') o.out = v();
     else if (a === '--keep') o.keep = true;
@@ -77,6 +96,13 @@ function parseArgs(argv) {
     if (!Number.isInteger(o[k]) || o[k] < 1) throw new Error(`--${k} inválido`);
   }
   if (o.reps > 5) throw new Error('--reps máximo 5 (proteção de orçamento)');
+  if (o.yolo && !o.sandbox)
+    throw new Error(
+      '--yolo recusado sem --sandbox: o --yolo do aluy derruba a cerca de workspace. ' +
+        'Rode com --sandbox (bubblewrap) ou sem --yolo.',
+    );
+  if (o.sandbox && !o.noYolo) o.yolo = true;
+  if (o.sandbox && o.noYolo) o.yolo = false;
   return o;
 }
 
@@ -99,10 +125,18 @@ function argvDoAluy(o, prompt) {
   return a;
 }
 
+/** Se o build do aluy mora sob /tmp (escondido pelo tmpfs), monta o checkout em ro. */
+function roExtraDe(entry) {
+  if (!entry.startsWith('/tmp/')) return [];
+  return [resolve(entry, '..', '..', '..', '..', '..')];
+}
+
 function executar(o, cwd, prompt) {
   return new Promise((res) => {
     const t0 = Date.now();
-    const filho = spawn(process.execPath, argvDoAluy(o, prompt), {
+    const cmd = [process.execPath, ...argvDoAluy(o, prompt)];
+    const [bin, ...args] = o.sandbox ? confinar(cwd, cmd, { roExtra: roExtraDe(o.entry) }) : cmd;
+    const filho = spawn(bin, args, {
       cwd,
       env: { ...process.env, NO_COLOR: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -128,9 +162,106 @@ function executar(o, cwd, prompt) {
   });
 }
 
+/** Prova o confinamento: escritas fora do diretório do cenário FALHAM, dentro funciona. */
+function autoTesteSandbox(o) {
+  if (!bwrapDisponivel()) throw new Error('bubblewrap (/usr/bin/bwrap) indisponível');
+  const base = realpathSync(tmpdir());
+  const dir = mkdtempSync(join(base, 'aluy-eval-selftest-'));
+  const home = homedir();
+  const sonda = join(home, 'eval-escape-probe');
+  const alvos = [
+    ['$HOME/eval-escape-probe', sonda],
+    ['/home/aluy/projects/x', '/home/aluy/projects/x'],
+    ['~/.aluy/x (real)', join(home, '.aluy', 'x')],
+  ];
+  const credencial = join(home, '.aluy', 'config.json');
+  for (const [, p] of alvos) rmSync(p, { force: true });
+  let falhas = 0;
+  const tenta = (rotulo, arq, esperaSucesso) => {
+    const [bin, ...args] = confinar(dir, ['/bin/sh', '-c', ': >> "$1"', 'sh', arq]);
+    const r = spawnSync(bin, args, { encoding: 'utf8' });
+    const sucesso = r.status === 0;
+    const ok = sucesso === esperaSucesso;
+    if (!ok) falhas++;
+    console.log(
+      `${ok ? 'OK  ' : 'FALHA'} escrever em ${rotulo}: ${sucesso ? 'permitido' : 'bloqueado'} (esperado: ${esperaSucesso ? 'permitido' : 'bloqueado'})`,
+    );
+  };
+  tenta('diretório do cenário', join(dir, 'ok.txt'), true);
+  for (const [r, p] of alvos.slice(0, 2)) tenta(r, p, false);
+  // ~/.aluy é um tmpfs descartável: a escrita "funciona" lá dentro, mas nunca chega ao real
+  // (conferido logo abaixo). Os arquivos de auth montados por cima são somente-leitura.
+  tenta('~/.aluy/x (tmpfs descartável; o real é conferido abaixo)', alvos[2][1], true);
+  if (existsSync(credencial)) tenta('~/.aluy/config.json (ro-bind)', credencial, false);
+  // O arquivo real não pode ter aparecido fora (nem o ~/.aluy/x).
+  for (const [r, p] of alvos)
+    if (existsSync(p)) {
+      falhas++;
+      console.log(`FALHA ${r} EXISTE no disco real: ${p}`);
+    }
+  // Sonda ao vivo: o agente real tenta escapar; o arquivo NÃO pode existir.
+  if (!existsSync(o.entry)) throw new Error(`entry não existe: ${o.entry}`);
+  console.log('\nsonda ao vivo: aluy --yolo pedindo `touch ' + sonda + '` dentro do sandbox...');
+  const live = { ...o, sandbox: true, yolo: true, maxIterations: 6 };
+  const prompt = `Execute exatamente este comando no shell e diga o resultado: touch ${sonda}`;
+  const cmd = [process.execPath, ...argvDoAluy(live, prompt)];
+  const [bin, ...args] = confinar(dir, cmd);
+  const r = spawnSync(bin, args, {
+    cwd: dir,
+    encoding: 'utf8',
+    timeout: 180000,
+    env: { ...process.env, NO_COLOR: '1' },
+  });
+  const { events } = parseStream(r.stdout);
+  const tools = events.filter((e) => e.type === 'tool_call').map((e) => e.name);
+  console.log(`  exit=${r.status} tools=[${tools.join(',')}] eventos=${events.length}`);
+  const res = [...events].reverse().find((e) => e.type === 'result');
+  if (res) console.log(`  result: ${JSON.stringify(res).slice(0, 300)}`);
+  if (events.length === 0) console.log(`  stderr: ${(r.stderr ?? '').slice(-300)}`);
+  const existe = existsSync(sonda);
+  if (existe) {
+    falhas++;
+    rmSync(sonda, { force: true });
+  }
+  console.log(
+    `${existe ? 'FALHA' : 'OK  '} ${sonda} ${existe ? 'EXISTE (escapou!)' : 'não existe após a sonda'}`,
+  );
+  if (!tools.includes('bash'))
+    console.log(
+      '  aviso: o agente não chegou a chamar bash; sonda inconclusiva quanto à tentativa.',
+    );
+  rmSync(dir, { recursive: true, force: true });
+  console.log(falhas === 0 ? '\nSANDBOX OK' : `\nSANDBOX COM ${falhas} FALHA(S)`);
+  process.exitCode = falhas === 0 ? 0 : 1;
+}
+
+/** Reavalia as expectativas a partir das métricas salvas e re-renderiza. */
+function reavaliar(arquivo) {
+  const dados = JSON.parse(readFileSync(arquivo, 'utf8'));
+  const todos = JSON.parse(readFileSync(join(AQUI, 'scenarios/scenarios.json'), 'utf8'));
+  for (const s of dados.cenarios) {
+    const def = todos.find((x) => x.id === s.id);
+    for (const r of s.runs)
+      r.checks =
+        r.outcome === 'sem_cota' || r.outcome === 'erro_provider'
+          ? []
+          : scoreExpectations(def?.expect, r.metrics);
+    s.agregado = aggregateScenario(s.runs);
+  }
+  const md = renderSummary(dados);
+  writeFileSync(arquivo, JSON.stringify(dados, null, 2));
+  writeFileSync(arquivo.replace(/\.json$/, '.md'), md);
+  console.log(md);
+}
+
 async function main() {
   const o = parseArgs(process.argv.slice(2));
   if (o.help) return void console.log(AJUDA);
+  if (o.rescore) return void reavaliar(o.rescore);
+  if (o.selfTest) {
+    o.entry = resolve(o.entry ?? join(RAIZ, 'packages/cli/dist/bin/aluy.js'));
+    return void autoTesteSandbox(o);
+  }
   if (o.compare) {
     const [a, b] = o.compare.map((p) => JSON.parse(readFileSync(p, 'utf8')));
     return void console.log(renderComparison(a, b));
@@ -146,7 +277,7 @@ async function main() {
 
   console.log(`aluy: ${o.entry}`);
   console.log(
-    `permissão: ${o.yolo ? 'yolo (sem confinamento!)' : 'normal (efeitos são NEGADOS em headless)'}`,
+    `permissão: ${o.yolo ? 'yolo CONFINADO (bwrap: só o diretório do cenário é gravável)' : 'normal (efeitos são NEGADOS em headless)'}`,
   );
   console.log(
     `execuções: ${sel.length} cenário(s) x ${o.reps} rep = ${sel.length * o.reps} (timeout ${o.timeoutS}s, max-iter ${o.maxIterations})`,
@@ -154,6 +285,7 @@ async function main() {
   for (const s of sel) console.log(`  - ${s.id} [${s.kind}] ${s.descricao}`);
   if (o.dry) return void console.log('\n(dry-run: nada executado)');
   if (!existsSync(o.entry)) throw new Error(`entry não existe: ${o.entry} (rode npm run build)`);
+  if (o.sandbox && !bwrapDisponivel()) throw new Error('--sandbox exige /usr/bin/bwrap (Linux)');
   if (typeof process.getuid === 'function' && process.getuid() === 0 && o.yolo)
     throw new Error('--yolo recusado como root');
 
@@ -162,7 +294,7 @@ async function main() {
       rotulo: o.label ?? 'execucao',
       entry: o.entry,
       modelo: o.model ?? null,
-      permissao: o.yolo ? 'yolo' : 'normal',
+      permissao: o.yolo ? 'yolo-confinado' : 'normal',
       repeticoes: o.reps,
       iniciado_em: new Date().toISOString(),
       abortado: null,
