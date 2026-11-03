@@ -95,9 +95,10 @@ export function formatRelativeAge(ageMs: number): string {
  * nº de mensagens e recência, NUNCA o corpo da transcrição, CLI-SEC-6). `S` é o
  * default (Enter = sim): a UX menos surpreendente é continuar de onde parou.
  */
-export function formatResumeOffer(messageCount: number, ageMs: number): string {
+export function formatResumeOffer(messageCount: number, ageMs: number, label?: string): string {
   const plural = messageCount === 1 ? 'mensagem' : 'mensagens';
-  return `↻ retomar a conversa anterior (${messageCount} ${plural}, ${formatRelativeAge(
+  const name = label !== undefined && label.trim() !== '' ? ` «${label.trim()}»` : '';
+  return `↻ retomar a conversa anterior${name} (${messageCount} ${plural}, ${formatRelativeAge(
     ageMs,
   )})? [S/n] `;
 }

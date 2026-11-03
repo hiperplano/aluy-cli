@@ -7,6 +7,7 @@
 
 import type { SessionRecord, SessionStore, SessionSummary } from '../io/index.js';
 import { formatResumeOffer } from './session-persist.js';
+import { HISTORY_LIST_LIMIT } from './history.js';
 
 /** O pedido de retomada vindo do parser (`cli.ts`). */
 export type ResumeRequest = { kind: 'continue' } | { kind: 'resume'; id?: string };
@@ -302,6 +303,39 @@ export function resolveAutoResume(
   return { kind: 'offer', record, ageMs, messageCount };
 }
 
+/** Metadados da oferta de retomada (só DADO DE UI — nunca o corpo da transcrição). */
+export interface ResumeOfferInfo {
+  readonly messageCount: number;
+  readonly ageMs: number;
+  /** Nome (`/rename`) da sessão oferecida; ausente ⇒ sem nome. */
+  readonly label?: string;
+  /** Cor de identificação da sessão oferecida (nome da paleta do DS). */
+  readonly labelColor?: string;
+  /** Sessões do MESMO cwd (recente-first) p/ o usuário escolher OUTRA. */
+  readonly sessions: readonly SessionSummary[];
+}
+
+/** Decisão do usuário na oferta: retomar a sugerida, escolher outra (por id) ou começar nova. */
+export type ResumeChoice =
+  | { readonly kind: 'resume' }
+  | { readonly kind: 'pick'; readonly id: string }
+  | { readonly kind: 'new' };
+
+/**
+ * Sessões retomáveis do projeto (mesmo `cwd`): as do usuário (com 1ª fala ou nome),
+ * recente-first, até `HISTORY_LIST_LIMIT`. Mesmo critério de F187 do `--resume`. Fail-safe.
+ */
+export function listProjectSessions(store: SessionStore, cwd: string): readonly SessionSummary[] {
+  try {
+    return store
+      .list()
+      .filter((s) => s.cwd === cwd && (s.title !== undefined || s.label !== undefined))
+      .slice(0, HISTORY_LIST_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * EST-0972 (BUG 2) — ORQUESTRA a retomada do boot num único ponto testável (sem Ink):
  * combina o caminho EXPLÍCITO (`resolveResume` p/ `--continue`/`--resume`) com a
@@ -324,6 +358,11 @@ export async function decideBootResume(args: {
   readonly store: SessionStore;
   readonly cwd: string;
   readonly promptYesNo: (prompt: string) => Promise<boolean>;
+  /**
+   * Oferta RICA (splash TTY): mostra nome+cor da sessão e permite escolher OUTRA sessão do
+   * projeto. Ausente ⇒ o `promptYesNo` textual de sempre (agora já com o nome, se houver).
+   */
+  readonly promptResume?: (info: ResumeOfferInfo) => Promise<ResumeChoice>;
   readonly now?: number;
   readonly windowMs?: number;
 }): Promise<ResumeResolution> {
@@ -341,9 +380,33 @@ export async function decideBootResume(args: {
   );
   if (auto.kind !== 'offer') return { kind: 'none' };
 
+  if (args.promptResume !== undefined) {
+    let choice: ResumeChoice = { kind: 'new' };
+    try {
+      choice = await args.promptResume({
+        messageCount: auto.messageCount,
+        ageMs: auto.ageMs,
+        ...(auto.record.label !== undefined ? { label: auto.record.label } : {}),
+        ...(auto.record.labelColor !== undefined ? { labelColor: auto.record.labelColor } : {}),
+        sessions: listProjectSessions(args.store, args.cwd),
+      });
+    } catch {
+      choice = { kind: 'new' }; // fail-safe: prompt falhou ⇒ sessão nova.
+    }
+    if (choice.kind === 'resume') return { kind: 'resumed', record: auto.record };
+    if (choice.kind === 'pick') {
+      // id escolhido na lista: relê do disco (fail-safe: sumiu/corrompeu ⇒ sessão nova).
+      const rec = args.store.load(choice.id);
+      return rec ? { kind: 'resumed', record: rec } : { kind: 'none' };
+    }
+    return { kind: 'none' };
+  }
+
   let accept = false;
   try {
-    accept = await args.promptYesNo(formatResumeOffer(auto.messageCount, auto.ageMs));
+    accept = await args.promptYesNo(
+      formatResumeOffer(auto.messageCount, auto.ageMs, auto.record.label),
+    );
   } catch {
     accept = false; // fail-safe: prompt falhou ⇒ sessão nova.
   }

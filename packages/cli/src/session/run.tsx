@@ -828,6 +828,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // EST-0989 — a auto-oferta de retomada agora aparece na CAIXA do splash (TTY),
     // não mais como `↻ … [S/n]` solto no meio da tela.
     promptYesNo: bootPrompt,
+    // Oferta rica (nome+cor da sessão, `l` lista as outras do projeto) — só no splash TTY.
+    ...(splash !== undefined ? { promptResume: splash.promptResume } : {}),
     // ADR-0150 (balde b) — janela de "recente" p/ a auto-oferta, config-driven
     // (clampada a 7 dias por `resolveAutoResumeWindowMs`; ausente ⇒ 24h de sempre).
     windowMs: resolveAutoResumeWindowMs(savedConfig.session?.autoResumeWindowMs),
@@ -2363,6 +2365,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // DADO DE UI (HG-2). Só quando há rótulo (sem label ⇒ controller fica sem rótulo).
   if (resumedRecord?.label !== undefined) {
     built.controller.setLabel(resumedRecord.label, resumedRecord.labelColor);
+    // O título da janela também volta com o nome (antes só o `/rename` o setava).
+    setWindowTitle(`aluy · ${resumedRecord.label}`);
   }
   // EST-0972 (BUG Custom) — record Custom LEGADO (salvo antes do fix, sem o slug): a
   // resolução caiu no tier canônico default. Avisa o usuário (uma nota honesta) — a
@@ -4520,6 +4524,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // composer passa a ser o da sessão escolhida). Sem rótulo na escolhida ⇒ LIMPA o da
     // atual (a sessão "é" a retomada — não herda o rótulo da anterior). DADO DE UI.
     built.controller.setLabel(record.label, record.labelColor);
+    // título da janela acompanha o nome da sessão retomada (sem nome ⇒ reseta).
+    setWindowTitle(record.label !== undefined ? `aluy · ${record.label}` : undefined);
     // grava JÁ no arquivo da sessão retomada (consolida o alvo trocado) e confirma.
     saveNow();
     if (rm.warning) built.controller.pushNote('model', [rm.warning]);

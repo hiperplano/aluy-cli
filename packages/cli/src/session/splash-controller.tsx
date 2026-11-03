@@ -32,6 +32,9 @@ import { useTick } from '../ui/hooks/useTick.js';
 import { SplashScreen, type BootPrompt } from '../ui/components/SplashScreen.js';
 import { emitBootClear } from './run-clear.js';
 import { CLI_VERSION } from '../version.js';
+import type { SessionSummary } from '../io/index.js';
+import type { ResumeChoice, ResumeOfferInfo } from './resume.js';
+import { formatRelativeAge } from './session-persist.js';
 
 /** Cadência LENTA da cauda de pontinhos do "carregando" (ms). ~3 pontos/s — calmo,
  *  bem abaixo do tick de stream (anti-flicker: a marca não treme, só a cauda muda). */
@@ -57,8 +60,50 @@ interface SplashState {
   readonly prompt: BootPrompt | undefined;
   /** Resolver da pergunta corrente (setado enquanto há prompt; null fora dela). */
   readonly resolve: ((accept: boolean) => void) | null;
+  /**
+   * Oferta de retomada RICA (nome+cor, lista de outras sessões). `view: 'offer'` mostra a
+   * caixa; `'list'` mostra o <HistoryPicker>. undefined fora da oferta.
+   */
+  readonly resume: ResumeState | undefined;
+  /** Resolver da oferta rica (null fora dela). */
+  readonly resolveResume: ((choice: ResumeChoice) => void) | null;
   /** Sinaliza que o splash terminou (a App vai montar) — o <SplashApp> desmonta. */
   readonly done: boolean;
+}
+
+export interface ResumeState {
+  readonly info: ResumeOfferInfo;
+  readonly view: 'offer' | 'list';
+  /** Índice selecionado na lista (↑↓). */
+  readonly selected: number;
+}
+
+/**
+ * Monta a caixa da OFERTA de retomada: nome da sessão pintado na cor dela (se houver),
+ * nº de mensagens + recência, e a dica de teclas em PT-BR. A tecla `l` só aparece quando
+ * há MAIS de uma sessão do projeto para escolher. PURO.
+ */
+export function buildResumeOfferPrompt(info: ResumeOfferInfo): BootPrompt {
+  const plural = info.messageCount === 1 ? 'mensagem' : 'mensagens';
+  const label = info.label?.trim();
+  return {
+    title: '↻ retomar sessão',
+    body: [
+      `retomar a conversa anterior (${info.messageCount} ${plural}, ${formatRelativeAge(info.ageMs)})?`,
+    ],
+    options:
+      info.sessions.length > 1
+        ? 'Enter retomar · l outras sessões · n nova'
+        : 'Enter retomar · n nova',
+    ...(label
+      ? { session: { label, ...(info.labelColor ? { color: info.labelColor } : {}) } }
+      : {}),
+  };
+}
+
+/** Sessões da lista (só o que o picker precisa). */
+function pickerOf(r: ResumeState): { sessions: readonly SessionSummary[]; selected: number } {
+  return { sessions: r.info.sessions, selected: r.selected };
 }
 
 /**
@@ -179,6 +224,24 @@ export class BootSplash {
     });
 
   /**
+   * Oferta de retomada RICA (nome+cor, `l` abre a lista de outras sessões do projeto,
+   * `n` nova). Resolve no single-key; esc na lista volta à oferta. Entra em
+   * `decideBootResume({ promptResume })`.
+   */
+  promptResume = (info: ResumeOfferInfo): Promise<ResumeChoice> =>
+    new Promise<ResumeChoice>((resolve) => {
+      const finish = (choice: ResumeChoice): void => {
+        this.store.set((s) => ({ ...s, resume: undefined, resolveResume: null }));
+        resolve(choice);
+      };
+      this.store.set((s) => ({
+        ...s,
+        resume: { info, view: 'offer', selected: 0 },
+        resolveResume: finish,
+      }));
+    });
+
+  /**
    * Encerra o splash: desmonta o Ink E re-emite o boot-clear ANTES de a App montar,
    * p/ a transição não deixar fantasma do splash no scrollback. Idempotente.
    */
@@ -188,7 +251,14 @@ export class BootSplash {
     //    escreveria o ÚLTIMO frame do React PINTADO (a marca ainda viva) — o React só
     //    re-renderiza p/ `null` de forma assíncrona, então o `done` no store sozinho
     //    não chega a tempo. O `rerender(<></>)` força o frame vazio JÁ (sem race).
-    this.store.set((s) => ({ ...s, done: true, prompt: undefined, resolve: null }));
+    this.store.set((s) => ({
+      ...s,
+      done: true,
+      prompt: undefined,
+      resolve: null,
+      resume: undefined,
+      resolveResume: null,
+    }));
     this.instance.rerender(<></>);
     // 2) `clear()` apaga a região viva (agora vazia) e `unmount()` desfaz o Ink. Como o
     //    frame corrente já é vazio, a desmontagem NÃO deixa fantasma do splash.
@@ -216,7 +286,14 @@ export interface SplashStore {
 }
 
 export function createSplashStore(): SplashStore {
-  let state: SplashState = { status: 'carregando', prompt: undefined, resolve: null, done: false };
+  let state: SplashState = {
+    status: 'carregando',
+    prompt: undefined,
+    resolve: null,
+    resume: undefined,
+    resolveResume: null,
+    done: false,
+  };
   const listeners = new Set<() => void>();
   return {
     get: () => state,
@@ -252,7 +329,7 @@ export function SplashApp(props: {
 
   // Tick LENTO só p/ a cauda de pontinhos (anti-flicker: cadência baixa, a marca não
   // treme). Desliga quando há pergunta (a caixa é estática — sem animação) ou done.
-  const ticking = state.prompt === undefined && !state.done;
+  const ticking = state.prompt === undefined && state.resume === undefined && !state.done;
   const frame = useTick({ enabled: ticking, intervalMs: SPLASH_DOTS_MS });
 
   // Captura do single-key da pergunta. Consistente com a TUI/EST-0972: s/y/Enter ⇒
@@ -265,7 +342,38 @@ export function SplashApp(props: {
   // handler é mais robusto e não muda o comportamento (sem pergunta ⇒ `resolve` é null
   // ⇒ retorna). Antes da 1ª pergunta / depois de resolver ⇒ no-op.
   useInput((input, key) => {
-    const resolve = props.store.get().resolve;
+    const cur = props.store.get();
+    // Oferta de retomada RICA (nome+cor / lista): Enter retoma · l lista · n/Esc nova;
+    // na lista ↑↓ navega · Enter retoma a escolhida · Esc volta à oferta.
+    if (cur.resolveResume && cur.resume) {
+      const done = cur.resolveResume;
+      const r = cur.resume;
+      const ch = input.toLowerCase();
+      if (r.view === 'offer') {
+        if (key.return || ch === 's' || ch === 'y') return done({ kind: 'resume' });
+        if (ch === 'n' || key.escape || (key.ctrl && ch === 'c')) return done({ kind: 'new' });
+        if (ch === 'l' && r.info.sessions.length > 1) {
+          props.store.set((s) => ({ ...s, resume: { ...r, view: 'list', selected: 0 } }));
+        }
+        return;
+      }
+      if (key.escape || (key.ctrl && ch === 'c')) {
+        props.store.set((s) => ({ ...s, resume: { ...r, view: 'offer' } }));
+        return;
+      }
+      if (key.upArrow || key.downArrow) {
+        const max = Math.max(0, r.info.sessions.length - 1);
+        const next = Math.min(max, Math.max(0, r.selected + (key.upArrow ? -1 : 1)));
+        props.store.set((s) => ({ ...s, resume: { ...r, selected: next } }));
+        return;
+      }
+      if (key.return) {
+        const picked = r.info.sessions[r.selected];
+        if (picked) done({ kind: 'pick', id: picked.id });
+      }
+      return;
+    }
+    const resolve = cur.resolve;
     if (!resolve) {
       // EST-BOOT-DECOUPLE — SEM pergunta pendente: qualquer tecla pula o piso de
       // exibição (ver `whenSkip`/`requestSkip` em `createBootSplash`). Não faz nada
@@ -288,10 +396,17 @@ export function SplashApp(props: {
 
   if (state.done) return null;
 
+  // Oferta rica: a caixa (nome+cor) OU a lista de sessões (HistoryPicker reaproveitado).
+  const richPrompt =
+    state.resume?.view === 'offer' ? buildResumeOfferPrompt(state.resume.info) : undefined;
+  const picker = state.resume?.view === 'list' ? pickerOf(state.resume) : undefined;
+
   return (
     <Splash
       status={state.status}
       frame={frame}
+      {...(picker !== undefined ? { picker } : {})}
+      {...(richPrompt !== undefined ? { richPrompt } : {})}
       {...(state.prompt !== undefined ? { prompt: state.prompt } : {})}
     />
   );
@@ -317,6 +432,8 @@ function Splash(props: {
   readonly status: string;
   readonly frame: number;
   readonly prompt?: BootPrompt;
+  readonly richPrompt?: BootPrompt;
+  readonly picker?: { readonly sessions: readonly SessionSummary[]; readonly selected: number };
 }): React.ReactElement {
   // O Ink injeta o stdout no contexto; mas p/ não acoplar a hook aqui, lemos do
   // process.stdout (este código só roda no ramo TTY real). Fallback 80×24. RE-LÊ no
@@ -336,7 +453,10 @@ function Splash(props: {
       status={props.status}
       frame={props.frame}
       version={CLI_VERSION}
-      {...(props.prompt !== undefined ? { prompt: props.prompt } : {})}
+      {...(props.prompt !== undefined || props.richPrompt !== undefined
+        ? { prompt: (props.richPrompt ?? props.prompt)! }
+        : {})}
+      {...(props.picker !== undefined ? { picker: props.picker } : {})}
     />
   );
 }
