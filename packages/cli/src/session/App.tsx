@@ -4232,10 +4232,6 @@ export function App(props: AppProps): React.ReactElement {
           // argumento; nunca executa direto). Comando-PAI (com subs) no TAB: drilla os subs
           // (`/<name> `). Caso contrário (comando-folha, ou Enter no pai): EXECUTA — mesmo
           // caminho de sempre (`runCommand`, abre o picker do /model//theme se couber).
-          const isParent =
-            entry.kind === 'command' &&
-            entry.command.subcommands !== undefined &&
-            entry.command.subcommands.length > 0;
           // EST-0983 (#157 fix) — SUBcomando TERMINAL (`/clear full`, `/clear memory`):
           // verbo SEM argumento ⇒ o Enter SUBMETE direto (`runCommand` do pai com o verbo
           // como arg), em vez de re-completar e ficar preso. O Tab segue só completando
@@ -4248,7 +4244,9 @@ export function App(props: AppProps): React.ReactElement {
             runCommand(entry.parent, entry.sub.name);
             return;
           }
-          if (entry.kind === 'subcommand' || (isParent && key.tab)) {
+          // F18 — TAB só COMPLETA (`/mo` ⇒ `/model`); quem EXECUTA é o Enter. Antes o Tab num
+          // comando-folha rodava o comando (abria o picker do /model sem querer).
+          if (entry.kind === 'subcommand' || key.tab) {
             const completion = entryCompletion(entry);
             setText(completion);
             syncSlashMenu(completion);

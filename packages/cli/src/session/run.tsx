@@ -3673,7 +3673,13 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         if (outcome.note.lines.length > 0) {
           built.controller.pushNote(outcome.note.title, outcome.note.lines);
         }
-        if (outcome.cleared) clearScreenFn?.();
+        if (outcome.cleared) {
+          clearScreenFn?.();
+          // F18 — confirmação textual curta (antes a tela só ficava vazia, sem feedback).
+          built.controller.pushNote('clear', [
+            'conversa limpa — o contexto da sessão foi zerado (a memória foi mantida).',
+          ]);
+        }
       });
       return;
     }
