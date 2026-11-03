@@ -103,29 +103,112 @@ async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
 }
 
 describe('feedback imediato no submit (controller)', () => {
-  it('SÍNCRONO: logo após submit() já há eco `you` + thinking/`preparando` (sem await)', () => {
+  it('SÍNCRONO: logo após submit() já há eco `you` + thinking/`lembrando` (sem await)', () => {
     const { engine } = slowMemory();
     const { controller } = build({ memory: engine });
     void controller.submit('oi');
     // nenhuma microtask rodou ainda: tudo isto veio do trecho síncrono do submit.
     expect(controller.current.phase).toBe('thinking');
-    expect(controller.current.workingLabel).toBe('preparando');
+    expect(controller.current.workingLabel).toBe('lembrando');
     expect(controller.current.workingSince).toBeTypeOf('number');
     expect(controller.current.blocks.some((b) => b.kind === 'you' && b.text === 'oi')).toBe(true);
     controller.dispose();
   });
 
-  it('honesto: segue `preparando` enquanto o recall pendura e vira `pensando` ao chamar o modelo', async () => {
+  it('honesto: `lembrando` enquanto o recall pendura e vira `pensando` ao chamar o modelo', async () => {
     const { engine, release } = slowMemory();
     const { controller, labelsAtCall } = build({ memory: engine });
     const done = controller.submit('oi');
     await new Promise((r) => setTimeout(r, 30));
-    expect(controller.current.workingLabel).toBe('preparando'); // recall ainda pendurado
+    expect(controller.current.workingLabel).toBe('lembrando'); // recall ainda pendurado
     expect(labelsAtCall).toEqual([]); // o modelo nem foi chamado
     release();
     await waitFor(() => labelsAtCall.length === 1);
     expect(labelsAtCall[0]).toBe('pensando'); // já `pensando` no instante do model.call
     await done;
+    controller.dispose();
+  });
+});
+
+describe('sub-rótulos do preparo (controller)', () => {
+  it('maestro: `maestro avaliando` só quando o rege vai esperar (mayBlock); depois `pensando`', async () => {
+    let releaseRege: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      releaseRege = r;
+    });
+    let queue: unknown[] = [
+      { origin: 'a', severity: 'warn', payload: {}, ts: 1 },
+      { origin: 'b', severity: 'warn', payload: {}, ts: 2 },
+    ];
+    const maestro = {
+      bus: {
+        poll: () => {
+          const q = queue;
+          queue = [];
+          return q;
+        },
+        publish: (s: unknown) => {
+          queue.push(s);
+        },
+      },
+      mayBlock: () => true,
+      async rege() {
+        await gate;
+        return { action: 'continuar', signals: [], reason: 'ok', ts: 0 };
+      },
+    } as unknown as NonNullable<ConstructorParameters<typeof SessionController>[0]['maestro']>;
+    const labelsAtCall: Array<string | undefined> = [];
+    let ref: SessionController | null = null;
+    const controller = new SessionController({
+      model: {
+        async call(): Promise<ModelCallResult> {
+          labelsAtCall.push(ref!.current.workingLabel);
+          return { request_id: 'r', content: 'ok', finish_reason: 'stop' };
+        },
+      },
+      permission: new PolicyPermissionEngine(),
+      ports,
+      askResolver: new TuiAskResolver(),
+      meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
+      flush: { intervalMs: 0 },
+      maestro,
+    });
+    ref = controller;
+    const done = controller.submit('oi');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(controller.current.workingLabel).toBe('maestro avaliando');
+    expect(labelsAtCall).toEqual([]);
+    releaseRege();
+    await done;
+    expect(labelsAtCall).toEqual(['pensando']);
+    controller.dispose();
+  });
+
+  it('maestro instantâneo (sem mayBlock) NÃO anuncia nada: segue `preparando`', async () => {
+    const seen: Array<string | undefined> = [];
+    const maestro = {
+      bus: { poll: () => [], publish: () => {} },
+      async rege() {
+        return { action: 'continuar', signals: [], reason: 'ok', ts: 0 };
+      },
+    } as unknown as NonNullable<ConstructorParameters<typeof SessionController>[0]['maestro']>;
+    const controller = new SessionController({
+      model: {
+        async call(): Promise<ModelCallResult> {
+          return { request_id: 'r', content: 'ok', finish_reason: 'stop' };
+        },
+      },
+      permission: new PolicyPermissionEngine(),
+      ports,
+      askResolver: new TuiAskResolver(),
+      meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
+      flush: { intervalMs: 0 },
+      maestro,
+    });
+    controller.subscribe((st) => seen.push(st.workingLabel));
+    await controller.submit('oi');
+    expect(seen).not.toContain('maestro avaliando');
+    expect(seen).toContain('preparando');
     controller.dispose();
   });
 });
@@ -151,15 +234,15 @@ describe('feedback imediato no submit (App)', () => {
       r.stdin.write('ola\r');
       await new Promise((res) => setTimeout(res, 10));
     }
-    await waitFor(() => /preparando/.test(plain(r.lastFrame() ?? '')));
+    await waitFor(() => /lembrando/.test(plain(r.lastFrame() ?? '')));
     const f1 = plain(r.lastFrame() ?? '');
     expect(f1).toContain('ola'); // eco da mensagem
-    expect(f1).toMatch(/preparando… 0:00/);
+    expect(f1).toMatch(/lembrando… 0:00/);
     expect(f1).not.toContain('pensando');
 
     // 3s depois, com o recall ainda pendurado: a linha segue VIVA e o relógio andou.
     t += 3000;
-    await waitFor(() => /preparando… 0:03/.test(plain(r.lastFrame() ?? '')));
+    await waitFor(() => /lembrando… 0:03/.test(plain(r.lastFrame() ?? '')));
 
     release(); // recall termina ⇒ o loop chama o modelo ⇒ `pensando`
     await waitFor(() => /pensando… 0:0\d/.test(plain(r.lastFrame() ?? '')));

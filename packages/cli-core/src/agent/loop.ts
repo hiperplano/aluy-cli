@@ -201,7 +201,13 @@ export type ProgressSignal =
   // regência, auto-compactação, montagem das mensagens) e vai AGORA chamar o modelo. É o
   // marco honesto que separa "preparando" de "pensando" (esperando o modelo) na UX. Só
   // observação — não toca a catraca/budget.
-  | { readonly kind: 'model-call' };
+  | { readonly kind: 'model-call' }
+  // FEEDBACK-IMEDIATO — um passo de PREPARO que pode demorar começou (`recall` de memória,
+  // `maestro` consultando o judge por rede) ou terminou (`prompt` = volta ao preparo
+  // genérico). Só é emitido quando o passo REALMENTE vai esperar algo — não há sinal para
+  // passos instantâneos. A auto-compactação não entra aqui: ela já tem fase própria
+  // (`compacting`) via `autoCompactObserver`.
+  | { readonly kind: 'preparing'; readonly step: 'recall' | 'maestro' | 'prompt' };
 
 /** Callback de progresso (heartbeat). Ver {@link ProgressSignal}. */
 export type ProgressObserver = (signal: ProgressSignal) => void;
@@ -482,6 +488,12 @@ type ToolOutcome =
 export interface MaestroPort {
   readonly bus: SignalCollector;
   rege(signals: readonly SupervisorSignal[]): Promise<SupervisorDecision> | SupervisorDecision;
+  /**
+   * Opcional — `true` quando `rege(signals)` vai de fato ESPERAR I/O (ex.: consulta ao judge
+   * por rede). Só alimenta a UX (`preparing: maestro`); NÃO altera a decisão nem o fluxo.
+   * Ausente ⇒ o loop assume que `rege` é instantâneo e não anuncia nada.
+   */
+  mayBlock?(signals: readonly SupervisorSignal[]): boolean;
 }
 
 export interface AgentLoopOptions {
@@ -821,6 +833,8 @@ export class AgentLoop {
    */
   private async recallMemory(goal: string): Promise<readonly HistoryItem[]> {
     if (!this.memory || !this.memoryScope) return [];
+    // FEEDBACK-IMEDIATO — o recall pode esperar até RECALL_TIMEOUT_MS: anuncia o passo.
+    this.onProgress?.({ kind: 'preparing', step: 'recall' });
     try {
       // F78 — o recall é AWAITADO ANTES do loop (caminho crítico visível): teto DURO p/
       // não STALAR o start se o mem0 estiver lento/cold (Inv. I FLUIDEZ, mesma lição do
@@ -871,6 +885,8 @@ export class AgentLoop {
       ];
     } catch {
       return []; // CA-MA8 — sidecar fora ⇒ segue sem recall.
+    } finally {
+      this.onProgress?.({ kind: 'preparing', step: 'prompt' });
     }
   }
 
@@ -1257,7 +1273,15 @@ export class AgentLoop {
         // o turno"). EXCEÇÃO: abort (ESC/Ctrl-C) SOBE — cancelamento não é "baseline".
         try {
           const signals = this.maestro.bus.poll();
-          const decision = await this.maestro.rege(signals);
+          // FEEDBACK-IMEDIATO — só anuncia quando o `rege` vai de fato esperar (judge/rede).
+          const regeBloqueia = this.maestro.mayBlock?.(signals) === true;
+          if (regeBloqueia) this.onProgress?.({ kind: 'preparing', step: 'maestro' });
+          let decision: SupervisorDecision;
+          try {
+            decision = await this.maestro.rege(signals);
+          } finally {
+            if (regeBloqueia) this.onProgress?.({ kind: 'preparing', step: 'prompt' });
+          }
           const flow = await this.applyMaestroDecision(
             decision,
             history,
@@ -1942,9 +1966,7 @@ export class AgentLoop {
     const ctx: ToolRunContext = {
       ...(signal ? { signal } : {}),
       ...(detachSignal ? { detachSignal } : {}),
-      ...(this.detachHub
-        ? { onDetached: (info): void => this.detachHub?.onDetached(info) }
-        : {}),
+      ...(this.detachHub ? { onDetached: (info): void => this.detachHub?.onDetached(info) } : {}),
       // EST-0969 (heartbeat) — cada chunk de stdout/stderr é um SINAL DE VIDA da
       // tool: zera a inatividade do filho mesmo que o observer da TUI não esteja
       // plugado (um `run_command` longo MAS produzindo saída NÃO está travado). Por

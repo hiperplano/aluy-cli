@@ -167,8 +167,7 @@ import {
   buildMonitorTools,
 } from '@hiperplano/aluy-cli-core';
 import { MemoryRoomStore, buildRoomTools } from '@hiperplano/aluy-cli-core';
-import type {
-  DetachHub, RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
+import type { DetachHub, RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
 import {
   formatRoomList,
   formatConversation,
@@ -1121,6 +1120,13 @@ class FilaComRecibo extends EventQueue {
     return drenados;
   }
 }
+
+/** FEEDBACK-IMEDIATO — rótulos da linha viva enquanto o turno ainda PREPARA (antes do modelo). */
+const ROTULOS_DE_PREPARO: ReadonlySet<string> = new Set([
+  'preparando',
+  'lembrando',
+  'maestro avaliando',
+]);
 
 export class SessionController {
   private state: SessionState;
@@ -4450,9 +4456,21 @@ export class SessionController {
   private onParentProgress(signal: ProgressSignal): void {
     // FEEDBACK-IMEDIATO — fim do preparo: o modelo vai ser chamado. `preparando` → `pensando`
     // (só se ainda estamos no rótulo de preparo; rótulos de ciclo/workflow não são tocados).
-    if (signal.kind === 'model-call') {
-      if (this.state.phase === 'thinking' && this.state.workingLabel === 'preparando') {
-        this.patch({ workingLabel: 'pensando' });
+    if (signal.kind === 'model-call' || signal.kind === 'preparing') {
+      if (this.state.phase !== 'thinking') return;
+      const atual = this.state.workingLabel;
+      const emPreparo = atual !== undefined && ROTULOS_DE_PREPARO.has(atual);
+      if (signal.kind === 'model-call') {
+        if (emPreparo) this.patch({ workingLabel: 'pensando' });
+      } else if (signal.step === 'prompt') {
+        // fim de um passo: só desfaz o sub-rótulo do PRÓPRIO passo (não mexe em 'pensando').
+        if (atual === 'lembrando' || atual === 'maestro avaliando') {
+          this.patch({ workingLabel: 'preparando' });
+        }
+      } else if (emPreparo || atual === 'pensando') {
+        // iterações seguintes (depois de tools) também passam pelo maestro: o rótulo
+        // 'pensando' seria falso enquanto o judge responde.
+        this.patch({ workingLabel: signal.step === 'recall' ? 'lembrando' : 'maestro avaliando' });
       }
       return;
     }
@@ -9493,14 +9511,14 @@ function detachedOutcome(
           `nada falhou. O resultado dele chega como dado num turno seguinte: NÃO espere por ele, ` +
           `NÃO o dispare de novo, NÃO afirme que terminou nem invente o conteúdo dele. Diga ao ` +
           `dono o que despachou e encerre o turno; agents_status mostra o andamento.`
-      : motivo === 'solto'
-        ? `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. O dono ` +
-          `SOLTOU o fan-out (Ctrl+B) para liberar o turno. O resultado dele chega como dado ` +
-          `quando concluir: NÃO espere por ele, NÃO o dispare de novo, NÃO afirme que já ` +
-          `terminou nem invente o conteúdo dele. Diga ao dono que segue rodando e encerre.`
-        : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
-          `Você foi liberado para responder agora; o resultado dele chega como dado ` +
-          `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
+        : motivo === 'solto'
+          ? `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. O dono ` +
+            `SOLTOU o fan-out (Ctrl+B) para liberar o turno. O resultado dele chega como dado ` +
+            `quando concluir: NÃO espere por ele, NÃO o dispare de novo, NÃO afirme que já ` +
+            `terminou nem invente o conteúdo dele. Diga ao dono que segue rodando e encerre.`
+          : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
+            `Você foi liberado para responder agora; o resultado dele chega como dado ` +
+            `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
     stop: 'final',
     usage: { iterations: 0, toolCalls: 0, tokens: 0 },
   };
