@@ -1272,8 +1272,8 @@ export function App(props: AppProps): React.ReactElement {
   // PARÊNTESE DIM (estilo Claude Code): `(pensando · 1,2k tokens · 12s)` — a fase REAL, os
   // tokens do turno até agora e os segundos desde o INÍCIO DO TURNO (a mesma fonte do relógio
   // do rodapé: a contabilidade viva da raiz). Lido a cada render; o tick de 1s o atualiza.
-  // Tokens = uso reportado pelo broker/provider até o último passo concluído (o aggregate
-  // pai+filhos); ausente/0 ⇒ o segmento some. Rótulo funcional já é a fase ⇒ sem palavra.
+  // Tokens = GERADOS (saída) pelo pai no turno: `tokens_out` reportado + estimativa do que
+  // a chamada em voo streamou (`↓ 1,2k tokens`); 0 ⇒ o segmento some. Rótulo funcional já é a fase ⇒ sem palavra.
   const contaViva =
     state.phase === 'thinking' || state.phase === 'retrying'
       ? controller.turnAccounting()
@@ -1291,7 +1291,7 @@ export function App(props: AppProps): React.ReactElement {
             state.workingLabel !== undefined && ROTULOS_GENERICOS.has(state.workingLabel)
               ? state.workingLabel
               : undefined,
-          tokens: contaViva?.tokens,
+          tokens: contaViva !== undefined ? controller.turnOutputTokens() : undefined,
           ms: msDoTurno,
           // "Λluy " + rótulo + "… " + " " + sufixo dos sub-agentes: o que sobra da linha.
           larguraMax:

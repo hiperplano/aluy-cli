@@ -1632,6 +1632,12 @@ export class SessionController {
   // anterior, já visível). Limpo quando a verificação finaliza OU quando o modelo, em
   // vez de confirmar, ACHA UM GAP e volta a AGIR (uma tool dispara — trabalho real).
   private selfCheckInFlight = false;
+  // TOKENS GERADOS no turno (saída do PAI; os do filho só chegam somados com os de entrada, então
+  // não entram). `saidaConfirmada` = soma dos `tokens_out` que o provider REPORTOU; `saidaChars` =
+  // texto streamado da chamada em voo, ainda sem uso reportado (estimativa ~4 chars/token).
+  private saidaConfirmada = 0;
+  private saidaChars = 0;
+  private usageDaChamadaRecebido = false;
   // SELF-CHECK — uma passada de verificação TERMINOU sem que nenhuma tool tenha disparado
   // depois dela (o modelo conferiu e confirmou). A nota "✓ auto-verificado" só é empurrada
   // no fim do turno (`afterRun`): a tool da correção vem DEPOIS do fim do stream da passada,
@@ -2862,7 +2868,7 @@ export class SessionController {
   private async resumePausedMain(history: readonly HistoryItem[]): Promise<void> {
     // A semente da sessão retomada já está DENTRO do histórico guardado: não a repete.
     this.pendingSeed = null;
-    this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+    this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
     this.beginTurn();
     this.startTurnAccounting();
     const rootSignal = this.rootFlow!.signal;
@@ -4092,6 +4098,9 @@ export class SessionController {
   private beginTurn(): void {
     this.flowTree = new FlowTree({ clock: this.clock });
     this.rootFlow = this.flowTree.rootNode;
+    this.saidaConfirmada = 0;
+    this.saidaChars = 0;
+    this.usageDaChamadaRecebido = false;
     // EST-0982 (semântica do esc) — turno novo re-arma o discriminante do PARAR-TUDO:
     // um F8 antigo não silencia os desfechos desacoplados do turno que COMEÇA agora.
     this.hardStopped = false;
@@ -4807,7 +4816,7 @@ export class SessionController {
       return;
     }
     this.pushNote('redirecionado', [`nova direção: ${direction}`]);
-    this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+    this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
     this.settleStuck({ kind: 'redirect', text: direction });
   }
 
@@ -4818,7 +4827,7 @@ export class SessionController {
    */
   continueAfterStuck(): void {
     if (this.state.phase !== 'stuck' || !this.stuckResolve) return;
-    this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+    this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
     this.settleStuck({ kind: 'continue' });
   }
 
@@ -4863,6 +4872,15 @@ export class SessionController {
    * Claude Code. Leitura/display — não dispara efeito, não vaza segredo. `undefined`
    * antes do 1º turno.
    */
+  /**
+   * Tokens GERADOS (saída) pelo PAI neste turno, para o `↓ N tokens` da linha de trabalho:
+   * os `tokens_out` já reportados + uma ESTIMATIVA (~4 chars/token) do que a chamada em voo
+   * streamou. Quando o uso da chamada chega, a estimativa é trocada pelo número real.
+   */
+  turnOutputTokens(): number {
+    return this.saidaConfirmada + Math.ceil(this.saidaChars / 4);
+  }
+
   turnAccounting(): TurnAccountingView | undefined {
     if (!this.rootFlow || !this.flowTree) return undefined;
     // EST-0973 (hunt-budget) — AGREGADO pai+filhos via `totalAccounting()` (sem dobra);
@@ -6181,7 +6199,12 @@ export class SessionController {
     const history = this.budgetResumeHistory;
     this.budgetResumeHistory = undefined;
     this.pausaNoCanal = undefined;
-    this.patch({ phase: 'thinking', workingLabel: 'pensando', pendingBudget: undefined });
+    this.patch({
+      phase: 'thinking',
+      workingLabel: 'pensando',
+      workingSince: this.clock(),
+      pendingBudget: undefined,
+    });
     this.abort = new AbortController();
     try {
       // `budgetOverride` = o MESMO budget já estendido: o loop NÃO re-arma (não zera) —
@@ -6378,7 +6401,7 @@ export class SessionController {
       // teto zerado (runaway órfão). Com desacoplados vivos, RESTAURA só os tetos (extend
       // do que a compactação liberou) sem zerar — o agregado segue cercando a árvore toda.
       if (this.detachedTrees.size === 0) this.budget.reset();
-      this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+      this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
       const seed = this.takeCompactedSeed()!;
       this.abort = new AbortController();
       try {
@@ -6794,6 +6817,12 @@ export class SessionController {
     // caixa entram no primeiro byte (`abrirTurnoAluy`), no MESMO patch — a razão de 16/09
     // (fase e caixa num patch só, senão o composer pisca) continua valendo lá.
     this.turnoAluyPendente = true;
+    // nova chamada: se a anterior nunca reportou `tokens_out`, a estimativa vira definitiva
+    if (!this.usageDaChamadaRecebido) {
+      this.saidaConfirmada += Math.ceil(this.saidaChars / 4);
+    }
+    this.saidaChars = 0;
+    this.usageDaChamadaRecebido = false;
   }
 
   /**
@@ -6867,6 +6896,7 @@ export class SessionController {
    * frequência de pintura é limitada.
    */
   private appendAluyReasoning(content: string): void {
+    this.saidaChars += content.length;
     this.abrirTurnoAluy();
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
@@ -6882,6 +6912,7 @@ export class SessionController {
   }
 
   private appendAluyDelta(content: string): void {
+    this.saidaChars += content.length;
     this.abrirTurnoAluy();
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
@@ -7093,6 +7124,12 @@ export class SessionController {
 
   private applyUsage(usage: ModelUsage): void {
     const total = (usage.tokens_in ?? 0) + (usage.tokens_out ?? 0);
+    // reconcilia: o número REAL da chamada substitui a estimativa do que foi streamado
+    if (usage.tokens_out !== undefined) {
+      this.saidaConfirmada += usage.tokens_out;
+      this.saidaChars = 0;
+      this.usageDaChamadaRecebido = true;
+    }
     const pct = pctDeCache(usage.tokens_in, usage.tokens_cached);
     if (pct !== undefined) this.cachePctDoUltimoTurno = pct;
     // DIAGNÓSTICO sob `ALUY_DEBUG` — "por que não aparece o cache?" tem pelo menos quatro
