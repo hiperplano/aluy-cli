@@ -20,7 +20,6 @@ import { Role } from '../theme/index.js';
 import { SubAgents, type SubAgentChildView } from './SubAgents.js';
 import { linhasDoRodapeAgentes } from '../../session/footer-agents-layout.js';
 
-
 /**
  * Quantos filhos o rodapé mostra. O bloco gasta 1 linha de cabeçalho + 1 por filho (+1 de
  * respiro), então o teto de LINHAS vira este teto de FILHOS. PURO — a medição de altura usa
@@ -57,6 +56,8 @@ export interface FooterAgentsProps {
   readonly filhos: readonly SubAgentChildView[];
   /** Altura do terminal: decide quantos filhos cabem (ver `linhasDoRodapeAgentes`). */
   readonly rows?: number;
+  /** Frame do tick central — o brilho dos agentes rodando. */
+  readonly frame?: number;
   /** O painel de status, que fica ABAIXO do bloco fixado. */
   readonly children: React.ReactNode;
 }
@@ -72,7 +73,10 @@ export function FooterAgents(props: FooterAgentsProps): React.ReactElement {
   const { mostrados, sobra } = recorteDoRodape(props.filhos, props.rows);
   return (
     <Box flexDirection="column">
-      <SubAgents childrenStatus={mostrados} />
+      <SubAgents
+        childrenStatus={mostrados}
+        {...(props.frame !== undefined ? { frame: props.frame } : {})}
+      />
       {sobra > 0 && (
         <Box paddingLeft={4}>
           <Role name="fgDim">{`+${String(sobra)} outros`}</Role>

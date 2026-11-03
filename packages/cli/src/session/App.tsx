@@ -5686,7 +5686,7 @@ export function App(props: AppProps): React.ReactElement {
         {/* FOOTER-AGENTES — os sub-agentes VIVOS ganham uma coluna À ESQUERDA do painel,
             separados por uma barra vertical (pedido do dono). Sem agentes vivos o
             <FooterAgents> é passagem direta: a tela de quem não dispara agente não muda. */}
-        <FooterAgents filhos={filhosRodape} rows={rows}>
+        <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
           {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
             pulso âmbar, que saiu. Continuar passando faria o painel re-renderizar a cada
             quadro sem desenhar nada diferente, e deixaria dois campos aceitos-e-ignorados
@@ -5905,7 +5905,13 @@ export function BlockView(props: {
       // EST-0969 (display) — indicador compacto dos sub-agentes paralelos: status
       // por filho, NUNCA os tokens crus de cada um (que interleavariam). Bloco
       // estável (sem jitter): só muda na transição de um filho (início/fim).
-      return <SubAgents childrenStatus={b.children} settled={props.settled === true} />;
+      return (
+        <SubAgents
+          childrenStatus={b.children}
+          settled={props.settled === true}
+          frame={props.frame}
+        />
+      );
     case 'doctor':
       // EST-0970 (ticks AO VIVO) — checklist progressiva do `/doctor`: cada item
       // `pending` (spinner ⠋) "acende" p/ ✓/⚠/✗ quando o probe resolve aquele check.

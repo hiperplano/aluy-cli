@@ -17,6 +17,7 @@ import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import type { GlyphName } from '../theme/glyphs.js';
 import { AluyLoader } from './AluyLoader.js';
+import { ShimmerText } from './ShimmerText.js';
 import { formatElapsed } from '../../session/model.js';
 
 /** Largura da banda de onda (nº de `～`). 3 em telas normais (spec §3.6). */
@@ -106,7 +107,9 @@ export function Working(props: WorkingProps): React.ReactElement {
         </>
       )}
       <Text> </Text>
-      <Role name="fgDim">{props.label}…</Role>
+      {/* BRILHO no rótulo: a banda de cor da marca varre `pensando…` (estático sem cor ou em
+          reduced-motion — ver ShimmerText). O relógio ao lado é só complemento. */}
+      <ShimmerText text={`${props.label}…`} frame={frame} />
       {props.elapsedMs !== undefined && (props.suffix === undefined || props.suffix === '') && (
         <Role name="fgDim"> {formatElapsed(props.elapsedMs)}</Role>
       )}

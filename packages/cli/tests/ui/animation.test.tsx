@@ -18,6 +18,11 @@ import { Spinner } from '../../src/ui/components/Spinner.js';
 import { UnsafeBanner } from '../../src/ui/components/UnsafeBanner.js';
 import { ToolLine } from '../../src/ui/components/ToolLine.js';
 
+// O rótulo vivo é pintado célula a célula pelo brilho (ShimmerText): sob cor, o texto vem
+// cortado por escapes. O SENTIDO (a palavra) é o que estes testes travam.
+const semAnsi = (s: string): string =>
+  s.replace(new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'), '');
+
 function wrap(node: React.ReactElement, env: NodeJS.ProcessEnv = {}) {
   const base: NodeJS.ProcessEnv = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color', ...env };
   const theme = resolveTheme({ env: base });
@@ -27,7 +32,7 @@ function wrap(node: React.ReactElement, env: NodeJS.ProcessEnv = {}) {
 describe('<Working> — a onda "vau" + verbo vivo (§2.4/§2.6)', () => {
   it('mostra o verbo vivo SEMPRE (o sentido não depende do movimento)', () => {
     const { lastFrame } = wrap(<Working label="pensando" frame={0} />);
-    expect(lastFrame() ?? '').toContain('pensando…');
+    expect(semAnsi(lastFrame() ?? '')).toContain('pensando…');
   });
 
   // A ONDA continua sendo o desenho do papel de TOOL (`◌ ~~~ rodando npm test…`) — ali
@@ -70,7 +75,7 @@ describe('<Working> — a onda "vau" + verbo vivo (§2.4/§2.6)', () => {
         LANG: 'C',
       }).lastFrame() ?? '';
     expect(out).toContain('~');
-    expect(out).toContain('pensando…');
+    expect(semAnsi(out)).toContain('pensando…');
   });
 });
 
@@ -83,7 +88,7 @@ describe('<Working> — o wordmark Λluy no papel do Aluy', () => {
   it('desenha o nome INTEIRO, não só a inicial', () => {
     const out = wrap(<Working label="pensando" frame={0} />).lastFrame() ?? '';
     expect(out).toContain('Λluy');
-    expect(out).toContain('pensando…');
+    expect(semAnsi(out)).toContain('pensando…');
   });
 
   it('a onda decorativa SAIU deste papel (era a poluição)', () => {
@@ -117,7 +122,8 @@ describe('<Working> — o wordmark Λluy no papel do Aluy', () => {
 
   it('LARGURA CONSTANTE entre frames — nenhuma letra some (anti-jitter EST-0956)', () => {
     // eslint-disable-next-line no-control-regex
-    const semCor = (s: string): string => s.replace(/\u001b\[[0-9;]*m/g, '');
+    const semCor = (s: string): string =>
+      s.replace(new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'), '');
     // As duas medidas vêm de fontes DIFERENTES de propósito: a largura do texto SEM cor
     // (é o que ocupa célula na tela) e a variação do texto COM cor (o brilho correndo é
     // só código ANSI). Medir as duas na string sem cor daria "nada muda" — e daria certo
@@ -135,17 +141,23 @@ describe('<Working> — o wordmark Λluy no papel do Aluy', () => {
   });
 
   it('sem animação: nome SÓLIDO, sem pulso, verbo preservado', () => {
-    const out = wrap(<Working label="pensando" frame={3} />, { ALUY_NO_ANIM: '1' }).lastFrame() ?? '';
+    const out =
+      wrap(<Working label="pensando" frame={3} />, { ALUY_NO_ANIM: '1' }).lastFrame() ?? '';
     expect(out).toContain('Λluy');
     expect(out).toContain('pensando…');
   });
 
   it('SUFIXO na mesma linha: a contagem de sub-agentes não vira um segundo indicador', () => {
     const out =
-      wrap(<Working label="pensando" suffix="· 3 sub-agente(s) trabalhando · F8 para parar" frame={0} />)
-        .lastFrame() ?? '';
+      wrap(
+        <Working
+          label="pensando"
+          suffix="· 3 sub-agente(s) trabalhando · F8 para parar"
+          frame={0}
+        />,
+      ).lastFrame() ?? '';
     expect(out.split('\n')).toHaveLength(1); // UMA linha
-    expect(out).toContain('pensando…');
+    expect(semAnsi(out)).toContain('pensando…');
     expect(out).toContain('3 sub-agente(s)');
     expect(out).toContain('F8 para parar');
   });
@@ -188,7 +200,7 @@ describe('<ToolLine> — in-flight ○ → ⏺ (§2.6; EST-0984 endureceu ◌→
         />,
       ).lastFrame() ?? '';
     expect(out).toContain('○');
-    expect(out).toContain('rodando');
+    expect(semAnsi(out)).toContain('rodando');
     expect(out).toContain('npm run typecheck');
   });
 
