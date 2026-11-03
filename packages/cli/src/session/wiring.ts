@@ -1113,6 +1113,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     tier,
     everyKEnv: env.ALUY_SELF_CHECK_EVERY,
     maxVerificationsEnv: env.ALUY_SELF_CHECK_MAX,
+    skipWhenVerifiedEnv: env.ALUY_SELF_CHECK_SKIP_VERIFIED,
+    ...(opts.advanced?.selfCheck?.skipWhenVerified !== undefined
+      ? { skipWhenVerifiedConfig: opts.advanced.selfCheck.skipWhenVerified }
+      : {}),
     // ADR-0150 (Tier 2) — config.advanced.selfCheck (nível ENTRE env e default).
     ...(opts.advanced?.selfCheck?.everyK !== undefined
       ? { everyKConfig: opts.advanced.selfCheck.everyK }

@@ -383,6 +383,8 @@ export interface UserAdvancedConfig {
     readonly everyK?: number;
     /** `maxVerificationsEnv` (ALUY_SELF_CHECK_MAX) vence. Clamp core `[1,10]`. */
     readonly maxVerifications?: number;
+    /** `ALUY_SELF_CHECK_SKIP_VERIFIED` vence. Opt-in: pula a sonda se o agente já verificou. */
+    readonly skipWhenVerified?: boolean;
   };
   /** `agent/mem-pressure.ts` — limiar BASE do backstop de OOM (heap). */
   readonly memPressure?: {
@@ -642,18 +644,19 @@ function sanitizeAdvanced(raw: unknown): UserAdvancedConfig | undefined {
   const posInt = (v: unknown): number | undefined =>
     typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
   const out: {
-    selfCheck?: { everyK?: number; maxVerifications?: number };
+    selfCheck?: { everyK?: number; maxVerifications?: number; skipWhenVerified?: boolean };
     memPressure?: { compactAt?: number | string };
     webFetch?: { maxObservationChars?: number };
   } = {};
 
   if (typeof o.selfCheck === 'object' && o.selfCheck !== null) {
     const sc = o.selfCheck as Record<string, unknown>;
-    const clean: { everyK?: number; maxVerifications?: number } = {};
+    const clean: { everyK?: number; maxVerifications?: number; skipWhenVerified?: boolean } = {};
     const ek = posInt(sc.everyK);
     const mv = posInt(sc.maxVerifications);
     if (ek !== undefined) clean.everyK = ek;
     if (mv !== undefined) clean.maxVerifications = mv;
+    if (typeof sc.skipWhenVerified === 'boolean') clean.skipWhenVerified = sc.skipWhenVerified;
     if (Object.keys(clean).length > 0) out.selfCheck = clean;
   }
 
