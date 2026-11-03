@@ -407,6 +407,8 @@ export interface SessionControllerOptions {
    * baseline do loop deles (são curtos/dirigidos; a re-âncora foca o agente PRINCIPAL).
    */
   readonly selfCheck?: SelfCheckConfig;
+  /** Dica de delegação do agente principal (ver cli-core delegation-nudge.ts). */
+  readonly delegationNudge?: boolean;
   /**
    * EST-0980 — GATE de pre-tool (hooks `gate:true` que podem VETAR uma tool). O wiring
    * o constrói a partir do `HookRunner` + a config de hooks (`makePreToolGate`) e o
@@ -2385,6 +2387,7 @@ export class SessionController {
         // auto-verificação pré-"pronto". Já resolvido pelo gating no wiring (flag/env/
         // tier fraco). Ausente ⇒ baseline (o loop ignora — sem overhead).
         ...(opts.selfCheck ? { selfCheck: opts.selfCheck } : {}),
+        ...(opts.delegationNudge ? { delegationNudge: true } : {}),
         // EST-SEC-HARDEN (F21) · AG-0008 — GUARDRAIL do combo perigoso (yolo + tier-fraco
         // + conteúdo não-confiável no contexto) no agente PRINCIPAL. O loop lê o YOLO de
         // `permission.isUnsafe` (dinâmico); aqui damos o `tier` corrente (THUNK — o

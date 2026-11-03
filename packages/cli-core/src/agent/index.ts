@@ -115,6 +115,12 @@ export {
 // "pronto"). Config + gating puros (flag/env/tier fraco) + redatores dos lembretes.
 export { VerificationLedger } from './verification-ledger.js';
 export {
+  DelegationNudger,
+  DELEGATION_NUDGE_MARKER,
+  delegationNudgeEnabled,
+  countIndependentSteps,
+} from './delegation-nudge.js';
+export {
   type SelfCheckConfig,
   type SelfCheckInputs,
   SELF_CHECK_OFF,
