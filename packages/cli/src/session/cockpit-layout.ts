@@ -23,6 +23,7 @@
 // DEGRADAÇÃO (ADR-0076 §6): abaixo do PISO de colunas (`MIN_COLS=80`) ou de linhas
 // (`MIN_ROWS`), o grid não cabe com legibilidade ⇒ o cockpit é RECUSADO (cai pro inline
 // com aviso). Esta é a decisão (a), recomendada no ADR.
+import type { StatuslineMode } from '../io/user-config.js';
 
 /** ADR-0076 §6 — piso de COLUNAS p/ o cockpit (abaixo disso cai pro inline). */
 export const COCKPIT_MIN_COLS = 80;
@@ -47,11 +48,27 @@ export const STATUS_ROWS = 3; // painel de status (sessão/estado/uso) — 3 lin
 export const COCKPIT_PANEL_MIN_ROWS = 24;
 
 /** Quantas linhas o painel de status ocupa no cockpit, dada a altura da tela. */
-export function statusRowsFor(rows: number): number {
+export function statusRowsFor(rows: number, mode: StatuslineMode = 'full'): number {
+  if (mode === 'hidden') return 0;
+  if (mode === 'compact') return 1;
   return rows >= COCKPIT_PANEL_MIN_ROWS ? STATUS_ROWS : 1;
 }
 export const COMPOSER_ROWS = 1; // input — 1 linha (PISO; cresce p/ multi-linha, ver abaixo).
 export const HINTS_ROWS = 1; // atalhos contextuais — 1 linha.
+
+/**
+ * Rodapé (`/statusline`, F2) NO cockpit: o modo escolhido muda as alturas das regiões de
+ * status e hints; as linhas liberadas vão para as regiões geridas (conversa/log), e a soma
+ * segue == rows.
+ *  · `full`    — painel de status (3 linhas, ou 1 em tela baixa) + hints (1);
+ *  · `compact` — UMA linha de status (a linha parcial) + hints (1);
+ *  · `hidden`  — status 0; hints só se `hintsRow` (marcador `⚠ yolo` / dica de como voltar).
+ */
+export interface CockpitChromeOpts {
+  readonly statusline?: StatuslineMode;
+  /** Em `hidden`: reserva a linha de hints (yolo ativo ou dica "F2 volta"). */
+  readonly hintsRow?: boolean;
+}
 
 /**
  * BUG P2-C — TETO de linhas do COMPOSER no cockpit. No inline o composer cresce sem teto
@@ -72,8 +89,7 @@ export const COMPOSER_MAX_ROWS = 5;
 export const SEPARATOR_ROWS = 3; // header│conversa, conversa│log, log│status (3 réguas).
 
 /** Altura total de chrome FIXO (regiões + separadores). O resto vai p/ conversa+log. */
-export const COCKPIT_CHROME_ROWS =
-  HEADER_ROWS + 1 + COMPOSER_ROWS + HINTS_ROWS + SEPARATOR_ROWS;
+export const COCKPIT_CHROME_ROWS = HEADER_ROWS + 1 + COMPOSER_ROWS + HINTS_ROWS + SEPARATOR_ROWS;
 
 /**
  * ADR-0076 §6 — piso de LINHAS: o chrome fixo + ≥1 linha útil de conversa E ≥1 de log.
@@ -202,6 +218,7 @@ export function resolveCockpitLayout(
   cols: number,
   composerLines = COMPOSER_ROWS,
   logHint?: LogActivityHint,
+  chrome: CockpitChromeOpts = {},
 ): CockpitLayout {
   // GUARD DURO (crash `RangeError: Invalid array length` no Ink, achado do dono) — dimensões
   // INVÁLIDAS (NaN, Infinity, ≤0, fracionárias) vindas de `stdout.rows/columns` em transições
@@ -227,7 +244,11 @@ export function resolveCockpitLayout(
   // `COCKPIT_CHROME_ROWS` conta o painel de status no PISO (1 linha). Quando a tela é alta
   // o bastante para ele abrir inteiro, as 2 linhas extras saem daqui — senão a soma das
   // regiões estouraria `rows` e o grid deixaria de fechar (invariante §5).
-  const baseManaged = rows - COCKPIT_CHROME_ROWS - (statusRowsFor(rows) - 1);
+  const statusRows = statusRowsFor(rows, chrome.statusline);
+  const hintsRows =
+    chrome.statusline === 'hidden' ? (chrome.hintsRow === true ? HINTS_ROWS : 0) : HINTS_ROWS;
+  const baseManaged =
+    rows - (HEADER_ROWS + COMPOSER_ROWS + SEPARATOR_ROWS) - statusRows - hintsRows;
   const wantExtra = composerRowsForLines(composerLines) - COMPOSER_ROWS;
   const extra = Math.max(0, Math.min(wantExtra, baseManaged - 2));
   const composerRows = COMPOSER_ROWS + extra;
@@ -244,9 +265,9 @@ export function resolveCockpitLayout(
     rows,
     cols,
     headerRows: HEADER_ROWS,
-    statusRows: statusRowsFor(rows),
+    statusRows,
     composerRows,
-    hintsRows: HINTS_ROWS,
+    hintsRows,
     regions: { conversaRows, logRows },
   };
 }

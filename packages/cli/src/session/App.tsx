@@ -1057,7 +1057,12 @@ export function App(props: AppProps): React.ReactElement {
   // lógica mas ocupa N linhas visuais. Usar `composerLines` (lógicas) cravava a Box em 1
   // linha e CLIPAVA a janela+marcador do <Composer>; `composerVisualLines` cresce a Box até
   // COMPOSER_MAX_ROWS, casando com a janela visual que o <Composer> renderiza.
-  const cockpitLayout = resolveCockpitLayout(rows, columns, composerVisualLines, cockpitLogHint);
+  // RODAPÉ no cockpit — o MESMO modo (pref/env/F2//statusline) redimensiona status/hints; em
+  // `hidden` a linha de hints só existe p/ o `⚠ yolo` (nunca some) e a dica de como voltar.
+  const cockpitLayout = resolveCockpitLayout(rows, columns, composerVisualLines, cockpitLogHint, {
+    statusline: statuslineMode,
+    hintsRow: state.mode === 'unsafe' || dicaOculto,
+  });
   // ATIVO = o usuário pediu fullscreen E o layout cabe (não recusou). Se recusou, a App
   // renderiza o INLINE (degrada) e mostra o aviso. O alt-screen real (entrar/sair) é
   // disparado no TOGGLE (handler abaixo), espelhando este "ativo".
@@ -5265,6 +5270,8 @@ export function App(props: AppProps): React.ReactElement {
         composerActive={composerActive}
         showCursor={composerShowCursor}
         hintState={hintState}
+        statuslineMode={statuslineMode}
+        dicaOculto={dicaOculto}
         tierDisplay={tierDisplay}
         headerTierDisplay={headerTierDisplay}
         isDefaultTier={isDefaultTier}
