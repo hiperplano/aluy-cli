@@ -33,7 +33,7 @@ const root = new URL('../packages/cli/dist/', import.meta.url);
 const { buildSessionCommandsNote } = await import(new URL('slash/commands.js', root));
 const { setupMcp } = await import(new URL('mcp/setup.js', root));
 
-const cwd = mkdtempSync(join(tmpdir(), 'aluy-medir-'));
+const cwd = val('--cwd') ?? mkdtempSync(join(tmpdir(), 'aluy-medir-'));
 const tier = val('--tier', 'custom');
 const runtime = { provider: val('--provider', 'zai-coding'), model: val('--model', 'glm-5.3') };
 const msg = val('--msg', 'responda apenas: ok');
@@ -74,12 +74,20 @@ if (!flag('--sem-mcp')) {
   for (const r of s.discovery.servers ?? [])
     if (!r.ok) console.error(`[aviso] server MCP "${r.server}" nao conectou`);
 }
-const tools = [...base, ...mcpTools, ...extra];
+// PROMPT-ENXUTO — a ordem vem do ToolRegistry real (nativas, MCP por server/nome), igual ao
+// controller; `--embaralhar` inverte a ordem de CONEXAO dos servers p/ provar que nao importa.
+const ordemConexao = flag('--embaralhar') ? [...mcpTools].reverse() : mcpTools;
+const reg = new core.ToolRegistry();
+for (const t of [...base, ...ordemConexao, ...extra]) reg.register(t);
+const tools = [...reg.list()];
+// `--nativo` = o request manda `tools` nativo => o system NAO traz o catalogo em texto
+// (caminho novo). Sem a flag = caminho de fallback (texto completo), igual ao antigo.
+const nativo = flag('--nativo');
 
 const note = buildSessionCommandsNote();
 const history = [{ role: 'goal', text: msg }];
 const build = (ts, t = tier, rt = runtime, roots = [cwd], sc = note) =>
-  core.buildMessages(ts, history, undefined, roots, undefined, sc, t, rt);
+  core.buildMessages(ts, history, undefined, roots, undefined, sc, t, rt, nativo);
 const sys = (...a) => build(...a)[0].content;
 
 const full = sys(tools);
@@ -88,7 +96,7 @@ const schemasChars = JSON.stringify(schemas).length;
 
 const skeleton = sys([]).length;
 const out = {
-  config: { tier, runtime, mensagem: msg, charsPorToken: CPT, nTools: tools.length },
+  config: { nativo, tier, runtime, mensagem: msg, charsPorToken: CPT, nTools: tools.length },
   secoes: [],
 };
 const S = (secao, chars, estavel, nota = '') =>
@@ -138,7 +146,7 @@ out.porTool = tools
   }))
   .sort((a, b) => b.tokensSchema - a.tokensSchema);
 
-const soma = full.length + schemasChars + msg.length;
+const soma = full.length + (nativo ? schemasChars : schemasChars) + msg.length;
 out.total = {
   systemTokens: tokN(full.length),
   toolsFieldTokens: tokN(schemasChars),
