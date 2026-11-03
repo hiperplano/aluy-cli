@@ -1467,17 +1467,13 @@ export function App(props: AppProps): React.ReactElement {
         suggestAbortRef.current?.abort();
         const ctl = new AbortController();
         suggestAbortRef.current = ctl;
-        const ultimoObjetivo = [...state.blocks]
-          .reverse()
-          .find((b) => b.kind === 'you')?.text;
+        const ultimoObjetivo = [...state.blocks].reverse().find((b) => b.kind === 'you')?.text;
         void controller
           .suggestNext(
             {
               lang: activeLang,
               ...(turnRecap !== undefined ? { recap: turnRecap } : {}),
-              ...(ultimoObjetivo !== undefined
-                ? { lastGoal: ultimoObjetivo.slice(0, 200) }
-                : {}),
+              ...(ultimoObjetivo !== undefined ? { lastGoal: ultimoObjetivo.slice(0, 200) } : {}),
             },
             ctl.signal,
           )
@@ -5808,6 +5804,10 @@ export function BlockView(props: {
         </Box>
       );
     case 'aluy':
+      // SELF-CHECK — a passada de verificação é máquina do loop: o indicador "conferindo o
+      // trabalho…" (<Working>) é o que o usuário vê; o texto da verificação não aparece nem
+      // enquanto streama (era o flash que sumia ao terminar).
+      if (b.selfCheck === true) return <></>;
       return (
         <Box paddingBottom={1} paddingTop={aluyNeedsLeadingBlank(props.prevKind) ? 1 : 0}>
           <AluyBlock

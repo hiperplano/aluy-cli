@@ -1620,6 +1620,11 @@ export class SessionController {
   // anterior, já visível). Limpo quando a verificação finaliza OU quando o modelo, em
   // vez de confirmar, ACHA UM GAP e volta a AGIR (uma tool dispara — trabalho real).
   private selfCheckInFlight = false;
+  // SELF-CHECK — uma passada de verificação TERMINOU sem que nenhuma tool tenha disparado
+  // depois dela (o modelo conferiu e confirmou). A nota "✓ auto-verificado" só é empurrada
+  // no fim do turno (`afterRun`): a tool da correção vem DEPOIS do fim do stream da passada,
+  // então decidir no `finishAluyTurn` afirmava "verificado" mesmo quando a passada achou lacuna.
+  private selfCheckPassDone = false;
   // EST-1007 (HANG) — modo NÃO-INTERATIVO (sem TTY/headless `-p`/posicional piped). A
   // App da TUI (que responde `[r]/[c]/[n]`) NUNCA monta neste caminho ⇒ a pausa-pede-
   // direção do watchdog (`openStuckPause`) ficaria PRESA esperando uma tecla impossível
@@ -3971,6 +3976,7 @@ export class SessionController {
     // de um turno anterior (fail-safe: o sinal `self-check` do loop a re-arma quando, e
     // se, houver um probe). Sem isto, um flag preso esconderia a resposta do turno novo.
     this.selfCheckInFlight = false;
+    this.selfCheckPassDone = false;
   }
 
   /**
@@ -3978,6 +3984,11 @@ export class SessionController {
    * `/compact` posterior ter o que compactar) e decide a fase (budget vs done).
    */
   private afterRun(result: AgentRunResult): void {
+    // SELF-CHECK — a última passada confirmou e o turno fechou numa resposta final.
+    if (this.selfCheckPassDone) {
+      this.selfCheckPassDone = false;
+      if (result.stop.kind === 'final') this.pushNote('self-check', ['✓ auto-verificado']);
+    }
     this._lastRunResult = result;
     // ADR-0126(A·PR2) — em FOCO, o histórico do turno é da SUB-SESSÃO (isolado); o histórico
     // do principal NÃO é tocado (a conversa principal não vê os turnos do foco). Fora de foco,
@@ -4479,7 +4490,19 @@ export class SessionController {
     // PRÓXIMO turno do modelo é máquina do loop (reconferir a evidência), NÃO resposta.
     // Arma a supressão p/ que esse turno `aluy` NÃO vire bloco visível (ver
     // `startAluyTurn`/`finishAluyTurn`). É um sinal de display — não toca catraca/budget.
-    else if (signal.kind === 'self-check') this.selfCheckInFlight = true;
+    else if (signal.kind === 'self-check') {
+      this.selfCheckInFlight = true;
+      // SEM AR MORTO — a `final` candidata JÁ está na tela (streamou como bloco normal). A
+      // passada extra de verificação é uma chamada de modelo inteira; sem isto a fase seguia
+      // `streaming` (sem indicador) até o fim dela. Volta a `thinking` com o rótulo honesto
+      // e o relógio zerado: `conferindo o trabalho (1/2)… 0:04`. Interrompível como todo
+      // `thinking` (esc). Só display — não toca catraca/budget.
+      this.patch({
+        phase: 'thinking',
+        workingLabel: `conferindo o trabalho (${String(signal.attempt)}/${String(signal.max)})`,
+        workingSince: this.clock(),
+      });
+    }
     // F191 — o loop CORTOU a chamada de modelo em voo p/ acelerar o encaixe: o parcial
     // do turno `aluy` (prosa já streamada) é DESCARTADO (o inject supersede — o dono
     // re-direcionou). Remove o bloco vivo p/ não deixar prosa ÓRFÃ na tela antes da nota
@@ -6623,10 +6646,13 @@ export class SessionController {
   private abrirTurnoAluy(): void {
     if (!this.turnoAluyPendente) return;
     this.turnoAluyPendente = false;
+    // SELF-CHECK — a passada de verificação fica em `thinking` (o <Working> "conferindo o
+    // trabalho…" segue na tela); o texto dela é escondido e `streaming` apagaria o indicador.
     const enterStreaming =
-      this.state.phase === 'thinking' ||
-      this.state.phase === 'streaming' ||
-      this.state.phase === 'retrying';
+      !this.selfCheckInFlight &&
+      (this.state.phase === 'thinking' ||
+        this.state.phase === 'streaming' ||
+        this.state.phase === 'retrying');
     const block: SessionBlock = {
       kind: 'aluy',
       text: '',
@@ -6816,18 +6842,16 @@ export class SessionController {
       if (last.selfCheck) {
         blocks.pop();
         this.selfCheckInFlight = false;
-        // Nota dim discreta (UMA linha), análoga ao "↳ encaixado" do btw: deixa o rastro
-        // sem re-exibir o texto cru da verificação. Com cap≥2 há mais de uma passada de
-        // verificação seguidas; NÃO repetimos a nota (no máximo UMA dim, spec): só empurra
-        // se o último bloco já não for a própria nota de self-check.
-        const tail = blocks[blocks.length - 1];
-        const alreadyNoted =
-          tail !== undefined && tail.kind === 'note' && tail.title === 'self-check';
-        if (alreadyNoted) {
-          this.patch({ blocks });
+        // Rastro discreto: UMA nota dim "✓ auto-verificado" no fim do turno (não o texto cru).
+        // Só afirma "verificado" se a passada de fato terminou; interrompida/erro não conferiu.
+        // O "✓" em si é decidido no fim do turno (ver `selfCheckPassDone`).
+        this.patch({ blocks });
+        if (motivo !== 'done') {
+          this.pushNote('self-check', [
+            'verificação interrompida — a resposta acima não foi conferida',
+          ]);
         } else {
-          this.patch({ blocks });
-          this.pushNote('self-check', ['✓ auto-verificado']);
+          this.selfCheckPassDone = true;
         }
         return;
       }
@@ -7562,9 +7586,14 @@ export class SessionController {
     // o modelo NÃO confirmou — ACHOU UM GAP e voltou a AGIR. Esse trabalho (e a resposta
     // que vier depois) é REAL ⇒ desarma a supressão e DESPROMOVE o turno `aluy` em voo
     // (se marcado `selfCheck`), p/ não esconder a resposta nova por engano.
-    if (this.selfCheckInFlight) {
+    if (this.selfCheckInFlight || this.selfCheckPassDone) {
+      if (this.selfCheckInFlight) this.demoteSelfCheckBlock();
       this.selfCheckInFlight = false;
-      this.demoteSelfCheckBlock();
+      this.selfCheckPassDone = false;
+      // CORREÇÃO PÓS-VERIFICAÇÃO — deixa claro na tela que o que vem agora não é a resposta
+      // original: a verificação achou pendência e o agente voltou a agir.
+      this.pushNote('self-check', ['↳ a verificação achou pendências — corrigindo']);
+      this.patch({ workingLabel: 'corrigindo após a verificação' });
     }
     const target = targetOfCall(call);
     this.pushBlock({
