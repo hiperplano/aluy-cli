@@ -60,6 +60,8 @@ export const en: PartialCatalog = {
   'cockpit.entered':
     'cockpit mode (full screen) — tab switches chat⇄log · pgup/pgdn scroll · ctrl-s export · /fullscreen exits',
   'cockpit.left': 'inline mode restored (native scrollback).',
+  'cockpit.renderFault':
+    'full-screen render failed; back to inline mode (details in ~/.aluy/logs/crash.log).',
   'cockpit.refuseNarrow': 'narrow terminal (<80 col): cockpit unavailable, using inline.',
   'cockpit.refuseShort': 'short terminal (too few rows): cockpit unavailable, using inline.',
   'cockpit.exported': 'transcript exported (redacted) to',

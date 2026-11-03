@@ -134,6 +134,7 @@ import {
 import { buildActivityLog, countActivityLines } from './activity-log.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
 import { Cockpit, type CockpitFocus } from './Cockpit.js';
+import { onRenderFault } from './render-fault.js';
 import { resolveCockpitLayout } from './cockpit-layout.js';
 import { scrollOffset, type ScrollKey } from './viewport.js';
 import {
@@ -2028,6 +2029,25 @@ export function App(props: AppProps): React.ReactElement {
     setConversaScroll(0);
     setLogScroll(0);
   }, [props, controller, t, rows, columns, clearScreen]);
+
+  // CRASH-YOGA — se o render do Ink (Yoga-wasm) lançar com o cockpit ativo (ver
+  // `ink-root-guard.tsx`), em vez de morrer VOLTAMOS ao inline com uma nota em PT-BR. O
+  // `crash.log` já guarda a entrada. Fora do cockpit a falha é só registrada (o guard descarta
+  // o frame e o próximo render segue).
+  const fullscreenRef = useRef(fullscreen);
+  fullscreenRef.current = fullscreen;
+  useEffect(
+    () =>
+      onRenderFault(() => {
+        if (!fullscreenRef.current) return;
+        setFullscreen(false);
+        props.cockpitScreen?.leave();
+        clearScreen();
+        controller.replaceNote('cockpit', [t('cockpit.renderFault')]);
+        props.onFullscreenChange?.(false);
+      }),
+    [props, controller, t, clearScreen],
+  );
 
   const runCommand = useCallback(
     (command: SlashCommand, args: string) => {

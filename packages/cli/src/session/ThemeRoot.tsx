@@ -15,6 +15,7 @@ import { resolveThemeByName, type ThemeName } from '../ui/theme/themes.js';
 import type { Density } from '../ui/theme/theme.js';
 import { I18nProvider, i18n as makeI18n, DEFAULT_LANG, type Lang } from '../i18n/index.js';
 import { App, type AppProps } from './App.js';
+import { InkRootGuard } from './ink-root-guard.js';
 
 export interface ThemeRootProps extends Omit<
   AppProps,
@@ -95,6 +96,7 @@ export function ThemeRoot(props: ThemeRootProps): React.ReactElement {
   return (
     <ThemeProvider theme={theme}>
       <I18nProvider value={i18nValue}>
+        <InkRootGuard />
         <App
           {...appProps}
           currentTheme={active}

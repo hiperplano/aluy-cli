@@ -227,8 +227,10 @@ export function resolveCockpitLayout(
   // `new Array(height)` no `Output.get` ⇒ CRASH que MATA o processo (e o Ctrl-C junto). Aqui
   // normalizamos p/ inteiros e, se não formam uma tela válida, RECUSAMOS (cai pro inline
   // seguro) — NUNCA propagamos dimensão inválida adiante. PURO/determinístico.
-  const safeRows = Number.isFinite(rows) ? Math.floor(rows) : 0;
-  const safeCols = Number.isFinite(cols) ? Math.floor(cols) : 0;
+  // `Math.max(0, …)`: a recusa também ecoa `rows/cols` — jamais um valor NEGATIVO (um
+  // `width`/`height` negativo num <Box> corrompe o Yoga-wasm).
+  const safeRows = Number.isFinite(rows) ? Math.max(0, Math.floor(rows)) : 0;
+  const safeCols = Number.isFinite(cols) ? Math.max(0, Math.floor(cols)) : 0;
   rows = safeRows;
   cols = safeCols;
   if (cols < COCKPIT_MIN_COLS) {
