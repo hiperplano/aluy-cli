@@ -210,7 +210,10 @@ export type ProgressSignal =
   // regência, auto-compactação, montagem das mensagens) e vai AGORA chamar o modelo. É o
   // marco honesto que separa "preparando" de "pensando" (esperando o modelo) na UX. Só
   // observação — não toca a catraca/budget.
-  | { readonly kind: 'model-call' }
+  //
+  // `promptChars` — tamanho (em caracteres) das mensagens que VÃO na requisição; a TUI estima
+  // o `↑ N` (tokens enviados) com isso até o uso real chegar. Só observação.
+  | { readonly kind: 'model-call'; readonly promptChars?: number }
   // FEEDBACK-IMEDIATO — um passo de PREPARO que pode demorar começou (`recall` de memória,
   // `maestro` consultando o judge por rede) ou terminou (`prompt` = volta ao preparo
   // genérico). Só é emitido quando o passo REALMENTE vai esperar algo — não há sinal para
@@ -1406,7 +1409,20 @@ export class AgentLoop {
       const callSignal = this.expedite ? combineAbort(signal, expediteAc.signal) : signal;
       let result: ModelCallResult;
       // FEEDBACK-IMEDIATO — fim do preparo: a próxima coisa é a chamada ao modelo.
-      this.onProgress?.({ kind: 'model-call' });
+      this.onProgress?.({
+        kind: 'model-call',
+        promptChars: messages.reduce(
+          (n, m) =>
+            n +
+            (typeof m.content === 'string'
+              ? m.content.length
+              : m.content.reduce(
+                  (k, p) => k + ('text' in p && typeof p.text === 'string' ? p.text.length : 0),
+                  0,
+                )),
+          0,
+        ),
+      });
       try {
         result = await this.callModelPausable(
           {

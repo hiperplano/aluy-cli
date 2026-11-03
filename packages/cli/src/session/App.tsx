@@ -163,14 +163,7 @@ import { isUnrecognizedEscapeTail } from './escape-leak.js';
 // F197 — sugestão de próximo prompt (ghost + Tab): blocos+i18n → texto do composer.
 import { resolveSuggestionText } from './suggest.js';
 import { buildTurnRecap } from './turn-recap.js';
-import {
-  ROTULOS_GENERICOS,
-  SeletorDeVerbo,
-  detalheDeEspera,
-  parseVerbos,
-  rotuloExibido,
-  verbosSimples,
-} from './verbos.js';
+import { ROTULOS_GENERICOS, detalheDeEspera, rotuloExibido } from './verbos.js';
 import {
   createPasteRegistry,
   shouldCollapse,
@@ -1253,17 +1246,7 @@ export function App(props: AppProps): React.ReactElement {
 
   // VERBOS DE ESPERA — o rótulo genérico (`pensando`…) vira um gerúndio sorteado 1× por PASSO
   // (a identidade do passo é o `workingSince`). Rótulos funcionais ficam como estão.
-  const seletorVerbo = useRef<SeletorDeVerbo | null>(null);
-  if (seletorVerbo.current === null) seletorVerbo.current = new SeletorDeVerbo();
-  const listaVerbos = useMemo(() => parseVerbos(t('working.verbs')), [t]);
-  const verbosPlanos = useMemo(() => verbosSimples(), []);
-  const rotuloVivo = rotuloExibido({
-    label: state.workingLabel,
-    passo: state.workingSince,
-    verbos: listaVerbos,
-    seletor: seletorVerbo.current,
-    simples: verbosPlanos,
-  });
+  const rotuloVivo = rotuloExibido({ label: state.workingLabel, verbo: state.workingVerb });
   const indicadorTrabalho = workingIndicator({
     count: state.detachedSubagents ?? 0,
     phase: state.phase,
@@ -1275,7 +1258,7 @@ export function App(props: AppProps): React.ReactElement {
   // Tokens = GERADOS (saída) pelo pai no turno: `tokens_out` reportado + estimativa do que
   // a chamada em voo streamou (`↓ 1,2k tokens`); 0 ⇒ o segmento some. Rótulo funcional já é a fase ⇒ sem palavra.
   const contaViva =
-    state.phase === 'thinking' || state.phase === 'retrying'
+    state.phase === 'thinking' || state.phase === 'retrying' || state.phase === 'streaming'
       ? controller.turnAccounting()
       : undefined;
   const msDoTurno =
@@ -1288,10 +1271,14 @@ export function App(props: AppProps): React.ReactElement {
     msDoTurno !== undefined
       ? detalheDeEspera({
           fase:
-            state.workingLabel !== undefined && ROTULOS_GENERICOS.has(state.workingLabel)
-              ? state.workingLabel
-              : undefined,
+            state.phase === 'streaming' &&
+            (state.blocks[state.blocks.length - 1] as { text?: string } | undefined)?.text
+              ? 'escrevendo'
+              : state.workingLabel !== undefined && ROTULOS_GENERICOS.has(state.workingLabel)
+                ? state.workingLabel
+                : undefined,
           tokens: contaViva !== undefined ? controller.turnOutputTokens() : undefined,
+          entrada: contaViva !== undefined ? controller.turnInputTokens() : undefined,
           ms: msDoTurno,
           // "Λluy " + rótulo + "… " + " " + sufixo dos sub-agentes: o que sobra da linha.
           larguraMax:
@@ -5151,6 +5138,8 @@ export function App(props: AppProps): React.ReactElement {
               // onde este repo já teve o "buraco no meio da tela".
               prevKind={i > 0 ? live[i - 1]?.kind : undefined}
               nextKind={live[i + 1]?.kind}
+              verbo={state.workingVerb}
+              detalhe={state.phase === 'streaming' ? detalheEspera : undefined}
             />
           ))}
 
@@ -5866,6 +5855,10 @@ export function BlockView(props: {
    * sub-agentes que desceu com filhos em segundo plano (ver `liveStartIndex`).
    */
   readonly settled?: boolean;
+  /** Verbo do passo (fonte única: `state.workingVerb`) p/ o `⋯ Costurando…` do raciocínio. */
+  readonly verbo?: string | undefined;
+  /** Parêntese dim da espera (`(pensando · ↓ 394 tokens · 9s)`) p/ o raciocínio ao vivo. */
+  readonly detalhe?: string | undefined;
 }): React.ReactElement {
   const b = props.block;
   switch (b.kind) {
@@ -5897,6 +5890,8 @@ export function BlockView(props: {
             {...(props.columns !== undefined ? { columns: props.columns } : {})}
             {...(b.accounting !== undefined ? { accounting: b.accounting } : {})}
             {...(b.interrupted === true ? { interrupted: true } : {})}
+            {...(props.verbo !== undefined ? { verbo: props.verbo } : {})}
+            {...(props.detalhe !== undefined ? { detalhe: props.detalhe } : {})}
           />
         </Box>
       );

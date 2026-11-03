@@ -246,15 +246,15 @@ describe('feedback imediato no submit (App)', () => {
     await waitFor(() => /lembrando/.test(plain(r.lastFrame() ?? '')));
     const f1 = plain(r.lastFrame() ?? '');
     expect(f1).toContain('ola'); // eco da mensagem
-    expect(f1).toMatch(/lembrando… \(lembrando · \d+s\)/); // fase honesta + segundos, sem M:SS
+    expect(f1).toMatch(/lembrando… \(lembrando · [^)]*\d+s\)/); // fase honesta + segundos, sem M:SS
     expect(f1).not.toContain('pensando');
 
     // 3s depois, com o recall ainda pendurado: a linha segue lá e os segundos andaram.
     t += 3000;
-    await waitFor(() => /lembrando… \(lembrando · 3s\)/.test(plain(r.lastFrame() ?? '')));
+    await waitFor(() => /lembrando… \(lembrando · [^)]*3s\)/.test(plain(r.lastFrame() ?? '')));
 
     release(); // recall termina ⇒ o loop chama o modelo ⇒ `pensando`
-    await waitFor(() => /pensando… \(pensando · \d+s\)/.test(plain(r.lastFrame() ?? '')));
+    await waitFor(() => /pensando… \(pensando · [^)]*\d+s\)/.test(plain(r.lastFrame() ?? '')));
     r.unmount();
     controller.dispose();
   });

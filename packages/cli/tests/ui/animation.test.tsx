@@ -87,8 +87,9 @@ describe('<Working> — a onda "vau" + verbo vivo (§2.4/§2.6)', () => {
 describe('<Working> — o wordmark Λluy no papel do Aluy', () => {
   it('desenha o nome INTEIRO, não só a inicial', () => {
     const out = wrap(<Working label="pensando" frame={0} />).lastFrame() ?? '';
-    expect(out).toContain('Λluy');
-    expect(semAnsi(out)).toContain('pensando…');
+    // só a MARCA Λ (o nome "luy" fica no cabeçalho da caixa da resposta, como o "você")
+    expect(semAnsi(out)).toContain('Λ pensando…');
+    expect(semAnsi(out)).not.toContain('Λluy');
   });
 
   it('a onda decorativa SAIU deste papel (era a poluição)', () => {
@@ -134,7 +135,7 @@ describe('<Working> — o wordmark Λluy no papel do Aluy', () => {
       const cru = wrap(<Working label="pensando" frame={f} />).lastFrame() ?? '';
       larguras.add(semCor(cru).length);
       comCor.add(cru);
-      expect(semCor(cru)).toContain('Λluy'); // as 4 letras, em TODO frame
+      expect(semCor(cru)).toContain('Λ pensando…'); // a marca, em TODO frame
     }
     expect(larguras.size).toBe(1); // a largura NUNCA muda
     expect(comCor.size).toBeGreaterThanOrEqual(1); // (o brilho se prova no teste acima)
@@ -143,8 +144,7 @@ describe('<Working> — o wordmark Λluy no papel do Aluy', () => {
   it('sem animação: nome SÓLIDO, sem pulso, verbo preservado', () => {
     const out =
       wrap(<Working label="pensando" frame={3} />, { ALUY_NO_ANIM: '1' }).lastFrame() ?? '';
-    expect(out).toContain('Λluy');
-    expect(out).toContain('pensando…');
+    expect(semAnsi(out)).toContain('Λ pensando…');
   });
 
   it('SUFIXO na mesma linha: a contagem de sub-agentes não vira um segundo indicador', () => {

@@ -7,10 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
+import { AluyBlock } from '../../src/ui/components/TurnBlock.js';
 import { Working } from '../../src/ui/components/Working.js';
 import {
   ROTULOS_GENERICOS,
-  SeletorDeVerbo,
   detalheDeEspera,
   formatSegundos,
   formatTokensPtBr,
@@ -20,6 +20,8 @@ import {
   sortearVerbo,
   verbosSimples,
 } from '../../src/session/verbos.js';
+import { PolicyPermissionEngine } from '@hiperplano/aluy-cli-core';
+import { SessionController } from '../../src/session/controller.js';
 import { resolveText } from '../../src/i18n/translate.js';
 
 const ESC = String.fromCharCode(27);
@@ -37,22 +39,62 @@ describe('lista de verbos (catálogo)', () => {
   });
 });
 
-describe('sorteio por passo', () => {
-  it('estável dentro do passo, diferente entre passos, sem repetir o anterior', () => {
-    const sel = new SeletorDeVerbo(42);
-    const a1 = sel.para(1000, verbos);
-    expect(sel.para(1000, verbos)).toBe(a1);
-    expect(sel.para(1000, verbos)).toBe(a1);
-    const vistos = new Set<string>([a1!]);
-    let anterior = a1;
+describe('sorteio por passo (fonte única: estado do controller)', () => {
+  const comPasso = (c: SessionController, since: number): string | undefined => {
+    (c as unknown as { patch(p: Record<string, unknown>): void }).patch({
+      phase: 'thinking',
+      workingLabel: 'pensando',
+      workingSince: since,
+    });
+    return c.current.workingVerb;
+  };
+  const novo = (): SessionController =>
+    new SessionController({
+      model: {
+        async call() {
+          return { request_id: 'r', content: 'ok', finish_reason: 'stop' };
+        },
+      },
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: {} as never,
+      askResolver: {
+        async resolve() {
+          return { kind: 'approve-once' as const };
+        },
+      },
+      meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
+      flush: { intervalMs: 0 },
+    });
+
+  it('estável dentro do passo, novo e diferente do anterior a cada passo', () => {
+    const c = novo();
+    let anterior = comPasso(c, 1000);
+    expect(verbos).toContain(anterior);
+    expect(comPasso(c, 1000)).toBe(anterior); // mesmo passo ⇒ mesmo verbo
+    const vistos = new Set<string>([anterior!]);
     for (let passo = 2000; passo < 2000 + 40 * 1000; passo += 1000) {
-      const v = sel.para(passo, verbos)!;
+      const v = comPasso(c, passo)!;
       expect(v).not.toBe(anterior);
       anterior = v;
       vistos.add(v);
     }
     expect(vistos.size).toBeGreaterThan(10);
+    c.dispose();
   });
+
+  it('ALUY_VERBOS=simples ⇒ nenhum verbo no estado', () => {
+    const antes = process.env.ALUY_VERBOS;
+    process.env.ALUY_VERBOS = 'simples';
+    try {
+      const c = novo();
+      expect(comPasso(c, 1000)).toBeUndefined();
+      c.dispose();
+    } finally {
+      if (antes === undefined) delete process.env.ALUY_VERBOS;
+      else process.env.ALUY_VERBOS = antes;
+    }
+  });
+
   it('determinístico com a mesma semente', () => {
     const seq = (seed: number): string[] => {
       const rng = criarRng(seed);
@@ -70,12 +112,11 @@ describe('sorteio por passo', () => {
 });
 
 describe('quais rótulos viram verbo', () => {
-  const sel = new SeletorDeVerbo(1);
-  const exibe = (label: string, simples = false): string | undefined =>
-    rotuloExibido({ label, passo: 1, verbos, seletor: sel, simples });
+  const exibe = (label: string, verbo: string | undefined = 'Costurando'): string | undefined =>
+    rotuloExibido({ label, verbo });
 
-  it('genéricos (pensando/lembrando/preparando/maestro avaliando) viram verbo', () => {
-    for (const g of ROTULOS_GENERICOS) expect(verbos).toContain(exibe(g));
+  it('genéricos (pensando/lembrando/preparando/maestro avaliando) viram o verbo', () => {
+    for (const g of ROTULOS_GENERICOS) expect(exibe(g)).toBe('Costurando');
   });
   it('funcionais/honestos ficam INTACTOS', () => {
     for (const f of [
@@ -90,8 +131,8 @@ describe('quais rótulos viram verbo', () => {
       expect(exibe(f)).toBe(f);
     }
   });
-  it('modo simples devolve o rótulo plano', () => {
-    expect(exibe('pensando', true)).toBe('pensando');
+  it('sem verbo (modo simples) devolve o rótulo plano', () => {
+    expect(rotuloExibido({ label: 'pensando', verbo: undefined })).toBe('pensando');
   });
   it('ALUY_VERBOS=simples é lido do ambiente', () => {
     expect(verbosSimples({ ALUY_VERBOS: 'simples' })).toBe(true);
@@ -124,6 +165,27 @@ describe('formatação do parêntese', () => {
     expect(detalheDeEspera({ fase: 'pensando', tokens: 0, ms: 5000 })).toBe('(pensando · 5s)');
     expect(detalheDeEspera({ tokens: 850, ms: 5000 })).toBe('(↓ 850 tokens · 5s)');
   });
+  it('↑ enviados antes do 1º delta; ↑ e ↓ depois; estimativa leva `~`', () => {
+    const base = { fase: 'pensando', ms: 3000 };
+    expect(detalheDeEspera({ ...base, entrada: { tokens: 21_000, estimado: true } })).toBe(
+      '(pensando · ↑ ~21k tokens · 3s)',
+    );
+    expect(
+      detalheDeEspera({ ...base, entrada: { tokens: 21_000, estimado: false }, tokens: 394 }),
+    ).toBe('(pensando · ↑ 21k ↓ 394 tokens · 3s)');
+  });
+  it('aperto com ↑ e ↓: perde o ↑, depois o ↓, depois a fase', () => {
+    const a = {
+      fase: 'pensando',
+      ms: 9000,
+      tokens: 394,
+      entrada: { tokens: 21_000, estimado: false },
+    };
+    expect(detalheDeEspera({ ...a, larguraMax: 36 })).toBe('(pensando · ↑ 21k ↓ 394 tokens · 9s)');
+    expect(detalheDeEspera({ ...a, larguraMax: 35 })).toBe('(pensando · ↓ 394 tokens · 9s)');
+    expect(detalheDeEspera({ ...a, larguraMax: 29 })).toBe('(pensando · 9s)');
+    expect(detalheDeEspera({ ...a, larguraMax: 5 })).toBe('(9s)');
+  });
   it('aperto: perde tokens primeiro, depois a fase; segundos ficam', () => {
     const args = { fase: 'pensando', tokens: 1200, ms: 12_000 };
     expect(detalheDeEspera({ ...args, larguraMax: 20 })).toBe('(pensando · 12s)');
@@ -149,6 +211,38 @@ describe('<Working>', () => {
       <Working label="conferindo o trabalho (1/2)" frame={0} detalhe="(900 tokens · 4s)" />,
     );
     expect(f).toContain('conferindo o trabalho (1/2)… (900 tokens · 4s)');
+  });
+});
+
+describe('caixa da resposta: o MESMO verbo no raciocínio ao vivo', () => {
+  const theme = resolveTheme({ env: { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' } });
+  const tela = (el: React.ReactElement): string =>
+    plain(render(<ThemeProvider theme={theme}>{el}</ThemeProvider>).lastFrame() ?? '');
+
+  it('streaming com verbo ⇒ `⋯ Costurando…` (cabeçalho Λluy preservado)', () => {
+    const f = tela(
+      <AluyBlock text="" streaming reasoning="hmm" verbo="Costurando" frame={2} isCurrent />,
+    );
+    expect(f).toContain('⋯ Costurando…');
+    expect(f).not.toContain('⋯ pensando');
+    expect(f).toContain('Λluy');
+  });
+  it('streaming sem verbo (modo simples) ⇒ `⋯ pensando` como sempre', () => {
+    const f = tela(<AluyBlock text="" streaming reasoning="hmm" frame={2} isCurrent />);
+    expect(f).toContain('⋯ pensando');
+  });
+  it('terminado ⇒ texto honesto de sempre, sem o verbo', () => {
+    const f = tela(
+      <AluyBlock
+        text="resposta"
+        streaming={false}
+        reasoning="hmmhmm"
+        verbo="Costurando"
+        isCurrent={false}
+      />,
+    );
+    expect(f).toContain('⋯ pensou 6 caracteres');
+    expect(f).not.toContain('Costurando');
   });
 });
 

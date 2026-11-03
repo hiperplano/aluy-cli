@@ -46,9 +46,17 @@ describe('BUG-ARGS-VAZIOS · fragmento que chega DEPOIS do finish_reason', () =>
   // depois era acumulado e jogado fora — a call já tinha saído vazia.
   it('argumentos após o finish_reason NÃO se perdem', () => {
     const ev = rodar([
-      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'run_command' } }] } }] },
+      {
+        choices: [
+          { delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'run_command' } }] } },
+        ],
+      },
       { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
-      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"command":"ls"}' } }] } }] },
+      {
+        choices: [
+          { delta: { tool_calls: [{ index: 0, function: { arguments: '{"command":"ls"}' } }] } },
+        ],
+      },
     ]);
     expect(callsDe(ev)).toEqual([{ id: 'c1', name: 'run_command', input: { command: 'ls' } }]);
   });
@@ -57,12 +65,19 @@ describe('BUG-ARGS-VAZIOS · fragmento que chega DEPOIS do finish_reason', () =>
     const ev = rodar([
       {
         choices: [
-          { delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'f', arguments: '{"a":1}' } }] } },
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: 'c1', function: { name: 'f', arguments: '{"a":1}' } }],
+            },
+          },
         ],
       },
       { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
     ]);
-    expect(ev.map((e) => e.type)).toEqual(['tool_call', 'done']);
+    expect(ev.filter((e) => e.type !== 'progress').map((e) => e.type)).toEqual([
+      'tool_call',
+      'done',
+    ]);
   });
 
   // Rede: provider que fecha o corpo sem `[DONE]` — o `finalize` tem de emitir os dois.
@@ -71,12 +86,17 @@ describe('BUG-ARGS-VAZIOS · fragmento que chega DEPOIS do finish_reason', () =>
       [
         { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'f' } }] } }] },
         { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
-        { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"a":1}' } }] } }] },
+        {
+          choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"a":1}' } }] } }],
+        },
       ],
       false,
     );
     expect(callsDe(ev)).toEqual([{ id: 'c1', name: 'f', input: { a: 1 } }]);
-    expect(ev.map((e) => e.type)).toEqual(['tool_call', 'done']);
+    expect(ev.filter((e) => e.type !== 'progress').map((e) => e.type)).toEqual([
+      'tool_call',
+      'done',
+    ]);
   });
 
   // O teto anti-hang: com o flush movido para o fim, este caminho perderia a call INTEIRA
@@ -90,13 +110,19 @@ describe('BUG-ARGS-VAZIOS · fragmento que chega DEPOIS do finish_reason', () =>
         '',
         JSON.stringify({
           choices: [
-            { delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'f', arguments: '{"a":1}' } }] } },
+            {
+              delta: {
+                tool_calls: [{ index: 0, id: 'c1', function: { name: 'f', arguments: '{"a":1}' } }],
+              },
+            },
           ],
         }),
         acc,
       ),
     );
-    out.push(...a.mapSse('', JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] }), acc));
+    out.push(
+      ...a.mapSse('', JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] }), acc),
+    );
     for (let i = 0; i < 80; i++) out.push(...a.mapSse('', JSON.stringify({ choices: [] }), acc));
     expect(callsDe(out)).toEqual([{ id: 'c1', name: 'f', input: { a: 1 } }]);
     expect(out.filter((e) => e.type === 'done')).toHaveLength(1);
@@ -111,7 +137,11 @@ describe('BUG-ARGS-VAZIOS · `arguments` como OBJETO (fora da spec, mas existe)'
           {
             delta: {
               tool_calls: [
-                { index: 0, id: 'c1', function: { name: 'run_command', arguments: { command: 'ls -la' } } },
+                {
+                  index: 0,
+                  id: 'c1',
+                  function: { name: 'run_command', arguments: { command: 'ls -la' } },
+                },
               ],
             },
           },
@@ -119,16 +149,18 @@ describe('BUG-ARGS-VAZIOS · `arguments` como OBJETO (fora da spec, mas existe)'
       },
       { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
     ]);
-    expect(callsDe(ev)).toEqual([
-      { id: 'c1', name: 'run_command', input: { command: 'ls -la' } },
-    ]);
+    expect(callsDe(ev)).toEqual([{ id: 'c1', name: 'run_command', input: { command: 'ls -la' } }]);
   });
 
   it('`null` segue sendo AUSÊNCIA, não conteúdo (não vira a string "null")', () => {
     const ev = rodar([
       {
         choices: [
-          { delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'f', arguments: null } }] } },
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: 'c1', function: { name: 'f', arguments: null } }],
+            },
+          },
         ],
       },
       { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"a":1}' } }] } }] },
@@ -156,12 +188,20 @@ describe('BUG-ARGS-VAZIOS · COLISÃO de slot (duas calls no mesmo index)', () =
     const ev = rodar([
       {
         choices: [
-          { delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'f', arguments: '{"a":1}' } }] } },
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: 'c1', function: { name: 'f', arguments: '{"a":1}' } }],
+            },
+          },
         ],
       },
       {
         choices: [
-          { delta: { tool_calls: [{ index: 0, id: 'c2', function: { name: 'g', arguments: '{"b":2}' } }] } },
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: 'c2', function: { name: 'g', arguments: '{"b":2}' } }],
+            },
+          },
         ],
       },
       { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
@@ -176,8 +216,16 @@ describe('BUG-ARGS-VAZIOS · COLISÃO de slot (duas calls no mesmo index)', () =
   it('id REPETIDO no mesmo index é continuação, não call nova', () => {
     const ev = rodar([
       { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'f' } }] } }] },
-      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { arguments: '{"a":' } }] } }] },
-      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { arguments: '1}' } }] } }] },
+      {
+        choices: [
+          { delta: { tool_calls: [{ index: 0, id: 'c1', function: { arguments: '{"a":' } }] } },
+        ],
+      },
+      {
+        choices: [
+          { delta: { tool_calls: [{ index: 0, id: 'c1', function: { arguments: '1}' } }] } },
+        ],
+      },
       { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
     ]);
     expect(callsDe(ev)).toEqual([{ id: 'c1', name: 'f', input: { a: 1 } }]);
@@ -188,22 +236,44 @@ describe('BUG-ARGS-VAZIOS · COLISÃO de slot (duas calls no mesmo index)', () =
     const ev = rodar([
       {
         choices: [
-          { delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'read_file', arguments: '{"path":"1"}' } }] } },
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'a', function: { name: 'read_file', arguments: '{"path":"1"}' } },
+              ],
+            },
+          },
         ],
       },
       {
         choices: [
-          { delta: { tool_calls: [{ index: 1, id: 'b', function: { name: 'read_file', arguments: '{"path":"2"}' } }] } },
+          {
+            delta: {
+              tool_calls: [
+                { index: 1, id: 'b', function: { name: 'read_file', arguments: '{"path":"2"}' } },
+              ],
+            },
+          },
         ],
       },
       {
         choices: [
-          { delta: { tool_calls: [{ index: 2, id: 'c', function: { name: 'read_file', arguments: '{"path":"3"}' } }] } },
+          {
+            delta: {
+              tool_calls: [
+                { index: 2, id: 'c', function: { name: 'read_file', arguments: '{"path":"3"}' } },
+              ],
+            },
+          },
         ],
       },
       { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
     ]);
     expect(callsDe(ev)).toHaveLength(3);
-    expect(callsDe(ev).map((c) => (c as { input: { path: string } }).input.path)).toEqual(['1', '2', '3']);
+    expect(callsDe(ev).map((c) => (c as { input: { path: string } }).input.path)).toEqual([
+      '1',
+      '2',
+      '3',
+    ]);
   });
 });

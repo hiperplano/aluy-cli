@@ -85,7 +85,7 @@ export function Working(props: WorkingProps): React.ReactElement {
           o desenho segue igual — ali a onda acompanha um verbo que muda a cada tool, e não
           é o indicador permanente de que ele reclamou. */}
       {usaWordmark ? (
-        <AluyLoader frame={frame} wordmark />
+        <AluyLoader frame={frame} />
       ) : (
         <>
           <Glyph name={glyph} role={glyphRole} />
