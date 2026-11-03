@@ -1138,6 +1138,7 @@ const ROTULOS_DE_PREPARO: ReadonlySet<string> = new Set([
   'preparando',
   'lembrando',
   'maestro avaliando',
+  'conectando MCP',
 ]);
 
 export class SessionController {
@@ -6763,9 +6764,18 @@ export class SessionController {
    * catálogo (registry congelado) — registrado em `ALUY_DEBUG`. Executa uma vez de fato.
    */
   private awaitMcpSettledForPrompt(): Promise<void> {
+    // ESPERA HONESTA — enquanto aguarda o boot MCP o rótulo vira `conectando MCP` (antes
+    // ficava `preparando` sem dizer a que). Só se ainda está em preparo; volta p/ `preparando`.
+    const esperando =
+      this.mcpSettlePromise === undefined && this.toolRegistry.pendingMcp().length > 0;
+    if (esperando && this.state.phase === 'thinking' && this.state.workingLabel === 'preparando') {
+      this.patch({ workingLabel: 'conectando MCP' });
+    }
     this.mcpSettlePromise ??= this.toolRegistry
       .awaitMcpSettled(MCP_SETTLE_TIMEOUT_MS)
       .then((pending) => {
+        if (this.state.workingLabel === 'conectando MCP')
+          this.patch({ workingLabel: 'preparando' });
         if (pending.length > 0 && process.env.ALUY_DEBUG !== undefined) {
           process.stderr.write(
             `aluy: MCP — 1ª chamada sem esperar mais: ${pending.join(', ')} (entram no fim do catálogo ao conectar)\n`,

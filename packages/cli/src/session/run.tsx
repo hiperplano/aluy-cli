@@ -16,6 +16,7 @@ import {
   overwriteRenderEnabled,
 } from './synchronized-output.js';
 import { enableBracketedPaste } from './bracketed-paste.js';
+import { disableAutowrap, noAutowrapEnabled } from './autowrap.js';
 import { resolveTheme } from '../ui/theme/index.js';
 import { tableLines } from '../ui/table-lines.js';
 import type { RewindChoice } from '../ui/hooks/useRewindPicker.js';
@@ -4658,7 +4659,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // ('exit')` (defesa p/ exit abrupto). O `enableBracketedPaste` LIGA o `?2004h` já e dá um
   // `disable()` IDEMPOTENTE (só escreve `?2004l` uma vez) — espelha o alt-screen.
   const pasteMode = enableBracketedPaste(baseStdout);
-  const disableBracketedPaste = (): void => pasteMode.disable();
+  // Auto-wrap OFF (`?7l`): o terminal não quebra mais a linha que ele mede mais larga que o
+  // Ink (emoji ZWJ/tom de pele…) ⇒ nº de linhas físicas == nº que o Ink emitiu ⇒ o erase da
+  // região viva nunca deixa a linha de trabalho/branco para trás. Ver `autowrap.ts`.
+  const autowrap = disableAutowrap(baseStdout, noAutowrapEnabled(env));
+  const disableBracketedPaste = (): void => {
+    pasteMode.disable();
+    autowrap.restore();
+  };
   // Defesa: garante o `?2004l` mesmo num `process.exit` que pule o `finally` (ex.: um
   // caminho de saída abrupto). Idempotente com o `onSignal`/`finally`.
   process.once('exit', disableBracketedPaste);

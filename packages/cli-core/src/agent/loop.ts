@@ -901,7 +901,9 @@ export class AgentLoop {
         return true;
       });
       if (relevant.length === 0) return [];
-      const lines = relevant.map((h) => `- ${h.text.replace(/\s*\n\s*/g, ' | ')}`).join('\n');
+      const lines = capRecallLines(
+        relevant.map((h) => `- ${h.text.replace(/\s*\n\s*/g, ' | ')}`),
+      ).join('\n');
       return [
         {
           role: 'observation',
@@ -2465,6 +2467,30 @@ export class AgentLoop {
  * do turno: 2.5s (mesma folga do judge #478). PURO — só um número.
  */
 const RECALL_TIMEOUT_MS = 2_500;
+
+/**
+ * TETO DE TAMANHO do recall (antes: 5 hits SEM limite de texto — cada hit é um "Objetivo+Resultado"
+ * de um turno passado e pode ter milhares de caracteres, inflando TODO turno que recorda). Por
+ * item e no total (≈ 1k tokens). O que passa do teto é cortado com `…`; itens além do orçamento
+ * saem (a lista já vem ordenada por relevância, então caem os menos relevantes).
+ */
+export const RECALL_MAX_CHARS_PER_ITEM = 600;
+export const RECALL_MAX_CHARS_TOTAL = 2_400;
+
+export function capRecallLines(lines: readonly string[]): string[] {
+  const out: string[] = [];
+  let total = 0;
+  for (const raw of lines) {
+    const line =
+      raw.length > RECALL_MAX_CHARS_PER_ITEM
+        ? `${raw.slice(0, RECALL_MAX_CHARS_PER_ITEM - 1)}…`
+        : raw;
+    if (total + line.length > RECALL_MAX_CHARS_TOTAL) break;
+    out.push(line);
+    total += line.length + 1;
+  }
+  return out;
+}
 
 /**
  * F91 — PISO de RELEVÂNCIA do recall: só injeta memórias com `score >= ` isto. Sem o
