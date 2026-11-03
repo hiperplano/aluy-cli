@@ -104,6 +104,7 @@ export interface UserConfig {
    * Precedência: `ALUY_NOTIFY` (env) > este campo > default. Só pref de UI (CLI-SEC-7).
    */
   readonly notify?: NotifyMode;
+  /**
    * RODAPÉ (tudo abaixo do composer) — `completo` (painel inteiro + dicas), `parcial` (1 linha
    * com o essencial + avisos) ou `oculto` (nada além do funcionalmente necessário; o `⚠ yolo`
    * nunca some). Ausente ⇒ automático: `completo`, ou `parcial` em terminal baixo (≤ 30 linhas).
