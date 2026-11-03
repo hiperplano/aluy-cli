@@ -53,8 +53,12 @@ export const DEFAULT_REANCHOR_EVERY_K = 8;
 export const MIN_REANCHOR_EVERY_K = 1;
 export const MAX_REANCHOR_EVERY_K = 1_000;
 
-/** AUTO-VERIFICAÇÃO default: no máximo 2 passadas por turno (anti-loop). */
-export const DEFAULT_MAX_VERIFICATIONS = 2;
+/**
+ * AUTO-VERIFICAÇÃO default: no máximo 1 passada por turno (F1). Medido: edição trivial
+ * custou 1m34s/110k tokens contra 20s/65k do trabalho com 2 passadas; a 2ª raramente
+ * acha algo que a 1ª não achou. Quem quer mais sobe via `ALUY_SELF_CHECK_MAX`/config.
+ */
+export const DEFAULT_MAX_VERIFICATIONS = 1;
 /** Piso/teto sãos do cap de verificações (1 = ao menos uma; teto baixo = não vira loop). */
 export const MIN_MAX_VERIFICATIONS = 1;
 export const MAX_MAX_VERIFICATIONS = 10;

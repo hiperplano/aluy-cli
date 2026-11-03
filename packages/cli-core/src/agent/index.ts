@@ -113,6 +113,7 @@ export {
 } from './mem-pressure.js';
 // EST-0944 — SELF-CHECK de atenção (re-âncora de objetivo + auto-verificação pré-
 // "pronto"). Config + gating puros (flag/env/tier fraco) + redatores dos lembretes.
+export { VerificationLedger } from './verification-ledger.js';
 export {
   type SelfCheckConfig,
   type SelfCheckInputs,

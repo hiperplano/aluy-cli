@@ -90,6 +90,18 @@ export class VerificationLedger {
   private mutated = false;
   private lastCheckFailed = false;
 
+  /**
+   * `true` se a tool-call, SE bem-sucedida, produz/pode produzir um EFEITO (escrita de
+   * arquivo, comando não só-leitura, tool não auditável). Leitura, busca e teste/build/lint
+   * passante NÃO são efeito. Usado pela UX do self-check: uma passada de verificação que só
+   * lê e reconfirma é CONFIRMAÇÃO, não "achou pendências". PURO.
+   */
+  static isEffect(name: string, input: unknown): boolean {
+    const l = new VerificationLedger();
+    l.record(name, input, true);
+    return l.mutated;
+  }
+
   /** Normaliza caminho p/ comparação (`./a/../b.txt` ⇒ `b.txt`). */
   static normPath(p: string): string {
     const parts: string[] = [];

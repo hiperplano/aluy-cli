@@ -120,6 +120,7 @@ import {
   type PermissionEngine,
   type SessionLimits,
   type SelfCheckConfig,
+  VerificationLedger,
   type SessionMode,
   type SubAgentObserver,
   type SubAgentOutcome,
@@ -7925,7 +7926,12 @@ export class SessionController {
     // o modelo NÃO confirmou — ACHOU UM GAP e voltou a AGIR. Esse trabalho (e a resposta
     // que vier depois) é REAL ⇒ desarma a supressão e DESPROMOVE o turno `aluy` em voo
     // (se marcado `selfCheck`), p/ não esconder a resposta nova por engano.
-    if (this.selfCheckInFlight || this.selfCheckPassDone) {
+    // F1 — só é "gap" quando a passada AGE (efeito novo). Ler/buscar/rodar teste e reconfirmar
+    // é CONFIRMAÇÃO: não desarma a supressão nem afirma "achou pendências".
+    if (
+      (this.selfCheckInFlight || this.selfCheckPassDone) &&
+      VerificationLedger.isEffect(call.name, call.input)
+    ) {
       if (this.selfCheckInFlight) this.demoteSelfCheckBlock();
       this.selfCheckInFlight = false;
       this.selfCheckPassDone = false;

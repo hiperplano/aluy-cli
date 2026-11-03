@@ -50,6 +50,7 @@ const ports = {
 } as unknown as ToolPorts;
 
 const TOOL = `<<<ALUY_TOOL_CALL\n${JSON.stringify({ name: 'read_file', input: { path: 'a.txt' } })}\nALUY_TOOL_CALL>>>`;
+const EDIT = `<<<ALUY_TOOL_CALL\n${JSON.stringify({ name: 'edit_file', input: { path: 'a.txt', old_string: 'a', new_string: 'b' } })}\nALUY_TOOL_CALL>>>`;
 const REAL = 'Pronto — li o arquivo e está tudo certo.';
 const VERIF = 'Confirmo: EVIDÊNCIA conferida, está cumprido.';
 
@@ -79,7 +80,7 @@ function build(responses: readonly string[], gateAt: number, sc?: Partial<SelfCh
   };
   const controller = new SessionController({
     model,
-    permission: new PolicyPermissionEngine(),
+    permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
     ports,
     askResolver: new TuiAskResolver(),
     meta: { cwd: '/proj', tier: 'custom', tokens: 0, windowPct: 0 },
@@ -135,13 +136,21 @@ describe('self-check sem ar morto (controller)', () => {
   it('achou lacuna e AGIU: nota "corrigindo" + rótulo próprio; a resposta nova é visível', async () => {
     // 0 tool, 1 final, 2 verificação que volta a agir (tool), 3 nova final, 4 re-verificação
     const FIXED = 'Corrigido: agora sim está completo.';
-    const { controller, release } = build([TOOL, REAL, TOOL, FIXED, VERIF], 99);
+    const { controller, release } = build([TOOL, REAL, EDIT, FIXED, VERIF], 99);
     release();
     await controller.submit('leia a.txt');
     expect(notes(controller)).toContain('↳ a verificação achou pendências — corrigindo');
     expect(visibleAluyTexts(controller)).toContain(REAL);
     expect(visibleAluyTexts(controller)).toContain(FIXED);
     expect(controller.current.phase).toBe('done');
+    controller.dispose();
+  });
+
+  it('F1 — passada que só RELÊ e reconfirma é confirmação: NÃO diz "achou pendências"', async () => {
+    const { controller, release } = build([TOOL, REAL, TOOL, VERIF], 99);
+    release();
+    await controller.submit('leia a.txt');
+    expect(notes(controller).join(' ')).not.toContain('achou pendências');
     controller.dispose();
   });
 
