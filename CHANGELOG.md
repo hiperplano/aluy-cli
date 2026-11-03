@@ -14,6 +14,32 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.188] — 2026-11-03
+
+### Adicionado
+
+- 💬 **Encaixe fluido de mensagens durante o trabalho.** A mensagem do dono entra antes de cada tool do lote (as que ainda não começaram são puladas com aviso ao modelo), sem precisar de ESC; o ESC não descarta mais a prosa que já está na tela.
+- ✨ **Indicador contínuo e honesto**: `Λ <Verbo>… (fase · ↑ ~21k ↓ 44 tokens · 3s)` — um verbo brincalhão por turno com brilho na cor do Aluy, a fase real, tokens enviados/gerados ao vivo (raciocínio, texto e argumentos de tool, em qualquer provider) e os segundos. Nunca some entre etapas nem durante o streaming. `ALUY_SPINNER_VERBS=plain` volta aos rótulos simples.
+- ⏸️ **Pausa por cota em vez de morrer** (pai e sub-agentes), para os 11 providers do catálogo: janela esgotada espera o reset e volta sozinha; saldo esgotado pede recarga. O estado é salvo e retomado por `--resume`/`--continue`. Ver `docs/pausa-por-cota.md`.
+- 🤝 **Delegação autônoma e conversa pai ⇄ filho** (ADR 0002): `spawn_agent` permitido por padrão (os filhos seguem pela catraca), opção "lembrar esta decisão", `agent_send` (o orquestrador instrui um filho vivo) e `ask_parent` (o filho pergunta sem parar); regra de plano primeiro.
+- 🧭 **Retomar sessão mostra nome e cor**, e `l` abre a lista de outras sessões do projeto.
+- 🎛️ **`/statusline full|compact|hidden`** (F2 alterna; vale também no `/fullscreen`) e **`/notify all|attention|off`** para calar só o "turno concluído".
+- ⌨️ **Nova linha no composer** com `\`+Enter, Alt+Enter e Ctrl-J; atalhos readline também com o turno rodando; texto digitado no splash, na retomada e sob a caixa de permissão vira rascunho.
+- 🧪 **Avaliação comportamental** (`npm run eval`, com `--sandbox` em bubblewrap) e `scripts/medir-prompt.mjs`.
+
+### Mudado
+
+- 🪶 **Prompt enxuto**: o catálogo de tools vai uma vez só (o texto fica só como fallback), em ordem estável, com as partes dinâmicas no fim — de ~33k para ~21k tokens e cache bem maior.
+- ✅ **Self-check com 1 passada por padrão**; "achou pendências" só quando há efeito novo; a conferência não aparece mais como resposta.
+- ⎋ **ESC na caixa de permissão ou na pergunta interrompe o turno** (`n` continua negando e seguindo).
+- ❗ **`!comando` digitado pelo dono roda direto**, sem caixa (ADR 0003); o `run_command` do modelo continua pela catraca.
+
+### Corrigido
+
+- 🧹 Sobra de redesenho com emoji (largura divergente entre Ink e terminal) e a linha de trabalho que ficava presa acima da resposta.
+- 💥 Crash do `/fullscreen` em sessão longa (ponteiro solto do `<Static>` no Ink/yoga), com volta automática ao modo inline se o desenho falhar; falhas fatais vão para `~/.aluy/logs/crash.log`.
+- 🧾 Notas sem jargão interno ("entram como dado"), diff exibido uma vez com `+`/`-`, uso restaurado ao retomar, linhas digitadas que chegavam juntas não se perdem mais.
+
 ## [1.0.0-rc.187] — 2026-09-22
 
 ### Adicionado
