@@ -19,6 +19,7 @@ import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { App } from '../../src/session/App.js';
 import { SessionController } from '../../src/session/controller.js';
+import { buildTurnRecap } from '../../src/session/turn-recap.js';
 
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');
@@ -156,6 +157,15 @@ describe('indicador contínuo entre passos (App renderizada)', () => {
     for (const [i, s] of seen.entries()) {
       expect(s.tela, `passo ${i}`).toMatch(/pensando… \d:\d\d/);
     }
+    // Fim do turno: o RECAP (`✔ leu a0.txt…`) não é mais desenhado dentro do composer.
+    const fim2 = Date.now() + 5000;
+    while (!['done', 'idle'].includes(controller.current.phase) && Date.now() < fim2) {
+      await sleep(20);
+    }
+    await sleep(100);
+    const recap = buildTurnRecap(controller.current.blocks);
+    expect(recap).toBeTruthy();
+    expect(plain(r.lastFrame() ?? '')).not.toContain(recap as string);
     r.unmount();
     controller.dispose();
   });

@@ -57,7 +57,6 @@ import {
   PermissionsPanel,
   FlowTreeView,
   ActivityLog,
-  TurnFooter,
   QuotaFooter,
   Divider,
   type HintState,
@@ -1150,8 +1149,8 @@ export function App(props: AppProps): React.ReactElement {
   // EST-0989 (i18n) — os NATIVOS LOCALIZADOS no idioma ativo (summaries traduzidos). Memo
   // pelo `t`: só re-mapeia ao trocar de idioma (em pt-BR devolve a MESMA ref ⇒ sem churn).
   const localizedNatives = useMemo(() => localizeCommands(NATIVE_COMMANDS, t), [t]);
-  // F-RECAP — resumo do que o turno FEZ, para a linha do rodapé (ver `turn-recap.ts`).
-  // Memoizado nos blocos: a função é PURA e barata, mas o rodapé re-renderiza a cada tick
+  // Resumo do que o turno FEZ — alimenta SÓ o digest da sugestão de próximo prompt
+  // (`suggestNext`); NÃO é mais desenhado no composer (ver `turn-recap.ts`). Memoizado nos blocos: a função é PURA e barata, mas o rodapé re-renderiza a cada tick
   // da região viva e não há por que refazer a varredura enquanto os blocos não mudam.
   const turnRecap = useMemo(() => buildTurnRecap(state.blocks), [state.blocks]);
 
@@ -5573,14 +5572,9 @@ export function App(props: AppProps): React.ReactElement {
           // F-COMPOSER-FUNDO — a cor vem do tema e some sozinha sem truecolor.
           {...(theme.composerBg !== undefined ? { backgroundColor: theme.composerBg } : {})}
         />
-        {state.turnAccounting && (state.phase === 'done' || state.phase === 'budget') && (
-          <TurnFooter
-            accounting={state.turnAccounting}
-            columns={columns}
-            showCost={false}
-            {...(turnRecap !== undefined ? { recap: turnRecap } : {})}
-          />
-        )}
+        {/* SEM LOG DENTRO DO COMPOSER — o recap do turno (`✔ editou b.txt`) saiu daqui a pedido
+            do dono: o composer é para COMPOR; o que o turno fez já está na conversa. O custo
+            vive no cabeçalho da caixa da resposta (F-CONTA-NO-BLOCO). */}
       </ComposerBox>
       {/* F-COMPOSER-SOMBRA — TIRADA a pedido do dono ("achei que a sombra não ficou
           legal"). A técnica (meio-bloco deslocado, a mesma da marca 3D) funciona numa
