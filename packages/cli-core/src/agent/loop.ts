@@ -1147,17 +1147,7 @@ export class AgentLoop {
       // passa por `decide()`. Defensivo: só aceita itens `user_inject` (o canal do
       // dono) — qualquer outro papel vindo da porta é ignorado (não há caminho p/
       // a injeção virar `system` nem p/ forjar uma observação/tool).
-      if (this.pollInjected) {
-        const injected = this.pollInjected().filter((i) => i.role === 'user_inject');
-        if (injected.length > 0) {
-          history.push(...injected);
-          this.onProgress?.({ kind: 'inject', count: injected.length });
-          // EST-0969 (watchdog) — input fresco do usuário ("btw") é o progresso
-          // máximo: o turno mudou de rumo. Zera TODAS as séries de travamento p/
-          // não pausar logo após o usuário já ter redirecionado.
-          watchdog?.noteRedirect();
-        }
-      }
+      this.appendInjected(history, this.takeInjected(), watchdog);
       // EST-MON-1 · ADR-0079 (APR-0084) — DRENA os eventos de MONITOR no MESMO ponto,
       // logo APÓS o "btw": um monitor que disparou ENQUANTO o agente rodava entra no
       // histórico DESTE turno como `observation` (DADO NÃO-CONFIÁVEL, CLI-SEC-4) — o
@@ -1432,6 +1422,34 @@ export class AgentLoop {
             emitHumanCancelSignal(this.maestro?.bus, 'ESC/Ctrl+C durante batch de tool-calls');
             throw new ModelCallAbortedError();
           }
+          // ENCAIXE FLUIDO — PONTO SEGURO ANTES DE CADA TOOL do batch. Se o dono disse algo
+          // desde o último ponto de drenagem (durante a geração do modelo ou durante a tool
+          // anterior), a mensagem entra AGORA: as tools AINDA NÃO INICIADAS (esta e as
+          // seguintes) NÃO rodam e voltam como `tool_result` "pulada", e o `user_inject` é
+          // anexado DEPOIS do último `tool_result` (o formato OpenAI-compat exige que as
+          // mensagens `tool` sigam DIRETO o `assistant` com `tool_calls` — um `user` só pode
+          // vir após TODAS as respostas daquele turno). Nada que já rodou é perdido; nada
+          // que não rodou tem efeito (cessar ≠ agir) e o modelo, vendo a msg nova, re-emite
+          // o que ainda valer. A catraca é INTOCADA: só se ANEXA contexto e se DEIXA de
+          // executar; toda tool seguinte ainda passa por `decide()`.
+          const midBatch = this.takeInjected();
+          if (midBatch.length > 0) {
+            for (let j = ci; j < nativeCalls.length; j += 1) {
+              const skipped = nativeCalls[j]!;
+              history.push({
+                role: 'tool_result',
+                toolCallId: skipped.id,
+                toolName: skipped.name,
+                text:
+                  `AÇÃO NÃO EXECUTADA — o usuário enviou uma mensagem nova antes de esta ` +
+                  `ferramenta começar, então ela foi PULADA (não teve efeito). NÃO é erro nem ` +
+                  `bloqueio de política. Leia a mensagem do usuário a seguir e, se esta ação ` +
+                  `ainda fizer sentido, emita-a de novo.`,
+              });
+            }
+            this.appendInjected(history, midBatch, watchdog);
+            break;
+          }
           const outcome = await this.executeToolCall(
             call.name,
             call.input,
@@ -1484,6 +1502,10 @@ export class AgentLoop {
             text: outcome.observation,
           });
         }
+        // ENCAIXE FLUIDO — a mensagem que chegou DURANTE a ÚLTIMA tool do batch entra já
+        // aqui (todos os `tool_result` estão pareados), e não só no topo da próxima volta
+        // (que viria após o `checkStuck`, que pode pausar esperando o dono).
+        this.appendInjected(history, this.takeInjected(), watchdog);
         // EST-0969 (watchdog) — CHECKPOINT de travamento após o bloco de tools: se
         // o agente está repetindo a MESMA tool / o MESMO erro sem avançar, PAUSA e
         // PEDE DIREÇÃO. `redirect`/`continue` ⇒ segue o loop (já reincorporado/resetado);
@@ -1694,11 +1716,44 @@ export class AgentLoop {
         successfulToolCalls += 1;
       }
       history.push({ role: 'observation', toolName: turn.call.name, text: outcome.observation });
+      // ENCAIXE FLUIDO — idem ao caminho nativo: o "btw" que chegou durante a tool entra
+      // logo após a observação (1 tool por turno aqui ⇒ o par já está fechado).
+      this.appendInjected(history, this.takeInjected(), watchdog);
       // EST-0969 (watchdog) — CHECKPOINT após a tool de texto: mesma tool/erro em
       // loop ⇒ pausa-pede-direção. `end` ⇒ encerra; demais ⇒ segue.
       const dirT = await this.checkStuck(watchdog, history, signal);
       if (dirT === 'end') return this.stopByStuck(own, history, sessionId);
     }
+  }
+
+  /**
+   * ENCAIXE FLUIDO — DRENA a fila viva de injeção (`pollInjected`) e devolve SÓ os itens
+   * `user_inject` (o canal do dono; qualquer outro papel vindo da porta é ignorado — não há
+   * caminho p/ a injeção virar `system` nem forjar observação/tool). Consome uma vez.
+   * Chamado em TODOS os pontos seguros do loop (topo da iteração, antes de cada tool do
+   * batch, após o batch e após a tool de texto) — não decide nada de permissão.
+   */
+  private takeInjected(): HistoryItem[] {
+    if (!this.pollInjected) return [];
+    return this.pollInjected().filter((i) => i.role === 'user_inject');
+  }
+
+  /**
+   * ENCAIXE FLUIDO — anexa ao histórico os `user_inject` já drenados, sinaliza o encaixe
+   * (a TUI vira "encaixando…" em "↳ encaixado") e zera as séries de travamento do watchdog
+   * (input fresco do dono é o progresso máximo: o turno mudou de rumo). Vazio ⇒ no-op.
+   * O CALLER garante que o ponto é seguro p/ o formato do provider (nunca entre um
+   * `assistant` com `tool_calls` e seus `tool_result`).
+   */
+  private appendInjected(
+    history: HistoryItem[],
+    injected: readonly HistoryItem[],
+    watchdog: StuckWatchdog | undefined,
+  ): void {
+    if (injected.length === 0) return;
+    history.push(...injected);
+    this.onProgress?.({ kind: 'inject', count: injected.length });
+    watchdog?.noteRedirect();
   }
 
   /**
@@ -1935,9 +1990,7 @@ export class AgentLoop {
     const ctx: ToolRunContext = {
       ...(signal ? { signal } : {}),
       ...(detachSignal ? { detachSignal } : {}),
-      ...(this.detachHub
-        ? { onDetached: (info): void => this.detachHub?.onDetached(info) }
-        : {}),
+      ...(this.detachHub ? { onDetached: (info): void => this.detachHub?.onDetached(info) } : {}),
       // EST-0969 (heartbeat) — cada chunk de stdout/stderr é um SINAL DE VIDA da
       // tool: zera a inatividade do filho mesmo que o observer da TUI não esteja
       // plugado (um `run_command` longo MAS produzindo saída NÃO está travado). Por

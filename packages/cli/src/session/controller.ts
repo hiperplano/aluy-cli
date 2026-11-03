@@ -167,8 +167,7 @@ import {
   buildMonitorTools,
 } from '@hiperplano/aluy-cli-core';
 import { MemoryRoomStore, buildRoomTools } from '@hiperplano/aluy-cli-core';
-import type {
-  DetachHub, RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
+import type { DetachHub, RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
 import {
   formatRoomList,
   formatConversation,
@@ -4184,6 +4183,21 @@ export class SessionController {
    * uma tool longa), NÃO há ouvinte ⇒ NO-OP. Idempotente/seguro chamar a qualquer hora.
    */
   expedite(): void {
+    // ENCAIXE FLUIDO — o ESC NUNCA joga fora trabalho útil em silêncio. Se a chamada em voo
+    // JÁ produziu prosa visível (bloco `aluy` streamando com texto), cortá-la destruiria
+    // uma resposta que o dono já está lendo (e que o modelo só reaproveitaria regerando);
+    // então NÃO cortamos — a mensagem pendente entra no PRÓXIMO ponto seguro do loop (logo
+    // que a geração terminar, ANTES de qualquer tool do batch). Só cortamos quando não há
+    // nada visível a perder (fase `pensando`, antes do 1º delta), e AVISAMOS na tela.
+    const blocks = this.state.blocks;
+    const last = blocks[blocks.length - 1];
+    if (last && last.kind === 'aluy' && last.streaming && last.text.trim() !== '') {
+      this.pushNoteSafe('encaixe', [
+        'a resposta em andamento termina primeiro; sua mensagem entra logo em seguida,',
+        'antes de qualquer ferramenta — nada foi descartado',
+      ]);
+      return;
+    }
     this.expediteBus.fire();
   }
 
@@ -4450,12 +4464,17 @@ export class SessionController {
     // Arma a supressão p/ que esse turno `aluy` NÃO vire bloco visível (ver
     // `startAluyTurn`/`finishAluyTurn`). É um sinal de display — não toca catraca/budget.
     else if (signal.kind === 'self-check') this.selfCheckInFlight = true;
-    // F191 — o loop CORTOU a chamada de modelo em voo p/ acelerar o encaixe: o parcial
+    // F191 — o loop CORTOU a chamada de modelo em voo p/ acelerar o encaixe (só ocorre sem prosa visível, ver `expedite()`): o parcial
     // do turno `aluy` (prosa já streamada) é DESCARTADO (o inject supersede — o dono
     // re-direcionou). Remove o bloco vivo p/ não deixar prosa ÓRFÃ na tela antes da nota
     // "↳ encaixado" que virá quando o inject drenar na próxima volta. Só de display —
     // não toca catraca/budget/histórico do loop (o loop já descartou o `result`).
-    else if (signal.kind === 'expedite') this.discardStreamingAluyTurn();
+    else if (signal.kind === 'expedite') {
+      this.discardStreamingAluyTurn();
+      this.pushNoteSafe('encaixe', [
+        'interrompi o raciocínio em andamento (ainda sem resposta) para encaixar sua mensagem',
+      ]);
+    }
     // F-TETO-DE-SAÍDA — a resposta acima foi CORTADA no `max_tokens`. O caso sem fala
     // nenhuma vira a própria resposta final do loop (`stopByOutputCeiling`); aqui é só o
     // parcial, que sem aviso passa por resposta completa.
@@ -9481,14 +9500,14 @@ function detachedOutcome(
           `nada falhou. O resultado dele chega como dado num turno seguinte: NÃO espere por ele, ` +
           `NÃO o dispare de novo, NÃO afirme que terminou nem invente o conteúdo dele. Diga ao ` +
           `dono o que despachou e encerre o turno; agents_status mostra o andamento.`
-      : motivo === 'solto'
-        ? `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. O dono ` +
-          `SOLTOU o fan-out (Ctrl+B) para liberar o turno. O resultado dele chega como dado ` +
-          `quando concluir: NÃO espere por ele, NÃO o dispare de novo, NÃO afirme que já ` +
-          `terminou nem invente o conteúdo dele. Diga ao dono que segue rodando e encerre.`
-        : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
-          `Você foi liberado para responder agora; o resultado dele chega como dado ` +
-          `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
+        : motivo === 'solto'
+          ? `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. O dono ` +
+            `SOLTOU o fan-out (Ctrl+B) para liberar o turno. O resultado dele chega como dado ` +
+            `quando concluir: NÃO espere por ele, NÃO o dispare de novo, NÃO afirme que já ` +
+            `terminou nem invente o conteúdo dele. Diga ao dono que segue rodando e encerre.`
+          : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
+            `Você foi liberado para responder agora; o resultado dele chega como dado ` +
+            `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
     stop: 'final',
     usage: { iterations: 0, toolCalls: 0, tokens: 0 },
   };
