@@ -130,13 +130,18 @@ export function resolveMaestro(opts: ResolveMaestroOptions = {}): MaestroPort | 
   //      Senão, usa só motor-a.
   //   3. Judge que falha/timeout ⇒ degrada para heurística (CA-MA8) —
   //      o próprio OllamaJudgeEngine já retorna mode:'heuristic' no fallback.
+  // Fonte ÚNICA da condição "o judge vai ser consultado" — `rege` decide por ela e o loop a
+  // usa (via `mayBlock`) só p/ anunciar "maestro avaliando…" na UX.
+  const consultaJudge = (signals: readonly SupervisorSignal[]): boolean =>
+    toggles.has('ollama') && signals.length >= 2;
+
   async function rege(signals: readonly SupervisorSignal[]): Promise<SupervisorDecision> {
     // Camada (a): motor heurístico SEMPRE (CA-MA8).
     const motorResult = motorADecide(signals);
 
     // Camada (b): judge opcional — só se há sinais conflitantes e o judge
     // está habilitado (toggle ollama ON).
-    if (toggles.has('ollama') && signals.length >= 2) {
+    if (consultaJudge(signals)) {
       try {
         const judgeResult = await judge.judge({
           question: 'Dados os sinais de supervisão, qual a decisão de regência?',
@@ -198,7 +203,7 @@ export function resolveMaestro(opts: ResolveMaestroOptions = {}): MaestroPort | 
 
     return motorResult.decision;
   }
-  return { bus, rege };
+  return { bus, rege, mayBlock: consultaJudge };
 }
 
 // ─── EST-F54 — Config de CONTINUAÇÃO ─────────────────────────────────────

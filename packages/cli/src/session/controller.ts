@@ -1121,6 +1121,13 @@ class FilaComRecibo extends EventQueue {
   }
 }
 
+/** FEEDBACK-IMEDIATO — rótulos da linha viva enquanto o turno ainda PREPARA (antes do modelo). */
+const ROTULOS_DE_PREPARO: ReadonlySet<string> = new Set([
+  'preparando',
+  'lembrando',
+  'maestro avaliando',
+]);
+
 export class SessionController {
   private state: SessionState;
   private readonly observers = new Set<StateObserver>();
@@ -1613,6 +1620,11 @@ export class SessionController {
   // anterior, já visível). Limpo quando a verificação finaliza OU quando o modelo, em
   // vez de confirmar, ACHA UM GAP e volta a AGIR (uma tool dispara — trabalho real).
   private selfCheckInFlight = false;
+  // SELF-CHECK — uma passada de verificação TERMINOU sem que nenhuma tool tenha disparado
+  // depois dela (o modelo conferiu e confirmou). A nota "✓ auto-verificado" só é empurrada
+  // no fim do turno (`afterRun`): a tool da correção vem DEPOIS do fim do stream da passada,
+  // então decidir no `finishAluyTurn` afirmava "verificado" mesmo quando a passada achou lacuna.
+  private selfCheckPassDone = false;
   // EST-1007 (HANG) — modo NÃO-INTERATIVO (sem TTY/headless `-p`/posicional piped). A
   // App da TUI (que responde `[r]/[c]/[n]`) NUNCA monta neste caminho ⇒ a pausa-pede-
   // direção do watchdog (`openStuckPause`) ficaria PRESA esperando uma tecla impossível
@@ -2876,7 +2888,11 @@ export class SessionController {
     for (;;) {
       // Entra em `thinking` (§2.4): o vácuo pré-1º-token ganha o `<Working>` âmbar
       // (`◇ ～～› pensando…`). Quando o 1º delta chega (sink.onStart), vira `streaming`.
-      this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+      // FEEDBACK-IMEDIATO — o rótulo nasce `preparando` (recall de memória, regência,
+      // compactação, montagem do prompt: passos que rodam ANTES do modelo) e só vira
+      // `pensando` quando o loop sinaliza `model-call` (ver `onParentProgress`). Assim o
+      // indicador reflete a fase real, sem fingir que o modelo já está pensando.
+      this.patch({ phase: 'thinking', workingLabel: 'preparando', workingSince: this.clock() });
       // EST-0982 · ADR-0063 — abre a ÁRVORE DE FLUXOS do turno: o pai é a raiz; o seu
       // AbortSignal É o do loop (PARAR-todos = abortar a raiz, que desce a subárvore).
       // `interrupt()` (Ctrl-C) e `cancelAllFlows()` convergem no MESMO abort — sem 2º
@@ -3960,6 +3976,7 @@ export class SessionController {
     // de um turno anterior (fail-safe: o sinal `self-check` do loop a re-arma quando, e
     // se, houver um probe). Sem isto, um flag preso esconderia a resposta do turno novo.
     this.selfCheckInFlight = false;
+    this.selfCheckPassDone = false;
   }
 
   /**
@@ -3967,6 +3984,11 @@ export class SessionController {
    * `/compact` posterior ter o que compactar) e decide a fase (budget vs done).
    */
   private afterRun(result: AgentRunResult): void {
+    // SELF-CHECK — a última passada confirmou e o turno fechou numa resposta final.
+    if (this.selfCheckPassDone) {
+      this.selfCheckPassDone = false;
+      if (result.stop.kind === 'final') this.pushNote('self-check', ['✓ auto-verificado']);
+    }
     this._lastRunResult = result;
     // ADR-0126(A·PR2) — em FOCO, o histórico do turno é da SUB-SESSÃO (isolado); o histórico
     // do principal NÃO é tocado (a conversa principal não vê os turnos do foco). Fora de foco,
@@ -4458,12 +4480,44 @@ export class SessionController {
    * já é coberto pelo `toolObserver`. NÃO toca catraca/budget.
    */
   private onParentProgress(signal: ProgressSignal): void {
+    // FEEDBACK-IMEDIATO — fim do preparo: o modelo vai ser chamado. `preparando` → `pensando`
+    // (só se ainda estamos no rótulo de preparo; rótulos de ciclo/workflow não são tocados).
+    if (signal.kind === 'model-call' || signal.kind === 'preparing') {
+      if (this.state.phase !== 'thinking') return;
+      const atual = this.state.workingLabel;
+      const emPreparo = atual !== undefined && ROTULOS_DE_PREPARO.has(atual);
+      if (signal.kind === 'model-call') {
+        if (emPreparo) this.patch({ workingLabel: 'pensando' });
+      } else if (signal.step === 'prompt') {
+        // fim de um passo: só desfaz o sub-rótulo do PRÓPRIO passo (não mexe em 'pensando').
+        if (atual === 'lembrando' || atual === 'maestro avaliando') {
+          this.patch({ workingLabel: 'preparando' });
+        }
+      } else if (emPreparo || atual === 'pensando') {
+        // iterações seguintes (depois de tools) também passam pelo maestro: o rótulo
+        // 'pensando' seria falso enquanto o judge responde.
+        this.patch({ workingLabel: signal.step === 'recall' ? 'lembrando' : 'maestro avaliando' });
+      }
+      return;
+    }
     if (signal.kind === 'inject') this.flushInjectNotes(signal.count);
     // EST-0944 (refino #121) — começou uma passada INTERNA de auto-verificação: o
     // PRÓXIMO turno do modelo é máquina do loop (reconferir a evidência), NÃO resposta.
     // Arma a supressão p/ que esse turno `aluy` NÃO vire bloco visível (ver
     // `startAluyTurn`/`finishAluyTurn`). É um sinal de display — não toca catraca/budget.
-    else if (signal.kind === 'self-check') this.selfCheckInFlight = true;
+    else if (signal.kind === 'self-check') {
+      this.selfCheckInFlight = true;
+      // SEM AR MORTO — a `final` candidata JÁ está na tela (streamou como bloco normal). A
+      // passada extra de verificação é uma chamada de modelo inteira; sem isto a fase seguia
+      // `streaming` (sem indicador) até o fim dela. Volta a `thinking` com o rótulo honesto
+      // e o relógio zerado: `conferindo o trabalho (1/2)… 0:04`. Interrompível como todo
+      // `thinking` (esc). Só display — não toca catraca/budget.
+      this.patch({
+        phase: 'thinking',
+        workingLabel: `conferindo o trabalho (${String(signal.attempt)}/${String(signal.max)})`,
+        workingSince: this.clock(),
+      });
+    }
     // F191 — o loop CORTOU a chamada de modelo em voo p/ acelerar o encaixe (só ocorre sem prosa visível, ver `expedite()`): o parcial
     // do turno `aluy` (prosa já streamada) é DESCARTADO (o inject supersede — o dono
     // re-direcionou). Remove o bloco vivo p/ não deixar prosa ÓRFÃ na tela antes da nota
@@ -6612,10 +6666,13 @@ export class SessionController {
   private abrirTurnoAluy(): void {
     if (!this.turnoAluyPendente) return;
     this.turnoAluyPendente = false;
+    // SELF-CHECK — a passada de verificação fica em `thinking` (o <Working> "conferindo o
+    // trabalho…" segue na tela); o texto dela é escondido e `streaming` apagaria o indicador.
     const enterStreaming =
-      this.state.phase === 'thinking' ||
-      this.state.phase === 'streaming' ||
-      this.state.phase === 'retrying';
+      !this.selfCheckInFlight &&
+      (this.state.phase === 'thinking' ||
+        this.state.phase === 'streaming' ||
+        this.state.phase === 'retrying');
     const block: SessionBlock = {
       kind: 'aluy',
       text: '',
@@ -6805,18 +6862,16 @@ export class SessionController {
       if (last.selfCheck) {
         blocks.pop();
         this.selfCheckInFlight = false;
-        // Nota dim discreta (UMA linha), análoga ao "↳ encaixado" do btw: deixa o rastro
-        // sem re-exibir o texto cru da verificação. Com cap≥2 há mais de uma passada de
-        // verificação seguidas; NÃO repetimos a nota (no máximo UMA dim, spec): só empurra
-        // se o último bloco já não for a própria nota de self-check.
-        const tail = blocks[blocks.length - 1];
-        const alreadyNoted =
-          tail !== undefined && tail.kind === 'note' && tail.title === 'self-check';
-        if (alreadyNoted) {
-          this.patch({ blocks });
+        // Rastro discreto: UMA nota dim "✓ auto-verificado" no fim do turno (não o texto cru).
+        // Só afirma "verificado" se a passada de fato terminou; interrompida/erro não conferiu.
+        // O "✓" em si é decidido no fim do turno (ver `selfCheckPassDone`).
+        this.patch({ blocks });
+        if (motivo !== 'done') {
+          this.pushNote('self-check', [
+            'verificação interrompida — a resposta acima não foi conferida',
+          ]);
         } else {
-          this.patch({ blocks });
-          this.pushNote('self-check', ['✓ auto-verificado']);
+          this.selfCheckPassDone = true;
         }
         return;
       }
@@ -7551,9 +7606,14 @@ export class SessionController {
     // o modelo NÃO confirmou — ACHOU UM GAP e voltou a AGIR. Esse trabalho (e a resposta
     // que vier depois) é REAL ⇒ desarma a supressão e DESPROMOVE o turno `aluy` em voo
     // (se marcado `selfCheck`), p/ não esconder a resposta nova por engano.
-    if (this.selfCheckInFlight) {
+    if (this.selfCheckInFlight || this.selfCheckPassDone) {
+      if (this.selfCheckInFlight) this.demoteSelfCheckBlock();
       this.selfCheckInFlight = false;
-      this.demoteSelfCheckBlock();
+      this.selfCheckPassDone = false;
+      // CORREÇÃO PÓS-VERIFICAÇÃO — deixa claro na tela que o que vem agora não é a resposta
+      // original: a verificação achou pendência e o agente voltou a agir.
+      this.pushNote('self-check', ['↳ a verificação achou pendências — corrigindo']);
+      this.patch({ workingLabel: 'corrigindo após a verificação' });
     }
     const target = targetOfCall(call);
     this.pushBlock({

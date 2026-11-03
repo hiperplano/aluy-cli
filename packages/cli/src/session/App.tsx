@@ -5105,6 +5105,9 @@ export function App(props: AppProps): React.ReactElement {
             glyph="aluy"
             glyphRole="accent"
             label={indicadorTrabalho.label}
+            {...(state.phase === 'thinking' && state.workingSince !== undefined
+              ? { elapsedMs: Math.max(0, (props.now ?? Date.now)() - state.workingSince) }
+              : {})}
             {...(indicadorTrabalho.suffix !== undefined
               ? { suffix: indicadorTrabalho.suffix }
               : {})}
@@ -5803,6 +5806,10 @@ export function BlockView(props: {
         </Box>
       );
     case 'aluy':
+      // SELF-CHECK — a passada de verificação é máquina do loop: o indicador "conferindo o
+      // trabalho…" (<Working>) é o que o usuário vê; o texto da verificação não aparece nem
+      // enquanto streama (era o flash que sumia ao terminar).
+      if (b.selfCheck === true) return <></>;
       return (
         <Box paddingBottom={1} paddingTop={aluyNeedsLeadingBlank(props.prevKind) ? 1 : 0}>
           <AluyBlock
