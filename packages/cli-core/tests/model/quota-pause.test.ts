@@ -152,3 +152,49 @@ describe('sondagem e config', () => {
     expect(resolveQuotaPause({ maxWaitConfig: '2h' }).maxWaitMs).toBe(7_200_000);
   });
 });
+
+describe('Z.ai GLM Coding Plan (zai-coding)', () => {
+  const MSG = 'Usage limit reached for 5 hour. Your limit will reset at 2026-11-03 05:00:00';
+  it('data/hora sem fuso é lida como UTC+8 (Pequim); com fuso explícito vale o explícito', () => {
+    expect(resetAtFromMessage(MSG, NOW)).toBe(Date.parse('2026-11-02T21:00:00Z'));
+    expect(resetAtFromMessage('limit will reset at 2026-11-03 05:00:00 UTC', NOW)).toBe(
+      Date.parse('2026-11-03T05:00:00+08:00'),
+    ); // "UTC" solto não é fuso reconhecido
+    expect(resetAtFromMessage('reset at 2026-11-03T05:00:00Z', NOW)).toBe(
+      Date.parse('2026-11-03T05:00:00Z'),
+    );
+    expect(resetAtFromMessage('reset at 2026-11-03 05:00:00+02:00', NOW)).toBe(
+      Date.parse('2026-11-03T05:00:00+02:00'),
+    );
+  });
+  it('429 + error.code 1308/1310 + mensagem de limite ⇒ cota (janela), com o reset do texto', () => {
+    const now = Date.parse('2026-11-02T18:00:00Z');
+    const e = err(429, 'RATE_LIMITED', { detail: MSG, type: 'provider_code:1308' });
+    const v = classifyQuota(e, now);
+    expect(v?.scope).toBe('janela');
+    expect(v?.resetAtMs).toBe(Date.parse('2026-11-02T21:00:00Z'));
+    expect(
+      classifyQuota(err(429, 'RATE_LIMITED', { type: 'provider_code:1310', detail: 'limit' }), now)
+        ?.scope,
+    ).toBe('credito');
+    expect(isTransient(e)).toBe(false); // não é retry curto
+  });
+  it('429 simples e códigos de rate (1302/1303) seguem como taxa; 1301 (filtro de conteúdo) não é cota', () => {
+    expect(
+      classifyQuota(err(429, 'RATE_LIMITED', { type: 'provider_code:1302' }), NOW)?.scope,
+    ).toBe('taxa');
+    expect(
+      classifyQuota(
+        err(400, 'VALIDATION_FAILED', { type: 'provider_code:1301', detail: 'unsafe' }),
+        NOW,
+      ),
+    ).toBeNull();
+  });
+  it('horário já vencido (fuso divergente) vira desconhecido — nunca sondagem imediata em laço', () => {
+    const v = classifyQuota(
+      err(429, 'RATE_LIMITED', { detail: MSG, type: 'provider_code:1308' }),
+      Date.parse('2026-11-03T00:00:00Z'),
+    );
+    expect(v?.resetAtMs).toBeUndefined();
+  });
+});

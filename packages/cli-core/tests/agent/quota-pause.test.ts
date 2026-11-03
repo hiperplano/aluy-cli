@@ -188,6 +188,66 @@ describe('rate-limit curto (429 simples)', () => {
   });
 });
 
+describe('Z.ai coding: 429 com corpo de limite de uso', () => {
+  // reset daqui a 10 min, escrito como a Z.ai escreve: hora de Pequim (UTC+8), sem fuso.
+  const zai = (): BrokerError => {
+    const t = new Date(Date.now() + 600_000 + 8 * 3_600_000).toISOString();
+    return new BrokerError({
+      status: 429,
+      code: 'RATE_LIMITED',
+      type: 'provider_code:1308',
+      detail: `Usage limit reached for 5 hour. Your limit will reset at ${t.slice(0, 10)} ${t.slice(11, 19)}`,
+    });
+  };
+
+  it('agente PRINCIPAL pausa (não é retry curto) e retoma no horário do corpo', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg });
+    const model = new Script([zai(), ok('feito')]);
+    const p = newLoop(model, co).run('x');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(co.view?.scope).toBe('janela');
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(model.calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(305_000);
+    expect((await p).stop.kind).toBe('final');
+    expect(model.calls).toBe(2);
+  });
+
+  it('SUB-AGENTE também pausa', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg });
+    const sp = new SubAgentSpawner({
+      model: new Script([zai(), ok('ok')]),
+      permission: allowAllEngine,
+      ports: ports(),
+      baseTools: NATIVE_TOOLS,
+      quotaPause: co,
+    });
+    const p = sp.spawn([{ label: 'f', goal: 't' }]);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(co.view?.agents[0]?.label).toBe('f');
+    await vi.advanceTimersByTimeAsync(610_000);
+    expect((await p)[0]).toMatchObject({ ok: true });
+  });
+
+  it('429 de corpo genérico (limite de uso) sem header pausa o principal; 429 pelado não', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg });
+    const body = new BrokerError({
+      status: 429,
+      code: 'RATE_LIMITED',
+      detail: 'You exceeded your current quota',
+    });
+    void newLoop(new Script([body]), co)
+      .run('x')
+      .catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(co.view?.scope).toBe('credito');
+    const co2 = new QuotaPauseCoordinator({ config: cfg });
+    await expect(
+      newLoop(new Script([new BrokerError({ status: 429, code: 'RATE_LIMITED' })]), co2).run('x'),
+    ).rejects.toBeInstanceOf(BrokerError);
+  });
+});
+
 describe('pausa compartilhada entre irmãos', () => {
   it('o irmão não martela o provider: espera o mesmo portão e libera junto', async () => {
     const co = new QuotaPauseCoordinator({ config: cfg });

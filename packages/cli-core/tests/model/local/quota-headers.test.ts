@@ -92,4 +92,24 @@ describe('reset de cota a partir dos headers', () => {
     expect(v?.scope).toBe('janela');
     expect(v!.resetAtMs! - Date.now()).toBeGreaterThan(1_790_000);
   });
+
+  it('Z.ai coding: corpo 429 {error:{code:"1308"}} chega ao classificador como cota de janela', async () => {
+    const { fetch } = makeBrokerFetch({
+      status: 429,
+      json: {
+        error: {
+          code: '1308',
+          message: 'Usage limit reached for 5 hour. Your limit will reset at 2099-11-03 05:00:00',
+        },
+      },
+    });
+    const err = (await drain(local(fetch).stream({ request: req() })).catch(
+      (e) => e,
+    )) as BrokerError;
+    const v = classifyQuota(err, Date.now());
+    expect(v?.scope).toBe('janela');
+    // 2099 passa do horizonte de 8 dias: o reset é clampado (anti-hostil)
+    expect(v!.resetAtMs!).toBeGreaterThan(Date.now());
+    expect(v!.resetAtMs!).toBeLessThanOrEqual(Date.now() + 8 * 86_400_000);
+  });
 });

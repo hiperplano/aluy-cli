@@ -9,6 +9,7 @@ sozinho quando a cota liberar — ou quando você mandar.
 | Situação                                                                                                                                              | O que o aluy faz                                                                                                           |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Blip de rede, 5xx, 429 curto (até 60 s)                                                                                                               | **Retentativa** de sempre (`ALUY_RETRY`)                                                                                   |
+| 429 cujo **corpo** diz cota/limite de uso (qualquer agente, mesmo sem header de reset)                                                                | **Pausa**                                                                                                                  |
 | Janela de uso (5 h), teto semanal, orçamento, saldo zerado (`insufficient_quota`, HTTP 402, "credit balance is too low"), 429 com reset acima de 60 s | **Pausa**                                                                                                                  |
 | 401, 403, 404, 400, 422, recusa de conteúdo                                                                                                           | **Falha** como sempre — esperar não conserta chave inválida nem modelo inexistente, e no BYO cada tentativa custa dinheiro |
 
@@ -17,6 +18,15 @@ sozinho quando a cota liberar — ou quando você mandar.
 O horário vem do próprio provider, na ordem: `Retry-After` → `x-ratelimit-reset-requests|tokens`
 (OpenAI/OpenRouter, ex. `6m0s`) → `anthropic-ratelimit-*-reset` (RFC 3339) → o texto do erro
 ("try again in 6m0s"). Limitado a 8 dias.
+
+Z.ai (`zai-coding`, GLM Coding Plan): a cota esgotada vem como HTTP 429 com `error.code` de negócio
+(`1308` limite de uso, `1310`, `1304`, `1309`) e uma mensagem como "Usage limit reached for 5 hour.
+Your limit will reset at 2026-11-03 05:00:00". O código e o texto são reconhecidos como cota, e o
+horário é lido da mensagem. **Esse horário não traz fuso**: o aluy o interpreta como horário de
+Pequim (UTC+8), o da Z.ai — suposição não verificada contra amostra real. Com fuso explícito
+(`Z`, `+02:00`) vale o explícito; header (`Retry-After`) sempre vence. Horário que já passou
+(fuso errado) é descartado e entra a escada de sondagem, nunca um laço de tentativas. Os códigos
+`1302/1303/1305` seguem como rate-limit curto e `1301` (filtro de conteúdo) nunca é cota.
 
 Sem nenhuma dica, o aluy **sonda** com espaçamento crescente: 1, 2, 5, 10, 15 e depois a cada 30 min.
 A sondagem é a **própria chamada pendente de um agente** (nunca uma chamada extra), **uma por vez**:

@@ -322,9 +322,13 @@ export class LocalModelClient implements ModelClient {
       res.status === 429 || res.status === 402 || res.status === 400 || res.status === 403
         ? resetAtFromHeaders(res.headers, Date.now())
         : undefined;
+    // Código de negócio do provider (`error.code`, ex.: "1308" da Z.ai) viaja em `type`
+    // (campo de texto livre, sem segredo) p/ o classificador de cota reconhecê-lo.
+    const providerCode = extractProviderCode(parsed);
     const problem = toProblemDetails(status, {
       code,
       ...(message !== undefined ? { detail: message } : {}),
+      ...(providerCode !== undefined ? { type: `provider_code:${providerCode}` } : {}),
       ...(resetAt !== undefined ? { reset_at_ms: resetAt } : {}),
     });
     return new BrokerError(problem);
@@ -350,6 +354,16 @@ function mapProviderErrorCode(status: number, body: unknown): string {
   if (status >= 500) return 'PROVIDER_ERROR';
   if (status === 400 || status === 422) return 'VALIDATION_FAILED';
   return 'PROVIDER_ERROR';
+}
+
+/** `error.code` do corpo (string ou número), saneado a dígitos/letras curtos. */
+function extractProviderCode(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null) return undefined;
+  const err = (body as Record<string, unknown>).error;
+  if (typeof err !== 'object' || err === null) return undefined;
+  const c = (err as Record<string, unknown>).code;
+  const str = typeof c === 'number' ? String(c) : typeof c === 'string' ? c : undefined;
+  return str !== undefined && /^[A-Za-z0-9_.-]{1,40}$/.test(str) ? str : undefined;
 }
 
 function extractErrorMessage(body: unknown): string | undefined {

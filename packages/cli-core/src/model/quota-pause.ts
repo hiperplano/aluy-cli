@@ -173,6 +173,21 @@ export function resetAtFromHeaders(headers: HeaderReader, nowMs: number): number
  * (já sem segredo). PURO.
  */
 export function resetAtFromMessage(message: string, nowMs: number): number | undefined {
+  // Z.ai (GLM Coding Plan): "Your limit will reset at 2026-11-03 05:00:00". Data/hora ABSOLUTAS.
+  // Sem fuso na mensagem, o fuso é o do provider: UTC+8 (Pequim). Com fuso explícito (Z/±hh:mm),
+  // vale o explícito. Se estiver errado, o custo é uma sondagem a mais (a escada de backoff
+  // assume) — nunca um laço apertado.
+  const abs =
+    /reset(?:s)?\s+at\s+(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)\s*(Z|[+-]\d{2}:?\d{2})?/i.exec(
+      message,
+    );
+  if (abs) {
+    const tz = abs[3] === undefined ? '+08:00' : abs[3] === 'Z' || abs[3] === 'z' ? 'Z' : abs[3];
+    const hms = abs[2]!.length === 5 ? `${abs[2]}:00` : abs[2]!;
+    const tzNorm = /^[+-]\d{4}$/.test(tz) ? `${tz.slice(0, 3)}:${tz.slice(3)}` : tz;
+    const t = Date.parse(`${abs[1]}T${hms}${tzNorm}`);
+    if (Number.isFinite(t)) return t;
+  }
   const m =
     /(?:try again|retry|resets?)\s+(?:in|after)\s+((?:\d+(?:\.\d+)?\s*(?:ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?)\s*)+)/i.exec(
       message,
@@ -193,14 +208,17 @@ export function resetAtFromMessage(message: string, nowMs: number): number | und
 /** Garante que o reset está no futuro próximo e dentro do horizonte; senão `undefined`. */
 function clampReset(resetAtMs: number | undefined, nowMs: number): number | undefined {
   if (resetAtMs === undefined || !Number.isFinite(resetAtMs)) return undefined;
-  return Math.min(Math.max(resetAtMs, nowMs), nowMs + MAX_QUOTA_HORIZON_MS);
+  // Horário já vencido (relógio/fuso divergente, header velho): não é informação útil e
+  // geraria sondagem imediata em laço — trata como desconhecido (a escada de backoff assume).
+  if (resetAtMs <= nowMs) return undefined;
+  return Math.min(resetAtMs, nowMs + MAX_QUOTA_HORIZON_MS);
 }
 
 // ── classificação ────────────────────────────────────────────────────────────
 
 /** Mensagens que, por si sós, dizem "acabou a cota/saldo" (provider BYO). */
 const STRONG_QUOTA_TEXT =
-  /insufficient_quota|billing_hard_limit|exceeded your current quota|credit balance is too low|out of (?:credits|quota)|no (?:remaining )?credits|usage limit|quota (?:exceeded|exhausted|reached)|resource_exhausted/i;
+  /provider_code:13(?:04|08|09|10)\b|usage limit|limit (?:will )?resets?\b|insufficient_quota|billing_hard_limit|exceeded your current quota|credit balance is too low|out of (?:credits|quota)|no (?:remaining )?credits|quota (?:exceeded|exhausted|reached)|resource_exhausted/i;
 const WINDOW_TEXT = /5[- ]?hour|window|janela|hourly/i;
 const WEEKLY_TEXT = /week|semanal/i;
 
