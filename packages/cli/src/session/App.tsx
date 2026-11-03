@@ -156,6 +156,7 @@ import {
   backslashNewline,
   drainTypedChunk,
 } from './composer-edit.js';
+import { buildSentDisplay } from './sent-display.js';
 import {
   createBracketedPasteMachine,
   gateInputPaste,
@@ -189,7 +190,12 @@ import {
   type SlashCommand,
   type PaletteHit,
 } from '../slash/commands.js';
-import { trailingMention, stripTrailingMention, parseAtMentions } from '../attach/index.js';
+import {
+  trailingMention,
+  stripTrailingMention,
+  parseAtMentions,
+  stripMentions,
+} from '../attach/index.js';
 import { resolveLinearMentions } from './linear.js';
 import type { FileIndexPort, SessionStore } from '../io/index.js';
 import type { AttachReader } from '../attach/index.js';
@@ -2189,8 +2195,10 @@ export function App(props: AppProps): React.ReactElement {
     [runCommand, controller],
   );
 
+  // F16 — linha cujo `@arquivo` inexistente JÁ foi avisado: reenviar a MESMA linha envia assim mesmo.
+  const unresolvedAckRef = useRef<string>('');
   const submit = useCallback(
-    (line: string) => {
+    (line: string, rawLine?: string) => {
       // EST-1015 (cockpit) — SNAP p/ a cauda ao SUBMETER: se o usuário rolou a conversa/
       // log p/ cima e então envia algo (objetivo//comando/!bang), a resposta nasce na
       // CAUDA — fora da janela rolada, invisível. Submeter é "quero ver o agora" ⇒ volta
@@ -2217,20 +2225,51 @@ export function App(props: AppProps): React.ReactElement {
           // abrir o picker mid-turn. Sem menções, é o caminho de antes (zero custo).
           if (parseAtMentions(route.text).length > 0 && props.attachReader) {
             const beforeChips = picker.attachments.map((a) => a.item);
+            const chipPaths = picker.attachments.map((a) => a.path);
             void resolveLinearMentions(route.text, props.attachReader).then(
-              ({ goal, items: resolved }) => {
+              ({ goal, items: resolved, attached, refused }) => {
+                // F16 — `@naoexiste.txt oi` NÃO pode virar só "oi" em silêncio: AVISA (PT-BR) e
+                // DEVOLVE o texto ao composer p/ o usuário corrigir. Reenviar a MESMA linha
+                // (Enter de novo) envia assim mesmo, com a menção literal (ex.: `@alguem`).
+                if (refused.length > 0 && unresolvedAckRef.current !== route.text) {
+                  unresolvedAckRef.current = route.text;
+                  controller.pushNote('anexo', [
+                    ...refused.map(
+                      (r) => `arquivo não encontrado ou recusado: @${r.path} — ${r.reason}`,
+                    ),
+                    'a mensagem NÃO foi enviada — corrija o caminho (Enter de novo envia assim mesmo).',
+                  ]);
+                  setComposer((c) =>
+                    c.text === ''
+                      ? { text: route.text, cursor: route.text.length }
+                      : {
+                          text: `${route.text} ${c.text}`,
+                          cursor: route.text.length + 1 + c.text.length,
+                        },
+                  );
+                  return;
+                }
+                const forced = refused.length > 0; // 2º Enter: envia como está.
+                unresolvedAckRef.current = '';
                 // STRIP pode esvaziar o texto (a linha era só `@arquivo`): preservamos a
                 // regra "anexo sozinho NÃO é pedido" — sem goal E sem nada resolvido, não
                 // submete. Com anexo resolvido mas goal vazio, mandamos o texto original
                 // (ainda carrega a intenção `@…`) como objetivo, com o DADO rotulado.
-                if (goal === '' && resolved.length === 0) {
+                if (goal === '' && resolved.length === 0 && !forced) {
                   picker.clear();
                   return;
                 }
                 const items = [...beforeChips, ...resolved];
-                const outGoal = goal !== '' ? goal : route.text;
+                const outGoal = forced || goal === '' ? route.text : goal;
                 setHistory((h) => [...h, outGoal]);
-                void controller.submit(outGoal, items);
+                void controller.submit(outGoal, items, {
+                  display: buildSentDisplay(
+                    forced
+                      ? route.text
+                      : stripMentions(rawLine ?? goal, parseAtMentions(rawLine ?? goal)),
+                    [...chipPaths, ...attached],
+                  ),
+                });
                 picker.clear();
               },
             );
@@ -2238,7 +2277,12 @@ export function App(props: AppProps): React.ReactElement {
           }
           const items = picker.attachments.map((a) => a.item);
           setHistory((h) => [...h, route.text]);
-          void controller.submit(route.text, items);
+          void controller.submit(route.text, items, {
+            display: buildSentDisplay(
+              rawLine ?? route.text,
+              picker.attachments.map((a) => a.path),
+            ),
+          });
           picker.clear();
         }
         return;
@@ -2257,7 +2301,7 @@ export function App(props: AppProps): React.ReactElement {
       }
       // unknown-command: ignora silenciosamente (o menu já guia o usuário).
     },
-    [controller, userCommands, picker, runCommand, props.attachReader],
+    [controller, userCommands, picker, runCommand, props.attachReader, setComposer],
   );
 
   // ── EST-0982 (type-ahead mid-turn) — ENFILEIRAR vs ENCAIXAR uma linha do composer ──
@@ -4427,7 +4471,7 @@ export function App(props: AppProps): React.ReactElement {
       setSlashSel(0);
       setHistIdx(-1);
       picker.closePicker();
-      submit(line);
+      submit(line, input);
       return;
     }
     // BACKSPACE apaga em `pos-1`; DELETE (forward) apaga em `pos`. Ambas as físicas
@@ -4481,7 +4525,7 @@ export function App(props: AppProps): React.ReactElement {
         drained.lines.forEach((l, idx) => {
           // EST-PASTE-COLLAPSE — expande chips de paste antes de submeter (igual ao Enter limpo).
           const line = expandAndReset(l.text);
-          if (idx === 0) submit(line);
+          if (idx === 0) submit(line, l.text);
           else if (line.trim() !== '') {
             enqueueOrInject(line.trim());
             setHistory((h) => [...h, line.trim()]);
@@ -5946,7 +5990,7 @@ export function BlockView(props: {
       return (
         <Box paddingBottom={1}>
           <YouBlock
-            text={b.text}
+            text={b.display ?? b.text}
             isCurrent={props.isCurrent}
             {...(props.columns !== undefined ? { columns: props.columns } : {})}
             {...(b.origem !== undefined ? { origem: b.origem } : {})}

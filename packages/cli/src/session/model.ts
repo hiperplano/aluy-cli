@@ -39,6 +39,13 @@ export interface YouTurn {
    * digitou do que chegou por um canal externo.
    */
   readonly origem?: string;
+  /**
+   * F8/F16 — TEXTO DE EXIBIÇÃO do eco, quando difere do `text` enviado ao modelo: o paste
+   * grande aparece como o MESMO chip do composer (`[texto colado #1, +130 linhas]`) em vez
+   * de despejar as 130 linhas, e os anexos viram `📎 arquivo`. Só apresentação — o modelo
+   * recebe o `text` cheio.
+   */
+  readonly display?: string;
 }
 
 /** Um turno do agente (◇ aluy) — texto que faz stream token-a-token. */
