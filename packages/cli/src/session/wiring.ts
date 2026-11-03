@@ -91,7 +91,12 @@ import { SessionController } from './controller.js';
 import { HooksConfigStore } from '../io/index.js';
 import { FileRoomStore } from './rooms/file-room-store.js';
 import { makePreToolGate } from './pre-tool-gate.js';
-import { HookRunner, selectHooks, type HooksConfig } from '@hiperplano/aluy-cli-core';
+import {
+  HookRunner,
+  selectHooks,
+  canRememberTool,
+  type HooksConfig,
+} from '@hiperplano/aluy-cli-core';
 import {
   resolveContextWindow,
   modelWindowFromConfig,
@@ -122,6 +127,10 @@ export const DEFAULT_TIER = 'aluy-flux';
 export const DEFAULT_EXEC_TIMEOUT_MS = 120_000;
 
 export interface BuildSessionOptions {
+  /** ADR aluy-cli 0002 — tools que o dono mandou lembrar ("sempre permitir"), do config. */
+  readonly rememberedAllow?: readonly string[];
+  /** ADR aluy-cli 0002 — persiste um novo "lembrar esta decisão" (config do usuário). */
+  readonly onRememberTool?: (tool: string) => void;
   readonly env?: NodeJS.ProcessEnv;
   /**
    * `--anonymous` — sessão ANÔNIMA (não deixa rastro): a memória de agente
@@ -958,6 +967,8 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // = catraca intacta.
   const engine = new PolicyPermissionEngine({
     mode: initialMode,
+    // ADR aluy-cli 0002 — "sempre permitir" persistido (o piso de CLI-SEC-3 é reaplicado na engine).
+    rememberedAllow: new Set((opts.rememberedAllow ?? []).filter((t) => canRememberTool(t))),
     // EST-0944 — write_file: (path, content) ⇒ diff de adição (arquivo novo/rewrite).
     // edit_file (str_replace): (path, new_string, old_string) ⇒ diff do TRECHO trocado
     // (old→new), o efeito EXATO; o resto do arquivo fica intacto por construção.
@@ -1383,6 +1394,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
 
   const controller = new SessionController({
     model: caller,
+    ...(opts.onRememberTool ? { onRememberTool: opts.onRememberTool } : {}),
     compactionModel: compactionCaller,
     sideQueryModel: sideQueryCaller,
     permission: engine,

@@ -1935,9 +1935,7 @@ export class AgentLoop {
     const ctx: ToolRunContext = {
       ...(signal ? { signal } : {}),
       ...(detachSignal ? { detachSignal } : {}),
-      ...(this.detachHub
-        ? { onDetached: (info): void => this.detachHub?.onDetached(info) }
-        : {}),
+      ...(this.detachHub ? { onDetached: (info): void => this.detachHub?.onDetached(info) } : {}),
       // EST-0969 (heartbeat) — cada chunk de stdout/stderr é um SINAL DE VIDA da
       // tool: zera a inatividade do filho mesmo que o observer da TUI não esteja
       // plugado (um `run_command` longo MAS produzindo saída NÃO está travado). Por
@@ -2028,6 +2026,11 @@ export class AgentLoop {
     ) {
       // a engine recusa grant p/ sempre-ask (retorna false) — não relaxa CLI-SEC-3.
       this.permission.grantSession(call);
+    }
+    // ADR aluy-cli 0002 — "lembrar esta decisão": vale na engine (compartilhada com os
+    // filhos) já; a persistência em disco é do locus (controller.resolveAsk).
+    if (resolution.kind === 'approve-always' && this.permission instanceof PolicyPermissionEngine) {
+      this.permission.rememberAllow(call.name);
     }
     return true;
   }

@@ -23,7 +23,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { displayWidth } from '../../session/visual-lines.js';
-import type { AskRequest } from '@hiperplano/aluy-cli-core';
+import { canRememberTool, type AskRequest } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { resolveLanguage } from '../markdown/index.js';
 import {
@@ -201,6 +201,9 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
             <Text> </Text>
             {/* [s] SÓ quando NÃO é sempre-ask (CLI-SEC-3) */}
             {req.alwaysAsk === false && <Role name="accent">[s] sempre nesta sessão</Role>}
+            {req.alwaysAsk === false && canRememberTool(req.call.name) && (
+              <Role name="accent"> [l] lembrar</Role>
+            )}
           </Box>
           <Box>
             <Role name="accent">{theme.box.vertical} </Role>
@@ -227,6 +230,9 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
 /** Footer linear de atalhos (§4.3), por tipo de ask. */
 function footerOf(req: AskRequest, destructive: boolean): string {
   if (destructive) return 'n nega (recomendado) · a aprova mesmo assim · esc cancela';
+  if (req.alwaysAsk === false && canRememberTool(req.call.name)) {
+    return 'a aprova · s sessão · l lembra (não pergunta mais) · n nega · e edita · esc cancela';
+  }
   if (req.alwaysAsk === false) return 'a aprova · s sempre · n nega · e edita · esc cancela';
   return 'a aprova · n nega · e edita · esc cancela';
 }

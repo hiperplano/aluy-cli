@@ -48,6 +48,9 @@ import {
   spawnAgentTool,
   agentsStatusTool,
   agentsStopTool,
+  agentSendTool,
+  childNoteText,
+  type ParentNoteKind,
   formatSubAgentResults,
   bindNamedAgent,
   buildAvailableAgentsNote,
@@ -167,8 +170,7 @@ import {
   buildMonitorTools,
 } from '@hiperplano/aluy-cli-core';
 import { MemoryRoomStore, buildRoomTools } from '@hiperplano/aluy-cli-core';
-import type {
-  DetachHub, RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
+import type { DetachHub, RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
 import {
   formatRoomList,
   formatConversation,
@@ -180,7 +182,7 @@ import {
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { sep as pathSep } from 'node:path';
-import { redactOutputSecrets } from '@hiperplano/aluy-cli-core';
+import { redactOutputSecrets, canRememberTool } from '@hiperplano/aluy-cli-core';
 import type { StreamSink } from './streaming-caller.js';
 import type { ModelCaller, ModelClient } from '@hiperplano/aluy-cli-core';
 import { withToolReport, targetOf, type ToolReporter } from './tool-reporter.js';
@@ -343,6 +345,8 @@ export function nextMode(mode: SessionMode): SessionMode {
 }
 
 export interface SessionControllerOptions {
+  /** ADR aluy-cli 0002 — persiste o "lembrar esta decisão" de uma tool (config do usuário). */
+  readonly onRememberTool?: (tool: string) => void;
   readonly model: ModelCaller;
   readonly permission: PermissionEngine;
   readonly ports: ToolPorts;
@@ -1624,7 +1628,11 @@ export class SessionController {
   // intocada — encerrar é estritamente RESTRITIVO (nunca executa um efeito não-aprovado).
   private nonInteractive = false;
 
+  /** ADR aluy-cli 0002 — persistência do "lembrar esta decisão". */
+  private readonly onRememberTool: ((tool: string) => void) | undefined;
+
   constructor(opts: SessionControllerOptions) {
+    this.onRememberTool = opts.onRememberTool;
     this.permissionEngine = opts.permission; // ADR-0126(A·PR2)
     this.subagentRegistry = opts.agentRegistry; // ADR-0126(A·PR2)
     this.reloadProjectAgents = opts.reloadProjectAgents; // GS-MD7 fix: registry segue o cwd
@@ -2050,6 +2058,11 @@ export class SessionController {
           list: () => this.listaFilhosParaGestao(),
           stop: (label: string) => this.pararFilhoPorRotulo(label),
         },
+        // CONVERSA PAI → FILHO (ADR 0002): o pai só enxerga `send`.
+        agentMessaging: {
+          send: (to: string, message: string) =>
+            spawner.sendFromParent(this.rotuloDoFilho(to), message),
+        },
       };
       // `spawn_agent` SÓ no toolset do PAI (os filhos nunca o recebem — E-A1).
       allTools.push(spawnAgentTool);
@@ -2058,9 +2071,17 @@ export class SessionController {
       // árvore de fluxo sabia tudo, o `Ctrl+T → P` do dono usava esse saber, e o agente
       // não alcançava. `agents_status` é leitura pura; `agents_stop` é efeito e passa pela
       // catraca, porque encerrar trabalho que o dono pediu não é decisão silenciosa.
-      allTools.push(agentsStatusTool, agentsStopTool);
+      allTools.push(agentsStatusTool, agentsStopTool, agentSendTool);
       // O RELATO do filho vai para o NÓ dele na árvore — a mesma fonte que o
       // `agents_status` lê. Sem espelho em paralelo.
+      // CONVERSA PAI ⇄ FILHO (ADR 0002) — a UI mostra cada troca, compacta e redigida.
+      spawner.onInjectedToChild = (label, message, from) => {
+        const resumo = this.resumoMensagem(message);
+        const no = this.childNodeOf(label);
+        if (no) no.lastMessage = `↳ ${from}: ${resumo}`;
+        this.pushNoteSafe('agentes', [`↳ ${from} → ${label}: ${resumo}`]);
+      };
+      spawner.onChildNote = (label, message, kind) => this.recebeNotaDoFilho(label, message, kind);
       spawner.onChildReport = (label: string, nota: string): boolean => {
         const arvores = [...this.detachedTrees];
         if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
@@ -4306,6 +4327,10 @@ export class SessionController {
    */
   injectInput(nodeId: string, input: string): boolean {
     this.lastLiveInject = null;
+    // ADR aluy-cli 0002 — FILHO VIVO: a injeção do dono entra na fila VIVA dele (drenada no
+    // topo da próxima iteração do loop dele), em vez de esperar o próximo turno do pai.
+    const viaFilho = this.injetaNoFilhoVivo(nodeId, input);
+    if (viaFilho !== undefined) return viaFilho;
     if (!this.flowTree) return false;
     const node = this.flowTree.node(nodeId);
     if (!node) return false;
@@ -7225,6 +7250,18 @@ export class SessionController {
         exact: pending.request.effect.exact,
       });
     }
+    // ADR aluy-cli 0002 — "lembrar esta decisão": persiste o nome da tool (best-effort) e
+    // vale já na engine (o loop faz `rememberAllow`). Nunca para o que o piso proíbe.
+    if (
+      resolution.kind === 'approve-always' &&
+      pending.request.alwaysAsk === false &&
+      canRememberTool(pending.request.call.name)
+    ) {
+      this.onRememberTool?.(pending.request.call.name);
+      this.pushNoteSafe('permissões', [
+        `lembrado: ${pending.request.call.name} não pergunta mais (revogue em ~/.aluy/config.json → permissions.alwaysAllow)`,
+      ]);
+    }
     pending.resolve(resolution);
   }
 
@@ -8403,6 +8440,62 @@ export class SessionController {
    * AbortController). `false` quando o rótulo não existe ou o filho já terminou:
    * dizer "parei" sobre algo que não parou seria a mentira que este projeto persegue.
    */
+  /** `undefined` ⇒ `nodeId` não é um filho vivo (segue o caminho antigo). */
+  private injetaNoFilhoVivo(nodeId: string, input: string): boolean | undefined {
+    if (!this.spawner || !nodeId.startsWith('root/')) return undefined;
+    const label = this.rotuloDoFilho(nodeId);
+    if (!this.spawner.hasLiveChild(label)) return undefined;
+    const item = injectedInputItem(input);
+    if (!item) return false;
+    this.controlAudit.recordInjectInput(nodeId, label, input);
+    const ok = this.spawner.injectIntoChild(label, item);
+    if (ok) {
+      const resumo = this.resumoMensagem(input);
+      const no = this.childNodeOf(label);
+      if (no) no.lastMessage = `↳ usuário: ${resumo}`;
+      this.pushNoteSafe('agentes', [`↳ usuário → ${label}: ${resumo}`]);
+    }
+    return ok;
+  }
+
+  /** Uma linha curta e REDIGIDA (CLI-SEC-6) de uma mensagem pai ⇄ filho, para a TUI. */
+  private resumoMensagem(texto: string): string {
+    const lim = redactOutputSecrets(texto).replace(/\s+/g, ' ').trim();
+    return lim.length > 90 ? `${lim.slice(0, 90)}…` : lim;
+  }
+
+  /** `to` do `agent_send`: aceita o rótulo puro ou o id da árvore (`root/<rótulo>`). */
+  private rotuloDoFilho(to: string): string {
+    return to.startsWith('root/') ? to.slice('root/'.length) : to;
+  }
+
+  private mensagensDoFilho = 0;
+
+  /**
+   * FILHO → PAI (`ask_parent`). Entra pela fila de monitor como OBSERVAÇÃO (DADO NÃO-CONFIÁVEL,
+   * CLI-SEC-4 — nunca instrução), com id ÚNICO por nota (a fila coalesce por id; aqui cada
+   * nota conta). `pergunta` fura a guarda de "filhos soltos vivos" para acordar um pai em
+   * repouso (senão a pergunta ficaria parada até o dono digitar); `progresso` só espera o
+   * próximo ponto seguro. O teto por filho já foi aplicado pelo spawner.
+   */
+  private recebeNotaDoFilho(label: string, message: string, kind: ParentNoteKind): boolean {
+    const resumo = this.resumoMensagem(message);
+    const no = this.childNodeOf(label);
+    if (no) no.lastMessage = `↳ ao orquestrador (${kind}): ${resumo}`;
+    this.pushNoteSafe('agentes', [`↳ ${label} → orquestrador (${kind}): ${resumo}`]);
+    if (kind === 'pergunta') this.pendingFanoutCompletion = true;
+    this.mensagensDoFilho += 1;
+    this.monitorQueue.enqueue({
+      monitorId: `agent-note:${label}:${this.mensagensDoFilho}`,
+      label: `sub-agente ${label}`,
+      type: 'agent-note',
+      condition: kind,
+      payload: childNoteText(label, redactOutputSecrets(message), kind),
+      firedAt: new Date(this.clock()).toISOString(),
+    });
+    return true;
+  }
+
   private pararFilhoPorRotulo(label: string): boolean {
     const arvores = [...this.detachedTrees];
     if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
@@ -8716,7 +8809,11 @@ export class SessionController {
     }
     // SÓ aprovação EXPLÍCITA libera o de projeto. `approve-session` não deveria ser
     // ofertado (alwaysAsk), mas se vier, tratamos como aprovação pontual desta vez.
-    return resolution.kind === 'approve-once' || resolution.kind === 'approve-session';
+    return (
+      resolution.kind === 'approve-once' ||
+      resolution.kind === 'approve-session' ||
+      resolution.kind === 'approve-always'
+    );
   }
 
   /**
@@ -9481,14 +9578,14 @@ function detachedOutcome(
           `nada falhou. O resultado dele chega como dado num turno seguinte: NÃO espere por ele, ` +
           `NÃO o dispare de novo, NÃO afirme que terminou nem invente o conteúdo dele. Diga ao ` +
           `dono o que despachou e encerre o turno; agents_status mostra o andamento.`
-      : motivo === 'solto'
-        ? `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. O dono ` +
-          `SOLTOU o fan-out (Ctrl+B) para liberar o turno. O resultado dele chega como dado ` +
-          `quando concluir: NÃO espere por ele, NÃO o dispare de novo, NÃO afirme que já ` +
-          `terminou nem invente o conteúdo dele. Diga ao dono que segue rodando e encerre.`
-        : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
-          `Você foi liberado para responder agora; o resultado dele chega como dado ` +
-          `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
+        : motivo === 'solto'
+          ? `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. O dono ` +
+            `SOLTOU o fan-out (Ctrl+B) para liberar o turno. O resultado dele chega como dado ` +
+            `quando concluir: NÃO espere por ele, NÃO o dispare de novo, NÃO afirme que já ` +
+            `terminou nem invente o conteúdo dele. Diga ao dono que segue rodando e encerre.`
+          : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
+            `Você foi liberado para responder agora; o resultado dele chega como dado ` +
+            `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
     stop: 'final',
     usage: { iterations: 0, toolCalls: 0, tokens: 0 },
   };

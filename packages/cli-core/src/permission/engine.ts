@@ -177,6 +177,24 @@ const READ_TOOLS = new Set([
   CAPABILITIES_TOOL_ALIAS,
 ]);
 
+/**
+ * ADR aluy-cli 0002 — tools de DELEGAÇÃO liberadas por padrão (o usuário pode voltar a `ask`).
+ * `agents_stop` NÃO entra: parar o trabalho que o dono pediu segue passando pela confirmação.
+ */
+const DELEGATION_ALLOW_BY_DEFAULT: ReadonlySet<string> = new Set([
+  'spawn_agent',
+  'agent_send',
+  'agents_status',
+  // comunicação do filho com o orquestrador / relato de status: só enfileiram texto.
+  'ask_parent',
+  'report_status',
+]);
+
+/** Tools cujo "sempre permitir" NUNCA pode ser permanente (piso de CLI-SEC-3). */
+export function canRememberTool(tool: string): boolean {
+  return tool !== 'run_command' && tool !== 'edit_file' && tool !== 'write_file';
+}
+
 export interface PermissionEngineOptions {
   /** Política do usuário (dado de config). Default: vazia (só defaults seguros). */
   readonly policy?: PermissionPolicy;
@@ -260,6 +278,13 @@ export interface PermissionEngineOptions {
    * Plan, E-A1 — continuam). `undefined`/vazio ⇒ sem isenção (não-regressão).
    */
   readonly roomExemptTools?: ReadonlySet<string>;
+  /**
+   * ADR aluy-cli 0002 — tools que o dono mandou LEMBRAR ("sempre permitir", persistido em
+   * `~/.aluy/config.json` pelo locus). Conjunto MUTÁVEL compartilhado por referência com as
+   * engines dos filhos. Só vale na precedência de DEFAULT (7): categorias sempre-ask, Plan,
+   * toolScope e o piso de `run_command`/`edit_file`/`write_file` seguem acima/valendo.
+   */
+  readonly rememberedAllow?: Set<string>;
 }
 
 /**
@@ -321,11 +346,14 @@ export class PolicyPermissionEngine implements PermissionEngine {
   // persiste — morre com a sessão. FONTE ÚNICA do limite (não vai p/ a política).
   private readonly maxMemoryWrites: number;
   private memoryWrites = 0;
+  // ADR aluy-cli 0002 — "sempre permitir" lembrado (ver `PermissionEngineOptions`).
+  private readonly rememberedAllow: Set<string>;
 
   constructor(opts: PermissionEngineOptions = {}) {
     this.policy = opts.policy ?? EMPTY_POLICY;
     this.hooks = opts.hooks ?? [];
     this.grants = opts.sessionGrants ?? new SessionGrants();
+    this.rememberedAllow = opts.rememberedAllow ?? new Set<string>();
     // `mode` explícito VENCE o legado `unsafe:boolean`. Sem nenhum dos dois ⇒
     // `normal` (default seguro). `unsafe:true` (sem `mode`) ⇒ `mode='unsafe'`.
     this.modeValue = opts.mode ?? (opts.unsafe ? 'unsafe' : 'normal');
@@ -371,6 +399,7 @@ export class PolicyPermissionEngine implements PermissionEngine {
       hooks: this.hooks,
       mode: this.modeValue, // herda Plan/normal/unsafe do pai (escopo ⊆ pai)
       sessionGrants: new SessionGrants(), // E-A3: grants ISOLADOS por filho
+      rememberedAllow: this.rememberedAllow, // o "lembrar" do dono vale para os filhos também
       denySpawnAgent: true, // E-A1: teto de profundidade
       ...(childScope !== undefined ? { toolScope: childScope } : {}), // GS-MD1: tools ⊆ pai
       ...(roomExemptTools !== undefined ? { roomExemptTools } : {}), // GS-MD8: carve-out sala
@@ -428,7 +457,7 @@ export class PolicyPermissionEngine implements PermissionEngine {
     //     cria netos, nem manipulado por injeção a declarar/chamar a tool, nem sob
     //     `--unsafe`. É a propriedade que torna E-A1 garantida pela CATRACA (não só
     //     pela ausência da tool no toolset do filho). CA-A1: deny ⇒ nenhum neto.
-    if (this.denySpawnAgent && call.name === 'spawn_agent') {
+    if (this.denySpawnAgent && (call.name === 'spawn_agent' || call.name === 'agent_send')) {
       return ok(
         'deny',
         'profundidade de sub-agente ≤1 (E-A1): um sub-agente NÃO pode criar netos — spawn_agent negado na catraca',
@@ -593,6 +622,25 @@ export class PolicyPermissionEngine implements PermissionEngine {
       );
     }
 
+    // 0.55) ADR aluy-cli 0002 (decisão 1) — DELEGAÇÃO É ALLOW POR PADRÃO. `spawn_agent` e
+    //     `agent_send` não têm efeito PRÓPRIO no mundo: cada filho passa pela MESMA `decide()`
+    //     para tudo que de fato faz (engine ⊆ pai, nada relaxado). Perguntar a cada delegação
+    //     só adicionava atrito ao que o dono quer autônomo. O usuário volta a `ask` com
+    //     `policy.defaults.spawn_agent = 'ask'` (ou pelo painel `/permissions`), e uma regra
+    //     explícita (`rules`) também vence. Plan já negou acima (não está na allow-list).
+    if (DELEGATION_ALLOW_BY_DEFAULT.has(call.name)) {
+      const overlay = this.safeDefaults.get(call.name);
+      const configured = this.policy.defaults?.[call.name];
+      const rule = evaluatePolicyRules(this.policy, call.name, primaryArg(call));
+      // o "lembrar" do dono (mais recente) vence o default configurado; regra explícita vence tudo.
+      const chosen =
+        rule?.decision ?? (this.rememberedAllow.has(call.name) ? 'allow' : (overlay ?? configured));
+      if (chosen === undefined || chosen === 'allow') {
+        return ok('allow', `delegação (${call.name}) — allow por padrão`, 'default', effect);
+      }
+      return ok(chosen, `política do usuário (${call.name})`, 'default', effect);
+    }
+
     // 0.6) EST-ROOMS-2 · ADR-0081 §8.2 + §13.1 · CLI-SEC-3 (gate AG-0008, P1) —
     //     `room_post` = COMUNICAÇÃO ENTRE AGENTES (categoria `agent-comms`). Chegou
     //     aqui ⇒ NÃO está em Plan (Plan já deu DENY acima: `room_post` NÃO está na
@@ -750,6 +798,17 @@ export class PolicyPermissionEngine implements PermissionEngine {
   }
 
   /**
+   * ADR aluy-cli 0002 — LEMBRA "sempre permitir" para `tool` (o locus persiste em disco).
+   * Recusa (`false`) o que nunca pode ser permanente: `run_command`/`edit_file`/`write_file`
+   * (piso de CLI-SEC-3). Categorias sempre-ask não são alcançadas por isto (precedência 3).
+   */
+  rememberAllow(tool: string): boolean {
+    if (!canRememberTool(tool)) return false;
+    this.rememberedAllow.add(tool);
+    return true;
+  }
+
+  /**
    * EST-0983 · ADR-0064 · CLI-SEC-15 (GS-M2) — REGISTRA que uma gravação de memória
    * (`remember`) OCORREU nesta sessão, avançando o contador do teto. O loop chama
    * isto APÓS a tool `remember` rodar COM SUCESSO (não na decisão — uma gravação que
@@ -791,7 +850,7 @@ export class PolicyPermissionEngine implements PermissionEngine {
     if (fromOverlay) return fromOverlay;
     const fromConfig = this.policy.defaults?.[tool];
     if (fromConfig === 'allow' || fromConfig === 'ask') return fromConfig;
-    return READ_TOOLS.has(tool) ? 'allow' : 'ask';
+    return READ_TOOLS.has(tool) || DELEGATION_ALLOW_BY_DEFAULT.has(tool) ? 'allow' : 'ask';
   }
 
   // ── default seguro por tool (piso de CLI-SEC-3) ──────────────────────────────
@@ -805,6 +864,9 @@ export class PolicyPermissionEngine implements PermissionEngine {
     if (fromOverlay) {
       const floored = this.floor(call.name, fromOverlay);
       return ok(floored, `default ajustado no painel (${call.name})`, 'default', effect);
+    }
+    if (this.rememberedAllow.has(call.name) && canRememberTool(call.name)) {
+      return ok('allow', `lembrado pelo dono (sempre permitir ${call.name})`, 'default', effect);
     }
     const fromConfig = this.policy.defaults?.[call.name];
     if (fromConfig) {

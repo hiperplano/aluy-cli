@@ -97,13 +97,24 @@ function OverviewRow(props: {
   const n = props.node;
   const indent = n.kind === 'root' ? 0 : 2;
   const marker = props.focused ? '▸' : ' ';
+  // ADR aluy-cli 0002 — a última troca pai ⇄ filho, numa ÚNICA linha extra (já redigida e
+  // curta na origem); só aparece para quem de fato conversou, então o orçamento de linhas da
+  // região viva não cresce no caso comum.
+  const mensagem = n.kind === 'root' ? undefined : n.message;
   return (
-    <Box paddingLeft={indent}>
-      <Role name={props.focused ? 'accent' : 'fgDim'}>{marker} </Role>
-      <Role name="accent">[{n.label}]</Role>
-      <Text> </Text>
-      <Role name={phaseRole(n.phase)}>{PHASE_WORD[n.phase]}</Role>
-      <Role name="fgDim"> · {accountingText(n.accounting)}</Role>
+    <Box flexDirection="column">
+      <Box paddingLeft={indent}>
+        <Role name={props.focused ? 'accent' : 'fgDim'}>{marker} </Role>
+        <Role name="accent">[{n.label}]</Role>
+        <Text> </Text>
+        <Role name={phaseRole(n.phase)}>{PHASE_WORD[n.phase]}</Role>
+        <Role name="fgDim"> · {accountingText(n.accounting)}</Role>
+      </Box>
+      {mensagem !== undefined && (
+        <Box paddingLeft={indent + 2}>
+          <Role name="fgDim">{mensagem}</Role>
+        </Box>
+      )}
     </Box>
   );
 }

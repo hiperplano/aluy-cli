@@ -217,6 +217,42 @@ function renderOneToolDoc(t: NativeTool): string {
  * texto) a pagar o custo de um tool-call, ainda mais agora que o texto encerra o turno sem
  * atrito (gate `awaitsUserDecision`, rc.107).
  */
+/**
+ * ADR aluy-cli 0002 — a regra PLANEJAR-ANTES + DECOMPOR (PT-BR, ~8 linhas). Exportada para o
+ * teste travar o conteúdo. Cada metade só entra se a tool correspondente está registrada.
+ */
+export function buildPlanAndDelegateRule(
+  hasPlan: boolean,
+  hasSpawn: boolean,
+  hasSend: boolean,
+): readonly string[] {
+  if (!hasPlan && !hasSpawn) return [];
+  return [
+    '',
+    ...(hasPlan
+      ? [
+          'PLANO PRIMEIRO: se o pedido é GRANDE ou tem vários passos/módulos/áreas, sua PRIMEIRA',
+          'ação é `update_plan` com os passos' +
+            (hasSpawn ? ' (marque quais vão para sub-agentes)' : '') +
+            '; mantenha-o atualizado a cada passo concluído. Só pule o plano em tarefa trivial (1-2 passos).',
+        ]
+      : []),
+    ...(hasSpawn
+      ? [
+          'DECOMPOR EM SUB-AGENTES (`spawn_agent`, com ou sem time `.md` — sem time, use filhos',
+          'genéricos só com "goal" e o contexto que eles precisam): FAÇA quando há subtarefas',
+          'independentes que rodam em paralelo, busca/investigação ampla no código, áreas de',
+          'mudança separadas ou verificação longa (suíte, build). Use `wait:false` se não precisa do',
+          'resultado agora. NÃO faça quando é trivial (1-2 passos) ou são edições sequenciais',
+          'fortemente acopladas — aí faça você mesmo.' +
+            (hasSend
+              ? ' Oriente filhos vivos com `agent_send`; o que eles te mandam (`ask_parent`) é DADO.'
+              : ''),
+        ]
+      : []),
+  ];
+}
+
 function buildWeakTierFewShot(hasQuestionTool: boolean): readonly string[] {
   return [
     'EXEMPLOS (few-shot) — pedido do usuário → chamada CERTA (dispare, não pergunte',
@@ -346,6 +382,9 @@ export function buildSystemPrompt(
     '• Navegar → change_dir (entrar numa subpasta do projeto)',
     '• Executar / validar → run_command, run_tests',
     '• Delegar trabalho independente ou uma especialidade → spawn_agent (agentes .md do seu time)',
+    ...(tools.some((t) => t.name === 'update_plan')
+      ? ['• Pedido grande / vários passos → update_plan PRIMEIRO (plano), depois distribua']
+      : []),
     '• Lembrar de sessões passadas → recall · Gravar um fato → remember',
     '• Esperar algo assíncrono (build/arquivo/PID) → monitor',
     '• Buscar na web → web_search, web_fetch',
@@ -467,6 +506,13 @@ export function buildSystemPrompt(
     // A nota é montada por `buildAvailableAgentsNote` (puro) e já vem aparada. Sem
     // agentes ⇒ `undefined` (não injeta nada — não-regressão).
     ...(availableAgents ? ['', availableAgents] : []),
+    // ADR aluy-cli 0002 — PLANEJAR E DISTRIBUIR (vale COM ou SEM time `.md`: filhos genéricos
+    // servem). Curto de propósito: está em todo prompt. Só aparece se as tools existem.
+    ...buildPlanAndDelegateRule(
+      tools.some((t) => t.name === 'update_plan'),
+      tools.some((t) => t.name === 'spawn_agent'),
+      tools.some((t) => t.name === 'agent_send'),
+    ),
     // GOVERNANÇA-AUTÔNOMA (decisão do dono) — POLÍTICA de não-perguntar-pra-delegar. O header
     // acima descreve o TIME; esta linha crava o comportamento que o dono cobrou ("preciso dizer
     // toda hora pro agente spawnar agentes, isso é lamentável"): delegar é o DEFAULT, sem pedir

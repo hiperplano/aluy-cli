@@ -491,6 +491,11 @@ export interface ToolPorts {
    */
   readonly agentsControl?: import('./agents-manage.js').AgentsControlPort;
   /**
+   * CONVERSA PAI ⇄ FILHO (ADR aluy-cli 0002). OPCIONAL: sem ela `agent_send`/`ask_parent`
+   * respondem "indisponível". O pai recebe `send`; o filho recebe `notifyParent`.
+   */
+  readonly agentMessaging?: import('./agent-messaging.js').AgentMessagingPort;
+  /**
    * EST-0982 — porta do DIRETÓRIO DE TRABALHO DE SESSÃO (`sessionCwd`) que a tool
    * `change_dir` navega (confinada à raiz). OPCIONAL: sem ela, `change_dir` é inerte
    * (erro claro, nenhum efeito) e o agente segue na raiz (não-regressão). O locus
