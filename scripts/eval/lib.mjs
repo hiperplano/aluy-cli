@@ -128,13 +128,12 @@ export function scoreExpectations(expect, m) {
   const out = [];
   const add = (chave, esperado, obtido, ok) => out.push({ chave, esperado, obtido, ok });
   if (!expect) return out;
-  if (expect.planBeforeEffect !== undefined)
-    add(
-      'planBeforeEffect',
-      expect.planBeforeEffect,
-      m.planejou_antes_do_efeito,
-      m.planejou_antes_do_efeito === expect.planBeforeEffect,
-    );
+  if (expect.planBeforeEffect !== undefined) {
+    // Em modo normal (headless) efeitos NEGADOS não aparecem no stream: sem efeito
+    // visível, usa "chamou update_plan" como proxy.
+    const obtido = m.planejou_antes_do_efeito ?? m.plan_chamado;
+    add('planBeforeEffect', expect.planBeforeEffect, obtido, obtido === expect.planBeforeEffect);
+  }
   if (expect.planUpdatesMin !== undefined)
     add(
       'planUpdatesMin',

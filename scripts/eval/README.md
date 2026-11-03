@@ -66,7 +66,9 @@ Outros desfechos: `ok`, `timeout`, `erro_provider`, `falha`.
 
 Em headless não há como confirmar permissão, então no modo **normal (default)** os efeitos
 (edit/write/bash) são **negados**: o agente é medido pelo que _tenta_ fazer (as chamadas
-aparecem no stream), mas pode não concluir a tarefa. `--yolo` auto-aprova tudo, porém o
+aparecem no stream), mas pode não concluir a tarefa. Efeitos negados NÃO aparecem como tool-call no stream (efeitos = 0); por isso, sem efeito
+visível, `planBeforeEffect` usa "chamou `update_plan`" como proxy, e cenários grandes podem
+estourar o timeout (o agente fica sem poder agir). `--yolo` auto-aprova tudo, porém o
 `--yolo` do aluy **derruba a cerca de workspace** (disco inteiro) — não dá para confinar ao
 diretório temporário. Use `--yolo` por sua conta e risco, de preferência em VM/container.
 Por segurança o harness sempre usa `--new --anonymous` (sem retomar sessão, sem gravar

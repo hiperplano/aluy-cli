@@ -150,6 +150,15 @@ const meta = (rotulo) => ({
   repeticoes: 1,
 });
 
+describe('planBeforeEffect sem efeito visível (efeitos negados no modo normal)', () => {
+  it('usa plan_chamado como proxy', () => {
+    const com = computeMetrics(parseStream(nd(call('read'), call('update_plan'))).events);
+    const sem = computeMetrics(parseStream(nd(call('read'))).events);
+    expect(scoreExpectations({ planBeforeEffect: true }, com)[0].ok).toBe(true);
+    expect(scoreExpectations({ planBeforeEffect: true }, sem)[0].ok).toBe(false);
+  });
+});
+
 describe('compare / render', () => {
   const base = { meta: meta('main'), cenarios: [reg('c1', STREAM_SEM_PLANO)] };
   const novo = {
