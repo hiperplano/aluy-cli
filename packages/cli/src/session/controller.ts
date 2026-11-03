@@ -4610,6 +4610,20 @@ export class SessionController {
     // FEEDBACK-IMEDIATO — fim do preparo: o modelo vai ser chamado. `preparando` → `pensando`
     // (só se ainda estamos no rótulo de preparo; rótulos de ciclo/workflow não são tocados).
     if (signal.kind === 'model-call' || signal.kind === 'preparing') {
+      // SEM AR MORTO ENTRE PASSOS — da 2ª chamada de modelo em diante (depois de uma tool) a
+      // fase seguia `streaming` (herdada do passo anterior; não existe fase `tool`) e nada na região viva animava
+      // enquanto o modelo calculava o PRÓXIMO passo: 5–9s só com o relógio do rodapé.
+      // Cada `model-call` reabre a espera honesta: `thinking` + `pensando` + relógio zerado.
+      // A primeira palavra do passo (`abrirTurnoAluy`) devolve a `streaming`. Só a partir de
+      // streaming/tool: asking/budget/etc. nunca coexistem com o início de uma iteração.
+      if (
+        signal.kind === 'model-call' &&
+        this.state.phase === 'streaming' &&
+        !this.selfCheckInFlight
+      ) {
+        this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
+        return;
+      }
       if (this.state.phase !== 'thinking') return;
       const atual = this.state.workingLabel;
       const emPreparo = atual !== undefined && ROTULOS_DE_PREPARO.has(atual);
@@ -7779,6 +7793,10 @@ export class SessionController {
       status: 'running',
       verbGerund: gerundOf(call.name),
     });
+    // SEM INDICADOR DUPLICADO — a linha `◌ rodando…` da tool já anima por conta própria. Se a
+    // fase seguia `thinking` (iteração só de tool-call, sem prosa), o `Λluy pensando…` ficaria
+    // junto com ela. Passa a `streaming` (sem Working); o próximo `model-call` volta a `thinking`.
+    if (this.state.phase === 'thinking') this.patch({ phase: 'streaming' });
     // EST-0982 — alimenta a ATIVIDADE observável da RAIZ (VER/drill-in do pai). O
     // `noteToolStart` REDIGE o alvo (RES-C-1/CLI-SEC-6) antes de torná-lo observável —
     // um `curl … Authorization: Bearer sk-…` vira `‹redigido›` no drill-in.

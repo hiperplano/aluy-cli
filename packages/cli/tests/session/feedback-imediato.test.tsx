@@ -8,7 +8,7 @@
 // o rótulo vira `pensando` quando o loop sinaliza `model-call`; o tempo decorrido anda.
 
 import React from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
 import {
   PolicyPermissionEngine,
@@ -25,6 +25,15 @@ import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
 
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');
+// Rótulos planos: estes testes travam o SENTIDO do rótulo (os verbos brincalhões têm teste próprio).
+const verbosAntes = process.env.ALUY_VERBOS;
+beforeAll(() => {
+  process.env.ALUY_VERBOS = 'simples';
+});
+afterAll(() => {
+  if (verbosAntes === undefined) delete process.env.ALUY_VERBOS;
+  else process.env.ALUY_VERBOS = verbosAntes;
+});
 const plain = (s: string): string => s.replace(ANSI, '');
 
 const ports = {
@@ -214,7 +223,7 @@ describe('sub-rótulos do preparo (controller)', () => {
 });
 
 describe('feedback imediato no submit (App)', () => {
-  it('Enter ⇒ eco da fala + `preparando… 0:00` na tela; o relógio anda; depois `pensando`', async () => {
+  it('Enter ⇒ eco da fala + `lembrando… (lembrando · Ns)` na tela; os segundos andam; depois `pensando`', async () => {
     const { engine, release } = slowMemory();
     let t = 1_000_000;
     const { controller } = build({ memory: engine, clock: () => t });
@@ -237,15 +246,15 @@ describe('feedback imediato no submit (App)', () => {
     await waitFor(() => /lembrando/.test(plain(r.lastFrame() ?? '')));
     const f1 = plain(r.lastFrame() ?? '');
     expect(f1).toContain('ola'); // eco da mensagem
-    expect(f1).toMatch(/lembrando… 0:00/);
+    expect(f1).toMatch(/lembrando… \(lembrando · \d+s\)/); // fase honesta + segundos, sem M:SS
     expect(f1).not.toContain('pensando');
 
-    // 3s depois, com o recall ainda pendurado: a linha segue VIVA e o relógio andou.
+    // 3s depois, com o recall ainda pendurado: a linha segue lá e os segundos andaram.
     t += 3000;
-    await waitFor(() => /lembrando… 0:03/.test(plain(r.lastFrame() ?? '')));
+    await waitFor(() => /lembrando… \(lembrando · 3s\)/.test(plain(r.lastFrame() ?? '')));
 
     release(); // recall termina ⇒ o loop chama o modelo ⇒ `pensando`
-    await waitFor(() => /pensando… 0:0\d/.test(plain(r.lastFrame() ?? '')));
+    await waitFor(() => /pensando… \(pensando · \d+s\)/.test(plain(r.lastFrame() ?? '')));
     r.unmount();
     controller.dispose();
   });

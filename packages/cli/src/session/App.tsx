@@ -57,7 +57,6 @@ import {
   PermissionsPanel,
   FlowTreeView,
   ActivityLog,
-  TurnFooter,
   QuotaFooter,
   Divider,
   type HintState,
@@ -164,6 +163,14 @@ import { isUnrecognizedEscapeTail } from './escape-leak.js';
 // F197 — sugestão de próximo prompt (ghost + Tab): blocos+i18n → texto do composer.
 import { resolveSuggestionText } from './suggest.js';
 import { buildTurnRecap } from './turn-recap.js';
+import {
+  ROTULOS_GENERICOS,
+  SeletorDeVerbo,
+  detalheDeEspera,
+  parseVerbos,
+  rotuloExibido,
+  verbosSimples,
+} from './verbos.js';
 import {
   createPasteRegistry,
   shouldCollapse,
@@ -1150,8 +1157,8 @@ export function App(props: AppProps): React.ReactElement {
   // EST-0989 (i18n) — os NATIVOS LOCALIZADOS no idioma ativo (summaries traduzidos). Memo
   // pelo `t`: só re-mapeia ao trocar de idioma (em pt-BR devolve a MESMA ref ⇒ sem churn).
   const localizedNatives = useMemo(() => localizeCommands(NATIVE_COMMANDS, t), [t]);
-  // F-RECAP — resumo do que o turno FEZ, para a linha do rodapé (ver `turn-recap.ts`).
-  // Memoizado nos blocos: a função é PURA e barata, mas o rodapé re-renderiza a cada tick
+  // Resumo do que o turno FEZ — alimenta SÓ o digest da sugestão de próximo prompt
+  // (`suggestNext`); NÃO é mais desenhado no composer (ver `turn-recap.ts`). Memoizado nos blocos: a função é PURA e barata, mas o rodapé re-renderiza a cada tick
   // da região viva e não há por que refazer a varredura enquanto os blocos não mudam.
   const turnRecap = useMemo(() => buildTurnRecap(state.blocks), [state.blocks]);
 
@@ -1244,11 +1251,58 @@ export function App(props: AppProps): React.ReactElement {
     return [];
   })();
 
+  // VERBOS DE ESPERA — o rótulo genérico (`pensando`…) vira um gerúndio sorteado 1× por PASSO
+  // (a identidade do passo é o `workingSince`). Rótulos funcionais ficam como estão.
+  const seletorVerbo = useRef<SeletorDeVerbo | null>(null);
+  if (seletorVerbo.current === null) seletorVerbo.current = new SeletorDeVerbo();
+  const listaVerbos = useMemo(() => parseVerbos(t('working.verbs')), [t]);
+  const verbosPlanos = useMemo(() => verbosSimples(), []);
+  const rotuloVivo = rotuloExibido({
+    label: state.workingLabel,
+    passo: state.workingSince,
+    verbos: listaVerbos,
+    seletor: seletorVerbo.current,
+    simples: verbosPlanos,
+  });
   const indicadorTrabalho = workingIndicator({
     count: state.detachedSubagents ?? 0,
     phase: state.phase,
-    ...(state.workingLabel !== undefined ? { workingLabel: state.workingLabel } : {}),
+    ...(rotuloVivo !== undefined ? { workingLabel: rotuloVivo } : {}),
   });
+  // PARÊNTESE DIM (estilo Claude Code): `(pensando · 1,2k tokens · 12s)` — a fase REAL, os
+  // tokens do turno até agora e os segundos desde o INÍCIO DO TURNO (a mesma fonte do relógio
+  // do rodapé: a contabilidade viva da raiz). Lido a cada render; o tick de 1s o atualiza.
+  // Tokens = uso reportado pelo broker/provider até o último passo concluído (o aggregate
+  // pai+filhos); ausente/0 ⇒ o segmento some. Rótulo funcional já é a fase ⇒ sem palavra.
+  const contaViva =
+    state.phase === 'thinking' || state.phase === 'retrying'
+      ? controller.turnAccounting()
+      : undefined;
+  const msDoTurno =
+    contaViva?.live === true
+      ? contaViva.durationMs
+      : state.workingSince !== undefined
+        ? Math.max(0, (props.now ?? Date.now)() - state.workingSince)
+        : undefined;
+  const detalheEspera =
+    msDoTurno !== undefined
+      ? detalheDeEspera({
+          fase:
+            state.workingLabel !== undefined && ROTULOS_GENERICOS.has(state.workingLabel)
+              ? state.workingLabel
+              : undefined,
+          tokens: contaViva?.tokens,
+          ms: msDoTurno,
+          // "Λluy " + rótulo + "… " + " " + sufixo dos sub-agentes: o que sobra da linha.
+          larguraMax:
+            columns -
+            (5 +
+              indicadorTrabalho.label.length +
+              2 +
+              (indicadorTrabalho.suffix !== undefined ? indicadorTrabalho.suffix.length + 1 : 0) +
+              2),
+        })
+      : undefined;
   const phaseAnimates =
     animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo }) ||
     doctorRunning(state.blocks);
@@ -5127,9 +5181,7 @@ export function App(props: AppProps): React.ReactElement {
             glyph="aluy"
             glyphRole="accent"
             label={indicadorTrabalho.label}
-            {...(state.phase === 'thinking' && state.workingSince !== undefined
-              ? { elapsedMs: Math.max(0, (props.now ?? Date.now)() - state.workingSince) }
-              : {})}
+            {...(detalheEspera !== undefined ? { detalhe: detalheEspera } : {})}
             {...(indicadorTrabalho.suffix !== undefined
               ? { suffix: indicadorTrabalho.suffix }
               : {})}
@@ -5573,14 +5625,9 @@ export function App(props: AppProps): React.ReactElement {
           // F-COMPOSER-FUNDO — a cor vem do tema e some sozinha sem truecolor.
           {...(theme.composerBg !== undefined ? { backgroundColor: theme.composerBg } : {})}
         />
-        {state.turnAccounting && (state.phase === 'done' || state.phase === 'budget') && (
-          <TurnFooter
-            accounting={state.turnAccounting}
-            columns={columns}
-            showCost={false}
-            {...(turnRecap !== undefined ? { recap: turnRecap } : {})}
-          />
-        )}
+        {/* SEM LOG DENTRO DO COMPOSER — o recap do turno (`✔ editou b.txt`) saiu daqui a pedido
+            do dono: o composer é para COMPOR; o que o turno fez já está na conversa. O custo
+            vive no cabeçalho da caixa da resposta (F-CONTA-NO-BLOCO). */}
       </ComposerBox>
       {/* F-COMPOSER-SOMBRA — TIRADA a pedido do dono ("achei que a sombra não ficou
           legal"). A técnica (meio-bloco deslocado, a mesma da marca 3D) funciona numa
@@ -5686,7 +5733,7 @@ export function App(props: AppProps): React.ReactElement {
         {/* FOOTER-AGENTES — os sub-agentes VIVOS ganham uma coluna À ESQUERDA do painel,
             separados por uma barra vertical (pedido do dono). Sem agentes vivos o
             <FooterAgents> é passagem direta: a tela de quem não dispara agente não muda. */}
-        <FooterAgents filhos={filhosRodape} rows={rows}>
+        <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
           {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
             pulso âmbar, que saiu. Continuar passando faria o painel re-renderizar a cada
             quadro sem desenhar nada diferente, e deixaria dois campos aceitos-e-ignorados
@@ -5905,7 +5952,13 @@ export function BlockView(props: {
       // EST-0969 (display) — indicador compacto dos sub-agentes paralelos: status
       // por filho, NUNCA os tokens crus de cada um (que interleavariam). Bloco
       // estável (sem jitter): só muda na transição de um filho (início/fim).
-      return <SubAgents childrenStatus={b.children} settled={props.settled === true} />;
+      return (
+        <SubAgents
+          childrenStatus={b.children}
+          settled={props.settled === true}
+          frame={props.frame}
+        />
+      );
     case 'doctor':
       // EST-0970 (ticks AO VIVO) — checklist progressiva do `/doctor`: cada item
       // `pending` (spinner ⠋) "acende" p/ ✓/⚠/✗ quando o probe resolve aquele check.

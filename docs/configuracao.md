@@ -94,6 +94,7 @@ As `ALUY_*` sobrescrevem o `config.json`. As mais usadas:
 | `ALUY_LOCAL_AUTH` | `apikey` ou `oauth` |
 | `ALUY_LOCAL_BASE_URL` | endpoint próprio (validado por anti-SSRF) |
 | `ALUY_RETRY` | `off` desliga a retentativa automática |
+| `ALUY_VERBOS` | `simples` troca os verbos de espera brincalhões (`Garimpando…`, `Matutando…`) pelos rótulos planos (`pensando…`). Padrão: verbos. `ALUY_VERBOS_SEED` fixa o sorteio (testes) |
 | `ALUY_QUOTA_PAUSE` · `ALUY_QUOTA_MAX_WAIT` | pausa por cota esgotada: `off` desliga; espera máxima (`90m`, `6h`) — ver [pausa por cota](pausa-por-cota.md) |
 | `ANTHROPIC_API_KEY` · `OPENAI_API_KEY` · `OPENROUTER_API_KEY` | credencial do provider |
 

@@ -15,6 +15,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import stringWidth from 'string-width';
+import { ShimmerText } from './ShimmerText.js';
 
 /** Espelha `SubAgentChild` do model (sem importar o tipo p/ manter o componente puro). */
 export interface SubAgentChildView {
@@ -43,6 +44,8 @@ export interface SubAgentsProps {
    * plano" (o estado ao vivo mora no painel do rodapé).
    */
   readonly settled?: boolean;
+  /** Frame do tick central (brilho dos filhos rodando). Ausente ⇒ frame 0. */
+  readonly frame?: number;
 }
 
 /** Palavra do estado (a11y): glifo NUNCA sozinho. `timeout`/`limit` ⇒ palavra honesta. */
@@ -68,6 +71,7 @@ function statusWord(child: SubAgentChildView, settled = false): string {
 function ChildLine(props: {
   readonly child: SubAgentChildView;
   readonly settled?: boolean;
+  readonly frame?: number;
 }): React.ReactElement {
   const theme = useTheme();
   const c = props.child;
@@ -83,6 +87,10 @@ function ChildLine(props: {
     ) : (
       <Glyph name="err" role="danger" />
     );
+  // Só quem está RODANDO brilha — `settled` (scrollback) é história, nunca repinta.
+  const viva = c.status === 'running' && props.settled !== true;
+  const rotulo = `[${c.label}]`;
+  const total = rotulo.length + 1 + word.length;
   const wordRole = c.status === 'done' ? 'success' : c.status === 'fail' ? 'danger' : 'fgDim';
   // O `✔` mede DUAS colunas na conta do Ink (`string-width`) e UMA na nossa
   // (`displayWidth`) — as duas bibliotecas discordam. Com o separador FIXO em um espaço, a
@@ -104,11 +112,26 @@ function ChildLine(props: {
   const espacoAposGlifo = ' '.repeat(Math.max(0, 2 - stringWidth(theme.glyph(nomeGlifo))) + 1);
   return (
     <Box paddingLeft={2}>
-      <Role name="accent">[{c.label}]</Role>
+      {/* BRILHO: enquanto RODA, a banda de cor da marca varre `[nome] … palavra` (o sinal de
+          "vivo"; o relógio/glifo é só complemento). Terminado/pausado/falho: estático. */}
+      {viva ? (
+        <ShimmerText text={rotulo} frame={props.frame ?? 0} papelEstatico="accent" total={total} />
+      ) : (
+        <Role name="accent">{rotulo}</Role>
+      )}
       <Text> </Text>
       {glyph}
       <Text>{espacoAposGlifo}</Text>
-      <Role name={wordRole}>{word}</Role>
+      {viva ? (
+        <ShimmerText
+          text={word}
+          frame={props.frame ?? 0}
+          offset={rotulo.length + 1}
+          total={total}
+        />
+      ) : (
+        <Role name={wordRole}>{word}</Role>
+      )}
       {/* ADR-0146 (D5) — tier/modelo RESOLVIDO: visível enquanto roda E mantido no
           resumo final (mesma linha, ao lado do status/summary). NUNCA credencial. */}
       {c.model !== undefined && <Role name="fgDim"> · {c.model}</Role>}
@@ -138,7 +161,12 @@ export function SubAgents(props: SubAgentsProps): React.ReactElement {
         {headTail !== '' && <Role name="fgDim">{headTail}</Role>}
       </Box>
       {items.map((c, i) => (
-        <ChildLine key={`${c.label}:${i}`} child={c} settled={props.settled === true} />
+        <ChildLine
+          key={`${c.label}:${i}`}
+          child={c}
+          settled={props.settled === true}
+          {...(props.frame !== undefined ? { frame: props.frame } : {})}
+        />
       ))}
     </Box>
   );
