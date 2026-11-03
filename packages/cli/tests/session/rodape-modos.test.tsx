@@ -1,4 +1,4 @@
-// RODAPÉ em 3 modos (completo | parcial | oculto) — resolução, persistência, F2, /rodape,
+// RODAPÉ em 3 modos (full | compact | hidden) — resolução, persistência, F2, /statusline,
 // avisos que não somem (yolo) e a linha compacta.
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,9 +14,9 @@ import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
 import {
   UserConfigStore,
-  proximoRodape,
-  resolveInitialRodape,
-  rodapeEfetivo,
+  nextStatusline,
+  resolveInitialStatusline,
+  effectiveStatusline,
 } from '../../src/io/user-config.js';
 import { caminhoCurto, linhaParcial, segmentosParcial } from '../../src/session/rodape.js';
 
@@ -27,25 +27,27 @@ const ENV = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' };
 
 describe('resolução do modo', () => {
   it('automático: completo, ou parcial em tela baixa (≤ 30); altura 0/desconhecida ⇒ completo', () => {
-    expect(rodapeEfetivo(undefined, 45)).toBe('completo');
-    expect(rodapeEfetivo(undefined, 31)).toBe('completo');
-    expect(rodapeEfetivo(undefined, 30)).toBe('parcial');
-    expect(rodapeEfetivo(undefined, 24)).toBe('parcial');
-    expect(rodapeEfetivo(undefined, 0)).toBe('completo');
+    expect(effectiveStatusline(undefined, 45)).toBe('full');
+    expect(effectiveStatusline(undefined, 31)).toBe('full');
+    expect(effectiveStatusline(undefined, 30)).toBe('compact');
+    expect(effectiveStatusline(undefined, 24)).toBe('compact');
+    expect(effectiveStatusline(undefined, 0)).toBe('full');
   });
   it('escolha explícita vence a altura', () => {
-    expect(rodapeEfetivo('completo', 24)).toBe('completo');
-    expect(rodapeEfetivo('oculto', 45)).toBe('oculto');
+    expect(effectiveStatusline('full', 24)).toBe('full');
+    expect(effectiveStatusline('hidden', 45)).toBe('hidden');
   });
   it('env > config; lixo é ignorado', () => {
-    expect(resolveInitialRodape({ rodape: 'parcial' }, { ALUY_RODAPE: 'oculto' })).toBe('oculto');
-    expect(resolveInitialRodape({ rodape: 'parcial' }, {})).toBe('parcial');
-    expect(resolveInitialRodape({}, { ALUY_RODAPE: 'xx' })).toBeUndefined();
+    expect(resolveInitialStatusline({ statusline: 'compact' }, { ALUY_STATUSLINE: 'hidden' })).toBe(
+      'hidden',
+    );
+    expect(resolveInitialStatusline({ statusline: 'compact' }, {})).toBe('compact');
+    expect(resolveInitialStatusline({}, { ALUY_STATUSLINE: 'xx' })).toBeUndefined();
   });
-  it('ciclo F2: completo → parcial → oculto → completo', () => {
-    expect(proximoRodape('completo')).toBe('parcial');
-    expect(proximoRodape('parcial')).toBe('oculto');
-    expect(proximoRodape('oculto')).toBe('completo');
+  it('ciclo F2: full → compact → hidden → full', () => {
+    expect(nextStatusline('full')).toBe('compact');
+    expect(nextStatusline('compact')).toBe('hidden');
+    expect(nextStatusline('hidden')).toBe('full');
   });
 });
 
@@ -55,13 +57,15 @@ describe('persistência em ~/.aluy/config.json', () => {
     dir = mkdtempSync(join(tmpdir(), 'aluy-rodape-'));
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
-  it('saveRodape grava e o load devolve; valor inválido no disco some', () => {
+  it('saveStatusline grava e o load devolve; valor inválido no disco some', () => {
     const store = new UserConfigStore({ baseDir: dir });
-    expect(store.saveRodape('oculto')).toBe(true);
-    expect(store.load().rodape).toBe('oculto');
+    expect(store.saveStatusline('hidden')).toBe(true);
+    expect(store.load().statusline).toBe('hidden');
     expect(existsSync(join(dir, 'config.json'))).toBe(true);
-    const bruto = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { rodape?: string };
-    expect(bruto.rodape).toBe('oculto');
+    const bruto = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as {
+      statusline?: string;
+    };
+    expect(bruto.statusline).toBe('hidden');
   });
 });
 
@@ -123,7 +127,7 @@ function ports(): ToolPorts {
   } as ToolPorts;
 }
 
-function mount(opts: { rodape?: 'completo' | 'parcial' | 'oculto'; unsafe?: boolean }) {
+function mount(opts: { statusline?: 'full' | 'compact' | 'hidden'; unsafe?: boolean }) {
   const controller = new SessionController({
     model: {
       async call() {
@@ -137,19 +141,19 @@ function mount(opts: { rodape?: 'completo' | 'parcial' | 'oculto'; unsafe?: bool
     flush: { intervalMs: 0 },
   });
   controller.dismissBoot();
-  const onRodapeChange = vi.fn();
+  const onStatuslineChange = vi.fn();
   const r = render(
     <ThemeProvider theme={resolveTheme({ env: ENV })}>
       <App
         controller={controller}
         animate={false}
         bootMs={0}
-        {...(opts.rodape !== undefined ? { initialRodape: opts.rodape } : {})}
-        onRodapeChange={onRodapeChange}
+        {...(opts.statusline !== undefined ? { initialStatusline: opts.statusline } : {})}
+        onStatuslineChange={onStatuslineChange}
       />
     </ThemeProvider>,
   );
-  return { controller, onRodapeChange, ...r };
+  return { controller, onStatuslineChange, ...r };
 }
 
 async function esperar(cond: () => boolean, ms = 2000): Promise<void> {
@@ -162,7 +166,7 @@ async function esperar(cond: () => boolean, ms = 2000): Promise<void> {
 
 describe('App — os 3 modos', () => {
   it('completo: painel inteiro + dicas', async () => {
-    const { lastFrame, unmount } = mount({ rodape: 'completo' });
+    const { lastFrame, unmount } = mount({ statusline: 'full' });
     await esperar(() => plain(lastFrame()).includes('sessão'));
     const f = plain(lastFrame());
     expect(f).toContain('estado');
@@ -171,7 +175,7 @@ describe('App — os 3 modos', () => {
   });
 
   it('parcial: UMA linha com o essencial; sem o painel', async () => {
-    const { lastFrame, unmount } = mount({ rodape: 'parcial' });
+    const { lastFrame, unmount } = mount({ statusline: 'compact' });
     await esperar(() => plain(lastFrame()).includes('% janela'));
     const f = plain(lastFrame());
     expect(f).toContain('4% janela');
@@ -181,13 +185,13 @@ describe('App — os 3 modos', () => {
   });
 
   it('parcial + yolo: o aviso aparece na linha', async () => {
-    const { lastFrame, unmount } = mount({ rodape: 'parcial', unsafe: true });
+    const { lastFrame, unmount } = mount({ statusline: 'compact', unsafe: true });
     await esperar(() => plain(lastFrame()).includes('⚠ yolo'));
     unmount();
   });
 
   it('oculto: nada abaixo do composer (sem yolo); a dica só aparece ao entrar no modo', async () => {
-    const { lastFrame, unmount } = mount({ rodape: 'oculto' });
+    const { lastFrame, unmount } = mount({ statusline: 'hidden' });
     await new Promise((r) => setTimeout(r, 100));
     const f = plain(lastFrame());
     expect(f).not.toContain('% janela');
@@ -197,13 +201,13 @@ describe('App — os 3 modos', () => {
   });
 
   it('oculto + yolo: o ⚠ yolo NUNCA some', async () => {
-    const { lastFrame, unmount } = mount({ rodape: 'oculto', unsafe: true });
+    const { lastFrame, unmount } = mount({ statusline: 'hidden', unsafe: true });
     await esperar(() => plain(lastFrame()).includes('⚠ yolo'));
     unmount();
   });
 
-  it('F2 cicla (completo → parcial → oculto) e persiste cada escolha', async () => {
-    const { lastFrame, stdin, onRodapeChange, unmount } = mount({ rodape: 'completo' });
+  it('F2 cicla (full → compact → hidden) e persiste cada escolha', async () => {
+    const { lastFrame, stdin, onStatuslineChange, unmount } = mount({ statusline: 'full' });
     await esperar(() => plain(lastFrame()).includes('estado'));
     // espera o listener cru do stdin attachar
     await new Promise((r) => setTimeout(r, 50));
@@ -213,7 +217,7 @@ describe('App — os 3 modos', () => {
     );
     stdin.write('\x1b[12~');
     await esperar(() => plain(lastFrame()).includes('rodapé oculto'));
-    expect(onRodapeChange.mock.calls.map((c) => c[0])).toEqual(['parcial', 'oculto']);
+    expect(onStatuslineChange.mock.calls.map((c) => c[0])).toEqual(['compact', 'hidden']);
     unmount();
   });
 });

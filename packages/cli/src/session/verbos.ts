@@ -17,10 +17,10 @@ export const ROTULOS_GENERICOS: ReadonlySet<string> = new Set([
   'maestro avaliando',
 ]);
 
-/** `ALUY_VERBOS=simples` volta aos rótulos planos (`pensando…`). Default: verbos. */
+/** `ALUY_SPINNER_VERBS=plain` volta aos rótulos planos (`pensando…`). Default: `playful`. */
 export function verbosSimples(env: NodeJS.ProcessEnv = process.env): boolean {
-  const v = (env.ALUY_VERBOS ?? '').trim().toLowerCase();
-  return v === 'simples' || v === 'off' || v === '0' || v === 'false';
+  const v = (env.ALUY_SPINNER_VERBS ?? '').trim().toLowerCase();
+  return v === 'plain' || v === 'off' || v === '0' || v === 'false';
 }
 
 /** RNG determinístico (mulberry32) — `seed` fixa a sequência. */
@@ -35,9 +35,9 @@ export function criarRng(seed: number): () => number {
   };
 }
 
-/** Seed do processo: `ALUY_VERBOS_SEED` (testes/repro) ou o relógio. */
+/** Seed do processo: `ALUY_SPINNER_VERBS_SEED` (testes/repro) ou o relógio. */
 export function seedPadrao(env: NodeJS.ProcessEnv = process.env): number {
-  const s = Number.parseInt(env.ALUY_VERBOS_SEED ?? '', 10);
+  const s = Number.parseInt(env.ALUY_SPINNER_VERBS_SEED ?? '', 10);
   return Number.isFinite(s) ? s : Date.now();
 }
 

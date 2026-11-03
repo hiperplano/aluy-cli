@@ -1,5 +1,5 @@
 // VERBOS DE ESPERA — `pensando…` vira um gerúndio brincalhão, sorteado 1× por PASSO; os rótulos
-// funcionais seguem intactos; `ALUY_VERBOS=simples` volta ao plano; espera longa ganha uma dica
+// funcionais seguem intactos; `ALUY_SPINNER_VERBS=plain` volta ao plano; espera longa ganha uma dica
 // honesta SEM números; e a linha NÃO tem mais relógio (o brilho é o sinal de "vivo").
 
 import React from 'react';
@@ -90,17 +90,17 @@ describe('sorteio por TURNO (fonte única: estado do controller)', () => {
     c.dispose();
   });
 
-  it('ALUY_VERBOS=simples ⇒ nenhum verbo no estado', () => {
-    const antes = process.env.ALUY_VERBOS;
-    process.env.ALUY_VERBOS = 'simples';
+  it('ALUY_SPINNER_VERBS=plain ⇒ nenhum verbo no estado', () => {
+    const antes = process.env.ALUY_SPINNER_VERBS;
+    process.env.ALUY_SPINNER_VERBS = 'plain';
     try {
       const c = novo();
       novoTurno(c);
       expect(comPasso(c, 1000)).toBeUndefined();
       c.dispose();
     } finally {
-      if (antes === undefined) delete process.env.ALUY_VERBOS;
-      else process.env.ALUY_VERBOS = antes;
+      if (antes === undefined) delete process.env.ALUY_SPINNER_VERBS;
+      else process.env.ALUY_SPINNER_VERBS = antes;
     }
   });
 
@@ -143,8 +143,8 @@ describe('quais rótulos viram verbo', () => {
   it('sem verbo (modo simples) devolve o rótulo plano', () => {
     expect(rotuloExibido({ label: 'pensando', verbo: undefined })).toBe('pensando');
   });
-  it('ALUY_VERBOS=simples é lido do ambiente', () => {
-    expect(verbosSimples({ ALUY_VERBOS: 'simples' })).toBe(true);
+  it('ALUY_SPINNER_VERBS=plain é lido do ambiente', () => {
+    expect(verbosSimples({ ALUY_SPINNER_VERBS: 'plain' })).toBe(true);
     expect(verbosSimples({})).toBe(false);
   });
 });
@@ -256,13 +256,13 @@ describe('caixa da resposta: o MESMO verbo no raciocínio ao vivo', () => {
 });
 
 describe('integração de ambiente', () => {
-  const antes = process.env.ALUY_VERBOS;
+  const antes = process.env.ALUY_SPINNER_VERBS;
   beforeAll(() => {
-    process.env.ALUY_VERBOS = 'simples';
+    process.env.ALUY_SPINNER_VERBS = 'plain';
   });
   afterAll(() => {
-    if (antes === undefined) delete process.env.ALUY_VERBOS;
-    else process.env.ALUY_VERBOS = antes;
+    if (antes === undefined) delete process.env.ALUY_SPINNER_VERBS;
+    else process.env.ALUY_SPINNER_VERBS = antes;
   });
   it('lê o processo por padrão', () => {
     expect(verbosSimples()).toBe(true);

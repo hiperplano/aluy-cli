@@ -668,7 +668,7 @@ export interface SessionState {
   /**
    * VERBO do passo corrente (`Costurando`) — FONTE ÚNICA: o controller sorteia um novo a cada
    * mudança de `workingSince` (cada passo) e a linha de trabalho e o `⋯ Costurando…` da caixa
-   * da resposta leem o MESMO valor, então nunca divergem. Ausente (`ALUY_VERBOS=simples`) ⇒
+   * da resposta leem o MESMO valor, então nunca divergem. Ausente (`ALUY_SPINNER_VERBS=plain`) ⇒
    * rótulos planos (`pensando`).
    */
   readonly workingVerb?: string | undefined;

@@ -26,13 +26,13 @@ import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');
 // Rótulos planos: estes testes travam o SENTIDO do rótulo (os verbos brincalhões têm teste próprio).
-const verbosAntes = process.env.ALUY_VERBOS;
+const verbosAntes = process.env.ALUY_SPINNER_VERBS;
 beforeAll(() => {
-  process.env.ALUY_VERBOS = 'simples';
+  process.env.ALUY_SPINNER_VERBS = 'plain';
 });
 afterAll(() => {
-  if (verbosAntes === undefined) delete process.env.ALUY_VERBOS;
-  else process.env.ALUY_VERBOS = verbosAntes;
+  if (verbosAntes === undefined) delete process.env.ALUY_SPINNER_VERBS;
+  else process.env.ALUY_SPINNER_VERBS = verbosAntes;
 });
 const plain = (s: string): string => s.replace(ANSI, '');
 

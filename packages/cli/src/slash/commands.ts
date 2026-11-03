@@ -57,7 +57,7 @@ export type NativeCommandId =
   | 'split'
   | 'fullscreen'
   | 'suggest'
-  | 'rodape'
+  | 'statusline'
   | 'export'
   | 'tools'
   | 'quit'
@@ -656,7 +656,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
   },
   {
     name: 'notify',
-    summary: 'notificações: tudo | atencao | nada',
+    summary: 'notificações: all | attention | off',
     summaryKey: 'cmd.notify',
     source: 'native',
     id: 'notify',
@@ -700,12 +700,12 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
   },
   {
     // RODAPÉ — 3 modos p/ tudo abaixo do composer: completo | parcial | oculto. Sem arg alterna
-    // (o mesmo ciclo do F2); persiste a pref (ui.rodape). Alias `/statusline`.
-    name: 'rodape',
-    summary: 'rodapé: completo | parcial | oculto (F2 alterna · /statusline)',
-    usage: '[completo|parcial|oculto]',
+    // (o mesmo ciclo do F2); persiste a pref (statusline).
+    name: 'statusline',
+    summary: 'rodapé: full | compact | hidden (F2 alterna)',
+    usage: '[full|compact|hidden]',
     source: 'native',
-    id: 'rodape',
+    id: 'statusline',
     section: 'sessão',
     // ADR-0147 — layout do terminal do humano: sem sentido p/ o agente.
     agentEffect: 'human-only',
@@ -1416,14 +1416,7 @@ export function routeInput(line: string, userCommands: readonly SlashCommand[] =
   const rawName = (spaceIdx === -1 ? withoutSlash : withoutSlash.slice(0, spaceIdx)).toLowerCase();
   // EST-0990 — `/view` é ALIAS de `/split` (mesmo toggle do modo view avançado).
   // EST-1000 · ADR-0076 — `/cockpit` é ALIAS de `/fullscreen` (mesmo toggle do cockpit).
-  const name =
-    rawName === 'view'
-      ? 'split'
-      : rawName === 'cockpit'
-        ? 'fullscreen'
-        : rawName === 'statusline'
-          ? 'rodape'
-          : rawName;
+  const name = rawName === 'view' ? 'split' : rawName === 'cockpit' ? 'fullscreen' : rawName;
   const args = spaceIdx === -1 ? '' : withoutSlash.slice(spaceIdx + 1).trim();
   const all = [...NATIVE_COMMANDS, ...userCommands];
   const command = all.find((c) => c.name === name);

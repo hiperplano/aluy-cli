@@ -171,11 +171,11 @@ import { ROTULOS_GENERICOS, detalheDeEspera, rotuloExibido } from './verbos.js';
 import { homedir } from 'node:os';
 import { buildSidecarChip } from '@hiperplano/aluy-cli-core';
 import {
-  rodapeEfetivo,
-  proximoRodape,
-  isRodapeModo,
-  RODAPE_LINHAS_CURTAS,
-  type RodapeModo,
+  effectiveStatusline,
+  nextStatusline,
+  isStatuslineMode,
+  STATUSLINE_SHORT_ROWS,
+  type StatuslineMode,
 } from '../io/user-config.js';
 import { RodapeParcial } from '../ui/components/RodapeParcial.js';
 import {
@@ -604,12 +604,12 @@ export interface AppProps {
   /** F21 — janela (ms) p/ a sugestão do modelo chegar antes da heurística (default 2500; teste). */
   readonly suggestModelWindowMs?: number;
   /**
-   * RODAPÉ — modo ESCOLHIDO na partida (`ALUY_RODAPE` > `config.rodape`); ausente ⇒ automático
-   * (`completo`, ou `parcial` em terminal ≤ 30 linhas). `/rodape` e F2 mudam em sessão.
+   * RODAPÉ — modo ESCOLHIDO na partida (`ALUY_STATUSLINE` > `config.statusline`); ausente ⇒ automático
+   * (`full`, ou `compact` em terminal ≤ 30 linhas). `/statusline` e F2 mudam em sessão.
    */
-  readonly initialRodape?: RodapeModo;
-  /** RODAPÉ — persiste a escolha (`store.saveRodape`). Só UI — nunca segredo. */
-  readonly onRodapeChange?: (modo: RodapeModo) => void;
+  readonly initialStatusline?: StatuslineMode;
+  /** RODAPÉ — persiste a escolha (`store.saveStatusline`). Só UI — nunca segredo. */
+  readonly onStatuslineChange?: (modo: StatuslineMode) => void;
   /**
    * EST-1000 · ADR-0076 §4 / CLI-SEC-6 / RES-C-1 — exporta o transcript REDIGIDO p/
    * arquivo (`/export` / ctrl+s). O wiring injeta o gravador (passa pela catraca +
@@ -811,20 +811,20 @@ export function App(props: AppProps): React.ReactElement {
   const [suggestionsOn, setSuggestionsOn] = useState(props.initialSuggestions !== false);
   const [suggestion, setSuggestion] = useState<string | undefined>(undefined);
   // RODAPÉ — `undefined` = automático (parcial em tela baixa); escolha explícita vence.
-  const [rodapeEscolhido, setRodapeEscolhido] = useState<RodapeModo | undefined>(
-    props.initialRodape,
+  const [statuslineChosen, setStatuslineChosen] = useState<StatuslineMode | undefined>(
+    props.initialStatusline,
   );
   // 1ª vez em `oculto`: uma dica mínima de como voltar, até o próximo envio.
   const [dicaOculto, setDicaOculto] = useState(false);
   // `stdout.rows` ausente (pipe/teste) ⇒ altura desconhecida ⇒ NÃO força o modo compacto.
-  const rodapeModo: RodapeModo = rodapeEfetivo(rodapeEscolhido, stdout?.rows ?? 0);
-  const rodapeModoRef = useRef<RodapeModo>(rodapeModo);
-  rodapeModoRef.current = rodapeModo;
-  const aplicarRodape = useCallback(
-    (modo: RodapeModo) => {
-      setRodapeEscolhido(modo);
-      setDicaOculto(modo === 'oculto');
-      props.onRodapeChange?.(modo);
+  const statuslineMode: StatuslineMode = effectiveStatusline(statuslineChosen, stdout?.rows ?? 0);
+  const statuslineModeRef = useRef<StatuslineMode>(statuslineMode);
+  statuslineModeRef.current = statuslineMode;
+  const applyStatusline = useCallback(
+    (modo: StatuslineMode) => {
+      setStatuslineChosen(modo);
+      setDicaOculto(modo === 'hidden');
+      props.onStatuslineChange?.(modo);
     },
     [props],
   );
@@ -833,8 +833,8 @@ export function App(props: AppProps): React.ReactElement {
     if (state.phase === 'thinking') setDicaOculto(false);
   }, [state.phase]);
   const ciclarRodape = useCallback(
-    () => aplicarRodape(proximoRodape(rodapeModoRef.current)),
-    [aplicarRodape],
+    () => applyStatusline(nextStatusline(statuslineModeRef.current)),
+    [applyStatusline],
   );
   // Aborta a sugestão do modelo do turno ANTERIOR: se um turno novo começou, a resposta
   // que ainda está vindo é sobre um contexto morto e não pode pintar por cima.
@@ -2040,20 +2040,21 @@ export function App(props: AppProps): React.ReactElement {
         toggleFullscreen();
         return;
       }
-      // RODAPÉ — `/rodape [completo|parcial|oculto]` (alias `/statusline`): sem arg cicla (como
+      // RODAPÉ — `/statusline [full|compact|hidden]`: sem arg cicla (como
       // o F2). UI pura — persiste a pref e confirma com uma nota curta.
-      if (command.id === 'rodape') {
+      if (command.id === 'statusline') {
         const arg = args.trim().toLowerCase();
-        if (arg !== '' && !isRodapeModo(arg)) {
+        if (arg !== '' && !isStatuslineMode(arg)) {
           controller.replaceNote('rodapé', [
-            `modo desconhecido: ${arg} — use completo, parcial ou oculto.`,
+            `modo desconhecido: ${arg} — use full, compact ou hidden.`,
           ]);
           return;
         }
-        const next = isRodapeModo(arg) ? arg : proximoRodape(rodapeModoRef.current);
-        aplicarRodape(next);
+        const next = isStatuslineMode(arg) ? arg : nextStatusline(statuslineModeRef.current);
+        applyStatusline(next);
         controller.replaceNote('rodapé', [
-          `rodapé: ${next}` + (next === 'oculto' ? ' — F2 ou /rodape voltam.' : ' (F2 alterna).'),
+          `rodapé: ${next}` +
+            (next === 'hidden' ? ' — F2 ou /statusline voltam.' : ' (F2 alterna).'),
         ]);
         return;
       }
@@ -2250,7 +2251,7 @@ export function App(props: AppProps): React.ReactElement {
       props.onCommand?.(command, args);
     },
     [
-      aplicarRodape,
+      applyStatusline,
       props,
       modelPicker,
       permPanel,
@@ -5311,7 +5312,7 @@ export function App(props: AppProps): React.ReactElement {
   const previaDeFalaViva =
     state.phase === 'streaming' && live.some((b) => b.kind === 'aluy' && b.streaming);
   const telaBaixa =
-    stdout?.rows !== undefined && stdout.rows > 0 && stdout.rows <= RODAPE_LINHAS_CURTAS;
+    stdout?.rows !== undefined && stdout.rows > 0 && stdout.rows <= STATUSLINE_SHORT_ROWS;
   // F17 — nada vivo na coluna do chat (repouso): usado p/ enxugar o respiro em tela baixa.
   const regiaoVivaVazia =
     (state.phase === 'idle' || state.phase === 'done') &&
@@ -5898,7 +5899,7 @@ export function App(props: AppProps): React.ReactElement {
           também DUPLICAVA o número numa linha órfã logo acima do rodapé — foi o que ele
           viu na tela. No BROKER nada muda: lá o footer carrega janela + reset, que a
           linha primária não comporta. */}
-      {rodapeModo === 'completo' &&
+      {statuslineMode === 'full' &&
         state.meta.backend !== 'local' &&
         (state.phase === 'done' ||
           state.phase === 'budget' ||
@@ -5928,7 +5929,7 @@ export function App(props: AppProps): React.ReactElement {
           ele sumia e o composer descia 1 linha; ao terminar, voltava e o composer subia. Agora
           basta ter havido turno (a regra do F-COMPOSER-BARRA acima continua: sessão sem turno
           não ganha a linha morta). */}
-      {rodapeModo === 'completo' &&
+      {statuslineMode === 'full' &&
         columns >= 60 &&
         rows >= RESPIRO_MIN_ROWS &&
         state.turnAccounting !== undefined && <Box height={1} />}
@@ -5937,7 +5938,7 @@ export function App(props: AppProps): React.ReactElement {
           composer para todas as outras linhas") — o bloco do composer tem a barra `┃` +
           1 coluna, então o texto dele começa na coluna 2. O rodapé começava na 0 e ficava
           desalinhado com o campo logo acima. `paddingLeft={2}` alinha os dois. */}
-      {rodapeModo === 'parcial' && (
+      {statuslineMode === 'compact' && (
         <Box paddingLeft={2}>
           <RodapeParcial
             model={displayModel ?? tierDisplay}
@@ -5966,14 +5967,14 @@ export function App(props: AppProps): React.ReactElement {
       )}
       {/* RODAPÉ oculto — nada além do necessário: o `⚠ yolo` NUNCA some (catraca desligada) e,
           na 1ª vez, uma dica mínima de como voltar. */}
-      {rodapeModo === 'oculto' && (state.mode === 'unsafe' || dicaOculto) && (
+      {statuslineMode === 'hidden' && (state.mode === 'unsafe' || dicaOculto) && (
         <Box paddingLeft={2}>
           {state.mode === 'unsafe' && <Role name="danger">⚠ yolo</Role>}
           {state.mode === 'unsafe' && dicaOculto && <Role name="fgDim">{' · '}</Role>}
-          {dicaOculto && <Role name="fgDim">rodapé oculto — F2 ou /rodape voltam</Role>}
+          {dicaOculto && <Role name="fgDim">rodapé oculto — F2 ou /statusline voltam</Role>}
         </Box>
       )}
-      {rodapeModo === 'completo' && (
+      {statuslineMode === 'full' && (
         <Box paddingLeft={2} flexDirection="column">
           {/* FOOTER-AGENTES — os sub-agentes VIVOS ganham uma coluna À ESQUERDA do painel,
             separados por uma barra vertical (pedido do dono). Sem agentes vivos o
