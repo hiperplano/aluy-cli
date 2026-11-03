@@ -75,7 +75,6 @@ import type { AskResolver, AskRequest, AskResolution } from '../permission/ask.j
 import { ROOM_POST_TOOL_NAME, ROOM_READ_TOOL_NAME } from './rooms/room-tools.js';
 import { QuotaPauseStoppedError } from '../model/errors.js';
 import type { QuotaPauseCoordinator, PausedAgentSnapshot } from './quota-pause.js';
-import type { HistoryItem } from './context.js';
 
 /** Defaults anti-runaway do fan-out (CLI-SEC-8 / E-A2). */
 export const DEFAULT_MAX_CONCURRENCY = 4;
