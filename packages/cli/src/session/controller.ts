@@ -4394,7 +4394,7 @@ export class SessionController {
         ]);
       } else if (this.isBusyPhase()) {
         // F11 — confirmação curta: o esc cortava em ≤ 0.15 s sem dizer nada.
-        this.pushNote('turno', ['↳ interrompido (esc)']);
+        this.pushNote('turno', ['↳ interrompido']);
       }
     }
     // F-TURNO-CORTADO — registra que ESTE turno terminou por interrupção; o cabeçalho do

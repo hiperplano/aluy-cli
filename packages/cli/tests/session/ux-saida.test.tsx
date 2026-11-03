@@ -162,13 +162,24 @@ describe('UX de saída', () => {
     r.unmount();
   });
 
-  it('F11: esc durante o trabalho deixa a nota "↳ interrompido (esc)"', async () => {
-    const { controller, gate, r } = build(BASE_ENV);
-    void controller.submit('objetivo');
-    await waitFor(() => controller.current.phase === 'streaming');
-    controller.interrupt();
-    gate.resolve();
-    await waitFor(() => plain(r.lastFrame()).includes('interrompido (esc)'));
-    r.unmount();
-  });
+  it.each([
+    ['esc', ESC],
+    ['Ctrl-C', String.fromCharCode(3)],
+  ])(
+    'F11: %s durante o trabalho deixa a nota "↳ interrompido" (sem rotular a tecla)',
+    async (_nome, tecla) => {
+      const { controller, gate, r } = build(BASE_ENV);
+      void controller.submit('objetivo');
+      await waitFor(() => controller.current.phase === 'streaming');
+      await new Promise((res) => setTimeout(res, 50));
+      r.stdin.write(tecla);
+      await waitFor(() => plain(r.lastFrame()).includes('↳ interrompido'), 3000);
+      gate.resolve();
+      await new Promise((res) => setTimeout(res, 30));
+      const txt = plain(r.lastFrame());
+      // Ctrl-C também interrompe, então a nota não pode afirmar "(esc)".
+      expect(txt).not.toContain('interrompido (esc)');
+      r.unmount();
+    },
+  );
 });
