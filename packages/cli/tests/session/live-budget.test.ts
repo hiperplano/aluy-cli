@@ -260,20 +260,20 @@ describe('live-budget — orçamento dinâmico da região viva (anti-flicker EST
   });
 
   it('liveOverheadLines: tool running = 1 linha', () => {
-    expect(liveOverheadLines({ live: [runningTool()], phase: 'streaming', hasBlocks: true })).toBe(
+    expect(liveOverheadLines({ live: [runningTool()], phase: 'done', hasBlocks: true })).toBe(
       1,
     );
   });
 
   it('liveOverheadLines: sub-agentes = cabeçalho + N filhos + paddingBottom', () => {
     // 3 filhos ⇒ 1(cab) + 3 + 1(pad) = 5.
-    expect(liveOverheadLines({ live: [subagents(3)], phase: 'streaming', hasBlocks: true })).toBe(
+    expect(liveOverheadLines({ live: [subagents(3)], phase: 'done', hasBlocks: true })).toBe(
       5,
     );
   });
 
   it('liveOverheadLines: a prévia de fala soma cabeçalho+cursor+paddingBottom (3)', () => {
-    expect(liveOverheadLines({ live: [longSpeech(10)], phase: 'streaming', hasBlocks: true })).toBe(
+    expect(liveOverheadLines({ live: [longSpeech(10)], phase: 'done', hasBlocks: true })).toBe(
       3,
     );
   });
@@ -319,14 +319,14 @@ describe('EST-0982 — saída ao vivo do comando entra no orçamento da região 
   });
 
   it('tool running SEM saída = 1 linha (não-regressão); COM saída soma as linhas', () => {
-    expect(liveOverheadLines({ live: [runningTool()], phase: 'streaming', hasBlocks: true })).toBe(
+    expect(liveOverheadLines({ live: [runningTool()], phase: 'done', hasBlocks: true })).toBe(
       1,
     );
     // 3 linhas de saída ⇒ 1 (in-flight) + 3 = 4.
     expect(
       liveOverheadLines({
         live: [runningToolWithOutput(3)],
-        phase: 'streaming',
+        phase: 'done',
         hasBlocks: true,
       }),
     ).toBe(4);
@@ -337,7 +337,7 @@ describe('EST-0982 — saída ao vivo do comando entra no orçamento da região 
     expect(
       liveOverheadLines({
         live: [runningToolWithOutput(50)],
-        phase: 'streaming',
+        phase: 'done',
         hasBlocks: true,
       }),
     ).toBe(8);
@@ -345,7 +345,7 @@ describe('EST-0982 — saída ao vivo do comando entra no orçamento da região 
     expect(
       liveOverheadLines({
         live: [runningBangWithOutput(50)],
-        phase: 'streaming',
+        phase: 'done',
         hasBlocks: true,
       }),
     ).toBe(8);
@@ -543,9 +543,9 @@ describe('EST-0965 (wrap) — altura VISUAL da região viva ≤ rows-1 com linha
     // visuais cada ⇒ 15 visuais; capped em LIVE_SHELL_OUTPUT_MAX_LINES(6)+1 marcador.
     // total = 1 (in-flight) + 7 = 8 — sem wrap a conta antiga daria 1 + 5 = 6 (furo).
     const live = [runningToolWide(5, 200)];
-    expect(liveOverheadLines({ live, phase: 'streaming', hasBlocks: true, columns: 80 })).toBe(8);
+    expect(liveOverheadLines({ live, phase: 'done', hasBlocks: true, columns: 80 })).toBe(8);
     // sem columns (linhas-fonte): 5 ≤ 6 ⇒ 1 + 5 = 6 (o comportamento antigo).
-    expect(liveOverheadLines({ live, phase: 'streaming', hasBlocks: true })).toBe(6);
+    expect(liveOverheadLines({ live, phase: 'done', hasBlocks: true })).toBe(6);
   });
 });
 
@@ -559,18 +559,18 @@ describe('F87 — bloco de sub-agentes é WRAP-AWARE (label longo / terminal est
     // `  [abcdefghij] x rodando` = 24 colunas visuais. columns=12 ⇒ 2 visuais/filho.
     const live = [subWithLabels(['abcdefghij'])];
     // overhead = cabeçalho(1) + paddingBottom(1) + 2 (filho quebrado) = 4.
-    expect(liveOverheadLines({ live, phase: 'streaming', hasBlocks: true, columns: 12 })).toBe(4);
+    expect(liveOverheadLines({ live, phase: 'done', hasBlocks: true, columns: 12 })).toBe(4);
     // largo o bastante p/ caber em 1 visual ⇒ 1 + 1 + 1 = 3 (sem over-contar).
-    expect(liveOverheadLines({ live, phase: 'streaming', hasBlocks: true, columns: 40 })).toBe(3);
+    expect(liveOverheadLines({ live, phase: 'done', hasBlocks: true, columns: 40 })).toBe(3);
     // sem columns ⇒ degrada p/ linha-fonte (comportamento antigo): 2 + 1 = 3.
-    expect(liveOverheadLines({ live, phase: 'streaming', hasBlocks: true })).toBe(3);
+    expect(liveOverheadLines({ live, phase: 'done', hasBlocks: true })).toBe(3);
   });
 
   it('o FURO original: 3 filhos com label longo num terminal estreito sub-contavam', () => {
     const labels = ['fix-kpi-ativos', 'ux-menu-coverage', 'adr-menu-coverage'];
     const live = [subWithLabels(labels)];
     const old = 2 + labels.length; // a conta antiga (linhas-fonte) = 5.
-    const wrapAware = liveOverheadLines({ live, phase: 'streaming', hasBlocks: true, columns: 30 });
+    const wrapAware = liveOverheadLines({ live, phase: 'done', hasBlocks: true, columns: 30 });
     // num terminal de 30 colunas, esses labels QUEBRAM ⇒ o orçamento real é MAIOR que
     // a conta antiga (5). Sem isto, a região viva estourava `rows` ⇒ flicker.
     expect(wrapAware).toBeGreaterThan(old);
@@ -578,7 +578,7 @@ describe('F87 — bloco de sub-agentes é WRAP-AWARE (label longo / terminal est
 
   it('caso comum (labels curtos, terminal largo) NÃO regride: 2 + nFilhos', () => {
     const live = [subWithLabels(['rust', 'go', 'zig'])];
-    expect(liveOverheadLines({ live, phase: 'streaming', hasBlocks: true, columns: 120 })).toBe(5);
+    expect(liveOverheadLines({ live, phase: 'done', hasBlocks: true, columns: 120 })).toBe(5);
   });
 });
 
@@ -920,7 +920,7 @@ describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
   });
 
   it('com sub-agentes ⇒ a fala cede 1 linha (2 em terminal estreito)', () => {
-    const base = { rows: 40, live: [], phase: 'streaming' as const, hasBlocks: true, mode: 'normal' as SessionMode };
+    const base = { rows: 40, live: [], phase: 'idle' as const, hasBlocks: true, mode: 'normal' as SessionMode };
     expect(speechMaxLines({ ...base, columns: 80 })
       - speechMaxLines({ ...base, columns: 80, detachedSubagents: 3 })).toBe(1);
     expect(speechMaxLines({ ...base, columns: 40 })
@@ -973,19 +973,19 @@ describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
     const live = [longSpeech(300), subagents(3)];
     const queuedLines = 0;
     // `speechMaxLines` SEM `detachedSubagents` = o orçamento antigo.
-    const cego = speechMaxLines({ rows, live, phase: 'streaming', hasBlocks: true, mode: 'normal', columns, queuedLines });
+    const cego = speechMaxLines({ rows, live, phase: 'idle', hasBlocks: true, mode: 'normal', columns, queuedLines });
     const semAviso =
       LIVE_CHROME_BASE_ROWS +
       respiroOverhead(rows) +
       modeIndicatorOverhead('normal') +
       narrowChromeOverhead(columns) +
-      liveOverheadLines({ live, phase: 'streaming', hasBlocks: true, rows, columns }) +
+      liveOverheadLines({ live, phase: 'idle', hasBlocks: true, rows, columns }) +
       cego +
       queuedLines;
     // Sem o aviso o frame CABIA — o estouro é dele, não do resto do conteúdo.
     expect(semAviso).toBeLessThanOrEqual(rows - 1);
     // Com a altura REAL do aviso (que o teto cego ignorava), estoura.
-    expect(semAviso + subagentNoticeOverhead(3, columns, 'streaming')).toBeGreaterThan(rows - 1);
+    expect(semAviso + subagentNoticeOverhead(3, columns, 'idle')).toBeGreaterThan(rows - 1);
   });
 });
 
@@ -999,10 +999,23 @@ describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
 //        NADA na tela dizendo isso.
 //
 // A regra que concilia as duas: mostra quando há trabalho E não há OUTRA coisa mostrando.
+describe('F3 — linha de trabalho contínua no streaming', () => {
+  it('com prévia de fala viva a linha ocupa o lugar do cursor (custo 0 extra)', () => {
+    const a = liveOverheadLines({ live: [longSpeech(10)], phase: 'streaming', hasBlocks: true });
+    const b = liveOverheadLines({ live: [longSpeech(10)], phase: 'done', hasBlocks: true });
+    expect(a).toBe(b);
+  });
+  it('sem prévia (tool-line no lugar) a linha custa 1 + 1 de respiro, como no thinking', () => {
+    const a = liveOverheadLines({ live: [runningTool()], phase: 'streaming', hasBlocks: true });
+    const b = liveOverheadLines({ live: [runningTool()], phase: 'done', hasBlocks: true });
+    expect(a - b).toBe(2);
+  });
+});
+
 describe('mostraIndicadorTrabalho — tabela de verdade', () => {
-  it('ele FALA ⇒ NÃO (o brilho do cabeçalho da caixa já indica) — com ou sem filhos', () => {
-    expect(mostraIndicadorTrabalho('streaming', false)).toBe(false);
-    expect(mostraIndicadorTrabalho('streaming', true)).toBe(false);
+  it('ele FALA ⇒ SIM (indicador contínuo abaixo da prévia, F3) — com ou sem filhos', () => {
+    expect(mostraIndicadorTrabalho('streaming', false)).toBe(true);
+    expect(mostraIndicadorTrabalho('streaming', true)).toBe(true);
   });
 
   it('ele PENSA ⇒ SIM (não há caixa ainda; a linha enche o vazio)', () => {

@@ -219,22 +219,16 @@ export const SUBAGENT_STOP_HINT = '· F8 para parar';
 /**
  * A LINHA de progresso aparece neste frame?
  *
- * Decisão PURA porque ela já virou de lado duas vezes em um dia, e nas duas o efeito
- * colateral só apareceu na tela do dono:
- *
- *  · ele FALA (`streaming`) ⇒ NÃO. Quem indica trabalho é o brilho do nome no cabeçalho da
- *    caixa da resposta; somar a linha ali é a redundância que ele apontou ("acho redundante
- *    a barra de progresso e o efeito brilho juntos").
- *  · ele PENSA (`thinking`/`retrying`) ⇒ SIM. Ainda não há caixa; a linha enche o vazio.
- *  · ele PAROU e os FILHOS seguem ⇒ SIM. Não há brilho nenhum, e a linha vira a única coisa
- *    que sinaliza. Tirar este caso junto com a redundância produziu o relato seguinte:
- *    "depois que ele me responde ele para de mostrar o processando" — com agentes vivos.
- *
- * A regra que resolve os três: mostra quando há trabalho E não há OUTRA coisa mostrando.
+ * Decisão PURA. A regra atual (F3): UMA linha viva e CONTÍNUA enquanto há trabalho —
+ *  · ele PENSA (`thinking`/`retrying`) ⇒ SIM (ainda não há caixa; a linha enche o vazio);
+ *  · ele FALA (`streaming`) ⇒ SIM: com a prévia viva, a linha ocupa o lugar do antigo
+ *    cursor `●` (logo abaixo do texto); com uma tool-line no lugar, vem depois dela. O
+ *    indicador não some no meio do turno nem pisca quando surge uma tool-line;
+ *  · ele PAROU e os FILHOS seguem ⇒ SIM (única coisa que sinaliza).
+ * O bloco da resposta NÃO repete o verbo (só o brilho do nome), para nunca haver dois.
  */
 export function mostraIndicadorTrabalho(phase: SessionPhase, temFilhosVivos: boolean): boolean {
-  if (phase === 'thinking' || phase === 'retrying') return true;
-  if (phase === 'streaming') return false; // o cabeçalho da caixa já brilha
+  if (phase === 'thinking' || phase === 'retrying' || phase === 'streaming') return true;
   return temFilhosVivos;
 }
 
@@ -246,7 +240,8 @@ export function workingIndicator(args: {
   const base = args.workingLabel ?? 'pensando';
   if (args.count <= 0) return { label: base };
   const hint = SUBAGENT_STOP_HINT;
-  const paiTrabalha = args.phase === 'thinking' || args.phase === 'retrying';
+  const paiTrabalha =
+    args.phase === 'thinking' || args.phase === 'retrying' || args.phase === 'streaming';
   return paiTrabalha
     ? { label: base, suffix: `· ${subagentNoticeText(args.count)} ${hint}` }
     : { label: subagentNoticeText(args.count), suffix: hint };
@@ -274,7 +269,7 @@ export function subagentNoticeOverhead(
   // Se a FASE já rende o `<Working>` (é o que `liveOverheadLines` conta abaixo), a
   // contagem entra como SUFIXO na MESMA linha e não custa altura nenhuma. Descontar aqui
   // contaria a linha duas vezes e apertaria a fala à toa.
-  if (phase === 'thinking' || phase === 'compacting') return 0;
+  if (phase === 'thinking' || phase === 'streaming' || phase === 'compacting') return 0;
   if (columns === undefined || columns <= 0) return 1;
   // A largura medida da linha COMPOSTA, não de uma frase avulsa — é o que o render desenha.
   return columns < subagentIndicatorLine(count).length ? 2 : 1;
@@ -614,7 +609,7 @@ export function liveOverheadLines(input: LiveOverheadInput): number {
 
   for (const b of live) {
     if (b === speech) {
-      // A própria fala: cabeçalho `Λ aluy` (1) + cursor (1) + paddingBottom (1).
+      // A própria fala: cabeçalho `Λ aluy` (1) + linha de trabalho no lugar do cursor (1) + paddingBottom (1).
       // O CORPO de texto é orçado à parte (o `maxLines` devolvido); aqui só o que
       // existe ALÉM do corpo. O marcador `…N acima` (quando corta) entra abaixo.
       lines += 3;
@@ -631,6 +626,12 @@ export function liveOverheadLines(input: LiveOverheadInput): number {
   // <Working> de `thinking` (pré-stream) e <ProgressBar> de `compacting` (EST-0973):
   // 1 linha + 1 de paddingTop (quando há blocos) — mesma geometria, mesmo orçamento.
   if (phase === 'thinking' || phase === 'compacting') {
+    lines += 1 + (hasBlocks ? 1 : 0);
+  }
+  // F3 — no `streaming` a linha de trabalho também existe. COM a prévia de fala viva ela ocupa
+  // o lugar do antigo cursor `●` (já contado nas 3 linhas da fala) e não custa altura; SEM
+  // prévia (tool-line no lugar) é uma linha a mais, como no `thinking`.
+  if (phase === 'streaming' && speech === undefined) {
     lines += 1 + (hasBlocks ? 1 : 0);
   }
 

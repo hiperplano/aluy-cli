@@ -5109,6 +5109,9 @@ export function App(props: AppProps): React.ReactElement {
   // (single/side/tabs) — o conteúdo é IDÊNTICO; só o CONTÊINER muda (1 col vs row vs
   // aba). O `maxLines` é o `splitMaxLines` (= `liveMaxLines` em single; orçado p/ as 2
   // colunas em side/tabs), mantendo a região viva em `rows-1` (anti-flicker).
+  // F3 — com a prévia de fala viva a linha de trabalho assume o lugar do cursor `●` (sem respiro
+  // extra acima); sem ela (tool-line, pensando) mantém o respiro de sempre.
+  const previaDeFalaViva = state.phase === 'streaming' && live.some((b) => b.kind === 'aluy' && b.streaming);
   const liveChatColumn = (
     <>
       {/* F-SEM-SAUDACAO (decisão do dono: "eu não pedi essas msgs") — a tela de sessão
@@ -5138,8 +5141,7 @@ export function App(props: AppProps): React.ReactElement {
               // onde este repo já teve o "buraco no meio da tela".
               prevKind={i > 0 ? live[i - 1]?.kind : undefined}
               nextKind={live[i + 1]?.kind}
-              verbo={state.workingVerb}
-              detalhe={state.phase === 'streaming' ? detalheEspera : undefined}
+              semCursor
             />
           ))}
 
@@ -5165,7 +5167,7 @@ export function App(props: AppProps): React.ReactElement {
             os agentes ainda trabalhando. Redundante era mostrar os DOIS juntos, não
             mostrar este quando o outro não existe. */}
       {mostraIndicadorTrabalho(state.phase, haFilhoVivo) && (
-        <Box paddingTop={state.blocks.length > 0 ? 1 : 0}>
+        <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
           <Working
             glyph="aluy"
             glyphRole="accent"
@@ -5855,10 +5857,12 @@ export function BlockView(props: {
    * sub-agentes que desceu com filhos em segundo plano (ver `liveStartIndex`).
    */
   readonly settled?: boolean;
-  /** Verbo do passo (fonte única: `state.workingVerb`) p/ o `⋯ Costurando…` do raciocínio. */
+  /** Verbo do turno p/ o `⋯ Costurando…` do raciocínio (ausente na região viva: a linha de trabalho cobre). */
   readonly verbo?: string | undefined;
-  /** Parêntese dim da espera (`(pensando · ↓ 394 tokens · 9s)`) p/ o raciocínio ao vivo. */
+  /** Parêntese dim da espera p/ o raciocínio ao vivo. */
   readonly detalhe?: string | undefined;
+  /** F3 — sem o cursor `●`: a linha de trabalho do App é o indicador vivo. */
+  readonly semCursor?: boolean | undefined;
 }): React.ReactElement {
   const b = props.block;
   switch (b.kind) {
@@ -5892,6 +5896,7 @@ export function BlockView(props: {
             {...(b.interrupted === true ? { interrupted: true } : {})}
             {...(props.verbo !== undefined ? { verbo: props.verbo } : {})}
             {...(props.detalhe !== undefined ? { detalhe: props.detalhe } : {})}
+            {...(props.semCursor === true ? { semCursor: true } : {})}
           />
         </Box>
       );

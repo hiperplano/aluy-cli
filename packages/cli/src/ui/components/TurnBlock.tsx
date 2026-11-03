@@ -197,6 +197,11 @@ export interface AluyBlockProps {
    * (modo `simples` / cockpit) ⇒ o texto de sempre.
    */
   readonly verbo?: string;
+  /**
+   * F3 — sem o cursor `●` de trabalho: a linha `Λ Verbo… (…)` do App fica logo abaixo da prévia e
+   * é o indicador vivo (ocupa a mesma linha, então a altura não muda).
+   */
+  readonly semCursor?: boolean;
   /** Parêntese dim após o verbo no raciocínio ao vivo (`(pensando · ↓ 394 tokens · 9s)`). */
   readonly detalhe?: string;
 }
@@ -494,6 +499,7 @@ export function AluyBlock(props: AluyBlockProps): React.ReactElement {
             quando ele acabava. Agora a linha do cursor é pintada e preenchida como as
             outras — o cursor pisca, a superfície fica parada. */}
         {props.streaming &&
+          props.semCursor !== true &&
           (aluyFundo !== undefined && speechCols > 0 ? (
             <Text backgroundColor={aluyFundo}>
               {' '}

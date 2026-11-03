@@ -1641,8 +1641,7 @@ export class SessionController {
   // TOKENS GERADOS no turno (saída do PAI; os do filho só chegam somados com os de entrada, então
   // não entram). `saidaConfirmada` = soma dos `tokens_out` que o provider REPORTOU; `saidaChars` =
   // texto streamado da chamada em voo, ainda sem uso reportado (estimativa ~4 chars/token).
-  // VERBO POR PASSO (fonte única do `Costurando…` — ver `SessionState.workingVerb`).
-  private verboDoPasso: number | undefined;
+  // VERBO POR TURNO (fonte única do `Costurando…` — ver `SessionState.workingVerb`).
   private readonly listaDeVerbos = parseVerbos(resolveText('pt-BR', 'working.verbs'));
   private readonly rngDeVerbos = criarRng(seedPadrao());
   // TOKENS ENVIADOS (↑) na requisição do passo: estimativa (chars/4 das mensagens) até o
@@ -3058,6 +3057,7 @@ export class SessionController {
       // compactação, montagem do prompt: passos que rodam ANTES do modelo) e só vira
       // `pensando` quando o loop sinaliza `model-call` (ver `onParentProgress`). Assim o
       // indicador reflete a fase real, sem fingir que o modelo já está pensando.
+      this.sortearVerboDoTurno();
       this.patch({ phase: 'thinking', workingLabel: 'preparando', workingSince: this.clock() });
       // EST-0982 · ADR-0063 — abre a ÁRVORE DE FLUXOS do turno: o pai é a raiz; o seu
       // AbortSignal É o do loop (PARAR-todos = abortar a raiz, que desce a subárvore).
@@ -9356,6 +9356,17 @@ export class SessionController {
     this.pushNote(title, lines);
   }
 
+  /**
+   * VERBO POR TURNO — sorteia o verbo UMA vez quando o turno nasce (fica o mesmo em todos os
+   * passos, auto-verificação inclusa); o turno seguinte sorteia outro, nunca repetindo o
+   * anterior. Chamado ANTES do 1º `patch` do turno, para o 1º frame já sair com o verbo.
+   */
+  private sortearVerboDoTurno(): void {
+    if (verbosSimples()) return;
+    const v = sortearVerbo(this.listaDeVerbos, this.rngDeVerbos, this.state.workingVerb);
+    if (v !== undefined) this.state = { ...this.state, workingVerb: v };
+  }
+
   private setPhase(phase: SessionState['phase']): void {
     this.patch({ phase });
     // F168 — o "te aviso quando terminar" que NUNCA chegava: um evento de conclusão
@@ -9384,18 +9395,6 @@ export class SessionController {
    */
   private patch(partial: Partial<SessionState>): void {
     this.state = { ...this.state, ...partial };
-    // VERBO POR PASSO — cada novo `workingSince` é um passo novo ⇒ sorteia o verbo (fonte única).
-    if (
-      partial.workingSince !== undefined &&
-      partial.workingSince !== this.verboDoPasso &&
-      partial.workingVerb === undefined
-    ) {
-      this.verboDoPasso = partial.workingSince;
-      if (!verbosSimples()) {
-        const v = sortearVerbo(this.listaDeVerbos, this.rngDeVerbos, this.state.workingVerb);
-        if (v !== undefined) this.state = { ...this.state, workingVerb: v };
-      }
-    }
     this.flush.flushNow();
     this.notify();
   }
