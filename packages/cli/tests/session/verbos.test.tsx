@@ -115,14 +115,14 @@ describe('formatação do parêntese', () => {
     expect(formatTokensPtBr(0)).toBeUndefined();
     expect(formatTokensPtBr(Number.NaN)).toBeUndefined();
   });
-  it('completo cabe: (pensando · 1,2k tokens · 12s)', () => {
+  it('completo cabe: (pensando · ↓ 1,2k tokens · 12s)', () => {
     expect(detalheDeEspera({ fase: 'pensando', tokens: 1200, ms: 12_000 })).toBe(
-      '(pensando · 1,2k tokens · 12s)',
+      '(pensando · ↓ 1,2k tokens · 12s)',
     );
   });
   it('sem tokens ⇒ segmento some; rótulo funcional ⇒ sem fase', () => {
     expect(detalheDeEspera({ fase: 'pensando', tokens: 0, ms: 5000 })).toBe('(pensando · 5s)');
-    expect(detalheDeEspera({ tokens: 850, ms: 5000 })).toBe('(850 tokens · 5s)');
+    expect(detalheDeEspera({ tokens: 850, ms: 5000 })).toBe('(↓ 850 tokens · 5s)');
   });
   it('aperto: perde tokens primeiro, depois a fase; segundos ficam', () => {
     const args = { fase: 'pensando', tokens: 1200, ms: 12_000 };
@@ -137,11 +137,11 @@ describe('<Working>', () => {
   const tela = (el: React.ReactElement): string =>
     plain(render(<ThemeProvider theme={theme}>{el}</ThemeProvider>).lastFrame() ?? '');
 
-  it('`Λluy Garimpando… (pensando · 1,2k tokens · 12s)` — sem M:SS', () => {
+  it('`Λluy Garimpando… (pensando · ↓ 1,2k tokens · 12s)` — sem M:SS', () => {
     const f = tela(
-      <Working label="Garimpando" frame={3} detalhe="(pensando · 1,2k tokens · 12s)" />,
+      <Working label="Garimpando" frame={3} detalhe="(pensando · ↓ 1,2k tokens · 12s)" />,
     );
-    expect(f).toContain('Garimpando… (pensando · 1,2k tokens · 12s)');
+    expect(f).toContain('Garimpando… (pensando · ↓ 1,2k tokens · 12s)');
     expect(f).not.toMatch(/\d:\d\d/);
   });
   it('rótulo funcional: mantém o texto e o parêntese só com números', () => {

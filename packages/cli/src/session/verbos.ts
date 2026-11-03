@@ -94,7 +94,9 @@ export function detalheDeEspera(args: {
   readonly larguraMax?: number | undefined;
 }): string {
   const secs = formatSegundos(args.ms);
-  const tok = args.tokens !== undefined ? formatTokensPtBr(args.tokens) : undefined;
+  const tokTxt = args.tokens !== undefined ? formatTokensPtBr(args.tokens) : undefined;
+  // `↓ 1,2k tokens` — tokens GERADOS (saída) no turno, como o Claude Code
+  const tok = tokTxt !== undefined ? `↓ ${tokTxt}` : undefined;
   const candidatos: string[][] = [
     [args.fase, tok, secs].filter((x): x is string => x !== undefined),
     [args.fase, secs].filter((x): x is string => x !== undefined),
