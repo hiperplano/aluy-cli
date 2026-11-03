@@ -49,8 +49,27 @@ export function formatClock(epochMs: number, nowMs: number): string {
  * é o título; depois vêm o estado, o relógio e as escolhas do dono.
  */
 export function quotaPauseLines(view: QuotaPauseView, nowMs: number): string[] {
-  const lines: string[] = [`pausado — cota esgotada (${quotaScopeLabel(view.scope)})`];
   const who = view.agents.map((a) => a.label).join(', ');
+  const lines: string[] = [];
+  if (view.manual) {
+    // Saldo esgotado: esperar NÃO repõe. Diz isso, sonda de forma esparsa e pede a recarga.
+    lines.push(`pausado — ${quotaScopeLabel(view.scope)}: recarregue o saldo`);
+    if (who !== '')
+      lines.push(`agentes pausados: ${who} — o trabalho está guardado, nada foi perdido`);
+    lines.push('esperar não repõe saldo: recarregue no provedor e pressione ↵ para retomar');
+    lines.push(
+      view.probing
+        ? 'tentando retomar agora…'
+        : `verificação automática (esparsa) em ${formatCountdown(view.nextProbeAtMs - nowMs)} ` +
+            `(${formatClock(view.nextProbeAtMs, nowMs)})`,
+    );
+    lines.push(
+      `se nada mudar, o trabalho é salvo sozinho em ${formatCountdown(view.deadlineAtMs - nowMs)} ` +
+        '— retome depois com `aluy --continue`',
+    );
+    return lines;
+  }
+  lines.push(`pausado — cota esgotada (${quotaScopeLabel(view.scope)})`);
   if (who !== '')
     lines.push(`agentes pausados: ${who} — o trabalho está guardado, nada foi perdido`);
   if (view.probing) {

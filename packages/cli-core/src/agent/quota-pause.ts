@@ -25,6 +25,7 @@
 import type { HistoryItem } from './context.js';
 import { ModelCallAbortedError, QuotaPauseStoppedError } from '../model/errors.js';
 import {
+  BALANCE_MAX_WAIT_MS,
   classifyQuota,
   exceedsShortRetry,
   probeDelayMs,
@@ -66,6 +67,8 @@ export interface QuotaPauseView {
   readonly probes: number;
   /** Há uma sondagem em voo agora. */
   readonly probing: boolean;
+  /** Só recarga resolve (saldo): a UI diz "recarregue e pressione ↵". */
+  readonly manual: boolean;
   readonly agents: readonly { readonly label: string; readonly kind: 'principal' | 'subagente' }[];
 }
 
@@ -120,6 +123,7 @@ interface Waiter {
 interface Episode {
   scope: QuotaScope;
   reason: string;
+  manual: boolean;
   resetAtMs: number | undefined;
   nextProbeAt: number;
   readonly startedAt: number;
@@ -272,10 +276,15 @@ export class QuotaPauseCoordinator {
       ep = {
         scope: verdict.scope,
         reason: verdict.reason,
+        manual: verdict.manual,
         resetAtMs: verdict.resetAtMs,
-        nextProbeAt: verdict.resetAtMs ?? now + probeDelayMs(0),
+        nextProbeAt: verdict.resetAtMs ?? now + probeDelayMs(0, verdict.manual),
         startedAt: now,
-        deadlineAt: now + this.cfg.maxWaitMs,
+        // Saldo esgotado: esperar não repõe. Não fica horas sondando — teto curto, e o
+        // trabalho fica salvo (parar salvando) para retomar depois da recarga.
+        deadlineAt:
+          now +
+          (verdict.manual ? Math.min(this.cfg.maxWaitMs, BALANCE_MAX_WAIT_MS) : this.cfg.maxWaitMs),
         probes: 0,
         probing: null,
         probingLabel: null,
@@ -286,12 +295,13 @@ export class QuotaPauseCoordinator {
     } else {
       ep.scope = verdict.scope;
       ep.reason = verdict.reason;
+      ep.manual = verdict.manual;
       if (wasProbe) {
         // A sondagem falhou de novo: recalcula a próxima espera.
         this.dropProbe(ep);
         ep.probes += 1;
         ep.resetAtMs = verdict.resetAtMs;
-        ep.nextProbeAt = verdict.resetAtMs ?? now + probeDelayMs(ep.probes);
+        ep.nextProbeAt = verdict.resetAtMs ?? now + probeDelayMs(ep.probes, ep.manual);
       } else if (verdict.resetAtMs !== undefined) {
         ep.resetAtMs = Math.max(ep.resetAtMs ?? 0, verdict.resetAtMs);
         ep.nextProbeAt = Math.max(ep.nextProbeAt, verdict.resetAtMs);
@@ -449,6 +459,7 @@ export class QuotaPauseCoordinator {
       deadlineAtMs: ep.deadlineAt,
       probes: ep.probes,
       probing: ep.probing !== null,
+      manual: ep.manual,
       agents: [...ep.agents.values()].map((a) => ({ label: a.label, kind: a.kind })),
     };
   }

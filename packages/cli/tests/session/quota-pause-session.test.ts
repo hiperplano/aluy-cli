@@ -72,6 +72,7 @@ describe('texto', () => {
       deadlineAtMs: 1_000_000 + 3_600_000,
       probes: 0,
       probing: false,
+      manual: false,
       agents: [{ label: 'pesquisa', kind: 'subagente' }],
     };
     const com = quotaPauseLines(base, 1_000_000).join('\n');
@@ -80,6 +81,25 @@ describe('texto', () => {
     expect(com).toMatch(/retoma sozinho/);
     const sem = quotaPauseLines({ ...base, resetAtMs: undefined }, 1_000_000).join('\n');
     expect(sem).toMatch(/sem horário do provedor/);
+  });
+  it('banner de saldo esgotado: diz que esperar não repõe e pede a recarga (↵)', () => {
+    const view: QuotaPauseView = {
+      scope: 'credito',
+      reason: 'x',
+      resetAtMs: undefined,
+      nextProbeAtMs: 1_000_000 + 300_000,
+      startedAt: 1_000_000,
+      deadlineAtMs: 1_000_000 + 1_800_000,
+      probes: 0,
+      probing: false,
+      manual: true,
+      agents: [{ label: 'principal', kind: 'principal' }],
+    };
+    const txt = quotaPauseLines(view, 1_000_000).join('\n');
+    expect(txt).toMatch(/recarregue o saldo/);
+    expect(txt).toMatch(/esperar não repõe saldo: recarregue no provedor e pressione ↵/);
+    expect(txt).toMatch(/verificação automática \(esparsa\)/);
+    expect(txt).toMatch(/salvo sozinho em 30min/);
   });
   it('env: default ligado; off desliga; max wait', () => {
     expect(quotaPauseConfigFromEnv({}).enabled).toBe(true);

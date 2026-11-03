@@ -176,7 +176,7 @@ describe('Z.ai GLM Coding Plan (zai-coding)', () => {
     expect(
       classifyQuota(err(429, 'RATE_LIMITED', { type: 'provider_code:1310', detail: 'limit' }), now)
         ?.scope,
-    ).toBe('credito');
+    ).toBe('semanal');
     expect(isTransient(e)).toBe(false); // não é retry curto
   });
   it('429 simples e códigos de rate (1302/1303) seguem como taxa; 1301 (filtro de conteúdo) não é cota', () => {

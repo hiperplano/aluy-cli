@@ -46,6 +46,8 @@ export interface QuotaVerdict {
   readonly scope: QuotaScope;
   /** Quando a cota deve liberar (epoch ms), se o provider disse. `undefined` ⇒ desconhecido. */
   readonly resetAtMs: number | undefined;
+  /** Só recarga/ação do dono resolve (saldo): esperar não repõe. Sondagem esparsa e teto curto. */
+  readonly manual: boolean;
   /** Motivo curto, sem segredo — vai p/ a TUI e a auditoria. */
   readonly reason: string;
 }
@@ -177,6 +179,15 @@ export function resetAtFromMessage(message: string, nowMs: number): number | und
   // Sem fuso na mensagem, o fuso é o do provider: UTC+8 (Pequim). Com fuso explícito (Z/±hh:mm),
   // vale o explícito. Se estiver errado, o custo é uma sondagem a mais (a escada de backoff
   // assume) — nunca um laço apertado.
+  // Anthropic (teto de gasto): "You will regain access on 2026-09-01 at 00:00 UTC."
+  const reg =
+    /(?:regain access|access resum\w*)\s+on\s+(\d{4}-\d{2}-\d{2})\s+at\s+(\d{2}:\d{2})(?::\d{2})?\s*(?:UTC|GMT|Z)?/i.exec(
+      message,
+    );
+  if (reg) {
+    const t = Date.parse(`${reg[1]}T${reg[2]}:00Z`);
+    if (Number.isFinite(t)) return t;
+  }
   const abs =
     /reset(?:s)?\s+at\s+(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)\s*(Z|[+-]\d{2}:?\d{2})?/i.exec(
       message,
@@ -218,39 +229,106 @@ function clampReset(resetAtMs: number | undefined, nowMs: number): number | unde
 
 /** Mensagens que, por si sós, dizem "acabou a cota/saldo" (provider BYO). */
 const STRONG_QUOTA_TEXT =
-  /provider_code:13(?:04|08|09|10)\b|usage limit|limit (?:will )?resets?\b|insufficient_quota|billing_hard_limit|exceeded your current quota|credit balance is too low|out of (?:credits|quota)|no (?:remaining )?credits|quota (?:exceeded|exhausted|reached)|resource_exhausted/i;
-const WINDOW_TEXT = /5[- ]?hour|window|janela|hourly/i;
-const WEEKLY_TEXT = /week|semanal/i;
+  /usage limit|limit (?:will )?resets?\b|insufficient_quota|billing_hard_limit|exceeded your current quota|credit balance is too low|out of (?:credits|quota)|no (?:remaining )?credits|quota (?:exceeded|exhausted|reached)|credit_balance_exhausted|(?:organization|project)_(?:spend|usage)_limit_exceeded|used all available credits|purchase more credits|(?:weekly|session|hourly|daily|monthly) (?:usage )?limit|free-models-per-day/i;
+const WINDOW_TEXT =
+  /5[- ]?hour|window|janela|hourly|per day|tokens per day|requests per day|\((?:TPD|RPD)\)|daily|free-models-per-day/i;
+const WEEKLY_TEXT = /week|semanal|per month/i;
+/** Anthropic: teto de gasto (429 `enforced_spend_limit_reached`) e limite de gasto próprio (400). */
+/** 429 simples cujo texto fala de cota DIÁRIA/de janela (Groq TPD/RPD, OpenRouter free). */
+const DAILY_TEXT = /per day|\((?:TPD|RPD)\)|free-models-per-day|5[- ]?hour/i;
+const SPEND_LIMIT_TEXT =
+  /enforced_spend_limit|reached your (?:specified )?(?:workspace )?api usage limits|monthly api usage threshold/i;
+
+/** Códigos de negócio da Z.ai (docs.z.ai/api-reference/api-code, verificado): código → sabor. */
+const ZAI_CODES: Readonly<Record<string, QuotaScope>> = {
+  '1113': 'credito', // saldo insuficiente / sem pacote de recursos — recarregue
+  '1308': 'janela', // limite de uso de uma janela; reseta em horário informado
+  '1309': 'credito', // GLM Coding Plan expirado — renove
+  '1310': 'semanal', // limite semanal/mensal esgotado; reseta em horário informado
+  '1313': 'credito', // Fair Usage Policy — exige pedido ao suporte (não volta sozinho)
+  '1316': 'janela', // janela de 5h + saldo insuficiente p/ uso extra
+  '1317': 'semanal', // janela de 7d + saldo insuficiente p/ uso extra
+  '1318': 'janela',
+  '1319': 'semanal',
+  '1320': 'janela',
+  '1321': 'semanal',
+};
+
+/** Z.ai: códigos 13xx que NÃO são cota (conteúdo sinalizado, plano sem o modelo, chave do produto errado). */
+const ZAI_NOT_QUOTA: ReadonlySet<string> = new Set(['1301', '1311', '1315']);
+
+/** Todos os valores `provider_code:X` / `provider_type:Y` / `provider_quota:Z` no texto. */
+function providerTags(text: string, tag: string): string[] {
+  return [...text.matchAll(new RegExp(`${tag}:([A-Za-z0-9_.-]+)`, 'g'))].map((m) => m[1]!);
+}
+
+/**
+ * Sabor de cota a partir das marcas do provider, ou `undefined`. Ordem importa: o mais
+ * específico (código de negócio) vence o texto.
+ */
+function scopeFromProvider(text: string): QuotaScope | undefined {
+  for (const c of providerTags(text, 'provider_code')) {
+    const z = ZAI_CODES[c];
+    if (z !== undefined) return z;
+  }
+  // Google (Gemini) RESOURCE_EXHAUSTED: quase sempre taxa/diária (volta sozinho), NÃO saldo.
+  if (providerTags(text, 'provider_code').includes('RESOURCE_EXHAUSTED')) {
+    return /perday|per day|daily/i.test(text) ? 'janela' : 'taxa';
+  }
+  if (SPEND_LIMIT_TEXT.test(text)) return 'orcamento';
+  return undefined;
+}
+
+/** Espera máxima por episódio quando só RECARGA resolve (saldo): não fica horas sondando. */
+export const BALANCE_MAX_WAIT_MS = 30 * 60 * 1000;
+/** Escada ESPARSA para saldo esgotado: 5, 10, 20 min (esperar não repõe saldo). */
+export const BALANCE_LADDER_MS: readonly number[] = [300_000, 600_000, 1_200_000];
 
 /**
  * "Isto é cota que vai liberar depois?" Devolve o veredito ou `null` (não é cota:
  * transitório OU definitivo — quem decide entre os dois é `retry.ts`).
  *
  * Regras (conservadoras de propósito):
- *  - cancelamento e erro de transporte ⇒ `null`;
- *  - só `BrokerError`; 401/404/422/5xx ⇒ `null` mesmo que o texto cite "quota";
- *  - códigos do broker (janela/semanal/orçamento/crédito) e 402 ⇒ cota;
- *  - texto inequívoco ("insufficient_quota", "credit balance is too low"…) em 400/402/
- *    403/429 ⇒ cota (a Anthropic devolve o saldo zerado como 400);
+ *  - cancelamento e erro de transporte ⇒ `null`; só `BrokerError`;
+ *  - Ollama LOCAL (marca `provider_local:no_quota`) nunca tem cota ⇒ `null`;
+ *  - 401/404/422/5xx ⇒ `null` mesmo que o texto cite "quota" (exceto a Z.ai, que usa 429);
+ *  - códigos do broker, códigos de negócio da Z.ai, `insufficient_quota` e afins ⇒ cota;
+ *  - 402 ⇒ saldo; texto inequívoco em 400/402/403/429 ⇒ cota;
  *  - 429 sem mais pistas ⇒ `taxa` (rate-limit). Quem chega aqui já passou pelo retry
  *    curto, ou não tem retry (sub-agentes).
+ * `manual` = só recarga/ação do dono resolve (esperar não repõe): a pausa sonda de forma
+ * esparsa, tem teto curto e a UI diz "recarregue e pressione ↵".
  */
 export function classifyQuota(err: unknown, nowMs: number): QuotaVerdict | null {
   if (err instanceof ModelCallAbortedError || err instanceof BrokerTransportError) return null;
   if (!(err instanceof BrokerError)) return null;
   const status = err.status;
   const text = `${err.message} ${err.problem.title ?? ''} ${err.problem.type ?? ''}`;
+  if (/provider_local:no_quota/.test(text)) return null;
   const resetFromError =
     err.resetAtMs ??
     (err.retryAfter !== undefined ? nowMs + err.retryAfter * 1000 : undefined) ??
     resetAtFromMessage(text, nowMs);
-  const resetAtMs = clampReset(resetFromError, nowMs);
+  let resetAtMs = clampReset(resetFromError, nowMs);
 
-  const mk = (scope: QuotaScope): QuotaVerdict => ({
-    scope,
-    resetAtMs,
-    reason: `${quotaScopeLabel(scope)} (HTTP ${status})`,
-  });
+  const mk = (scope: QuotaScope): QuotaVerdict => {
+    // Dica de reset < 1 min numa janela/teto é enganosa (ex.: Gemini manda retryDelay 1s para
+    // cota DIÁRIA): ignora e deixa a escada de sondagem decidir.
+    if (
+      resetAtMs !== undefined &&
+      resetAtMs - nowMs < SHORT_RETRY_LIMIT_MS &&
+      scope !== 'taxa' &&
+      scope !== 'credito'
+    ) {
+      resetAtMs = undefined;
+    }
+    return {
+      scope,
+      resetAtMs,
+      manual: scope === 'credito' || (scope === 'orcamento' && resetAtMs === undefined),
+      reason: `${quotaScopeLabel(scope)} (HTTP ${status})`,
+    };
+  };
 
   switch (err.code) {
     case 'USAGE_WINDOW_EXHAUSTED':
@@ -266,10 +344,16 @@ export function classifyQuota(err: unknown, nowMs: number): QuotaVerdict | null 
   }
   if (status === 402) return mk('credito');
   if (status === 401 || status === 404 || status === 422 || status >= 500) return null;
-  if ((status === 400 || status === 403 || status === 429) && STRONG_QUOTA_TEXT.test(text)) {
+  const quotaStatus = status === 400 || status === 403 || status === 429;
+  if (providerTags(text, 'provider_code').some((c) => ZAI_NOT_QUOTA.has(c))) return null;
+  if (quotaStatus) {
+    const fromProvider = scopeFromProvider(text);
+    if (fromProvider !== undefined) return mk(fromProvider);
+  }
+  if (quotaStatus && STRONG_QUOTA_TEXT.test(text)) {
     return mk(WEEKLY_TEXT.test(text) ? 'semanal' : WINDOW_TEXT.test(text) ? 'janela' : 'credito');
   }
-  if (status === 429) return mk('taxa');
+  if (status === 429) return mk(DAILY_TEXT.test(text) ? 'janela' : 'taxa');
   return null;
 }
 
@@ -293,9 +377,10 @@ export const PROBE_LADDER_MS: readonly number[] = [
 ];
 
 /** Espera até a sondagem de índice `n` (0-based); satura no último degrau. */
-export function probeDelayMs(n: number): number {
-  const i = Math.max(0, Math.min(n, PROBE_LADDER_MS.length - 1));
-  return PROBE_LADDER_MS[i]!;
+export function probeDelayMs(n: number, manual = false): number {
+  const ladder = manual ? BALANCE_LADDER_MS : PROBE_LADDER_MS;
+  const i = Math.max(0, Math.min(n, ladder.length - 1));
+  return ladder[i]!;
 }
 
 // ── configuração ─────────────────────────────────────────────────────────────

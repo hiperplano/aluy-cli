@@ -248,6 +248,40 @@ describe('Z.ai coding: 429 com corpo de limite de uso', () => {
   });
 });
 
+describe('saldo esgotado (402): só recarga resolve', () => {
+  const noBalance = (): BrokerError =>
+    new BrokerError({ status: 402, code: 'INSUFFICIENT_CREDIT', detail: 'Insufficient Balance' });
+
+  it('marca manual, sonda de forma esparsa (5, 10 min) e NÃO espera horas: salva em 30 min', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg }); // maxWait configurado = 6h
+    const model = new Script([noBalance()]);
+    const p = newLoop(model, co).run('x');
+    const caught = p.catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(co.view?.manual).toBe(true);
+    expect(co.view!.deadlineAtMs - co.view!.startedAt).toBe(30 * 60_000);
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(model.calls).toBe(1); // nada de sondar a cada minuto
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(model.calls).toBe(2); // 1ª sondagem aos 5 min
+    await vi.advanceTimersByTimeAsync(9 * 60_000);
+    expect(model.calls).toBe(2); // a próxima só +10 min
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(model.calls).toBe(3);
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    expect(await caught).toMatchObject({ why: 'tempo-maximo' }); // teto curto de saldo
+  });
+
+  it('recarregou e pressionou ↵ (tentar agora): retoma de onde parou', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg });
+    const model = new Script([noBalance(), ok('voltei')]);
+    const p = newLoop(model, co).run('x');
+    await vi.advanceTimersByTimeAsync(10);
+    co.resumeNow();
+    expect((await p).stop.kind).toBe('final');
+  });
+});
+
 describe('pausa compartilhada entre irmãos', () => {
   it('o irmão não martela o provider: espera o mesmo portão e libera junto', async () => {
     const co = new QuotaPauseCoordinator({ config: cfg });
