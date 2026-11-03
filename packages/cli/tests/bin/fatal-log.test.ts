@@ -39,6 +39,24 @@ describe('fatal-log (rede de segurança de crash)', () => {
     expect(appendFatalLog('k', 'x', { dir: join(d, 'arquivo', 'sub') })).toBe(false);
   });
 
+  it('uncaughtExceptionMonitor NÃO duplica a entrada quando o MESMO erro é re-lançado (alt-screen)', () => {
+    const dir = tmp();
+    const handlers = new Map<string, (...a: never[]) => void>();
+    const proc: FatalProcessLike = {
+      on: (e, l) => handlers.set(e, l),
+      exit: ((): never => {
+        throw new Error('exit');
+      }) as never,
+    };
+    installFatalLogger(proc, { dir });
+    const err = new Error('mesmo-objeto');
+    handlers.get('uncaughtExceptionMonitor')!(err, 'uncaughtException');
+    handlers.get('uncaughtExceptionMonitor')!(err, 'uncaughtException'); // re-throw do alt-screen
+    expect(read(dir).split('mesmo-objeto').length - 1).toBe(1); // 1 só entrada (stack tem a msg 1×)
+    handlers.get('uncaughtExceptionMonitor')!(new Error('outro-erro'), 'uncaughtException');
+    expect(read(dir)).toContain('outro-erro');
+  });
+
   it('installFatalLogger observa uncaughtExceptionMonitor, exit≠0 e SIGHUP (sem tirar o default)', () => {
     const dir = tmp();
     const handlers = new Map<string, (...a: unknown[]) => void>();

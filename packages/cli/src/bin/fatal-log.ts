@@ -75,7 +75,15 @@ export function installFatalLogger(
   proc: FatalProcessLike = process as unknown as FatalProcessLike,
   opts: FatalLogOptions = {},
 ): void {
+  const seen = new WeakSet<object>();
   proc.on('uncaughtExceptionMonitor', ((err: unknown, origin: unknown) => {
+    // O alt-screen RE-LANÇA o MESMO erro no próximo tick (p/ não silenciar o crash) ⇒ o Node
+    // dispara o monitor 2× p/ o mesmo objeto (achado do dono: entrada duplicada no crash.log).
+    // Dedupe por identidade do Error.
+    if (err !== null && typeof err === 'object') {
+      if (seen.has(err)) return;
+      seen.add(err);
+    }
     appendFatalLog(`uncaughtException(${String(origin)})`, err, opts);
   }) as never);
   proc.on('exit', ((code: number) => {

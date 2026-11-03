@@ -90,6 +90,7 @@ export interface Catalog {
   /** EST-1000 · ADR-0076 — nota de que o cockpit é EXPERIMENTAL (inline é o recomendado). */
   /** Aviso ao SAIR do cockpit (volta ao inline). */
   'cockpit.left': string;
+  'cockpit.renderFault': string;
   /** Recusa por tela ESTREITA (<80 col) — cai pro inline (ADR §6). */
   'cockpit.refuseNarrow': string;
   /** Recusa por tela BAIXA (poucas linhas) — cai pro inline (ADR §6). */
