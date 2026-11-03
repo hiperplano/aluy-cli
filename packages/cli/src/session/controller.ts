@@ -5085,7 +5085,37 @@ export class SessionController {
     // qualquer bloco `running`/`streaming` corrente FORA do `<Static>` até resolver in-place
     // (sem a âncora coarse que congelava a linha "rodando" viva no scrollback). A demoção é
     // HONESTA (running→err/cancelled = "interrompido", nunca finge sucesso).
-    this.patch({ blocks: sanitizeOrphans(blocks), phase: 'idle' });
+    // F14 — NOTAS são efêmeras (resposta de slash-command: `comando desconhecido: /xyz`, `/help`,
+    // avisos de boot…): não voltam como ruído na retomada. A conversa (você/aluy/tool) fica.
+    const semNotas = blocks.filter((b) => b.kind !== 'note');
+    if (semNotas.length === 0) return;
+    this.patch({ blocks: sanitizeOrphans(semNotas), phase: 'idle' });
+  }
+
+  /**
+   * F14 — restaura os contadores de uso da sessão retomada (`◉ N% janela · M sessão`). Usa o
+   * `usage` persistido; em record antigo (sem ele) ESTIMA os tokens pelo texto da conversa
+   * (~4 chars/token) e a janela pela janela do modelo, quando conhecida. Só display.
+   */
+  restoreUsage(
+    usage: { readonly tokens: number; readonly windowPct: number } | undefined,
+    blocks: readonly SessionBlock[],
+  ): void {
+    if (usage !== undefined) {
+      this.patch({
+        meta: { ...this.state.meta, tokens: usage.tokens, windowPct: usage.windowPct },
+      });
+      return;
+    }
+    let chars = 0;
+    for (const b of blocks) {
+      if (b.kind === 'you' || b.kind === 'aluy') chars += b.text.length;
+    }
+    if (chars === 0) return;
+    const tokens = Math.round(chars / 4);
+    const windowPct =
+      this.contextWindow > 0 ? Math.min(100, Math.round((tokens / this.contextWindow) * 100)) : 0;
+    this.patch({ meta: { ...this.state.meta, tokens, windowPct } });
   }
 
   /** EST-0972 — os blocos correntes da sessão (p/ o auto-save persistir). */

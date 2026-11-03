@@ -2357,7 +2357,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // dele mantém o envelope (blocksToHistory → observation, envelopada por
   // buildMessages como DADO_NAO_CONFIAVEL). NADA ingerido vira instrução (CLI-SEC-4).
   const resumedHistory: HistoryItem[] = resumedRecord ? blocksToHistory(resumedRecord.blocks) : [];
-  if (resumedRecord) built.controller.restoreBlocks(resumedRecord.blocks);
+  if (resumedRecord) {
+    built.controller.restoreBlocks(resumedRecord.blocks);
+    built.controller.restoreUsage(resumedRecord.usage, resumedRecord.blocks);
+  }
   // HUNT-RESUME-RACE — semeia o contexto do modelo AQUI, no MESMO ponto em que a tela
   // é restaurada, e não lá embaixo depois do `await memory.recall()`. O histórico já
   // está pronto (linha acima, síncrono); prendê-lo ao I/O da memória abria uma janela
@@ -2413,6 +2416,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       ...(built.controller.labelColor !== undefined
         ? { labelColor: built.controller.labelColor }
         : {}),
+      // F14 — uso da sessão (rodapé `◉ N% janela · M sessão`) volta certo na retomada.
+      usage: {
+        tokens: built.controller.current.meta.tokens,
+        windowPct: built.controller.current.meta.windowPct,
+      },
       blocks: built.controller.blocks,
     });
   };
@@ -2859,6 +2867,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // ANTES de semear a retomada (a conversa anterior não vaza na retomada).
           built.controller.resetResumeContext();
           built.controller.restoreBlocks(record.blocks);
+          built.controller.restoreUsage(record.usage, record.blocks);
           const seed = blocksToHistory(record.blocks);
           if (seed.length > 0) built.controller.seedHistory(seed);
           saveNow();

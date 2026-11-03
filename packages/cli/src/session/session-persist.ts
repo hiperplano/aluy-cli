@@ -49,6 +49,8 @@ export function autoSaveSession(
     readonly label?: string;
     /** EST-0972 (rename) — cor de identificação corrente (nome da paleta do DS). */
     readonly labelColor?: string;
+    /** F14 — contadores de uso (tokens/janela) p/ a retomada não zerar o rodapé. */
+    readonly usage?: { readonly tokens: number; readonly windowPct: number };
     readonly blocks: readonly SessionBlock[];
   },
 ): boolean {
