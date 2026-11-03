@@ -5,7 +5,12 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TerminalNotificationPort, loadNotifyConfig } from '../../src/io/notify-port.js';
+import {
+  TerminalNotificationPort,
+  loadNotifyConfig,
+  modeAllows,
+  parseNotifyMode,
+} from '../../src/io/notify-port.js';
 import { UserConfigStore, CONFIG_FILENAME } from '../../src/io/user-config.js';
 
 function emitted(mode: 'all' | 'attention' | 'off') {
@@ -97,5 +102,40 @@ describe('config.notify — persistência', () => {
     expect(new UserConfigStore({ baseDir: base }).load().notify).toBeUndefined();
     writeFileSync(join(base, CONFIG_FILENAME), JSON.stringify({ notify: 'xyz' }));
     expect(new UserConfigStore({ baseDir: base }).load().notify).toBeUndefined();
+  });
+});
+
+describe('modeAllows — motivo × modo', () => {
+  it('all: attention + done; attention: só attention; off: nenhum', () => {
+    expect(modeAllows('all', 'attention')).toBe(true);
+    expect(modeAllows('all', 'done')).toBe(true);
+    expect(modeAllows('attention', 'attention')).toBe(true);
+    expect(modeAllows('attention', 'done')).toBe(false);
+    expect(modeAllows('off', 'attention')).toBe(false);
+    expect(modeAllows('off', 'done')).toBe(false);
+  });
+});
+
+describe('parseNotifyMode — inglês, legados truthy/falsey e PT antigo', () => {
+  it('mapeia tudo', () => {
+    const casos: Array<[string, string | undefined]> = [
+      ['all', 'all'],
+      ['attention', 'attention'],
+      ['off', 'off'],
+      ['on', 'all'],
+      ['1', 'all'],
+      ['true', 'all'],
+      ['0', 'off'],
+      ['false', 'off'],
+      ['no', 'off'],
+      ['tudo', 'all'],
+      ['atencao', 'attention'],
+      ['atenção', 'attention'],
+      ['nada', 'off'],
+      ['xx', undefined],
+      ['', undefined],
+    ];
+    for (const [i, o] of casos) expect(parseNotifyMode(i)).toBe(o);
+    expect(parseNotifyMode(undefined)).toBeUndefined();
   });
 });

@@ -19,6 +19,7 @@ import {
   rotuloExibido,
   sortearVerbo,
   verbosSimples,
+  seedPadrao,
 } from '../../src/session/verbos.js';
 import { PolicyPermissionEngine } from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
@@ -266,5 +267,23 @@ describe('integração de ambiente', () => {
   });
   it('lê o processo por padrão', () => {
     expect(verbosSimples()).toBe(true);
+  });
+});
+
+describe('env do spinner (nomes em inglês)', () => {
+  it('ALUY_SPINNER_VERBS: plain/off/0/false ligam o modo plano; playful e ausente não', () => {
+    for (const v of ['plain', 'PLAIN', 'off', '0', 'false']) {
+      expect(verbosSimples({ ALUY_SPINNER_VERBS: v })).toBe(true);
+    }
+    expect(verbosSimples({ ALUY_SPINNER_VERBS: 'playful' })).toBe(false);
+    expect(verbosSimples({})).toBe(false);
+  });
+  it('o nome antigo ALUY_VERBOS=simples NÃO vale mais', () => {
+    expect(verbosSimples({ ALUY_VERBOS: 'simples' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(verbosSimples({ ALUY_SPINNER_VERBS: 'simples' })).toBe(false);
+  });
+  it('ALUY_SPINNER_VERBS_SEED fixa a semente; o nome antigo é ignorado', () => {
+    expect(seedPadrao({ ALUY_SPINNER_VERBS_SEED: '42' })).toBe(42);
+    expect(seedPadrao({ ALUY_VERBOS_SEED: '42' } as NodeJS.ProcessEnv)).not.toBe(42);
   });
 });

@@ -220,4 +220,43 @@ describe('App — os 3 modos', () => {
     expect(onStatuslineChange.mock.calls.map((c) => c[0])).toEqual(['compact', 'hidden']);
     unmount();
   });
+
+  async function digitar(
+    stdin: { write: (s: string) => void },
+    texto: string,
+    pronto: () => boolean,
+  ): Promise<void> {
+    await new Promise((r) => setTimeout(r, 250));
+    stdin.write(texto);
+    await new Promise((r) => setTimeout(r, 250));
+    for (let i = 0; i < 3 && !pronto(); i++) {
+      stdin.write('\r');
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    await esperar(pronto);
+  }
+
+  it('/statusline sem argumento cicla (como o F2)', async () => {
+    const { lastFrame, stdin, onStatuslineChange, unmount } = mount({ statusline: 'full' });
+    await esperar(() => plain(lastFrame()).includes('estado'));
+    await digitar(stdin, '/statusline', () => onStatuslineChange.mock.calls.length >= 1);
+    expect(onStatuslineChange.mock.calls[0]?.[0]).toBe('compact');
+    unmount();
+  });
+
+  it('/statusline hidden fixa o modo', async () => {
+    const { lastFrame, stdin, onStatuslineChange, unmount } = mount({ statusline: 'full' });
+    await esperar(() => plain(lastFrame()).includes('estado'));
+    await digitar(stdin, '/statusline hidden', () => onStatuslineChange.mock.calls.length >= 1);
+    expect(onStatuslineChange.mock.calls[0]?.[0]).toBe('hidden');
+    unmount();
+  });
+
+  it('/statusline com argumento inválido avisa e não muda nada', async () => {
+    const { lastFrame, stdin, onStatuslineChange, unmount } = mount({ statusline: 'full' });
+    await esperar(() => plain(lastFrame()).includes('estado'));
+    await digitar(stdin, '/statusline xyz', () => plain(lastFrame()).includes('modo desconhecido'));
+    expect(onStatuslineChange).not.toHaveBeenCalled();
+    unmount();
+  });
 });
