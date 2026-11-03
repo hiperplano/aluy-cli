@@ -585,12 +585,18 @@ describe('EST-0969 · a tool spawn_agent (no toolset do PAI)', () => {
 });
 
 describe('EST-0969 · spawn_agent atrás da catraca do PAI (CLI-SEC-H1)', () => {
-  it('o PAI, sob a engine concreta, trata spawn_agent como efeito (ask por padrão)', () => {
+  it('o PAI, sob a engine concreta, libera spawn_agent por padrão (ADR aluy-cli 0002) e volta a ask por config', () => {
     const parent = new PolicyPermissionEngine();
     const v = parent.decide({ name: SPAWN_AGENT_TOOL_NAME, input: { agents: [] } });
-    // no PAI, spawn_agent não é negado por profundidade (denySpawnAgent=false); é
-    // tool de efeito desconhecida ⇒ ask (nunca allow silencioso).
-    expect(v.decision).toBe('ask');
+    // no PAI, spawn_agent não é negado por profundidade (denySpawnAgent=false). Delegar não
+    // tem efeito próprio: cada filho passa pela MESMA decide() — allow por padrão.
+    expect(v.decision).toBe('allow');
+    const configurado = new PolicyPermissionEngine({
+      policy: { rules: [], defaults: { [SPAWN_AGENT_TOOL_NAME]: 'ask' } },
+    });
+    expect(
+      configurado.decide({ name: SPAWN_AGENT_TOOL_NAME, input: { agents: [] } }).decision,
+    ).toBe('ask');
   });
 
   it('o PAI executa spawn_agent SÓ após o gate liberar (loop real)', async () => {

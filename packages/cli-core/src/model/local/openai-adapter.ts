@@ -222,6 +222,8 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
       }
       if (delta !== undefined && Array.isArray(delta.tool_calls)) {
         accumulateToolCalls(acc, delta.tool_calls);
+        const chars = charsDeArgs(delta.tool_calls);
+        if (chars > 0) out.push({ type: 'progress', kind: 'tool_args', chars });
       }
       const finish = str(choice, 'finish_reason');
       if (finish !== undefined && finish !== null && finish !== '') {
@@ -310,6 +312,12 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
     if (inTok !== undefined) out.tokens_in = inTok;
     const outTok = num(raw, 'completion_tokens');
     if (outTok !== undefined) out.tokens_out = outTok;
+    // RACIOCÍNIO reportado à parte (`completion_tokens_details.reasoning_tokens`).
+    const det = isRecord(raw['completion_tokens_details'])
+      ? raw['completion_tokens_details']
+      : undefined;
+    const reasoningTok = det !== undefined ? num(det, 'reasoning_tokens') : undefined;
+    if (reasoningTok !== undefined) out.tokens_reasoning = reasoningTok;
     // CACHE DE PROMPT — até 10/09/2026 este trailer era lido pela metade: pegávamos os dois
     // totais e descartávamos quanto do prompt veio do cache. Nos providers de cache
     // IMPLÍCITO isso já vinha acontecendo e sendo cobrado mais barato, sem ninguém ver.
@@ -321,6 +329,17 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
 }
 
 /** Acumula os deltas de `tool_calls[]` (fragmentados por `index`) no acumulador. */
+/** Tamanho dos fragmentos de `function.arguments` num lote de deltas de tool-call. */
+function charsDeArgs(deltas: unknown[]): number {
+  let n = 0;
+  for (const d of deltas) {
+    if (!isRecord(d) || !isRecord(d.function)) continue;
+    const a = d.function['arguments'];
+    if (typeof a === 'string') n += a.length;
+  }
+  return n;
+}
+
 function accumulateToolCalls(acc: SseAccumulator, deltas: unknown[]): void {
   for (const d of deltas) {
     if (!isRecord(d)) continue;

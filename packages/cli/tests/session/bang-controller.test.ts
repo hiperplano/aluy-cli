@@ -101,33 +101,15 @@ describe('EST-0958 · runBang — leitura pura roda direto (bloco de saída)', (
   });
 });
 
-describe('EST-0958 · runBang — efeito (sempre-ask) abre o AskDialog e respeita a escolha', () => {
-  it('`!rm -rf build` ⇒ phase asking; negar ⇒ bloco blocked, shell NÃO chamado', async () => {
+describe('F15 · runBang — `!comando` do usuário é ação explícita: roda sem caixa de permissão', () => {
+  it('`!rm -rf build` executa direto (nunca entra em asking) e o bloco vira ok', async () => {
     const { controller, ran } = build();
-    const p = controller.runBang('rm -rf build'); // não await: precisa resolver o ask
-    await waitForAsk(controller);
-    expect(controller.current.phase).toBe('asking');
-    // o AskDialog recebe o efeito EXATO + sempre-ask (CLI-SEC-9)
-    expect(controller.current.pendingAsk?.request.effect.exact).toBe('$ rm -rf build');
-    expect(controller.current.pendingAsk?.request.alwaysAsk).toBe(true);
-    controller.resolveAsk({ kind: 'deny', reason: 'não' });
-    await p;
-    expect(ran).toEqual([]); // não executou
-    const bang = controller.current.blocks.find((b) => b.kind === 'bang');
-    expect(bang?.kind === 'bang' && bang.status).toBe('blocked');
-    // volta ao composer (não fica preso em asking/streaming)
-    expect(['idle', 'done']).toContain(controller.current.phase);
-  });
-
-  it('aprovar (approve-once) ⇒ executa e bloco vira ok', async () => {
-    const { controller, ran } = build();
-    const p = controller.runBang('rm -rf build');
-    await waitForAsk(controller);
-    controller.resolveAsk({ kind: 'approve-once' });
-    await p;
+    await controller.runBang('rm -rf build');
+    expect(controller.current.pendingAsk).toBeUndefined();
     expect(ran).toEqual(['rm -rf build']);
     const bang = controller.current.blocks.find((b) => b.kind === 'bang');
     expect(bang?.kind === 'bang' && bang.status).toBe('ok');
+    expect(['idle', 'done']).toContain(controller.current.phase);
   });
 });
 
@@ -244,11 +226,7 @@ describe('EST-0958 · não-TTY — `!comando` LITERAL passa pela catraca (sem as
     expect(o.text()).toContain('saída de: ls');
   });
 
-  it('`!rm -rf` SEM TTY ⇒ ask sem aprovação ⇒ BLOQUEADO (catraca não cede)', async () => {
-    // Sem TTY não há diálogo de ask interativo: o ambiente não-interativo NEGA por
-    // fail-safe (nunca executa por inação). Modelamos isso com um AskResolver que
-    // nega de imediato — exatamente o fail-safe que o não-TTY aplica. O controller
-    // aceita um resolver não-Tui (o loop/bang o invocam direto), sem fila/UI.
+  it('F15 · `!rm -rf` SEM TTY roda direto (ação explícita do usuário; não há caixa a negar)', async () => {
     const denyResolver: AskResolver = {
       async resolve(): Promise<AskResolution> {
         return { kind: 'deny', reason: 'sem TTY (fail-safe)' };
@@ -264,7 +242,7 @@ describe('EST-0958 · não-TTY — `!comando` LITERAL passa pela catraca (sem as
     });
     const o = makeOut();
     await runLinear(controller, '!rm -rf build', o.out);
-    expect(ran).toEqual([]); // não executou (catraca pediu ask, ambiente negou)
-    expect(o.text()).toContain('[shell] $ rm -rf build — bloqueado');
+    expect(ran).toEqual(['rm -rf build']);
+    expect(o.text()).toContain('[shell] $ rm -rf build');
   });
 });

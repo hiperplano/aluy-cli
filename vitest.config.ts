@@ -12,6 +12,8 @@ export default defineConfig({
       'packages/*/tests/**/*.test.ts',
       // EST-0948 — testes de componente Ink (ink-testing-library) são .tsx.
       'packages/*/tests/**/*.test.tsx',
+      // Eval comportamental (scripts/eval): só as partes PURAS (sem provider/rede).
+      'scripts/eval/**/*.test.mjs',
     ],
     passWithNoTests: false,
     // F66 — GATE HONESTO sob paralelismo. Os suites de INTEGRAÇÃO mais pesados

@@ -113,6 +113,13 @@ export {
 } from './mem-pressure.js';
 // EST-0944 — SELF-CHECK de atenção (re-âncora de objetivo + auto-verificação pré-
 // "pronto"). Config + gating puros (flag/env/tier fraco) + redatores dos lembretes.
+export { VerificationLedger } from './verification-ledger.js';
+export {
+  DelegationNudger,
+  DELEGATION_NUDGE_MARKER,
+  delegationNudgeEnabled,
+  countIndependentSteps,
+} from './delegation-nudge.js';
 export {
   type SelfCheckConfig,
   type SelfCheckInputs,
@@ -663,3 +670,16 @@ export { buildRoomTools, type RoomToolsDeps } from './rooms/room-tools.js';
 // EST-1125 (§4): esqueleto do grafo de caixas de contexto (ContextGraph) — fundação.
 // EST-1128: portas MemoryEngine + JudgeEngine (interfaces puras, ZERO impl/I-O/sidecar).
 export * from './maestro/index.js';
+
+// PAUSA POR COTA — coordenador compartilhado + porta do loop (sub-agentes e agente principal).
+export {
+  QuotaPauseCoordinator,
+  type AgentSpec as QuotaPauseAgentSpec,
+  type PausedAgentSnapshot,
+  type PausedProfile,
+  type QuotaPauseCallContext,
+  type QuotaPauseEnd,
+  type QuotaPauseEvent,
+  type QuotaPausePort,
+  type QuotaPauseView,
+} from './quota-pause.js';

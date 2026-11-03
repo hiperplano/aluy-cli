@@ -39,6 +39,13 @@ export interface YouTurn {
    * digitou do que chegou por um canal externo.
    */
   readonly origem?: string;
+  /**
+   * F8/F16 — TEXTO DE EXIBIÇÃO do eco, quando difere do `text` enviado ao modelo: o paste
+   * grande aparece como o MESMO chip do composer (`[texto colado #1, +130 linhas]`) em vez
+   * de despejar as 130 linhas, e os anexos viram `📎 arquivo`. Só apresentação — o modelo
+   * recebe o `text` cheio.
+   */
+  readonly display?: string;
 }
 
 /** Um turno do agente (◇ aluy) — texto que faz stream token-a-token. */
@@ -183,7 +190,7 @@ export interface SubAgentChild {
    */
   readonly summary?: string;
   /** Motivo da parada (`final`/`limit`/`timeout`/`error`/`cancelled`) — a11y/auditoria. */
-  readonly stop?: 'final' | 'limit' | 'timeout' | 'error' | 'cancelled';
+  readonly stop?: 'final' | 'limit' | 'timeout' | 'error' | 'cancelled' | 'paused';
   /**
    * ADR-0146 (D5) — o NOME do tier/modelo RESOLVIDO deste filho (`aluy-strata`,
    * `custom · <slug>`, `herdado (aluy-flux)`, `herdado (custom · <slug-do-pai>)`).
@@ -193,6 +200,8 @@ export interface SubAgentChild {
    * mostra. Visível enquanto `status==='running'` e mantido no resumo final.
    */
   readonly model?: string;
+  /** F13 — início (epoch ms) do filho em `running`: a linha mostra os SEGUNDOS ao vivo. */
+  readonly startedAt?: number;
 }
 
 /**
@@ -650,6 +659,19 @@ export interface SessionState {
    * `pensando`; some quando o stream começa.
    */
   readonly workingLabel?: string | undefined;
+  /**
+   * FEEDBACK-IMEDIATO — instante (relógio do controller, ms) em que o turno começou a
+   * trabalhar. A App deriva daí o tempo decorrido do `<Working>` (`preparando… 0:03`), de modo
+   * que o relógio anda desde o Enter, antes de qualquer atividade do modelo.
+   */
+  readonly workingSince?: number | undefined;
+  /**
+   * VERBO do passo corrente (`Costurando`) — FONTE ÚNICA: o controller sorteia um novo a cada
+   * mudança de `workingSince` (cada passo) e a linha de trabalho e o `⋯ Costurando…` da caixa
+   * da resposta leem o MESMO valor, então nunca divergem. Ausente (`ALUY_SPINNER_VERBS=plain`) ⇒
+   * rótulos planos (`pensando`).
+   */
+  readonly workingVerb?: string | undefined;
   // `| undefined` explícito (exactOptionalPropertyTypes): o controlador LIMPA
   // estes campos com `undefined` ao resolver o ask/budget — então o tipo precisa
   // admitir a ausência por atribuição, não só por omissão da chave.
@@ -673,6 +695,13 @@ export interface SessionState {
    * ([r]/[c]/[n]). Mesma mecânica de campo `| undefined` do `pendingBudget`.
    */
   readonly pendingStuck?: PendingStuck | undefined;
+  /**
+   * PAUSA POR COTA — o episódio de pausa em curso (`undefined` fora dele). A cota do modelo
+   * acabou; os agentes listados estão PAUSADOS (não mortos) e voltam sozinhos quando a cota
+   * liberar. A TUI mostra o banner com contagem regressiva e as escolhas (tentar agora /
+   * parar salvando). Não é uma fase: o composer e o ESC seguem como no trabalho normal.
+   */
+  readonly quotaPause?: import('@hiperplano/aluy-cli-core').QuotaPauseView | undefined;
   /**
    * EST-0982 · ADR-0063 — contabilidade do TURNO do agente principal (tokens +
    * tempo), exibida no rodapé estilo Claude Code. `undefined` antes do 1º turno.

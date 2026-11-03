@@ -23,7 +23,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { displayWidth } from '../../session/visual-lines.js';
-import type { AskRequest } from '@hiperplano/aluy-cli-core';
+import { canRememberTool, type AskRequest } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { resolveLanguage } from '../markdown/index.js';
 import {
@@ -96,10 +96,10 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
 
   const tag = destructive ? 'destrutivo · ask' : 'ask';
 
-  // Teto de 72 para a caixa não virar uma faixa gigante em terminal largo (a decisão é
+  // Teto de 100 (F21: era 72 fixo — pequeno demais num terminal de 160) para a caixa não virar uma faixa gigante em terminal largo (a decisão é
   // curta; uma moldura de 200 colunas afasta o olho do que importa). `-4`: o recuo de 2 do
   // bloco mais os dois cantos.
-  const larguraCaixa = Math.max(24, Math.min(72, (props.columns ?? 80) - 4));
+  const larguraCaixa = Math.max(24, Math.min(100, (props.columns ?? 80) - 4));
   /** Traço que completa uma linha da moldura até fechar na largura única. */
   const preencher = (usado: number, glifo: string): string =>
     glifo.repeat(Math.max(1, larguraCaixa - usado));
@@ -201,6 +201,9 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
             <Text> </Text>
             {/* [s] SÓ quando NÃO é sempre-ask (CLI-SEC-3) */}
             {req.alwaysAsk === false && <Role name="accent">[s] sempre nesta sessão</Role>}
+            {req.alwaysAsk === false && canRememberTool(req.call.name) && (
+              <Role name="accent"> [l] lembrar</Role>
+            )}
           </Box>
           <Box>
             <Role name="accent">{theme.box.vertical} </Role>
@@ -226,9 +229,12 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
 
 /** Footer linear de atalhos (§4.3), por tipo de ask. */
 function footerOf(req: AskRequest, destructive: boolean): string {
-  if (destructive) return 'n nega (recomendado) · a aprova mesmo assim · esc cancela';
-  if (req.alwaysAsk === false) return 'a aprova · s sempre · n nega · e edita · esc cancela';
-  return 'a aprova · n nega · e edita · esc cancela';
+  if (destructive) return 'n nega (recomendado) · a aprova mesmo assim · esc interrompe';
+  if (req.alwaysAsk === false && canRememberTool(req.call.name)) {
+    return 'a aprova · s sessão · l lembra (não pergunta mais) · n nega · esc interrompe';
+  }
+  if (req.alwaysAsk === false) return 'a aprova · s sempre · n nega · esc interrompe';
+  return 'a aprova · n nega · esc interrompe';
 }
 
 /** O pedido em linguagem natural (edit vs bash). */

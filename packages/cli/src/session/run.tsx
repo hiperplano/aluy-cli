@@ -16,6 +16,7 @@ import {
   overwriteRenderEnabled,
 } from './synchronized-output.js';
 import { enableBracketedPaste } from './bracketed-paste.js';
+import { disableAutowrap, noAutowrapEnabled } from './autowrap.js';
 import { resolveTheme } from '../ui/theme/index.js';
 import { tableLines } from '../ui/table-lines.js';
 import type { RewindChoice } from '../ui/hooks/useRewindPicker.js';
@@ -162,6 +163,7 @@ import {
   loadProjectInstructions,
   UserConfigStore,
   SessionStore,
+  PausaStore,
   // ADR-0150 (balde b) — resolve `session.gcMaxAgeMs`/`gcMaxCount` do config único.
   resolveSessionGcOptions,
   blocksToHistory,
@@ -198,6 +200,7 @@ import {
   resolveInitialSplitView,
   resolveInitialFullscreen,
   resolveInitialSuggestions,
+  resolveInitialStatusline,
   configuredLang,
   type UserConfig,
   type UserProviderEntry,
@@ -778,6 +781,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // (env, 0/1) > `config.suggestions` (pref do `/suggest`) > default ON. É uma OPÇÃO
   // default-LIGADA (decisão do dono); o toggle em sessão grava de volta p/ a próxima.
   const initialSuggestions = resolveInitialSuggestions(savedConfig, env);
+  // RODAPÉ — `ALUY_STATUSLINE` > `config.statusline` > automático (parcial em terminal ≤ 30 linhas).
+  const initialStatusline = resolveInitialStatusline(savedConfig, env);
 
   // EST-0972 — PERSISTÊNCIA de SESSÃO (`--continue`/`--resume`). Resolve a retomada
   // ANTES de fiar a sessão (precisa do id p/ reusar o MESMO arquivo de sessão E o
@@ -828,6 +833,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // EST-0989 — a auto-oferta de retomada agora aparece na CAIXA do splash (TTY),
     // não mais como `↻ … [S/n]` solto no meio da tela.
     promptYesNo: bootPrompt,
+    // Oferta rica (nome+cor da sessão, `l` lista as outras do projeto) — só no splash TTY.
+    ...(splash !== undefined ? { promptResume: splash.promptResume } : {}),
     // ADR-0150 (balde b) — janela de "recente" p/ a auto-oferta, config-driven
     // (clampada a 7 dias por `resolveAutoResumeWindowMs`; ausente ⇒ 24h de sempre).
     windowMs: resolveAutoResumeWindowMs(savedConfig.session?.autoResumeWindowMs),
@@ -1846,7 +1853,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                 ok: false,
                 detail:
                   `provider "${entry.id}" NÃO respondeu ao teste: ${prova.detail}. ` +
-                  'nada mudou — o provider ativo continua o mesmo (fail-closed). ' +
+                  'nada mudou — o provider ativo continua o mesmo. ' +
                   (hasStoredApiKey(entry.id)
                     ? 'se a chave está velha, rode `aluy login --provider ' + entry.id + '`.'
                     : 'grave a chave com `aluy login --provider ' + entry.id + '`.'),
@@ -2014,6 +2021,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   void _lbu;
   const built = buildSession({
     ...optsForBuild,
+    // ADR aluy-cli 0002 — "sempre permitir" lembrado (lê/grava no config do usuário).
+    rememberedAllow: savedConfig.permissions?.alwaysAllow ?? [],
+    onRememberTool: (tool: string) => {
+      configStore.saveAlwaysAllowTool(tool);
+    },
     // ADR-0120 / EST-1113 — sob `backend:'local'`, injeta o LocalModelClient como o
     // `ModelClient` da sessão (mesmo contrato do broker). O wiring o usa p/ o caller
     // de stream/loop sem mudar nada. `undefined` (modo broker) ⇒ o wiring cria o
@@ -2349,7 +2361,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // dele mantém o envelope (blocksToHistory → observation, envelopada por
   // buildMessages como DADO_NAO_CONFIAVEL). NADA ingerido vira instrução (CLI-SEC-4).
   const resumedHistory: HistoryItem[] = resumedRecord ? blocksToHistory(resumedRecord.blocks) : [];
-  if (resumedRecord) built.controller.restoreBlocks(resumedRecord.blocks);
+  if (resumedRecord) {
+    built.controller.restoreBlocks(resumedRecord.blocks);
+    built.controller.restoreUsage(resumedRecord.usage, resumedRecord.blocks);
+  }
   // HUNT-RESUME-RACE — semeia o contexto do modelo AQUI, no MESMO ponto em que a tela
   // é restaurada, e não lá embaixo depois do `await memory.recall()`. O histórico já
   // está pronto (linha acima, síncrono); prendê-lo ao I/O da memória abria uma janela
@@ -2358,11 +2373,21 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // vezes ele se perde no que estava fazendo antes quando fechei e reabri"). "Às
   // vezes" porque é CORRIDA: quem digita rápido perde. A memória PREPENDA depois.
   if (resumedHistory.length > 0) built.controller.seedHistory(resumedHistory);
+  // PAUSA POR COTA — liga a persistência da pausa a ESTA sessão e, se a sessão retomada foi
+  // fechada (ou parada) com agentes pausados por cota, continua o trabalho de onde parou.
+  {
+    const pausaStore = new PausaStore({ disabled: opts.anonymous === true });
+    built.controller.attachPausaStore(pausaStore, activeSession.id);
+    const pausa = resumedRecord ? pausaStore.load(activeSession.id) : null;
+    if (pausa) void built.controller.resumeFromPausa(pausa);
+  }
   // EST-0972 (rename) — RESTAURA o RÓTULO + COR de identificação da sessão retomada
   // (boot via --continue/--resume/auto-oferta) ⇒ o ●+nome reaparece no composer de cara.
   // DADO DE UI (HG-2). Só quando há rótulo (sem label ⇒ controller fica sem rótulo).
   if (resumedRecord?.label !== undefined) {
     built.controller.setLabel(resumedRecord.label, resumedRecord.labelColor);
+    // O título da janela também volta com o nome (antes só o `/rename` o setava).
+    setWindowTitle(`aluy · ${resumedRecord.label}`);
   }
   // EST-0972 (BUG Custom) — record Custom LEGADO (salvo antes do fix, sem o slug): a
   // resolução caiu no tier canônico default. Avisa o usuário (uma nota honesta) — a
@@ -2395,6 +2420,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       ...(built.controller.labelColor !== undefined
         ? { labelColor: built.controller.labelColor }
         : {}),
+      // F14 — uso da sessão (rodapé `◉ N% janela · M sessão`) volta certo na retomada.
+      usage: {
+        tokens: built.controller.current.meta.tokens,
+        windowPct: built.controller.current.meta.windowPct,
+      },
       blocks: built.controller.blocks,
     });
   };
@@ -2841,6 +2871,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // ANTES de semear a retomada (a conversa anterior não vaza na retomada).
           built.controller.resetResumeContext();
           built.controller.restoreBlocks(record.blocks);
+          built.controller.restoreUsage(record.usage, record.blocks);
           const seed = blocksToHistory(record.blocks);
           if (seed.length > 0) built.controller.seedHistory(seed);
           saveNow();
@@ -2923,6 +2954,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // montar do ZERO, sem deixar fantasma do splash no scrollback (anti-flicker #118).
   // Feito ANTES da auto-detecção OSC 11 (que lê stdin) — o splash solta o raw-mode do
   // stdin ao desmontar, então não há disputa de stdin.
+  // F6 — o que o usuário digitou durante o splash/pergunta de boot vira o rascunho do composer.
+  const bootTypedAhead = splash?.typedAhead() ?? '';
   if (splash) {
     await splash.finish();
   } else {
@@ -2993,11 +3026,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // já retornou). O config vem do env (ALUY_NOTIFY/NO_COLOR). A escrita vai p/ o
   // MESMO stdout do render — sequências de controle curtas, nunca conteúdo.
   const notifyOut = opts.stdout ?? process.stdout;
-  const notifyConfig = loadNotifyConfig(env);
+  const notifyConfig = loadNotifyConfig(env, savedConfig.notify);
   const notifyPort = new TerminalNotificationPort({
     write: (s) => notifyOut.write(s),
     isTty: true, // este ramo só roda com TTY (o não-TTY retornou acima).
-    enabled: notifyConfig.enabled,
+    mode: notifyConfig.mode,
     desktop: notifyConfig.desktop,
   });
   // Gancho ESTREITO: observa as transições de fase do controller (stream público)
@@ -3317,7 +3350,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           if (!r.ok) {
             built.controller.pushNote('model', [
               `o modelo "${alvo}" não respondeu no provider ativo: ${r.detail}`,
-              'nada mudou (fail-closed) — o modelo anterior continua em uso.',
+              'nada mudou — o modelo anterior continua em uso.',
             ]);
             return;
           }
@@ -3526,9 +3559,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     }
     // EST-0963 — `/notify on|off|toggle`: aplica o estado na porta e empurra a nota.
     if (command.id === 'notify') {
-      const effect = buildNotifyEffect(args, { enabled: notifyPort.enabled, tty: true });
+      const effect = buildNotifyEffect(args, {
+        enabled: notifyPort.enabled,
+        mode: notifyPort.mode,
+        tty: true,
+      });
       if (effect.kind === 'notify') {
-        notifyPort.setEnabled(effect.enable);
+        if (effect.mode !== undefined) {
+          notifyPort.setMode(effect.mode);
+          configStore.saveNotify(effect.mode);
+        }
         built.controller.pushNote(effect.note.title, effect.note.lines);
       }
       return;
@@ -3653,7 +3693,13 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         if (outcome.note.lines.length > 0) {
           built.controller.pushNote(outcome.note.title, outcome.note.lines);
         }
-        if (outcome.cleared) clearScreenFn?.();
+        if (outcome.cleared) {
+          clearScreenFn?.();
+          // F18 — confirmação textual curta (antes a tela só ficava vazia, sem feedback).
+          built.controller.pushNote('clear', [
+            'conversa limpa — o contexto da sessão foi zerado (a memória foi mantida).',
+          ]);
+        }
       });
       return;
     }
@@ -4520,6 +4566,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // composer passa a ser o da sessão escolhida). Sem rótulo na escolhida ⇒ LIMPA o da
     // atual (a sessão "é" a retomada — não herda o rótulo da anterior). DADO DE UI.
     built.controller.setLabel(record.label, record.labelColor);
+    // título da janela acompanha o nome da sessão retomada (sem nome ⇒ reseta).
+    setWindowTitle(record.label !== undefined ? `aluy · ${record.label}` : undefined);
     // grava JÁ no arquivo da sessão retomada (consolida o alvo trocado) e confirma.
     saveNow();
     if (rm.warning) built.controller.pushNote('model', [rm.warning]);
@@ -4638,7 +4686,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // ('exit')` (defesa p/ exit abrupto). O `enableBracketedPaste` LIGA o `?2004h` já e dá um
   // `disable()` IDEMPOTENTE (só escreve `?2004l` uma vez) — espelha o alt-screen.
   const pasteMode = enableBracketedPaste(baseStdout);
-  const disableBracketedPaste = (): void => pasteMode.disable();
+  // Auto-wrap OFF (`?7l`): o terminal não quebra mais a linha que ele mede mais larga que o
+  // Ink (emoji ZWJ/tom de pele…) ⇒ nº de linhas físicas == nº que o Ink emitiu ⇒ o erase da
+  // região viva nunca deixa a linha de trabalho/branco para trás. Ver `autowrap.ts`.
+  const autowrap = disableAutowrap(baseStdout, noAutowrapEnabled(env));
+  const disableBracketedPaste = (): void => {
+    pasteMode.disable();
+    autowrap.restore();
+  };
   // Defesa: garante o `?2004l` mesmo num `process.exit` que pule o `finally` (ex.: um
   // caminho de saída abrupto). Idempotente com o `onSignal`/`finally`.
   process.once('exit', disableBracketedPaste);
@@ -4775,6 +4830,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           ]);
         }}
         controller={built.controller}
+        {...(bootTypedAhead !== '' ? { initialInput: bootTypedAhead } : {})}
         egress={built.egress}
         userCommands={userCommandList}
         animate={theme.animate}
@@ -4960,6 +5016,11 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         }}
         // F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab). Estado inicial + persistência.
         initialSuggestions={initialSuggestions}
+        {...(initialStatusline !== undefined ? { initialStatusline } : {})}
+        onStatuslineChange={(modo) => {
+          // RODAPÉ — persiste a escolha de `/statusline`/F2 (best-effort). Só UI — nunca segredo.
+          configStore.saveStatusline(modo);
+        }}
         onSuggestionsChange={(on) => {
           // F197 — persiste a pref do `/suggest` p/ a próxima sessão (best-effort). Só UI
           // (booleano) — jamais segredo (CLI-SEC-7).
@@ -5038,7 +5099,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                   if (!r.ok) {
                     built.controller.pushNote('model', [
                       `modelo "${slug}" recusado: ${r.detail}`,
-                      'nada mudou — o modelo ativo continua o mesmo (fail-closed).',
+                      'nada mudou — o modelo ativo continua o mesmo.',
                     ]);
                     return;
                   }
@@ -5115,7 +5176,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
                         ? 'gravado como padrão para as próximas sessões.'
                         : 'vale só nesta sessão — no próximo boot volta o provider anterior.',
                     ]
-                  : [`falha ao trocar p/ "${provider}": ${r.detail}`, 'nada mudou (fail-closed).'],
+                  : [`falha ao trocar p/ "${provider}": ${r.detail}`, 'nada mudou.'],
               );
               // F-PROV-RETRY — na falha devolve o MOTIVO junto, não só `false`: o App usa
               // o `detail` para REABRIR o campo de chave (chave velha/errada ⇒ "cole

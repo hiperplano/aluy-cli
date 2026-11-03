@@ -9,7 +9,6 @@
 //
 // Sem JSX de propósito: o `live-budget.ts` importa daqui, e ele é puro.
 
-
 /**
  * Altura FIXA da coluna de agentes quando ela aparece. Fixa porque um bloco que cresce a
  * cada filho que nasce mudaria a altura do frame o tempo todo; com teto, ela muda DUAS

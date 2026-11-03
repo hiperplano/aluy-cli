@@ -19,7 +19,7 @@ export const en: PartialCatalog = {
   'composer.moreLines': 'lines',
 
   // ── FooterHints ───────────────────────────────────────────────────────────
-  'hints.idle': '{enter} send · / commands · {up} history',
+  'hints.idle': '{enter} send · \\⏎ new line · / commands · {up} history',
   'hints.thinking': 'esc interrupt · ctrl-b detach · ctrl-c×2 quit',
   'hints.streaming': 'esc interrupt · ctrl-b detach · ctrl-c×2 quit',
   'hints.ask': 'a approve · s always · n deny · e edit · esc cancel',
@@ -28,9 +28,10 @@ export const en: PartialCatalog = {
   'hints.palette': 'type to search · ↑↓ navigate · enter run · esc close',
   'hints.budget': 'c continue · n end',
   'hints.error': 'r retry · esc cancel',
-  'hints.workSubagents': 'esc stops the parent · ctrl-b detach · F8 stops all · ctrl-t view/stop · ctrl-c×2 quit',
+  'hints.workSubagents': 'esc stops the parent · ctrl-b detach · F8 stops all · /help',
+  'hints.quotaPause': 'esc cancels the turn · ctrl-c×2 quit',
   'hints.detachInline': 'ctrl-b detach',
-  'hints.idleSubagents': 'enter sends · F8 stops the sub-agents · ctrl-t view/stop · ctrl-c×2 quit',
+  'hints.idleSubagents': 'enter sends · F8 stops the sub-agents · /help',
   'hints.ctrlcAgain': 'press ctrl-c again to quit',
   'hints.cockpit':
     'tab focuses · pgup/pgdn scroll · ctrl-s export · /fullscreen exits · ctrl-c×2 quit',
@@ -59,6 +60,8 @@ export const en: PartialCatalog = {
   'cockpit.entered':
     'cockpit mode (full screen) — tab switches chat⇄log · pgup/pgdn scroll · ctrl-s export · /fullscreen exits',
   'cockpit.left': 'inline mode restored (native scrollback).',
+  'cockpit.renderFault':
+    'full-screen render failed; back to inline mode (details in ~/.aluy/logs/crash.log).',
   'cockpit.refuseNarrow': 'narrow terminal (<80 col): cockpit unavailable, using inline.',
   'cockpit.refuseShort': 'short terminal (too few rows): cockpit unavailable, using inline.',
   'cockpit.exported': 'transcript exported (redacted) to',
@@ -120,7 +123,8 @@ export const en: PartialCatalog = {
   // (masked with •). See pt-BR.ts for the owner-reported motivation.
   'picker.provider.credential.label': '{provider} API key (hidden) — enter saves and applies',
   'picker.provider.credential.help': 'esc goes back to the list · the key is NEVER shown in clear',
-  'picker.provider.credential.retryTitle': '✗ the key failed the connection test — paste another one',
+  'picker.provider.credential.retryTitle':
+    '✗ the key failed the connection test — paste another one',
 
   // ── ModelPicker (/model) ──────────────────────────────────────────────────
   'picker.model.help': 'change model · ↑↓ navigate · enter select · esc close',
@@ -209,7 +213,7 @@ export const en: PartialCatalog = {
   'cmd.usage': 'tokens and window for this session',
   'cmd.rename': 'name + color-tag the session · ●name in the composer',
   'cmd.history': 'browse and RESUME a previous session · without leaving aluy',
-  'cmd.notify': 'toggle the attention bell (on/off)',
+  'cmd.notify': 'notifications: all | attention | off',
   'cmd.undo': "undo the agent's last file edit",
   'cmd.redo': 'redo the last undone edit',
   'cmd.rewind': 'rewind the session to a point (code and/or conversation) · Esc Esc',

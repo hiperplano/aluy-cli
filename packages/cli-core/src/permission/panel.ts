@@ -130,5 +130,7 @@ export const LOCKED_CATEGORIES: readonly LockedCategory[] = [
 export function isSafeToolDefaultChange(tool: string, decision: SafeToolDecision): boolean {
   if (decision === 'ask') return true;
   // decision === 'allow': so p/ tools read-only da lista fechada.
-  return SAFE_TOGGLEABLE_TOOLS.includes(tool);
+  // ADR aluy-cli 0002: delegação é allow por padrão; o ajuste de sessão (ex.: `/permissions`
+  // ou o config) pode voltar de `ask` para `allow`. Não aparece como linha do painel.
+  return SAFE_TOGGLEABLE_TOOLS.includes(tool) || tool === 'spawn_agent' || tool === 'agent_send';
 }

@@ -67,6 +67,12 @@ export interface StreamSink {
    * sink que não o implementa simplesmente ignora o pensamento (comportamento antigo).
    */
   onReasoning?(content: string): void;
+  /**
+   * CONTADOR DE GERAÇÃO — sinal NORMALIZADO, igual p/ qualquer backend (broker, openai-compat,
+   * anthropic): `chars` gerados de `reasoning` | `text` | `tool_args` neste instante. A TUI
+   * estima o `↓ N tokens` ao vivo com isto; nunca olha o provider.
+   */
+  onGenerated?(kind: 'reasoning' | 'text' | 'tool_args', chars: number): void;
   /** Trailer de uso (◷ tokens / ⛁ janela). */
   onUsage?(usage: ModelUsage): void;
   /**
@@ -97,6 +103,7 @@ export function delegatingSink(get: () => StreamSink | undefined): StreamSink {
     onStart: () => get()?.onStart?.(),
     onDelta: (c) => get()?.onDelta(c),
     onReasoning: (c) => get()?.onReasoning?.(c),
+    onGenerated: (k, n) => get()?.onGenerated?.(k, n),
     onUsage: (u) => get()?.onUsage?.(u),
     onQuota: (q) => get()?.onQuota?.(q),
     onDone: () => get()?.onDone?.(),
@@ -347,6 +354,8 @@ export class StreamingModelCaller implements ModelCaller {
 
   async call(argsIn: {
     readonly messages: readonly ChatMessage[];
+    /** PROMPT-ENXUTO — variante sem o catálogo em texto (usada quando `tools` nativo vai no body). */
+    readonly messagesNative?: readonly ChatMessage[];
     readonly idempotencyKey: string;
     readonly signal?: AbortSignal;
     readonly onActivity?: () => void;
@@ -430,6 +439,8 @@ export class StreamingModelCaller implements ModelCaller {
    */
   private async callOnceWithToolDegrade(args: {
     readonly messages: readonly ChatMessage[];
+    /** PROMPT-ENXUTO — variante sem o catálogo em texto (usada quando `tools` nativo vai no body). */
+    readonly messagesNative?: readonly ChatMessage[];
     readonly idempotencyKey: string;
     readonly signal?: AbortSignal;
     readonly onActivity?: () => void;
@@ -459,6 +470,8 @@ export class StreamingModelCaller implements ModelCaller {
   private async streamOnce(
     args: {
       readonly messages: readonly ChatMessage[];
+      /** PROMPT-ENXUTO — variante sem o catálogo em texto (usada quando `tools` nativo vai no body). */
+      readonly messagesNative?: readonly ChatMessage[];
       readonly idempotencyKey: string;
       readonly signal?: AbortSignal;
       readonly onActivity?: () => void;
@@ -509,7 +522,8 @@ export class StreamingModelCaller implements ModelCaller {
         this.customProvider !== undefined
           ? { provider: this.customProvider }
           : {}),
-        messages: args.messages,
+        // PROMPT-ENXUTO — mesma flag (`withTools`) decide `tools` no body E a variante do prompt.
+        messages: withTools ? (args.messagesNative ?? args.messages) : args.messages,
         ...(this.brokerSessionId !== undefined ? { session_id: this.brokerSessionId } : {}),
         ...(this.opts.maxTokens !== undefined ? { max_tokens: this.opts.maxTokens } : {}),
         ...(this.opts.temperature !== undefined ? { temperature: this.opts.temperature } : {}),
@@ -523,6 +537,7 @@ export class StreamingModelCaller implements ModelCaller {
       ...(args.signal ? { signal: args.signal } : {}),
     });
 
+    let streamedArgs = false;
     for await (const ev of stream) {
       // Sinal de vida por evento (ver `ModelCaller.call`'s `onActivity`).
       args.onActivity?.();
@@ -535,6 +550,7 @@ export class StreamingModelCaller implements ModelCaller {
         case 'delta':
           content += ev.content;
           sink.onDelta(ev.content);
+          sink.onGenerated?.('text', ev.content.length);
           guard.push(ev.content);
           if (cap.addText(ev.content)) capped = true;
           break;
@@ -544,6 +560,11 @@ export class StreamingModelCaller implements ModelCaller {
           // medem a FALA, e um raciocínio longo é normal nesses modelos — contá-lo ali
           // faria o turno ser cortado por "degenerou" sem o modelo ter falado nada.
           sink.onReasoning?.(ev.content);
+          sink.onGenerated?.('reasoning', ev.content.length);
+          break;
+        case 'progress':
+          streamedArgs = true;
+          sink.onGenerated?.('tool_args', ev.chars);
           break;
         case 'tool_call':
           // EST-0996 — tool-call NATIVA agregada: acumula na ordem (1+ por turno).
@@ -553,6 +574,10 @@ export class StreamingModelCaller implements ModelCaller {
           // broker vazar fragmentos do MESMO id, funde em UMA call em vez de empilhar
           // duplicata (que daria `tool_call_id` repetido ⇒ 400 do provider no resume).
           pushOrMergeToolCall(toolCalls, ev.call);
+          // adapters que agregam (broker) entregam a call inteira de uma vez
+          if (!streamedArgs) {
+            sink.onGenerated?.('tool_args', JSON.stringify(ev.call).length);
+          }
           if (cap.addToolCall(ev.call)) capped = true;
           break;
         case 'usage':

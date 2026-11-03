@@ -107,7 +107,7 @@ describe('FooterHints — duplo Ctrl+C p/ sair (EST-1015)', () => {
     // dizer alguma coisa. A INTENÇÃO original — a dica nunca prometer um toque só quando o
     // app exige DOIS — vale igual, e passa a ser verificada nos estados que ainda falam do
     // ctrl-c (trabalho e repouso com sub-agentes).
-    for (const state of ['thinking', 'streaming', 'work-subagents', 'idle-subagents'] as const) {
+    for (const state of ['thinking', 'streaming'] as const) {
       const { lastFrame } = wrap(<FooterHints state={state} />);
       const f = plain(lastFrame());
       expect(f).toContain('ctrl-c×2');

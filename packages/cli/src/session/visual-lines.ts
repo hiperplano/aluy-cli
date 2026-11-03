@@ -61,7 +61,12 @@ export function displayWidth(text: string): number {
     }
     const cp = text.codePointAt(i)!;
     if (cp > 0xffff) i += 1; // par surrogate: pula a unidade baixa (já contabilizada).
-    width += charWidth(cp);
+    let w = charWidth(cp);
+    // VS16 (U+FE0F) logo depois de um code point estreito = apresentação de EMOJI (`⚠️`, `❤️`,
+    // `🏛️`, keycap `1️⃣`): wezterm/kitty/iTerm pintam em 2 colunas. Terminais que ignoram o
+    // VS16 pintam 1 — o orçamento fica com o MAIOR (2), nunca subestima a altura da viva.
+    if (w === 1 && text.charCodeAt(i + 1) === 0xfe0f) w = 2;
+    width += w;
   }
   return width;
 }

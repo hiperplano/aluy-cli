@@ -51,6 +51,17 @@ import { DEFAULT_LIMITS, type SessionLimits } from './limits.js';
 import { ToolRegistry } from './tools/registry.js';
 import { reportStatusTool, REPORT_STATUS_TOOL_NAME } from './tools/agents-manage.js';
 import { SPAWN_AGENT_TOOL_NAME } from './tools/spawn-agent.js';
+import {
+  AGENT_SEND_TOOL_NAME,
+  ASK_PARENT_TOOL_NAME,
+  MESSAGING_LIMITS,
+  askParentTool,
+  clampMessage,
+  parentInstructionItem,
+  type MessagingAck,
+  type ParentNoteKind,
+} from './tools/agent-messaging.js';
+import type { HistoryItem } from './context.js';
 import { QUESTION_TOOL_NAME } from './tools/question.js';
 import type { NativeTool, ToolPorts } from './tools/types.js';
 import { resolveChildWorktree, type WorktreeHandle } from './worktree-port.js';
@@ -62,6 +73,8 @@ import {
 import { PolicyPermissionEngine } from '../permission/engine.js';
 import type { AskResolver, AskRequest, AskResolution } from '../permission/ask.js';
 import { ROOM_POST_TOOL_NAME, ROOM_READ_TOOL_NAME } from './rooms/room-tools.js';
+import { QuotaPauseStoppedError } from '../model/errors.js';
+import type { QuotaPauseCoordinator, PausedAgentSnapshot } from './quota-pause.js';
 
 /** Defaults anti-runaway do fan-out (CLI-SEC-8 / E-A2). */
 export const DEFAULT_MAX_CONCURRENCY = 4;
@@ -374,7 +387,7 @@ export interface SubAgentOutcome {
   /** O texto que o filho produziu (resposta final OU motivo da parada). */
   readonly result: string;
   /** Como o filho terminou (p/ auditoria/UX). */
-  readonly stop: 'final' | 'limit' | 'timeout' | 'error';
+  readonly stop: 'final' | 'limit' | 'timeout' | 'error' | 'paused';
   readonly usage: { iterations: number; toolCalls: number; tokens: number };
   /**
    * O filho NÃO terminou: foi desacoplado (ESC no pai, ou injeção do dono) e segue rodando em
@@ -382,6 +395,12 @@ export interface SubAgentOutcome {
    * relatório ao pai (`formatSubAgentResults`) diz isso com todas as letras.
    */
   readonly detached?: boolean;
+  /**
+   * PAUSA POR COTA — o filho NÃO falhou: parou por cota esgotada (e o dono mandou "parar
+   * salvando" ou a espera máxima estourou). Carrega a foto dele (histórico + perfil) para
+   * ser retomado depois de onde parou. O pai o trata como PAUSADO, não como erro.
+   */
+  readonly paused?: PausedAgentSnapshot;
 }
 
 /** Observador OPCIONAL do ciclo de vida dos filhos (a UI do @hiperplano/aluy-cli pluga). */
@@ -422,6 +441,12 @@ export interface SubAgentCompletionPort {
 }
 
 export interface SubAgentSpawnerOptions {
+  /**
+   * PAUSA POR COTA — coordenador compartilhado da sessão (o MESMO do agente principal).
+   * Cada filho ganha uma porta própria; o relógio de inatividade dele é suspenso durante a
+   * pausa (esperar a cota não é travar). Ausente ⇒ baseline (cota esgotada = filho falha).
+   */
+  readonly quotaPause?: QuotaPauseCoordinator;
   /** O MESMO ModelCaller do pai (toda llm_call pelo broker — CLI-SEC-7). */
   readonly model: ModelCaller;
   /**
@@ -611,7 +636,7 @@ export function childEngineOf(
   return {
     decide(call: ToolCall): PermissionVerdict {
       // E-A1/GS-MD2: `spawn_agent` SEMPRE negado no filho (acima do toolScope).
-      if (call.name === SPAWN_AGENT_TOOL_NAME) {
+      if (call.name === SPAWN_AGENT_TOOL_NAME || call.name === AGENT_SEND_TOOL_NAME) {
         return {
           decision: 'deny',
           reason:
@@ -881,6 +906,91 @@ export class SubAgentSpawner {
    * "indisponível" em vez de fingir que anotou.
    */
   onChildReport?: (label: string, nota: string) => boolean;
+  /**
+   * Gancho de NOTA do filho ao pai (`ask_parent`). O locus entrega ao pai como OBSERVAÇÃO
+   * (dado não-confiável). Os tetos (quantidade/tamanho) já foram aplicados aqui. Ausente ⇒
+   * `ask_parent` responde que não há canal.
+   */
+  onChildNote?: (label: string, message: string, kind: ParentNoteKind) => boolean;
+  /**
+   * Gancho de ENTREGA ao filho (UI/auditoria): chamado depois que uma mensagem entrou na fila
+   * viva dele. `from` é a origem rotulada ("do orquestrador" | "usuário").
+   */
+  onInjectedToChild?: (label: string, message: string, from: string) => void;
+  /**
+   * CANAIS VIVOS: label → fila de entrada do filho em execução. Existe só enquanto o
+   * `runChild` corre (inclui filhos desacoplados — o spawner segue dono deles).
+   */
+  private readonly liveChannels = new Map<
+    string,
+    { queue: HistoryItem[]; sentByParent: number; notesToParent: number }
+  >();
+
+  /** O filho `label` está rodando e aceita mensagens? */
+  hasLiveChild(label: string): boolean {
+    return this.liveChannels.has(label);
+  }
+
+  /**
+   * Entrega `item` (um `user_inject`) na fila VIVA do filho `label` — o loop dele a drena no
+   * topo da próxima iteração (`pollInjected`). NÃO muda a engine do filho (escopo ⊆ pai; toda
+   * tool derivada re-passa `decide()`). Usado pelo `agent_send` e pela injeção do dono.
+   */
+  injectIntoChild(label: string, item: HistoryItem): boolean {
+    const ch = this.liveChannels.get(label);
+    if (!ch || item.role !== 'user_inject') return false;
+    ch.queue.push(item);
+    return true;
+  }
+
+  /** PAI → filho (`agent_send`), com os tetos anti-runaway. A origem é carimbada AQUI. */
+  sendFromParent(label: string, message: string): MessagingAck {
+    const ch = this.liveChannels.get(label);
+    if (!ch) {
+      return {
+        ok: false,
+        error:
+          `sub-agente "${label}" não está rodando (não existe, já terminou ou ainda espera vaga na fila). ` +
+          'Veja os rótulos vivos com `agents_status`; se ele já terminou, spawne um novo com o contexto necessário.',
+      };
+    }
+    if (ch.sentByParent >= MESSAGING_LIMITS.parentToChildPerChild) {
+      return {
+        ok: false,
+        error: `teto de ${MESSAGING_LIMITS.parentToChildPerChild} mensagens para "${label}" atingido (anti-runaway). Deixe-o terminar ou pare-o e spawne outro.`,
+      };
+    }
+    if (ch.queue.length >= MESSAGING_LIMITS.parentToChildPending) {
+      return {
+        ok: false,
+        error: `"${label}" ainda não leu as ${ch.queue.length} mensagens anteriores — aguarde ele consumir antes de mandar outra.`,
+      };
+    }
+    const item = parentInstructionItem(message);
+    ch.queue.push(item);
+    ch.sentByParent += 1;
+    if (item.role === 'user_inject') this.onInjectedToChild?.(label, item.text, item.origin);
+    return { ok: true };
+  }
+
+  /** FILHO → pai (`ask_parent`), com os tetos. Entrega pelo gancho do locus. */
+  private noteToParent(label: string, message: string, kind: ParentNoteKind): MessagingAck {
+    const ch = this.liveChannels.get(label);
+    if (!ch) return { ok: false, error: 'canal encerrado.' };
+    if (!this.onChildNote) {
+      return { ok: false, error: 'não há canal para o orquestrador neste locus.' };
+    }
+    if (ch.notesToParent >= MESSAGING_LIMITS.childToParentPerChild) {
+      return {
+        ok: false,
+        error: `teto de ${MESSAGING_LIMITS.childToParentPerChild} mensagens ao orquestrador atingido (anti-runaway). Siga com sua melhor suposição e entregue o resultado final.`,
+      };
+    }
+    const ok = this.onChildNote(label, clampMessage(message), kind);
+    if (!ok) return { ok: false, error: 'o orquestrador não pôde receber a mensagem agora.' };
+    ch.notesToParent += 1;
+    return { ok: true };
+  }
   private readonly childTools: readonly NativeTool<ToolPorts>[];
   private readonly askResolver?: AskResolver;
   private readonly budget: SharedBudget;
@@ -903,6 +1013,8 @@ export class SubAgentSpawner {
   private readonly worktree?: import('./worktree-port.js').WorktreePort;
   /** EST-F158 — porta de completion: acordar o Maestro quando o fan-out termina. */
   private readonly completionPort?: SubAgentCompletionPort;
+  /** PAUSA POR COTA — coordenador compartilhado (ausente ⇒ sem pausa). */
+  private readonly quotaPause?: QuotaPauseCoordinator;
 
   constructor(opts: SubAgentSpawnerOptions) {
     // display: os filhos usam o caller DEDICADO (sem o sink ao vivo do pai) — se
@@ -928,15 +1040,22 @@ export class SubAgentSpawner {
         t.name !== SPAWN_AGENT_TOOL_NAME &&
         t.name !== QUESTION_TOOL_NAME &&
         t.name !== 'agents_status' &&
-        t.name !== 'agents_stop',
+        t.name !== 'agents_stop' &&
+        // Conversa PAI ⇄ FILHO (ADR 0002): o filho NÃO manda mensagem a irmãos nem ao pai
+        // por `agent_send` — só ao orquestrador, por `ask_parent`.
+        t.name !== AGENT_SEND_TOOL_NAME,
     );
     // RELATAR, sim. A árvore sabe o mecânico ("rodando run_command: npm test"); o que o
     // filho está fazendo CONCEITUALMENTE só ele sabe, e sem isso o `agents_status` do
     // pai responde metade da pergunta do dono ("eu quero que vc veja o que ele está
     // fazendo"). Sem efeito no mundo: escreve um rótulo curto no nó dele.
-    this.childTools = semDelegar.some((t) => t.name === REPORT_STATUS_TOOL_NAME)
+    const comRelato = semDelegar.some((t) => t.name === REPORT_STATUS_TOOL_NAME)
       ? semDelegar
       : [...semDelegar, reportStatusTool];
+    // FALAR COM O PAI (`ask_parent`) — só o filho tem; chega ao pai como DADO (CLI-SEC-4).
+    this.childTools = comRelato.some((t) => t.name === ASK_PARENT_TOOL_NAME)
+      ? comRelato
+      : [...comRelato, askParentTool];
     if (opts.askResolver) this.askResolver = opts.askResolver;
     this.budget = opts.sharedBudget ?? new SharedBudget(opts.limits ?? DEFAULT_LIMITS);
     // ADR-0150 (balde b) — precedência opção(flag) > env > config > default, clampada
@@ -977,6 +1096,7 @@ export class SubAgentSpawner {
     if (opts.roomCode) this.roomCode = opts.roomCode;
     if (opts.worktree) this.worktree = opts.worktree;
     if (opts.completionPort) this.completionPort = opts.completionPort;
+    if (opts.quotaPause) this.quotaPause = opts.quotaPause;
   }
 
   /** O budget compartilhado (p/ o pai contabilizar/auditar — E-A2). */
@@ -995,7 +1115,12 @@ export class SubAgentSpawner {
   async spawn(
     profiles: readonly SubAgentProfile[],
     signal?: AbortSignal,
-    opts?: { room?: boolean; pattern?: string },
+    opts?: {
+      room?: boolean;
+      pattern?: string;
+      /** PAUSA POR COTA — retomada: histórico a continuar, por label do filho. */
+      resume?: ReadonlyMap<string, readonly HistoryItem[]>;
+    },
   ): Promise<readonly SubAgentOutcome[]> {
     if (profiles.length === 0) return [];
     if (profiles.length > this.maxSubagentsPerCall) {
@@ -1044,6 +1169,7 @@ export class SubAgentSpawner {
           profiles.length,
           i,
           roomCode,
+          opts?.resume?.get(profile.label),
         );
         outcomes[i] = outcome;
         this.observer?.onChildEnd?.(profile.label, outcome, profile.model);
@@ -1068,6 +1194,7 @@ export class SubAgentSpawner {
     total = 0,
     index = 0,
     roomCode = '',
+    resumeHistory?: readonly HistoryItem[],
   ): Promise<SubAgentOutcome> {
     // E-A1 + E-A3 + não-bypass: a engine do filho é DERIVADA da do pai —
     // `forSubAgent()` herda o modo (Plan/normal/`--unsafe`) e a política (escopo
@@ -1082,7 +1209,13 @@ export class SubAgentSpawner {
     const childEngine = childEngineOf(
       this.permission,
       profile.toolScope,
-      effectiveRoomActive ? ROOM_COORD_TOOLS : undefined,
+      // `ask_parent`/`report_status` são comunicação, não capacidade nova: isentas do
+      // `toolScope` do `.md` (senão um agente com `tools:` restrito não conseguiria falar).
+      new Set<string>([
+        ASK_PARENT_TOOL_NAME,
+        REPORT_STATUS_TOOL_NAME,
+        ...(effectiveRoomActive ? ROOM_COORD_TOOLS : []),
+      ]),
     );
 
     // EST-SUBAGENT-MODEL — qual CALLER este filho usa: se o `.md` dele declara `model:`
@@ -1201,6 +1334,10 @@ export class SubAgentSpawner {
           ? articulationNote
           : baseInstructions;
 
+    // Canal vivo deste filho (mensagens do pai/dono). Removido no `finally` abaixo.
+    const channel = { queue: [] as HistoryItem[], sentByParent: 0, notesToParent: 0 };
+    this.liveChannels.set(profile.label, channel);
+
     const loop = new AgentLoop({
       // EST-SUBAGENT-MODEL — o caller POR FILHO (tier do `.md` dele, ou o do pai como
       // fallback). Era `this.model` (UM caller p/ TODOS); agora cada filho roteia ao
@@ -1220,6 +1357,17 @@ export class SubAgentSpawner {
           stop: () => false,
           report: (nota: string) => this.onChildReport?.(profile.label, nota) ?? false,
         },
+        // O filho só enxerga a metade `notifyParent`; a origem (label) é carimbada aqui.
+        agentMessaging: {
+          notifyParent: (message: string, kind: ParentNoteKind) =>
+            this.noteToParent(profile.label, message, kind),
+        },
+      },
+      // MENSAGENS VIVAS (do pai ou do dono): drenadas no topo de cada iteração do filho —
+      // mesmo mecanismo da injeção mid-turn do pai. Só `user_inject` passa (o loop filtra).
+      pollInjected: (): readonly HistoryItem[] => {
+        const q = channel.queue;
+        return q.length === 0 ? [] : q.splice(0, q.length);
       },
       // E-A2: o MESMO SharedBudget — a reserva atômica no loop garante a soma ≤ teto.
       budget: this.budget,
@@ -1242,6 +1390,23 @@ export class SubAgentSpawner {
         this.observer?.onChildProgress?.(profile.label, u);
       },
       ...(heldAsk ? { askResolver: heldAsk } : {}),
+      // PAUSA POR COTA — porta própria deste filho (label + perfil p/ retomar + hold do idle).
+      ...(this.quotaPause
+        ? {
+            quotaPause: this.quotaPause.forAgent({
+              label: profile.label,
+              kind: 'subagente',
+              profile: {
+                label: profile.label,
+                goal: profile.goal,
+                ...(profile.agent !== undefined ? { agent: profile.agent } : {}),
+                ...(profile.context !== undefined ? { context: profile.context } : {}),
+                ...(profile.model !== undefined ? { model: profile.model } : {}),
+              },
+              hold: () => idle.hold(),
+            }),
+          }
+        : {}),
       // EST-0977/0978 — o SYSTEM PROMPT do agente nomeado (persona, corpo do `.md`) +
       // o CONTEXTO recortado pelo pai entram no canal `system` do filho (instrução
       // confiável do dono, NÃO conteúdo ingerido). Ambos opcionais: a persona vem 1º
@@ -1280,7 +1445,10 @@ export class SubAgentSpawner {
     });
 
     try {
-      const run = loop.run(profile.goal, childAbort.signal);
+      const run =
+        resumeHistory !== undefined && resumeHistory.length > 0
+          ? loop.resume(resumeHistory, childAbort.signal)
+          : loop.run(profile.goal, childAbort.signal);
       const result = await Promise.race([run, idlePromise]);
       // Se o heartbeat perdeu a corrida, `result` é o AgentRunResult; se a inatividade
       // disparou (`result === undefined`), o filho foi morto por estar travado.
@@ -1308,6 +1476,33 @@ export class SubAgentSpawner {
           usage: ownUsage,
         };
       }
+      // PAUSA POR COTA — não é falha: o filho está PAUSADO, com o trabalho guardado.
+      if (err instanceof QuotaPauseStoppedError) {
+        const history = err.partialHistory ?? resumeHistory ?? [];
+        return {
+          label: profile.label,
+          ok: false,
+          result:
+            `sub-agente "${profile.label}" PAUSADO por cota esgotada (${err.message}) — o trabalho ` +
+            `foi guardado e ele continua de onde parou quando a sessão for retomada. NÃO é falha: ` +
+            `não o dispare de novo nem refaça o trabalho dele.`,
+          stop: 'paused',
+          usage: ownUsage,
+          paused: {
+            label: profile.label,
+            kind: 'subagente',
+            history,
+            profile: {
+              label: profile.label,
+              goal: profile.goal,
+              ...(profile.agent !== undefined ? { agent: profile.agent } : {}),
+              ...(profile.context !== undefined ? { context: profile.context } : {}),
+              ...(profile.model !== undefined ? { model: profile.model } : {}),
+            },
+            pausedAt: Date.now(),
+          },
+        };
+      }
       return {
         label: profile.label,
         ok: false,
@@ -1320,6 +1515,7 @@ export class SubAgentSpawner {
       // Encerra o relógio de inatividade (resolve `idle.done` como `false` ⇒ o
       // `idlePromise` vira no-op; evita timer pendurado) e desliga o listener do pai.
       idle.stop();
+      if (this.liveChannels.get(profile.label) === channel) this.liveChannels.delete(profile.label);
       parentSignal?.removeEventListener('abort', onParentAbort);
       nodeSignal?.removeEventListener('abort', onNodeAbort);
       // EST-1098 (WT-1) — remove o worktree do filho em TODO caminho de saída (sucesso/

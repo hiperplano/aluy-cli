@@ -17,6 +17,7 @@
 // o resolver o REBAIXA para `approve-once` (defesa em profundidade — a TUI não
 // contorna a engine). A engine ainda recusa o grant (grantSession devolve false).
 
+import { canRememberTool } from '@hiperplano/aluy-cli-core';
 import type { AskRequest, AskResolution, AskResolver } from '@hiperplano/aluy-cli-core';
 
 /** Estado de uma confirmação pendente, observável pela UI. */
@@ -162,8 +163,16 @@ function deny(reason: string): AskResolution {
  * mais passa como veio.
  */
 function sanitize(resolution: AskResolution, request: AskRequest): AskResolution {
-  if (resolution.kind === 'approve-session' && request.alwaysAsk === true) {
+  if (
+    (resolution.kind === 'approve-session' || resolution.kind === 'approve-always') &&
+    request.alwaysAsk === true
+  ) {
     return { kind: 'approve-once' };
+  }
+  // ADR aluy-cli 0002: "lembrar" de uma tool que não pode ser permanente (run_command/
+  // edit_file/write_file) vale só pela sessão.
+  if (resolution.kind === 'approve-always' && !canRememberTool(request.call.name)) {
+    return { kind: 'approve-session' };
   }
   return resolution;
 }

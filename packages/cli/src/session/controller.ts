@@ -24,6 +24,7 @@ import {
   BrokerError,
   BrokerTransportError,
   ModelCallAbortedError,
+  QuotaPauseStoppedError,
   closeInterruptedHistory,
   AuthError,
   RefreshUnavailableError,
@@ -48,6 +49,9 @@ import {
   spawnAgentTool,
   agentsStatusTool,
   agentsStopTool,
+  agentSendTool,
+  childNoteText,
+  type ParentNoteKind,
   formatSubAgentResults,
   bindNamedAgent,
   buildAvailableAgentsNote,
@@ -116,6 +120,7 @@ import {
   type PermissionEngine,
   type SessionLimits,
   type SelfCheckConfig,
+  VerificationLedger,
   type SessionMode,
   type SubAgentObserver,
   type SubAgentOutcome,
@@ -151,6 +156,8 @@ import {
   mapSkillsToCapabilityItems,
   groupMcpServers,
 } from './capabilities-snapshot.js';
+import { QuotaPauseSession, quotaPauseConfigFromEnv } from './quota-pause-session.js';
+import type { PausaRecord, PausaStore } from '../io/pausa-store.js';
 import { createSuggestEngine, runSideQuery, summarizeLiveFlows } from '@hiperplano/aluy-cli-core';
 import { pctDeCache, diagnosticoDeCache } from '@hiperplano/aluy-cli-core';
 // F191 — primitivo de EXPEDITE ("acelerar o encaixe"): o controller o POSSUI e o passa
@@ -167,8 +174,7 @@ import {
   buildMonitorTools,
 } from '@hiperplano/aluy-cli-core';
 import { MemoryRoomStore, buildRoomTools } from '@hiperplano/aluy-cli-core';
-import type {
-  DetachHub, RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
+import type { DetachHub, RoomStore, MeshPolicy } from '@hiperplano/aluy-cli-core';
 import {
   formatRoomList,
   formatConversation,
@@ -180,7 +186,7 @@ import {
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { sep as pathSep } from 'node:path';
-import { redactOutputSecrets } from '@hiperplano/aluy-cli-core';
+import { redactOutputSecrets, canRememberTool } from '@hiperplano/aluy-cli-core';
 import type { StreamSink } from './streaming-caller.js';
 import type { ModelCaller, ModelClient } from '@hiperplano/aluy-cli-core';
 import { withToolReport, targetOf, type ToolReporter } from './tool-reporter.js';
@@ -204,6 +210,8 @@ import {
   type ToolLineBlock,
   type LiveSubagent,
 } from './model.js';
+import { criarRng, parseVerbos, seedPadrao, sortearVerbo, verbosSimples } from './verbos.js';
+import { resolveText } from '../i18n/translate.js';
 
 /** EST-0958 — estados do bloco `!comando` (running → ok/err/blocked). */
 type BangStatus = BangBlock['status'];
@@ -343,6 +351,8 @@ export function nextMode(mode: SessionMode): SessionMode {
 }
 
 export interface SessionControllerOptions {
+  /** ADR aluy-cli 0002 — persiste o "lembrar esta decisão" de uma tool (config do usuário). */
+  readonly onRememberTool?: (tool: string) => void;
   readonly model: ModelCaller;
   readonly permission: PermissionEngine;
   readonly ports: ToolPorts;
@@ -397,6 +407,8 @@ export interface SessionControllerOptions {
    * baseline do loop deles (são curtos/dirigidos; a re-âncora foca o agente PRINCIPAL).
    */
   readonly selfCheck?: SelfCheckConfig;
+  /** Dica de delegação do agente principal (ver cli-core delegation-nudge.ts). */
+  readonly delegationNudge?: boolean;
   /**
    * EST-0980 — GATE de pre-tool (hooks `gate:true` que podem VETAR uma tool). O wiring
    * o constrói a partir do `HookRunner` + a config de hooks (`makePreToolGate`) e o
@@ -1025,6 +1037,8 @@ const DEFAULT_MEM_SAMPLE_MS = 2000;
  * de conectar"; a barra não deve virar chrome permanente.
  */
 const MCP_PROGRESS_CLEAR_MS = 2000;
+/** PROMPT-ENXUTO — teto da espera do boot MCP antes da 1ª chamada ao modelo (ms). */
+const MCP_SETTLE_TIMEOUT_MS = 4000;
 
 /**
  * EST-0948 — teto NOMEADO de tentativas do auto-retry (1ª + re-tentativas). "Fácil de
@@ -1122,6 +1136,19 @@ class FilaComRecibo extends EventQueue {
   }
 }
 
+/** FEEDBACK-IMEDIATO — rótulos da linha viva enquanto o turno ainda PREPARA (antes do modelo). */
+const ROTULOS_DE_PREPARO: ReadonlySet<string> = new Set([
+  'preparando',
+  'lembrando',
+  'maestro avaliando',
+  'conectando MCP',
+]);
+
+/** O texto é só o eco do probe de auto-verificação (`AUTO-VERIFICAÇÃO (passada 2/2)…`)? */
+export function ehEcoDeAutoVerificacao(texto: string): boolean {
+  return /^\s*AUTO-VERIFICA[ÇC][ÃA]O\b/i.test(texto);
+}
+
 export class SessionController {
   private state: SessionState;
   private readonly observers = new Set<StateObserver>();
@@ -1132,6 +1159,8 @@ export class SessionController {
   // hooks `pre-tool`/`post-tool`, espelhando o que `attachHooksObserver` faz p/ `turn-end`.
   private readonly toolObservers = new Set<ToolLifecycleObserver>();
   private readonly loop: AgentLoop;
+  /** PROMPT-ENXUTO — espera única do boot MCP antes da 1ª chamada ao modelo. */
+  private mcpSettlePromise: Promise<void> | undefined;
   // ADR-0126(A·PR2) — FÁBRICA do loop (PR1) promovida a campo: o `/subagent` a reusa p/
   // construir o loop FOCADO com {permission: forSubAgent, projectInstructions: persona}.
   private readonly makeLoop: (overrides?: Partial<AgentLoopOptions>) => AgentLoop;
@@ -1597,6 +1626,10 @@ export class SessionController {
   // EST-1107 — SPAWNER de sub-agentes (construído no constructor quando subAgents habilitado).
   // Reusado pelo modo ATIVO de workflow p/ delegar atividades com [agente].
   private spawner: SubAgentSpawner | null = null;
+  /** PAUSA POR COTA — coordenador compartilhado (principal + sub-agentes) e persistência. */
+  private readonly quotaPauseSession: QuotaPauseSession;
+  private pausaStore: PausaStore | null = null;
+  private pausaSessionId = 'sessao';
   // EST-F158 — completionPort do spawner: chamado quando o fan-out termina. ACORDA o
   // turn-loop do Maestro via onFanoutCompleted(), que enfileira os resultados no
   // monitorQueue e dispara maybeWakeForMonitor() — o pai processa na hora.
@@ -1614,6 +1647,34 @@ export class SessionController {
   // anterior, já visível). Limpo quando a verificação finaliza OU quando o modelo, em
   // vez de confirmar, ACHA UM GAP e volta a AGIR (uma tool dispara — trabalho real).
   private selfCheckInFlight = false;
+  // F22 — a caixa de permissão acabou de mostrar o diff do próximo edit (não repetir no bloco).
+  private diffJaMostradoNoAsk = false;
+  // TOKENS GERADOS no turno (saída do PAI; os do filho só chegam somados com os de entrada, então
+  // não entram). `saidaConfirmada` = soma dos `tokens_out` que o provider REPORTOU; `saidaChars` =
+  // texto streamado da chamada em voo, ainda sem uso reportado (estimativa ~4 chars/token).
+  // VERBO POR TURNO (fonte única do `Costurando…` — ver `SessionState.workingVerb`).
+  private readonly listaDeVerbos = parseVerbos(resolveText('pt-BR', 'working.verbs'));
+  private readonly rngDeVerbos = criarRng(seedPadrao());
+  // TOKENS ENVIADOS (↑) na requisição do passo: estimativa (chars/4 das mensagens) até o
+  // `tokens_in` real chegar. `undefined` fora de um passo.
+  private entradaPasso: { tokens: number; estimado: boolean } | undefined;
+  private promptCharsDoPasso: number | undefined;
+  // diferença (real − chars/4) medida na última chamada: schema de tools etc. Calibra o ↑.
+  private sobrecargaDeEntrada = 0;
+  private saidaConfirmada = 0;
+  private saidaChars = 0;
+  private usageDaChamadaRecebido = false;
+  // diagnóstico (ALUY_DEBUG): quanto cada canal gerou na chamada corrente
+  private geracaoDaChamada = {
+    reasoning: { chunks: 0, chars: 0 },
+    text: { chunks: 0, chars: 0 },
+    tool_args: { chunks: 0, chars: 0 },
+  };
+  // SELF-CHECK — uma passada de verificação TERMINOU sem que nenhuma tool tenha disparado
+  // depois dela (o modelo conferiu e confirmou). A nota "✓ auto-verificado" só é empurrada
+  // no fim do turno (`afterRun`): a tool da correção vem DEPOIS do fim do stream da passada,
+  // então decidir no `finishAluyTurn` afirmava "verificado" mesmo quando a passada achou lacuna.
+  private selfCheckPassDone = false;
   // EST-1007 (HANG) — modo NÃO-INTERATIVO (sem TTY/headless `-p`/posicional piped). A
   // App da TUI (que responde `[r]/[c]/[n]`) NUNCA monta neste caminho ⇒ a pausa-pede-
   // direção do watchdog (`openStuckPause`) ficaria PRESA esperando uma tecla impossível
@@ -1624,7 +1685,30 @@ export class SessionController {
   // intocada — encerrar é estritamente RESTRITIVO (nunca executa um efeito não-aprovado).
   private nonInteractive = false;
 
+  /** ADR aluy-cli 0002 — persistência do "lembrar esta decisão". */
+  private readonly onRememberTool: ((tool: string) => void) | undefined;
+
   constructor(opts: SessionControllerOptions) {
+    this.onRememberTool = opts.onRememberTool;
+    // PAUSA POR COTA — criada ANTES de qualquer loop/spawner (ambos recebem a porta dela).
+    this.quotaPauseSession = new QuotaPauseSession({
+      config: quotaPauseConfigFromEnv(opts.subAgents?.env ?? process.env),
+      store: () => this.pausaStore,
+      sessionId: () => this.pausaSessionId,
+      onView: (v) => {
+        // F9 — o rótulo funcional `pausado` tira o verbo genérico da linha de trabalho; ao fim da
+        // pausa volta o `pensando` (a fase do loop segue `thinking`: o turno continua vivo).
+        const atual = this.state.workingLabel;
+        if (v !== undefined) this.patch({ quotaPause: v, workingLabel: 'pausado' });
+        else
+          this.patch({
+            quotaPause: v,
+            ...(atual === 'pausado' ? { workingLabel: 'pensando' } : {}),
+          });
+      },
+      note: (t, l) => this.pushNoteSafe(t, [...l]),
+      now: () => this.clock(),
+    });
     this.permissionEngine = opts.permission; // ADR-0126(A·PR2)
     this.subagentRegistry = opts.agentRegistry; // ADR-0126(A·PR2)
     this.reloadProjectAgents = opts.reloadProjectAgents; // GS-MD7 fix: registry segue o cwd
@@ -2019,6 +2103,8 @@ export class SessionController {
         // e o controller ACORDA o turn-loop do Maestro IMEDIATAMENTE (orientado a
         // evento) — sem polling, sem esperar o próximo submit do usuário.
         completionPort: this.spawnerCompletionPort,
+        // PAUSA POR COTA — os filhos pausam no MESMO coordenador (pausa compartilhada).
+        quotaPause: this.quotaPauseSession.coordinator,
       });
       // EST-1107 — guarda o spawner p/ o modo ATIVO de workflow delegar etapas.
       this.spawner = spawner;
@@ -2050,6 +2136,11 @@ export class SessionController {
           list: () => this.listaFilhosParaGestao(),
           stop: (label: string) => this.pararFilhoPorRotulo(label),
         },
+        // CONVERSA PAI → FILHO (ADR 0002): o pai só enxerga `send`.
+        agentMessaging: {
+          send: (to: string, message: string) =>
+            spawner.sendFromParent(this.rotuloDoFilho(to), message),
+        },
       };
       // `spawn_agent` SÓ no toolset do PAI (os filhos nunca o recebem — E-A1).
       allTools.push(spawnAgentTool);
@@ -2058,9 +2149,17 @@ export class SessionController {
       // árvore de fluxo sabia tudo, o `Ctrl+T → P` do dono usava esse saber, e o agente
       // não alcançava. `agents_status` é leitura pura; `agents_stop` é efeito e passa pela
       // catraca, porque encerrar trabalho que o dono pediu não é decisão silenciosa.
-      allTools.push(agentsStatusTool, agentsStopTool);
+      allTools.push(agentsStatusTool, agentsStopTool, agentSendTool);
       // O RELATO do filho vai para o NÓ dele na árvore — a mesma fonte que o
       // `agents_status` lê. Sem espelho em paralelo.
+      // CONVERSA PAI ⇄ FILHO (ADR 0002) — a UI mostra cada troca, compacta e redigida.
+      spawner.onInjectedToChild = (label, message, from) => {
+        const resumo = this.resumoMensagem(message);
+        const no = this.childNodeOf(label);
+        if (no) no.lastMessage = `↳ ${from}: ${resumo}`;
+        this.pushNoteSafe('agentes', [`↳ ${from} → ${label}: ${resumo}`]);
+      };
+      spawner.onChildNote = (label, message, kind) => this.recebeNotaDoFilho(label, message, kind);
       spawner.onChildReport = (label: string, nota: string): boolean => {
         const arvores = [...this.detachedTrees];
         if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
@@ -2188,7 +2287,10 @@ export class SessionController {
     this.onToolsReadyCb = opts.onToolsReady;
     this.nativeToolsDisabled = opts.disableNativeTools === true;
     if (!this.nativeToolsDisabled && this.onToolsReadyCb) {
-      this.onToolsReadyCb(new NativeToolsCapability({ tools: toToolFunctionSchemas(allTools) }));
+      // PROMPT-ENXUTO — via `toolRegistry.list()` (ordem ESTÁVEL: nativas, MCP por server/nome).
+      this.onToolsReadyCb(
+        new NativeToolsCapability({ tools: toToolFunctionSchemas(this.toolRegistry.list()) }),
+      );
     }
 
     // Observador do ciclo de vida (EST-0948 in-flight): início ⇒ linha `◌ running`
@@ -2277,6 +2379,11 @@ export class SessionController {
         // (vs. o loop criar um interno por execução) é o que torna o `[c]` capaz de
         // retomar o MESMO turno com o teto estendido.
         budget: this.budget,
+        // PAUSA POR COTA — cota esgotada pausa o agente principal em vez de matar o turno.
+        quotaPause: this.quotaPauseSession.coordinator.forAgent({
+          label: 'principal',
+          kind: 'principal',
+        }),
         // EST-0982 · ADR-0063 (GS-C5) — porta de INJEÇÃO MID-TURN ("btw"): o loop a
         // CONSULTA entre iterações e DRENA a fila viva (`liveInjected`). Os itens (já
         // `user_inject` — canal `user`, INSTRUÇÃO do dono) entram no histórico DESTE
@@ -2297,6 +2404,7 @@ export class SessionController {
         // auto-verificação pré-"pronto". Já resolvido pelo gating no wiring (flag/env/
         // tier fraco). Ausente ⇒ baseline (o loop ignora — sem overhead).
         ...(opts.selfCheck ? { selfCheck: opts.selfCheck } : {}),
+        ...(opts.delegationNudge ? { delegationNudge: true } : {}),
         // EST-SEC-HARDEN (F21) · AG-0008 — GUARDRAIL do combo perigoso (yolo + tier-fraco
         // + conteúdo não-confiável no contexto) no agente PRINCIPAL. O loop lê o YOLO de
         // `permission.isUnsafe` (dinâmico); aqui damos o `tier` corrente (THUNK — o
@@ -2338,6 +2446,10 @@ export class SessionController {
         // F-SABER-O-MODELO — quem atende a sessão, resolvido a CADA chamada (o `/model` e o
         // `/provider` trocam no meio dela). SÓ sob backend local: no broker o mapa
         // tier→provider é segredo do produto e não pode vazar pelo system prompt.
+        // PROMPT-ENXUTO — antes da 1ª chamada ao modelo, espera o boot MCP assentar (teto
+        // `MCP_SETTLE_TIMEOUT_MS`; server lento/quebrado não trava a sessão). Depois de
+        // assentar é imediato.
+        beforeModelCall: () => this.awaitMcpSettledForPrompt(),
         runtimeInfoProvider: () =>
           this.state.meta.backend === 'local'
             ? {
@@ -2509,6 +2621,13 @@ export class SessionController {
       onStart: () => this.startAluyTurn(),
       onDelta: (content) => this.appendAluyDelta(content),
       onReasoning: (content) => this.appendAluyReasoning(content),
+      // contador normalizado de geração (reasoning | text | tool_args) — igual p/ todo backend
+      onGenerated: (kind, chars) => {
+        this.saidaChars += chars;
+        const c = this.geracaoDaChamada[kind];
+        c.chunks += 1;
+        c.chars += chars;
+      },
       onUsage: (usage) => this.applyUsage(usage),
       onQuota: (quota) => this.applyQuota(quota),
       onDone: () => {
@@ -2589,7 +2708,7 @@ export class SessionController {
   async submit(
     goal: string,
     attachments: readonly HistoryItem[] = [],
-    opts: { readonly origem?: string } = {},
+    opts: { readonly origem?: string; readonly display?: string } = {},
   ): Promise<void> {
     if (goal.trim() === '') return;
     // EST-0980 — `user-prompt-submit` (Claude: UserPromptSubmit): o usuário submeteu um
@@ -2691,6 +2810,9 @@ export class SessionController {
       kind: 'you',
       text: goal,
       ...(opts.origem !== undefined && opts.origem !== '' ? { origem: opts.origem } : {}),
+      ...(opts.display !== undefined && opts.display !== '' && opts.display !== goal
+        ? { display: opts.display }
+        : {}),
     });
     // DESGRUDA A DICA DE CANAL. Um turno do Telegram injeta uma observação dizendo
     // "responda com `telegram_send`", e observação NÃO se apaga do histórico: nos turnos
@@ -2745,6 +2867,83 @@ export class SessionController {
    * desloga, não toca o contexto/credencial — só dispensa o aviso. No-op fora da fase
    * de erro (idempotente).
    */
+  /** PAUSA POR COTA — liga o store e o id da sessão (o `run.tsx` sabe o id; o controller não). */
+  attachPausaStore(store: PausaStore | null, sessionId: string): void {
+    this.pausaStore = store;
+    this.pausaSessionId = sessionId;
+  }
+
+  /** PAUSA POR COTA — "tentar agora": antecipa a sondagem sem esperar o horário. */
+  quotaResumeNow(): void {
+    this.quotaPauseSession.coordinator.resumeNow();
+  }
+
+  /** PAUSA POR COTA — "parar salvando": encerra a espera; o trabalho fica salvo p/ retomar. */
+  quotaStopSaving(): void {
+    this.quotaPauseSession.coordinator.stop('usuario');
+  }
+
+  /**
+   * PAUSA POR COTA — retoma o trabalho pausado de uma sessão reaberta (`--resume`/`--continue`).
+   * Os sub-agentes continuam do histórico guardado, em segundo plano (resultado chega como dado,
+   * pelo mesmo canal dos desacoplados); o agente principal, se estava pausado, retoma o turno.
+   * Se a cota ainda estiver esgotada, pausa de novo — sem perder nada.
+   */
+  async resumeFromPausa(record: PausaRecord): Promise<void> {
+    const kids = record.agents.filter((a) => a.kind === 'subagente' && a.profile !== undefined);
+    const principal = record.agents.find((a) => a.kind === 'principal');
+    this.pushNote('retomando trabalho pausado', [
+      `a sessão foi pausada por cota esgotada (${record.reason || record.scope}).`,
+      `retomando: ${record.agents.map((a) => a.label).join(', ')} — de onde pararam.`,
+    ]);
+    // O arquivo some ao retomar; se pausar de novo, é regravado.
+    this.pausaStore?.remove(this.pausaSessionId);
+    this.quotaPauseSession.coordinator.rearm();
+    const spawner = this.spawner;
+    if (kids.length > 0 && spawner) {
+      const registry = this.rescanAgents(this.subagentRegistry);
+      const bound: SubAgentProfile[] = [];
+      for (const k of kids) {
+        let profile: SubAgentProfile = k.profile as SubAgentProfile;
+        if (registry !== undefined && profile.agent !== undefined) {
+          const b = bindNamedAgent(registry, profile);
+          // Agente nomeado que sumiu do disco: NÃO roda sem a restrição dele (GS-MD7).
+          if (!b.ok) {
+            this.pushNote('sub-agentes', [`${profile.label}: ${b.error}`]);
+            continue;
+          }
+          profile = b.profile;
+        }
+        bound.push(profile);
+      }
+      if (bound.length > 0) {
+        const resume = new Map(kids.map((k) => [k.label, k.history] as const));
+        this.detachSpawn(spawner.spawn(bound, undefined, { resume }), bound.length);
+      }
+    }
+    if (principal) await this.resumePausedMain(principal.history);
+  }
+
+  /** Retoma o turno do agente principal a partir do histórico guardado na pausa. */
+  private async resumePausedMain(history: readonly HistoryItem[]): Promise<void> {
+    // A semente da sessão retomada já está DENTRO do histórico guardado: não a repete.
+    this.pendingSeed = null;
+    this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
+    this.beginTurn();
+    this.startTurnAccounting();
+    const rootSignal = this.rootFlow!.signal;
+    try {
+      const run = await this.loop.resume(history, rootSignal);
+      this.afterRun(run);
+    } catch (err) {
+      this.onError(err);
+    } finally {
+      this.abort = null;
+      this.endTurnAccounting();
+      this.garantirRepousoSemTurno();
+    }
+  }
+
   dismissError(): void {
     if (this.state.phase !== 'error') return;
     this.patch({
@@ -2871,21 +3070,31 @@ export class SessionController {
     // o dono SUBMETER um novo turno (perguntar status, etc.) com destacados vivos, em vez de o
     // submit ser RECUSADO (o "CLI travado").
     if (this.detachedTrees.size === 0) this.budget.reset();
+    // PAUSA POR COTA — um turno NOVO do dono sai do estado "parado" (volta a pausar/sondar).
+    this.quotaPauseSession.coordinator.rearm();
     // `attempt` é 1-based: a 1ª chamada é a `attempt=1`; cada `BrokerError` retryable
     // (com tentativas restantes) incrementa e dispara o backoff antes da próxima.
     let attempt = 1;
     for (;;) {
       // Entra em `thinking` (§2.4): o vácuo pré-1º-token ganha o `<Working>` âmbar
       // (`◇ ～～› pensando…`). Quando o 1º delta chega (sink.onStart), vira `streaming`.
-      this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+      // FEEDBACK-IMEDIATO — o rótulo nasce `preparando` (recall de memória, regência,
+      // compactação, montagem do prompt: passos que rodam ANTES do modelo) e só vira
+      // `pensando` quando o loop sinaliza `model-call` (ver `onParentProgress`). Assim o
+      // indicador reflete a fase real, sem fingir que o modelo já está pensando.
+      this.sortearVerboDoTurno();
+      this.patch({ phase: 'thinking', workingLabel: 'preparando', workingSince: this.clock() });
       // EST-0982 · ADR-0063 — abre a ÁRVORE DE FLUXOS do turno: o pai é a raiz; o seu
       // AbortSignal É o do loop (PARAR-todos = abortar a raiz, que desce a subárvore).
       // `interrupt()` (Ctrl-C) e `cancelAllFlows()` convergem no MESMO abort — sem 2º
       // mecanismo de parada (ADR-0063 §3: reusa o abort/signal existente).
-      this.beginTurn();
-      const rootSignal = this.rootFlow!.signal;
-      this.startTurnAccounting();
       try {
+        // BEGIN DENTRO DO TRY — se abrir o turno falhar (árvore de fluxos/contabilidade), o erro
+        // cai no `catch` e a fase é resolvida; antes a exceção escapava com a fase presa em
+        // `thinking` (linha de trabalho eterna, sem turno vivo).
+        this.beginTurn();
+        const rootSignal = this.rootFlow!.signal;
+        this.startTurnAccounting();
         // EST-0973 — CONTINUIDADE MULTI-TURNO: cada turno CONTINUA a conversa a
         // partir do histórico dos turnos anteriores (`lastRunHistory` — goals +
         // respostas + observações de tools já acumulados), prependando-o ao novo
@@ -2930,7 +3139,11 @@ export class SessionController {
         // — repassado a `onError` p/ virar cancelamento limpo (idle), não broker-error.
         let retry = false;
         try {
-          retry = await this.shouldAutoRetry(err, attempt, this.rootFlow!.signal);
+          retry = await this.shouldAutoRetry(
+            err,
+            attempt,
+            this.rootFlow?.signal ?? new AbortController().signal,
+          );
         } catch (backoffErr) {
           this.devolveResultadosAoProximoTurno();
           this.onError(backoffErr);
@@ -2956,8 +3169,23 @@ export class SessionController {
         this.endTurnAccounting();
         // ...e o que ficou órfão volta p/ a fila da TUI, que o envia no repouso.
         this.publishOrphanInjects();
+        this.garantirRepousoSemTurno();
       }
     }
+  }
+
+  /**
+   * REDE DE SEGURANÇA — o turno acabou (qualquer desfecho) mas a fase seguiu `thinking`/
+   * `retrying`/`streaming`: a linha de trabalho ficaria na tela para sempre, com o relógio
+   * parado e nada a produzir. Nenhum caminho conhecido deveria deixar isso, mas o custo de
+   * errar é uma linha mentirosa eterna; o custo da rede é um no-op. Não mexe em fases de
+   * decisão (asking/budget/stuck/…) nem com ciclo/workflow ativo.
+   */
+  private garantirRepousoSemTurno(): void {
+    const f = this.state.phase;
+    if (f !== 'thinking' && f !== 'retrying' && f !== 'streaming') return;
+    if (this.abort !== null || this.cycleActive || this.state.workflowActive === true) return;
+    this.patch({ phase: 'idle', workingLabel: undefined });
   }
 
   /**
@@ -3954,6 +4182,10 @@ export class SessionController {
   private beginTurn(): void {
     this.flowTree = new FlowTree({ clock: this.clock });
     this.rootFlow = this.flowTree.rootNode;
+    this.saidaConfirmada = 0;
+    this.saidaChars = 0;
+    this.usageDaChamadaRecebido = false;
+    this.entradaPasso = undefined;
     // EST-0982 (semântica do esc) — turno novo re-arma o discriminante do PARAR-TUDO:
     // um F8 antigo não silencia os desfechos desacoplados do turno que COMEÇA agora.
     this.hardStopped = false;
@@ -3961,6 +4193,8 @@ export class SessionController {
     // de um turno anterior (fail-safe: o sinal `self-check` do loop a re-arma quando, e
     // se, houver um probe). Sem isto, um flag preso esconderia a resposta do turno novo.
     this.selfCheckInFlight = false;
+    this.selfCheckPassDone = false;
+    this.diffJaMostradoNoAsk = false;
   }
 
   /**
@@ -3968,6 +4202,11 @@ export class SessionController {
    * `/compact` posterior ter o que compactar) e decide a fase (budget vs done).
    */
   private afterRun(result: AgentRunResult): void {
+    // SELF-CHECK — a última passada confirmou e o turno fechou numa resposta final.
+    if (this.selfCheckPassDone) {
+      this.selfCheckPassDone = false;
+      if (result.stop.kind === 'final') this.pushNote('self-check', ['✓ auto-verificado']);
+    }
     this._lastRunResult = result;
     // ADR-0126(A·PR2) — em FOCO, o histórico do turno é da SUB-SESSÃO (isolado); o histórico
     // do principal NÃO é tocado (a conversa principal não vê os turnos do foco). Fora de foco,
@@ -4153,6 +4392,9 @@ export class SessionController {
         this.pushNote('turno interrompido', [
           `${agentesAindaTrabalhando(live)} — F8 para parar tudo.`,
         ]);
+      } else if (this.isBusyPhase()) {
+        // F11 — confirmação curta: o esc cortava em ≤ 0.15 s sem dizer nada.
+        this.pushNote('turno', ['↳ interrompido']);
       }
     }
     // F-TURNO-CORTADO — registra que ESTE turno terminou por interrupção; o cabeçalho do
@@ -4170,6 +4412,24 @@ export class SessionController {
     this.retryAbort?.abort();
   }
 
+  /** O turno está ocupado (pensando/escrevendo/re-tentando)? */
+  private isBusyPhase(): boolean {
+    const f = this.state.phase;
+    return f === 'thinking' || f === 'streaming' || f === 'retrying';
+  }
+
+  /**
+   * F10 — ESC numa caixa de PERMISSÃO ou PERGUNTA = INTERROMPER o turno (como o ESC em
+   * qualquer outro lugar): para o loop sem novas chamadas de modelo. O abort faz o resolver
+   * pendente liquidar sozinho (ask ⇒ deny, pergunta ⇒ unavailable), sem a tool correr e sem
+   * texto interno chegar ao transcript. `n` (negar e seguir) NÃO passa por aqui. Não limpa a
+   * fila do dono (a fila drena no repouso). Só cessa — sem `decide()`, sem efeito.
+   */
+  interruptFromPrompt(): void {
+    this.interrupt();
+    this.pushNote('interrompido', ['↳ interrompido (esc) — nada foi executado']);
+  }
+
   /**
    * F191 — EXPEDITE ("acelerar o encaixe"): o dono aperta ESC com uma mensagem JÁ
    * ESPERANDO encaixe (`pendingInjects`) e quer que ela entre RÁPIDO — corta a geração
@@ -4184,6 +4444,21 @@ export class SessionController {
    * uma tool longa), NÃO há ouvinte ⇒ NO-OP. Idempotente/seguro chamar a qualquer hora.
    */
   expedite(): void {
+    // ENCAIXE FLUIDO — o ESC NUNCA joga fora trabalho útil em silêncio. Se a chamada em voo
+    // JÁ produziu prosa visível (bloco `aluy` streamando com texto), cortá-la destruiria
+    // uma resposta que o dono já está lendo (e que o modelo só reaproveitaria regerando);
+    // então NÃO cortamos — a mensagem pendente entra no PRÓXIMO ponto seguro do loop (logo
+    // que a geração terminar, ANTES de qualquer tool do batch). Só cortamos quando não há
+    // nada visível a perder (fase `pensando`, antes do 1º delta), e AVISAMOS na tela.
+    const blocks = this.state.blocks;
+    const last = blocks[blocks.length - 1];
+    if (last && last.kind === 'aluy' && last.streaming && last.text.trim() !== '') {
+      this.pushNoteSafe('encaixe', [
+        'a resposta em andamento termina primeiro; sua mensagem entra logo em seguida,',
+        'antes de qualquer ferramenta — nada foi descartado',
+      ]);
+      return;
+    }
     this.expediteBus.fire();
   }
 
@@ -4306,6 +4581,10 @@ export class SessionController {
    */
   injectInput(nodeId: string, input: string): boolean {
     this.lastLiveInject = null;
+    // ADR aluy-cli 0002 — FILHO VIVO: a injeção do dono entra na fila VIVA dele (drenada no
+    // topo da próxima iteração do loop dele), em vez de esperar o próximo turno do pai.
+    const viaFilho = this.injetaNoFilhoVivo(nodeId, input);
+    if (viaFilho !== undefined) return viaFilho;
     if (!this.flowTree) return false;
     const node = this.flowTree.node(nodeId);
     if (!node) return false;
@@ -4444,18 +4723,77 @@ export class SessionController {
    * já é coberto pelo `toolObserver`. NÃO toca catraca/budget.
    */
   private onParentProgress(signal: ProgressSignal): void {
+    // ↑ ESTIMADO do passo: chars das mensagens montadas / 4, igual p/ qualquer provider.
+    if (signal.kind === 'model-call' && signal.promptChars !== undefined) {
+      // chars/4 não vê o que vai FORA das mensagens (o schema das tools nativas, ~constante na
+      // sessão): a sobrecarga medida na chamada anterior (real − estimado) é somada à próxima.
+      const base = Math.ceil(signal.promptChars / 4);
+      this.promptCharsDoPasso = signal.promptChars;
+      this.entradaPasso = { tokens: base + this.sobrecargaDeEntrada, estimado: true };
+    }
+    // FEEDBACK-IMEDIATO — fim do preparo: o modelo vai ser chamado. `preparando` → `pensando`
+    // (só se ainda estamos no rótulo de preparo; rótulos de ciclo/workflow não são tocados).
+    if (signal.kind === 'model-call' || signal.kind === 'preparing') {
+      // SEM AR MORTO ENTRE PASSOS — da 2ª chamada de modelo em diante (depois de uma tool) a
+      // fase seguia `streaming` (herdada do passo anterior; não existe fase `tool`) e nada na região viva animava
+      // enquanto o modelo calculava o PRÓXIMO passo: 5–9s só com o relógio do rodapé.
+      // Cada `model-call` reabre a espera honesta: `thinking` + `pensando` + relógio zerado.
+      // A primeira palavra do passo (`abrirTurnoAluy`) devolve a `streaming`. Só a partir de
+      // streaming/tool: asking/budget/etc. nunca coexistem com o início de uma iteração.
+      if (
+        signal.kind === 'model-call' &&
+        this.state.phase === 'streaming' &&
+        !this.selfCheckInFlight
+      ) {
+        this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
+        return;
+      }
+      if (this.state.phase !== 'thinking') return;
+      const atual = this.state.workingLabel;
+      const emPreparo = atual !== undefined && ROTULOS_DE_PREPARO.has(atual);
+      if (signal.kind === 'model-call') {
+        if (emPreparo) this.patch({ workingLabel: 'pensando' });
+      } else if (signal.step === 'prompt') {
+        // fim de um passo: só desfaz o sub-rótulo do PRÓPRIO passo (não mexe em 'pensando').
+        if (atual === 'lembrando' || atual === 'maestro avaliando') {
+          this.patch({ workingLabel: 'preparando' });
+        }
+      } else if (emPreparo || atual === 'pensando') {
+        // iterações seguintes (depois de tools) também passam pelo maestro: o rótulo
+        // 'pensando' seria falso enquanto o judge responde.
+        this.patch({ workingLabel: signal.step === 'recall' ? 'lembrando' : 'maestro avaliando' });
+      }
+      return;
+    }
     if (signal.kind === 'inject') this.flushInjectNotes(signal.count);
     // EST-0944 (refino #121) — começou uma passada INTERNA de auto-verificação: o
     // PRÓXIMO turno do modelo é máquina do loop (reconferir a evidência), NÃO resposta.
     // Arma a supressão p/ que esse turno `aluy` NÃO vire bloco visível (ver
     // `startAluyTurn`/`finishAluyTurn`). É um sinal de display — não toca catraca/budget.
-    else if (signal.kind === 'self-check') this.selfCheckInFlight = true;
-    // F191 — o loop CORTOU a chamada de modelo em voo p/ acelerar o encaixe: o parcial
+    else if (signal.kind === 'self-check') {
+      this.selfCheckInFlight = true;
+      // SEM AR MORTO — a `final` candidata JÁ está na tela (streamou como bloco normal). A
+      // passada extra de verificação é uma chamada de modelo inteira; sem isto a fase seguia
+      // `streaming` (sem indicador) até o fim dela. Volta a `thinking` com o rótulo honesto
+      // e o relógio zerado: `conferindo o trabalho (1/2)… 0:04`. Interrompível como todo
+      // `thinking` (esc). Só display — não toca catraca/budget.
+      this.patch({
+        phase: 'thinking',
+        workingLabel: `conferindo o trabalho (${String(signal.attempt)}/${String(signal.max)})`,
+        workingSince: this.clock(),
+      });
+    }
+    // F191 — o loop CORTOU a chamada de modelo em voo p/ acelerar o encaixe (só ocorre sem prosa visível, ver `expedite()`): o parcial
     // do turno `aluy` (prosa já streamada) é DESCARTADO (o inject supersede — o dono
     // re-direcionou). Remove o bloco vivo p/ não deixar prosa ÓRFÃ na tela antes da nota
     // "↳ encaixado" que virá quando o inject drenar na próxima volta. Só de display —
     // não toca catraca/budget/histórico do loop (o loop já descartou o `result`).
-    else if (signal.kind === 'expedite') this.discardStreamingAluyTurn();
+    else if (signal.kind === 'expedite') {
+      this.discardStreamingAluyTurn();
+      this.pushNoteSafe('encaixe', [
+        'interrompi o raciocínio em andamento (ainda sem resposta) para encaixar sua mensagem',
+      ]);
+    }
     // F-TETO-DE-SAÍDA — a resposta acima foi CORTADA no `max_tokens`. O caso sem fala
     // nenhuma vira a própria resposta final do loop (`stopByOutputCeiling`); aqui é só o
     // parcial, que sem aviso passa por resposta completa.
@@ -4593,7 +4931,7 @@ export class SessionController {
       return;
     }
     this.pushNote('redirecionado', [`nova direção: ${direction}`]);
-    this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+    this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
     this.settleStuck({ kind: 'redirect', text: direction });
   }
 
@@ -4604,7 +4942,7 @@ export class SessionController {
    */
   continueAfterStuck(): void {
     if (this.state.phase !== 'stuck' || !this.stuckResolve) return;
-    this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+    this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
     this.settleStuck({ kind: 'continue' });
   }
 
@@ -4642,6 +4980,24 @@ export class SessionController {
   /** A trilha de auditoria do plano de controle (cancel/inject — `actor_type=cli`). */
   controlLog(): readonly ControlAuditEvent[] {
     return this.controlAudit.log;
+  }
+
+  /**
+   * Tokens ENVIADOS (↑) na requisição do passo corrente: estimativa (chars das mensagens
+   * montadas / 4 — a mesma p/ qualquer provider) até o `tokens_in` real chegar no uso.
+   */
+  turnInputTokens(): { tokens: number; estimado: boolean } | undefined {
+    return this.entradaPasso;
+  }
+
+  /**
+   * Tokens GERADOS (↓) pelo PAI neste turno: os `tokens_out` já reportados + uma ESTIMATIVA
+   * (~4 chars/token) do que a chamada em voo gerou (raciocínio, texto e argumentos de tool —
+   * sinal normalizado `onGenerated`). Quando o uso da chamada chega, a estimativa é trocada
+   * pelo número real. Independe do provider.
+   */
+  turnOutputTokens(): number {
+    return this.saidaConfirmada + Math.ceil(this.saidaChars / 4);
   }
 
   /**
@@ -4757,7 +5113,37 @@ export class SessionController {
     // qualquer bloco `running`/`streaming` corrente FORA do `<Static>` até resolver in-place
     // (sem a âncora coarse que congelava a linha "rodando" viva no scrollback). A demoção é
     // HONESTA (running→err/cancelled = "interrompido", nunca finge sucesso).
-    this.patch({ blocks: sanitizeOrphans(blocks), phase: 'idle' });
+    // F14 — NOTAS são efêmeras (resposta de slash-command: `comando desconhecido: /xyz`, `/help`,
+    // avisos de boot…): não voltam como ruído na retomada. A conversa (você/aluy/tool) fica.
+    const semNotas = blocks.filter((b) => b.kind !== 'note');
+    if (semNotas.length === 0) return;
+    this.patch({ blocks: sanitizeOrphans(semNotas), phase: 'idle' });
+  }
+
+  /**
+   * F14 — restaura os contadores de uso da sessão retomada (`◉ N% janela · M sessão`). Usa o
+   * `usage` persistido; em record antigo (sem ele) ESTIMA os tokens pelo texto da conversa
+   * (~4 chars/token) e a janela pela janela do modelo, quando conhecida. Só display.
+   */
+  restoreUsage(
+    usage: { readonly tokens: number; readonly windowPct: number } | undefined,
+    blocks: readonly SessionBlock[],
+  ): void {
+    if (usage !== undefined) {
+      this.patch({
+        meta: { ...this.state.meta, tokens: usage.tokens, windowPct: usage.windowPct },
+      });
+      return;
+    }
+    let chars = 0;
+    for (const b of blocks) {
+      if (b.kind === 'you' || b.kind === 'aluy') chars += b.text.length;
+    }
+    if (chars === 0) return;
+    const tokens = Math.round(chars / 4);
+    const windowPct =
+      this.contextWindow > 0 ? Math.min(100, Math.round((tokens / this.contextWindow) * 100)) : 0;
+    this.patch({ meta: { ...this.state.meta, tokens, windowPct } });
   }
 
   /** EST-0972 — os blocos correntes da sessão (p/ o auto-save persistir). */
@@ -5967,7 +6353,12 @@ export class SessionController {
     const history = this.budgetResumeHistory;
     this.budgetResumeHistory = undefined;
     this.pausaNoCanal = undefined;
-    this.patch({ phase: 'thinking', workingLabel: 'pensando', pendingBudget: undefined });
+    this.patch({
+      phase: 'thinking',
+      workingLabel: 'pensando',
+      workingSince: this.clock(),
+      pendingBudget: undefined,
+    });
     this.abort = new AbortController();
     try {
       // `budgetOverride` = o MESMO budget já estendido: o loop NÃO re-arma (não zera) —
@@ -6164,7 +6555,7 @@ export class SessionController {
       // teto zerado (runaway órfão). Com desacoplados vivos, RESTAURA só os tetos (extend
       // do que a compactação liberou) sem zerar — o agregado segue cercando a árvore toda.
       if (this.detachedTrees.size === 0) this.budget.reset();
-      this.patch({ phase: 'thinking', workingLabel: 'pensando' });
+      this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
       const seed = this.takeCompactedSeed()!;
       this.abort = new AbortController();
       try {
@@ -6443,6 +6834,34 @@ export class SessionController {
   }
 
   /**
+   * PROMPT-ENXUTO — aguarda (até `MCP_SETTLE_TIMEOUT_MS`) os servers MCP ainda conectando,
+   * p/ o catálogo de tools da 1ª chamada ao modelo sair completo e na ordem estável (prefix
+   * cache). Server que estoura o teto fica de fora e, ao conectar, é anexado no FIM do
+   * catálogo (registry congelado) — registrado em `ALUY_DEBUG`. Executa uma vez de fato.
+   */
+  private awaitMcpSettledForPrompt(): Promise<void> {
+    // ESPERA HONESTA — enquanto aguarda o boot MCP o rótulo vira `conectando MCP` (antes
+    // ficava `preparando` sem dizer a que). Só se ainda está em preparo; volta p/ `preparando`.
+    const esperando =
+      this.mcpSettlePromise === undefined && this.toolRegistry.pendingMcp().length > 0;
+    if (esperando && this.state.phase === 'thinking' && this.state.workingLabel === 'preparando') {
+      this.patch({ workingLabel: 'conectando MCP' });
+    }
+    this.mcpSettlePromise ??= this.toolRegistry
+      .awaitMcpSettled(MCP_SETTLE_TIMEOUT_MS)
+      .then((pending) => {
+        if (this.state.workingLabel === 'conectando MCP')
+          this.patch({ workingLabel: 'preparando' });
+        if (pending.length > 0 && process.env.ALUY_DEBUG !== undefined) {
+          process.stderr.write(
+            `aluy: MCP — 1ª chamada sem esperar mais: ${pending.join(', ')} (entram no fim do catálogo ao conectar)\n`,
+          );
+        }
+      });
+    return this.mcpSettlePromise;
+  }
+
+  /**
    * EST-BOOT-DECOUPLE — RE-ANUNCIA o catálogo NATIVO (`onToolsReady`) a partir do
    * estado ATUAL do registry (`toolRegistry.list()`, não o `allTools` congelado do
    * boot). Chamado sempre que o registry muda DEPOIS do anúncio inicial do
@@ -6580,6 +6999,17 @@ export class SessionController {
     // caixa entram no primeiro byte (`abrirTurnoAluy`), no MESMO patch — a razão de 16/09
     // (fase e caixa num patch só, senão o composer pisca) continua valendo lá.
     this.turnoAluyPendente = true;
+    // nova chamada: se a anterior nunca reportou `tokens_out`, a estimativa vira definitiva
+    if (!this.usageDaChamadaRecebido) {
+      this.saidaConfirmada += Math.ceil(this.saidaChars / 4);
+    }
+    this.saidaChars = 0;
+    this.usageDaChamadaRecebido = false;
+    this.geracaoDaChamada = {
+      reasoning: { chunks: 0, chars: 0 },
+      text: { chunks: 0, chars: 0 },
+      tool_args: { chunks: 0, chars: 0 },
+    };
   }
 
   /**
@@ -6593,10 +7023,13 @@ export class SessionController {
   private abrirTurnoAluy(): void {
     if (!this.turnoAluyPendente) return;
     this.turnoAluyPendente = false;
+    // SELF-CHECK — a passada de verificação fica em `thinking` (o <Working> "conferindo o
+    // trabalho…" segue na tela); o texto dela é escondido e `streaming` apagaria o indicador.
     const enterStreaming =
-      this.state.phase === 'thinking' ||
-      this.state.phase === 'streaming' ||
-      this.state.phase === 'retrying';
+      !this.selfCheckInFlight &&
+      (this.state.phase === 'thinking' ||
+        this.state.phase === 'streaming' ||
+        this.state.phase === 'retrying');
     const block: SessionBlock = {
       kind: 'aluy',
       text: '',
@@ -6786,23 +7219,22 @@ export class SessionController {
       if (last.selfCheck) {
         blocks.pop();
         this.selfCheckInFlight = false;
-        // Nota dim discreta (UMA linha), análoga ao "↳ encaixado" do btw: deixa o rastro
-        // sem re-exibir o texto cru da verificação. Com cap≥2 há mais de uma passada de
-        // verificação seguidas; NÃO repetimos a nota (no máximo UMA dim, spec): só empurra
-        // se o último bloco já não for a própria nota de self-check.
-        const tail = blocks[blocks.length - 1];
-        const alreadyNoted =
-          tail !== undefined && tail.kind === 'note' && tail.title === 'self-check';
-        if (alreadyNoted) {
-          this.patch({ blocks });
+        // Rastro discreto: UMA nota dim "✓ auto-verificado" no fim do turno (não o texto cru).
+        // Só afirma "verificado" se a passada de fato terminou; interrompida/erro não conferiu.
+        // O "✓" em si é decidido no fim do turno (ver `selfCheckPassDone`).
+        this.patch({ blocks });
+        if (motivo !== 'done') {
+          this.pushNote('self-check', [
+            'verificação interrompida — a resposta acima não foi conferida',
+          ]);
         } else {
-          this.patch({ blocks });
-          this.pushNote('self-check', ['✓ auto-verificado']);
+          this.selfCheckPassDone = true;
         }
         return;
       }
-      // Turno vazio (só tool-call, sem fala) ⇒ remove o bloco vazio.
-      if (last.text.trim() === '') {
+      // Turno vazio (só tool-call, sem fala) ⇒ remove o bloco vazio. O ECO do probe de
+      // auto-verificação (`AUTO-VERIFICAÇÃO …`) também nunca é resposta: sai como vazio.
+      if (last.text.trim() === '' || ehEcoDeAutoVerificacao(last.text)) {
         blocks.pop();
       } else {
         // F-CONTA-NO-BLOCO — carimba o custo AQUI, no mesmo ponto em que o turno deixa de
@@ -6839,6 +7271,20 @@ export class SessionController {
           ...(conta !== undefined ? { accounting: conta } : {}),
           ...(motivo === 'cancelled' ? { interrupted: true } : {}),
         };
+        // O custo do turno é CUMULATIVO: só o ÚLTIMO bloco `Λluy` do turno o carrega. Sem isto, uma
+        // resposta + o bloco que a auto-verificação promoveu mostravam `✔ 110.4k tokens · 1m34s`
+        // duas vezes (a 2ª já incluía a 1ª).
+        if (conta !== undefined) {
+          for (let i = blocks.length - 2; i >= 0; i -= 1) {
+            const b = blocks[i];
+            if (b === undefined || b.kind === 'you') break;
+            if (b.kind === 'aluy' && b.accounting !== undefined) {
+              const { accounting: _anterior, ...semConta } = b;
+              void _anterior;
+              blocks[i] = semConta;
+            }
+          }
+        }
       }
       this.patch({ blocks });
     }
@@ -6855,6 +7301,12 @@ export class SessionController {
   private demoteSelfCheckBlock(): void {
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
+    if (last && last.kind === 'aluy' && last.selfCheck && ehEcoDeAutoVerificacao(last.text)) {
+      // O modelo só ecoou o probe: nada a promover — o bloco some.
+      blocks.pop();
+      this.patch({ blocks });
+      return;
+    }
     if (last && last.kind === 'aluy' && last.selfCheck) {
       // Re-cria o bloco SEM a marca `selfCheck` (vira turno normal/visível).
       blocks[blocks.length - 1] = {
@@ -6878,6 +7330,25 @@ export class SessionController {
 
   private applyUsage(usage: ModelUsage): void {
     const total = (usage.tokens_in ?? 0) + (usage.tokens_out ?? 0);
+    // reconcilia: o número REAL da chamada substitui a estimativa do que foi streamado
+    if (usage.tokens_out !== undefined) {
+      // raciocínio reportado à parte: na maioria dos providers já está em `tokens_out`; se
+      // `tokens_out` é menor que ele, o provider o reporta FORA e os dois se somam.
+      const raz = usage.tokens_reasoning ?? 0;
+      this.saidaConfirmada += raz > usage.tokens_out ? usage.tokens_out + raz : usage.tokens_out;
+      this.saidaChars = 0;
+      this.usageDaChamadaRecebido = true;
+    }
+    // ↑ real do passo (substitui a estimativa feita a partir das mensagens montadas)
+    if (usage.tokens_in !== undefined && usage.tokens_in > 0) {
+      this.entradaPasso = { tokens: usage.tokens_in, estimado: false };
+      if (this.promptCharsDoPasso !== undefined) {
+        this.sobrecargaDeEntrada = Math.max(
+          0,
+          usage.tokens_in - Math.ceil(this.promptCharsDoPasso / 4),
+        );
+      }
+    }
     const pct = pctDeCache(usage.tokens_in, usage.tokens_cached);
     if (pct !== undefined) this.cachePctDoUltimoTurno = pct;
     // DIAGNÓSTICO sob `ALUY_DEBUG` — "por que não aparece o cache?" tem pelo menos quatro
@@ -6897,6 +7368,7 @@ export class SessionController {
             : {}),
         }),
         `provider: ${usage.provider ?? '?'} · modelo: ${usage.model ?? '?'}`,
+        `geração: raciocínio ${String(this.geracaoDaChamada.reasoning.chunks)} chunks/${String(this.geracaoDaChamada.reasoning.chars)} chars · texto ${String(this.geracaoDaChamada.text.chunks)}/${String(this.geracaoDaChamada.text.chars)} · tool_args ${String(this.geracaoDaChamada.tool_args.chunks)}/${String(this.geracaoDaChamada.tool_args.chars)} · tokens_in ${String(usage.tokens_in)} tokens_out ${String(usage.tokens_out)} reasoning ${String(usage.tokens_reasoning)}`,
       ]);
     }
     const tokens = this.state.meta.tokens + total;
@@ -7190,6 +7662,8 @@ export class SessionController {
       // ORDEM: o aviso ANTES do `patch` — o `patch` notifica, e um observador pode
       // responder na mesma pilha (ver `onQuestionChange`).
       this.avisarAprovacaoNoCanal(pending.request);
+      // F22 — o diff já foi MOSTRADO na caixa de permissão: o bloco da tool não o repete.
+      if (pending.request.effect.kind === 'diff') this.diffJaMostradoNoAsk = true;
       this.patch({ phase: 'asking', pendingAsk: { request: pending.request } });
     } else if (this.state.phase === 'asking') {
       this.aprovacaoNoCanal = undefined;
@@ -7219,11 +7693,24 @@ export class SessionController {
     if (!pending) return;
     // Registra um bloco de deny p/ o histórico (efeito recusado fica visível §2.9).
     if (resolution.kind === 'deny') {
+      this.diffJaMostradoNoAsk = false;
       this.pushBlock({
         kind: 'deny',
         verb: verbOfTool(pending.request.call.name),
         exact: pending.request.effect.exact,
       });
+    }
+    // ADR aluy-cli 0002 — "lembrar esta decisão": persiste o nome da tool (best-effort) e
+    // vale já na engine (o loop faz `rememberAllow`). Nunca para o que o piso proíbe.
+    if (
+      resolution.kind === 'approve-always' &&
+      pending.request.alwaysAsk === false &&
+      canRememberTool(pending.request.call.name)
+    ) {
+      this.onRememberTool?.(pending.request.call.name);
+      this.pushNoteSafe('permissões', [
+        `lembrado: ${pending.request.call.name} não pergunta mais (revogue em ~/.aluy/config.json → permissions.alwaysAllow)`,
+      ]);
     }
     pending.resolve(resolution);
   }
@@ -7467,6 +7954,22 @@ export class SessionController {
   }
 
   private onError(err: unknown): void {
+    if (err instanceof QuotaPauseStoppedError) {
+      // PAUSA POR COTA — "parar salvando" (ou espera máxima): NÃO é falha. Guarda o histórico
+      // do turno como contexto, salva a foto retomável e volta ao repouso.
+      if (this.rootFlow && !this.rootFlow.isTerminal()) this.rootFlow.finish('paused');
+      const partial = err.partialHistory ?? [];
+      if (partial.length > 0) {
+        const history = closeInterruptedHistory(partial);
+        if (this.focus) this.focus.history = history;
+        else this.lastRunHistory = history;
+        this.quotaPauseSession.attachPrincipal(history);
+      }
+      this.finishAluyTurn('cancelled');
+      this.endTurnInjects();
+      this.setPhase('idle');
+      return;
+    }
     if (err instanceof ModelCallAbortedError) {
       // Interrupção do usuário (Ctrl-C / PARAR) — volta ao composer, sem bloco de erro.
       // EST-0982 — a raiz já foi `cancelled` por `interrupt()`/`cancelAllFlows`; se o
@@ -7532,9 +8035,19 @@ export class SessionController {
     // o modelo NÃO confirmou — ACHOU UM GAP e voltou a AGIR. Esse trabalho (e a resposta
     // que vier depois) é REAL ⇒ desarma a supressão e DESPROMOVE o turno `aluy` em voo
     // (se marcado `selfCheck`), p/ não esconder a resposta nova por engano.
-    if (this.selfCheckInFlight) {
+    // F1 — só é "gap" quando a passada AGE (efeito novo). Ler/buscar/rodar teste e reconfirmar
+    // é CONFIRMAÇÃO: não desarma a supressão nem afirma "achou pendências".
+    if (
+      (this.selfCheckInFlight || this.selfCheckPassDone) &&
+      VerificationLedger.isEffect(call.name, call.input)
+    ) {
+      if (this.selfCheckInFlight) this.demoteSelfCheckBlock();
       this.selfCheckInFlight = false;
-      this.demoteSelfCheckBlock();
+      this.selfCheckPassDone = false;
+      // CORREÇÃO PÓS-VERIFICAÇÃO — deixa claro na tela que o que vem agora não é a resposta
+      // original: a verificação achou pendência e o agente voltou a agir.
+      this.pushNote('self-check', ['↳ a verificação achou pendências — corrigindo']);
+      this.patch({ workingLabel: 'corrigindo após a verificação' });
     }
     const target = targetOfCall(call);
     this.pushBlock({
@@ -7545,6 +8058,10 @@ export class SessionController {
       status: 'running',
       verbGerund: gerundOf(call.name),
     });
+    // SEM INDICADOR DUPLICADO — a linha `◌ rodando…` da tool já anima por conta própria. Se a
+    // fase seguia `thinking` (iteração só de tool-call, sem prosa), o `Λluy pensando…` ficaria
+    // junto com ela. Passa a `streaming` (sem Working); o próximo `model-call` volta a `thinking`.
+    if (this.state.phase === 'thinking') this.patch({ phase: 'streaming' });
     // EST-0982 — alimenta a ATIVIDADE observável da RAIZ (VER/drill-in do pai). O
     // `noteToolStart` REDIGE o alvo (RES-C-1/CLI-SEC-6) antes de torná-lo observável —
     // um `curl … Authorization: Bearer sk-…` vira `‹redigido›` no drill-in.
@@ -7558,7 +8075,16 @@ export class SessionController {
    * `running` (ex.: tool instantânea sem onToolStart, ou teste com resolver direto),
    * empurra a linha já resolvida — preserva o comportamento antigo (compatível).
    */
-  private resolveToolLine(line: ToolLineBlock): void {
+  private resolveToolLine(rawLine: ToolLineBlock): void {
+    // F22 — mostra o diff UMA vez: se a caixa de permissão já o exibiu, tira do bloco da tool
+    // (auto-aprovado/yolo não passa pela caixa ⇒ o bloco é a única vez e fica).
+    let line = rawLine;
+    if (rawLine.diff !== undefined && this.diffJaMostradoNoAsk) {
+      const { diff: _omitido, ...semDiff } = rawLine;
+      void _omitido;
+      line = semDiff;
+      this.diffJaMostradoNoAsk = false;
+    }
     const blocks = [...this.state.blocks];
     const idx = lastRunningToolIndex(blocks);
     if (idx >= 0) {
@@ -8327,7 +8853,7 @@ export class SessionController {
         phase: c.ok ? 'concluído' : 'concluído com falha',
         tokens: c.tokens,
         toolCalls: c.toolCalls,
-        note: 'terminou — o resultado veio como dado (nota "sub-agentes concluíram"); NÃO está morto',
+        note: 'terminou — o resultado já foi entregue ao agente principal',
       });
     }
     for (const t of arvores) {
@@ -8403,6 +8929,62 @@ export class SessionController {
    * AbortController). `false` quando o rótulo não existe ou o filho já terminou:
    * dizer "parei" sobre algo que não parou seria a mentira que este projeto persegue.
    */
+  /** `undefined` ⇒ `nodeId` não é um filho vivo (segue o caminho antigo). */
+  private injetaNoFilhoVivo(nodeId: string, input: string): boolean | undefined {
+    if (!this.spawner || !nodeId.startsWith('root/')) return undefined;
+    const label = this.rotuloDoFilho(nodeId);
+    if (!this.spawner.hasLiveChild(label)) return undefined;
+    const item = injectedInputItem(input);
+    if (!item) return false;
+    this.controlAudit.recordInjectInput(nodeId, label, input);
+    const ok = this.spawner.injectIntoChild(label, item);
+    if (ok) {
+      const resumo = this.resumoMensagem(input);
+      const no = this.childNodeOf(label);
+      if (no) no.lastMessage = `↳ usuário: ${resumo}`;
+      this.pushNoteSafe('agentes', [`↳ usuário → ${label}: ${resumo}`]);
+    }
+    return ok;
+  }
+
+  /** Uma linha curta e REDIGIDA (CLI-SEC-6) de uma mensagem pai ⇄ filho, para a TUI. */
+  private resumoMensagem(texto: string): string {
+    const lim = redactOutputSecrets(texto).replace(/\s+/g, ' ').trim();
+    return lim.length > 90 ? `${lim.slice(0, 90)}…` : lim;
+  }
+
+  /** `to` do `agent_send`: aceita o rótulo puro ou o id da árvore (`root/<rótulo>`). */
+  private rotuloDoFilho(to: string): string {
+    return to.startsWith('root/') ? to.slice('root/'.length) : to;
+  }
+
+  private mensagensDoFilho = 0;
+
+  /**
+   * FILHO → PAI (`ask_parent`). Entra pela fila de monitor como OBSERVAÇÃO (DADO NÃO-CONFIÁVEL,
+   * CLI-SEC-4 — nunca instrução), com id ÚNICO por nota (a fila coalesce por id; aqui cada
+   * nota conta). `pergunta` fura a guarda de "filhos soltos vivos" para acordar um pai em
+   * repouso (senão a pergunta ficaria parada até o dono digitar); `progresso` só espera o
+   * próximo ponto seguro. O teto por filho já foi aplicado pelo spawner.
+   */
+  private recebeNotaDoFilho(label: string, message: string, kind: ParentNoteKind): boolean {
+    const resumo = this.resumoMensagem(message);
+    const no = this.childNodeOf(label);
+    if (no) no.lastMessage = `↳ ao orquestrador (${kind}): ${resumo}`;
+    this.pushNoteSafe('agentes', [`↳ ${label} → orquestrador (${kind}): ${resumo}`]);
+    if (kind === 'pergunta') this.pendingFanoutCompletion = true;
+    this.mensagensDoFilho += 1;
+    this.monitorQueue.enqueue({
+      monitorId: `agent-note:${label}:${this.mensagensDoFilho}`,
+      label: `sub-agente ${label}`,
+      type: 'agent-note',
+      condition: kind,
+      payload: childNoteText(label, redactOutputSecrets(message), kind),
+      firedAt: new Date(this.clock()).toISOString(),
+    });
+    return true;
+  }
+
   private pararFilhoPorRotulo(label: string): boolean {
     const arvores = [...this.detachedTrees];
     if (this.flowTree && !this.detachedTrees.has(this.flowTree)) arvores.push(this.flowTree);
@@ -8716,7 +9298,11 @@ export class SessionController {
     }
     // SÓ aprovação EXPLÍCITA libera o de projeto. `approve-session` não deveria ser
     // ofertado (alwaysAsk), mas se vier, tratamos como aprovação pontual desta vez.
-    return resolution.kind === 'approve-once' || resolution.kind === 'approve-session';
+    return (
+      resolution.kind === 'approve-once' ||
+      resolution.kind === 'approve-session' ||
+      resolution.kind === 'approve-always'
+    );
   }
 
   /**
@@ -8737,7 +9323,11 @@ export class SessionController {
    */
   private childModelLabel(model: string | undefined): string {
     const meta = this.state.meta;
-    const activeModel = meta.backend === 'local' ? meta.activeModel : undefined;
+    // F12 — o filho `inherit` usa o modelo que o PAI tem selecionado AGORA (o mesmo do rodapé:
+    // `meta.model`, mantido pelo /model). `meta.activeModel` é o eco do `usage.model` da última
+    // resposta e pode estar velho/diferente após um /model — rotular o filho com ele mentia
+    // (`herdado (glm-5.3)` com `glm-5.2` no rodapé).
+    const activeModel = meta.backend === 'local' ? (meta.model ?? meta.activeModel) : undefined;
     return formatResolvedModelLabel(resolveModelTier(model), {
       tier: this.tier,
       ...(this.model !== undefined ? { model: this.model } : {}),
@@ -8758,6 +9348,7 @@ export class SessionController {
           status: 'running',
           // ADR-0146 (D5) — tier/modelo RESOLVIDO deste filho, visível ENQUANTO roda.
           model: this.childModelLabel(model),
+          startedAt: Date.now(),
           ...(node ? { nodeId: node.id } : {}),
         });
         // O nº de filhos vivos mudou — republica p/ o aviso do rodapé acompanhar
@@ -8804,7 +9395,9 @@ export class SessionController {
         const acc = node?.accounting();
         this.upsertSubAgentChild(label, {
           label,
-          status: wasCancelled ? 'cancelled' : outcome.ok ? 'done' : 'fail',
+          // PAUSA POR COTA — pausado não é falha: usa o status neutro (dim) com stop:'paused'.
+          status:
+            wasCancelled || outcome.stop === 'paused' ? 'cancelled' : outcome.ok ? 'done' : 'fail',
           summary: subAgentSummary(outcome, acc?.durationMs),
           stop: wasCancelled ? 'cancelled' : outcome.stop,
           // ADR-0146 (D5) — mantido no resumo final (mesmo rótulo do início).
@@ -8890,6 +9483,17 @@ export class SessionController {
    */
   private pushNoteSafe(title: string, lines: readonly string[]): void {
     this.pushNote(title, lines);
+  }
+
+  /**
+   * VERBO POR TURNO — sorteia o verbo UMA vez quando o turno nasce (fica o mesmo em todos os
+   * passos, auto-verificação inclusa); o turno seguinte sorteia outro, nunca repetindo o
+   * anterior. Chamado ANTES do 1º `patch` do turno, para o 1º frame já sair com o verbo.
+   */
+  private sortearVerboDoTurno(): void {
+    if (verbosSimples()) return;
+    const v = sortearVerbo(this.listaDeVerbos, this.rngDeVerbos, this.state.workingVerb);
+    if (v !== undefined) this.state = { ...this.state, workingVerb: v };
   }
 
   private setPhase(phase: SessionState['phase']): void {
@@ -9481,14 +10085,14 @@ function detachedOutcome(
           `nada falhou. O resultado dele chega como dado num turno seguinte: NÃO espere por ele, ` +
           `NÃO o dispare de novo, NÃO afirme que terminou nem invente o conteúdo dele. Diga ao ` +
           `dono o que despachou e encerre o turno; agents_status mostra o andamento.`
-      : motivo === 'solto'
-        ? `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. O dono ` +
-          `SOLTOU o fan-out (Ctrl+B) para liberar o turno. O resultado dele chega como dado ` +
-          `quando concluir: NÃO espere por ele, NÃO o dispare de novo, NÃO afirme que já ` +
-          `terminou nem invente o conteúdo dele. Diga ao dono que segue rodando e encerre.`
-        : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
-          `Você foi liberado para responder agora; o resultado dele chega como dado ` +
-          `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
+        : motivo === 'solto'
+          ? `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. O dono ` +
+            `SOLTOU o fan-out (Ctrl+B) para liberar o turno. O resultado dele chega como dado ` +
+            `quando concluir: NÃO espere por ele, NÃO o dispare de novo, NÃO afirme que já ` +
+            `terminou nem invente o conteúdo dele. Diga ao dono que segue rodando e encerre.`
+          : `o sub-agente "${label}" segue trabalhando em segundo plano — nada falhou. ` +
+            `Você foi liberado para responder agora; o resultado dele chega como dado ` +
+            `quando concluir. NÃO afirme que já terminou nem invente o conteúdo dele.`,
     stop: 'final',
     usage: { iterations: 0, toolCalls: 0, tokens: 0 },
   };

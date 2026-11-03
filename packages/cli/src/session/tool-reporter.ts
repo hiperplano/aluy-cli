@@ -196,7 +196,11 @@ export function withToolReport(
         result: quantify(tool.name, result),
         status,
         ...(stat ? { added: stat.added, removed: stat.removed, diff: stat.diff } : {}),
-        ...(status === 'err' ? { output: truncate(result.observation) } : {}),
+        // F10 — a observação de `perguntar` sem resposta é texto PARA O MODELO ("Isto NÃO é um
+        // erro técnico…"): nunca vai ao transcript.
+        ...(status === 'err' && tool.name !== QUESTION_TOOL_NAME
+          ? { output: truncate(result.observation) }
+          : {}),
       };
       reporter.report(block);
       return result;

@@ -30,6 +30,7 @@ import {
   OTHER_INDEX,
   BrokerError,
   BudgetGate,
+  QuotaPauseLine,
   StuckGate,
   CycleCeilingGate,
   SlashMenu,
@@ -56,7 +57,6 @@ import {
   PermissionsPanel,
   FlowTreeView,
   ActivityLog,
-  TurnFooter,
   QuotaFooter,
   Divider,
   type HintState,
@@ -101,7 +101,7 @@ import type {
   EffortChoice,
   LocalProviderEntry,
 } from '@hiperplano/aluy-cli-core';
-import { formatQuota } from '@hiperplano/aluy-cli-core';
+import { formatQuota, canRememberTool } from '@hiperplano/aluy-cli-core';
 import { DEFAULT_TIER } from './wiring.js';
 import { tierDisplayName } from '../model/catalog.js';
 import type { SessionController } from './controller.js';
@@ -134,6 +134,7 @@ import {
 import { buildActivityLog, countActivityLines } from './activity-log.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
 import { Cockpit, type CockpitFocus } from './Cockpit.js';
+import { onRenderFault } from './render-fault.js';
 import { resolveCockpitLayout } from './cockpit-layout.js';
 import { scrollOffset, type ScrollKey } from './viewport.js';
 import {
@@ -152,7 +153,11 @@ import {
   decideCtrlC,
   CTRL_C_WINDOW_MS,
   type EditState,
+  isNewlineKey,
+  backslashNewline,
+  drainTypedChunk,
 } from './composer-edit.js';
+import { buildSentDisplay } from './sent-display.js';
 import {
   createBracketedPasteMachine,
   gateInputPaste,
@@ -163,6 +168,17 @@ import { isUnrecognizedEscapeTail } from './escape-leak.js';
 // F197 — sugestão de próximo prompt (ghost + Tab): blocos+i18n → texto do composer.
 import { resolveSuggestionText } from './suggest.js';
 import { buildTurnRecap } from './turn-recap.js';
+import { ROTULOS_GENERICOS, detalheDeEspera, rotuloExibido } from './verbos.js';
+import { homedir } from 'node:os';
+import { buildSidecarChip } from '@hiperplano/aluy-cli-core';
+import {
+  effectiveStatusline,
+  nextStatusline,
+  isStatuslineMode,
+  STATUSLINE_SHORT_ROWS,
+  type StatuslineMode,
+} from '../io/user-config.js';
+import { RodapeParcial } from '../ui/components/RodapeParcial.js';
 import {
   createPasteRegistry,
   shouldCollapse,
@@ -185,7 +201,12 @@ import {
   type SlashCommand,
   type PaletteHit,
 } from '../slash/commands.js';
-import { trailingMention, stripTrailingMention, parseAtMentions } from '../attach/index.js';
+import {
+  trailingMention,
+  stripTrailingMention,
+  parseAtMentions,
+  stripMentions,
+} from '../attach/index.js';
 import { resolveLinearMentions } from './linear.js';
 import type { FileIndexPort, SessionStore } from '../io/index.js';
 import type { AttachReader } from '../attach/index.js';
@@ -212,6 +233,8 @@ export interface ProviderSwitchFailure {
 
 export interface AppProps {
   readonly controller: SessionController;
+  /** F6 — rascunho inicial do composer (o que foi digitado durante o splash/pergunta de boot). */
+  readonly initialInput?: string;
   /** Comandos do usuário (DADO de ~/.aluy/commands/). */
   readonly userCommands?: readonly SlashCommand[];
   /**
@@ -579,6 +602,15 @@ export interface AppProps {
    * segura; testes). É pref de UI (booleano) — nunca segredo (CLI-SEC-7).
    */
   readonly onSuggestionsChange?: (on: boolean) => void;
+  /** F21 — janela (ms) p/ a sugestão do modelo chegar antes da heurística (default 2500; teste). */
+  readonly suggestModelWindowMs?: number;
+  /**
+   * RODAPÉ — modo ESCOLHIDO na partida (`ALUY_STATUSLINE` > `config.statusline`); ausente ⇒ automático
+   * (`full`, ou `compact` em terminal ≤ 30 linhas). `/statusline` e F2 mudam em sessão.
+   */
+  readonly initialStatusline?: StatuslineMode;
+  /** RODAPÉ — persiste a escolha (`store.saveStatusline`). Só UI — nunca segredo. */
+  readonly onStatuslineChange?: (modo: StatuslineMode) => void;
   /**
    * EST-1000 · ADR-0076 §4 / CLI-SEC-6 / RES-C-1 — exporta o transcript REDIGIDO p/
    * arquivo (`/export` / ctrl+s). O wiring injeta o gravador (passa pela catraca +
@@ -633,6 +665,9 @@ function safeDim(value: number | undefined, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value) && value >= 1) return Math.floor(value);
   return fallback;
 }
+
+/** F21 — janela (ms) p/ a sugestão do modelo chegar antes de entrar a heurística. */
+const SUGGEST_MODEL_WINDOW_MS = 2500;
 
 export function App(props: AppProps): React.ReactElement {
   const { controller } = props;
@@ -699,10 +734,27 @@ export function App(props: AppProps): React.ReactElement {
   // o atalho readline ser o canal confiável), Alt+←/→ (e Alt+b/Alt+f) movem por PALAVRA.
   // O char é INSERIDO em `cursor` (não append); backspace apaga em `cursor-1`.
   // INVARIANTE: `0 <= cursor <= text.length` SEMPRE (clampCursor).
-  const [composer, setComposer] = useState<{ text: string; cursor: number }>({
-    text: '',
-    cursor: 0,
+  const [composer, setComposerState] = useState<{ text: string; cursor: number }>({
+    text: props.initialInput ?? '',
+    cursor: (props.initialInput ?? '').length,
   });
+  // F5 — `composerRef` é a VERDADE-DO-INSTANTE do composer: atualizado SINCRONAMENTE em cada
+  // escrita (não só no render). Várias teclas num mesmo tick (tmux send-keys, xrdp, digitador
+  // rápido) liam `input` do closure VELHO e o submit levava texto defasado — a linha digitada
+  // entre dois Enter sumia. O wrapper aplica o updater sobre o ref (1× só, sem efeito duplo).
+  const composerRef = useRef(composer);
+  const setComposer = useCallback(
+    (
+      u:
+        | { text: string; cursor: number }
+        | ((c: { text: string; cursor: number }) => { text: string; cursor: number }),
+    ): void => {
+      const next = typeof u === 'function' ? u(composerRef.current) : u;
+      composerRef.current = next;
+      setComposerState(next);
+    },
+    [],
+  );
   const input = composer.text;
   const cursorPos = composer.cursor;
   // EST-0969 (watchdog) — `true` quando o usuário escolheu `[r]` na pausa-pede-direção
@@ -759,9 +811,37 @@ export function App(props: AppProps): React.ReactElement {
   // quando a rede cai. Custo aceito explicitamente pelo dono.
   const [suggestionsOn, setSuggestionsOn] = useState(props.initialSuggestions !== false);
   const [suggestion, setSuggestion] = useState<string | undefined>(undefined);
+  // RODAPÉ — `undefined` = automático (parcial em tela baixa); escolha explícita vence.
+  const [statuslineChosen, setStatuslineChosen] = useState<StatuslineMode | undefined>(
+    props.initialStatusline,
+  );
+  // 1ª vez em `oculto`: uma dica mínima de como voltar, até o próximo envio.
+  const [dicaOculto, setDicaOculto] = useState(false);
+  // `stdout.rows` ausente (pipe/teste) ⇒ altura desconhecida ⇒ NÃO força o modo compacto.
+  const statuslineMode: StatuslineMode = effectiveStatusline(statuslineChosen, stdout?.rows ?? 0);
+  const statuslineModeRef = useRef<StatuslineMode>(statuslineMode);
+  statuslineModeRef.current = statuslineMode;
+  const applyStatusline = useCallback(
+    (modo: StatuslineMode) => {
+      setStatuslineChosen(modo);
+      setDicaOculto(modo === 'hidden');
+      props.onStatuslineChange?.(modo);
+    },
+    [props],
+  );
+  // A dica "como voltar" some quando o próximo turno começa.
+  useEffect(() => {
+    if (state.phase === 'thinking') setDicaOculto(false);
+  }, [state.phase]);
+  const ciclarRodape = useCallback(
+    () => applyStatusline(nextStatusline(statuslineModeRef.current)),
+    [applyStatusline],
+  );
   // Aborta a sugestão do modelo do turno ANTERIOR: se um turno novo começou, a resposta
   // que ainda está vindo é sobre um contexto morto e não pode pintar por cima.
   const suggestAbortRef = useRef<AbortController | undefined>(undefined);
+  // F21 — timer do fallback heurístico (a sugestão do modelo tem uma janela p/ chegar antes).
+  const suggestFallbackRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Fase ANTERIOR (ref, não estado — não re-renderiza) p/ detectar a BORDA trabalho→idle:
   // a sugestão nasce só na TRANSIÇÃO p/ o repouso (não em cada render em idle).
   const prevPhaseRef = useRef<SessionState['phase']>(controller.current.phase);
@@ -773,8 +853,6 @@ export function App(props: AppProps): React.ReactElement {
   // consulta p/ decidir aceitar (e p/ o gate "composer VAZIO" ser confiável mesmo em burst).
   const suggestionRef = useRef<string | undefined>(undefined);
   suggestionRef.current = suggestion;
-  const composerRef = useRef(composer);
-  composerRef.current = composer;
 
   // EST-0982 (type-ahead) — FILA de mensagens digitadas ENQUANTO o agente trabalha
   // (`thinking`/`streaming`/`retrying`): Enter no composer durante o trabalho NÃO
@@ -980,7 +1058,12 @@ export function App(props: AppProps): React.ReactElement {
   // lógica mas ocupa N linhas visuais. Usar `composerLines` (lógicas) cravava a Box em 1
   // linha e CLIPAVA a janela+marcador do <Composer>; `composerVisualLines` cresce a Box até
   // COMPOSER_MAX_ROWS, casando com a janela visual que o <Composer> renderiza.
-  const cockpitLayout = resolveCockpitLayout(rows, columns, composerVisualLines, cockpitLogHint);
+  // RODAPÉ no cockpit — o MESMO modo (pref/env/F2//statusline) redimensiona status/hints; em
+  // `hidden` a linha de hints só existe p/ o `⚠ yolo` (nunca some) e a dica de como voltar.
+  const cockpitLayout = resolveCockpitLayout(rows, columns, composerVisualLines, cockpitLogHint, {
+    statusline: statuslineMode,
+    hintsRow: state.mode === 'unsafe' || dicaOculto,
+  });
   // ATIVO = o usuário pediu fullscreen E o layout cabe (não recusou). Se recusou, a App
   // renderiza o INLINE (degrada) e mostra o aviso. O alt-screen real (entrar/sair) é
   // disparado no TOGGLE (handler abaixo), espelhando este "ativo".
@@ -1149,8 +1232,8 @@ export function App(props: AppProps): React.ReactElement {
   // EST-0989 (i18n) — os NATIVOS LOCALIZADOS no idioma ativo (summaries traduzidos). Memo
   // pelo `t`: só re-mapeia ao trocar de idioma (em pt-BR devolve a MESMA ref ⇒ sem churn).
   const localizedNatives = useMemo(() => localizeCommands(NATIVE_COMMANDS, t), [t]);
-  // F-RECAP — resumo do que o turno FEZ, para a linha do rodapé (ver `turn-recap.ts`).
-  // Memoizado nos blocos: a função é PURA e barata, mas o rodapé re-renderiza a cada tick
+  // Resumo do que o turno FEZ — alimenta SÓ o digest da sugestão de próximo prompt
+  // (`suggestNext`); NÃO é mais desenhado no composer (ver `turn-recap.ts`). Memoizado nos blocos: a função é PURA e barata, mas o rodapé re-renderiza a cada tick
   // da região viva e não há por que refazer a varredura enquanto os blocos não mudam.
   const turnRecap = useMemo(() => buildTurnRecap(state.blocks), [state.blocks]);
 
@@ -1243,13 +1326,55 @@ export function App(props: AppProps): React.ReactElement {
     return [];
   })();
 
+  // VERBOS DE ESPERA — o rótulo genérico (`pensando`…) vira um gerúndio sorteado 1× por PASSO
+  // (a identidade do passo é o `workingSince`). Rótulos funcionais ficam como estão.
+  const rotuloVivo = rotuloExibido({ label: state.workingLabel, verbo: state.workingVerb });
   const indicadorTrabalho = workingIndicator({
     count: state.detachedSubagents ?? 0,
     phase: state.phase,
-    ...(state.workingLabel !== undefined ? { workingLabel: state.workingLabel } : {}),
+    ...(rotuloVivo !== undefined ? { workingLabel: rotuloVivo } : {}),
   });
+  // PARÊNTESE DIM (estilo Claude Code): `(pensando · 1,2k tokens · 12s)` — a fase REAL, os
+  // tokens do turno até agora e os segundos desde o INÍCIO DO TURNO (a mesma fonte do relógio
+  // do rodapé: a contabilidade viva da raiz). Lido a cada render; o tick de 1s o atualiza.
+  // Tokens = GERADOS (saída) pelo pai no turno: `tokens_out` reportado + estimativa do que
+  // a chamada em voo streamou (`↓ 1,2k tokens`); 0 ⇒ o segmento some. Rótulo funcional já é a fase ⇒ sem palavra.
+  const contaViva =
+    state.phase === 'thinking' || state.phase === 'retrying' || state.phase === 'streaming'
+      ? controller.turnAccounting()
+      : undefined;
+  const msDoTurno =
+    contaViva?.live === true
+      ? contaViva.durationMs
+      : state.workingSince !== undefined
+        ? Math.max(0, (props.now ?? Date.now)() - state.workingSince)
+        : undefined;
+  const detalheEspera =
+    msDoTurno !== undefined
+      ? detalheDeEspera({
+          fase:
+            state.phase === 'streaming' &&
+            (state.blocks[state.blocks.length - 1] as { text?: string } | undefined)?.text
+              ? 'escrevendo'
+              : state.workingLabel !== undefined && ROTULOS_GENERICOS.has(state.workingLabel)
+                ? state.workingLabel
+                : undefined,
+          tokens: contaViva !== undefined ? controller.turnOutputTokens() : undefined,
+          entrada: contaViva !== undefined ? controller.turnInputTokens() : undefined,
+          ms: msDoTurno,
+          // "Λluy " + rótulo + "… " + " " + sufixo dos sub-agentes: o que sobra da linha.
+          larguraMax:
+            columns -
+            (5 +
+              indicadorTrabalho.label.length +
+              2 +
+              (indicadorTrabalho.suffix !== undefined ? indicadorTrabalho.suffix.length + 1 : 0) +
+              2),
+        })
+      : undefined;
   const phaseAnimates =
-    animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo }) ||
+    (animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo }) &&
+      state.quotaPause === undefined) ||
     doctorRunning(state.blocks);
   const frame = useTick({ enabled: theme.animate && phaseAnimates });
 
@@ -1389,6 +1514,11 @@ export function App(props: AppProps): React.ReactElement {
     if (!stdin) return;
     const onData = (data: Buffer | string): void => {
       const s = typeof data === 'string' ? data : data.toString('utf8');
+      // RODAPÉ — F2 cicla completo → parcial → oculto (SS3 `\x1bOQ` ou CSI `\x1b[12~`).
+      if (s === '\x1bOQ' || s === '\x1b[12~') {
+        ciclarRodape();
+        return;
+      }
       if (s.includes('\x1b[19~') || s.includes('\x1bOW')) {
         controller.cancelAllFlows();
         // EST-0982 (P1-2) — F8 = PARAR TUDO: descarta também a fila do type-ahead (os itens
@@ -1407,7 +1537,7 @@ export function App(props: AppProps): React.ReactElement {
     return () => {
       stdin.removeListener('data', onData);
     };
-  }, [stdin, controller, clearQueue, setComposer]);
+  }, [stdin, controller, clearQueue, setComposer, ciclarRodape]);
 
   // Auto-dismiss do splash (spec §2.1: <1s). Some sozinho após `bootMs` mesmo
   // sem tecla — mas a 1ª tecla/objetivo já o dispensa antes (ver useInput/submit).
@@ -1460,30 +1590,37 @@ export function App(props: AppProps): React.ReactElement {
       // Turno terminou. Só sugere com o composer VAZIO e SEM fila (type-ahead pendente):
       // se o dono já está digitando / há algo p/ auto-submeter, a sugestão só atrapalharia.
       if (suggestionsOn && input === '' && queue.length === 0) {
-        // (1) imediata e local — a linha não nasce vazia enquanto o modelo pensa.
-        setSuggestion(resolveSuggestionText(state.blocks, t));
+        // F21 — ESTÁVEL: uma vez mostrada, a sugestão NÃO muda no turno. Antes a heurística
+        // aparecia na hora e o modelo a trocava ~3 s depois (o ghost "mudava sozinho"). Agora o
+        // modelo tem uma janela curta para responder; se não vier, entra a heurística — e quem
+        // chegar depois é descartado (só vale se o ghost ainda está vazio).
+        if (suggestFallbackRef.current !== undefined) clearTimeout(suggestFallbackRef.current);
+        const heuristica = resolveSuggestionText(state.blocks, t);
+        suggestFallbackRef.current = setTimeout(() => {
+          suggestFallbackRef.current = undefined;
+          setSuggestion((cur) => cur ?? heuristica);
+        }, props.suggestModelWindowMs ?? SUGGEST_MODEL_WINDOW_MS);
         // (2) do modelo — fire-and-forget. `void` de propósito: o turno já acabou e esta
         // chamada NÃO pode atrasar nem derrubar nada. Falhou/demorou ⇒ fica a heurística.
         suggestAbortRef.current?.abort();
         const ctl = new AbortController();
         suggestAbortRef.current = ctl;
-        const ultimoObjetivo = [...state.blocks]
-          .reverse()
-          .find((b) => b.kind === 'you')?.text;
+        const ultimoObjetivo = [...state.blocks].reverse().find((b) => b.kind === 'you')?.text;
         void controller
           .suggestNext(
             {
               lang: activeLang,
               ...(turnRecap !== undefined ? { recap: turnRecap } : {}),
-              ...(ultimoObjetivo !== undefined
-                ? { lastGoal: ultimoObjetivo.slice(0, 200) }
-                : {}),
+              ...(ultimoObjetivo !== undefined ? { lastGoal: ultimoObjetivo.slice(0, 200) } : {}),
             },
             ctl.signal,
           )
           .then((doModelo) => {
             // SÓ substitui se ainda é deste turno E o dono não começou a digitar.
-            if (doModelo !== undefined && !ctl.signal.aborted) setSuggestion(doModelo);
+            if (doModelo !== undefined && !ctl.signal.aborted) {
+              // chegou DENTRO da janela ⇒ vence a heurística; depois de mostrada, não troca.
+              setSuggestion((cur) => cur ?? doModelo);
+            }
           })
           .catch(() => {
             /* ornamento nunca avisa falha */
@@ -1493,6 +1630,8 @@ export function App(props: AppProps): React.ReactElement {
       // Novo trabalho (ou qualquer fase não-repouso): descarta a sugestão pendente — e
       // ABORTA a do modelo que ainda pode estar vindo, senão ela pinta por cima do turno novo.
       suggestAbortRef.current?.abort();
+      if (suggestFallbackRef.current !== undefined) clearTimeout(suggestFallbackRef.current);
+      suggestFallbackRef.current = undefined;
       setSuggestion(undefined);
     }
     // Deps: a BORDA é `state.phase`; os demais são lidos no instante da borda (mesmo render).
@@ -1505,7 +1644,11 @@ export function App(props: AppProps): React.ReactElement {
   // ela não RESSURJA se o dono apagar o que digitou (o descarte é definitivo p/ este turno).
   // `setSuggestion(undefined)` com valor já `undefined` é no-op no React (bail-out) ⇒ barato.
   useEffect(() => {
-    if (input !== '') setSuggestion(undefined);
+    if (input !== '') {
+      if (suggestFallbackRef.current !== undefined) clearTimeout(suggestFallbackRef.current);
+      suggestFallbackRef.current = undefined;
+      setSuggestion(undefined);
+    }
   }, [input]);
 
   /**
@@ -1887,6 +2030,25 @@ export function App(props: AppProps): React.ReactElement {
     setLogScroll(0);
   }, [props, controller, t, rows, columns, clearScreen]);
 
+  // CRASH-YOGA — se o render do Ink (Yoga-wasm) lançar com o cockpit ativo (ver
+  // `ink-root-guard.tsx`), em vez de morrer VOLTAMOS ao inline com uma nota em PT-BR. O
+  // `crash.log` já guarda a entrada. Fora do cockpit a falha é só registrada (o guard descarta
+  // o frame e o próximo render segue).
+  const fullscreenRef = useRef(fullscreen);
+  fullscreenRef.current = fullscreen;
+  useEffect(
+    () =>
+      onRenderFault(() => {
+        if (!fullscreenRef.current) return;
+        setFullscreen(false);
+        props.cockpitScreen?.leave();
+        clearScreen();
+        controller.replaceNote('cockpit', [t('cockpit.renderFault')]);
+        props.onFullscreenChange?.(false);
+      }),
+    [props, controller, t, clearScreen],
+  );
+
   const runCommand = useCallback(
     (command: SlashCommand, args: string) => {
       // EST-0990 — `/split` (alias `/view`): alterna o MODO VIEW AVANÇADO na hora
@@ -1901,6 +2063,24 @@ export function App(props: AppProps): React.ReactElement {
       // onCommand. Só em TTY que cabe (ADR §6: senão a nota de recusa, fica no inline).
       if (command.id === 'fullscreen') {
         toggleFullscreen();
+        return;
+      }
+      // RODAPÉ — `/statusline [full|compact|hidden]`: sem arg cicla (como
+      // o F2). UI pura — persiste a pref e confirma com uma nota curta.
+      if (command.id === 'statusline') {
+        const arg = args.trim().toLowerCase();
+        if (arg !== '' && !isStatuslineMode(arg)) {
+          controller.replaceNote('rodapé', [
+            `modo desconhecido: ${arg} — use full, compact ou hidden.`,
+          ]);
+          return;
+        }
+        const next = isStatuslineMode(arg) ? arg : nextStatusline(statuslineModeRef.current);
+        applyStatusline(next);
+        controller.replaceNote('rodapé', [
+          `rodapé: ${next}` +
+            (next === 'hidden' ? ' — F2 ou /statusline voltam.' : ' (F2 alterna).'),
+        ]);
         return;
       }
       // F197 — `/suggest [on|off]`: alterna a SUGESTÃO DE PRÓXIMO PROMPT. Sem arg = toggle;
@@ -2096,6 +2276,7 @@ export function App(props: AppProps): React.ReactElement {
       props.onCommand?.(command, args);
     },
     [
+      applyStatusline,
       props,
       modelPicker,
       permPanel,
@@ -2131,8 +2312,10 @@ export function App(props: AppProps): React.ReactElement {
     [runCommand, controller],
   );
 
+  // F16 — linha cujo `@arquivo` inexistente JÁ foi avisado: reenviar a MESMA linha envia assim mesmo.
+  const unresolvedAckRef = useRef<string>('');
   const submit = useCallback(
-    (line: string) => {
+    (line: string, rawLine?: string) => {
       // EST-1015 (cockpit) — SNAP p/ a cauda ao SUBMETER: se o usuário rolou a conversa/
       // log p/ cima e então envia algo (objetivo//comando/!bang), a resposta nasce na
       // CAUDA — fora da janela rolada, invisível. Submeter é "quero ver o agora" ⇒ volta
@@ -2159,20 +2342,51 @@ export function App(props: AppProps): React.ReactElement {
           // abrir o picker mid-turn. Sem menções, é o caminho de antes (zero custo).
           if (parseAtMentions(route.text).length > 0 && props.attachReader) {
             const beforeChips = picker.attachments.map((a) => a.item);
+            const chipPaths = picker.attachments.map((a) => a.path);
             void resolveLinearMentions(route.text, props.attachReader).then(
-              ({ goal, items: resolved }) => {
+              ({ goal, items: resolved, attached, refused }) => {
+                // F16 — `@naoexiste.txt oi` NÃO pode virar só "oi" em silêncio: AVISA (PT-BR) e
+                // DEVOLVE o texto ao composer p/ o usuário corrigir. Reenviar a MESMA linha
+                // (Enter de novo) envia assim mesmo, com a menção literal (ex.: `@alguem`).
+                if (refused.length > 0 && unresolvedAckRef.current !== route.text) {
+                  unresolvedAckRef.current = route.text;
+                  controller.pushNote('anexo', [
+                    ...refused.map(
+                      (r) => `arquivo não encontrado ou recusado: @${r.path} — ${r.reason}`,
+                    ),
+                    'a mensagem NÃO foi enviada — corrija o caminho (Enter de novo envia assim mesmo).',
+                  ]);
+                  setComposer((c) =>
+                    c.text === ''
+                      ? { text: route.text, cursor: route.text.length }
+                      : {
+                          text: `${route.text} ${c.text}`,
+                          cursor: route.text.length + 1 + c.text.length,
+                        },
+                  );
+                  return;
+                }
+                const forced = refused.length > 0; // 2º Enter: envia como está.
+                unresolvedAckRef.current = '';
                 // STRIP pode esvaziar o texto (a linha era só `@arquivo`): preservamos a
                 // regra "anexo sozinho NÃO é pedido" — sem goal E sem nada resolvido, não
                 // submete. Com anexo resolvido mas goal vazio, mandamos o texto original
                 // (ainda carrega a intenção `@…`) como objetivo, com o DADO rotulado.
-                if (goal === '' && resolved.length === 0) {
+                if (goal === '' && resolved.length === 0 && !forced) {
                   picker.clear();
                   return;
                 }
                 const items = [...beforeChips, ...resolved];
-                const outGoal = goal !== '' ? goal : route.text;
+                const outGoal = forced || goal === '' ? route.text : goal;
                 setHistory((h) => [...h, outGoal]);
-                void controller.submit(outGoal, items);
+                void controller.submit(outGoal, items, {
+                  display: buildSentDisplay(
+                    forced
+                      ? route.text
+                      : stripMentions(rawLine ?? goal, parseAtMentions(rawLine ?? goal)),
+                    [...chipPaths, ...attached],
+                  ),
+                });
                 picker.clear();
               },
             );
@@ -2180,7 +2394,12 @@ export function App(props: AppProps): React.ReactElement {
           }
           const items = picker.attachments.map((a) => a.item);
           setHistory((h) => [...h, route.text]);
-          void controller.submit(route.text, items);
+          void controller.submit(route.text, items, {
+            display: buildSentDisplay(
+              rawLine ?? route.text,
+              picker.attachments.map((a) => a.path),
+            ),
+          });
           picker.clear();
         }
         return;
@@ -2199,7 +2418,7 @@ export function App(props: AppProps): React.ReactElement {
       }
       // unknown-command: ignora silenciosamente (o menu já guia o usuário).
     },
-    [controller, userCommands, picker, runCommand, props.attachReader],
+    [controller, userCommands, picker, runCommand, props.attachReader, setComposer],
   );
 
   // ── EST-0982 (type-ahead mid-turn) — ENFILEIRAR vs ENCAIXAR uma linha do composer ──
@@ -2607,11 +2826,13 @@ export function App(props: AppProps): React.ReactElement {
   // da fila INJETANDO-os no agente vivo (`injectInput` ⇒ processam na PRÓXIMA iteração do loop, não
   // no fim de TUDO). PARA no 1º item não-injetável (bang/slash/anexo) p/ PRESERVAR A ORDEM — esses
   // seguem esperando o repouso/submit. Assim "como está?" digitado durante o trabalho entra logo,
-  // sem esperar o turno inteiro. (Limite honesto: se o pai está bloqueado num sub-agente/tool longo,
-  // a próxima iteração — e o drain — só vem quando aquele efeito termina; é o mais cedo possível.)
+  // sem esperar o turno inteiro. (O loop agora também drena ENTRE as tools de um batch e logo após
+  // cada tool — ver `AgentLoop` —; o que resta esperando é uma ÚNICA tool/geração em voo.)
   useEffect(() => {
     if (atRest || queue.length === 0) return;
-    if (state.phase !== 'thinking' && state.phase !== 'streaming') return;
+    if (state.phase !== 'thinking' && state.phase !== 'streaming' && state.phase !== 'retrying') {
+      return;
+    }
     let drained = 0;
     for (const item of queue) {
       if (!injectIfPlainText(item)) break; // bang/slash/anexo ⇒ para (ordem preservada)
@@ -2622,6 +2843,13 @@ export function App(props: AppProps): React.ReactElement {
   }, [atRest, queue, state.phase, injectIfPlainText]);
 
   useInput((char, key) => {
+    // F5 — FONTE FRESCA: o closure do `useInput` pode estar VELHO quando várias teclas chegam
+    // no mesmo tick (o React ainda não re-renderizou). `input` (texto do composer) e `state`
+    // (fase: idle/trabalhando) lidos do closure faziam o submit levar texto defasado, ou
+    // rotear a tecla pro ramo errado (idle enquanto o turno já começou) — a linha digitada
+    // entre dois Enter sumia. Sombreamos ambos com a verdade-do-instante.
+    const input = composerRef.current.text;
+    const state = controller.current;
     // ── EST-0948 — BRACKETED PASTE: SUPRIME os bytes do paste no `useInput` ──────────
     // Com o `?2004` ligado, o Ink entrega ao `useInput` o chunk do paste MANGLED (`[200~
     // …conteúdo…\x1b[201~`). O composer é alimentado pelo CANAL CRU (`onPasteData`, que
@@ -2953,43 +3181,53 @@ export function App(props: AppProps): React.ReactElement {
     // ── ask pendente CAPTURA o foco (handoff §10 regra 3) ───────────────────
     if (state.phase === 'asking' && state.pendingAsk) {
       const alwaysAsk = state.pendingAsk.request.alwaysAsk;
+      // F6 — TYPE-AHEAD sob a caixa de permissão. REGRA: as teclas de resposta (a/s/l/n/e/Esc)
+      // só RESPONDEM como PRIMEIRA tecla (composer vazio). Qualquer outra tecla imprimível
+      // começa um RASCUNHO no composer; com rascunho em curso, TUDO que é imprimível (inclusive
+      // a/s/l/n/e) é texto, Enter é ignorado, Backspace edita e Esc APAGA o rascunho (não
+      // responde) — depois disso as teclas voltam a responder. Digitar "aprovar tudo" jamais
+      // aprova por acidente, e o texto digitado não some.
+      if (input !== '') {
+        if (key.escape) {
+          setText('');
+          return;
+        }
+        if (key.backspace || key.delete) {
+          setComposer((c) => composerDeleteBackward(c));
+          return;
+        }
+        if (char && !key.ctrl && !key.meta) {
+          setComposer((c) => applyTypedChunk(c, char).state);
+          return;
+        }
+        if (handleReadlineKey(char, key)) return;
+        return;
+      }
+      const isAnswerKey =
+        key.escape || char === 'a' || char === 's' || char === 'l' || char === 'n' || char === 'e';
+      if (!isAnswerKey && char && !key.ctrl && !key.meta && !key.return) {
+        setComposer((c) => applyTypedChunk(c, char).state);
+        return;
+      }
       if (char === 'a') return controller.resolveAsk({ kind: 'approve-once' });
       if (char === 's' && alwaysAsk === false)
         return controller.resolveAsk({ kind: 'approve-session' });
+      // ADR aluy-cli 0002 — `l` = lembrar esta decisão (persiste; nunca p/ run_command/edit/write).
+      if (
+        char === 'l' &&
+        alwaysAsk === false &&
+        canRememberTool(state.pendingAsk.request.call.name)
+      )
+        return controller.resolveAsk({ kind: 'approve-always' });
       if (char === 'n')
         return controller.resolveAsk({ kind: 'deny', reason: 'negado pelo usuário' });
       if (key.escape) {
-        // BUG #2/#13 (QA) — o modal "comia" o ESC (deny + return), então o handler principal
-        // com double-ESC+interrupt NUNCA era alcançado: um `!cmd` de fundo (ex.: `!sleep 30`
-        // já aprovado e rodando atrás deste modal) seguia VIVO; ele terminava DEPOIS do bloco
-        // virar Static e a linha "rodando" ficava FANTASMA até um resize re-emitir (#13).
-        //
-        // BUG B (achado do dono) — REGRA EXPLÍCITA: "o ESC só pode parar se eu der ESC DEPOIS
-        // de ter encaixado todas as msgs". Com uma msg JÁ na FILA, o double-ESC sob o ask
-        // chamava interrupt()+clearQueue() ⇒ ABORTAVA O TRABALHO E LIMPAVA A FILA ("aborta
-        // tudo"). Isso é PROIBIDO: o ESC sob ask com fila pendente cancela SÓ o ask — NUNCA
-        // descarta a fila nem interrompe o turno. O hard-stop (double-ESC ⇒ interrupt+clear)
-        // só vale quando a FILA JÁ ESTÁ VAZIA (nada a preservar): aí o double-ESC é o gesto
-        // explícito de parar tudo (alinhado ao handler principal). Com fila não-vazia, o
-        // single-ESC nega o ask e a fila SOBREVIVE (drena no repouso, como sempre).
-        const now = Date.now();
-        const hasQueue = queueRef.current.length > 0;
-        const isDoubleEsc = now - lastEscRef.current < 500;
-        controller.resolveAsk({ kind: 'deny', reason: 'cancelado (esc)' });
-        // Só faz o hard-stop (interrupt + clear) quando NÃO há fila pendente. Com fila,
-        // o double-ESC NÃO aborta nem limpa: a fila é a intenção do dono, preservada.
-        if (isDoubleEsc && !hasQueue) {
-          controller.interrupt();
-          clearQueue();
-        }
-        // BUG B (vazamento entre handlers) — `lastEscRef` é COMPARTILHADO com o handler
-        // principal. Se o deste ESC armasse o "double-ESC" (lastEscRef = now), o PRÓXIMO
-        // ESC — que, após o deny, a fase já saiu de `asking` e cai no HANDLER PRINCIPAL —
-        // seria lido como double-ESC e ABORTARIA + LIMPARIA a fila (o bug que o tmux
-        // pegou). Com FILA pendente, NEGAR o ask é gesto ISOLADO: reseta o relógio (=0)
-        // p/ o ESC seguinte ser um SINGLE-ESC fresco (caminho que PRESERVA a fila). Sem
-        // fila, mantém o relógio armado p/ o double-ESC (hard-stop) seguir funcionando.
-        lastEscRef.current = hasQueue ? 0 : now;
+        // F10 — ESC na caixa de permissão INTERROMPE o turno (como em qualquer outro lugar):
+        // o agente não segue "explicando" nem abre `Pergunta`. `n` continua sendo o
+        // "nega e segue" (o modelo é avisado). A fila do dono NÃO é limpa (single-ESC
+        // preserva a fila — drena no repouso).
+        lastEscRef.current = 0;
+        controller.interruptFromPrompt();
         return;
       }
       // `e` (editar) cai p/ deny em v1 (abrir $EDITOR é evolução; nunca executa por inação).
@@ -3011,7 +3249,8 @@ export function App(props: AppProps): React.ReactElement {
           setQDraft('');
           return;
         }
-        return controller.resolveQuestion({ kind: 'unavailable', reason: 'cancelado (esc)' });
+        // F10 — ESC na pergunta interrompe o turno (não vira "sem resposta" + novo turno).
+        return controller.interruptFromPrompt();
       }
 
       // Digitação da resposta LIVRE (campo `text` OU "Outro" de single/multi).
@@ -3167,6 +3406,20 @@ export function App(props: AppProps): React.ReactElement {
           controller.endAfterStuck();
           return;
         }
+        return;
+      }
+    }
+
+    // ── PAUSA POR COTA — escolhas do banner (o ESC segue sendo o freio de sempre) ──
+    // ↵ com o composer VAZIO = tentar agora; Ctrl+G = parar salvando. Não rouba letras
+    // da digitação (type-ahead/injeção seguem funcionando durante a pausa).
+    if (state.quotaPause !== undefined) {
+      if (key.ctrl && char === 'g') {
+        controller.quotaStopSaving();
+        return;
+      }
+      if (key.return && !key.shift && composer.text === '') {
+        controller.quotaResumeNow();
         return;
       }
     }
@@ -3411,8 +3664,13 @@ export function App(props: AppProps): React.ReactElement {
       // robusta entre terminais: `key.return && key.ctrl` (CSI-u/kitty) OU um LF cru
       // (`\n`, Ctrl+J — muitos terminais mapeiam Ctrl+Enter p/ LF) chegando como char.
       // Vazio ⇒ no-op (nada a injetar). Reusa o `pendingInjected` (não duplica catraca).
-      const isCtrlEnter =
-        (key.return && key.ctrl) || (!key.return && char === '\n' && !key.ctrl && !key.meta);
+      // F2 — Ctrl+J (LF cru) agora é NOVA LINHA (igual ao repouso); o ENCAIXAR fica no
+      // Ctrl+Enter de terminais com CSI-u (`key.return && key.ctrl`).
+      if (isNewlineKey(char, key)) {
+        setComposer((c) => insertAt(c, '\n'));
+        return;
+      }
+      const isCtrlEnter = key.return && key.ctrl;
       if (isCtrlEnter) {
         // EST-PASTE-COLLAPSE — expande chips antes de injetar no agente vivo (conteúdo cheio).
         const line = expandAndReset(input).trim();
@@ -3432,6 +3690,11 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       if (key.return) {
+        const bs = backslashNewline(composerRef.current);
+        if (bs) {
+          setComposer(bs);
+          return;
+        }
         // EST-PASTE-COLLAPSE — expande chips antes de enfileirar (a fila guarda o texto cheio).
         const line = expandAndReset(input).trim();
         if (line !== '') {
@@ -3471,14 +3734,8 @@ export function App(props: AppProps): React.ReactElement {
         setComposer((c) => ({ ...c, cursor: key.meta ? moveWordRight(c) : moveRight(c) }));
         return;
       }
-      if (key.ctrl && char === 'a') {
-        setComposer((c) => ({ ...c, cursor: 0 }));
-        return;
-      }
-      if (key.ctrl && char === 'e') {
-        setComposer((c) => ({ ...c, cursor: c.text.length }));
-        return;
-      }
+      // F4 — atalhos readline IGUAIS ao repouso (Ctrl-A/E/U/K/W, Alt-B/F): fonte única.
+      if (handleReadlineKey(char, key)) return;
       // Digitação: aplica o chunk pela FONTE ÚNICA `applyTypedChunk` (EST-0965) — insere
       // na posição do cursor E honra backspace EMBUTIDO (`\x7f`/`\x08`) num chunk MISTO
       // (xrdp/SSH/paste entregam texto+edição grudados; o `key.backspace` só vem quando
@@ -3487,26 +3744,23 @@ export function App(props: AppProps): React.ReactElement {
       // agora). A LINHA já vem com os backspaces aplicados (não o texto cru).
       if (char && !key.ctrl && !key.meta) {
         if (char.search(/[\r\n]/) !== -1) {
-          // updater funcional: a linha sai do estado ATUAL (+ o chunk até a quebra),
-          // robusto a teclas síncronas. Os efeitos (fila/inject/histórico) leem o
-          // resultado puro de `applyTypedChunk` sobre o composer corrente.
-          setComposer((c) => {
-            const r = applyTypedChunk(c, char);
+          // F5 — TODAS as linhas do lote (não só a 1ª): `a\rb\rc\r` num chunk só enfileira/encaixa
+          // as três, na ordem; o texto depois da última quebra FICA no composer.
+          const drained = drainTypedChunk(composerRef.current, char);
+          for (const l of drained.lines) {
             // EST-PASTE-COLLAPSE — expande chips antes de injetar/enfileirar (texto cheio).
-            const line = expandAndReset(r.state.text).trim();
-            if (line !== '') {
-              // `\n` (LF/Ctrl+Enter) é o ENCAIXAR explícito ⇒ injeta a linha como está. `\r`
-              // (Enter) segue o type-ahead: TEXTO PURO ENCAIXA mid-turn (EST-0982), COMANDO
-              // PARALELO-SEGURO (`/ask`) RODA JÁ, `/slash` mutador/`!bang`/anexos ENFILEIRA.
-              if (r.newline === '\n') {
-                controller.injectInput('root', line);
-                controller.markLastInjectFromComposer();
-              } else enqueueOrInject(line);
-              setHistory((h) => [...h, line]);
-            }
-            setHistIdx(-1);
-            return { text: '', cursor: 0 };
-          });
+            const line = expandAndReset(l.text).trim();
+            if (line === '') continue;
+            // `\n` (LF) é o ENCAIXAR explícito; `\r` (Enter) segue o type-ahead: TEXTO PURO
+            // ENCAIXA mid-turn (EST-0982), PARALELO-SEGURO roda já, o resto ENFILEIRA.
+            if (l.term === '\n') {
+              controller.injectInput('root', line);
+              controller.markLastInjectFromComposer();
+            } else enqueueOrInject(line);
+            setHistory((h) => [...h, line]);
+          }
+          setComposer(drained.rest);
+          setHistIdx(-1);
           // O composer esvaziou (enfileirou/encaixou a linha) ⇒ fecha o menu.
           setSlashOpen(false);
           setSlashSel(0);
@@ -4071,10 +4325,6 @@ export function App(props: AppProps): React.ReactElement {
           // argumento; nunca executa direto). Comando-PAI (com subs) no TAB: drilla os subs
           // (`/<name> `). Caso contrário (comando-folha, ou Enter no pai): EXECUTA — mesmo
           // caminho de sempre (`runCommand`, abre o picker do /model//theme se couber).
-          const isParent =
-            entry.kind === 'command' &&
-            entry.command.subcommands !== undefined &&
-            entry.command.subcommands.length > 0;
           // EST-0983 (#157 fix) — SUBcomando TERMINAL (`/clear full`, `/clear memory`):
           // verbo SEM argumento ⇒ o Enter SUBMETE direto (`runCommand` do pai com o verbo
           // como arg), em vez de re-completar e ficar preso. O Tab segue só completando
@@ -4087,7 +4337,9 @@ export function App(props: AppProps): React.ReactElement {
             runCommand(entry.parent, entry.sub.name);
             return;
           }
-          if (entry.kind === 'subcommand' || (isParent && key.tab)) {
+          // F18 — TAB só COMPLETA (`/mo` ⇒ `/model`); quem EXECUTA é o Enter. Antes o Tab num
+          // comando-folha rodava o comando (abria o picker do /model sem querer).
+          if (entry.kind === 'subcommand' || key.tab) {
             const completion = entryCompletion(entry);
             setText(completion);
             syncSlashMenu(completion);
@@ -4286,39 +4538,21 @@ export function App(props: AppProps): React.ReactElement {
       setComposer((c) => ({ ...c, cursor: key.meta ? moveWordRight(c) : moveRight(c) }));
       return;
     }
-    // Alt+b / Alt+f (readline word-move por letra, p/ terminais sem Alt+seta).
-    if (key.meta && (char === 'b' || char === 'f')) {
-      setComposer((c) => ({ ...c, cursor: char === 'b' ? moveWordLeft(c) : moveWordRight(c) }));
-      return;
-    }
-    // Ctrl+A → início (Home); Ctrl+E → fim (End) — estilo readline.
-    if (key.ctrl && char === 'a') {
-      setComposer((c) => ({ ...c, cursor: 0 }));
-      return;
-    }
-    if (key.ctrl && char === 'e') {
-      setComposer((c) => ({ ...c, cursor: c.text.length }));
-      return;
-    }
-    // EST-1015 — Ctrl+U (apaga até o início) · Ctrl+K (apaga até o fim) · Ctrl+W (apaga a
-    // palavra à esquerda) — readline padrão. Sincroniza o slash-menu (o texto mudou).
-    if (key.ctrl && (char === 'u' || char === 'k' || char === 'w')) {
-      setComposer((c) => {
-        const next =
-          char === 'u' ? deleteToStart(c) : char === 'k' ? deleteToEnd(c) : deleteWordBack(c);
-        syncSlashMenu(next.text);
-        return next;
-      });
-      setHistIdx(-1);
-      return;
-    }
+    // Alt+b/Alt+f · Ctrl+A/E · Ctrl+U/K/W — readline; FONTE ÚNICA com o ramo de trabalho (F4).
+    if (handleReadlineKey(char, key)) return;
 
     // multilinha: shift+enter insere `\n` NA POSIÇÃO do cursor (§4.2); enter puro envia.
-    if (key.return && key.shift) {
+    // F2 — Alt+Enter / Ctrl+J / Shift+Enter ⇒ NOVA LINHA; `\`+Enter ⇒ a barra vira `\n`.
+    if (isNewlineKey(char, key)) {
       setComposer((c) => insertAt(c, '\n'));
       return;
     }
     if (key.return) {
+      const bs = backslashNewline(composerRef.current);
+      if (bs) {
+        setComposer(bs);
+        return;
+      }
       // EST-PASTE-COLLAPSE — EXPANDE os chips de paste no submit: o modelo recebe o conteúdo
       // COMPLETO original (fiel byte-a-byte) no lugar de cada `[texto colado #N, …]`. Sem
       // chips, é o `input` inalterado. Esvazia o registro depois (sessão de composição nova).
@@ -4328,7 +4562,7 @@ export function App(props: AppProps): React.ReactElement {
       setSlashSel(0);
       setHistIdx(-1);
       picker.closePicker();
-      submit(line);
+      submit(line, input);
       return;
     }
     // BACKSPACE apaga em `pos-1`; DELETE (forward) apaga em `pos`. Ambas as físicas
@@ -4369,19 +4603,25 @@ export function App(props: AppProps): React.ReactElement {
       // EMBUTIDO no chunk, igual ao type-ahead): `abc\x7f\r` submete `ab`, não `abc`.
       if (char.search(/[\r\n]/) !== -1) {
         picker.dismissNotice();
-        const typed = applyTypedChunk({ text: input, cursor: input.length }, char).state.text;
-        // EST-PASTE-COLLAPSE — expande chips de paste antes de submeter (igual ao Enter limpo).
-        const line = expandAndReset(typed);
-        // Limpa o composer e fecha overlays de digitação ANTES de rotear (mesma
-        // sequência do Enter limpo). `submit` → `routeInput` trata objetivo, `/slash`
-        // (com/sem args) e `!bang` de forma uniforme — o paste literal é o que o
-        // usuário digitou, então roteamos o texto, não a seleção do menu.
-        setText('');
+        // F5 — TODAS as linhas do lote: a 1ª é o objetivo (submit); as seguintes chegam com o
+        // turno já vivo ⇒ seguem o type-ahead (encaixa/enfileira, ordem FIFO). Antes só a 1ª
+        // era tratada e o RESTO do chunk era descartado em silêncio. O que vier depois da
+        // última quebra fica no composer.
+        const drained = drainTypedChunk({ text: input, cursor: input.length }, char);
+        setComposer(drained.rest);
         setSlashOpen(false);
         setSlashSel(0);
         setHistIdx(-1);
         picker.closePicker();
-        submit(line);
+        drained.lines.forEach((l, idx) => {
+          // EST-PASTE-COLLAPSE — expande chips de paste antes de submeter (igual ao Enter limpo).
+          const line = expandAndReset(l.text);
+          if (idx === 0) submit(line, l.text);
+          else if (line.trim() !== '') {
+            enqueueOrInject(line.trim());
+            setHistory((h) => [...h, line.trim()]);
+          }
+        });
         return;
       }
       // O aviso de recusa de anexo (revisor #3) some na próxima digitação (ação nova).
@@ -4399,6 +4639,37 @@ export function App(props: AppProps): React.ReactElement {
       setHistIdx(-1);
     }
   });
+
+  /**
+   * F4 — atalhos readline do composer, FONTE ÚNICA p/ repouso e trabalho (antes o ramo de
+   * trabalho só tinha Ctrl-A/E e engolia Ctrl-U/K/W/Alt-B/F: o texto "apagado" ficava e se
+   * fundia com o próximo). Devolve `true` se a tecla foi tratada.
+   */
+  function handleReadlineKey(char: string, key: { ctrl: boolean; meta: boolean }): boolean {
+    if (key.meta && !key.ctrl && (char === 'b' || char === 'f')) {
+      setComposer((c) => ({ ...c, cursor: char === 'b' ? moveWordLeft(c) : moveWordRight(c) }));
+      return true;
+    }
+    if (key.ctrl && char === 'a') {
+      setComposer((c) => ({ ...c, cursor: 0 }));
+      return true;
+    }
+    if (key.ctrl && char === 'e') {
+      setComposer((c) => ({ ...c, cursor: c.text.length }));
+      return true;
+    }
+    if (key.ctrl && (char === 'u' || char === 'k' || char === 'w')) {
+      setComposer((c) => {
+        const next =
+          char === 'u' ? deleteToStart(c) : char === 'k' ? deleteToEnd(c) : deleteWordBack(c);
+        syncSlashMenu(next.text);
+        return next;
+      });
+      setHistIdx(-1);
+      return true;
+    }
+    return false;
+  }
 
   /**
    * EST-0957 — re-sincroniza o picker `@` com o input corrente: abre/fecha e
@@ -4457,7 +4728,12 @@ export function App(props: AppProps): React.ReactElement {
   // A dica do composer: em trabalho o composer está ATIVO ⇒ sem `hint` (a dica só
   // aparece quando inativo). Em `ask`/`budget` (composer dim) explica que a decisão
   // acima tem o foco. (O `<Composer>` só mostra `hint` quando `active === false`.)
-  const composerHint = state.phase === 'asking' ? 'aguardando sua decisão acima' : undefined;
+  const composerHint =
+    state.phase === 'asking'
+      ? input !== ''
+        ? 'rascunho guardado · esc apaga e volta a responder a caixa'
+        : 'aguardando sua decisão acima'
+      : undefined;
 
   // EST-0965 — UM CURSOR SÓ NA TELA. Enquanto o agente TRABALHA (isWorkPhase), o
   // <AluyBlock> pinta o cursor AMARELO de trabalho (●) na ponta do stream — ELE é o
@@ -4497,7 +4773,14 @@ export function App(props: AppProps): React.ReactElement {
   // `theme.animate`: com `ALUY_NO_ANIM` o número segue subindo (é informativo, não
   // decorativo). Formato `M:SS` (`0:12`) via `formatElapsed`.
   const acc = busy ? controller.turnAccounting() : undefined;
-  const elapsed = acc && acc.live ? formatElapsed(acc.durationMs) : undefined;
+  // F19 — UM relógio só: com a linha de trabalho mostrando os segundos (`Λ Verbo… (… · 32s)`),
+  // o rodapé NÃO repete `· 0:32`; ele mantém só as dicas de tecla.
+  const linhaDeTrabalhoMostraSegundos =
+    mostraIndicadorTrabalho(state.phase, haFilhoVivo) && detalheEspera !== undefined;
+  const elapsed =
+    acc && acc.live && !linhaDeTrabalhoMostraSegundos && state.quotaPause === undefined
+      ? formatElapsed(acc.durationMs)
+      : undefined;
 
   // EST-0973 — ELAPSED do <ProgressBar> indeterminado (fase `compacting`): `now() −
   // startedAt`. Como `compacting` arma o tick de 1s (elapsedTickEnabled), este valor é
@@ -4808,6 +5091,7 @@ export function App(props: AppProps): React.ReactElement {
           selected={qSelected}
           editing={qEditing}
           draft={qDraft}
+          columns={columns}
         />
       );
     }
@@ -5006,6 +5290,8 @@ export function App(props: AppProps): React.ReactElement {
         composerActive={composerActive}
         showCursor={composerShowCursor}
         hintState={hintState}
+        statuslineMode={statuslineMode}
+        dicaOculto={dicaOculto}
         tierDisplay={tierDisplay}
         headerTierDisplay={headerTierDisplay}
         isDefaultTier={isDefaultTier}
@@ -5048,6 +5334,18 @@ export function App(props: AppProps): React.ReactElement {
   // (single/side/tabs) — o conteúdo é IDÊNTICO; só o CONTÊINER muda (1 col vs row vs
   // aba). O `maxLines` é o `splitMaxLines` (= `liveMaxLines` em single; orçado p/ as 2
   // colunas em side/tabs), mantendo a região viva em `rows-1` (anti-flicker).
+  // F3 — com a prévia de fala viva a linha de trabalho assume o lugar do cursor `●` (sem respiro
+  // extra acima); sem ela (tool-line, pensando) mantém o respiro de sempre.
+  const previaDeFalaViva =
+    state.phase === 'streaming' && live.some((b) => b.kind === 'aluy' && b.streaming);
+  const telaBaixa =
+    stdout?.rows !== undefined && stdout.rows > 0 && stdout.rows <= STATUSLINE_SHORT_ROWS;
+  // F17 — nada vivo na coluna do chat (repouso): usado p/ enxugar o respiro em tela baixa.
+  const regiaoVivaVazia =
+    (state.phase === 'idle' || state.phase === 'done') &&
+    live.length === 0 &&
+    !haFilhoVivo &&
+    state.quotaPause === undefined;
   const liveChatColumn = (
     <>
       {/* F-SEM-SAUDACAO (decisão do dono: "eu não pedi essas msgs") — a tela de sessão
@@ -5077,6 +5375,7 @@ export function App(props: AppProps): React.ReactElement {
               // onde este repo já teve o "buraco no meio da tela".
               prevKind={i > 0 ? live[i - 1]?.kind : undefined}
               nextKind={live[i + 1]?.kind}
+              semCursor
             />
           ))}
 
@@ -5101,12 +5400,13 @@ export function App(props: AppProps): React.ReactElement {
             inteiro: "depois que ele me responde ele para de mostrar o processando" — com
             os agentes ainda trabalhando. Redundante era mostrar os DOIS juntos, não
             mostrar este quando o outro não existe. */}
-      {mostraIndicadorTrabalho(state.phase, haFilhoVivo) && (
-        <Box paddingTop={state.blocks.length > 0 ? 1 : 0}>
+      {mostraIndicadorTrabalho(state.phase, haFilhoVivo) && state.quotaPause === undefined && (
+        <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
           <Working
             glyph="aluy"
             glyphRole="accent"
             label={indicadorTrabalho.label}
+            {...(detalheEspera !== undefined ? { detalhe: detalheEspera } : {})}
             {...(indicadorTrabalho.suffix !== undefined
               ? { suffix: indicadorTrabalho.suffix }
               : {})}
@@ -5145,7 +5445,14 @@ export function App(props: AppProps): React.ReactElement {
             selected={qSelected}
             editing={qEditing}
             draft={qDraft}
+            columns={columns}
           />
+        </Box>
+      )}
+
+      {state.quotaPause !== undefined && (
+        <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
+          <QuotaPauseLine view={state.quotaPause} columns={columns} />
         </Box>
       )}
 
@@ -5319,7 +5626,15 @@ export function App(props: AppProps): React.ReactElement {
       )}
 
       {splitLayout === 'single' ? (
-        <Box flexDirection="column" paddingY={1}>
+        // F17 — em terminal BAIXO (≤ 30 linhas) o respiro é enxuto: sem o `paddingTop` (o bloco
+        // de cima já paga a linha em branco) e, em repouso (nada vivo), sem o `paddingBottom`.
+        // Eram 3 linhas em branco entre o fim da resposta e o composer; ficam 1. O orçamento
+        // (`LIVE_CHROME_BASE_ROWS`) segue contando o respiro cheio ⇒ só sobra folga.
+        <Box
+          flexDirection="column"
+          paddingTop={telaBaixa ? 0 : 1}
+          paddingBottom={telaBaixa && regiaoVivaVazia ? 0 : 1}
+        >
           {liveChatColumn}
         </Box>
       ) : splitLayout === 'side' ? (
@@ -5544,14 +5859,9 @@ export function App(props: AppProps): React.ReactElement {
           // F-COMPOSER-FUNDO — a cor vem do tema e some sozinha sem truecolor.
           {...(theme.composerBg !== undefined ? { backgroundColor: theme.composerBg } : {})}
         />
-        {state.turnAccounting && (state.phase === 'done' || state.phase === 'budget') && (
-          <TurnFooter
-            accounting={state.turnAccounting}
-            columns={columns}
-            showCost={false}
-            {...(turnRecap !== undefined ? { recap: turnRecap } : {})}
-          />
-        )}
+        {/* SEM LOG DENTRO DO COMPOSER — o recap do turno (`✔ editou b.txt`) saiu daqui a pedido
+            do dono: o composer é para COMPOR; o que o turno fez já está na conversa. O custo
+            vive no cabeçalho da caixa da resposta (F-CONTA-NO-BLOCO). */}
       </ComposerBox>
       {/* F-COMPOSER-SOMBRA — TIRADA a pedido do dono ("achei que a sombra não ficou
           legal"). A técnica (meio-bloco deslocado, a mesma da marca 3D) funciona numa
@@ -5616,7 +5926,8 @@ export function App(props: AppProps): React.ReactElement {
           também DUPLICAVA o número numa linha órfã logo acima do rodapé — foi o que ele
           viu na tela. No BROKER nada muda: lá o footer carrega janela + reset, que a
           linha primária não comporta. */}
-      {state.meta.backend !== 'local' &&
+      {statuslineMode === 'full' &&
+        state.meta.backend !== 'local' &&
         (state.phase === 'done' ||
           state.phase === 'budget' ||
           state.phase === 'idle' ||
@@ -5645,86 +5956,124 @@ export function App(props: AppProps): React.ReactElement {
           ele sumia e o composer descia 1 linha; ao terminar, voltava e o composer subia. Agora
           basta ter havido turno (a regra do F-COMPOSER-BARRA acima continua: sessão sem turno
           não ganha a linha morta). */}
-      {columns >= 60 && rows >= RESPIRO_MIN_ROWS && state.turnAccounting !== undefined && (
-        <Box height={1} />
-      )}
+      {statuslineMode === 'full' &&
+        columns >= 60 &&
+        rows >= RESPIRO_MIN_ROWS &&
+        state.turnAccounting !== undefined && <Box height={1} />}
 
       {/* F-RECUO (pedido do dono: "a mesma afastadinha que você deu na lateral do
           composer para todas as outras linhas") — o bloco do composer tem a barra `┃` +
           1 coluna, então o texto dele começa na coluna 2. O rodapé começava na 0 e ficava
           desalinhado com o campo logo acima. `paddingLeft={2}` alinha os dois. */}
-      <Box paddingLeft={2} flexDirection="column">
-        {/* FOOTER-AGENTES — os sub-agentes VIVOS ganham uma coluna À ESQUERDA do painel,
+      {statuslineMode === 'compact' && (
+        <Box paddingLeft={2}>
+          <RodapeParcial
+            model={displayModel ?? tierDisplay}
+            cwd={state.meta.cwd}
+            home={homedir()}
+            windowPct={state.meta.windowPct}
+            tokens={state.meta.tokens}
+            unsafe={state.mode === 'unsafe'}
+            sidecarCaido={
+              state.sidecarUsage !== undefined &&
+              (buildSidecarChip(state.sidecarUsage) ?? []).some((e) => e.state === 'down')
+            }
+            cotaPausada={state.quotaPause !== undefined}
+            dicas={
+              state.phase === 'asking' || state.phase === 'questioning'
+                ? undefined
+                : state.phase === 'thinking' ||
+                    state.phase === 'streaming' ||
+                    state.phase === 'retrying'
+                  ? 'esc interrompe · F2 rodapé'
+                  : '/ comandos · F2 rodapé'
+            }
+            columns={Math.max(20, columns - 2)}
+          />
+        </Box>
+      )}
+      {/* RODAPÉ oculto — nada além do necessário: o `⚠ yolo` NUNCA some (catraca desligada) e,
+          na 1ª vez, uma dica mínima de como voltar. */}
+      {statuslineMode === 'hidden' && (state.mode === 'unsafe' || dicaOculto) && (
+        <Box paddingLeft={2}>
+          {state.mode === 'unsafe' && <Role name="danger">⚠ yolo</Role>}
+          {state.mode === 'unsafe' && dicaOculto && <Role name="fgDim">{' · '}</Role>}
+          {dicaOculto && <Role name="fgDim">rodapé oculto — F2 ou /statusline voltam</Role>}
+        </Box>
+      )}
+      {statuslineMode === 'full' && (
+        <Box paddingLeft={2} flexDirection="column">
+          {/* FOOTER-AGENTES — os sub-agentes VIVOS ganham uma coluna À ESQUERDA do painel,
             separados por uma barra vertical (pedido do dono). Sem agentes vivos o
             <FooterAgents> é passagem direta: a tela de quem não dispara agente não muda. */}
-        <FooterAgents filhos={filhosRodape} rows={rows}>
-          {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
+          <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
+            {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
             pulso âmbar, que saiu. Continuar passando faria o painel re-renderizar a cada
             quadro sem desenhar nada diferente, e deixaria dois campos aceitos-e-ignorados
             na interface — a armadilha que já custou o `maxWidths` hoje. */}
-          <StatusPanel
-            mode={state.mode}
-            {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
-            {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
-            cwd={state.meta.cwd}
-            tier={tierDisplay}
-            isDefaultTier={isDefaultTier}
-            {...(displayModel !== undefined
-              ? // HG-2/CLI-SEC-7: o `model` da via Custom (slug que o USUÁRIO escolheu) SEMPRE
-                // exibe. O `activeModel` (=usage.model resolvido do tier) só entra com o OPT-IN
-                // `ALUY_SHOW_MODEL` (default OFF — o binário público NÃO revela o mapa tier→
-                // provider; gate AG-0008). `displayModel` já aplicou essa regra acima. A redação
-                // server-side do trailer (broker) segue como o caminho p/ expor por default.
-                { model: displayModel }
-              : {})}
-            tokens={state.meta.tokens}
-            {...(state.meta.budgetPct !== undefined ? { budgetPct: state.meta.budgetPct } : {})}
-            windowPct={state.meta.windowPct}
-            {...(dominantQuota !== undefined
-              ? { quotaPct: dominantQuota.pct, quotaLevel: dominantQuota.level }
-              : {})}
-            // F-SALDO-BYO — saldo do provider BYO na linha PRIMÁRIA, colado no par
-            // provider·modelo (pedido do dono: "deveria ficar após o provedor"). Antes caía
-            // no <QuotaFooter>, numa linha própria e órfã acima do rodapé.
-            {...(state.meta.quota?.credit?.balance !== undefined
-              ? { credit: state.meta.quota.credit.balance }
-              : {})}
-            // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
-            // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
-            // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
-            columns={Math.max(20, columns - 2)}
-            error={state.phase === 'error'}
-            {...(state.governance !== undefined ? { governance: state.governance } : {})}
-            {...(!cycleUiOff && state.cycleProgress !== undefined
-              ? { cycleProgress: state.cycleProgress }
-              : {})}
-            {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
-            {...(state.sidecarUsage !== undefined
-              ? // F-SIDECAR-USO — USO REAL dos sidecars (headroom/ollama/mem0). O wiring arma
-                // o medidor e o controller espelha as contagens aqui; o chip só aparece no
-                // perfil TURBO (em leve o `buildSidecarChip` devolve `undefined` e a barra
-                // nem ganha o campo). Responde "estão sendo USADOS?", não "estão de pé?".
-                { sidecarUsage: state.sidecarUsage }
-              : {})}
-          />
-        </FooterAgents>
-        {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
+            <StatusPanel
+              mode={state.mode}
+              {...(state.configSources !== undefined ? { configSources: state.configSources } : {})}
+              {...(state.meta.branch !== undefined ? { branch: state.meta.branch } : {})}
+              cwd={state.meta.cwd}
+              tier={tierDisplay}
+              isDefaultTier={isDefaultTier}
+              {...(displayModel !== undefined
+                ? // HG-2/CLI-SEC-7: o `model` da via Custom (slug que o USUÁRIO escolheu) SEMPRE
+                  // exibe. O `activeModel` (=usage.model resolvido do tier) só entra com o OPT-IN
+                  // `ALUY_SHOW_MODEL` (default OFF — o binário público NÃO revela o mapa tier→
+                  // provider; gate AG-0008). `displayModel` já aplicou essa regra acima. A redação
+                  // server-side do trailer (broker) segue como o caminho p/ expor por default.
+                  { model: displayModel }
+                : {})}
+              tokens={state.meta.tokens}
+              {...(state.meta.budgetPct !== undefined ? { budgetPct: state.meta.budgetPct } : {})}
+              windowPct={state.meta.windowPct}
+              {...(dominantQuota !== undefined
+                ? { quotaPct: dominantQuota.pct, quotaLevel: dominantQuota.level }
+                : {})}
+              // F-SALDO-BYO — saldo do provider BYO na linha PRIMÁRIA, colado no par
+              // provider·modelo (pedido do dono: "deveria ficar após o provedor"). Antes caía
+              // no <QuotaFooter>, numa linha própria e órfã acima do rodapé.
+              {...(state.meta.quota?.credit?.balance !== undefined
+                ? { credit: state.meta.quota.credit.balance }
+                : {})}
+              // F-RECUO — o bloco do rodapé tem `paddingLeft={2}`; sem descontar aqui, o
+              // StatusBar acha que tem a largura toda, desenha além do que sobra e o Ink
+              // quebra a barra em três linhas (foi o que apareceu na 1ª tentativa do recuo).
+              columns={Math.max(20, columns - 2)}
+              error={state.phase === 'error'}
+              {...(state.governance !== undefined ? { governance: state.governance } : {})}
+              {...(!cycleUiOff && state.cycleProgress !== undefined
+                ? { cycleProgress: state.cycleProgress }
+                : {})}
+              {...(state.mcpProgress !== undefined ? { mcpProgress: state.mcpProgress } : {})}
+              {...(state.sidecarUsage !== undefined
+                ? // F-SIDECAR-USO — USO REAL dos sidecars (headroom/ollama/mem0). O wiring arma
+                  // o medidor e o controller espelha as contagens aqui; o chip só aparece no
+                  // perfil TURBO (em leve o `buildSidecarChip` devolve `undefined` e a barra
+                  // nem ganha o campo). Responde "estão sendo USADOS?", não "estão de pé?".
+                  { sidecarUsage: state.sidecarUsage }
+                : {})}
+            />
+          </FooterAgents>
+          {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
           descansa). Sempre visível (glifo+palavra, a11y): plan=read-only (petrol),
           normal=catraca (neutro), unsafe=BANNER gritante e persistente (CLI-SEC-3 —
           o aviso loud NÃO regride; o usuário PRECISA ver que a catraca está
           desligada). Reativo: o Tab cicla `normal→plan→unsafe` (invertido) — fica VIVO (fora do
           Static, na região viva do rodapé, já dentro do LIVE_CHROME_ROWS), só mudou
           de lugar (topo→rodapé), sem flicker. */}
-        {/* A linha amarela de sub-agentes SAIU daqui: virou sufixo do indicador único de
+          {/* A linha amarela de sub-agentes SAIU daqui: virou sufixo do indicador único de
             trabalho (ver o <Working> acima). Manter as duas desenhava a mesma informação
             duas vezes, em dois lugares, com gatilhos diferentes — e era a segunda que
             fazia a altura da região viva oscilar. */}
-        {/* F-PAINEL — o <ModeIndicator> foi ABSORVIDO: modo e catraca são a linha `estado`
+          {/* F-PAINEL — o <ModeIndicator> foi ABSORVIDO: modo e catraca são a linha `estado`
           do painel. Manter os dois desenharia a mesma informação duas vezes, uma dentro da
           caixa e outra fora. O banner do modo `unsafe` continua existindo — o próprio
           <StatusPanel> o emite, porque um aviso de modo perigoso não pode virar linha de
           tabela cinza. */}
-        {/* fix(footer-bleed) — durante uma APROVAÇÃO ATIVA (`asking`) o <AskDialog> JÁ
+          {/* fix(footer-bleed) — durante uma APROVAÇÃO ATIVA (`asking`) o <AskDialog> JÁ
           renderiza seu PRÓPRIO footer de atalhos (`a aprova · s sempre · …`), em
           contexto, colado ao diálogo (AskDialog.footerOf, mesmas strings de
           `hints.ask`/`hints.askDestructive`). Repetir o footer AQUI no rodapé —
@@ -5735,21 +6084,22 @@ export function App(props: AppProps): React.ReactElement {
           o rodapé NÃO deve duplicar a dica de ask. Suprimimos os estados de ask aqui; o
           AskDialog é a única fonte da dica durante a catraca. Ao resolver, `hintState`
           volta a `idle`/etc. e o rodapé reaparece — transição limpa ask→composer. */}
-        {showHints && hintState && hintState !== 'ask' && hintState !== 'ask-destructive' && (
-          <FooterHints
-            state={hintState}
-            {...(elapsed !== undefined ? { elapsed } : {})}
-            {...(ctrlCArmed ? { armedExit: true } : {})}
-            {...(showSuggestion ? { suggesting: true } : {})}
-          />
-        )}
-        {/* COMPOSER PARADO (16/09) — a linha das dicas sai durante o ask, mas o LUGAR dela
+          {showHints && hintState && hintState !== 'ask' && hintState !== 'ask-destructive' && (
+            <FooterHints
+              state={hintState}
+              {...(elapsed !== undefined ? { elapsed } : {})}
+              {...(ctrlCArmed ? { armedExit: true } : {})}
+              {...(showSuggestion ? { suggesting: true } : {})}
+            />
+          )}
+          {/* COMPOSER PARADO (16/09) — a linha das dicas sai durante o ask, mas o LUGAR dela
             fica: sem isto a pilha abaixo do composer perdia 1 linha e ele descia a cada
             aprovação (medido no tmux: 47 → 48 → 47). */}
-        {showHints && (hintState === 'ask' || hintState === 'ask-destructive') && (
-          <Box height={1} />
-        )}
-      </Box>
+          {showHints && (hintState === 'ask' || hintState === 'ask-destructive') && (
+            <Box height={1} />
+          )}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -5790,6 +6140,12 @@ export function BlockView(props: {
    * sub-agentes que desceu com filhos em segundo plano (ver `liveStartIndex`).
    */
   readonly settled?: boolean;
+  /** Verbo do turno p/ o `⋯ Costurando…` do raciocínio (ausente na região viva: a linha de trabalho cobre). */
+  readonly verbo?: string | undefined;
+  /** Parêntese dim da espera p/ o raciocínio ao vivo. */
+  readonly detalhe?: string | undefined;
+  /** F3 — sem o cursor `●`: a linha de trabalho do App é o indicador vivo. */
+  readonly semCursor?: boolean | undefined;
 }): React.ReactElement {
   const b = props.block;
   switch (b.kind) {
@@ -5797,7 +6153,7 @@ export function BlockView(props: {
       return (
         <Box paddingBottom={1}>
           <YouBlock
-            text={b.text}
+            text={b.display ?? b.text}
             isCurrent={props.isCurrent}
             {...(props.columns !== undefined ? { columns: props.columns } : {})}
             {...(b.origem !== undefined ? { origem: b.origem } : {})}
@@ -5805,6 +6161,10 @@ export function BlockView(props: {
         </Box>
       );
     case 'aluy':
+      // SELF-CHECK — a passada de verificação é máquina do loop: o indicador "conferindo o
+      // trabalho…" (<Working>) é o que o usuário vê; o texto da verificação não aparece nem
+      // enquanto streama (era o flash que sumia ao terminar).
+      if (b.selfCheck === true) return <></>;
       return (
         <Box paddingBottom={1} paddingTop={aluyNeedsLeadingBlank(props.prevKind) ? 1 : 0}>
           <AluyBlock
@@ -5817,6 +6177,9 @@ export function BlockView(props: {
             {...(props.columns !== undefined ? { columns: props.columns } : {})}
             {...(b.accounting !== undefined ? { accounting: b.accounting } : {})}
             {...(b.interrupted === true ? { interrupted: true } : {})}
+            {...(props.verbo !== undefined ? { verbo: props.verbo } : {})}
+            {...(props.detalhe !== undefined ? { detalhe: props.detalhe } : {})}
+            {...(props.semCursor === true ? { semCursor: true } : {})}
           />
         </Box>
       );
@@ -5872,7 +6235,13 @@ export function BlockView(props: {
       // EST-0969 (display) — indicador compacto dos sub-agentes paralelos: status
       // por filho, NUNCA os tokens crus de cada um (que interleavariam). Bloco
       // estável (sem jitter): só muda na transição de um filho (início/fim).
-      return <SubAgents childrenStatus={b.children} settled={props.settled === true} />;
+      return (
+        <SubAgents
+          childrenStatus={b.children}
+          settled={props.settled === true}
+          frame={props.frame}
+        />
+      );
     case 'doctor':
       // EST-0970 (ticks AO VIVO) — checklist progressiva do `/doctor`: cada item
       // `pending` (spinner ⠋) "acende" p/ ✓/⚠/✗ quando o probe resolve aquele check.
@@ -5998,6 +6367,8 @@ function hintStateOf(
   // EST-0961 — a palette é modal: seu hint tem prioridade quando aberta.
   if (paletteOpen) return 'palette';
   if (slashOpen) return 'slash';
+  // F9 — pausa por cota: dicas próprias (nada de `esc interromper · 0:32` fingindo que roda).
+  if (state.quotaPause !== undefined && state.phase !== 'asking') return 'quota-pause';
   switch (state.phase) {
     // EST-0948 (auto-retry) — durante o backoff (`retrying`) o footer mostra o mesmo
     // hint do `thinking` ("esc para interromper"): esc cancela a re-tentativa.

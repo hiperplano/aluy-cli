@@ -462,7 +462,8 @@ describe('EST-0969 (display) · ask de um filho aparece rotulado [sub-agente: <l
     // O ask do FILHO chegou ao resolver, ROTULADO pela origem (spawner injeta o
     // prefixo `[sub-agente: rust]`). Isso NÃO some com o novo indicador de display.
     expect(askReasons.some((r) => r.includes('[sub-agente: rust]'))).toBe(true);
-    // o ask do PAI (spawn_agent) NÃO é rotulado de filho (é o efeito do próprio pai).
-    expect(askReasons.some((r) => !r.includes('[sub-agente:'))).toBe(true);
+    // ADR aluy-cli 0002: o spawn_agent do PAI é allow por padrão ⇒ NÃO pergunta; todo ask que
+    // chega ao resolver é de um filho (a catraca dos filhos segue intacta).
+    expect(askReasons.every((r) => r.includes('[sub-agente:'))).toBe(true);
   });
 });

@@ -34,7 +34,8 @@ import {
 } from 'node:fs';
 import { themeByName, type ThemeName } from '../ui/theme/themes.js';
 import { langByCode, type Lang } from '../i18n/lang.js';
-import { embedderSpec, DEFAULT_EMBEDDER_MODEL } from '@hiperplano/aluy-cli-core';
+import { parseNotifyMode, type NotifyMode } from './notify-port.js';
+import { embedderSpec, DEFAULT_EMBEDDER_MODEL, canRememberTool } from '@hiperplano/aluy-cli-core';
 
 /** Permissões restritas: dir `0700`, arquivo `0600` (espelha o journal-store). */
 const DIR_MODE = 0o700;
@@ -98,6 +99,18 @@ export interface UserConfig {
    * segredo (CLI-SEC-7). A heurística é LOCAL (sem modelo/tokens) — não gasta o BYO.
    */
   readonly suggestions?: boolean;
+  /**
+   * Modo das notificações (`/notify`): `all` | `attention` | `off`. Ausente ⇒ `all`.
+   * Precedência: `ALUY_NOTIFY` (env) > este campo > default. Só pref de UI (CLI-SEC-7).
+   */
+  readonly notify?: NotifyMode;
+  /**
+   * RODAPÉ (tudo abaixo do composer) — `full` (painel inteiro + dicas), `compact` (1 linha
+   * com o essencial + avisos) ou `hidden` (nada além do funcionalmente necessário; o `⚠ yolo`
+   * nunca some). Ausente ⇒ automático: `full`, ou `compact` em terminal baixo (≤ 30 linhas).
+   * Precedência: `ALUY_STATUSLINE` (env) > este campo (`/statusline`, F2) > automático. Só UI.
+   */
+  readonly statusline?: StatuslineMode;
   /**
    * F-AUTOUPDATE (pedido do dono: "quando tiver update no npm, instalar automaticamente")
    * — liga/desliga a atualização automática. Ausente ⇒ LIGADO (a decisão dele).
@@ -277,6 +290,12 @@ export interface UserConfig {
    */
   readonly mcp?: UserMcpConfig;
   /**
+   * ADR aluy-cli 0002 — tools que o dono mandou LEMBRAR no diálogo de permissão
+   * ("sempre permitir"). Só NOMES de tool (nunca comando/caminho). `run_command`/`edit_file`/
+   * `write_file` são descartados na leitura (piso de CLI-SEC-3 — nunca permanentes).
+   */
+  readonly permissions?: { readonly alwaysAllow?: readonly string[] };
+  /**
    * ADR-0150 — retenção/GC das sessões (`~/.aluy/sessions/`) e janela da AUTO-OFERTA
    * de retomada no boot. Sem env hoje; precedência config > default, com sanidade
    * MÍNIMA aplicada pelo `cli` (idade ≥1 dia, contagem ≥1, janela de auto-resume
@@ -377,6 +396,8 @@ export interface UserAdvancedConfig {
     readonly everyK?: number;
     /** `maxVerificationsEnv` (ALUY_SELF_CHECK_MAX) vence. Clamp core `[1,10]`. */
     readonly maxVerifications?: number;
+    /** `ALUY_SELF_CHECK_SKIP_VERIFIED` vence. Opt-in: pula a sonda se o agente já verificou. */
+    readonly skipWhenVerified?: boolean;
   };
   /** `agent/mem-pressure.ts` — limiar BASE do backstop de OOM (heap). */
   readonly memPressure?: {
@@ -589,6 +610,23 @@ function sanitizeMcp(raw: unknown): UserMcpConfig | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** ADR aluy-cli 0002 — sanitiza `permissions.alwaysAllow` (nomes de tool; piso CLI-SEC-3). */
+function sanitizePermissions(raw: unknown): { alwaysAllow: string[] } | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const list = (raw as Record<string, unknown>).alwaysAllow;
+  if (!Array.isArray(list)) return undefined;
+  const out: string[] = [];
+  for (const v of list) {
+    if (typeof v !== 'string') continue;
+    const name = v.trim();
+    if (name === '' || name.length > 128 || [...name].some((c) => c.charCodeAt(0) < 32)) continue;
+    if (!canRememberTool(name) || out.includes(name)) continue;
+    out.push(name);
+    if (out.length >= 64) break;
+  }
+  return out.length > 0 ? { alwaysAllow: out } : undefined;
+}
+
 /**
  * ADR-0150 (balde b) — sanitiza `session`. Só inteiros positivos; o `cli` aplica a
  * sanidade MÍNIMA (não anti-runaway) no uso (`resolveSessionGcOptions`/
@@ -619,18 +657,19 @@ function sanitizeAdvanced(raw: unknown): UserAdvancedConfig | undefined {
   const posInt = (v: unknown): number | undefined =>
     typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
   const out: {
-    selfCheck?: { everyK?: number; maxVerifications?: number };
+    selfCheck?: { everyK?: number; maxVerifications?: number; skipWhenVerified?: boolean };
     memPressure?: { compactAt?: number | string };
     webFetch?: { maxObservationChars?: number };
   } = {};
 
   if (typeof o.selfCheck === 'object' && o.selfCheck !== null) {
     const sc = o.selfCheck as Record<string, unknown>;
-    const clean: { everyK?: number; maxVerifications?: number } = {};
+    const clean: { everyK?: number; maxVerifications?: number; skipWhenVerified?: boolean } = {};
     const ek = posInt(sc.everyK);
     const mv = posInt(sc.maxVerifications);
     if (ek !== undefined) clean.everyK = ek;
     if (mv !== undefined) clean.maxVerifications = mv;
+    if (typeof sc.skipWhenVerified === 'boolean') clean.skipWhenVerified = sc.skipWhenVerified;
     if (Object.keys(clean).length > 0) out.selfCheck = clean;
   }
 
@@ -853,6 +892,8 @@ function sanitize(raw: unknown): UserConfig {
     lang?: Lang;
     fullscreen?: boolean;
     suggestions?: boolean;
+    notify?: NotifyMode;
+    statusline?: StatuslineMode;
     autoUpdate?: boolean;
     backend?: 'broker' | 'local';
     localProvider?: string;
@@ -876,6 +917,7 @@ function sanitize(raw: unknown): UserConfig {
     subagents?: UserSubagentsConfig;
     cycle?: UserCycleConfig;
     mcp?: UserMcpConfig;
+    permissions?: { readonly alwaysAllow?: readonly string[] };
     session?: UserSessionConfig;
     advanced?: UserAdvancedConfig;
   } = {};
@@ -908,6 +950,13 @@ function sanitize(raw: unknown): UserConfig {
   // fullscreen. Só sobrevive como boolean genuíno; lixo/ausente ⇒ default ON (resolvido
   // em `resolveInitialSuggestions`, não aqui — aqui só preservamos o que foi salvo). NUNCA lança.
   if (typeof obj.suggestions === 'boolean') out.suggestions = obj.suggestions;
+  // notify — só os 3 modos canônicos sobrevivem (lixo ⇒ descartado ⇒ default `all`).
+  if (typeof obj.notify === 'string') {
+    const m = parseNotifyMode(obj.notify);
+    if (m !== undefined) out.notify = m;
+  }
+  // RODAPÉ — só os 3 modos conhecidos sobrevivem; lixo some ⇒ automático.
+  if (isStatuslineMode(obj.statusline)) out.statusline = obj.statusline;
   // F-AUTOUPDATE — booleano de comportamento, MESMA disciplina dos de UI acima: só
   // boolean genuíno entra (string "true" do disco não vira `true` por acidente).
   if (typeof obj.autoUpdate === 'boolean') out.autoUpdate = obj.autoUpdate;
@@ -1025,6 +1074,9 @@ function sanitize(raw: unknown): UserConfig {
   const session = sanitizeSession(obj.session);
   if (session) out.session = session;
 
+  const permissions = sanitizePermissions(obj.permissions);
+  if (permissions) out.permissions = permissions;
+
   // ADR-0150 (Tier 2) — advanced (self-check/mem-pressure/web-fetch): tunables que
   // já tinham override por env+clamp; config só "termina o padrão".
   const advanced = sanitizeAdvanced(obj.advanced);
@@ -1110,6 +1162,14 @@ export class UserConfigStore {
     }
   }
 
+  /** ADR aluy-cli 0002 — açúcar: acrescenta `tool` ao "sempre permitir" persistido (dedup). */
+  saveAlwaysAllowTool(tool: string): boolean {
+    const cur = this.load().permissions?.alwaysAllow ?? [];
+    if (!canRememberTool(tool)) return false;
+    if (cur.includes(tool)) return true;
+    return this.save({ permissions: { alwaysAllow: [...cur, tool] } });
+  }
+
   /** Açúcar: persiste só o tema (preserva o tier salvo). */
   saveTheme(theme: ThemeName): boolean {
     return this.save({ theme });
@@ -1168,8 +1228,18 @@ export class UserConfigStore {
     return this.save({ autoUpdate });
   }
 
+  /** Persiste o modo de notificação (`/notify`), preservando as demais. */
+  saveNotify(notify: NotifyMode): boolean {
+    return this.save({ notify });
+  }
+
   saveSuggestions(suggestions: boolean): boolean {
     return this.save({ suggestions });
+  }
+
+  /** RODAPÉ — persiste o modo escolhido (`/statusline` / F2), preservando as demais prefs. */
+  saveStatusline(statusline: StatuslineMode): boolean {
+    return this.save({ statusline });
   }
 
   /**
@@ -1420,6 +1490,44 @@ export function resolveInitialSplitView(flag: boolean | undefined, config: UserC
 export function resolveInitialFullscreen(flag: boolean | undefined, config: UserConfig): boolean {
   if (flag === true) return true;
   return config.fullscreen ?? false;
+}
+
+/** Os 3 modos do rodapé (tudo abaixo do composer). */
+export type StatuslineMode = 'full' | 'compact' | 'hidden';
+export const STATUSLINE_MODES: readonly StatuslineMode[] = ['full', 'compact', 'hidden'];
+export function isStatuslineMode(v: unknown): v is StatuslineMode {
+  return v === 'full' || v === 'compact' || v === 'hidden';
+}
+
+/** Terminal BAIXO: até esta altura o rodapé automático é `compact`. */
+export const STATUSLINE_SHORT_ROWS = 30;
+
+/**
+ * Modo do rodapé NA PARTIDA. `escolhido` = o que o dono fixou (env `ALUY_STATUSLINE` > config);
+ * `undefined` ⇒ automático (`full`, ou `compact` em terminal ≤ 30 linhas — ver
+ * `effectiveStatusline`). PURO.
+ */
+export function resolveInitialStatusline(
+  config: UserConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): StatuslineMode | undefined {
+  const raw = env['ALUY_STATUSLINE']?.trim().toLowerCase();
+  if (isStatuslineMode(raw)) return raw;
+  return config.statusline;
+}
+
+/** O modo EFETIVO: escolha explícita vence; senão `compact` em tela baixa, `full` no resto. */
+export function effectiveStatusline(
+  escolhido: StatuslineMode | undefined,
+  rows: number,
+): StatuslineMode {
+  if (escolhido !== undefined) return escolhido;
+  return rows > 0 && rows <= STATUSLINE_SHORT_ROWS ? 'compact' : 'full';
+}
+
+/** Próximo modo do ciclo F2: full → compact → hidden → full. */
+export function nextStatusline(atual: StatuslineMode): StatuslineMode {
+  return atual === 'full' ? 'compact' : atual === 'compact' ? 'hidden' : 'full';
 }
 
 /**

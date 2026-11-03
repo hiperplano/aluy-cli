@@ -112,8 +112,33 @@ export interface SessionRecord {
    * DE UI — seguro persistir. Default determinístico pelo nome; override via `--cor`.
    */
   readonly labelColor?: string;
+  /**
+   * F14 — contadores de USO da sessão (`◉ N% janela · M sessão`), persistidos p/ a retomada
+   * não zerar o rodapé. DADO numérico de UI (nunca credencial). Ausente em records antigos.
+   */
+  readonly usage?: SessionUsage;
   /** A transcrição: os blocos da conversa (você/aluy/tool/bang/note/…). */
   readonly blocks: readonly SessionBlock[];
+}
+
+/** F14 — contadores de uso persistidos com a sessão. */
+export interface SessionUsage {
+  /** Tokens acumulados da sessão. */
+  readonly tokens: number;
+  /** % da janela de contexto no último turno. */
+  readonly windowPct: number;
+}
+
+function sanitizeUsage(raw: unknown): SessionUsage | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const tokens = typeof o.tokens === 'number' && Number.isFinite(o.tokens) ? o.tokens : NaN;
+  const pct = typeof o.windowPct === 'number' && Number.isFinite(o.windowPct) ? o.windowPct : NaN;
+  if (Number.isNaN(tokens) || tokens < 0) return undefined;
+  return {
+    tokens: Math.round(tokens),
+    windowPct: Number.isNaN(pct) ? 0 : Math.max(0, Math.min(100, Math.round(pct))),
+  };
 }
 
 /** Metadados de uma sessão p/ a LISTA do `--resume` (sem carregar a transcrição). */
@@ -362,6 +387,8 @@ export class SessionStore {
     readonly label?: string;
     /** EST-0972 (rename) — cor de identificação (nome da paleta do DS). Só com `label`. */
     readonly labelColor?: string;
+    /** F14 — contadores de uso (persistidos p/ a retomada). */
+    readonly usage?: SessionUsage;
     readonly blocks: readonly SessionBlock[];
   }): boolean {
     // `--anonymous` — no-op ANTES de qualquer I/O: nem o `mkdirSync` de
@@ -398,6 +425,7 @@ export class SessionStore {
         ...(persistProvider ? { provider: input.provider!.trim() } : {}),
         ...(label !== undefined ? { label } : {}),
         ...(labelColor !== undefined ? { labelColor } : {}),
+        ...(sanitizeUsage(input.usage) !== undefined ? { usage: sanitizeUsage(input.usage)! } : {}),
       };
       // EST-1011 (Bug 7) — CABE NO CAP DE LEITURA: se o record serializado passar do
       // teto de escrita, descarta os blocos mais ANTIGOS (mantém a cauda — o contexto
@@ -639,6 +667,7 @@ export class SessionStore {
       ...(provider !== undefined ? { provider } : {}),
       ...(label !== undefined ? { label } : {}),
       ...(labelColor !== undefined ? { labelColor } : {}),
+      ...(sanitizeUsage(o.usage) !== undefined ? { usage: sanitizeUsage(o.usage)! } : {}),
       blocks: sanitizeBlocks(o.blocks),
     };
   }

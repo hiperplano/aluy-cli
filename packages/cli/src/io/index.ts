@@ -55,10 +55,14 @@ export {
   NO_OP_NOTIFICATION_PORT,
   NOTIFY_LABELS,
   loadNotifyConfig,
+  parseNotifyMode,
+  modeAllows,
+  NOTIFY_MODES,
 } from './notify-port.js';
 export type {
   NotificationPort,
   NotifyReason,
+  NotifyMode,
   NotifyConfig,
   TerminalNotificationPortOptions,
 } from './notify-port.js';
@@ -178,3 +182,12 @@ export type { ProjectSkillsLoaderOptions } from './project-skills.js';
 // `~/.aluy/` (aluy-config-write-deny). O `HookRunner` (core) executa atrás da catraca.
 export { HooksConfigStore, HOOKS_CONFIG_FILENAME } from './hooks-config-store.js';
 export type { HooksConfigStoreOptions } from './hooks-config-store.js';
+
+// PAUSA POR COTA — persistência do trabalho pausado (retomável via --resume/--continue).
+export {
+  PausaStore,
+  PAUSAS_DIRNAME,
+  PAUSA_RECORD_VERSION,
+  PAUSA_MAX_AGE_MS,
+} from './pausa-store.js';
+export type { PausaRecord, PausaStoreOptions } from './pausa-store.js';

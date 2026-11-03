@@ -80,21 +80,34 @@ export interface RunLinearOptions {
 export async function resolveLinearMentions(
   goal: string,
   reader: AttachReader | undefined,
-): Promise<{ goal: string; items: readonly HistoryItem[]; notes: readonly string[] }> {
+): Promise<{
+  goal: string;
+  items: readonly HistoryItem[];
+  notes: readonly string[];
+  /** F16 — caminhos efetivamente anexados (p/ o chip no transcript). */
+  attached: readonly string[];
+  /** F16 — menções que NÃO resolveram (arquivo inexistente/negado), com o motivo. */
+  refused: readonly { readonly path: string; readonly reason: string }[];
+}> {
   const mentions = parseAtMentions(goal);
-  if (!reader || mentions.length === 0) return { goal, items: [], notes: [] };
+  if (!reader || mentions.length === 0)
+    return { goal, items: [], notes: [], attached: [], refused: [] };
   const items: HistoryItem[] = [];
   const notes: string[] = [];
+  const attached: string[] = [];
+  const refused: { path: string; reason: string }[] = [];
   for (const m of mentions) {
     const res = await reader.attach(m.path);
     if (res.kind === 'ok') {
       items.push(res.item);
+      attached.push(res.path);
       notes.push(`[anexo] @${res.path}${res.truncated ? ' (truncado)' : ''}`);
     } else {
+      refused.push({ path: m.path, reason: res.reason });
       notes.push(`[anexo recusado] @${m.path} — ${res.reason}`);
     }
   }
-  return { goal: stripMentions(goal, mentions), items, notes };
+  return { goal: stripMentions(goal, mentions), items, notes, attached, refused };
 }
 
 /**
@@ -388,6 +401,7 @@ export async function runHeadlessStreamJson(
   // Rastreador de blocos já emitidos: chave = `${index}::${kind}::${status||streaming}`
   const emitted = new Set<string>();
   let lastPhase: string | undefined;
+  let lastSelfCheckLabel: string | undefined;
 
   /** Emite um evento NDJSON se ainda não foi emitido (pela chave). */
   const emitIfNew = (block: SessionBlock, index: number): void => {
@@ -465,6 +479,15 @@ export async function runHeadlessStreamJson(
       lastPhase = state.phase;
       if (state.phase !== 'idle' && state.phase !== 'boot') {
         out.write(JSON.stringify({ type: 'phase', phase: state.phase }) + '\n');
+      }
+    }
+    // Passada de auto-verificação (self-check): evento aditivo p/ medir custo/benefício
+    // em headless (scripts/experiments/self-check). Um por mudança de rótulo "(n/m)".
+    const wl = state.workingLabel;
+    if (wl !== lastSelfCheckLabel) {
+      lastSelfCheckLabel = wl;
+      if (wl !== undefined && wl.startsWith('conferindo o trabalho')) {
+        out.write(JSON.stringify({ type: 'self_check', label: wl }) + '\n');
       }
     }
     // Diff dos blocks: emite blocos novos ou com status alterado

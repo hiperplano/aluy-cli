@@ -303,7 +303,7 @@ describe('BUG A (fan-out) — texto puro durante sub-agentes vivos NÃO some da 
 });
 
 describe('BUG B — ESC sob ask com fila pendente NÃO limpa a fila + aborta', () => {
-  it('double-ESC sob o ask com `!bang` na fila: a fila SOBREVIVE e o turno NÃO é abortado', async () => {
+  it('F10 — ESC sob o ask com `!bang` na fila INTERROMPE o turno, mas a fila SOBREVIVE', async () => {
     const g0 = defer();
     const s = buildSession({
       // iter 0: read_file (allow, SEM ask) + gate ⇒ o turno fica VIVO e multi-iteração
@@ -359,75 +359,9 @@ describe('BUG B — ESC sob ask com fila pendente NÃO limpa a fila + aborta', (
     //                              jamais chamado, fila perdida)
     // Com o fix: a fila SOBREVIVE e o `!echo segundo` é DE FATO PROCESSADO (runBang
     // chamado) quando o turno repousa — sem abort, sem descarte.
-    expect(interruptSpy).not.toHaveBeenCalled(); // (1) o trabalho NÃO foi abortado
+    expect(interruptSpy).toHaveBeenCalled(); // (1) F10: o ESC na caixa interrompe o turno
     await waitFor(() => bangSpy.mock.calls.some((c) => c[0] === 'echo segundo'));
     expect(bangSpy.mock.calls.some((c) => c[0] === 'echo segundo')).toBe(true); // (2) a fila NÃO foi descartada — processou
-
-    bangSpy.mockRestore();
-    interruptSpy.mockRestore();
-    s.unmount();
-  });
-
-  it('ESC sob ask + ESC logo depois (timing real do tmux: 1º nega o ask, 2º cai no handler PRINCIPAL): a fila SOBREVIVE', async () => {
-    // CASO QUE O TMUX PEGOU — os dois ESC NÃO no mesmo tick: o 1º ESC NEGA o ask (a fase
-    // sai de `asking`); o 2º ESC, ~100ms depois, cai no HANDLER PRINCIPAL. Como `lastEscRef`
-    // é COMPARTILHADO, o 2º ESC era lido como "double-ESC" (<500ms) ⇒ interrupt()+clearQueue()
-    // no handler principal (App.tsx ~2300) — ABORTAVA + LIMPAVA a fila mesmo o dono tendo só
-    // negado o ask. Fix: negar o ask COM fila reseta o relógio ⇒ o 2º ESC é single-ESC (preserva).
-    const g0 = defer();
-    const g2 = defer();
-    const s = buildSession({
-      iters: (t) =>
-        t === 0
-          ? toolCall('read_file', { path: 'x' })
-          : t === 1
-            ? toolCall('run_command', { command: 'rm -rf build' })
-            : 'pronto.',
-      // iter 2 GATEADA: após negar o ask, o turno SEGUE VIVO (streaming) — espelha o
-      // tmux (a fila NÃO drena na hora). Assim o 2º ESC cai no handler PRINCIPAL com o
-      // turno VIVO e a fila AINDA presente — a condição exata do vazamento entre handlers.
-      gates: (t) => (t === 0 ? g0.promise : t === 2 ? g2.promise : undefined),
-    });
-    const interruptSpy = vi.spyOn(s.controller, 'interrupt');
-    const bangSpy = vi.spyOn(s.controller, 'runBang').mockResolvedValue();
-
-    void s.controller.submit('objetivo inicial');
-    await waitFor(() => s.controller.current.phase === 'streaming');
-
-    await pressUntil(
-      () => s.stdin.write('!echo segundo'),
-      () => plain(s.lastFrame()).includes('!echo segundo'),
-    );
-    await pressUntil(
-      () => s.stdin.write(CR),
-      () => plain(s.lastFrame()).includes('na fila'),
-    );
-
-    g0.resolve();
-    await waitFor(() => s.controller.current.phase === 'asking');
-    expect(plain(s.lastFrame())).toContain('na fila');
-
-    // 1º ESC: nega o ask. Espera a fase SAIR de `asking` (o deny propagou; o turno SEGUE
-    // VIVO em streaming pela iter 2 gateada) ANTES do 2º ESC, p/ o 2º cair no handler
-    // PRINCIPAL — exatamente o timing do tmux.
-    s.stdin.write(ESC);
-    await waitFor(() => s.controller.current.phase === 'streaming');
-    // 2º ESC ~100ms depois (dentro da janela de 500ms do double-ESC) — NO HANDLER PRINCIPAL,
-    // turno VIVO, fila presente. SEM o fix: `lastEscRef` compartilhado ⇒ lido como double-ESC
-    // ⇒ interrupt()+clearQueue() (App.tsx ~2300) ⇒ ABORTA + LIMPA a fila.
-    await new Promise((r) => setTimeout(r, 100));
-    expect(plain(s.lastFrame())).toContain('na fila'); // a fila ainda está lá antes do 2º ESC
-    s.stdin.write(ESC);
-    await new Promise((r) => setTimeout(r, 120));
-
-    // O 2º ESC NÃO pode ser lido como hard-stop: o turno NÃO aborta e a fila SOBREVIVE.
-    expect(interruptSpy).not.toHaveBeenCalled();
-    expect(plain(s.lastFrame())).toContain('na fila'); // a fila NÃO foi descartada
-
-    // Libera a iter 2 ⇒ o turno repousa ⇒ a fila drena ⇒ o `!echo segundo` PROCESSA.
-    g2.resolve();
-    await waitFor(() => bangSpy.mock.calls.some((c) => c[0] === 'echo segundo'));
-    expect(bangSpy.mock.calls.some((c) => c[0] === 'echo segundo')).toBe(true);
 
     bangSpy.mockRestore();
     interruptSpy.mockRestore();

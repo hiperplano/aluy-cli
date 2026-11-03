@@ -140,8 +140,9 @@ export const UNICODE_GLYPHS: Readonly<Record<GlyphName, string>> = {
   gauge: '◉',
   window: '■',
   branch: '⎇',
-  diffDel: '‹',
-  diffAdd: '›',
+  // F22 — marcadores do diff são `-`/`+` (o `‹`/`›` lia como seta/aspas, não como remoção/adição).
+  diffDel: '-',
+  diffAdd: '+',
   // F-PROMPT (pedido do dono: "ao invés de › o composer deveria ter outro ícone") —
   // `❯` é o chevron pesado que virou convenção de prompt em terminal (starship,
   // powerlevel, oh-my-zsh). Tem MASSA (o `›` é um sinal de aspas, fino e apagado), é
@@ -277,8 +278,9 @@ export const NERD_GLYPHS: Readonly<Record<GlyphName, string>> = {
   gauge: '◉', // F-GLYPH-PESO — não é troca Nerd; segue o normal (mesmo glifo, ver UNICODE_GLYPHS)
   window: '■', // F-GLYPH-PESO-2 — não é troca Nerd; SINCRONIZADO com o normal (□→■)
   branch: '\uE0A0', // nf-pl-branch (Powerline VCS branch) — o ícone canônico de git branch
-  diffDel: '‹',
-  diffAdd: '›',
+  // F22 — marcadores do diff são `-`/`+` (o `‹`/`›` lia como seta/aspas, não como remoção/adição).
+  diffDel: '-',
+  diffAdd: '+',
   prompt: '\uE0B1', // nf-pl-right_soft_divider — chevron powerline do prompt
   cursor: '●',
   thinkingCursor: '●',

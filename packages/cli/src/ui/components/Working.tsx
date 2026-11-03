@@ -17,6 +17,7 @@ import { Box, Text } from 'ink';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import type { GlyphName } from '../theme/glyphs.js';
 import { AluyLoader } from './AluyLoader.js';
+import { ShimmerText } from './ShimmerText.js';
 
 /** Largura da banda de onda (nº de `～`). 3 em telas normais (spec §3.6). */
 const WAVE_WIDTH = 3;
@@ -43,6 +44,11 @@ export interface WorkingProps {
    * aparece embaixo (ele deveria ficar do lado)". Um elemento só, altura constante.
    */
   readonly suffix?: string;
+  /**
+   * Parêntese dim depois do verbo (`(pensando · 1,2k tokens · 12s)`) — a fase real, os tokens do
+   * turno e os segundos. Vem pronto (e já medido p/ caber) de `detalheDeEspera`.
+   */
+  readonly detalhe?: string;
 }
 
 /**
@@ -79,7 +85,7 @@ export function Working(props: WorkingProps): React.ReactElement {
           o desenho segue igual — ali a onda acompanha um verbo que muda a cada tool, e não
           é o indicador permanente de que ele reclamou. */}
       {usaWordmark ? (
-        <AluyLoader frame={frame} wordmark />
+        <AluyLoader frame={frame} />
       ) : (
         <>
           <Glyph name={glyph} role={glyphRole} />
@@ -99,7 +105,12 @@ export function Working(props: WorkingProps): React.ReactElement {
         </>
       )}
       <Text> </Text>
-      <Role name="fgDim">{props.label}…</Role>
+      {/* BRILHO no rótulo: a banda de cor da marca varre `pensando…` (estático sem cor ou em
+          reduced-motion — ver ShimmerText). O brilho é o sinal de 'vivo'. */}
+      <ShimmerText text={`${props.label}…`} frame={frame} />
+      {props.detalhe !== undefined && props.detalhe !== '' && (
+        <Role name="fgDim"> {props.detalhe}</Role>
+      )}
       {props.suffix !== undefined && props.suffix !== '' && (
         <>
           <Text> </Text>

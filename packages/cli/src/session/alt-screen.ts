@@ -22,6 +22,7 @@
 // catraca, egress, broker nem auth (ADR-0076 §Decisão: o cockpit é superfície de
 // RENDER, não decide invariante). Sem `node:*` além do que o tipo do stream/process
 // já oferece.
+import { isYogaRenderFault, notifyRenderFault } from './render-fault.js';
 
 /** `\x1b[?1049h` — ENTRA no alternate-screen buffer (salva a tela primária). */
 export const ENTER_ALT_SCREEN = '\x1b[?1049h';
@@ -225,6 +226,14 @@ export function registerRestoreHandlers(
     // viva, SEM restaurar a tela (restaurar corromperia o cockpit) e SEM re-lançar (re-lançar
     // = o crash que o dono viu). Erros de verdade seguem restaurando + re-lançando (abaixo).
     if (isBenignNetworkAbort(err)) return;
+    // CRASH-YOGA — falha de render/layout do Yoga-wasm escapando do timer do Ink (fora do
+    // alcance de qualquer error boundary): NÃO derruba a TUI. A App é avisada e volta ao
+    // inline com uma nota; o `crash.log` já recebeu a entrada (monitor de `fatal-log`).
+    // Restrito a `RuntimeError` do wasm com pilha no Yoga/renderer — o resto segue crashando.
+    if (isYogaRenderFault(err)) {
+      notifyRenderFault(err);
+      return;
+    }
     restoreScreen();
     cleanupListeners();
     // Re-lança no próximo tick p/ o crash NÃO ser silenciado (tela já limpa). Usa o

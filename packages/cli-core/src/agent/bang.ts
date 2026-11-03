@@ -1,5 +1,9 @@
 // EST-0958 · CLI-SEC-3/4/9 — `!comando` (atalho de shell do composer).
 //
+// F15 (docs/decisions/0003): `ask` NÃO abre caixa — o usuário digitou o comando (ação
+// explícita); `deny` (Plan, pisos de ~/.aluy, hooks) segue bloqueando. O texto abaixo é o
+// desenho original (EST-0958).
+//
 // O `!comando` é exec de shell GUIADO PELO USUÁRIO (fora do raciocínio do modelo),
 // mas NÃO é um bypass da catraca. A trava central da estória (gate `seguranca`):
 // `!comando` PASSA PELO MESMO ponto de interceptação (CLI-SEC-H1) que o `run_command`
@@ -78,6 +82,14 @@ export interface BangExecutorOptions {
    * auto-aprova) — idêntico ao loop do agente.
    */
   readonly askResolver?: AskResolver;
+  /**
+   * F15 (ADR 0003) — o `!comando` é uma AÇÃO EXPLÍCITA DO USUÁRIO: um veredito `ask` NÃO
+   * abre a caixa de permissão (quem digitou já decidiu). Default `true`. `deny` continua
+   * bloqueando (pisos duros: `~/.aluy`, hooks que negam, modo Plan, escopo). `false` restaura
+   * o comportamento antigo (ask via resolver). Isto vale SÓ para este executor (origem
+   * usuário); o `run_command` do MODELO segue 100% por `decide()` no loop.
+   */
+  readonly userExplicit?: boolean;
 }
 
 /**
@@ -91,6 +103,7 @@ export class BangExecutor {
   private readonly permission: PermissionEngine;
   private readonly ports: ToolPorts;
   private readonly askResolver?: AskResolver;
+  private readonly userExplicit: boolean;
   /**
    * F-BG — o canal do Ctrl+B, o MESMO que o loop do agente usa.
    *
@@ -103,6 +116,7 @@ export class BangExecutor {
   constructor(opts: BangExecutorOptions) {
     this.permission = opts.permission;
     this.ports = opts.ports;
+    this.userExplicit = opts.userExplicit ?? true;
     if (opts.askResolver) this.askResolver = opts.askResolver;
     if (opts.detachHub) this.detachHub = opts.detachHub;
   }
@@ -129,7 +143,8 @@ export class BangExecutor {
       return this.blocked(command, verdict);
     }
 
-    if (verdict.decision === 'ask') {
+    // F15 — `ask` + ação explícita do usuário ⇒ executa direto (sem caixa). Só `deny` bloqueia.
+    if (verdict.decision === 'ask' && !this.userExplicit) {
       const approved = await this.resolveAsk(call, verdict, signal);
       if (!approved) return this.blocked(command, verdict);
     }
@@ -145,9 +160,7 @@ export class BangExecutor {
       ...(signal ? { signal } : {}),
       ...(onChunk ? { onShellChunk: onChunk } : {}),
       ...(detachSignal ? { detachSignal } : {}),
-      ...(this.detachHub
-        ? { onDetached: (info): void => this.detachHub?.onDetached(info) }
-        : {}),
+      ...(this.detachHub ? { onDetached: (info): void => this.detachHub?.onDetached(info) } : {}),
     };
     const result = await runCommandTool.run({ command }, this.ports, ctx);
     return {

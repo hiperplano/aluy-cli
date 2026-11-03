@@ -51,7 +51,7 @@ export type FlowPhase =
   | 'failed'; // teto/timeout/erro
 
 /** Como um fluxo terminou (espelha `SubAgentOutcome.stop` + `cancelled`). */
-export type FlowStop = 'final' | 'limit' | 'timeout' | 'error' | 'cancelled';
+export type FlowStop = 'final' | 'limit' | 'timeout' | 'error' | 'cancelled' | 'paused';
 
 /** Contabilidade de UM fluxo: tokens (do budget/broker) + TEMPO (do relógio). */
 export interface FlowAccounting {
@@ -337,6 +337,8 @@ export class FlowNode {
    */
   /** RELATO curto do próprio filho — o que ele diz que está fazendo. */
   statusNote: string | undefined = undefined;
+  /** Última mensagem trocada com o orquestrador/dono (ADR 0002) — uma linha, já redigida. */
+  lastMessage: string | undefined = undefined;
 
   /** A atividade ainda em curso, se houver — a última marcada `running`. */
   currentActivity(): { tool: string; target: string } | undefined {
@@ -532,6 +534,8 @@ export interface FlowSummary {
   readonly activity?: { readonly tool: string; readonly target: string };
   /** Relato do próprio filho (`report_status`), quando ele deu um. */
   readonly note?: string;
+  /** Última mensagem pai ⇄ filho ("↳ do orquestrador: …"), redigida e curta. */
+  readonly message?: string;
 }
 
 /**
@@ -681,6 +685,7 @@ export class FlowTree {
         ...(n.stop !== undefined ? { stop: n.stop } : {}),
         ...(n.currentActivity() !== undefined ? { activity: n.currentActivity()! } : {}),
         ...(n.statusNote !== undefined ? { note: n.statusNote } : {}),
+        ...(n.lastMessage !== undefined ? { message: n.lastMessage } : {}),
       });
       for (const c of n.childNodes) visit(c);
     };

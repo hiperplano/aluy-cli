@@ -43,6 +43,7 @@ export interface Catalog {
   'hints.budget': string;
   'hints.error': string;
   'hints.workSubagents': string;
+  'hints.quotaPause': string;
   'hints.idleSubagents': string;
   /** F-BG — sufixo da linha viva de um comando de shell: onde o Ctrl+B age. */
   'hints.detachInline': string;
@@ -52,6 +53,9 @@ export interface Catalog {
   'hints.cockpit': string;
   // F197 — dica anexada ao footer idle quando há uma sugestão de próximo prompt pendente.
   'hints.suggest': string;
+
+  // ── Linha de trabalho: verbos brincalhões (separados por `|`) ──
+  'working.verbs': string;
 
   // ── F197 — sugestão de PRÓXIMO PROMPT (ghost + Tab). Cada chave é a FRASE que vira o
   //    texto do composer ao aceitar a sugestão (é um objetivo real, acionável). Uma por
@@ -86,6 +90,7 @@ export interface Catalog {
   /** EST-1000 · ADR-0076 — nota de que o cockpit é EXPERIMENTAL (inline é o recomendado). */
   /** Aviso ao SAIR do cockpit (volta ao inline). */
   'cockpit.left': string;
+  'cockpit.renderFault': string;
   /** Recusa por tela ESTREITA (<80 col) — cai pro inline (ADR §6). */
   'cockpit.refuseNarrow': string;
   /** Recusa por tela BAIXA (poucas linhas) — cai pro inline (ADR §6). */

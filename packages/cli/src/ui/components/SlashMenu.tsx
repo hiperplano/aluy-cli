@@ -88,6 +88,15 @@ export function SlashMenu(props: SlashMenuProps): React.ReactElement {
       <Box>
         <Role name="fgDim">/ para comandos · ↑↓ navega · enter executa · esc fecha</Role>
       </Box>
+      {/* F18 — `/xyz` sem match NÃO abre um popup vazio: diz o que aconteceu. */}
+      {props.commands.length === 0 && (
+        <Box>
+          <Role name="fgDim">
+            {' '}
+            nenhum comando encontrado{query.trim() !== '' ? ` para /${query.trim()}` : ''}
+          </Role>
+        </Box>
+      )}
       {win.hiddenAbove > 0 && (
         <Box>
           <Role name="fgDim"> ↑ {win.hiddenAbove} acima</Role>
@@ -111,9 +120,7 @@ export function SlashMenu(props: SlashMenuProps): React.ReactElement {
                 O traço à esquerda e o papel `depth` resolvem: seção vira seção. */}
             {header && (
               <Box>
-                <Role name="depth">
-                  ── {header === 'usuário' ? 'seus comandos' : header}
-                </Role>
+                <Role name="depth">── {header === 'usuário' ? 'seus comandos' : header}</Role>
               </Box>
             )}
             <Box>

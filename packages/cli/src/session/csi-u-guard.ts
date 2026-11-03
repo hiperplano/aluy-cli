@@ -1,3 +1,5 @@
+import { createKeySplitter } from './key-split.js';
+
 // task #18 (🔴 CRASH — DERRUBA o app) — sequência CSI-u de tecla FUNCIONAL do kitty
 // keyboard protocol (ex.: `\x1b[57414u`) faz o Ink CRASHAR.
 //
@@ -50,6 +52,10 @@
 // char CRU dentro de um regex-literal (`no-control-regex`) — o byte é o MESMO ESC.
 const ESC = '';
 const CSI_U_SEQ = new RegExp(`${ESC}\\[[0-9;:]*u`, 'g');
+// F2 — Shift+Enter negociado por terminais que o emitem de fábrica: kitty/CSI-u
+// (`\x1b[13;2u`) e modifyOtherKeys (`\x1b[27;2;13~`). Em vez de descartar, vira ESC+CR
+// (Alt+Enter), que a App já trata como "nova linha" — sem negociar protocolo no boot.
+const SHIFT_ENTER_SEQ = new RegExp(`${ESC}\\[(?:13;2(?::\\d+)?u|27;2;13~)`, 'g');
 
 /**
  * O maior SUFIXO de `s` que é PREFIXO PRÓPRIO de uma CSI-u em construção — i.e. um
@@ -102,6 +108,8 @@ export function createCsiUFilter(): CsiUFilter {
   const feed = (chunk: string): string => {
     let s = pending + chunk;
     pending = '';
+    // F2 — Shift+Enter vira Alt+Enter (nova linha) ANTES de strippar o resto da família.
+    s = s.replace(SHIFT_ENTER_SEQ, `${ESC}\r`);
     // Remove todas as CSI-u COMPLETAS.
     s = s.replace(CSI_U_SEQ, '');
     // Segura uma CSI-u PARCIAL no fim (cortada no boundary) p/ o próximo chunk.
@@ -175,6 +183,9 @@ export function installCsiUGuard(stdin: ReadableStdin): () => void {
   // do call-site (o stream) p/ preservar a semântica do `read` do stream.
   const original = target.read as (this: unknown, size?: number) => unknown;
   const filter = createCsiUFilter();
+  // F7 — teclas já separadas, aguardando o laço de leitura do Ink (1 por `read()`).
+  const splitter = createKeySplitter();
+  const queued: string[] = [];
 
   // F159 — bytes LIBERADOS pelo flush (a continuação não veio ⇒ era Esc humano). São
   // entregues CRUS na próxima leitura (NÃO repassam pelo filtro — já foram retidos 1×;
@@ -200,6 +211,8 @@ export function installCsiUGuard(stdin: ReadableStdin): () => void {
   };
 
   const wrapped = function (this: unknown, size?: number): unknown {
+    // F7 — o chunk anterior tinha VÁRIAS teclas: entrega uma por `read()` (o Ink itera até null).
+    if (queued.length > 0) return queued.shift();
     const chunk = size === undefined ? original.call(this) : original.call(this, size);
     // F159 — entrega primeiro o que o flush liberou (bytes crus, sem re-filtrar).
     const head = flushed;
@@ -218,7 +231,11 @@ export function installCsiUGuard(stdin: ReadableStdin): () => void {
     const out = head + filter.feed(asStr);
     // Re-arma o prazo da cauda retida (se sobrou uma) a cada chunk novo.
     scheduleFlush();
-    return out;
+    // F7 — quebra em TECLAS (várias sequências no mesmo chunk não se perdem).
+    const keys = splitter.split(out);
+    if (keys.length <= 1) return out;
+    queued.push(...keys.slice(1));
+    return keys[0];
   };
 
   target.read = wrapped;
@@ -231,6 +248,7 @@ export function installCsiUGuard(stdin: ReadableStdin): () => void {
         clearTimeout(flushTimer);
         flushTimer = undefined;
       }
+      queued.length = 0;
       target.read = original as typeof target.read;
       target[WRAP_FLAG] = false;
     }

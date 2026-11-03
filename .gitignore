@@ -49,3 +49,6 @@ packages/*/hiperplano-aluy-cli-*.tgz
 # Estado do aluy escrito DENTRO do projeto. O lugar dele é `~/.aluy/`; quando aparece aqui
 # é um teste (ou uma execução) resolvendo o caminho a partir do CWD em vez do HOME.
 .aluy/
+
+# Resultados de execucoes reais do harness comportamental (podem conter saida do agente).
+scripts/eval/results/

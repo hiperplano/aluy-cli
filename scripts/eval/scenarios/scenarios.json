@@ -1,0 +1,50 @@
+[
+  {
+    "id": "feature-multipartes",
+    "kind": "grande",
+    "descricao": "Feature com várias partes independentes no projeto de exemplo",
+    "fixture": "mini-loja",
+    "prompt": "Preciso de uma evolução grande na mini-loja. (1) Corrigir o cálculo de desconto em src/precos.js (10% de desconto sobre 100 deve dar 90) e cobrir com teste. (2) Criar um módulo src/cupons.js com cupons de desconto (percentual e valor fixo, com validade e limite de uso) e testes em test/cupons.test.js. (3) Integrar os cupons ao Carrinho (método aplicarCupom) com testes. (4) Adicionar em src/relatorio.js um relatório por cliente (total gasto e nº de pedidos) com testes. (5) Atualizar o README.md documentando tudo. No fim rode `npm test` e me entregue um resumo.",
+    "expect": { "planBeforeEffect": true, "planUpdatesMin": 2, "delegated": true }
+  },
+  {
+    "id": "investigar-corrigir-testar",
+    "kind": "grande",
+    "descricao": "Investigar, corrigir e testar em vários arquivos",
+    "fixture": "mini-loja",
+    "prompt": "Há inconsistências no fluxo de pedidos da mini-loja: o total do pedido ignora desconto, o estoque é baixado mesmo quando o pedido falha no meio, e o relatório soma valores sem tratar pedidos vazios. Investigue o código inteiro (src/ e test/), identifique a causa de cada problema, corrija os três, escreva testes de regressão para cada um em test/ e rode a suíte completa até ficar verde. Explique o que encontrou.",
+    "expect": { "planBeforeEffect": true, "planUpdatesMin": 2, "delegated": true }
+  },
+  {
+    "id": "auditoria-ampla",
+    "kind": "grande",
+    "descricao": "Auditoria ampla com áreas independentes (somente leitura + relatório)",
+    "fixture": "mini-loja",
+    "prompt": "Faça uma auditoria completa da mini-loja em quatro frentes independentes: (a) correção lógica e bugs em src/, (b) cobertura e qualidade dos testes em test/, (c) tratamento de erros e casos de borda (valores negativos, quantidades zero, entradas inválidas), (d) organização, documentação e manutenibilidade. Para cada frente liste achados priorizados com arquivo e linha. Grave o consolidado em AUDITORIA.md com um plano de correção priorizado.",
+    "expect": { "planBeforeEffect": true, "planUpdatesMin": 1, "delegated": true }
+  },
+  {
+    "id": "refatorar-modulos",
+    "kind": "grande",
+    "descricao": "Refatoração em múltiplos módulos com migração e testes",
+    "fixture": "mini-loja",
+    "prompt": "Quero refatorar a mini-loja: (1) trocar o estado global em memória de src/estoque.js e src/pedidos.js por classes (Estoque e RepositorioPedidos) injetadas, mantendo a API antiga funcionando via wrappers; (2) adaptar Carrinho, pedidos e relatório para usar as classes; (3) validar entradas (quantidade e preço positivos) em todos os pontos de entrada; (4) migrar e ampliar os testes; (5) atualizar o README com a nova arquitetura. Faça por etapas e garanta `npm test` verde ao final.",
+    "expect": { "planBeforeEffect": true, "planUpdatesMin": 2, "delegated": true }
+  },
+  {
+    "id": "controle-correcao-trivial",
+    "kind": "controle",
+    "descricao": "Controle: correção de uma linha (planejar/delegar seria exagero)",
+    "fixture": "mini-loja",
+    "prompt": "Em src/precos.js, a função aplicarDesconto está errada: deveria retornar valor * (1 - percentual). Corrija essa linha e rode npm test.",
+    "expect": { "delegated": false, "planUpdatesMax": 1 }
+  },
+  {
+    "id": "controle-pergunta",
+    "kind": "controle",
+    "descricao": "Controle: pergunta simples, sem efeito",
+    "fixture": "mini-loja",
+    "prompt": "Em qual arquivo da mini-loja está a função formatarMoeda e o que ela faz? Responda em uma frase.",
+    "expect": { "delegated": false, "planUpdatesMax": 0, "effectsMax": 0 }
+  }
+]

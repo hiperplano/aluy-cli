@@ -135,7 +135,9 @@ export class AnthropicAdapter implements ProviderAdapter {
           const partial = str(delta, 'partial_json') ?? '';
           const tc = acc.toolCalls.get(index);
           if (tc !== undefined) tc.argsText += partial;
-          return [];
+          return partial.length > 0
+            ? [{ type: 'progress', kind: 'tool_args', chars: partial.length }]
+            : [];
         }
         // F-RAC — `thinking_delta` é o RACIOCÍNIO (extended thinking). Antes era
         // descartado aqui com a justificativa de "não é conteúdo visível do turno" —

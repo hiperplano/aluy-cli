@@ -26,7 +26,8 @@ import {
 import type { AskResolver } from '../permission/ask.js';
 import { PolicyPermissionEngine } from '../permission/engine.js';
 import type { ModelCallResult, ModelUsage, NativeToolCall } from '../model/types.js';
-import { ModelCallAbortedError } from '../model/errors.js';
+import { ModelCallAbortedError, QuotaPauseStoppedError } from '../model/errors.js';
+import type { QuotaPausePort } from './quota-pause.js';
 import { buildMessages, type HistoryItem } from './context.js';
 import { redactOutputSecrets } from './journal/redact.js';
 import { idempotencyKeyFor, newSessionId } from './idempotency.js';
@@ -49,6 +50,8 @@ import {
   buildVerificationCapNote,
   awaitsUserDecision,
 } from './self-check.js';
+import { VerificationLedger } from './verification-ledger.js';
+import { DelegationNudger } from './delegation-nudge.js';
 import {
   detectWeakYoloUntrusted,
   buildWeakYoloWarning,
@@ -98,6 +101,14 @@ import { valeMemorizar } from './memory/vale-memorizar.js';
 export interface ModelCaller {
   call(args: {
     readonly messages: ReturnType<typeof buildMessages>;
+    /**
+     * PROMPT-ENXUTO — a MESMA conversa, mas com o `system` SEM o catálogo de tools em texto
+     * (variante p/ quando o request manda o campo nativo `tools`). `messages` é sempre a
+     * variante COMPLETA (fallback). O caller escolhe por request, com a MESMA flag que decide
+     * se `tools` vai no body (`NativeToolsCapability.shouldSendTools()`): nativo ⇒
+     * `messagesNative ?? messages`; senão ⇒ `messages`. Ausente ⇒ só há a completa.
+     */
+    readonly messagesNative?: ReturnType<typeof buildMessages>;
     readonly idempotencyKey: string;
     readonly signal?: AbortSignal;
     /**
@@ -196,7 +207,21 @@ export type ProgressSignal =
   // (o dono apertou ESC com um `user_inject` esperando). O parcial foi DESCARTADO e a
   // próxima volta drena o inject. É o gancho p/ a TUI descartar o bloco `aluy` parcial
   // (o inject supersede). NÃO é `stop` — o loop segue. NÃO toca a catraca/budget.
-  | { readonly kind: 'expedite' };
+  | { readonly kind: 'expedite' }
+  // FEEDBACK-IMEDIATO — o loop terminou os passos de PREPARO da iteração (recall de memória,
+  // regência, auto-compactação, montagem das mensagens) e vai AGORA chamar o modelo. É o
+  // marco honesto que separa "preparando" de "pensando" (esperando o modelo) na UX. Só
+  // observação — não toca a catraca/budget.
+  //
+  // `promptChars` — tamanho (em caracteres) das mensagens que VÃO na requisição; a TUI estima
+  // o `↑ N` (tokens enviados) com isso até o uso real chegar. Só observação.
+  | { readonly kind: 'model-call'; readonly promptChars?: number }
+  // FEEDBACK-IMEDIATO — um passo de PREPARO que pode demorar começou (`recall` de memória,
+  // `maestro` consultando o judge por rede) ou terminou (`prompt` = volta ao preparo
+  // genérico). Só é emitido quando o passo REALMENTE vai esperar algo — não há sinal para
+  // passos instantâneos. A auto-compactação não entra aqui: ela já tem fase própria
+  // (`compacting`) via `autoCompactObserver`.
+  | { readonly kind: 'preparing'; readonly step: 'recall' | 'maestro' | 'prompt' };
 
 /** Callback de progresso (heartbeat). Ver {@link ProgressSignal}. */
 export type ProgressObserver = (signal: ProgressSignal) => void;
@@ -477,6 +502,12 @@ type ToolOutcome =
 export interface MaestroPort {
   readonly bus: SignalCollector;
   rege(signals: readonly SupervisorSignal[]): Promise<SupervisorDecision> | SupervisorDecision;
+  /**
+   * Opcional — `true` quando `rege(signals)` vai de fato ESPERAR I/O (ex.: consulta ao judge
+   * por rede). Só alimenta a UX (`preparing: maestro`); NÃO altera a decisão nem o fluxo.
+   * Ausente ⇒ o loop assume que `rege` é instantâneo e não anuncia nada.
+   */
+  mayBlock?(signals: readonly SupervisorSignal[]): boolean;
 }
 
 export interface AgentLoopOptions {
@@ -529,6 +560,13 @@ export interface AgentLoopOptions {
    */
   readonly onModelActivity?: () => void;
   /**
+   * PAUSA POR COTA — porta deste agente no coordenador compartilhado da sessão. Quando a
+   * chamada de modelo falha por cota (janela/semanal/saldo/rate-limit longo), o loop PAUSA
+   * dentro da própria chamada e a refaz quando a cota libera — o agente não morre e o
+   * histórico segue na memória. Ausente ⇒ baseline (o erro sobe como antes).
+   */
+  readonly quotaPause?: QuotaPausePort;
+  /**
    * EST-0982 — OBSERVADOR DO USO PRÓPRIO desta execução. O loop o pinga com um
    * SNAPSHOT (cópia) do tally próprio a cada débito (iteração/tool-call/tokens).
    * O `SubAgentSpawner` o usa p/ reportar o uso PRÓPRIO do filho MESMO quando o
@@ -578,6 +616,13 @@ export interface AgentLoopOptions {
    */
   readonly runtimeInfoProvider?: () => { readonly provider?: string; readonly model?: string };
   /**
+   * PROMPT-ENXUTO — gancho aguardado ANTES de montar o prompt de cada chamada ao modelo
+   * (barato quando já assentou). O controller o usa p/ esperar o boot MCP assentar (com
+   * teto de tempo) e a 1ª mensagem já sair com o catálogo de tools completo e ESTÁVEL.
+   * Nunca deve rejeitar; erro aqui é ignorado.
+   */
+  readonly beforeModelCall?: () => Promise<void>;
+  /**
    * EST-0969 · ADR-0057 (E-A2) — CONTADOR INJETADO. Default: o loop cria um
    * `SessionBudget` PRÓPRIO por execução (mono-loop, idêntico ao baseline). Mas
    * um SUB-AGENTE recebe aqui o `SharedBudget` COMPARTILHADO do pai — assim a
@@ -620,6 +665,12 @@ export interface AgentLoopOptions {
    * entram como `reanchor` (canal `assistant`, trusted), nunca como `system`/DADO.
    */
   readonly selfCheck?: SelfCheckConfig;
+  /**
+   * Dica de delegação (delegation-nudge.ts): quando o plano tem >= 3 passos independentes e o
+   * modelo começa a executá-los em série, injeta UMA dica curta (`reanchor`) sugerindo
+   * `spawn_agent`. Ausente/false ⇒ desligada (sub-agentes nunca recebem). Não toca a catraca.
+   */
+  readonly delegationNudge?: boolean;
   /**
    * EST-SEC-HARDEN (F21) · AG-0008 — GUARDRAIL do combo perigoso `yolo + tier-fraco +
    * conteúdo não-confiável no contexto`. O estado de YOLO é DINÂMICO (lido de
@@ -711,6 +762,7 @@ export class AgentLoop {
   // EST-0969 (heartbeat) — pinga progresso (iteração/modelo/tool). undefined ⇒ no-op.
   private readonly onProgress?: ProgressObserver;
   private readonly onModelActivity?: () => void;
+  private readonly quotaPause?: QuotaPausePort;
   // EST-0982 — pinga o uso PRÓPRIO (snapshot) a cada débito. undefined ⇒ no-op.
   private readonly onUsage?: (usage: {
     iterations: number;
@@ -727,6 +779,7 @@ export class AgentLoop {
   // ADR-0145 (frente c) — thunk do tier corrente (gateia o few-shot no `system`).
   // undefined ⇒ sem few-shot (baseline).
   private readonly tierProvider?: () => string | undefined;
+  private readonly beforeModelCall?: () => Promise<void>;
   private readonly runtimeInfoProvider?: () => {
     readonly provider?: string;
     readonly model?: string;
@@ -745,6 +798,7 @@ export class AgentLoop {
   // EST-0944 — config do self-check de atenção (re-âncora + auto-verificação).
   // SELF_CHECK_OFF ⇒ baseline (sem overhead). Já vem resolvida pelo gating externo.
   private readonly selfCheck: SelfCheckConfig;
+  private readonly delegationNudge: boolean;
   // EST-SEC-HARDEN (F21) — config do guardrail do combo perigoso (yolo+tier-fraco+
   // untrusted). undefined ⇒ inerte (baseline). O YOLO é lido de permission.isUnsafe.
   private readonly weakYoloGuardrail?: WeakYoloGuardrailConfig;
@@ -784,17 +838,20 @@ export class AgentLoop {
     if (opts.preToolGate) this.preToolGate = opts.preToolGate;
     if (opts.onProgress) this.onProgress = opts.onProgress;
     if (opts.onModelActivity) this.onModelActivity = opts.onModelActivity;
+    if (opts.quotaPause) this.quotaPause = opts.quotaPause;
     if (opts.onUsage) this.onUsage = opts.onUsage;
     if (opts.projectInstructions !== undefined) this.projectInstructions = opts.projectInstructions;
     if (opts.availableAgents !== undefined) this.availableAgents = opts.availableAgents;
     if (opts.sessionCommands !== undefined) this.sessionCommands = opts.sessionCommands;
     if (opts.tierProvider) this.tierProvider = opts.tierProvider;
     if (opts.runtimeInfoProvider) this.runtimeInfoProvider = opts.runtimeInfoProvider;
+    if (opts.beforeModelCall) this.beforeModelCall = opts.beforeModelCall;
     if (opts.budget) this.sharedBudget = opts.budget;
     if (opts.pollInjected) this.pollInjected = opts.pollInjected;
     if (opts.expedite) this.expedite = opts.expedite;
     if (opts.monitorQueue) this.monitorQueue = opts.monitorQueue;
     this.selfCheck = opts.selfCheck ?? SELF_CHECK_OFF;
+    this.delegationNudge = opts.delegationNudge === true;
     if (opts.weakYoloGuardrail) this.weakYoloGuardrail = opts.weakYoloGuardrail;
     if (opts.stuckResolver) this.stuckResolver = opts.stuckResolver;
     if (opts.env) this.watchdogEnv = opts.env;
@@ -816,6 +873,8 @@ export class AgentLoop {
    */
   private async recallMemory(goal: string): Promise<readonly HistoryItem[]> {
     if (!this.memory || !this.memoryScope) return [];
+    // FEEDBACK-IMEDIATO — o recall pode esperar até RECALL_TIMEOUT_MS: anuncia o passo.
+    this.onProgress?.({ kind: 'preparing', step: 'recall' });
     try {
       // F78 — o recall é AWAITADO ANTES do loop (caminho crítico visível): teto DURO p/
       // não STALAR o start se o mem0 estiver lento/cold (Inv. I FLUIDEZ, mesma lição do
@@ -851,7 +910,9 @@ export class AgentLoop {
         return true;
       });
       if (relevant.length === 0) return [];
-      const lines = relevant.map((h) => `- ${h.text.replace(/\s*\n\s*/g, ' | ')}`).join('\n');
+      const lines = capRecallLines(
+        relevant.map((h) => `- ${h.text.replace(/\s*\n\s*/g, ' | ')}`),
+      ).join('\n');
       return [
         {
           role: 'observation',
@@ -866,6 +927,8 @@ export class AgentLoop {
       ];
     } catch {
       return []; // CA-MA8 — sidecar fora ⇒ segue sem recall.
+    } finally {
+      this.onProgress?.({ kind: 'preparing', step: 'prompt' });
     }
   }
 
@@ -954,6 +1017,36 @@ export class AgentLoop {
     return result;
   }
 
+  /**
+   * PAUSA POR COTA — a chamada de modelo com o portão de cota. Sem porta ⇒ chamada direta.
+   * Com porta: espera no portão se a sessão está pausada; se a chamada falha por cota,
+   * `handle` pausa até a hora de tentar de novo (MESMA `idempotencyKey`, MESMAS mensagens)
+   * e o laço refaz a chamada. Erro que não é cota sobe intacto.
+   */
+  private async callModelPausable(
+    args: Parameters<ModelCaller['call']>[0],
+    history: HistoryItem[],
+    signal: AbortSignal | undefined,
+  ): Promise<ModelCallResult> {
+    const qp = this.quotaPause;
+    if (!qp) return this.model.call(args);
+    const ctx = { signal, history: (): readonly HistoryItem[] => history };
+    // Depois de `handle` voltar, ESTE agente é o sondador: refaz a chamada direto, sem passar
+    // de novo pelo portão (que o seguraria atrás de si mesmo).
+    let sondando = false;
+    for (;;) {
+      if (!sondando) await qp.gate(ctx);
+      try {
+        const r = await this.model.call(args);
+        qp.ok();
+        return r;
+      } catch (err) {
+        await qp.handle(err, ctx); // retorna ⇒ tentar de novo; senão lança.
+        sondando = true;
+      }
+    }
+  }
+
   /** F78 — writes de memória em voo (store em background). Drenado no shutdown. */
   private readonly pendingMemoryWrites = new Set<Promise<void>>();
 
@@ -1033,7 +1126,6 @@ export class AgentLoop {
     // EST-0981 — a sessão DESTA execução: override (um por ciclo de `/cycle`, p/ keys
     // únicas entre ciclos) OU a sessão do loop (baseline). NÃO muda a do loop.
     const sessionId = sessionIdOverride ?? this.sessionId;
-    const toolList = this.tools.list();
     // EST-0969 (watchdog de TRAVAMENTO) — UM detector por execução (estado = as
     // séries recentes de tool/erro/turno). Só nasce quando há `stuckResolver` E o
     // env não o desliga (`ALUY_STUCK_OFF`) — senão `undefined` e o loop roda
@@ -1058,6 +1150,11 @@ export class AgentLoop {
     // ativos quando `this.selfCheck.enabled` — fora disso, código morto (baseline).
     const goalText = originalGoal(history);
     let verifications = 0;
+    const nudger = this.delegationNudge ? new DelegationNudger() : undefined;
+    let pendingNudge: string | undefined;
+    // Livro-caixa do "pula a sonda se já verificou" (opt-in `skipWhenVerified`). Sempre
+    // alimentado (barato, puro); só CONSULTADO quando a opção está ligada.
+    const ledger = new VerificationLedger();
     // EST-SEC-HARDEN (F21) — estado ONE-SHOT do guardrail do combo perigoso (yolo +
     // tier-fraco + untrusted). `true` depois que JÁ avisamos+reforçamos: o WARN no stderr
     // é uma vez por sessão (não polui a cada iteração) e o REFORÇO do envelope (um
@@ -1147,17 +1244,7 @@ export class AgentLoop {
       // passa por `decide()`. Defensivo: só aceita itens `user_inject` (o canal do
       // dono) — qualquer outro papel vindo da porta é ignorado (não há caminho p/
       // a injeção virar `system` nem p/ forjar uma observação/tool).
-      if (this.pollInjected) {
-        const injected = this.pollInjected().filter((i) => i.role === 'user_inject');
-        if (injected.length > 0) {
-          history.push(...injected);
-          this.onProgress?.({ kind: 'inject', count: injected.length });
-          // EST-0969 (watchdog) — input fresco do usuário ("btw") é o progresso
-          // máximo: o turno mudou de rumo. Zera TODAS as séries de travamento p/
-          // não pausar logo após o usuário já ter redirecionado.
-          watchdog?.noteRedirect();
-        }
-      }
+      this.appendInjected(history, this.takeInjected(), watchdog);
       // EST-MON-1 · ADR-0079 (APR-0084) — DRENA os eventos de MONITOR no MESMO ponto,
       // logo APÓS o "btw": um monitor que disparou ENQUANTO o agente rodava entra no
       // histórico DESTE turno como `observation` (DADO NÃO-CONFIÁVEL, CLI-SEC-4) — o
@@ -1252,7 +1339,15 @@ export class AgentLoop {
         // o turno"). EXCEÇÃO: abort (ESC/Ctrl-C) SOBE — cancelamento não é "baseline".
         try {
           const signals = this.maestro.bus.poll();
-          const decision = await this.maestro.rege(signals);
+          // FEEDBACK-IMEDIATO — só anuncia quando o `rege` vai de fato esperar (judge/rede).
+          const regeBloqueia = this.maestro.mayBlock?.(signals) === true;
+          if (regeBloqueia) this.onProgress?.({ kind: 'preparing', step: 'maestro' });
+          let decision: SupervisorDecision;
+          try {
+            decision = await this.maestro.rege(signals);
+          } finally {
+            if (regeBloqueia) this.onProgress?.({ kind: 'preparing', step: 'prompt' });
+          }
           const flow = await this.applyMaestroDecision(
             decision,
             history,
@@ -1291,19 +1386,31 @@ export class AgentLoop {
       // ADR-0145 (frente c) — tier LIDO A CADA iteração (o `/model` pode trocar
       // mid-sessão, igual ao YOLO do weakYoloGuardrail): o few-shot aparece/some
       // conforme o tier corrente, sem exigir reconstruir o loop.
-      const messages = buildMessages(
-        toolList,
-        history,
-        this.projectInstructions,
-        roots,
-        this.availableAgents,
-        this.sessionCommands,
-        this.tierProvider?.(),
-        // F-SABER-O-MODELO — quem atende esta sessão. Resolvido a CADA chamada (o `/model` e
-        // o `/provider` trocam no meio da sessão), e ausente sob broker, onde o mapa
-        // tier→provider é segredo do produto.
-        this.runtimeInfoProvider?.(),
-      );
+      // PROMPT-ENXUTO — espera o boot MCP assentar (teto no gancho) ANTES de listar as tools.
+      try {
+        await this.beforeModelCall?.();
+      } catch {
+        /* best-effort: nunca derruba o turno. */
+      }
+      const toolList = this.tools.list();
+      const buildFor = (nativeToolsActive: boolean) =>
+        buildMessages(
+          toolList,
+          history,
+          this.projectInstructions,
+          roots,
+          this.availableAgents,
+          this.sessionCommands,
+          this.tierProvider?.(),
+          // F-SABER-O-MODELO — quem atende esta sessão. Resolvido a CADA chamada (o `/model` e
+          // o `/provider` trocam no meio da sessão), e ausente sob broker, onde o mapa
+          // tier→provider é segredo do produto.
+          this.runtimeInfoProvider?.(),
+          nativeToolsActive,
+        );
+      const messages = buildFor(false);
+      const messagesNative = buildFor(true);
+
       // F191 — EXPEDITE ("acelerar o encaixe"): subscreve um ouvinte SÓ pela duração
       // desta chamada de modelo. Ao disparar (o dono aperta ESC com um `user_inject`
       // esperando), aborta um controller PRÓPRIO da iteração — DISTINTO do hard-abort
@@ -1318,13 +1425,33 @@ export class AgentLoop {
       });
       const callSignal = this.expedite ? combineAbort(signal, expediteAc.signal) : signal;
       let result: ModelCallResult;
+      // FEEDBACK-IMEDIATO — fim do preparo: a próxima coisa é a chamada ao modelo.
+      this.onProgress?.({
+        kind: 'model-call',
+        promptChars: messages.reduce(
+          (n, m) =>
+            n +
+            (typeof m.content === 'string'
+              ? m.content.length
+              : m.content.reduce(
+                  (k, p) => k + ('text' in p && typeof p.text === 'string' ? p.text.length : 0),
+                  0,
+                )),
+          0,
+        ),
+      });
       try {
-        result = await this.model.call({
-          messages,
-          idempotencyKey,
-          ...(callSignal ? { signal: callSignal } : {}),
-          ...(this.onModelActivity ? { onActivity: this.onModelActivity } : {}),
-        });
+        result = await this.callModelPausable(
+          {
+            messages,
+            messagesNative,
+            idempotencyKey,
+            ...(callSignal ? { signal: callSignal } : {}),
+            ...(this.onModelActivity ? { onActivity: this.onModelActivity } : {}),
+          },
+          history,
+          signal,
+        );
       } catch (err) {
         // EST-0969 (anti-runaway) — a GUARDA ANTI-REPETIÇÃO disparou DENTRO do
         // stream (o acumulador de deltas abortou o turno). O modelo entrou em
@@ -1432,6 +1559,34 @@ export class AgentLoop {
             emitHumanCancelSignal(this.maestro?.bus, 'ESC/Ctrl+C durante batch de tool-calls');
             throw new ModelCallAbortedError();
           }
+          // ENCAIXE FLUIDO — PONTO SEGURO ANTES DE CADA TOOL do batch. Se o dono disse algo
+          // desde o último ponto de drenagem (durante a geração do modelo ou durante a tool
+          // anterior), a mensagem entra AGORA: as tools AINDA NÃO INICIADAS (esta e as
+          // seguintes) NÃO rodam e voltam como `tool_result` "pulada", e o `user_inject` é
+          // anexado DEPOIS do último `tool_result` (o formato OpenAI-compat exige que as
+          // mensagens `tool` sigam DIRETO o `assistant` com `tool_calls` — um `user` só pode
+          // vir após TODAS as respostas daquele turno). Nada que já rodou é perdido; nada
+          // que não rodou tem efeito (cessar ≠ agir) e o modelo, vendo a msg nova, re-emite
+          // o que ainda valer. A catraca é INTOCADA: só se ANEXA contexto e se DEIXA de
+          // executar; toda tool seguinte ainda passa por `decide()`.
+          const midBatch = this.takeInjected();
+          if (midBatch.length > 0) {
+            for (let j = ci; j < nativeCalls.length; j += 1) {
+              const skipped = nativeCalls[j]!;
+              history.push({
+                role: 'tool_result',
+                toolCallId: skipped.id,
+                toolName: skipped.name,
+                text:
+                  `AÇÃO NÃO EXECUTADA — o usuário enviou uma mensagem nova antes de esta ` +
+                  `ferramenta começar, então ela foi PULADA (não teve efeito). NÃO é erro nem ` +
+                  `bloqueio de política. Leia a mensagem do usuário a seguir e, se esta ação ` +
+                  `ainda fizer sentido, emita-a de novo.`,
+              });
+            }
+            this.appendInjected(history, midBatch, watchdog);
+            break;
+          }
           const outcome = await this.executeToolCall(
             call.name,
             call.input,
@@ -1475,6 +1630,9 @@ export class AgentLoop {
           if (outcome.ok) {
             successfulToolCalls += 1;
           }
+          ledger.record(call.name, call.input, outcome.ok === true);
+          const nudge = nudger?.note(call.name, call.input, outcome.ok === true);
+          if (nudge !== undefined) pendingNudge = nudge;
           // RESULTADO no canal `tool` (pareado por `tool_call_id`). O conteúdo segue
           // DADO NÃO-CONFIÁVEL (envelopado em buildMessages) — anti-injeção intacta.
           history.push({
@@ -1484,6 +1642,15 @@ export class AgentLoop {
             text: outcome.observation,
           });
         }
+        // Dica de delegação: DEPOIS de todos os `tool_result` do batch (não quebra o pareamento).
+        if (pendingNudge !== undefined) {
+          history.push({ role: 'reanchor', text: pendingNudge });
+          pendingNudge = undefined;
+        }
+        // ENCAIXE FLUIDO — a mensagem que chegou DURANTE a ÚLTIMA tool do batch entra já
+        // aqui (todos os `tool_result` estão pareados), e não só no topo da próxima volta
+        // (que viria após o `checkStuck`, que pode pausar esperando o dono).
+        this.appendInjected(history, this.takeInjected(), watchdog);
         // EST-0969 (watchdog) — CHECKPOINT de travamento após o bloco de tools: se
         // o agente está repetindo a MESMA tool / o MESMO erro sem avançar, PAUSA e
         // PEDE DIREÇÃO. `redirect`/`continue` ⇒ segue o loop (já reincorporado/resetado);
@@ -1529,7 +1696,11 @@ export class AgentLoop {
         // por não haver evidência a conferir; aqui não se sonda porque o que falta NÃO É
         // TRABALHO NOSSO. Aceitar o final é o baseline (idêntico a self-check off).
         const awaitingUser = awaitsUserDecision(turn.text);
-        const verifiable = this.selfCheck.enabled && successfulToolCalls > 0 && !awaitingUser;
+        // Opt-in `skipWhenVerified`: o agente JÁ conferiu o que fez depois do último
+        // efeito (releu o arquivo / teste passou) ⇒ a sonda é redundante; aceita o final.
+        const alreadyVerified = this.selfCheck.skipWhenVerified === true && ledger.canSkip();
+        const verifiable =
+          this.selfCheck.enabled && successfulToolCalls > 0 && !awaitingUser && !alreadyVerified;
         if (verifiable && verifications < this.selfCheck.maxVerifications) {
           verifications += 1;
           // Segura o CANDIDATO REAL a entregar ao usuário no fim. ATUALIZA-o SÓ quando
@@ -1693,12 +1864,48 @@ export class AgentLoop {
       if (outcome.ok) {
         successfulToolCalls += 1;
       }
+      ledger.record(turn.call.name, turn.call.input, outcome.ok === true);
       history.push({ role: 'observation', toolName: turn.call.name, text: outcome.observation });
+      const nudgeT = nudger?.note(turn.call.name, turn.call.input, outcome.ok === true);
+      if (nudgeT !== undefined) history.push({ role: 'reanchor', text: nudgeT });
+      // ENCAIXE FLUIDO — idem ao caminho nativo: o "btw" que chegou durante a tool entra
+      // logo após a observação (1 tool por turno aqui ⇒ o par já está fechado).
+      this.appendInjected(history, this.takeInjected(), watchdog);
       // EST-0969 (watchdog) — CHECKPOINT após a tool de texto: mesma tool/erro em
       // loop ⇒ pausa-pede-direção. `end` ⇒ encerra; demais ⇒ segue.
       const dirT = await this.checkStuck(watchdog, history, signal);
       if (dirT === 'end') return this.stopByStuck(own, history, sessionId);
     }
+  }
+
+  /**
+   * ENCAIXE FLUIDO — DRENA a fila viva de injeção (`pollInjected`) e devolve SÓ os itens
+   * `user_inject` (o canal do dono; qualquer outro papel vindo da porta é ignorado — não há
+   * caminho p/ a injeção virar `system` nem forjar observação/tool). Consome uma vez.
+   * Chamado em TODOS os pontos seguros do loop (topo da iteração, antes de cada tool do
+   * batch, após o batch e após a tool de texto) — não decide nada de permissão.
+   */
+  private takeInjected(): HistoryItem[] {
+    if (!this.pollInjected) return [];
+    return this.pollInjected().filter((i) => i.role === 'user_inject');
+  }
+
+  /**
+   * ENCAIXE FLUIDO — anexa ao histórico os `user_inject` já drenados, sinaliza o encaixe
+   * (a TUI vira "encaixando…" em "↳ encaixado") e zera as séries de travamento do watchdog
+   * (input fresco do dono é o progresso máximo: o turno mudou de rumo). Vazio ⇒ no-op.
+   * O CALLER garante que o ponto é seguro p/ o formato do provider (nunca entre um
+   * `assistant` com `tool_calls` e seus `tool_result`).
+   */
+  private appendInjected(
+    history: HistoryItem[],
+    injected: readonly HistoryItem[],
+    watchdog: StuckWatchdog | undefined,
+  ): void {
+    if (injected.length === 0) return;
+    history.push(...injected);
+    this.onProgress?.({ kind: 'inject', count: injected.length });
+    watchdog?.noteRedirect();
   }
 
   /**
@@ -1935,9 +2142,7 @@ export class AgentLoop {
     const ctx: ToolRunContext = {
       ...(signal ? { signal } : {}),
       ...(detachSignal ? { detachSignal } : {}),
-      ...(this.detachHub
-        ? { onDetached: (info): void => this.detachHub?.onDetached(info) }
-        : {}),
+      ...(this.detachHub ? { onDetached: (info): void => this.detachHub?.onDetached(info) } : {}),
       // EST-0969 (heartbeat) — cada chunk de stdout/stderr é um SINAL DE VIDA da
       // tool: zera a inatividade do filho mesmo que o observer da TUI não esteja
       // plugado (um `run_command` longo MAS produzindo saída NÃO está travado). Por
@@ -2028,6 +2233,11 @@ export class AgentLoop {
     ) {
       // a engine recusa grant p/ sempre-ask (retorna false) — não relaxa CLI-SEC-3.
       this.permission.grantSession(call);
+    }
+    // ADR aluy-cli 0002 — "lembrar esta decisão": vale na engine (compartilhada com os
+    // filhos) já; a persistência em disco é do locus (controller.resolveAsk).
+    if (resolution.kind === 'approve-always' && this.permission instanceof PolicyPermissionEngine) {
+      this.permission.rememberAllow(call.name);
     }
     return true;
   }
@@ -2279,6 +2489,30 @@ export class AgentLoop {
 const RECALL_TIMEOUT_MS = 2_500;
 
 /**
+ * TETO DE TAMANHO do recall (antes: 5 hits SEM limite de texto — cada hit é um "Objetivo+Resultado"
+ * de um turno passado e pode ter milhares de caracteres, inflando TODO turno que recorda). Por
+ * item e no total (≈ 1k tokens). O que passa do teto é cortado com `…`; itens além do orçamento
+ * saem (a lista já vem ordenada por relevância, então caem os menos relevantes).
+ */
+export const RECALL_MAX_CHARS_PER_ITEM = 600;
+export const RECALL_MAX_CHARS_TOTAL = 2_400;
+
+export function capRecallLines(lines: readonly string[]): string[] {
+  const out: string[] = [];
+  let total = 0;
+  for (const raw of lines) {
+    const line =
+      raw.length > RECALL_MAX_CHARS_PER_ITEM
+        ? `${raw.slice(0, RECALL_MAX_CHARS_PER_ITEM - 1)}…`
+        : raw;
+    if (total + line.length > RECALL_MAX_CHARS_TOTAL) break;
+    out.push(line);
+    total += line.length + 1;
+  }
+  return out;
+}
+
+/**
  * F91 — PISO de RELEVÂNCIA do recall: só injeta memórias com `score >= ` isto. Sem o
  * piso, o recall injetava os top-5 INDEPENDENTE do score — e ao vivo o embedder devolve
  * ~0.5 (sem match real) p/ memórias IRRELEVANTES (ex.: objetivos de teste antigos), que
@@ -2456,7 +2690,10 @@ function blocked(name: string, verdict: PermissionVerdict): string {
  * Só preenche uma vez (o cancelamento de um sub-loop não é sobrescrito pelo do pai).
  */
 function attachPartialHistory(e: unknown, history: readonly HistoryItem[]): never {
-  if (e instanceof ModelCallAbortedError && e.partialHistory === undefined) {
+  if (
+    (e instanceof ModelCallAbortedError || e instanceof QuotaPauseStoppedError) &&
+    e.partialHistory === undefined
+  ) {
     e.partialHistory = [...history];
   }
   throw e;

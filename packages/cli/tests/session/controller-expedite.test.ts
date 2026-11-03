@@ -169,4 +169,51 @@ describe('F191 — controller.expedite() acelera o encaixe (soft-interrupt)', ()
     expect(n).toBe(1);
     expect(['idle', 'done']).toContain(controller.current.phase);
   });
+
+  it('ESC NÃO corta a geração que já tem prosa visível (nada é descartado em silêncio)', async () => {
+    const call0Started = defer();
+    const release = defer();
+    let call0Aborted = false;
+    const capturedUser: string[] = [];
+    let n = 0;
+    const model: ModelCaller = {
+      async call(args): Promise<ModelCallResult> {
+        const lastUser = [...args.messages].reverse().find((m) => m.role === 'user');
+        capturedUser.push(String(lastUser?.content ?? ''));
+        const k = n;
+        n += 1;
+        if (k === 0) {
+          call0Started.resolve();
+          try {
+            await Promise.race([release.promise, abortableForever(args.signal)]);
+          } catch (e) {
+            call0Aborted = true;
+            throw e;
+          }
+          return {
+            ...finalResult('resposta longa completa'),
+            tool_calls: [{ id: 'c1', name: 'read_file', input: { path: 'a.md' } }],
+          };
+        }
+        return finalResult('ok, ajustado.');
+      },
+    };
+    const controller = buildController(model);
+    const done = controller.submit('objetivo inicial');
+    await call0Started.promise;
+
+    // A prosa já está na tela (bloco `aluy` streamando com texto).
+    controller.sink.onStart();
+    controller.sink.onDelta('já escrevi um pedaço da resposta');
+
+    controller.injectInput('root', 'mude para Y');
+    controller.expedite();
+    // deixa a geração terminar sozinha
+    release.resolve();
+    await done;
+
+    expect(call0Aborted).toBe(false);
+    expect(n).toBe(2);
+    expect(capturedUser[1]).toContain('mude para Y');
+  });
 });

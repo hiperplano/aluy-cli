@@ -81,7 +81,8 @@ describe('live-region height — as constantes do orçamento batem com o render 
     expect(
       liveOverheadLines({
         live: [{ kind: 'tool', verb: 'rodar', target: 'npm test', result: '', status: 'running' }],
-        phase: 'streaming',
+        // `done` isola a altura do bloco (no `streaming` a linha de trabalho soma +2 — F3).
+        phase: 'done',
         hasBlocks: true,
       }),
     ).toBe(1);
@@ -104,7 +105,7 @@ describe('live-region height — as constantes do orçamento batem com o render 
     expect(
       liveOverheadLines({
         live: [{ kind: 'subagents', children }],
-        phase: 'streaming',
+        phase: 'done',
         hasBlocks: true,
       }),
     ).toBe(h);

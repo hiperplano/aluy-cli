@@ -22,6 +22,10 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Role, Glyph } from '../ui/theme/index.js';
 import { useI18n } from '../i18n/index.js';
+import { homedir } from 'node:os';
+import type { StatuslineMode } from '../io/user-config.js';
+import { RodapeParcial } from '../ui/components/RodapeParcial.js';
+import { buildSidecarChip } from '@hiperplano/aluy-cli-core';
 import { Header, StatusPanel, Composer, ActivityLog } from '../ui/components/index.js';
 import { FooterHints, type HintState } from '../ui/components/index.js';
 import { BlockView } from './App.js';
@@ -98,6 +102,13 @@ export interface CockpitProps {
   readonly showCursor: boolean;
   /** Estado do footer de hints (idle/thinking/streaming/…) ou `null` (compact = sem hints). */
   readonly hintState: HintState | null;
+  /**
+   * Modo do rodapé (`/statusline`, F2): `full` (padrão) | `compact` | `hidden`. Tem de ser o
+   * MESMO que gerou `layout` (as alturas de status/hints já refletem o modo).
+   */
+  readonly statuslineMode?: StatuslineMode;
+  /** `hidden`: mostra a dica "rodapé oculto — F2 volta" ao lado do `⚠ yolo`. */
+  readonly dicaOculto?: boolean;
   /** Nome de exibição do tier (`Granito`), nunca a key crua (HG-2) — usado no RODAPÉ. */
   readonly tierDisplay: string;
   /**
@@ -392,47 +403,69 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
       <Rule columns={props.columns} />
 
       {/* ── 4) STATUS (fixo, vivo) ───────────────────────────────────────────── */}
-      <Box height={clampH(layout.statusRows)}>
-        <StatusPanel
-          mode={props.state.mode}
-          compact={layout.statusRows < 3}
-          cwd={props.cwd}
-          tier={props.tierDisplay}
-          isDefaultTier={props.isDefaultTier}
-          {...(props.state.meta.quota?.credit?.balance !== undefined
-            ? // F-CREDITO-COCKPIT — o saldo aparecia só no inline. Quem passa o dia em
-              // `/fullscreen` ficava sem a informação mais volátil da sessão.
-              { credit: props.state.meta.quota.credit.balance }
-            : {})}
-          {...(props.state.meta.model !== undefined
-            ? // HG-2/CLI-SEC-7: só o `model` da via Custom (slug do usuário); NÃO exibir
-              // `activeModel` (=usage.model = modelo de roteamento upstream cru) — revelaria
-              // o mapa tier→provider na tela (gate AG-0008 reprovou #378). Ver App.tsx.
-              { model: props.state.meta.model }
-            : {})}
-          tokens={tokens}
-          windowPct={windowPct}
-          columns={props.columns}
-          error={props.state.phase === 'error'}
-          busy={elapsedTickEnabled(props.state.phase)}
-          frame={props.frame}
-          {...(props.state.meta.focus !== undefined ? { focus: props.state.meta.focus } : {})}
-          {...(process.env.ALUY_CYCLE_UI_OFF !== '1' &&
-          process.env.ALUY_CYCLE_UI_OFF !== 'true' &&
-          props.state.cycleProgress !== undefined
-            ? { cycleProgress: props.state.cycleProgress }
-            : {})}
-          {...(props.state.mcpProgress !== undefined
-            ? { mcpProgress: props.state.mcpProgress }
-            : {})}
-          {...(props.state.sidecarUsage !== undefined
-            ? // F-SIDECAR-USO — o cockpit (alt-screen) usa a MESMA <StatusBar> do inline,
-              // então o chip de uso dos sidecars tem de chegar aqui também: sem este fio,
-              // trocar p/ `/fullscreen` apagaria o indicador sem motivo.
-              { sidecarUsage: props.state.sidecarUsage }
-            : {})}
-        />
-      </Box>
+      {/* `hidden` ⇒ 0 linhas (não monta nada: `clampH` jamais devolve < 1). `compact` ⇒ a linha
+          parcial; `full` ⇒ o painel. */}
+      {layout.statusRows > 0 && props.statuslineMode === 'compact' && (
+        <Box height={clampH(layout.statusRows)} overflow="hidden">
+          <RodapeParcial
+            model={props.state.meta.model ?? props.tierDisplay}
+            cwd={props.cwd}
+            home={homedir()}
+            windowPct={windowPct}
+            tokens={tokens}
+            unsafe={props.state.mode === 'unsafe'}
+            sidecarCaido={
+              props.state.sidecarUsage !== undefined &&
+              (buildSidecarChip(props.state.sidecarUsage) ?? []).some((e) => e.state === 'down')
+            }
+            cotaPausada={props.state.quotaPause !== undefined}
+            columns={Math.max(20, props.columns)}
+          />
+        </Box>
+      )}
+      {layout.statusRows > 0 && props.statuslineMode !== 'compact' && (
+        <Box height={clampH(layout.statusRows)}>
+          <StatusPanel
+            mode={props.state.mode}
+            compact={layout.statusRows < 3}
+            cwd={props.cwd}
+            tier={props.tierDisplay}
+            isDefaultTier={props.isDefaultTier}
+            {...(props.state.meta.quota?.credit?.balance !== undefined
+              ? // F-CREDITO-COCKPIT — o saldo aparecia só no inline. Quem passa o dia em
+                // `/fullscreen` ficava sem a informação mais volátil da sessão.
+                { credit: props.state.meta.quota.credit.balance }
+              : {})}
+            {...(props.state.meta.model !== undefined
+              ? // HG-2/CLI-SEC-7: só o `model` da via Custom (slug do usuário); NÃO exibir
+                // `activeModel` (=usage.model = modelo de roteamento upstream cru) — revelaria
+                // o mapa tier→provider na tela (gate AG-0008 reprovou #378). Ver App.tsx.
+                { model: props.state.meta.model }
+              : {})}
+            tokens={tokens}
+            windowPct={windowPct}
+            columns={props.columns}
+            error={props.state.phase === 'error'}
+            busy={elapsedTickEnabled(props.state.phase)}
+            frame={props.frame}
+            {...(props.state.meta.focus !== undefined ? { focus: props.state.meta.focus } : {})}
+            {...(process.env.ALUY_CYCLE_UI_OFF !== '1' &&
+            process.env.ALUY_CYCLE_UI_OFF !== 'true' &&
+            props.state.cycleProgress !== undefined
+              ? { cycleProgress: props.state.cycleProgress }
+              : {})}
+            {...(props.state.mcpProgress !== undefined
+              ? { mcpProgress: props.state.mcpProgress }
+              : {})}
+            {...(props.state.sidecarUsage !== undefined
+              ? // F-SIDECAR-USO — o cockpit (alt-screen) usa a MESMA <StatusBar> do inline,
+                // então o chip de uso dos sidecars tem de chegar aqui também: sem este fio,
+                // trocar p/ `/fullscreen` apagaria o indicador sem motivo.
+                { sidecarUsage: props.state.sidecarUsage }
+              : {})}
+          />
+        </Box>
+      )}
 
       {/* ── 5) COMPOSER (fixo) ───────────────────────────────────────────────── */}
       {/* overflow:hidden — o composer SELF-CLIPA em `composerRows`: se o input crescer/encolher
@@ -458,20 +491,34 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
       </Box>
 
       {/* ── 6) HINTS (fixo, contextual) ──────────────────────────────────────── */}
-      <Box height={clampH(layout.hintsRows)}>
-        {/* No idle/streaming o cockpit ensina seus próprios atalhos (tab/pgup/ctrl-s);
+      {layout.hintsRows > 0 && props.statuslineMode === 'hidden' && (
+        // `hidden`: só o marcador de segurança (`⚠ yolo` nunca some) e a dica de como voltar.
+        <Box height={clampH(layout.hintsRows)}>
+          {props.state.mode === 'unsafe' && <Role name="danger">⚠ yolo</Role>}
+          {props.state.mode === 'unsafe' && props.dicaOculto === true && (
+            <Role name="fgDim">{' · '}</Role>
+          )}
+          {props.dicaOculto === true && (
+            <Role name="fgDim">rodapé oculto — F2 ou /statusline voltam</Role>
+          )}
+        </Box>
+      )}
+      {layout.hintsRows > 0 && props.statuslineMode !== 'hidden' && (
+        <Box height={clampH(layout.hintsRows)}>
+          {/* No idle/streaming o cockpit ensina seus próprios atalhos (tab/pgup/ctrl-s);
             nos estados de ask/budget/erro mantém os hints do inline (decididos a montante).
             `null` (compact) ⇒ ao menos o atalho-base do cockpit (a região existe no grid). */}
-        {props.hintState === null || props.hintState === 'idle' ? (
-          <Role name="fgDim">
-            {t('hints.cockpit')}
-            <Text> · </Text>
-            {abbreviateCount(tokens)} tok
-          </Role>
-        ) : (
-          <FooterHints state={props.hintState} />
-        )}
-      </Box>
+          {props.hintState === null || props.hintState === 'idle' ? (
+            <Role name="fgDim">
+              {t('hints.cockpit')}
+              <Text> · </Text>
+              {abbreviateCount(tokens)} tok
+            </Role>
+          ) : (
+            <FooterHints state={props.hintState} />
+          )}
+        </Box>
+      )}
     </Box>
   );
 }

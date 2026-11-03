@@ -57,6 +57,7 @@ export type NativeCommandId =
   | 'split'
   | 'fullscreen'
   | 'suggest'
+  | 'statusline'
   | 'export'
   | 'tools'
   | 'quit'
@@ -655,7 +656,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
   },
   {
     name: 'notify',
-    summary: 'liga/desliga o sino de atenção (on/off)',
+    summary: 'notificações: all | attention | off',
     summaryKey: 'cmd.notify',
     source: 'native',
     id: 'notify',
@@ -695,6 +696,18 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     id: 'suggest',
     section: 'sessão',
     // ADR-0147 — ghost-text é DICA VISUAL pro humano digitar: sem sentido p/ o agente.
+    agentEffect: 'human-only',
+  },
+  {
+    // RODAPÉ — 3 modos p/ tudo abaixo do composer: completo | parcial | oculto. Sem arg alterna
+    // (o mesmo ciclo do F2); persiste a pref (statusline).
+    name: 'statusline',
+    summary: 'rodapé: full | compact | hidden (F2 alterna)',
+    usage: '[full|compact|hidden]',
+    source: 'native',
+    id: 'statusline',
+    section: 'sessão',
+    // ADR-0147 — layout do terminal do humano: sem sentido p/ o agente.
     agentEffect: 'human-only',
   },
   {

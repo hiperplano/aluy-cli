@@ -325,3 +325,77 @@ describe('resolveCockpitLayout — log ADAPTATIVO (logHint)', () => {
     expect(semHint.regions.logRows).toBe(proporcional);
   });
 });
+
+describe('resolveCockpitLayout — rodapé (statusline) no cockpit', () => {
+  const dims: ReadonlyArray<readonly [number, number]> = [
+    [45, 160],
+    [24, 80],
+    [30, 100],
+    [13, 80],
+  ];
+  const ok = (r: ReturnType<typeof resolveCockpitLayout>) => {
+    if (r.kind !== 'cockpit') throw new Error('esperava cockpit');
+    return r;
+  };
+
+  it('full == comportamento anterior (sem opções)', () => {
+    for (const [rows, cols] of dims) {
+      expect(resolveCockpitLayout(rows, cols, 1, undefined, { statusline: 'full' })).toEqual(
+        resolveCockpitLayout(rows, cols),
+      );
+    }
+  });
+
+  it('compact: status vira 1 linha, hints seguem 1; soma == rows e as regiões geridas ganham linhas', () => {
+    for (const [rows, cols] of dims) {
+      const full = ok(resolveCockpitLayout(rows, cols));
+      const c = ok(resolveCockpitLayout(rows, cols, 1, undefined, { statusline: 'compact' }));
+      expect(c.statusRows).toBe(1);
+      expect(c.hintsRows).toBe(1);
+      expect(cockpitRegionSum(c)).toBe(rows);
+      expect(c.regions.conversaRows + c.regions.logRows).toBe(
+        full.regions.conversaRows + full.regions.logRows + (full.statusRows - 1),
+      );
+    }
+  });
+
+  it('hidden: status 0 e hints 0 (sem yolo); soma == rows; libera status+hints p/ as regiões geridas', () => {
+    for (const [rows, cols] of dims) {
+      const full = ok(resolveCockpitLayout(rows, cols));
+      const h = ok(resolveCockpitLayout(rows, cols, 1, undefined, { statusline: 'hidden' }));
+      expect(h.statusRows).toBe(0);
+      expect(h.hintsRows).toBe(0);
+      expect(cockpitRegionSum(h)).toBe(rows);
+      expect(h.regions.conversaRows + h.regions.logRows).toBe(
+        full.regions.conversaRows + full.regions.logRows + full.statusRows + full.hintsRows,
+      );
+    }
+  });
+
+  it('hidden + hintsRow (yolo/dica): reserva 1 linha de hints; soma == rows', () => {
+    for (const [rows, cols] of dims) {
+      const h = ok(
+        resolveCockpitLayout(rows, cols, 1, undefined, { statusline: 'hidden', hintsRow: true }),
+      );
+      expect(h.statusRows).toBe(0);
+      expect(h.hintsRows).toBe(1);
+      expect(cockpitRegionSum(h)).toBe(rows);
+    }
+  });
+
+  it('o piso de linhas NÃO depende do modo (alternar F2 não recusa/aceita o cockpit)', () => {
+    for (const statusline of ['full', 'compact', 'hidden'] as const) {
+      const abaixo = resolveCockpitLayout(COCKPIT_MIN_ROWS - 1, 100, 1, undefined, { statusline });
+      const no = resolveCockpitLayout(COCKPIT_MIN_ROWS, 100, 1, undefined, { statusline });
+      expect(abaixo.kind).toBe('refuse');
+      expect(no.kind).toBe('cockpit');
+    }
+  });
+
+  it('statusRowsFor por modo', () => {
+    expect(statusRowsFor(45, 'full')).toBe(3);
+    expect(statusRowsFor(20, 'full')).toBe(1);
+    expect(statusRowsFor(45, 'compact')).toBe(1);
+    expect(statusRowsFor(45, 'hidden')).toBe(0);
+  });
+});

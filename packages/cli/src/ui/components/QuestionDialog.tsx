@@ -38,6 +38,8 @@ export interface QuestionDialogProps {
   readonly editing?: boolean;
   /** O texto livre em digitação (quando `editing`). */
   readonly draft?: string;
+  /** F21 — largura do terminal: a caixa é proporcional (`min(100, cols-4)`), piso 44. */
+  readonly columns?: number;
 }
 
 /**
@@ -46,6 +48,12 @@ export interface QuestionDialogProps {
  * sep/base = `repeat(W)` entre os cantos ⇒ W+2 codepoints, glyph-independentes.
  */
 const QUESTION_BOX_W = 42;
+
+/** F21 — largura interna proporcional: `min(100, cols-4)` (cantos incluídos), nunca < 42+2. */
+export function questionBoxW(columns: number | undefined): number {
+  if (columns === undefined || columns <= 0) return QUESTION_BOX_W;
+  return Math.max(QUESTION_BOX_W, Math.min(100, columns - 4) - 2);
+}
 
 /**
  * Codepoints do PREFIXO do título no topo, ENTRE o canto e os traços — p/ o topo fechar
@@ -65,6 +73,7 @@ function hasOther(spec: QuestionSpec): boolean {
 export function QuestionDialog(props: QuestionDialogProps): React.ReactElement {
   const theme = useTheme();
   const { spec } = props;
+  const boxW = questionBoxW(props.columns);
 
   return (
     <Box flexDirection="column" paddingLeft={2}>
@@ -74,7 +83,7 @@ export function QuestionDialog(props: QuestionDialogProps): React.ReactElement {
         <Glyph name="ask" role="accent" />
         <Role name="accent">
           {' '}
-          Pergunta {theme.box.horizontal.repeat(QUESTION_BOX_W - QUESTION_TITLE_CPS)}
+          Pergunta {theme.box.horizontal.repeat(boxW - QUESTION_TITLE_CPS)}
           {theme.box.topRight}
         </Role>
       </Box>
@@ -111,7 +120,7 @@ export function QuestionDialog(props: QuestionDialogProps): React.ReactElement {
           grossa→leve (┠┨), miolo com `innerHorizontal` (LEVE), não a borda `horizontal`. */}
       <Role name="accent">
         {theme.box.teeLeft}
-        {theme.box.innerHorizontal.repeat(QUESTION_BOX_W)}
+        {theme.box.innerHorizontal.repeat(boxW)}
         {theme.box.teeRight}
       </Role>
       <Box>
@@ -121,7 +130,7 @@ export function QuestionDialog(props: QuestionDialogProps): React.ReactElement {
 
       <Role name="accent">
         {theme.box.bottomLeft}
-        {theme.box.horizontal.repeat(QUESTION_BOX_W)}
+        {theme.box.horizontal.repeat(boxW)}
         {theme.box.bottomRight}
       </Role>
     </Box>
@@ -210,11 +219,11 @@ function TextField(props: {
 /** Footer linear de atalhos (a11y §4.3), por tipo de pergunta. */
 function footerOf(spec: QuestionSpec, editing: boolean): string {
   if (editing) return 'enter confirma · esc cancela a digitação';
-  if (spec.kind === 'text') return 'digite a resposta · enter confirma · esc cancela';
+  if (spec.kind === 'text') return 'digite a resposta · enter confirma · esc interrompe';
   if (spec.kind === 'multi') {
-    return '↑↓ navega · espaço marca · enter confirma · esc cancela';
+    return '↑↓ navega · espaço marca · enter confirma · esc interrompe';
   }
-  return '↑↓ navega · enter escolhe · esc cancela';
+  return '↑↓ navega · enter escolhe · esc interrompe';
 }
 
 export default QuestionDialog;

@@ -73,7 +73,8 @@ describe('EST-0964 · AGENT.md no canal system (confiável)', () => {
     // frente b) + a nova tool `capabilities`/`list_tools` (frente d) acrescentam
     // ~2.7k chars; o ceiling sobe de novo p/ acomodar (continua um teto SÃO, não
     // ilimitado — só cresce quando o prompt cresce de propósito).
-    expect(sys.length).toBeLessThan(MAX_PROJECT_INSTRUCTIONS_CHARS + 13_000);
+    // ADR aluy-cli 0002 — a regra PLANO PRIMEIRO + a entrada update_plan no MAPA somam ~0.5k.
+    expect(sys.length).toBeLessThan(MAX_PROJECT_INSTRUCTIONS_CHARS + 14_000);
   });
 
   it('clampProjectInstructions: vazio/whitespace ⇒ undefined', () => {

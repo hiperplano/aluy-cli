@@ -23,6 +23,7 @@ import {
   toProblemDetails,
 } from '../errors.js';
 import { parseSse } from '../sse.js';
+import { parseDurationMs, resetAtFromHeaders } from '../quota-pause.js';
 import { newDegenerationSink } from '../../agent/degeneration.js';
 import { newStreamByteCap, STREAM_CAP_FINISH_REASON } from '../../agent/stream-cap.js';
 import type { StreamFetch, StreamCallArgs, ModelClient } from '../broker-client.js';
@@ -316,9 +317,24 @@ export class LocalModelClient implements ModelClient {
     // exige status 422 + code TOOLS_UNSUPPORTED. Um provider pode devolver 400 nesse
     // caso ⇒ NORMALIZAMOS o status p/ 422 quando o code é TOOLS_UNSUPPORTED.
     const status = code === 'TOOLS_UNSUPPORTED' ? 422 : res.status;
+    // Pausa por cota: `Retry-After` / `x-ratelimit-reset-*` / `anthropic-ratelimit-*-reset`.
+    const resetAt =
+      res.status === 429 || res.status === 402 || res.status === 400 || res.status === 403
+        ? resetAtFromHeaders(res.headers, Date.now())
+        : undefined;
+    // Marcas do provider (código de negócio, tipo, quota do Google, RetryInfo) viajam em `type`
+    // (campo de texto livre, sem segredo) p/ o classificador de cota reconhecê-las.
+    const meta = extractProviderMeta(parsed);
+    const noQuota = this.config.provider === 'ollama' && isLoopbackUrl(this.baseUrl);
+    const tags = [...meta.tags, ...(noQuota ? ['provider_local:no_quota'] : [])];
+    const retryDelayAt =
+      meta.retryDelayMs !== undefined ? Date.now() + meta.retryDelayMs : undefined;
+    const resetFinal = resetAt ?? retryDelayAt;
     const problem = toProblemDetails(status, {
       code,
       ...(message !== undefined ? { detail: message } : {}),
+      ...(tags.length > 0 ? { type: tags.join(' ') } : {}),
+      ...(resetFinal !== undefined ? { reset_at_ms: resetFinal } : {}),
     });
     return new BrokerError(problem);
   }
@@ -345,9 +361,73 @@ function mapProviderErrorCode(status: number, body: unknown): string {
   return 'PROVIDER_ERROR';
 }
 
-function extractErrorMessage(body: unknown): string | undefined {
-  if (typeof body !== 'object' || body === null) return undefined;
-  const obj = body as Record<string, unknown>;
+/** Corpo de erro: objeto, ou array com um objeto (o endpoint OpenAI-compat do Gemini embrulha). */
+function unwrapErrorBody(body: unknown): Record<string, unknown> | undefined {
+  const b = Array.isArray(body) ? body[0] : body;
+  return typeof b === 'object' && b !== null ? (b as Record<string, unknown>) : undefined;
+}
+
+const SAFE_TAG = /^[A-Za-z0-9_.-]{1,60}$/;
+
+/**
+ * Marcas de cota do corpo (sem segredo): `provider_code:` (error.code / error.status /
+ * details[].error_code), `provider_type:` (error.type) e `provider_quota:` (QuotaFailure.quotaId
+ * do Google); e o `retryDelay` do `google.rpc.RetryInfo`, em ms.
+ */
+function extractProviderMeta(body: unknown): {
+  tags: string[];
+  retryDelayMs: number | undefined;
+} {
+  const tags: string[] = [];
+  let retryDelayMs: number | undefined;
+  const root = unwrapErrorBody(body);
+  const err = root?.error;
+  if (typeof err !== 'object' || err === null) return { tags, retryDelayMs };
+  const e = err as Record<string, unknown>;
+  const add = (tag: string, v: unknown): void => {
+    const str = typeof v === 'number' ? String(v) : typeof v === 'string' ? v : undefined;
+    if (str !== undefined && SAFE_TAG.test(str)) tags.push(`${tag}:${str}`);
+  };
+  add('provider_code', e.code);
+  add('provider_code', e.status);
+  add('provider_type', e.type);
+  const det = e.details;
+  if (typeof det === 'object' && det !== null && !Array.isArray(det)) {
+    add('provider_code', (det as Record<string, unknown>).error_code);
+  }
+  if (Array.isArray(det)) {
+    for (const d of det) {
+      if (typeof d !== 'object' || d === null) continue;
+      const o = d as Record<string, unknown>;
+      if (typeof o.retryDelay === 'string') {
+        const ms = parseDurationMs(o.retryDelay);
+        if (ms !== undefined && ms > 0) retryDelayMs = ms;
+      }
+      if (Array.isArray(o.violations)) {
+        for (const v of o.violations) {
+          if (typeof v === 'object' && v !== null) {
+            add('provider_quota', (v as Record<string, unknown>).quotaId);
+          }
+        }
+      }
+    }
+  }
+  return { tags, retryDelayMs };
+}
+
+/** `true` se a URL aponta para esta máquina (Ollama local não tem cota). */
+function isLoopbackUrl(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.replace(/^\[|\]$/g, '');
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0';
+  } catch {
+    return false;
+  }
+}
+
+function extractErrorMessage(rawBody: unknown): string | undefined {
+  const obj = unwrapErrorBody(rawBody);
+  if (obj === undefined) return undefined;
   // `{error:{message}}` (OpenAI/Anthropic) OU `{message}` OU `{error:"..."}`.
   if (typeof obj.message === 'string') return obj.message;
   const err = obj.error;
