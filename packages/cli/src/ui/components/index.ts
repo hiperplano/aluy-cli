@@ -41,6 +41,8 @@ export { QuestionDialog, OTHER_INDEX } from './QuestionDialog.js';
 export type { QuestionDialogProps } from './QuestionDialog.js';
 export { BrokerError } from './BrokerError.js';
 export type { BrokerErrorProps } from './BrokerError.js';
+export { QuotaPauseBanner } from './QuotaPauseBanner.js';
+export type { QuotaPauseBannerProps } from './QuotaPauseBanner.js';
 export { BudgetGate } from './BudgetGate.js';
 export type { BudgetGateProps } from './BudgetGate.js';
 export { StuckGate } from './StuckGate.js';

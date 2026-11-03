@@ -62,6 +62,8 @@ export interface ProblemDetails {
   readonly retryable?: boolean;
   /** Segundos a esperar (`Retry-After`/corpo), quando o broker indica. */
   readonly retry_after?: number;
+  /** Instante (epoch ms) em que a cota deve liberar, derivado de headers/corpo pelo cliente. */
+  readonly reset_at_ms?: number;
 }
 
 /**
@@ -74,6 +76,8 @@ export class BrokerError extends Error {
   readonly code: BrokerErrorCode;
   readonly retryable: boolean;
   readonly retryAfter: number | undefined;
+  /** Epoch ms em que a cota deve liberar (headers de reset do provider), se conhecido. */
+  readonly resetAtMs: number | undefined;
   readonly problem: ProblemDetails;
 
   constructor(problem: ProblemDetails) {
@@ -87,6 +91,7 @@ export class BrokerError extends Error {
     this.code = problem.code;
     this.retryable = problem.retryable ?? defaultRetryable(problem.status);
     this.retryAfter = problem.retry_after;
+    this.resetAtMs = problem.reset_at_ms;
     this.problem = problem;
   }
 
@@ -153,6 +158,28 @@ export class ModelCallAbortedError extends Error {
 }
 
 /**
+ * A pausa por cota foi ENCERRADA sem retomar (o dono mandou "parar salvando" ou a espera
+ * máxima estourou). NÃO é falha do agente: o trabalho está guardado e é retomável. O
+ * `AgentLoop` preenche `partialHistory` (como no cancelamento) para quem conduz a conversa
+ * persistir o ponto exato onde o agente parou.
+ */
+export class QuotaPauseStoppedError extends Error {
+  partialHistory?: readonly HistoryItem[];
+  readonly why: 'usuario' | 'tempo-maximo';
+
+  constructor(why: 'usuario' | 'tempo-maximo', message?: string) {
+    super(
+      message ??
+        (why === 'usuario'
+          ? 'pausa por cota encerrada pelo usuário — trabalho salvo para retomar.'
+          : 'pausa por cota: espera máxima esgotada — trabalho salvo para retomar.'),
+    );
+    this.name = 'QuotaPauseStoppedError';
+    this.why = why;
+  }
+}
+
+/**
  * Constrói um `ProblemDetails` a partir de um corpo desconhecido da rede
  * (boundary `unknown` → tipo confiável). Tolerante: se o corpo não for um
  * problem+json reconhecível, sintetiza um a partir do `status` HTTP, sem
@@ -172,6 +199,7 @@ export function toProblemDetails(status: number, body: unknown): ProblemDetails 
   if (errors !== undefined) out.errors = errors;
   if (typeof obj.retryable === 'boolean') out.retryable = obj.retryable;
   if (typeof obj.retry_after === 'number') out.retry_after = obj.retry_after;
+  if (typeof obj.reset_at_ms === 'number') out.reset_at_ms = obj.reset_at_ms;
   return out;
 }
 

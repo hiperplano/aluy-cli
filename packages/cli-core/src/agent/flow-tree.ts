@@ -51,7 +51,7 @@ export type FlowPhase =
   | 'failed'; // teto/timeout/erro
 
 /** Como um fluxo terminou (espelha `SubAgentOutcome.stop` + `cancelled`). */
-export type FlowStop = 'final' | 'limit' | 'timeout' | 'error' | 'cancelled';
+export type FlowStop = 'final' | 'limit' | 'timeout' | 'error' | 'cancelled' | 'paused';
 
 /** Contabilidade de UM fluxo: tokens (do budget/broker) + TEMPO (do relógio). */
 export interface FlowAccounting {

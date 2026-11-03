@@ -26,7 +26,8 @@ import {
 import type { AskResolver } from '../permission/ask.js';
 import { PolicyPermissionEngine } from '../permission/engine.js';
 import type { ModelCallResult, ModelUsage, NativeToolCall } from '../model/types.js';
-import { ModelCallAbortedError } from '../model/errors.js';
+import { ModelCallAbortedError, QuotaPauseStoppedError } from '../model/errors.js';
+import type { QuotaPausePort } from './quota-pause.js';
 import { buildMessages, type HistoryItem } from './context.js';
 import { redactOutputSecrets } from './journal/redact.js';
 import { idempotencyKeyFor, newSessionId } from './idempotency.js';
@@ -529,6 +530,13 @@ export interface AgentLoopOptions {
    */
   readonly onModelActivity?: () => void;
   /**
+   * PAUSA POR COTA — porta deste agente no coordenador compartilhado da sessão. Quando a
+   * chamada de modelo falha por cota (janela/semanal/saldo/rate-limit longo), o loop PAUSA
+   * dentro da própria chamada e a refaz quando a cota libera — o agente não morre e o
+   * histórico segue na memória. Ausente ⇒ baseline (o erro sobe como antes).
+   */
+  readonly quotaPause?: QuotaPausePort;
+  /**
    * EST-0982 — OBSERVADOR DO USO PRÓPRIO desta execução. O loop o pinga com um
    * SNAPSHOT (cópia) do tally próprio a cada débito (iteração/tool-call/tokens).
    * O `SubAgentSpawner` o usa p/ reportar o uso PRÓPRIO do filho MESMO quando o
@@ -711,6 +719,7 @@ export class AgentLoop {
   // EST-0969 (heartbeat) — pinga progresso (iteração/modelo/tool). undefined ⇒ no-op.
   private readonly onProgress?: ProgressObserver;
   private readonly onModelActivity?: () => void;
+  private readonly quotaPause?: QuotaPausePort;
   // EST-0982 — pinga o uso PRÓPRIO (snapshot) a cada débito. undefined ⇒ no-op.
   private readonly onUsage?: (usage: {
     iterations: number;
@@ -784,6 +793,7 @@ export class AgentLoop {
     if (opts.preToolGate) this.preToolGate = opts.preToolGate;
     if (opts.onProgress) this.onProgress = opts.onProgress;
     if (opts.onModelActivity) this.onModelActivity = opts.onModelActivity;
+    if (opts.quotaPause) this.quotaPause = opts.quotaPause;
     if (opts.onUsage) this.onUsage = opts.onUsage;
     if (opts.projectInstructions !== undefined) this.projectInstructions = opts.projectInstructions;
     if (opts.availableAgents !== undefined) this.availableAgents = opts.availableAgents;
@@ -952,6 +962,36 @@ export class AgentLoop {
       this.pendingMemoryWrites.add(write);
     }
     return result;
+  }
+
+  /**
+   * PAUSA POR COTA — a chamada de modelo com o portão de cota. Sem porta ⇒ chamada direta.
+   * Com porta: espera no portão se a sessão está pausada; se a chamada falha por cota,
+   * `handle` pausa até a hora de tentar de novo (MESMA `idempotencyKey`, MESMAS mensagens)
+   * e o laço refaz a chamada. Erro que não é cota sobe intacto.
+   */
+  private async callModelPausable(
+    args: Parameters<ModelCaller['call']>[0],
+    history: HistoryItem[],
+    signal: AbortSignal | undefined,
+  ): Promise<ModelCallResult> {
+    const qp = this.quotaPause;
+    if (!qp) return this.model.call(args);
+    const ctx = { signal, history: (): readonly HistoryItem[] => history };
+    // Depois de `handle` voltar, ESTE agente é o sondador: refaz a chamada direto, sem passar
+    // de novo pelo portão (que o seguraria atrás de si mesmo).
+    let sondando = false;
+    for (;;) {
+      if (!sondando) await qp.gate(ctx);
+      try {
+        const r = await this.model.call(args);
+        qp.ok();
+        return r;
+      } catch (err) {
+        await qp.handle(err, ctx); // retorna ⇒ tentar de novo; senão lança.
+        sondando = true;
+      }
+    }
   }
 
   /** F78 — writes de memória em voo (store em background). Drenado no shutdown. */
@@ -1319,12 +1359,16 @@ export class AgentLoop {
       const callSignal = this.expedite ? combineAbort(signal, expediteAc.signal) : signal;
       let result: ModelCallResult;
       try {
-        result = await this.model.call({
-          messages,
-          idempotencyKey,
-          ...(callSignal ? { signal: callSignal } : {}),
-          ...(this.onModelActivity ? { onActivity: this.onModelActivity } : {}),
-        });
+        result = await this.callModelPausable(
+          {
+            messages,
+            idempotencyKey,
+            ...(callSignal ? { signal: callSignal } : {}),
+            ...(this.onModelActivity ? { onActivity: this.onModelActivity } : {}),
+          },
+          history,
+          signal,
+        );
       } catch (err) {
         // EST-0969 (anti-runaway) — a GUARDA ANTI-REPETIÇÃO disparou DENTRO do
         // stream (o acumulador de deltas abortou o turno). O modelo entrou em
@@ -2456,7 +2500,10 @@ function blocked(name: string, verdict: PermissionVerdict): string {
  * Só preenche uma vez (o cancelamento de um sub-loop não é sobrescrito pelo do pai).
  */
 function attachPartialHistory(e: unknown, history: readonly HistoryItem[]): never {
-  if (e instanceof ModelCallAbortedError && e.partialHistory === undefined) {
+  if (
+    (e instanceof ModelCallAbortedError || e instanceof QuotaPauseStoppedError) &&
+    e.partialHistory === undefined
+  ) {
     e.partialHistory = [...history];
   }
   throw e;

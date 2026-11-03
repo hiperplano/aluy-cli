@@ -31,6 +31,7 @@
 // preserva o comportamento antigo pra quem quiser voltar a ele.
 
 import { BrokerError, BrokerTransportError, ModelCallAbortedError } from './errors.js';
+import { exceedsShortRetry } from './quota-pause.js';
 
 /** Espera default entre tentativas (ms) — o "a cada 5 segundos" pedido pelo dono. */
 export const DEFAULT_RETRY_WAIT_MS = 5_000;
@@ -73,6 +74,9 @@ export function isTransient(err: unknown): boolean {
   if (err instanceof ModelCallAbortedError) return false;
   // Transporte (DNS, conexão recusada, timeout, TLS, stream cortado): sempre transitório.
   if (err instanceof BrokerTransportError) return true;
+  // PAUSA POR COTA: janela/semanal/saldo esgotados (ou rate-limit com reset > 60s) NÃO
+  // são blip — repetir a cada 5s não faz a cota liberar. Sobe, e a pausa assume.
+  if (exceedsShortRetry(err, Date.now())) return false;
   // HTTP: reusa o `retryable` do próprio erro (429 e 5xx por default; o corpo pode dizer).
   if (err instanceof BrokerError) return err.retryable;
   // AbortError cru (fetch abortado sem passar pelo nosso tipo) ⇒ não retenta.

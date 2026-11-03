@@ -23,6 +23,7 @@ import {
   toProblemDetails,
 } from '../errors.js';
 import { parseSse } from '../sse.js';
+import { resetAtFromHeaders } from '../quota-pause.js';
 import { newDegenerationSink } from '../../agent/degeneration.js';
 import { newStreamByteCap, STREAM_CAP_FINISH_REASON } from '../../agent/stream-cap.js';
 import type { StreamFetch, StreamCallArgs, ModelClient } from '../broker-client.js';
@@ -316,9 +317,15 @@ export class LocalModelClient implements ModelClient {
     // exige status 422 + code TOOLS_UNSUPPORTED. Um provider pode devolver 400 nesse
     // caso ⇒ NORMALIZAMOS o status p/ 422 quando o code é TOOLS_UNSUPPORTED.
     const status = code === 'TOOLS_UNSUPPORTED' ? 422 : res.status;
+    // Pausa por cota: `Retry-After` / `x-ratelimit-reset-*` / `anthropic-ratelimit-*-reset`.
+    const resetAt =
+      res.status === 429 || res.status === 402 || res.status === 400 || res.status === 403
+        ? resetAtFromHeaders(res.headers, Date.now())
+        : undefined;
     const problem = toProblemDetails(status, {
       code,
       ...(message !== undefined ? { detail: message } : {}),
+      ...(resetAt !== undefined ? { reset_at_ms: resetAt } : {}),
     });
     return new BrokerError(problem);
   }
