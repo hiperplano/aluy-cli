@@ -30,13 +30,20 @@ export const ptBR: FullCatalog = {
   'hints.palette': 'digite p/ buscar · ↑↓ navega · enter executa · esc fecha',
   'hints.budget': 'c continua · n encerra',
   'hints.error': 'r tentar · esc cancela',
-  'hints.workSubagents': 'esc para o pai · ctrl-b soltar · F8 para tudo · ctrl-t ver/parar · ctrl-c×2 sair',
+  'hints.workSubagents':
+    'esc para o pai · ctrl-b soltar · F8 para tudo · ctrl-t ver/parar · ctrl-c×2 sair',
   'hints.detachInline': 'ctrl-b solta',
   'hints.idleSubagents': 'enter envia · F8 para os sub-agentes · ctrl-t ver/parar · ctrl-c×2 sair',
   'hints.ctrlcAgain': 'pressione ctrl-c de novo para sair',
   'hints.cockpit': 'tab foca · pgup/pgdn rola · ctrl-s exporta · /fullscreen sai · ctrl-c×2 sair',
   // F197 — sugestão de próximo prompt: Tab aceita o ghost no composer.
   'hints.suggest': 'tab aceita a sugestão',
+
+  // ── Linha de trabalho ─────────────────────────────────────────────────────
+  // Verbos de espera (sorteados 1× por passo; `ALUY_VERBOS=simples` os desliga). Só
+  // substituem os rótulos GENÉRICOS (pensando/lembrando/preparando/maestro avaliando).
+  'working.verbs':
+    'Matutando|Fuçando|Garimpando|Destrinchando|Lapidando|Costurando|Tricotando|Desenrolando|Caçando bugs|Fermentando|Ruminando|Bolando|Arquitetando|Tecendo|Engatilhando|Desembaraçando|Afinando|Peneirando|Cozinhando|Apurando|Alinhavando|Esmiuçando|Destilando|Mapeando|Rabiscando|Rascunhando|Burilando|Calibrando|Cavucando|Escavando|Fiando|Moldando|Encaixando|Depurando|Rastreando|Farejando|Vasculhando|Cultivando|Semeando|Podando|Montando|Soldando|Polindo|Alinhando|Empilhando|Desatando|Tramando|Cogitando|Imaginando|Traçando|Revirando|Desbravando|Navegando|Pescando|Temperando|Amadurecendo|Combinando|Orquestrando|Desmontando|Remontando|Garimpando bits|Ponderando|Planejando|Tateando|Cruzando dados|Decifrando',
 
   // ── F197 — frases de sugestão (viram o texto do composer ao aceitar) ──────────────────
   'suggest.runTests': 'rode os testes e me mostre o resultado',
@@ -129,10 +136,8 @@ export const ptBR: FullCatalog = {
   // F-PROV-CRED (relato do dono: "mudei o provider no picker e ele não pediu nada") —
   // campo de chave entre escolher o provider e aplicar. NUNCA ecoado (mascarado com •).
   'picker.provider.credential.label': 'API key de {provider} (oculta) — enter grava e aplica',
-  'picker.provider.credential.help':
-    'esc volta pra lista · a chave NUNCA aparece em claro na tela',
-  'picker.provider.credential.retryTitle':
-    '✗ a chave não passou no teste de conexão — cole outra',
+  'picker.provider.credential.help': 'esc volta pra lista · a chave NUNCA aparece em claro na tela',
+  'picker.provider.credential.retryTitle': '✗ a chave não passou no teste de conexão — cole outra',
 
   // ── ModelPicker (/model) ──────────────────────────────────────────────────
   'picker.model.help': 'trocar modelo · ↑↓ navega · enter seleciona · esc fecha',

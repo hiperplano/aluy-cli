@@ -53,6 +53,9 @@ export interface Catalog {
   // F197 — dica anexada ao footer idle quando há uma sugestão de próximo prompt pendente.
   'hints.suggest': string;
 
+  // ── Linha de trabalho: verbos brincalhões (separados por `|`) ──
+  'working.verbs': string;
+
   // ── F197 — sugestão de PRÓXIMO PROMPT (ghost + Tab). Cada chave é a FRASE que vira o
   //    texto do composer ao aceitar a sugestão (é um objetivo real, acionável). Uma por
   //    `NextSuggestionId` do core (`suggest.<camelCase>`). ──────────────────────────────

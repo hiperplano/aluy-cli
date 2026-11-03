@@ -18,7 +18,6 @@ import { Glyph, Role, useTheme } from '../theme/index.js';
 import type { GlyphName } from '../theme/glyphs.js';
 import { AluyLoader } from './AluyLoader.js';
 import { ShimmerText } from './ShimmerText.js';
-import { formatElapsed } from '../../session/model.js';
 
 /** Largura da banda de onda (nº de `～`). 3 em telas normais (spec §3.6). */
 const WAVE_WIDTH = 3;
@@ -46,11 +45,10 @@ export interface WorkingProps {
    */
   readonly suffix?: string;
   /**
-   * FEEDBACK-IMEDIATO — tempo decorrido (ms) desde que o turno começou, exibido `M:SS` logo
-   * após o verbo (`preparando… 0:03`). Ausente ⇒ não mostra. Ignorado quando há `suffix`
-   * (a linha já é longa — somar o relógio poderia quebrá-la e inflar a região viva).
+   * Parêntese dim depois do verbo (`(pensando · 1,2k tokens · 12s)`) — a fase real, os tokens do
+   * turno e os segundos. Vem pronto (e já medido p/ caber) de `detalheDeEspera`.
    */
-  readonly elapsedMs?: number;
+  readonly detalhe?: string;
 }
 
 /**
@@ -108,10 +106,10 @@ export function Working(props: WorkingProps): React.ReactElement {
       )}
       <Text> </Text>
       {/* BRILHO no rótulo: a banda de cor da marca varre `pensando…` (estático sem cor ou em
-          reduced-motion — ver ShimmerText). O relógio ao lado é só complemento. */}
+          reduced-motion — ver ShimmerText). O brilho é o sinal de 'vivo'. */}
       <ShimmerText text={`${props.label}…`} frame={frame} />
-      {props.elapsedMs !== undefined && (props.suffix === undefined || props.suffix === '') && (
-        <Role name="fgDim"> {formatElapsed(props.elapsedMs)}</Role>
+      {props.detalhe !== undefined && props.detalhe !== '' && (
+        <Role name="fgDim"> {props.detalhe}</Role>
       )}
       {props.suffix !== undefined && props.suffix !== '' && (
         <>

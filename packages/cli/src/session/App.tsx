@@ -164,6 +164,14 @@ import { isUnrecognizedEscapeTail } from './escape-leak.js';
 import { resolveSuggestionText } from './suggest.js';
 import { buildTurnRecap } from './turn-recap.js';
 import {
+  ROTULOS_GENERICOS,
+  SeletorDeVerbo,
+  detalheDeEspera,
+  parseVerbos,
+  rotuloExibido,
+  verbosSimples,
+} from './verbos.js';
+import {
   createPasteRegistry,
   shouldCollapse,
   makePasteChip,
@@ -1243,11 +1251,58 @@ export function App(props: AppProps): React.ReactElement {
     return [];
   })();
 
+  // VERBOS DE ESPERA — o rótulo genérico (`pensando`…) vira um gerúndio sorteado 1× por PASSO
+  // (a identidade do passo é o `workingSince`). Rótulos funcionais ficam como estão.
+  const seletorVerbo = useRef<SeletorDeVerbo | null>(null);
+  if (seletorVerbo.current === null) seletorVerbo.current = new SeletorDeVerbo();
+  const listaVerbos = useMemo(() => parseVerbos(t('working.verbs')), [t]);
+  const verbosPlanos = useMemo(() => verbosSimples(), []);
+  const rotuloVivo = rotuloExibido({
+    label: state.workingLabel,
+    passo: state.workingSince,
+    verbos: listaVerbos,
+    seletor: seletorVerbo.current,
+    simples: verbosPlanos,
+  });
   const indicadorTrabalho = workingIndicator({
     count: state.detachedSubagents ?? 0,
     phase: state.phase,
-    ...(state.workingLabel !== undefined ? { workingLabel: state.workingLabel } : {}),
+    ...(rotuloVivo !== undefined ? { workingLabel: rotuloVivo } : {}),
   });
+  // PARÊNTESE DIM (estilo Claude Code): `(pensando · 1,2k tokens · 12s)` — a fase REAL, os
+  // tokens do turno até agora e os segundos desde o INÍCIO DO TURNO (a mesma fonte do relógio
+  // do rodapé: a contabilidade viva da raiz). Lido a cada render; o tick de 1s o atualiza.
+  // Tokens = uso reportado pelo broker/provider até o último passo concluído (o aggregate
+  // pai+filhos); ausente/0 ⇒ o segmento some. Rótulo funcional já é a fase ⇒ sem palavra.
+  const contaViva =
+    state.phase === 'thinking' || state.phase === 'retrying'
+      ? controller.turnAccounting()
+      : undefined;
+  const msDoTurno =
+    contaViva?.live === true
+      ? contaViva.durationMs
+      : state.workingSince !== undefined
+        ? Math.max(0, (props.now ?? Date.now)() - state.workingSince)
+        : undefined;
+  const detalheEspera =
+    msDoTurno !== undefined
+      ? detalheDeEspera({
+          fase:
+            state.workingLabel !== undefined && ROTULOS_GENERICOS.has(state.workingLabel)
+              ? state.workingLabel
+              : undefined,
+          tokens: contaViva?.tokens,
+          ms: msDoTurno,
+          // "Λluy " + rótulo + "… " + " " + sufixo dos sub-agentes: o que sobra da linha.
+          larguraMax:
+            columns -
+            (5 +
+              indicadorTrabalho.label.length +
+              2 +
+              (indicadorTrabalho.suffix !== undefined ? indicadorTrabalho.suffix.length + 1 : 0) +
+              2),
+        })
+      : undefined;
   const phaseAnimates =
     animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo }) ||
     doctorRunning(state.blocks);
@@ -5126,9 +5181,7 @@ export function App(props: AppProps): React.ReactElement {
             glyph="aluy"
             glyphRole="accent"
             label={indicadorTrabalho.label}
-            {...(state.phase === 'thinking' && state.workingSince !== undefined
-              ? { elapsedMs: Math.max(0, (props.now ?? Date.now)() - state.workingSince) }
-              : {})}
+            {...(detalheEspera !== undefined ? { detalhe: detalheEspera } : {})}
             {...(indicadorTrabalho.suffix !== undefined
               ? { suffix: indicadorTrabalho.suffix }
               : {})}

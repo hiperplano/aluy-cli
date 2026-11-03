@@ -169,7 +169,7 @@ describe('self-check sem ar morto (controller)', () => {
 });
 
 describe('self-check sem ar morto (App)', () => {
-  it('a tela mostra a resposta + `conferindo o trabalho (1/2)… M:SS`, sem o texto da verificação', async () => {
+  it('a tela mostra a resposta + `conferindo o trabalho (1/2)… (N s)`, sem o texto da verificação', async () => {
     const { controller, release } = build([TOOL, REAL, VERIF], 2);
     const theme = resolveTheme({ env: { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' } });
     const r = render(
@@ -185,7 +185,9 @@ describe('self-check sem ar morto (App)', () => {
       r.stdin.write('leia a.txt\r');
       await new Promise((res) => setTimeout(res, 10));
     }
-    await waitFor(() => /conferindo o trabalho \(1\/2\)… \d:\d\d/.test(plain(r.lastFrame() ?? '')));
+    await waitFor(() =>
+      /conferindo o trabalho \(1\/2\)… \(.*\d+s\)/.test(plain(r.lastFrame() ?? '')),
+    );
     const frame = plain(r.lastFrame() ?? '');
     expect(frame).toContain('Pronto — li o arquivo');
     expect(frame).not.toContain('EVIDÊNCIA');

@@ -7,7 +7,7 @@
 // duplicado enquanto a própria linha da tool está rodando.
 
 import React from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
 import {
   PolicyPermissionEngine,
@@ -20,6 +20,16 @@ import { resolveTheme } from '../../src/ui/theme/theme.js';
 import { App } from '../../src/session/App.js';
 import { SessionController } from '../../src/session/controller.js';
 import { buildTurnRecap } from '../../src/session/turn-recap.js';
+
+// rótulos planos: o teste trava a PRESENÇA/continuidade do indicador, não o verbo sorteado.
+const verbosAntes = process.env.ALUY_VERBOS;
+beforeAll(() => {
+  process.env.ALUY_VERBOS = 'simples';
+});
+afterAll(() => {
+  if (verbosAntes === undefined) delete process.env.ALUY_VERBOS;
+  else process.env.ALUY_VERBOS = verbosAntes;
+});
 
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');
@@ -155,7 +165,7 @@ describe('indicador contínuo entre passos (App renderizada)', () => {
     while (seen.length < 3 && Date.now() < fim) await sleep(20);
     expect(seen).toHaveLength(3);
     for (const [i, s] of seen.entries()) {
-      expect(s.tela, `passo ${i}`).toMatch(/pensando… \d:\d\d/);
+      expect(s.tela, `passo ${i}`).toMatch(/pensando… \(pensando · (\d+s|\d+m \d\ds)\)/);
     }
     // Fim do turno: o RECAP (`✔ leu a0.txt…`) não é mais desenhado dentro do composer.
     const fim2 = Date.now() + 5000;
