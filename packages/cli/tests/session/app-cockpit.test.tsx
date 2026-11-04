@@ -141,7 +141,7 @@ describe('App — MODO COCKPIT: entrada via /fullscreen', () => {
     const frame = plain(lastFrame() ?? '');
     // EST-1015 — a nota de entrada é INSTRUÇÃO (tab/scroll/sair), NÃO auto-depreciação: o
     // cockpit deixou de ser "experimental" (#386, render limpo provado). a App usa pt-BR.
-    expect(frame).toContain('modo cockpit');
+    expect(frame).toContain('tab alterna conversa⇄log');
     expect(frame).not.toContain('experimental');
     controller.dispose();
   });

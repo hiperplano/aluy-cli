@@ -633,8 +633,17 @@ function chunkIsFrameContent(chunk: string): boolean {
 export function createCockpitDiffer(
   rowsOf: () => number | undefined = () => process.stdout.rows,
   expectedRowsOf: () => number | undefined = () => undefined,
+  colsOf: () => number | undefined = () => process.stdout.columns,
 ): CockpitDiffer {
   let prevLines: string[] | undefined; // undefined ⇒ não há frame anterior (pinta tudo).
+  // FIX (resize no cockpit deixa lixo/linhas duplicadas) — a GEOMETRIA (linhas x colunas) do
+  // frame anterior. O reset por `resetDiffer()` da App roda num useEffect (PASSIVO), DEPOIS
+  // do commit — e o Ink escreve o frame da dimensão nova NO commit, ANTES do effect. Resultado:
+  // o 1º frame pós-resize era diffado contra um `prevLines` da geometria antiga (linhas
+  // "iguais" não reescritas ⇒ ficam os restos do reflow do terminal: header sumido, `┃ ola`
+  // 2x, composer ausente) e o reset chegava tarde demais. Agora o PRÓPRIO differ detecta a
+  // mudança de geometria no write e força o full-paint — síncrono, sem depender da App.
+  let prevGeometry: string | undefined;
 
   const transform = (chunk: string): string => {
     // FIX (corrupção sob streaming) — o differ OWNS os TRÊS formatos de write do Ink no
@@ -681,9 +690,22 @@ export function createCockpitDiffer(
       typeof rawExpected === 'number' && Number.isFinite(rawExpected) && rawExpected >= 1
         ? Math.floor(rawExpected)
         : undefined;
-    const clipRows = expectedRows ?? termRows;
+    // O frame NUNCA pode ser mais alto que o terminal REAL: uma linha a mais rola a tela e o
+    // modelo CUP-absoluto dessincroniza (composer duplicado). `termRows` é o teto duro.
+    const clipRows =
+      expectedRows !== undefined && termRows > 0
+        ? Math.min(expectedRows, termRows)
+        : (expectedRows ?? termRows);
     const clipped = clipRows > 0 && rawLines.length > clipRows;
     const nextLines = clipped ? rawLines.slice(-clipRows) : rawLines;
+    const rawCols = colsOf();
+    const geometry = `${clipRows}x${
+      typeof rawCols === 'number' && Number.isFinite(rawCols) ? Math.floor(rawCols) : 0
+    }`;
+    if (geometry !== prevGeometry) {
+      prevGeometry = geometry;
+      prevLines = undefined; // geometria mudou (resize) ⇒ full-paint na dimensão nova.
+    }
     // `body` recomposto do frame CLIPADO — p/ o `frameEndCursor` (onde o caret assenta) medir
     // a posição na tela REAL, não no frame inflado pelo Static. Sem clip, reusa o body cru.
     const effectiveBody = clipped ? nextLines.join('\n') : body;
@@ -761,6 +783,7 @@ export function createCockpitDiffer(
 
   const reset = (): void => {
     prevLines = undefined;
+    prevGeometry = undefined;
   };
 
   return { transform, reset };
@@ -902,6 +925,7 @@ export function wrapStdoutWithSync(
   const cockpitDiffer = createCockpitDiffer(
     () => original.rows,
     () => expectedCockpitRows,
+    () => original.columns,
   );
 
   // BURACO-NO-MEIO-RESIZE — estado do `primeClearOnNextFrame`: quando `true`, o PRÓXIMO
