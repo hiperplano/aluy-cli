@@ -222,7 +222,8 @@ describe('EST-0965 · ADR-0076 §5 (FIX #151) — POSIÇÃO: composer/caret na l
     const transformed = differ.transform(eraseLines + newRegion);
     // O differ AGORA OWNS esse frame: NÃO passa cru — vira diff ABSOLUTO (ZERO `\x1b[2K`).
     expect(transformed).not.toBe(eraseLines + newRegion);
-    expect(transformed.includes(`${ESC}2K`), 'sem branqueamento relativo de linha').toBe(false);
+    expect(transformed.includes(`${ESC}1A`), 'sem cursor-up relativo (eraseLines)').toBe(false);
+    expect(transformed.includes(`${ESC}2J`), 'sem branqueamento de tela').toBe(false);
     term.feed(transformed);
 
     // PROVA (a que importa, a TELA): o log assentou nas rows 0..4 corretas — sem deslocamento,

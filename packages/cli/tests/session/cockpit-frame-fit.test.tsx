@@ -234,7 +234,8 @@ describe('createCockpitDiffer — resize não deixa linhas velhas/duplicadas', (
     differ.transform(frame(24, 100, '❯ x'));
     cols = 120;
     const out = differ.transform(frame(24, 120, '❯ x'));
-    expect(out.startsWith(`${CSI}H`)).toBe(true);
+    expect(out.startsWith(`${CSI}1;1H`)).toBe(true);
+    expect(out).toContain(`${CSI}24;1H${CSI}2K`);
     expect(out).toContain('header 120');
   });
 

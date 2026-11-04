@@ -58,6 +58,7 @@
   },
   "devDependencies": {
     "@types/react": "^18",
+    "@xterm/headless": "^5.5.0",
     "esbuild": "^0.28.1"
   }
 }

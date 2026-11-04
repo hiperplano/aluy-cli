@@ -394,7 +394,7 @@ describe('setCockpit — transform do alt-screen no cockpit (mata o flicker do #
     expect(count(out, ERASE_SCREEN)).toBe(0);
     expect(count(out, ERASE_SCROLLBACK)).toBe(0);
     // o frame foi sobrescrito-no-lugar: home + conteúdo + `\x1b[J`.
-    expect(out.includes(CURSOR_HOME)).toBe(true);
+    expect(out.includes(`${ESC}1;1H`)).toBe(true);
     expect(out.includes(ERASE_TO_EOS)).toBe(true);
     // o envelope `?2026` segue valendo (atômico onde há suporte).
     expect(out.startsWith(BEGIN_SYNC)).toBe(true);
@@ -434,10 +434,12 @@ describe('setCockpit — transform do alt-screen no cockpit (mata o flicker do #
     stdout.write(cockpitFrame('AAAA longa\nb\nc')); // assenta (clearTerminal), 3 linhas.
     stdout.write(inkFrame(3, 'curta\nb\nc')); // ENCOLHEU ⇒ log-update eraseLines; deve ser DIFFADO.
     // ZERO branqueamento de linha: o diff absoluto substitui o `\x1b[2K` relativo.
-    expect(count(writes[1], ERASE_LINE)).toBe(0); // eraseLines NÃO passa mais cru — vira diff.
+    // (só 1 `\x1b[2K`: o da linha reescrita, em CUP absoluto; o `eraseLines` relativo não passa.)
+    expect(count(writes[1], ERASE_LINE)).toBe(1);
+    expect(writes[1].includes(`${ESC}1A`)).toBe(false);
     // o diff reescreveu SÓ a linha 1 (a que encolheu), por CUP ABSOLUTO + `\x1b[K` (limpa a
     // cauda da "AAAA longa" ⇒ sem rabo). As linhas 'b'/'c' (iguais) NÃO foram reescritas.
-    expect(writes[1].includes(`${ESC}1;1Hcurta${ERASE_TO_EOL}`)).toBe(true);
+    expect(writes[1].includes(`${ESC}1;1H${ERASE_LINE}curta`)).toBe(true);
     expect(writes[1].includes('AAAA')).toBe(false); // a linha velha não vaza.
   });
 
