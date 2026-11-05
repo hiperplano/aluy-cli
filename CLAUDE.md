@@ -57,7 +57,7 @@ MCP TS · **monorepo (npm workspaces)**: `@hiperplano/aluy-cli-core` (engine mod
 npm install
 npm run build       # tsc -b (cli-core → cli, na ordem do grafo)
 npm run lint        # eslint . (inclui a regra de fronteira do core)
-npm run typecheck   # tsc -b --noEmit
+npm run typecheck   # tsc -b (incremental; checa os 2 pacotes, emite em dist como o build)
 npm test            # vitest run (unit + fronteira + smoke do binário)
 npm run format      # prettier --check .
 node packages/cli/dist/bin/aluy.js --help
