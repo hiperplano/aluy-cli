@@ -17,6 +17,7 @@
 // de ela ser uma terceira régua.
 
 import type { SessionBlock } from './model.js';
+import { liveStartIndex } from './render-split.js';
 import { visualLines } from './visual-lines.js';
 
 /**
@@ -87,4 +88,28 @@ export function blocoSubagentesNaTela(args: VisibilidadeArgs): boolean {
     if (linhas + args.linhasDoRodape > args.rows) return false; // já rolou p/ fora
   }
   return linhas + args.linhasDoRodape <= args.rows;
+}
+
+/**
+ * A cópia VIVA do rodapé vale neste frame?
+ *
+ * Duas razões, e a segunda é a que faltava:
+ *  1. o bloco da conversa rolou para fora da tela (a regra original do dono);
+ *  2. o bloco já foi para o `<Static>` (ficou ATRÁS da conversa — o dono mandou uma
+ *     mensagem, o pai respondeu) E ainda há filho rodando. O que está no `<Static>` foi
+ *     escrito UMA vez no scrollback: nunca repinta, então o brilho dos filhos que seguem
+ *     trabalhando PARAVA — "mandei uma mensagem e parece que os agentes pararam". A única
+ *     cópia que anima é a do rodapé, e ela tem que aparecer mesmo com a original ainda
+ *     visível, porque a original é uma foto congelada.
+ *
+ * PURO. Sem filho rodando, a regra volta a ser só a visibilidade.
+ */
+export function copiaDoRodapeVale(args: VisibilidadeArgs): boolean {
+  const i = ultimoBlocoSubagentes(args.blocks);
+  if (i < 0) return false;
+  const b = args.blocks[i];
+  const algumRodando = b?.kind === 'subagents' && b.children.some((c) => c.status === 'running');
+  const congelado = i < liveStartIndex(args.blocks);
+  if (algumRodando && congelado) return true;
+  return !blocoSubagentesNaTela(args);
 }

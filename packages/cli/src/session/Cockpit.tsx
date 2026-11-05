@@ -417,6 +417,7 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
           scrollOffset={props.logScroll}
           focused={props.focus === 'log'}
           columns={props.columns}
+          frame={props.frame}
           bootInfo={bootInfo}
         />
       </Box>

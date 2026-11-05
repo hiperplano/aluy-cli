@@ -65,7 +65,7 @@ import {
 import type { SubAgentChildView } from '../ui/components/SubAgents.js';
 import { useMcpPicker, type McpSearchPort, type McpInstallPort } from '../ui/hooks/useMcpPicker.js';
 import { McpPicker } from '../ui/components/McpPicker.js';
-import { blocoSubagentesNaTela } from './subagentes-visiveis.js';
+import { copiaDoRodapeVale } from './subagentes-visiveis.js';
 import { Role, useTheme } from '../ui/theme/index.js';
 import { useTick } from '../ui/hooks/useTick.js';
 import { useFilePicker } from '../ui/hooks/useFilePicker.js';
@@ -1309,8 +1309,10 @@ export function App(props: AppProps): React.ReactElement {
     if (state.liveSubagents === undefined) return [];
     // SÓ QUANDO O DE CIMA SUMIU. "os agentes no footer deveriam aparecer embaixo somente
     // quando os de cima sumirem" — a cópia é socorro, não um segundo painel.
+    // EXCEÇÃO: bloco congelado no `<Static>` com filho AINDA rodando — a original não
+    // anima mais, a cópia é a única que mostra vida (ver `copiaDoRodapeVale`).
     if (
-      blocoSubagentesNaTela({
+      !copiaDoRodapeVale({
         blocks: state.blocks,
         rows,
         columns,
@@ -5665,6 +5667,7 @@ export function App(props: AppProps): React.ReactElement {
                 scrollOffset={logScroll}
                 focused={logFocused}
                 columns={splitRes.logCols}
+                frame={frame}
               />
             </Box>
           </Box>
@@ -5688,6 +5691,7 @@ export function App(props: AppProps): React.ReactElement {
               scrollOffset={logScroll}
               focused={logFocused}
               columns={columns}
+              frame={frame}
             />
           ) : (
             liveChatColumn
@@ -5990,6 +5994,16 @@ export function App(props: AppProps): React.ReactElement {
             }
             columns={Math.max(20, columns - 2)}
           />
+        </Box>
+      )}
+      {/* Cópia viva dos sub-agentes nos modos SEM painel (compact/hidden): o <FooterAgents>
+          do modo `full` envolve o painel; aqui não há painel para envolver, mas o brilho
+          dos filhos rodando não pode depender do modo do rodapé. */}
+      {statuslineMode !== 'full' && filhosRodape.length > 0 && (
+        <Box paddingLeft={2} flexDirection="column">
+          <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
+            {null}
+          </FooterAgents>
         </Box>
       )}
       {/* RODAPÉ oculto — nada além do necessário: o `⚠ yolo` NUNCA some (catraca desligada) e,

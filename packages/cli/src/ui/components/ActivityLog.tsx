@@ -22,6 +22,7 @@ import { wrappedLineCount } from '../../session/cockpit-conversa.js';
 import { truncateToWidth } from '../markdown/table-layout.js';
 import type { LogSection, LogEvent } from '../../session/activity-log.js';
 import type { FlowPhase } from '@hiperplano/aluy-cli-core';
+import { ShimmerText } from './ShimmerText.js';
 
 export interface ActivityLogProps {
   /** As seções projetadas (uma por nó da árvore) — `buildActivityLog`. */
@@ -37,6 +38,11 @@ export interface ActivityLogProps {
   readonly focused: boolean;
   /** Largura (colunas) da coluna — p/ elidir alvos longos sem estourar o wrap. */
   readonly columns?: number;
+  /**
+   * Frame do tick central — o brilho do `[filho] pensando` enquanto o filho NÃO terminou.
+   * Ausente ⇒ cabeçalho estático (como antes).
+   */
+  readonly frame?: number;
   /**
    * EST-1015 (cockpit idle) — DIAGNÓSTICO de boot (`config`/`agentes`) a mostrar no
    * EMPTY-STATE (sem atividade ainda), preenchendo a região de LOG que antes ficava
@@ -176,17 +182,48 @@ function EventRow(props: { readonly event: LogEvent; readonly cols: number }): R
 function Section(props: {
   readonly section: LogSection;
   readonly cols: number;
+  readonly frame?: number;
 }): React.ReactElement {
   const s = props.section;
+  // Filho (não a raiz) ainda NÃO terminal ⇒ brilha, sem depender do turno do pai: o brilho
+  // é função do `frame` central e do estado do FILHO, não da fase da sessão.
+  const viva =
+    props.frame !== undefined &&
+    s.kind !== 'root' &&
+    (s.phase === 'thinking' || s.phase === 'tool' || s.phase === 'asking');
+  const rotulo = `[${s.label}]`;
+  const palavra = PHASE_WORD[s.phase];
+  const largura = [...rotulo].length + 1 + [...palavra].length;
   const indent = s.kind === 'root' ? 0 : 1;
   return (
     <Box flexDirection="column" paddingLeft={indent}>
       <Box>
         {/* ▼ expandido / ▶ colapsado — o marcador é DADO (não só cor). */}
         <Role name="fgDim">{s.collapsed ? '▶' : '▼'} </Role>
-        <Role name="accent">[{s.label}]</Role>
-        <Text> </Text>
-        <Role name={phaseRole(s.phase)}>{PHASE_WORD[s.phase]}</Role>
+        {viva ? (
+          <>
+            <ShimmerText
+              text={rotulo}
+              frame={props.frame ?? 0}
+              papelEstatico="accent"
+              total={largura}
+            />
+            <Text> </Text>
+            <ShimmerText
+              text={palavra}
+              frame={props.frame ?? 0}
+              papelEstatico="accent"
+              offset={[...rotulo].length + 1}
+              total={largura}
+            />
+          </>
+        ) : (
+          <>
+            <Role name="accent">[{s.label}]</Role>
+            <Text> </Text>
+            <Role name={phaseRole(s.phase)}>{palavra}</Role>
+          </>
+        )}
         <Role name="fgDim"> · {sectionStat(s)}</Role>
         {s.collapsed && <Role name="fgDim"> (colapsado)</Role>}
       </Box>
@@ -348,6 +385,7 @@ export function ActivityLog(props: ActivityLogProps): React.ReactElement {
             key={`h:${ln.section.id}:${i}`}
             section={{ ...ln.section, events: [] }}
             cols={cols}
+            {...(props.frame !== undefined ? { frame: props.frame } : {})}
           />
         ) : (
           <EventRow key={`e:${ln.section.id}:${i}`} event={ln.event} cols={cols} />
