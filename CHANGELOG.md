@@ -14,6 +14,14 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.189] — 2026-11-05
+
+### Corrigido
+
+- 🖥️ **`/fullscreen` não duplica nem embaralha mais linhas.** O composer aparecia duas vezes, sobravam restos de linhas antigas e linhas sumiam, sobretudo em turnos com sub-agentes, com emoji e ao redimensionar a janela. Agora cada linha redesenhada é apagada antes de ser escrita, o quadro nunca passa da altura do terminal (não rola a tela), o resize repinta tudo e, após 0,7 s sem atualização, a tela é repintada por inteiro como rede de segurança. Linhas de largura total (separadores) não perdem mais a última coluna.
+- 📝 A nota de entrada do cockpit não repete mais "modo cockpit" e cabe em uma linha.
+- 🔧 `npm run typecheck` funciona de novo (`tsc -b`; antes falhava com TS6310).
+
 ## [1.0.0-rc.188] — 2026-11-03
 
 ### Adicionado
