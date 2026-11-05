@@ -29,9 +29,12 @@ const ESC = '\x1b[';
 const ERASE_SCREEN = `${ESC}2J`; // o branqueamento de tela = a fonte do flicker do #150.
 const ERASE_SCROLLBACK = `${ESC}3J`;
 const CLEAR_TERMINAL = `${ESC}2J${ESC}3J${ESC}H`; // o `clearTerminal` do Ink (alt-screen).
-const ERASE_TO_EOL = `${ESC}K`;
 const ERASE_TO_EOS = `${ESC}J`;
 const CURSOR_HOME = `${ESC}H`;
+const ERASE_LINE = `${ESC}2K`;
+/** uma linha reescrita: CUP ABSOLUTO + apaga a linha INTEIRA ANTES de escrever (a última coluna
+ * não pode ser comida por um `\x1b[K` posterior com o auto-wrap off). */
+const rowPaint = (n: number, text: string): string => `${ESC}${n};1H${ERASE_LINE}${text}`;
 
 /** Conta ocorrências (sem sobreposição) de `needle` em `s`. */
 function count(s: string, needle: string): number {
@@ -174,7 +177,7 @@ describe('EST-0965 · ADR-0076 §5 — renderer diferencial: 1 char ⇒ só a(s)
     // ANTES (#150 full-paint): o 1º frame ainda é full paint (correto — entrada). Mas o 2º
     // frame, no #150, seria OUTRO full-paint (home + body inteiro). DEPOIS (diff): o 2º é só
     // a linha mudada. Métrica: linhas de conteúdo reescritas no 2º frame.
-    expect(paintedA.startsWith(CURSOR_HOME), '1º frame deve pintar tudo na entrada (#145)').toBe(
+    expect(paintedA.startsWith(`${ESC}1;1H`), '1º frame deve pintar tudo na entrada (#145)').toBe(
       true,
     );
     expect(paintedA.includes('linha estática 0 — conteúdo do cockpit')).toBe(true);
@@ -312,7 +315,9 @@ describe('createCockpitDiffer — diff por-linha (unidade)', () => {
     // FIX (EST-1015, resize-órfão) — full-paint agora apaga a cauda POR-LINHA (`\x1b[K` ENTRE
     // as linhas) p/ não deixar rabo de conteúdo velho quando uma linha encolhe sobre a tela
     // SUJA (resetDiffer no resize). Em tela fresca os `\x1b[K` são inócuos. ZERO `\x1b[2J`.
-    expect(out).toBe(`${CURSOR_HOME}a${ERASE_TO_EOL}\nb${ERASE_TO_EOL}\nc${ERASE_TO_EOS}`);
+    expect(out).toBe(
+      `${rowPaint(1, 'a')}${rowPaint(2, 'b')}${rowPaint(3, 'c')}${ESC}4;1H${ERASE_TO_EOS}${endCUP('a\nb\nc')}`,
+    );
     expect(count(out, ERASE_SCREEN)).toBe(0); // sem branqueamento.
   });
 
@@ -322,7 +327,7 @@ describe('createCockpitDiffer — diff por-linha (unidade)', () => {
     const out = d.transform(cockpitFrame('a\nX\nc')); // mudou só a linha 2.
     // reposiciona na linha 2, escreve "X", limpa a cauda; nada das linhas 1 e 3. O cursor
     // ASSENTA no FIM do frame (após 'c' na linha 3 ⇒ `\x1b[3;2H`), NÃO no home (FIX #151).
-    expect(out).toBe(`${ESC}2;1HX${ERASE_TO_EOL}${endCUP('a\nX\nc')}`);
+    expect(out).toBe(`${rowPaint(2, 'X')}${endCUP('a\nX\nc')}`);
     expect(countCursorTo(out)).toBe(1); // 1 linha reescrita (`;1H`); o CUP final é `;2H`.
     expect(out.includes('a')).toBe(false); // linha 1 não reescrita.
     expect(out.includes('c')).toBe(false); // linha 3 não reescrita.
@@ -352,7 +357,7 @@ describe('createCockpitDiffer — diff por-linha (unidade)', () => {
     d.transform(cockpitFrame('a\nb')); // 2 linhas.
     const out = d.transform(cockpitFrame('a\nb\nc')); // 3 linhas (cresceu).
     // 'a','b' iguais ⇒ pula; só a linha 3 ('c') é nova ⇒ reescreve. Cursor no FIM (#151).
-    expect(out).toBe(`${ESC}3;1Hc${ERASE_TO_EOL}${endCUP('a\nb\nc')}`);
+    expect(out).toBe(`${rowPaint(3, 'c')}${endCUP('a\nb\nc')}`);
     expect(countCursorTo(out)).toBe(1);
   });
 
@@ -362,7 +367,9 @@ describe('createCockpitDiffer — diff por-linha (unidade)', () => {
     d.reset(); // entrou no cockpit de novo ⇒ tela vazia.
     const out = d.transform(cockpitFrame('a\nb\nc')); // MESMO conteúdo, mas pós-reset ⇒ full paint.
     // full-paint per-line (`\x1b[K` entre linhas) — limpa a cauda velha no resize (EST-1015).
-    expect(out).toBe(`${CURSOR_HOME}a${ERASE_TO_EOL}\nb${ERASE_TO_EOL}\nc${ERASE_TO_EOS}`);
+    expect(out).toBe(
+      `${rowPaint(1, 'a')}${rowPaint(2, 'b')}${rowPaint(3, 'c')}${ESC}4;1H${ERASE_TO_EOS}${endCUP('a\nb\nc')}`,
+    );
   });
 
   it('ESCAPE ISOLADO (toggle de cursor `\\x1b[?25l`/`\\x1b[?25h`) ⇒ devolve CRU e NÃO toca o buffer', () => {
@@ -393,10 +400,8 @@ describe('createCockpitDiffer — diff por-linha (unidade)', () => {
     const out = d.transform(raw);
     // SÓ a linha 1 mudou ⇒ CUP absoluto p/ a linha 1 + "curta" + `\x1b[K` (LIMPA a cauda da
     // "linha longa AAAAA" ⇒ sem rabo). Posiciona ABSOLUTO, não relativo. Cursor no FIM (#151).
-    expect(out).toBe(`${ESC}1;1Hcurta${ERASE_TO_EOL}${endCUP('curta\nb\nc')}`);
-    expect(out.includes(ERASE_TO_EOL), 'o `\\x1b[K` limpa a cauda da linha velha mais longa').toBe(
-      true,
-    );
+    expect(out).toBe(`${rowPaint(1, 'curta')}${endCUP('curta\nb\nc')}`);
+    expect(out.includes(ERASE_LINE), 'o `\\x1b[2K` limpa a linha velha mais longa').toBe(true);
     expect(countCursorTo(out)).toBe(1); // 1 linha reescrita por CUP ABSOLUTO.
   });
 
@@ -413,8 +418,10 @@ describe('createCockpitDiffer — diff por-linha (unidade)', () => {
     d.transform(cockpitFrame('AAAAAAAA muito longa\nb\nc')); // assenta.
     const out = d.transform(`${eraseLines(3)}curta\nb\nc`); // log-update encolheu.
     // ZERO `\x1b[2K` (branqueamento) no resultado — vira diff absoluto; só a linha 1 muda.
-    expect(count(out, ERASE_2K), 'sem branqueamento de linha (\\x1b[2K)').toBe(0);
-    expect(out).toBe(`${ESC}1;1Hcurta${ERASE_TO_EOL}${endCUP('curta\nb\nc')}`);
+    // (o diff apaga SÓ a linha reescrita, em CUP absoluto — 1 `\\x1b[2K`, não o `eraseLines` relativo.)
+    expect(count(out, ERASE_2K)).toBe(1);
+    expect(out.includes(`${ESC}1A`), 'sem cursor-up relativo').toBe(false);
+    expect(out).toBe(`${rowPaint(1, 'curta')}${endCUP('curta\nb\nc')}`);
   });
 
   it('clearTerminal PURO (clear sem conteúdo) ⇒ home + \\x1b[J e ZERA o buffer (próximo pinta tudo)', () => {
@@ -425,7 +432,9 @@ describe('createCockpitDiffer — diff por-linha (unidade)', () => {
     // pós-clear, o buffer zerou ⇒ o próximo frame pinta TUDO (não acha "nada mudou").
     const out = d.transform(cockpitFrame('a\nb\nc'));
     // full-paint per-line (`\x1b[K` entre linhas) — limpa a cauda velha no resize (EST-1015).
-    expect(out).toBe(`${CURSOR_HOME}a${ERASE_TO_EOL}\nb${ERASE_TO_EOL}\nc${ERASE_TO_EOS}`);
+    expect(out).toBe(
+      `${rowPaint(1, 'a')}${rowPaint(2, 'b')}${rowPaint(3, 'c')}${ESC}4;1H${ERASE_TO_EOS}${endCUP('a\nb\nc')}`,
+    );
   });
 });
 
@@ -465,10 +474,11 @@ describe('createCockpitDiffer — auto-correção (expectedRowsOf): mismatch for
     const out = d.transform(cockpitFrame('a\nX\nc'));
     // full-repaint: TODAS as linhas do corpo NOVO saem pintadas (não só a que mudou), no
     // MESMO formato do "sem frame anterior" (home + `\x1b[K` por linha + `\x1b[J`).
-    expect(out).toBe(`${CURSOR_HOME}a${ERASE_TO_EOL}\nX${ERASE_TO_EOL}\nc${ERASE_TO_EOS}`);
-    // prova negativa: um diff PARCIAL emitiria só 1 CUP (a linha mudada) — aqui não há CUP
-    // algum (o full-repaint usa `CURSOR_HOME`, não CUP por-linha).
-    expect(countCursorTo(out)).toBe(0);
+    expect(out.startsWith(rowPaint(1, 'a'))).toBe(true);
+    expect(out).toContain(rowPaint(2, 'X'));
+    expect(out).toContain(rowPaint(3, 'c'));
+    // prova negativa: um diff PARCIAL emitiria só a linha mudada — aqui saem as 3 (+ a varredura).
+    expect(out).toContain(rowPaint(1, 'a'));
   });
 
   it('após o full-repaint forçado, o frame SEGUINTE (já saudável) volta a diffar normal — sem fantasma persistente', () => {
@@ -478,7 +488,7 @@ describe('createCockpitDiffer — auto-correção (expectedRowsOf): mismatch for
     const out = d.transform(cockpitFrame('a\nX\nc\nY')); // 3º: já SAUDÁVEL de novo (4==4).
     // volta ao diff PARCIAL normal (CUP na linha que mudou) — NÃO outro full-repaint.
     expect(
-      out.startsWith(CURSOR_HOME),
+      out.startsWith(`${ESC}1;1H${ERASE_LINE}`),
       'não deveria repetir o full-repaint num frame saudável',
     ).toBe(false);
     expect(countCursorTo(out)).toBeGreaterThanOrEqual(1);
@@ -511,7 +521,7 @@ describe('createCockpitDiffer — auto-correção (expectedRowsOf): mismatch for
       // (reescreve as mudadas + varre as órfãs), NUNCA um full-repaint espúrio por mismatch.
       const out = d.transform(cockpitFrame('a\nb'));
       expect(
-        out.startsWith(CURSOR_HOME),
+        out.startsWith(`${ESC}1;1H${ERASE_LINE}`),
         'sem expectedRowsOf válido não deve forçar full-repaint',
       ).toBe(false);
     }

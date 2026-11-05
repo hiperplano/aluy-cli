@@ -65,8 +65,7 @@ export const ptBR: FullCatalog = {
   'cockpit.log': 'log',
   'cockpit.welcomeTitle': 'Λluy — cockpit',
   'cockpit.welcomeHint': 'digite um objetivo abaixo para começar · /help · /fullscreen sai',
-  'cockpit.entered':
-    'modo cockpit (tela cheia) — tab alterna conversa⇄log · pgup/pgdn rola · ctrl-s exporta · /fullscreen sai',
+  'cockpit.entered': 'tab alterna conversa⇄log · pgup/pgdn rola · ctrl-s exporta · /fullscreen sai',
   'cockpit.left': 'modo inline restaurado (scrollback nativo).',
   'cockpit.renderFault':
     'falha ao desenhar a tela cheia; voltei para o modo inline (detalhes em ~/.aluy/logs/crash.log).',

@@ -37,6 +37,23 @@ import { partitionCockpitBlocks } from './cockpit-blocks.js';
 import { elapsedTickEnabled } from './tick-policy.js';
 import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
 import { useTheme } from '../ui/theme/index.js';
+import { truncateToWidth } from '../ui/markdown/table-layout.js';
+import { NOTE_TITLE_COL } from '../ui/components/NoteBlock.js';
+import { ROTULO_COLS } from '../ui/components/StatusPanel.js';
+
+/**
+ * A nota de ENTRADA do cockpit (título `cockpit`) é uma linha de dicas de atalho: tem de
+ * ocupar EXATAMENTE 1 linha. Quebrar em 2 (terminal estreito) custa altura que a região não
+ * tem e, na conversa centrada do empty-state, nunca foi medida. Trunca com `…` ao que cabe
+ * ao lado do rótulo (glifo + espaço + rótulo + espaço). PURO; outras notas passam inalteradas.
+ */
+export function fitCockpitNoteToWidth(b: SessionBlock, columns: number): SessionBlock {
+  if (b.kind !== 'note' || b.title !== 'cockpit') return b;
+  // +4 de folga: o bloco recua 2 colunas na conversa e o empty-state centraliza a nota; 1 coluna a mais
+  // faria o Ink cortar a cauda (incl. o `…`) em vez de caber.
+  const avail = Math.max(1, columns - (NOTE_TITLE_COL + ROTULO_COLS - 1 + 1) - 4);
+  return { ...b, lines: b.lines.map((l) => truncateToWidth(l, avail)) };
+}
 
 /**
  * EST-1015 (fix fullscreen "texto embaralhado/sobreposto" — bug #1 do dono) — clipa as
@@ -343,7 +360,10 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
   const windowPct = props.state.meta.windowPct;
   // EST-1015 (cockpit idle) — realoca as notas de DIAGNÓSTICO de boot (config/agentes) p/ o
   // LOG (preenche a região barren) e deixa a CONVERSA limpa (boas-vindas até o 1º objetivo).
-  const { startupNotes, conversation } = partitionCockpitBlocks(props.state.blocks);
+  const { startupNotes, conversation: rawConversation } = partitionCockpitBlocks(
+    props.state.blocks,
+  );
+  const conversation = rawConversation.map((b) => fitCockpitNoteToWidth(b, props.columns));
   const bootInfo = startupNotes.map((n) => ({ title: n.title, lines: n.lines }));
 
   return (

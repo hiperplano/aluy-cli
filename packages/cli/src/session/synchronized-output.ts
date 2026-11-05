@@ -56,6 +56,10 @@ const CURSOR_COL1 = `${ESC}G`;
 const ERASE_TO_EOL = `${ESC}K`;
 /** `\x1b[J` — apaga do cursor até o FIM DA TELA (só pra BAIXO; nunca o scrollback). */
 const ERASE_TO_EOS = `${ESC}J`;
+/** `\x1b[?7l` — auto-wrap OFF (ver autowrap.ts). Reafirmado a cada frame do cockpit: uma linha que
+ * o terminal ache larga demais é TRUNCADA, nunca quebrada — quebrar na última linha ROLA a tela
+ * e dessincroniza o modelo CUP-absoluto do differ (composer duplicado). */
+const DISABLE_AUTOWRAP_SEQ = `${ESC}?7l`;
 
 // EST-0965 · ADR-0076 §5 — O FLICKER DO COCKPIT é por OUTRO byte que o inline. No
 // alt-screen o frame do cockpit ENCHE `rows` (invariante §3), então o Ink NÃO usa o
@@ -545,6 +549,14 @@ export interface CockpitDiffer {
   transform(chunk: string): string;
   /** Zera o frame anterior ⇒ o próximo frame pinta TUDO (entrada do alt-screen, #145). */
   reset(): void;
+  /**
+   * REDE DE SEGURANÇA — repinta o frame ANTERIOR inteiro (toda linha em CUP absoluto + `2K`),
+   * ou `''` se não há frame. O differ só reescreve o que MUDOU; se a tela real divergiu do
+   * modelo por algo que ele não viu (rolagem de 1 linha, escrita alheia, reflow do terminal),
+   * as linhas "iguais" ficam erradas PARA SEMPRE. O caller chama isto quando a tela assenta
+   * (ocioso) p/ curar. Não altera o estado.
+   */
+  heal(): string;
 }
 
 /** Quebra o body do frame em linhas LÓGICAS por `\n`, preservando um `\r` final na linha. */
@@ -633,8 +645,17 @@ function chunkIsFrameContent(chunk: string): boolean {
 export function createCockpitDiffer(
   rowsOf: () => number | undefined = () => process.stdout.rows,
   expectedRowsOf: () => number | undefined = () => undefined,
+  colsOf: () => number | undefined = () => process.stdout.columns,
 ): CockpitDiffer {
   let prevLines: string[] | undefined; // undefined ⇒ não há frame anterior (pinta tudo).
+  // FIX (resize no cockpit deixa lixo/linhas duplicadas) — a GEOMETRIA (linhas x colunas) do
+  // frame anterior. O reset por `resetDiffer()` da App roda num useEffect (PASSIVO), DEPOIS
+  // do commit — e o Ink escreve o frame da dimensão nova NO commit, ANTES do effect. Resultado:
+  // o 1º frame pós-resize era diffado contra um `prevLines` da geometria antiga (linhas
+  // "iguais" não reescritas ⇒ ficam os restos do reflow do terminal: header sumido, `┃ ola`
+  // 2x, composer ausente) e o reset chegava tarde demais. Agora o PRÓPRIO differ detecta a
+  // mudança de geometria no write e força o full-paint — síncrono, sem depender da App.
+  let prevGeometry: string | undefined;
 
   const transform = (chunk: string): string => {
     // FIX (corrupção sob streaming) — o differ OWNS os TRÊS formatos de write do Ink no
@@ -681,9 +702,22 @@ export function createCockpitDiffer(
       typeof rawExpected === 'number' && Number.isFinite(rawExpected) && rawExpected >= 1
         ? Math.floor(rawExpected)
         : undefined;
-    const clipRows = expectedRows ?? termRows;
+    // O frame NUNCA pode ser mais alto que o terminal REAL: uma linha a mais rola a tela e o
+    // modelo CUP-absoluto dessincroniza (composer duplicado). `termRows` é o teto duro.
+    const clipRows =
+      expectedRows !== undefined && termRows > 0
+        ? Math.min(expectedRows, termRows)
+        : (expectedRows ?? termRows);
     const clipped = clipRows > 0 && rawLines.length > clipRows;
     const nextLines = clipped ? rawLines.slice(-clipRows) : rawLines;
+    const rawCols = colsOf();
+    const geometry = `${clipRows}x${
+      typeof rawCols === 'number' && Number.isFinite(rawCols) ? Math.floor(rawCols) : 0
+    }`;
+    if (geometry !== prevGeometry) {
+      prevGeometry = geometry;
+      prevLines = undefined; // geometria mudou (resize) ⇒ full-paint na dimensão nova.
+    }
     // `body` recomposto do frame CLIPADO — p/ o `frameEndCursor` (onde o caret assenta) medir
     // a posição na tela REAL, não no frame inflado pelo Static. Sem clip, reusa o body cru.
     const effectiveBody = clipped ? nextLines.join('\n') : body;
@@ -726,7 +760,21 @@ export function createCockpitDiffer(
       // ao fim (varre as órfãs ABAIXO). O cursor termina no fim do frame, igual ao full-paint
       // antigo (sem CUP além da tela). Em tela fresca (entrada do alt-screen) os `\x1b[K` são
       // inócuos; no RESIZE eles limpam a cauda velha. ZERO `\x1b[2J` ⇒ sem branqueamento (#150).
-      return `${CURSOR_HOME}${nextLines.join(`${ERASE_TO_EOL}\n`)}${ERASE_TO_EOS}`;
+      // FIX (última coluna comida / linha larga) — CADA linha é posicionada em CUP ABSOLUTO e
+      // APAGADA POR INTEIRO (`\x1b[2K`) ANTES de escrever. O `\x1b[K` DEPOIS (antigo) apagava
+      // a ÚLTIMA célula de uma linha que enche a largura: com o auto-wrap desligado (`?7l`) o
+      // cursor fica PARADO na última coluna após escrever nela, e `\x1b[K` apaga dali pra
+      // frente — isto é, o próprio último caractere (régua de 106 col saía com 105). Apagar
+      // antes não depende da largura que o terminal acha que a linha tem (emoji/VS16/ZWJ).
+      const painted = nextLines.map((l, i) => `${cursorTo(i + 1)}${ERASE_LINE}${l}`).join('');
+      const endFull = frameEndCursor(effectiveBody);
+      // `\x1b[J` só se SOBRA tela abaixo: com o frame enchendo `rows`, CUP(rows+1) CLAMPA na última
+      // linha e o `J` apagaria o composer.
+      const sweep =
+        clipRows > 0 && nextLines.length >= clipRows
+          ? ''
+          : `${cursorTo(nextLines.length + 1)}${ERASE_TO_EOS}`;
+      return `${painted}${sweep}${cursorToRC(endFull.row, endFull.col)}`;
     }
 
     // DIFF por-linha: emite SÓ as linhas que mudaram, posicionando cada uma por CUP.
@@ -737,7 +785,7 @@ export function createCockpitDiffer(
       const prev = prevLines[r];
       if (prev === next) continue; // linha igual ⇒ NÃO reescreve (é o que mata o flicker).
       // posiciona na linha r (1-based) + escreve a linha nova + limpa a cauda (não a linha toda).
-      out += `${cursorTo(r + 1)}${next}${ERASE_TO_EOL}`;
+      out += `${cursorTo(r + 1)}${ERASE_LINE}${next}`;
     }
     // Frame ENCOLHEU: há linhas órfãs do frame anterior abaixo da última nova ⇒ varre PRA BAIXO.
     if (nextLines.length < prevLines.length) {
@@ -761,9 +809,17 @@ export function createCockpitDiffer(
 
   const reset = (): void => {
     prevLines = undefined;
+    prevGeometry = undefined;
   };
 
-  return { transform, reset };
+  const heal = (): string => {
+    if (prevLines === undefined || prevLines.length === 0) return '';
+    const painted = prevLines.map((l, i) => `${cursorTo(i + 1)}${ERASE_LINE}${l}`).join('');
+    const end = frameEndCursor(`${prevLines.join('\n')}\n`);
+    return `${painted}${cursorToRC(Math.min(end.row, prevLines.length), end.col)}`;
+  };
+
+  return { transform, reset, heal };
 }
 
 /**
@@ -902,6 +958,7 @@ export function wrapStdoutWithSync(
   const cockpitDiffer = createCockpitDiffer(
     () => original.rows,
     () => expectedCockpitRows,
+    () => original.columns,
   );
 
   // BURACO-NO-MEIO-RESIZE — estado do `primeClearOnNextFrame`: quando `true`, o PRÓXIMO
@@ -920,6 +977,28 @@ export function wrapStdoutWithSync(
     if (pendingClearFallback === undefined) return;
     clearTimeout(pendingClearFallback);
     pendingClearFallback = undefined;
+  };
+
+  // REDE DE SEGURANÇA do cockpit: quando a tela assenta (HEAL_IDLE_MS sem frame novo), repinta o
+  // último frame inteiro (ver `CockpitDiffer.heal`). Cura qualquer divergência tela×modelo
+  // (rolagem, escrita alheia) em ≤ ~1s, em vez de deixá-la até o próximo full-paint.
+  const HEAL_IDLE_MS = 700;
+  let healTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleHeal = (): void => {
+    if (healTimer !== undefined) clearTimeout(healTimer);
+    healTimer = setTimeout(() => {
+      healTimer = undefined;
+      if (!cockpitActive || cleanedUp) return;
+      const h = cockpitDiffer.heal();
+      if (h === '') return;
+      const out = `${DISABLE_AUTOWRAP_SEQ}${h}`;
+      try {
+        original.write(useSync ? `${BEGIN_SYNC}${out}${END_SYNC}` : out);
+      } catch {
+        /* stream fechado */
+      }
+    }, HEAL_IDLE_MS);
+    healTimer.unref?.();
   };
 
   const wrappedWrite = ((
@@ -967,7 +1046,7 @@ export function wrapStdoutWithSync(
     const transformed = !useOverwrite
       ? inlineBody
       : cockpitActive
-        ? cockpitDiffer.transform(body)
+        ? `${DISABLE_AUTOWRAP_SEQ}${cockpitDiffer.transform(body)}`
         : overwriteInPlace(inlineBody);
     // BURACO-NO-MEIO-RESIZE — se um `primeClearOnNextFrame()` está ARMADO, este É o
     // "próximo write de frame": prepende o `HARD_CLEAR` CRU (não passa pelo `overwriteInPlace`
@@ -982,6 +1061,7 @@ export function wrapStdoutWithSync(
       withClear = `${HARD_CLEAR}${transformed}`;
     }
     const framed = useSync ? `${BEGIN_SYNC}${withClear}${END_SYNC}` : withClear;
+    if (cockpitActive) scheduleHeal();
     // UM único write ao stream real: tudo concatenado e atômico.
     return original.write(framed, callback as () => void);
   }) as NodeJS.WriteStream['write'];
@@ -999,6 +1079,7 @@ export function wrapStdoutWithSync(
   const cleanup = (): void => {
     if (cleanedUp) return;
     cleanedUp = true;
+    if (healTimer !== undefined) clearTimeout(healTimer);
     clearPendingClearFallback(); // não deixa o timer da fallback pendurado no exit.
     // ESU final CRU (não pelo proxy — senão re-transformaria). Best-effort.
     if (!useSync) return; // sem `?2026`, não há modo sync p/ desfazer.

@@ -57,8 +57,7 @@ export const en: PartialCatalog = {
   'cockpit.log': 'log',
   'cockpit.welcomeTitle': 'Λluy — cockpit',
   'cockpit.welcomeHint': 'type a goal below to get started · /help · /fullscreen exits',
-  'cockpit.entered':
-    'cockpit mode (full screen) — tab switches chat⇄log · pgup/pgdn scroll · ctrl-s export · /fullscreen exits',
+  'cockpit.entered': 'tab switches chat⇄log · pgup/pgdn scroll · ctrl-s export · /fullscreen exits',
   'cockpit.left': 'inline mode restored (native scrollback).',
   'cockpit.renderFault':
     'full-screen render failed; back to inline mode (details in ~/.aluy/logs/crash.log).',
