@@ -14,6 +14,12 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.190] — 2026-11-06
+
+### Corrigido
+
+- ✨ **O brilho dos sub-agentes não para mais quando você manda uma mensagem.** Ao pedir um status (ou qualquer mensagem) com filhos ainda rodando, o bloco dos sub-agentes congelava e parecia que eles tinham travado. Agora, enquanto algum filho roda, uma lista viva com brilho aparece abaixo do composer em todos os modos de rodapé (`full`, `compact` e `hidden`), e no `/fullscreen` o LOG também brilha nos filhos que ainda trabalham. Quando todos terminam, o brilho para.
+
 ## [1.0.0-rc.189] — 2026-11-05
 
 ### Corrigido
