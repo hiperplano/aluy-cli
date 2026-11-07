@@ -372,6 +372,24 @@ describe('segredo: ZERO ocorrências do canário em tudo que persiste ou sai', (
     expect(secretVault.has('TOKEN_Y')).toBe(false);
     expect(plain(lastFrame() ?? '')).not.toContain('/secret TOKEN_Y'); // nada na fila/composer
 
+    // com a FILA já ocupada (um `!` enfileirado), o `/secret …` também roda na hora — não fica
+    // atrás da fila, visível em "na fila" e re-submetido depois
+    stdin.write('!echo fila');
+    await waitFor(() => plain(lastFrame() ?? '').includes('!echo fila'));
+    stdin.write('\r');
+    await tick(100);
+    stdin.write(`/secret TOKEN_Z ${CANARY}`);
+    await waitFor(() => plain(lastFrame() ?? '').includes('/secret TOKEN_Z'));
+    stdin.write('\r');
+    await waitFor(
+      () =>
+        controller.current.blocks.filter(
+          (b) => b.kind === 'note' && b.lines.some((l) => l.includes('digitado em aberto')),
+        ).length >= 2,
+      2000,
+    );
+    expect(controller.turnoVivo).toBe(true); // e o turno segue vivo: foi tratado na hora
+
     release();
     await waitFor(() => !controller.turnoVivo);
     await tick(100);
