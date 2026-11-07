@@ -293,8 +293,9 @@ export class Concierge {
   private onEvent(ev: TaskEvent): void {
     const t = this.o.registry.get(ev.taskId);
     if (!t) return;
-    if (TERMINAL_STATUSES.has(t.status)) this.releaseBlocked();
+    // Relata o fim ANTES de liberar quem esperava (a ordem na conversa conta a história certa).
     this.relay(ev, t);
+    if (TERMINAL_STATUSES.has(t.status)) this.releaseBlocked();
   }
 
   private releaseBlocked(): void {

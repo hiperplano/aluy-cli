@@ -178,6 +178,10 @@ describe('Concierge — tarefas paralelas e arquivos', () => {
     expect(engine.started).toEqual(['t1', 't2']);
     expect(registry.get('t2')!.status).toBe('running');
     expect(lines.some((l) => l.includes('t2 começou'))).toBe(true);
+    // a ordem conta a história: primeiro o fim da t1, depois o começo da t2
+    expect(lines.findIndex((l) => l.includes('t1 concluída'))).toBeLessThan(
+      lines.findIndex((l) => l.includes('t2 começou')),
+    );
   });
 
   it('pasta contém arquivo: conflito', () => {
