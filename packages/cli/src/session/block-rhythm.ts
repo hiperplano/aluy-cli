@@ -41,14 +41,18 @@ import type { SessionBlock } from './model.js';
 
 /**
  * Tipos de bloco cujo RENDER já TERMINA com uma linha em branco (o `paddingBottom={1}`
- * do wrapper no `<BlockView>`, ou do próprio componente no caso do `inject`). Quem está
+ * do wrapper no `<BlockView>`). Quem está
  * nesta lista JÁ paga o respiro de baixo ⇒ o bloco seguinte não deve pagar de novo.
  *
  * Quem NÃO está (e por quê):
  *   · `tool`         — `<ToolLine>` sem padding: tools seguidas formam lista compacta;
  *   · `testrun`      — idem (`<TestRunBlock>` fecha na linha `✓ todos passaram`);
  *   · `deny`         — linha única `[x] negado · …`, sem pad;
- *   · `broker-error` — fecha na BORDA `╰────` da caixa (traço, não linha em branco).
+ *   · `broker-error` — fecha na BORDA `╰────` da caixa (traço, não linha em branco);
+ *   · `inject`       — `↳ encaixado: …` sem pad: seguidas formam lista, e o respiro é pago
+ *                      por QUEM VEM DEPOIS (`blankAfterInject`). Pagar de cima dependia do
+ *                      FUTURO: a 1ª nota já está no `<Static>` (escrita uma vez, nunca
+ *                      repintada) quando a 2ª chega, e a linha em branco ficava no meio.
  */
 const KINDS_WITH_TRAILING_BLANK: ReadonlySet<SessionBlock['kind']> = new Set([
   'you',
@@ -57,7 +61,6 @@ const KINDS_WITH_TRAILING_BLANK: ReadonlySet<SessionBlock['kind']> = new Set([
   'bang',
   'subagents',
   'doctor',
-  'inject',
 ]);
 
 /** `true` se o render de um bloco deste tipo termina com uma linha em BRANCO. */
@@ -78,4 +81,42 @@ export function blockEndsWithBlankLine(kind: SessionBlock['kind']): boolean {
 export function aluyNeedsLeadingBlank(prevKind: SessionBlock['kind'] | undefined): boolean {
   if (prevKind === undefined) return false;
   return !blockEndsWithBlankLine(prevKind);
+}
+
+/**
+ * Bloco que NÃO desenha nada (`<></>`): a passada de verificação (`selfCheck`) do `aluy`.
+ * Não conta como vizinho — senão `inject → (invisível) → você` perderia o respiro e
+ * `inject → (invisível) → inject` ganharia um.
+ */
+export function isInvisibleBlock(b: SessionBlock): boolean {
+  return b.kind === 'aluy' && b.selfCheck === true;
+}
+
+/**
+ * Tipo do bloco VISÍVEL imediatamente anterior a `blocks[index]`, olhando só até `floor`
+ * (inclusive). `undefined` se não há. Pula blocos invisíveis.
+ */
+export function previousVisibleKind(
+  blocks: readonly SessionBlock[],
+  index: number,
+  floor = 0,
+): SessionBlock['kind'] | undefined {
+  for (let i = index - 1; i >= floor; i -= 1) {
+    const b = blocks[i];
+    if (b !== undefined && !isInvisibleBlock(b)) return b.kind;
+  }
+  return undefined;
+}
+
+/**
+ * `true` se o bloco `kind` precisa de 1 linha em branco ACIMA porque o vizinho visível de
+ * cima é um `inject` (que não paga respiro de baixo). Inject seguido de inject: não — é
+ * uma lista compacta. O respiro depende só do PASSADO: vale igual com o `inject` já no
+ * `<Static>` ou ainda na região viva.
+ */
+export function blankAfterInject(
+  kind: SessionBlock['kind'],
+  prevKind: SessionBlock['kind'] | undefined,
+): boolean {
+  return prevKind === 'inject' && kind !== 'inject';
 }

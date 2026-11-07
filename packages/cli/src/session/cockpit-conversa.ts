@@ -36,6 +36,7 @@ import { parseMarkdown, type Inline } from '../ui/markdown/parse.js';
 // medição precisa vir da mesma fonte: duplicar o número aqui reabriria justamente a
 // divergência medida×render que este módulo existe p/ evitar (ADR-0076 §5).
 import { noteContinuationIndent, noteTitleFitsColumn } from '../ui/components/NoteBlock.js';
+import { blankAfterInject, isInvisibleBlock, previousVisibleKind } from './block-rhythm.js';
 
 /** Contexto de medição — o que o render usa e a medição precisa espelhar. */
 export interface ConversaCtx {
@@ -232,7 +233,17 @@ function outputBoxLines(output: string | undefined, ctx: ConversaCtx): number {
  * cockpit (largura `ctx.columns`). Espelho 1:1 dos componentes (TurnBlock/ToolLine/
  * BangBlock/NoteBlock/SubAgents/Doctor/TestRunBlock/BrokerError/InjectAck). PURO.
  */
-export function measureConversaBlock(b: SessionBlock, ctx: ConversaCtx): number {
+export function measureConversaBlock(
+  b: SessionBlock,
+  ctx: ConversaCtx,
+  /** Vizinho VISÍVEL de cima: após um `inject` o bloco paga 1 linha em branco acima. */
+  prevKind?: SessionBlock['kind'] | undefined,
+): number {
+  const lead = blankAfterInject(b.kind, prevKind) && !isInvisibleBlock(b) ? 1 : 0;
+  return lead + measureConversaBlockBody(b, ctx);
+}
+
+function measureConversaBlockBody(b: SessionBlock, ctx: ConversaCtx): number {
   // PISO NA ENTRADA — a rc.137 pôs `effectiveCols` na FALA, na saída viva e no CLIP, e
   // deixou a MEDIÇÃO de fora: aqui `c` era `ctx.columns` cru, subtraído em dez pontos
   // deste switch. Com `columns` degenerado (0/negativo/NaN — a janela real que existe na
@@ -359,8 +370,9 @@ export function measureConversaBlock(b: SessionBlock, ctx: ConversaCtx): number 
       );
     }
     case 'inject':
-      // `↳ encaixado: …` (1, texto truncado a 80 pelo próprio componente) + pad (1).
-      return 2;
+      // `↳ encaixado: …` (1, texto truncado a 80 pelo próprio componente). SEM pad: o
+      // respiro é do bloco seguinte (`blankAfterInject`, somado em `measureConversaBlock`).
+      return 1;
   }
 }
 
@@ -518,15 +530,20 @@ export function fitConversaWindow(
   let used = 0;
   let start = end;
   for (let i = end - 1; i >= 0; i -= 1) {
-    const h = measureConversaBlock(blocks[i]!, ctx);
+    const h = measureConversaBlock(blocks[i]!, ctx, previousVisibleKind(blocks, i));
     if (used + h > room) break;
     used += h;
     start = i;
   }
   if (start === end) {
     // O bloco MAIS NOVO da janela sozinho não cabe ⇒ clipa na fonte p/ caber.
-    const clipped = clipConversaBlock(blocks[end - 1]!, room, ctx);
-    const h = measureConversaBlock(clipped, ctx);
+    // O respiro acima (após `inject`) também ocupa linha: o clip na fonte cabe no que sobra.
+    const prev = previousVisibleKind(blocks, end - 1);
+    const lead =
+      measureConversaBlock(blocks[end - 1]!, ctx, prev) -
+      measureConversaBlock(blocks[end - 1]!, ctx);
+    const clipped = clipConversaBlock(blocks[end - 1]!, room - lead, ctx);
+    const h = measureConversaBlock(clipped, ctx, prev);
     if (h <= room) {
       return {
         start: end - 1,

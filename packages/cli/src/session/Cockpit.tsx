@@ -36,6 +36,7 @@ import type { CockpitLayout } from './cockpit-layout.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
 import { elapsedTickEnabled } from './tick-policy.js';
 import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
+import { previousVisibleKind } from './block-rhythm.js';
 import { useTheme } from '../ui/theme/index.js';
 import { truncateToWidth } from '../ui/markdown/table-layout.js';
 import { NOTE_TITLE_COL } from '../ui/components/NoteBlock.js';
@@ -342,6 +343,9 @@ function ConversaRegion(props: {
             // sem teto, uma resposta longa streamando estourava `room` ⇒ mis-clip do Ink.
             // TEM de ser o MESMO valor usado na medição (ctx.streamMaxLines).
             maxLines={ctx.streamMaxLines}
+            // Respiro após `inject` (o `inject` não paga o de baixo): mesmo vizinho que a
+            // medição (`fitConversaWindow`) usou, inclusive o que ficou fora da janela.
+            aposInject={previousVisibleKind(blocks, vp.start + i) === 'inject'}
           />
         ))}
       </Box>

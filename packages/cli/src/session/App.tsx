@@ -110,7 +110,7 @@ import { formatElapsed, queueAtRest } from './model.js';
 import { decideEscAction } from './esc-redirect.js';
 import { animTickEnabled, elapsedTickEnabled } from './tick-policy.js';
 import { splitBlocks } from './render-split.js';
-import { aluyNeedsLeadingBlank } from './block-rhythm.js';
+import { aluyNeedsLeadingBlank, previousVisibleKind } from './block-rhythm.js';
 import {
   LIVE_CHROME_BASE_ROWS,
   mostraIndicadorTrabalho,
@@ -5375,8 +5375,7 @@ export function App(props: AppProps): React.ReactElement {
               // pad do contêiner) e 1 DEPOIS (o paddingTop do próprio aluy, no Static): a
               // altura não pula no instante em que o bloco desce p/ o scrollback — que é
               // onde este repo já teve o "buraco no meio da tela".
-              prevKind={i > 0 ? live[i - 1]?.kind : undefined}
-              nextKind={live[i + 1]?.kind}
+              prevKind={i > 0 ? previousVisibleKind(live, i) : undefined}
               semCursor
             />
           ))}
@@ -5580,7 +5579,10 @@ export function App(props: AppProps): React.ReactElement {
                   histórico. Antes de cada `you` que NÃO é o 1º turno, um traço
                   CURTO no papel apagado (subtle) separa o turno anterior do novo. */}
               {block.kind === 'you' && blockIndex > 0 && (
-                <Box paddingBottom={1}>
+                <Box
+                  paddingBottom={1}
+                  paddingTop={previousVisibleKind(done, blockIndex) === 'inject' ? 1 : 0}
+                >
                   <Divider columns={columns} subtle />
                 </Box>
               )}
@@ -5594,8 +5596,13 @@ export function App(props: AppProps): React.ReactElement {
                 isCurrent={false}
                 frame={0}
                 columns={columns}
-                prevKind={done[blockIndex - 1]?.kind}
-                nextKind={done[blockIndex + 1]?.kind}
+                // `you` com divisória: o respiro após `inject` vai ACIMA da divisória (acima), não
+                // entre ela e a fala — o BlockView não repete.
+                prevKind={
+                  block.kind === 'you' && blockIndex > 0
+                    ? undefined
+                    : previousVisibleKind(done, blockIndex)
+                }
                 settled
               />
             </Box>
@@ -6121,7 +6128,21 @@ export function App(props: AppProps): React.ReactElement {
 /** Renderiza um bloco da sessão pelo seu tipo. */
 // EST-1000 · ADR-0076 §3 — exportado p/ o <Cockpit> REUSAR o mesmo render de bloco da
 // conversa (uma fonte só; o cockpit não duplica a renderização dos turnos).
-export function BlockView(props: {
+export function BlockView(props: BlockViewProps): React.ReactElement {
+  // O `inject` não paga respiro de baixo (ver `block-rhythm.ts`): quem vem DEPOIS paga o de
+  // cima. O `aluy` já tem o seu `paddingTop` (e é o único com `selfCheck` invisível).
+  const apos = props.aposInject === true || props.prevKind === 'inject';
+  if (apos && props.block.kind !== 'inject' && props.block.kind !== 'aluy') {
+    return (
+      <Box paddingTop={1}>
+        <BlockBody {...props} />
+      </Box>
+    );
+  }
+  return <BlockBody {...props} />;
+}
+
+interface BlockViewProps {
   readonly block: SessionState['blocks'][number];
   readonly isCurrent: boolean;
 
@@ -6145,10 +6166,10 @@ export function BlockView(props: {
   // resultado de um índice que pode não existir (`blocks[i-1]?.kind`) direto.
   readonly prevKind?: SessionState['blocks'][number]['kind'] | undefined;
   /**
-   * O tipo do bloco SEGUINTE — espelho do `prevKind`. Hoje só o `inject` consulta: dois
-   * "↳ encaixado" seguidos são UMA lista, e o respiro entre eles a quebrava ao meio.
+   * Cockpit: o vizinho visível de cima é um `inject` (o cockpit não passa `prevKind` — ver
+   * `block-rhythm.ts`). Mesmo efeito de `prevKind === 'inject'`: 1 linha em branco acima.
    */
-  readonly nextKind?: SessionState['blocks'][number]['kind'] | undefined;
+  readonly aposInject?: boolean | undefined;
   /**
    * O bloco já está no `<Static>` (histórico, nunca repintado). Hoje só muda o lote de
    * sub-agentes que desceu com filhos em segundo plano (ver `liveStartIndex`).
@@ -6160,7 +6181,9 @@ export function BlockView(props: {
   readonly detalhe?: string | undefined;
   /** F3 — sem o cursor `●`: a linha de trabalho do App é o indicador vivo. */
   readonly semCursor?: boolean | undefined;
-}): React.ReactElement {
+}
+
+function BlockBody(props: BlockViewProps): React.ReactElement {
   const b = props.block;
   switch (b.kind) {
     case 'you':
@@ -6180,7 +6203,10 @@ export function BlockView(props: {
       // enquanto streama (era o flash que sumia ao terminar).
       if (b.selfCheck === true) return <></>;
       return (
-        <Box paddingBottom={1} paddingTop={aluyNeedsLeadingBlank(props.prevKind) ? 1 : 0}>
+        <Box
+          paddingBottom={1}
+          paddingTop={aluyNeedsLeadingBlank(props.prevKind) || props.aposInject === true ? 1 : 0}
+        >
           <AluyBlock
             text={b.text}
             streaming={b.streaming}
@@ -6304,7 +6330,7 @@ export function BlockView(props: {
       // EST-0982 (mid-turn) — confirmação "↳ encaixado": o "btw" do usuário ENTROU no
       // turno vivo (incorporado entre iterações). Nota leve/dim — feedback, não fala do
       // agente. O eco já vem REDIGIDO (CLI-SEC-6); vazio ⇒ só o rótulo.
-      return <InjectAck text={b.text} seguidoDeOutro={props.nextKind === 'inject'} />;
+      return <InjectAck text={b.text} />;
   }
 }
 
@@ -6313,17 +6339,14 @@ export function BlockView(props: {
  * eco REDIGIDO do que entrou (truncado p/ não inundar a região viva). Avisa o usuário
  * que o input foi incorporado no turno em curso (e não engolido / adiado).
  */
-function InjectAck(props: {
-  readonly text: string;
-  readonly seguidoDeOutro?: boolean;
-}): React.ReactElement {
+function InjectAck(props: { readonly text: string }): React.ReactElement {
   const echo = props.text.trim();
   const shown = echo.length > 80 ? `${echo.slice(0, 80)}…` : echo;
   return (
-    // Relato do dono: mandar DUAS mensagens no meio do turno rendia dois "↳ encaixado" com
-    // uma linha em branco no meio — cada nota carregava o próprio respiro. Seguidas, elas
-    // são uma lista; o respiro fica só depois da ÚLTIMA.
-    <Box paddingLeft={2} paddingBottom={props.seguidoDeOutro === true ? 0 : 1}>
+    // Sem `paddingBottom`: a nota é uma LINHA. O respiro depois dela é de quem vem a seguir
+    // (`blankAfterInject`) — pagar de cima dependia de a próxima já existir quando esta foi
+    // escrita no `<Static>`, e duas notas em instantes diferentes saíam com linha no meio.
+    <Box paddingLeft={2}>
       <Role name="fgDim">↳ encaixado{shown ? `: ${shown}` : ''}</Role>
     </Box>
   );
