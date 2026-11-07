@@ -297,4 +297,93 @@ describe('segredo: ZERO ocorrências do canário em tudo que persiste ou sai', (
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) expect(c).not.toContain(CANARY);
   }, 30_000);
+
+  it('com turno VIVO: `/secret NOME valor` não vai à fila nem ao histórico ↑↓', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const model: ModelCaller = {
+      async call(): Promise<ModelCallResult> {
+        await gate;
+        return { request_id: 'r', content: 'feito.', finish_reason: 'stop' };
+      },
+    };
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine(),
+      ports: {
+        fs: {
+          async readFile() {
+            return '';
+          },
+          async writeFile() {},
+          async exists() {
+            return false;
+          },
+        },
+        shell: {
+          async exec() {
+            return { stdout: '', stderr: '', exitCode: 0 };
+          },
+        },
+        search: {
+          async search() {
+            return { matches: [], truncated: {} };
+          },
+        },
+      } as unknown as ToolPorts,
+      askResolver: new TuiAskResolver(),
+      meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
+      watchdogEnv: { ALUY_STUCK_OFF: '1' },
+      flush: { intervalMs: 0 },
+    });
+    const secrets = new SecretsService({
+      projectDir: '/proj',
+      fileVault: {
+        vaultPath: join(dir, 'credentials.enc'),
+        machineId: { reader: () => 'maquina-de-teste' },
+        username: 'u',
+      },
+    });
+    const theme = resolveTheme({ env: { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' } });
+    const { stdin, lastFrame, frames, unmount } = render(
+      <ThemeProvider theme={theme}>
+        <App controller={controller} secrets={secrets} animate={false} bootMs={0} />
+      </ThemeProvider>,
+    );
+    controller.dismissBoot();
+    await waitFor(() => plain(lastFrame() ?? '').length > 0);
+    await tick(200);
+
+    stdin.write('trabalhe');
+    await waitFor(() => plain(lastFrame() ?? '').includes('trabalhe'));
+    stdin.write('\r');
+    await waitFor(() => controller.turnoVivo);
+
+    // OCUPADO: a linha com valor inline é tratada na hora (não enfileirada), sem guardar nada
+    stdin.write(`/secret TOKEN_Y ${CANARY}`);
+    await waitFor(() => plain(lastFrame() ?? '').includes('/secret TOKEN_Y'));
+    stdin.write('\r');
+    await waitFor(() =>
+      controller.current.blocks.some(
+        (b) => b.kind === 'note' && b.lines.some((l) => l.includes('digitado em aberto')),
+      ),
+    );
+    await tick(100);
+    expect(secretVault.has('TOKEN_Y')).toBe(false);
+    expect(plain(lastFrame() ?? '')).not.toContain('/secret TOKEN_Y'); // nada na fila/composer
+
+    release();
+    await waitFor(() => !controller.turnoVivo);
+    await tick(100);
+    const antes = frames.length;
+    for (let i = 0; i < 4; i++) {
+      stdin.write(`${ESC}[A`);
+      await tick(80);
+    }
+    const recall = frames.slice(antes).map(plain).join('\n');
+    expect(recall).toContain('trabalhe'); // o recall funciona e atravessa o ponto do /secret
+    expect(recall).not.toContain('/secret TOKEN_Y');
+    expect(recall).not.toContain(CANARY);
+    unmount();
+  }, 30_000);
 });
