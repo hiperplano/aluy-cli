@@ -44,6 +44,13 @@ export function formatClock(epochMs: number, nowMs: number): string {
   return same ? hm : `${p(d.getDate())}/${p(d.getMonth() + 1)} ${hm}`;
 }
 
+/** "ainda sem cota (última tentativa 02:47) — " ou vazio, para prefixar o estado. */
+function ultimaTentativa(view: QuotaPauseView, nowMs: number): string {
+  return view.lastProbeAtMs !== undefined
+    ? `ainda sem cota (última tentativa ${formatClock(view.lastProbeAtMs, nowMs)}) — `
+    : '';
+}
+
 /**
  * As linhas do banner de pausa (PT-BR), SEM glifos/cores — a TUI decorra. O primeiro item
  * é o título; depois vêm o estado, o relógio e as escolhas do dono.
@@ -59,8 +66,8 @@ export function quotaPauseLines(view: QuotaPauseView, nowMs: number): string[] {
     lines.push('esperar não repõe saldo: recarregue no provedor e pressione ↵ para retomar');
     lines.push(
       view.probing
-        ? 'tentando retomar agora…'
-        : `verificação automática (esparsa) em ${formatCountdown(view.nextProbeAtMs - nowMs)} ` +
+        ? 'verificando a cota…'
+        : `${ultimaTentativa(view, nowMs)}verificação automática (esparsa) em ${formatCountdown(view.nextProbeAtMs - nowMs)} ` +
             `(${formatClock(view.nextProbeAtMs, nowMs)})`,
     );
     lines.push(
@@ -73,15 +80,21 @@ export function quotaPauseLines(view: QuotaPauseView, nowMs: number): string[] {
   if (who !== '')
     lines.push(`agentes pausados: ${who} — o trabalho está guardado, nada foi perdido`);
   if (view.probing) {
-    lines.push('tentando retomar agora…');
+    lines.push('verificando a cota…');
   } else if (view.resetAtMs !== undefined && view.resetAtMs > nowMs) {
+    // O horário do provedor é só informativo (o prazo mais tarde): o aluy confere de tempos
+    // em tempos e segue sozinho se a cota voltar antes.
     lines.push(
-      `a cota deve liberar às ${formatClock(view.resetAtMs, nowMs)} ` +
-        `(em ${formatCountdown(view.resetAtMs - nowMs)}) — retoma sozinho`,
+      `${ultimaTentativa(view, nowMs)}tentando de novo a cada ~5 min — próxima checagem em ${formatCountdown(view.nextProbeAtMs - nowMs)}; ` +
+        'retoma sozinho se a cota voltar antes',
+    );
+    lines.push(
+      `limite informado pelo provedor: ${formatClock(view.resetAtMs, nowMs)} ` +
+        `(em ${formatCountdown(view.resetAtMs - nowMs)})`,
     );
   } else {
     lines.push(
-      `sem horário do provedor — nova tentativa em ${formatCountdown(view.nextProbeAtMs - nowMs)} ` +
+      `${ultimaTentativa(view, nowMs)}sem horário do provedor — nova tentativa em ${formatCountdown(view.nextProbeAtMs - nowMs)} ` +
         `(${formatClock(view.nextProbeAtMs, nowMs)}), a cada vez mais espaçada`,
     );
   }
@@ -91,8 +104,8 @@ export function quotaPauseLines(view: QuotaPauseView, nowMs: number): string[] {
 
 /**
  * F9 — a linha ÚNICA e estática que SUBSTITUI a linha de trabalho durante a pausa (sem
- * shimmer, sem relógio de turno): `pausado — cota esgotada · volta às 08:39 (em 4h 24min) ·
- * ↵ tentar agora · ctrl+g parar salvando`. Saldo esgotado diz "recarregue". Cabe em
+ * shimmer, sem relógio de turno): `pausado — cota esgotada · tentando de novo a cada ~5 min ·
+ * limite informado: 10/11 10:29 · ↵ tentar agora · ctrl+g parar salvando`. Saldo esgotado diz "recarregue". Cabe em
  * `larguraMax`: perde primeiro as teclas, depois o horário. PURO.
  */
 export function quotaPauseLinha(
@@ -101,24 +114,43 @@ export function quotaPauseLinha(
   larguraMax = Number.POSITIVE_INFINITY,
 ): string {
   const teclas = '↵ tentar agora · ctrl+g parar salvando';
-  let titulo: string;
-  let detalhe: string;
-  if (view.manual) {
-    titulo = 'pausado — saldo esgotado';
-    detalhe = view.probing
-      ? 'tentando retomar agora…'
-      : `recarregue no provedor (nova checagem em ${formatCountdown(view.nextProbeAtMs - nowMs)})`;
+  const enter = '↵ tentar agora';
+  const titulo = view.manual ? 'pausado — saldo esgotado' : 'pausado — cota esgotada';
+  const minutos = Math.max(1, Math.round((view.nextProbeAtMs - nowMs) / 60_000));
+  const proxima = `próxima em ~${minutos} min`;
+  const ultima =
+    view.lastProbeAtMs !== undefined
+      ? `última tentativa ${formatClock(view.lastProbeAtMs, nowMs)}`
+      : undefined;
+  const sem = view.manual ? 'ainda sem saldo' : 'ainda sem cota';
+  // detalhe completo / curto (o curto cabe em terminal estreito).
+  let cheio: string;
+  let curto: string;
+  let limite: string | undefined;
+  if (view.probing) {
+    cheio = curto = 'verificando a cota…';
+  } else if (ultima !== undefined) {
+    cheio = `${sem} · ${ultima} · ${proxima}`;
+    curto = `${sem} · ${proxima}`;
+  } else if (view.manual) {
+    cheio =
+      curto = `recarregue no provedor (nova checagem em ${formatCountdown(view.nextProbeAtMs - nowMs)})`;
+  } else if (view.resetAtMs === undefined || view.resetAtMs <= nowMs) {
+    cheio = curto = `nova tentativa em ${formatCountdown(view.nextProbeAtMs - nowMs)}`;
   } else {
-    titulo = 'pausado — cota esgotada';
-    if (view.probing) detalhe = 'tentando retomar agora…';
-    else if (view.resetAtMs !== undefined && view.resetAtMs > nowMs)
-      detalhe = `volta às ${formatClock(view.resetAtMs, nowMs)} (em ${formatCountdown(view.resetAtMs - nowMs)})`;
-    else detalhe = `nova tentativa em ${formatCountdown(view.nextProbeAtMs - nowMs)}`;
+    cheio = curto = 'tentando de novo a cada ~5 min';
   }
+  if (!view.manual && view.resetAtMs !== undefined && view.resetAtMs > nowMs && !view.probing)
+    limite = `limite informado: ${formatClock(view.resetAtMs, nowMs)}`;
+  const lim = limite !== undefined ? [limite] : [];
   for (const partes of [
-    [titulo, detalhe, teclas],
-    [titulo, detalhe, '↵ tentar agora'],
-    [titulo, detalhe],
+    [titulo, cheio, ...lim, teclas],
+    [titulo, cheio, ...lim, enter],
+    [titulo, cheio, enter],
+    [titulo, curto, enter],
+    [titulo, cheio, ...lim],
+    [titulo, cheio],
+    [titulo, curto],
     [titulo],
   ]) {
     const t = partes.join(' · ');
@@ -192,9 +224,7 @@ export class QuotaPauseSession {
     this.opts.onView(undefined);
     if (e.how === 'retomada') {
       this.opts.store()?.remove(this.opts.sessionId());
-      this.opts.note('cota liberada', [
-        'a cota voltou — os agentes pausados retomaram de onde pararam.',
-      ]);
+      this.opts.note('cota liberada', ['cota voltou — continuando']);
     } else if (e.how === 'cancelada') {
       this.opts.store()?.remove(this.opts.sessionId());
     } else {

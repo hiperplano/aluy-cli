@@ -141,7 +141,8 @@ export async function runLinear(
   // por inação) — a catraca NÃO é contornada por ser não-TTY. A saída sai linear.
   const bangGoal = goal.trim();
   if (bangGoal.startsWith('!')) {
-    const command = bangGoal.slice(1).trim();
+    const localOnly = bangGoal.startsWith('!!');
+    const command = bangGoal.slice(localOnly ? 2 : 1).trim();
     if (command === '') {
       out.write('aluy: `!` sem comando — nada a rodar.\n');
       return;
@@ -159,7 +160,7 @@ export async function runLinear(
       }
     });
     try {
-      await controller.runBang(command);
+      await controller.runBang(command, undefined, localOnly ? { localOnly: true } : undefined);
     } finally {
       unsub();
     }

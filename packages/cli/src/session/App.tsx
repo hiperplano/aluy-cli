@@ -42,6 +42,7 @@ import {
   ThemePicker,
   LangPicker,
   ProviderPicker,
+  SecretPrompt,
   HistoryPicker,
   RewindPicker,
   AttachChips,
@@ -88,6 +89,7 @@ import {
   type AddCustomProviderInput,
 } from '../ui/hooks/useProviderPicker.js';
 import { useHistoryPicker } from '../ui/hooks/useHistoryPicker.js';
+import { isSecretCommandLine, parseSecretArgs, type SecretsService } from './secrets.js';
 import { useRewindPicker, type RewindChoice } from '../ui/hooks/useRewindPicker.js';
 import { useCommandPalette } from '../ui/hooks/useCommandPalette.js';
 import { themeNameForBrightness, resolveThemeName, type ThemeName } from '../ui/theme/themes.js';
@@ -110,7 +112,7 @@ import { formatElapsed, queueAtRest } from './model.js';
 import { decideEscAction } from './esc-redirect.js';
 import { animTickEnabled, elapsedTickEnabled } from './tick-policy.js';
 import { splitBlocks } from './render-split.js';
-import { aluyNeedsLeadingBlank } from './block-rhythm.js';
+import { aluyNeedsLeadingBlank, previousVisibleKind } from './block-rhythm.js';
 import {
   LIVE_CHROME_BASE_ROWS,
   mostraIndicadorTrabalho,
@@ -233,6 +235,8 @@ export interface ProviderSwitchFailure {
 
 export interface AppProps {
   readonly controller: SessionController;
+  /** ADR 0005 — cofre de segredos (`/secret`). Ausente ⇒ o comando explica que não há. */
+  readonly secrets?: SecretsService;
   /** F6 — rascunho inicial do composer (o que foi digitado durante o splash/pergunta de boot). */
   readonly initialInput?: string;
   /** Comandos do usuário (DADO de ~/.aluy/commands/). */
@@ -792,7 +796,137 @@ export function App(props: AppProps): React.ReactElement {
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashSel, setSlashSel] = useState(0);
   // histórico de inputs (↑↓ no composer vazio, §4.4); -1 = "fora do histórico".
-  const [history, setHistory] = useState<readonly string[]>([]);
+  const [history, setHistoryState] = useState<readonly string[]>([]);
+  // ADR 0005 — uma linha `/secret …` NUNCA entra no histórico ↑↓ (pode trazer um valor digitado
+  // em aberto): o setter filtra a todos os chamadores num ponto só.
+  const setHistory = useCallback(
+    (update: (h: readonly string[]) => readonly string[]): void =>
+      setHistoryState((h) => update(h).filter((l) => !isSecretCommandLine(l))),
+    [],
+  );
+
+  // ── ADR 0005 — `/secret`: campo MASCARADO ──────────────────────────────────────
+  // O VALOR vive SÓ em `secretValueRef` (ref, fora do estado do React e de qualquer
+  // snapshot/log da UI); o estado guarda nome/flags e o COMPRIMENTO (p/ desenhar `•`). Não
+  // passa pelo composer, pelo histórico ↑↓, pelo transcript nem pelo controller — vai
+  // direto ao `SecretsService` no Enter, e o ref é esvaziado em qualquer saída do campo.
+  const [secretPrompt, setSecretPrompt] = useState<{
+    readonly name: string;
+    readonly save: boolean;
+    readonly force: boolean;
+    readonly length: number;
+  } | null>(null);
+  const secretPromptRef = useRef<{
+    readonly name: string;
+    readonly save: boolean;
+    readonly force: boolean;
+  } | null>(null);
+  const secretValueRef = useRef('');
+  const closeSecretPrompt = useCallback((): void => {
+    secretValueRef.current = '';
+    secretPromptRef.current = null;
+    setSecretPrompt(null);
+  }, []);
+  const typeSecret = useCallback((text: string): void => {
+    const p = secretPromptRef.current;
+    if (!p) return;
+    // tira quebra de linha/tab do que foi colado (o \n final de um "copiar" não faz parte).
+    const clean = text.replace(/[\r\n\t]/g, '');
+    if (clean === '') return;
+    secretValueRef.current += clean;
+    setSecretPrompt({ ...p, length: [...secretValueRef.current].length });
+  }, []);
+  const backspaceSecret = useCallback((): void => {
+    const p = secretPromptRef.current;
+    if (!p) return;
+    secretValueRef.current = [...secretValueRef.current].slice(0, -1).join('');
+    setSecretPrompt({ ...p, length: [...secretValueRef.current].length });
+  }, []);
+  const submitSecret = useCallback((): void => {
+    const p = secretPromptRef.current;
+    const value = secretValueRef.current;
+    closeSecretPrompt();
+    if (!p) return;
+    if (value === '') {
+      controller.pushNote('secret', [`cancelado: valor vazio — $${p.name} não foi guardado.`]);
+      return;
+    }
+    const r = props.secrets?.submit(p.name, value, { save: p.save, force: p.force });
+    if (!r) {
+      controller.pushNote('secret', ['cofre de segredos indisponível nesta sessão.']);
+      return;
+    }
+    if (!r.ok) {
+      controller.pushNote('secret', [r.message]);
+      return;
+    }
+    controller.pushNote('secret', [
+      `$${p.name} guardado ${r.saved ? '(salvo cifrado neste projeto)' : '(só nesta sessão — some ao sair)'}.`,
+      'o agente vê só o NOME e usa $' + p.name + '; o valor não entra no chat nem no histórico.',
+      ...(r.weak
+        ? ['⚠ valor curto: a redação por valor exato pode trocar trechos comuns da saída.']
+        : []),
+      ...(r.note ? [r.note] : []),
+    ]);
+  }, [closeSecretPrompt, controller, props.secrets]);
+  /** `/secret …` — roteado aqui (precisa do campo mascarado); nunca passa pelo `onCommand`. */
+  const runSecretCommand = useCallback(
+    (args: string): void => {
+      const cmd = parseSecretArgs(args);
+      const svc = props.secrets;
+      switch (cmd.kind) {
+        case 'usage':
+          controller.pushNote('secret', [
+            'uso: /secret <NOME> [--save] [--force] — abre um campo mascarado (o valor não vai ao chat)',
+            '     /secret list — só os nomes · /secret remove <NOME>',
+            '--save grava cifrado (só neste projeto); sem ele o segredo some ao sair.',
+            'o agente usa $NOME no comando; todo comando dele que cita o nome pede a sua aprovação.',
+          ]);
+          return;
+        case 'list': {
+          const rows = svc?.list() ?? [];
+          controller.pushNote(
+            'secret',
+            rows.length === 0
+              ? ['nenhum segredo guardado.']
+              : rows.map((r) => `$${r.name} · ${r.saved ? 'salvo cifrado' : 'só esta sessão'}`),
+          );
+          return;
+        }
+        case 'remove': {
+          const r = svc?.remove(cmd.name);
+          controller.pushNote('secret', [
+            r?.removed || r?.wasSaved
+              ? `$${cmd.name} removido${r.wasSaved ? ' (inclusive do cofre cifrado)' : ''}.`
+              : `$${cmd.name} não existe.`,
+          ]);
+          return;
+        }
+        case 'inline-value':
+          // O texto JÁ foi digitado em aberto (tela/scrollback do terminal). Não executa, não
+          // guarda, não vai ao histórico: só avisa — sem ecoar o que veio na linha.
+          controller.pushNote('secret', [
+            '⚠ essa linha trazia um VALOR digitado em aberto — NÃO foi guardado nem enviado.',
+            'ele ficou visível no terminal (e no scrollback): considere o segredo exposto e troque-o.',
+            'use `/secret NOME` (sem o valor): o campo seguinte é mascarado.',
+          ]);
+          return;
+        case 'error':
+          controller.pushNote('secret', [cmd.message]);
+          return;
+        case 'prompt':
+          if (!svc) {
+            controller.pushNote('secret', ['cofre de segredos indisponível nesta sessão.']);
+            return;
+          }
+          secretValueRef.current = '';
+          secretPromptRef.current = { name: cmd.name, save: cmd.save, force: cmd.force };
+          setSecretPrompt({ name: cmd.name, save: cmd.save, force: cmd.force, length: 0 });
+          return;
+      }
+    },
+    [controller, props.secrets],
+  );
   const [histIdx, setHistIdx] = useState(-1);
 
   // F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab, estilo "suggested next steps").
@@ -2053,6 +2187,11 @@ export function App(props: AppProps): React.ReactElement {
 
   const runCommand = useCallback(
     (command: SlashCommand, args: string) => {
+      // ADR 0005 — `/secret`: campo mascarado, roteado aqui (nunca vai ao `onCommand`).
+      if (command.id === 'secret') {
+        runSecretCommand(args);
+        return;
+      }
       // EST-0990 — `/split` (alias `/view`): alterna o MODO VIEW AVANÇADO na hora
       // (mesmo efeito do Ctrl+L). É UI pura — não toca o turno/contexto; não vai ao
       // onCommand (sem nota redundante do wiring).
@@ -2292,6 +2431,7 @@ export function App(props: AppProps): React.ReactElement {
       // F197 — o `/suggest` lê `suggestionsOn` p/ o toggle sem-arg; mantê-lo aqui evita
       // fechar sobre um valor velho (defensivo — este projeto não força exhaustive-deps).
       suggestionsOn,
+      runSecretCommand,
     ],
   );
 
@@ -2414,8 +2554,12 @@ export function App(props: AppProps): React.ReactElement {
       // run_command). Vai p/ o histórico de inputs (↑↓) como qualquer entrada do
       // composer. O controller avalia/executa; a saída vira um bloco de saída.
       if (route.kind === 'bang') {
-        setHistory((h) => [...h, `!${route.command}`]);
-        void controller.runBang(route.command);
+        setHistory((h) => [...h, `${route.localOnly ? '!!' : '!'}${route.command}`]);
+        void controller.runBang(
+          route.command,
+          undefined,
+          route.localOnly ? { localOnly: true } : undefined,
+        );
         return;
       }
       // unknown-command: ignora silenciosamente (o menu já guia o usuário).
@@ -2518,6 +2662,12 @@ export function App(props: AppProps): React.ReactElement {
   // (via `injectIfPlainText`/`runIfParallelCommand` devolverem `false`).
   const enqueueOrInject = useCallback(
     (line: string): void => {
+      // ADR 0005 — `/secret …` NUNCA vai à fila (ficaria visível em "na fila" e seria
+      // re-submetida depois) nem é encaixado como texto no turno: roda JÁ (não toca o turno).
+      if (isSecretCommandLine(line)) {
+        runIfParallelCommand(line);
+        return;
+      }
       // Fila NÃO-vazia ⇒ preserva a ordem: enfileira sem tentar encaixar/paralelizar.
       if (queueRef.current.length > 0) {
         enqueue(line);
@@ -2658,6 +2808,12 @@ export function App(props: AppProps): React.ReactElement {
   // (leem `input` direto), então já estavam corretos.
   const routePastedText = useCallback(
     (text: string): void => {
+      // ADR 0005 — o campo mascarado do `/secret` tem a MAIOR precedência: colar um segredo é
+      // o caso normal, e a colagem NUNCA pode cair no composer (nem em outro modal) por baixo.
+      if (secretPromptRef.current) {
+        typeSecret(text);
+        return;
+      }
       if (palette.open) {
         palette.setQuery(palette.query + sanitizeFieldPaste(text));
         return;
@@ -2725,6 +2881,7 @@ export function App(props: AppProps): React.ReactElement {
       qEditing,
       sanitizeFieldPaste,
       insertPaste,
+      typeSecret,
     ],
   );
   useEffect(() => {
@@ -2786,6 +2943,7 @@ export function App(props: AppProps): React.ReactElement {
     providerPicker.open ||
     historyPicker.open ||
     rewindPicker.open ||
+    secretPrompt !== null ||
     palette.open;
   const atRest = queueAtRest({ ...state, anyPickerOpen });
   useEffect(() => {
@@ -2897,6 +3055,37 @@ export function App(props: AppProps): React.ReactElement {
     // abaixo via `key.tab`. Como texto ele nunca serve — nem sozinho, nem com alt. O mesmo
     // vale para os demais caracteres de controle que sobrevivem até aqui: se o `char` só
     // tem controle, não há nada para digitar.
+
+    // ── ADR 0005 — campo MASCARADO do `/secret` CAPTURA tudo ─────────────────────────
+    // Vem ANTES de qualquer outro tratamento de tecla: o caractere vai SÓ ao ref do valor
+    // (nunca ao composer, histórico, fila ou controller). Esc/Ctrl+C cancelam; Enter confirma.
+    if (secretPromptRef.current) {
+      if (key.escape || (key.ctrl && (char === 'c' || char === '\x03'))) {
+        closeSecretPrompt();
+        controller.pushNote('secret', ['cancelado — nada foi guardado.']);
+        return;
+      }
+      if (key.return) {
+        submitSecret();
+        return;
+      }
+      if (key.backspace || key.delete) {
+        backspaceSecret();
+        return;
+      }
+      if (char && !key.ctrl && !key.meta) {
+        // Lote com quebra (xrdp/SSH entregam texto+Enter juntos): o que vem antes entra, e o
+        // Enter confirma.
+        const nl = char.search(/[\r\n]/);
+        if (nl === -1) {
+          typeSecret(char);
+        } else {
+          typeSecret(char.slice(0, nl));
+          submitSecret();
+        }
+      }
+      return;
+    }
 
     // ── splash de boot: QUALQUER tecla dispensa (a sessão começou) ───────────
     if (state.phase === 'boot') {
@@ -3677,8 +3866,13 @@ export function App(props: AppProps): React.ReactElement {
         // EST-PASTE-COLLAPSE — expande chips antes de injetar no agente vivo (conteúdo cheio).
         const line = expandAndReset(input).trim();
         if (line !== '') {
-          controller.injectInput('root', line);
-          controller.markLastInjectFromComposer();
+          // ADR 0005 — um `/secret …` nunca é encaixado como texto no agente (iria ao modelo).
+          if (isSecretCommandLine(line)) {
+            runIfParallelCommand(line);
+          } else {
+            controller.injectInput('root', line);
+            controller.markLastInjectFromComposer();
+          }
           setText('');
           setHistory((h) => [...h, line]);
           setHistIdx(-1);
@@ -3755,7 +3949,7 @@ export function App(props: AppProps): React.ReactElement {
             if (line === '') continue;
             // `\n` (LF) é o ENCAIXAR explícito; `\r` (Enter) segue o type-ahead: TEXTO PURO
             // ENCAIXA mid-turn (EST-0982), PARALELO-SEGURO roda já, o resto ENFILEIRA.
-            if (l.term === '\n') {
+            if (l.term === '\n' && !isSecretCommandLine(line)) {
               controller.injectInput('root', line);
               controller.markLastInjectFromComposer();
             } else enqueueOrInject(line);
@@ -5053,6 +5247,7 @@ export function App(props: AppProps): React.ReactElement {
     providerPicker.open ||
     historyPicker.open ||
     rewindPicker.open ||
+    secretPrompt !== null ||
     palette.open;
   // F-OVERLAY-UNICO — os DOIS caminhos de render (cockpit e inline) mantinham listas
   // PARALELAS e manuais dos mesmos overlays. A divergência custou dois bugs reais: o
@@ -5225,6 +5420,16 @@ export function App(props: AppProps): React.ReactElement {
             />
           </Box>
         )}
+        {secretPrompt !== null && (
+          <Box flexDirection="column" {...box}>
+            <SecretPrompt
+              name={secretPrompt.name}
+              length={secretPrompt.length}
+              save={secretPrompt.save}
+              columns={columns}
+            />
+          </Box>
+        )}
         {providerPicker.open && (
           <Box flexDirection="column" {...box}>
             <ProviderPicker
@@ -5375,8 +5580,7 @@ export function App(props: AppProps): React.ReactElement {
               // pad do contêiner) e 1 DEPOIS (o paddingTop do próprio aluy, no Static): a
               // altura não pula no instante em que o bloco desce p/ o scrollback — que é
               // onde este repo já teve o "buraco no meio da tela".
-              prevKind={i > 0 ? live[i - 1]?.kind : undefined}
-              nextKind={live[i + 1]?.kind}
+              prevKind={i > 0 ? previousVisibleKind(live, i) : undefined}
               semCursor
             />
           ))}
@@ -5580,7 +5784,10 @@ export function App(props: AppProps): React.ReactElement {
                   histórico. Antes de cada `you` que NÃO é o 1º turno, um traço
                   CURTO no papel apagado (subtle) separa o turno anterior do novo. */}
               {block.kind === 'you' && blockIndex > 0 && (
-                <Box paddingBottom={1}>
+                <Box
+                  paddingBottom={1}
+                  paddingTop={previousVisibleKind(done, blockIndex) === 'inject' ? 1 : 0}
+                >
                   <Divider columns={columns} subtle />
                 </Box>
               )}
@@ -5594,8 +5801,13 @@ export function App(props: AppProps): React.ReactElement {
                 isCurrent={false}
                 frame={0}
                 columns={columns}
-                prevKind={done[blockIndex - 1]?.kind}
-                nextKind={done[blockIndex + 1]?.kind}
+                // `you` com divisória: o respiro após `inject` vai ACIMA da divisória (acima), não
+                // entre ela e a fala — o BlockView não repete.
+                prevKind={
+                  block.kind === 'you' && blockIndex > 0
+                    ? undefined
+                    : previousVisibleKind(done, blockIndex)
+                }
                 settled
               />
             </Box>
@@ -6121,7 +6333,21 @@ export function App(props: AppProps): React.ReactElement {
 /** Renderiza um bloco da sessão pelo seu tipo. */
 // EST-1000 · ADR-0076 §3 — exportado p/ o <Cockpit> REUSAR o mesmo render de bloco da
 // conversa (uma fonte só; o cockpit não duplica a renderização dos turnos).
-export function BlockView(props: {
+export function BlockView(props: BlockViewProps): React.ReactElement {
+  // O `inject` não paga respiro de baixo (ver `block-rhythm.ts`): quem vem DEPOIS paga o de
+  // cima. O `aluy` já tem o seu `paddingTop` (e é o único com `selfCheck` invisível).
+  const apos = props.aposInject === true || props.prevKind === 'inject';
+  if (apos && props.block.kind !== 'inject' && props.block.kind !== 'aluy') {
+    return (
+      <Box paddingTop={1}>
+        <BlockBody {...props} />
+      </Box>
+    );
+  }
+  return <BlockBody {...props} />;
+}
+
+interface BlockViewProps {
   readonly block: SessionState['blocks'][number];
   readonly isCurrent: boolean;
 
@@ -6145,10 +6371,10 @@ export function BlockView(props: {
   // resultado de um índice que pode não existir (`blocks[i-1]?.kind`) direto.
   readonly prevKind?: SessionState['blocks'][number]['kind'] | undefined;
   /**
-   * O tipo do bloco SEGUINTE — espelho do `prevKind`. Hoje só o `inject` consulta: dois
-   * "↳ encaixado" seguidos são UMA lista, e o respiro entre eles a quebrava ao meio.
+   * Cockpit: o vizinho visível de cima é um `inject` (o cockpit não passa `prevKind` — ver
+   * `block-rhythm.ts`). Mesmo efeito de `prevKind === 'inject'`: 1 linha em branco acima.
    */
-  readonly nextKind?: SessionState['blocks'][number]['kind'] | undefined;
+  readonly aposInject?: boolean | undefined;
   /**
    * O bloco já está no `<Static>` (histórico, nunca repintado). Hoje só muda o lote de
    * sub-agentes que desceu com filhos em segundo plano (ver `liveStartIndex`).
@@ -6160,7 +6386,9 @@ export function BlockView(props: {
   readonly detalhe?: string | undefined;
   /** F3 — sem o cursor `●`: a linha de trabalho do App é o indicador vivo. */
   readonly semCursor?: boolean | undefined;
-}): React.ReactElement {
+}
+
+function BlockBody(props: BlockViewProps): React.ReactElement {
   const b = props.block;
   switch (b.kind) {
     case 'you':
@@ -6180,7 +6408,10 @@ export function BlockView(props: {
       // enquanto streama (era o flash que sumia ao terminar).
       if (b.selfCheck === true) return <></>;
       return (
-        <Box paddingBottom={1} paddingTop={aluyNeedsLeadingBlank(props.prevKind) ? 1 : 0}>
+        <Box
+          paddingBottom={1}
+          paddingTop={aluyNeedsLeadingBlank(props.prevKind) || props.aposInject === true ? 1 : 0}
+        >
           <AluyBlock
             text={b.text}
             streaming={b.streaming}
@@ -6234,6 +6465,7 @@ export function BlockView(props: {
             command={b.command}
             status={b.status}
             frame={props.frame}
+            {...(b.localOnly === true ? { localOnly: true } : {})}
             {...(b.output !== undefined ? { output: b.output } : {})}
             {...(b.liveOutput !== undefined ? { liveOutput: b.liveOutput } : {})}
             maxLines={
@@ -6304,7 +6536,7 @@ export function BlockView(props: {
       // EST-0982 (mid-turn) — confirmação "↳ encaixado": o "btw" do usuário ENTROU no
       // turno vivo (incorporado entre iterações). Nota leve/dim — feedback, não fala do
       // agente. O eco já vem REDIGIDO (CLI-SEC-6); vazio ⇒ só o rótulo.
-      return <InjectAck text={b.text} seguidoDeOutro={props.nextKind === 'inject'} />;
+      return <InjectAck text={b.text} />;
   }
 }
 
@@ -6313,17 +6545,14 @@ export function BlockView(props: {
  * eco REDIGIDO do que entrou (truncado p/ não inundar a região viva). Avisa o usuário
  * que o input foi incorporado no turno em curso (e não engolido / adiado).
  */
-function InjectAck(props: {
-  readonly text: string;
-  readonly seguidoDeOutro?: boolean;
-}): React.ReactElement {
+function InjectAck(props: { readonly text: string }): React.ReactElement {
   const echo = props.text.trim();
   const shown = echo.length > 80 ? `${echo.slice(0, 80)}…` : echo;
   return (
-    // Relato do dono: mandar DUAS mensagens no meio do turno rendia dois "↳ encaixado" com
-    // uma linha em branco no meio — cada nota carregava o próprio respiro. Seguidas, elas
-    // são uma lista; o respiro fica só depois da ÚLTIMA.
-    <Box paddingLeft={2} paddingBottom={props.seguidoDeOutro === true ? 0 : 1}>
+    // Sem `paddingBottom`: a nota é uma LINHA. O respiro depois dela é de quem vem a seguir
+    // (`blankAfterInject`) — pagar de cima dependia de a próxima já existir quando esta foi
+    // escrita no `<Static>`, e duas notas em instantes diferentes saíam com linha no meio.
+    <Box paddingLeft={2}>
       <Role name="fgDim">↳ encaixado{shown ? `: ${shown}` : ''}</Role>
     </Box>
   );

@@ -126,10 +126,23 @@ class TestMem0Handler(unittest.TestCase):
         self.assertEqual(len(handler._response_body["results"]), 1)
         self.assertEqual(handler._response_body["results"][0]["id"], "h1")
 
-        # Verifica chamada ao memory.search (mem0ai 2.0.7: filters=/top_k=).
-        self.memory_mock.search.assert_called_once_with(
+        # `_search_compat` tenta primeiro a assinatura do pin (mem0ai 0.1.x).
+        self.memory_mock.search.assert_called_once_with("teste", user_id="u1", limit=5)
+
+    def test_search_cai_na_api_nova_so_com_typeerror(self):
+        """mem0ai 2.x recusa `user_id=`/`limit=`; o venv pode ter qualquer uma das duas."""
+        velha_recusada = TypeError("unexpected keyword argument")
+        self.memory_mock.search.side_effect = [velha_recusada, {"results": []}]
+        result = server._search_compat(self.memory_mock, "teste", "u1", 5)
+        self.assertEqual(result, {"results": []})
+        self.memory_mock.search.assert_called_with(
             "teste", filters={"user_id": "u1"}, top_k=5
         )
+
+    def test_search_nao_engole_erro_de_backend(self):
+        self.memory_mock.search.side_effect = ConnectionError("backend fora")
+        with self.assertRaises(ConnectionError):
+            server._search_compat(self.memory_mock, "teste", "u1", 5)
 
     # ── GET /v1/users/ ──────────────────────────────────────────────────
 

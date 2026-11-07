@@ -33,6 +33,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
+import { StreamRedactor, secretVault } from '@hiperplano/aluy-cli-core';
 import type {
   ShellChunk,
   ShellExecOptions,
@@ -201,6 +202,12 @@ export class NodeShellPort implements ShellPort {
   async exec(command: string, options?: ShellExecOptions): Promise<ShellResult> {
     const signal = options?.signal;
     const onChunk = options?.onChunk;
+    // ADR 0005 — segredos do `/secret` entram SÓ no env DESTE filho (nunca em `process.env`
+    // do Aluy, nunca persistidos). Sem extras ⇒ o mesmo objeto de antes.
+    const childEnv: NodeJS.ProcessEnv =
+      options?.env !== undefined && Object.keys(options.env).length > 0
+        ? { ...this.env, ...options.env }
+        : this.env;
 
     // EST-0982 — sinal JÁ abortado ⇒ NÃO roda nada (curto-circuito): o usuário já
     // pediu parada antes de o efeito começar. Honra a parada sem spawnar processo.
@@ -247,7 +254,7 @@ export class NodeShellPort implements ShellPort {
             cwd: this.workspace.cwd,
             network: networkAllowed,
           },
-          { env: this.env, stdio: ['ignore', 'pipe', 'pipe'] },
+          { env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] },
         );
         // (e) REFUSE — prod sem piso de SO e sem flag: NÃO roda nada. Reporta o motivo
         // como DADO (CLI-SEC-4), não trava o loop. Nunca finge confinamento.
@@ -275,7 +282,7 @@ export class NodeShellPort implements ShellPort {
         const isWin = this.platform === 'win32';
         child = this.spawnFn(command, {
           cwd: this.workspace.cwd,
-          env: this.env,
+          env: childEnv,
           shell: this.shell ?? true,
           // `detached` é p/ o GRUPO POSIX (kill -pid). No Windows não há grupo POSIX
           // (o kill usa `taskkill /T`) e `detached` ABRE UM NOVO CONSOLE (janela cmd
@@ -335,7 +342,11 @@ export class NodeShellPort implements ShellPort {
       let tailPosSolto = '';
       const TAIL_MAX = 4096;
 
-      const escreverNoLog = (texto: string): void => {
+      // ADR 0005 — o log do comando SOLTO é um arquivo em disco: o valor exato dos segredos
+      // do `/secret` não pode parar lá (stream-safe: valor partido entre chunks).
+      const logRedactor = new StreamRedactor();
+      const escreverNoLog = (bruto: string): void => {
+        const texto = logRedactor.push(bruto);
         if (texto === '') return;
         if (tailPosSolto.length < TAIL_MAX) tailPosSolto += texto;
         try {
@@ -429,13 +440,13 @@ export class NodeShellPort implements ShellPort {
           ls.write(
             `
 === ${new Date().toISOString()} — solto para segundo plano ===
-$ ${command}
+$ ${secretVault.redact(command)}
 `,
           );
           // O que JÁ tinha saído antes de soltar também vai pro log: o dono não perde o
           // começo só porque decidiu soltar no meio.
-          if (stdout !== '') ls.write(stdout);
-          if (stderr !== '') ls.write(stderr);
+          if (stdout !== '') ls.write(secretVault.redact(stdout));
+          if (stderr !== '') ls.write(secretVault.redact(stderr));
         } catch {
           logStream = undefined; // sem log, o dreno abaixo ainda roda (anti-trava)
         }

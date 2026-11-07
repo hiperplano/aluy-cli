@@ -18,6 +18,7 @@ export type { AgentCommandEffect } from '@hiperplano/aluy-cli-core';
 /** Identificador de um comando nativo. */
 export type NativeCommandId =
   | 'help'
+  | 'secret'
   | 'login'
   | 'logout'
   | 'whoami'
@@ -932,6 +933,21 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     agentEffect: 'session-effect',
   },
   {
+    // ADR 0005 — entrega um segredo ao agente SEM passar pelo chat: abre um campo MASCARADO
+    // (o valor não entra no composer/histórico/transcript/sessão). O agente só vê o NOME.
+    name: 'secret',
+    summary: 'entrega um segredo ao agente sem digitá-lo no chat (campo mascarado)',
+    source: 'native',
+    id: 'secret',
+    section: 'workspace',
+    usage: '<NOME> [--save] [--force] · list · remove <NOME>',
+    // Não toca o turno (só o cofre local) ⇒ roda JÁ mid-turn em vez de enfileirar — e uma
+    // linha `/secret NOME valor` NUNCA pode ficar numa fila visível.
+    parallelWhileBusy: true,
+    // O agente NÃO pode invocar: só o dono entrega segredos.
+    agentEffect: 'human-only',
+  },
+  {
     name: 'memory',
     summary: 'vê/edita/esquece/fixa a memória do agente (global + projeto)',
     summaryKey: 'cmd.memory',
@@ -1390,7 +1406,8 @@ export type RouteResult =
   | { readonly kind: 'unknown-command'; readonly name: string }
   // EST-0958 — `!comando` (atalho de shell): o resto da linha é um comando rodado
   // localmente ATRÁS da catraca (mesma do `run_command`), NÃO um objetivo p/ o modelo.
-  | { readonly kind: 'bang'; readonly command: string }
+  // `localOnly` = `!!cmd`: roda igual, mas a saída NÃO é entregue ao modelo (ADR 0005 §bang).
+  | { readonly kind: 'bang'; readonly command: string; readonly localOnly?: boolean }
   | { readonly kind: 'goal'; readonly text: string }; // não é slash ⇒ é objetivo p/ o agente
 
 /**
@@ -1404,9 +1421,11 @@ export function routeInput(line: string, userCommands: readonly SlashCommand[] =
   // EST-0958 — `!` no INÍCIO entra em modo shell: o resto da linha (sem o `!`) é o
   // comando exato. `!` sozinho (sem comando) cai como goal vazio (o caller ignora).
   if (trimmed.startsWith('!')) {
-    const command = trimmed.slice(1).trim();
+    // `!!cmd` = só local: roda, mostra, mas NÃO manda a saída ao agente.
+    const localOnly = trimmed.startsWith('!!');
+    const command = trimmed.slice(localOnly ? 2 : 1).trim();
     if (command === '') return { kind: 'goal', text: '' };
-    return { kind: 'bang', command };
+    return localOnly ? { kind: 'bang', command, localOnly: true } : { kind: 'bang', command };
   }
   if (!trimmed.startsWith('/')) {
     return { kind: 'goal', text: trimmed };

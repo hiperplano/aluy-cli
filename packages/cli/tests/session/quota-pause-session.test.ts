@@ -78,7 +78,17 @@ describe('texto', () => {
     const com = quotaPauseLines(base, 1_000_000).join('\n');
     expect(com).toMatch(/pausado — cota esgotada/);
     expect(com).toMatch(/pesquisa/);
-    expect(com).toMatch(/retoma sozinho/);
+    expect(com).toMatch(/tentando de novo a cada ~5 min/);
+    expect(com).toMatch(/limite informado pelo provedor/);
+    expect(com).toMatch(/retoma sozinho se a cota voltar antes/);
+    expect(com).not.toMatch(/volta às|deve liberar/);
+    const recusada = quotaPauseLines({ ...base, lastProbeAtMs: 1_000_000 - 3_000 }, 1_000_000).join(
+      '\n',
+    );
+    expect(recusada).toMatch(/ainda sem cota \(última tentativa \d\d:\d\d\)/);
+    expect(quotaPauseLines({ ...base, probing: true }, 1_000_000).join('\n')).toMatch(
+      /verificando a cota/,
+    );
     const sem = quotaPauseLines({ ...base, resetAtMs: undefined }, 1_000_000).join('\n');
     expect(sem).toMatch(/sem horário do provedor/);
   });

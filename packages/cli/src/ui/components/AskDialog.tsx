@@ -23,7 +23,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { displayWidth } from '../../session/visual-lines.js';
-import { canRememberTool, type AskRequest } from '@hiperplano/aluy-cli-core';
+import { canRememberTool, secretVault, type AskRequest } from '@hiperplano/aluy-cli-core';
 import { Glyph, Role, useTheme } from '../theme/index.js';
 import { resolveLanguage } from '../markdown/index.js';
 import {
@@ -93,6 +93,12 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
   const network = req.category === 'always-ask:network' || props.egressOutsideAllowlist === true;
   // EST-0969 (display): rótulo de origem do sub-agente (se o ask vier de um filho).
   const origin = subAgentOriginOf(req);
+  // Nomes (nunca valores) dos segredos do cofre que o comando cita — vale p/ qualquer ask de
+  // comando, seja qual for a categoria que a catraca devolveu (rede, exec, secret-use).
+  const secretNames =
+    req.effect.kind === 'diff' || req.effect.kind === 'path'
+      ? []
+      : secretVault.referencedBy(req.effect.exact);
 
   const tag = destructive ? 'destrutivo · ask' : 'ask';
 
@@ -147,6 +153,16 @@ export function AskDialog(props: AskDialogProps): React.ReactElement {
 
       {/* CORPO: o EFEITO EXATO (CLI-SEC-9) — diff, comando ou caminho. */}
       <EffectBody request={req} />
+
+      {/* ADR 0005 — o comando CITA um segredo do `/secret` (`always-ask:secret-use`): dizer
+          em claro, em TODO caminho (inclusive rede), só o NOME — nunca o valor. */}
+      {secretNames.length > 0 && (
+        <Box>
+          <Role name="accent">{theme.box.vertical} </Role>
+          <Glyph name="ask" role="accent" />
+          <Role name="accent"> usa o segredo {secretNames.map((n) => `$${n}`).join(', ')}</Role>
+        </Box>
+      )}
 
       {/* contagem/consequência (rodapé-resumo dim) */}
       {network && (

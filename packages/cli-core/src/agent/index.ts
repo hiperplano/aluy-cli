@@ -511,6 +511,12 @@ export {
   blockedObservation,
   BANG_TOOL_NAME,
   BANG_SOURCE_LABEL,
+  BANG_FEED_MAX_CHARS,
+  NON_INTERACTIVE_HINT,
+  bangFeedObservation,
+  detectNonInteractive,
+  formatBangOutput,
+  parseSimpleCd,
   type BangExecutorOptions,
   type BangOutcome,
 } from './bang.js';

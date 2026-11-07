@@ -500,6 +500,8 @@ export interface SubAgentSpawnerOptions {
   readonly ports: ToolPorts;
   /** O toolset BASE (do pai). O spawner REMOVE `spawn_agent` p/ os filhos (E-A1). */
   readonly baseTools: readonly NativeTool<ToolPorts>[];
+  /** MEMÓRIA (ADR 0004) — o MESMO thunk do pai: os filhos seguem as preferências do dono. */
+  readonly memoryContextProvider?: () => Promise<string | undefined>;
   /**
    * Resolver de `ask` (CLI-SEC-9). Cada filho recebe um WRAPPER que injeta o
    * RÓTULO DE ORIGEM (E-A3): o usuário vê QUAL filho pede a confirmação. Sem
@@ -900,6 +902,7 @@ export class SubAgentSpawner {
   private readonly callerForLocalModel?: (slug: string) => ModelCaller;
   private readonly permission: PermissionEngine;
   private readonly ports: ToolPorts;
+  private readonly memoryContextProvider?: () => Promise<string | undefined>;
   /**
    * Gancho de RELATO do filho (`report_status`) — o locus liga na árvore de fluxo, que
    * é onde o estado de cada filho já mora. Ausente ⇒ o `report_status` responde
@@ -1028,6 +1031,7 @@ export class SubAgentSpawner {
     if (opts.callerForLocalModel) this.callerForLocalModel = opts.callerForLocalModel;
     this.permission = opts.permission;
     this.ports = opts.ports;
+    if (opts.memoryContextProvider) this.memoryContextProvider = opts.memoryContextProvider;
     // E-A1: o toolset do FILHO é o do pai SEM `spawn_agent` (filhos não delegam) e
     // SEM `perguntar` (EST-1110 · ressalva seguranca AG-0008): filhos NÃO perguntam
     // ao usuário — devolvem a dúvida ao pai como DADO; o pai pergunta. Evita o
@@ -1412,6 +1416,7 @@ export class SubAgentSpawner {
       // confiável do dono, NÃO conteúdo ingerido). Ambos opcionais: a persona vem 1º
       // (define quem o filho é), o contexto depois (a tarefa que o pai recortou).
       ...(projectInstructions !== undefined ? { projectInstructions } : {}),
+      ...(this.memoryContextProvider ? { memoryContextProvider: this.memoryContextProvider } : {}),
     });
 
     // HEARTBEAT (anti-deadlock): corre o loop contra o relógio de INATIVIDADE. O

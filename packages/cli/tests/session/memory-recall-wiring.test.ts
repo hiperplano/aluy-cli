@@ -138,15 +138,14 @@ describe('EST-0983 · recall ponta-a-ponta (memória escrita é relembrada)', ()
     expect(out.text).not.toContain('memória vazia');
   });
 
-  it('recall direto do wiring real (buildSession) devolve o fato escrito', async () => {
+  it('bloco de memória do wiring real (buildSession) contém o fato escrito', async () => {
     await seedProjectFact('o projeto se chama Vega e usa pnpm');
     const built = buildSession({
       ...baseOpts(),
       brokerClient: capturingBroker().client,
     });
-    const seed = await built.memory.recall();
-    expect(seed.length).toBe(1);
-    expect(seed[0]!.text).toContain('Vega');
+    const block = await built.memory.contextBlock();
+    expect(block).toContain('Vega');
   });
 
   it('TTY (boot recall→seedHistory→submit): o fato escrito chega à chamada de modelo', async () => {
@@ -154,7 +153,7 @@ describe('EST-0983 · recall ponta-a-ponta (memória escrita é relembrada)', ()
     await seedProjectFact('o projeto se chama Vega e usa pnpm');
     const { client, calls } = capturingBroker();
     const built = buildSession({ ...baseOpts(), brokerClient: client });
-    const seed = await built.memory.recall();
+    const seed = await built.memory.recall(); // sonda de leitura; a memória vai pelo system
     built.controller.seedHistory([...seed]);
     await built.controller.submit('qual o nome do meu projeto?');
     const allContent = calls.flat().join('\n');

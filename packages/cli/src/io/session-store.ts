@@ -33,6 +33,7 @@
 //     NUNCA lança. Uma QoL jamais derruba o startup. Auto-save é best-effort: falha
 //     de escrita nunca derruba a sessão viva.
 
+import { secretVault } from '@hiperplano/aluy-cli-core';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -714,7 +715,8 @@ export class SessionStore {
     mkdirSync(this.dir, { recursive: true, mode: DIR_MODE });
     const file = this.pathFor(record.id);
     const tmp = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-    const body = JSON.stringify(record) + '\n';
+    // ADR 0005 — último ponto antes do disco: nenhum valor do `/secret` vai ao arquivo da sessão.
+    const body = secretVault.redact(JSON.stringify(record)) + '\n';
     let fd: number | undefined;
     try {
       fd = openSync(

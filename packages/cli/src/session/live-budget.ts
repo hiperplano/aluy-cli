@@ -34,7 +34,7 @@
 import type { SessionBlock, SessionState } from './model.js';
 import { rodapeAgentesOverhead } from './footer-agents-layout.js';
 import { displayWidth, visualLines } from './visual-lines.js';
-import { aluyNeedsLeadingBlank } from './block-rhythm.js';
+import { aluyNeedsLeadingBlank, blankAfterInject, isInvisibleBlock } from './block-rhythm.js';
 
 /** Fase da sessão (do model) — o que distingue `thinking` (pré-stream) dos demais. */
 type SessionPhase = SessionState['phase'];
@@ -613,6 +613,11 @@ export function liveOverheadLines(input: LiveOverheadInput): number {
   let prevKind: SessionBlock['kind'] | undefined = undefined;
 
   for (const b of live) {
+    // Bloco invisível (selfCheck): não é vizinho de ninguém (espelha `previousVisibleKind`).
+    if (isInvisibleBlock(b) && b !== speech) continue;
+    // `inject` não paga respiro de baixo: o bloco que vem DEPOIS paga 1 linha acima
+    // (o `aluy` já conta o seu abaixo, via `aluyNeedsLeadingBlank`).
+    if (b.kind !== 'aluy' && blankAfterInject(b.kind, prevKind)) lines += 1;
     if (b === speech) {
       // A própria fala: cabeçalho `Λ aluy` (1) + linha de trabalho no lugar do cursor (1) + paddingBottom (1).
       // O CORPO de texto é orçado à parte (o `maxLines` devolvido); aqui só o que

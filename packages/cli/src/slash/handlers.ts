@@ -371,6 +371,14 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
             '',
             'atalhos: esc interrompe o pai · F8 para tudo · ctrl-t ver/parar sub-agentes ·',
             '         ctrl-b solta o comando/agente em segundo plano · ctrl-c×2 sai',
+            '',
+            // ADR 0003/0005 — o `!` do terminal e o cofre de segredos.
+            '!cmd       roda no terminal (sem pedir permissão) e o agente VÊ a saída',
+            '!!cmd      roda no terminal, só local: o agente NÃO vê a saída',
+            '           (`!cd dir` muda o diretório da sessão; não é interativo — sem teclado/TTY:',
+            '           para ssh/sudo/vim/read rode em outro terminal; `export` não persiste)',
+            '/secret    entrega um segredo SEM digitá-lo no chat: /secret NOME (campo mascarado);',
+            '           o agente só vê o nome e usa $NOME; /secret list · /secret remove NOME',
           ],
         },
       };
@@ -560,6 +568,19 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           lines: ['rewind indisponível neste contexto (precisa da TUI interativa).'],
         },
       };
+    case 'secret':
+      // ADR 0005 — o `/secret` REAL (campo mascarado) é roteado ANTES na TUI (App). Cair aqui
+      // só sem a TUI (não-TTY): explica, e NÃO aceita valor na linha de comando.
+      return {
+        kind: 'note',
+        note: {
+          title: 'secret',
+          lines: [
+            'o /secret abre um campo mascarado na TUI interativa — o valor nunca vai ao chat.',
+            'sem TTY não há como digitar sem eco: use uma variável de ambiente.',
+          ],
+        },
+      };
     case 'memory':
       // EST-0983 — o `/memory` REAL (lista/edita/esquece/fixa pela mecânica interna
       // + Plan-deny nas mutações) é roteado ANTES em run.tsx (precisa da AgentMemory
@@ -572,7 +593,7 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           lines: [
             'vejo/edito/esqueço/fixo os fatos que o agente lembra entre sessões',
             '(global + projeto), por este comando — o agente não lê esses arquivos direto.',
-            'o agente usa a memória como contexto, nunca como ordem.',
+            'o que você pediu para lembrar (origem usuario) o agente segue; o derivado é só contexto.',
             'uso: /memory [forget|edit|pin|unpin <id>]',
           ],
         },

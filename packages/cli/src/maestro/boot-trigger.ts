@@ -15,6 +15,7 @@ import { NodeBootSupervisor } from './boot-supervisor.js';
 import { UserConfigStore, resolveEmbedderModel } from '../io/user-config.js';
 import { warmupSidecars, type WarmTarget } from './sidecar-warmup.js';
 import { ensureMem0ServerScript } from '../provisioner/sidecar-provisioner.js';
+import { noticeSemanticMemoryDown } from './semantic-memory-notice.js';
 
 export interface BootTriggerOptions {
   /** Raiz do `~/.aluy/` (default: `<home>/.aluy`). Injetável p/ teste. */
@@ -138,6 +139,14 @@ export function triggerBoot(opts: BootTriggerOptions = {}): Promise<unknown> | u
               (result.allFailed ? ' (todos falharam — seguindo sem sidecars)' : '') +
               '\n',
           );
+        }
+        // Memória semântica fora do ar: avisa UMA vez, com o que houve e como religar (antes
+        // o dono só via um `✗` no rodapé e a memória "sumia" sem explicação). Dados intactos.
+        const mem0 = result.states.find((s) => s.kind === 'mem0');
+        if (mem0 !== undefined && !mem0.running) {
+          const ollamaDown = result.states.some((s) => s.kind === 'ollama' && !s.running);
+          const reason = ollamaDown ? 'o Ollama não respondeu' : 'o serviço mem0 não subiu';
+          noticeSemanticMemoryDown(reason, { headless: !tuiDonaDaTela() });
         }
         // F90 — AQUECE os sidecars que subiram (mem0/ollama) p/ a 1ª chamada real NÃO ser
         // COLD (qwen-0.5b ~9.5s cold vs ~0.5-1s warm; o teto do loop é 2.5s ⇒ cold = fail-

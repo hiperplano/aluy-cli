@@ -28,9 +28,21 @@ Pequim (UTC+8), o da Z.ai — suposição não verificada contra amostra real. C
 (fuso errado) é descartado e entra a escada de sondagem, nunca um laço de tentativas. Os códigos
 `1302/1303/1305` seguem como rate-limit curto e `1301` (filtro de conteúdo) nunca é cota.
 
-Sem nenhuma dica, o aluy **sonda** com espaçamento crescente: 1, 2, 5, 10, 15 e depois a cada 30 min.
-A sondagem é a **própria chamada pendente de um agente** (nunca uma chamada extra), **uma por vez**:
-sem laço apertado, sem queimar dinheiro no BYO.
+**O horário informado é o prazo mais tarde, não o mais cedo.** O plano pode ser resetado, o saldo
+recarregado ou a janela liberada antes — por isso o aluy **sonda durante toda a pausa**, mesmo com
+reset conhecido: 1, 2 e depois **a cada 5 min**, e também **no horário informado**
+(`min(agora + degrau, reset)`). Um reset a 80 h não deixa o agente mudo por 80 h. O horário continua
+na tela, só como informação, e um irmão que traga um reset mais distante não empurra a próxima
+sondagem. Reset já vencido não puxa a sondagem para trás (nada de laço apertado): vale a escada.
+
+Sem nenhuma dica de horário, a sondagem é mais esparsa: 1, 2, 5, 10, 15 e depois a cada 30 min.
+
+A sondagem é a **própria chamada pendente de um agente** (mesmas mensagens, mesma chave de
+idempotência — nunca uma chamada extra), **uma por vez** por sessão: sub-agentes esperam no portão e
+não fazem fila no provider. Recusada (429 de cota) não custa tokens; aceita, ela É o trabalho que o
+agente ia fazer de qualquer jeito — não há gasto além dele. Passou ⇒ todos os agentes continuam
+sozinhos (as mensagens que você enfileirou entram normalmente) e aparece uma nota curta:
+`cota voltou — continuando`.
 
 ## Comportamento por provider
 
@@ -91,13 +103,23 @@ vê o filho como **pausado**, não como falho — o resultado do `spawn_agent` d
 ```
 ◷ pausado — cota esgotada (janela de uso esgotada)
     agentes pausados: principal, pesquisa-rust — o trabalho está guardado, nada foi perdido
-    a cota deve liberar às 18:40 (em 12min 04s) — retoma sozinho
+    tentando de novo a cada ~5 min — próxima checagem em 3min 20s; retoma sozinho se a cota voltar antes
+    limite informado pelo provedor: 18:40 (em 12min 04s)
     espera máxima restante: 5h 48min
     esperar (automático) · ↵ tentar agora · ctrl+g parar salvando · esc cancela o turno
 ```
 
 - **Esperar** — é o padrão; não precisa fazer nada. Retoma sozinho.
-- **`↵` (com o campo vazio) — tentar agora**: antecipa a sondagem.
+- **`↵` (com o campo vazio) — tentar agora**: antecipa a sondagem. A linha mostra na hora
+  `verificando a cota…` e, se o provedor recusar, `ainda sem cota · última tentativa 02:47 ·
+próxima em ~5 min · ↵ tentar agora` (só a linha viva muda; nada novo no transcript a cada
+  sondagem). `↵` com uma sondagem já em voo não faz nada (nunca empilha: uma chamada por vez, seja
+  o agente principal ou um sub-agente o sondador). O `↵` **não reinicia a escada**: um `↵`
+  recusado conta como sondagem e avança o degrau (1 → 2 → 5 min), então apertar repetidamente
+  nunca vira martelada.
+
+No rodapé, a linha única fica `pausado — cota esgotada · tentando de novo a cada ~5 min · limite informado: 10/11 10:29 · ↵ tentar agora · ctrl+g parar salvando` (em terminal estreito perde primeiro as teclas extras, depois o limite).
+
 - **`Ctrl+G` — parar salvando**: encerra a espera, salva o trabalho e devolve o prompt.
 - **`Esc` / `Ctrl+C`** seguem sendo o freio de sempre: cancelam o turno (a pausa é interrompível).
 
@@ -132,7 +154,7 @@ Ao reabrir, o aluy encontra a foto e:
 1. **sub-agentes pausados** continuam do histórico guardado, em segundo plano; o resultado chega
    como dado, pelo mesmo canal dos sub-agentes desacoplados;
 2. o **agente principal**, se ele mesmo estava pausado, retoma o turno de onde parou;
-3. se a cota ainda não voltou, pausa de novo — sem perder nada.
+3. se a cota ainda não voltou, pausa de novo — sem perder nada — e sonda periodicamente do mesmo jeito (a chamada da retomada é a primeira sondagem).
 
 Fotos com mais de 14 dias são descartadas. Em `--anonymous` nada é gravado.
 

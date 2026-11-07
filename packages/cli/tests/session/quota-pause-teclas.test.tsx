@@ -158,9 +158,9 @@ describe('pausa por cota · texto na tela', () => {
     const { c, r } = montar(view());
     await esperar(() => plain(r.lastFrame()).includes('pausado — cota esgotada'));
     const f = plain(r.lastFrame());
-    expect(f).toMatch(/volta às \d\d:\d\d \(em /);
+    expect(f).toContain('tentando de novo a cada ~5 min');
+    expect(f).not.toContain('volta às');
     expect(f).toContain('↵ tentar agora');
-    expect(f).toContain('ctrl+g parar salvando');
     expect(f).not.toContain('esc interromper');
     r.unmount();
     c.dispose();

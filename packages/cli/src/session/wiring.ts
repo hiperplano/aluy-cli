@@ -1214,6 +1214,15 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     onRetry: (n) => controllerRef?.noteCallerRetry(n),
   });
 
+  // `/provider` (backend local) troca o client SÓ do `caller` do pai (`setClient`). Os
+  // callers secundários abaixo (compactação, /ask, sub-agentes, por-tier, custom) NÃO
+  // podem capturar `brokerClient` do boot: delegam, a CADA chamada, ao client VIGENTE do
+  // pai — assim um filho herdado fala com o MESMO provider ativo do pai.
+  const liveClient: ModelClient = {
+    stream: (args) => caller.currentClient.stream(args),
+    call: (args) => caller.currentClient.call(args),
+  };
+
   // EST-0973 — caller DEDICADO da compactação (`/compact`): NÃO-streaming (o resumo
   // é interno, não vaza tokens na UI como turno) e com TETO próprio (CLI-SEC-8). Vai
   // pelo MESMO broker (CLI-SEC-7) — só não usa o sink de stream.
@@ -1223,7 +1232,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // ("Custom exige model"); e ao trocar de tier via `/model` a compactação ficava
   // presa no tier de boot (não seguia o novo). O `model` só viaja sob tier custom.
   const compactionCaller = new BrokerModelCaller({
-    client: brokerClient,
+    client: liveClient,
     tier,
     tierSource: caller,
     maxTokens: DEFAULT_SUMMARY_MAX_TOKENS,
@@ -1236,7 +1245,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // CORRENTE do pai (o usuário pergunta com o mesmo modelo que escolheu via `/model`).
   // NÃO recebe `attachNativeTools` — é o que o mantém read-only (≠ o caller do loop).
   const sideQueryCaller = new BrokerModelCaller({
-    client: brokerClient,
+    client: liveClient,
     tier,
     tierSource: caller,
     maxTokens: 2048,
@@ -1265,7 +1274,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // provider/api_key/base_url (não existem no cliente).
   const subAgentCaller = opts.subAgents?.enabled
     ? new BrokerModelCaller({
-        client: brokerClient,
+        client: liveClient,
         tier,
         tierSource: caller,
         ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
@@ -1290,7 +1299,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
         const cached = tierCallers.get(t);
         if (cached) return cached;
         const c = new BrokerModelCaller({
-          client: brokerClient,
+          client: liveClient,
           // tier FIXO do `.md` do filho — NÃO o `tierSource` do pai (o filho roteado
           // por `.md` decide o próprio tier; o broker valida — 422 se inservível).
           tier: t,
@@ -1351,7 +1360,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
                 },
               };
         const c = new BrokerModelCaller({
-          client: brokerClient,
+          client: liveClient,
           tier: 'custom',
           tierSource,
           ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
@@ -1467,6 +1476,9 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     ...(opts.projectInstructions !== undefined
       ? { projectInstructions: opts.projectInstructions }
       : {}),
+    // ADR 0004 — a MEMÓRIA (preferências do dono + contexto) entra no `system` a cada chamada,
+    // no boot, na retomada e nos sub-agentes.
+    memoryContextProvider: () => memory.contextBlock(),
     // EST-1109 — agentes DISPONÍVEIS no contexto: nota já formatada pelo core.
     ...(opts.availableAgents !== undefined ? { availableAgents: opts.availableAgents } : {}),
     // EST-1149 — comandos da SESSÃO no contexto: nota já formatada.

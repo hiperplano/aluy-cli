@@ -43,10 +43,14 @@ const IMPERATIVE_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
+ * (Decisão do dono, ADR 0004: simplicidade — a memória do dono é seguida como instrução.)
  * `true` se o texto de um fato parece uma DIRETIVA/instrução imperativa (padrão de
  * injeção), e não um fato factual ("prefere X", "este repo usa Y"). Determinístico.
  */
-export function looksImperative(text: string): boolean {
+export function looksImperative(text: string, provenance?: 'usuario' | 'derivado'): boolean {
+  // Um fato de proveniência `usuario` É a instrução do dono ("sempre use pnpm", "a partir de
+  // agora…") — nunca é sinalizado como suspeito. A heurística só vale p/ o que o agente DERIVOU.
+  if (provenance === 'usuario') return false;
   if (text.trim() === '') return false;
   return IMPERATIVE_PATTERNS.some((re) => re.test(text));
 }

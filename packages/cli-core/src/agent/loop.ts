@@ -586,6 +586,12 @@ export interface AgentLoopOptions {
    */
   readonly projectInstructions?: string;
   /**
+   * MEMÓRIA (ADR 0004) — thunk ASSÍNCRONO do bloco de memória (`buildMemoryContext`), lido A CADA
+   * chamada ao modelo: um `remember` vale no turno seguinte, a retomada o relê do disco e os
+   * sub-agentes recebem o mesmo. Erro ⇒ sem bloco (nunca derruba o turno).
+   */
+  readonly memoryContextProvider?: () => Promise<string | undefined>;
+  /**
    * EST-1109 — AGENTES DISPONÍVEIS: nota COMPACTA (já formatada por
    * `buildAvailableAgentsNote`) que lista os sub-agentes nomeados que o modelo
    * pode delegar via `spawn_agent` (campo `agent: <nome>`). CONFIG CONFIÁVEL
@@ -671,6 +677,12 @@ export interface AgentLoopOptions {
    * `spawn_agent`. Ausente/false ⇒ desligada (sub-agentes nunca recebem). Não toca a catraca.
    */
   readonly delegationNudge?: boolean;
+  /**
+   * ADR 0005 — este loop exporta os segredos do `/secret` (só os que o comando cita, já
+   * aprovados pela catraca) como env var no shell do `run_command`. Só o loop PRINCIPAL liga;
+   * sub-agentes (loops criados no core) e o foco `/subagent` ficam sem — default `false`.
+   */
+  readonly injectSecretEnv?: boolean;
   /**
    * EST-SEC-HARDEN (F21) · AG-0008 — GUARDRAIL do combo perigoso `yolo + tier-fraco +
    * conteúdo não-confiável no contexto`. O estado de YOLO é DINÂMICO (lido de
@@ -771,6 +783,8 @@ export class AgentLoop {
   }) => void;
   // EST-0964 — AGENT.md confiável (já clampado). undefined ⇒ nada a injetar.
   private readonly projectInstructions?: string;
+  // MEMÓRIA — thunk lido a cada chamada ao modelo.
+  private readonly memoryContextProvider?: () => Promise<string | undefined>;
   // EST-1109 — agentes DISPONÍVEIS (nota já formatada). undefined ⇒ nada a injetar.
   // NÃO é `readonly`: pode ser TROCADA depois via `setAvailableAgents` (ver o método).
   private availableAgents: string | undefined;
@@ -799,6 +813,7 @@ export class AgentLoop {
   // SELF_CHECK_OFF ⇒ baseline (sem overhead). Já vem resolvida pelo gating externo.
   private readonly selfCheck: SelfCheckConfig;
   private readonly delegationNudge: boolean;
+  private readonly injectSecretEnv: boolean;
   // EST-SEC-HARDEN (F21) — config do guardrail do combo perigoso (yolo+tier-fraco+
   // untrusted). undefined ⇒ inerte (baseline). O YOLO é lido de permission.isUnsafe.
   private readonly weakYoloGuardrail?: WeakYoloGuardrailConfig;
@@ -841,6 +856,7 @@ export class AgentLoop {
     if (opts.quotaPause) this.quotaPause = opts.quotaPause;
     if (opts.onUsage) this.onUsage = opts.onUsage;
     if (opts.projectInstructions !== undefined) this.projectInstructions = opts.projectInstructions;
+    if (opts.memoryContextProvider) this.memoryContextProvider = opts.memoryContextProvider;
     if (opts.availableAgents !== undefined) this.availableAgents = opts.availableAgents;
     if (opts.sessionCommands !== undefined) this.sessionCommands = opts.sessionCommands;
     if (opts.tierProvider) this.tierProvider = opts.tierProvider;
@@ -852,6 +868,7 @@ export class AgentLoop {
     if (opts.monitorQueue) this.monitorQueue = opts.monitorQueue;
     this.selfCheck = opts.selfCheck ?? SELF_CHECK_OFF;
     this.delegationNudge = opts.delegationNudge === true;
+    this.injectSecretEnv = opts.injectSecretEnv === true;
     if (opts.weakYoloGuardrail) this.weakYoloGuardrail = opts.weakYoloGuardrail;
     if (opts.stuckResolver) this.stuckResolver = opts.stuckResolver;
     if (opts.env) this.watchdogEnv = opts.env;
@@ -1393,6 +1410,12 @@ export class AgentLoop {
         /* best-effort: nunca derruba o turno. */
       }
       const toolList = this.tools.list();
+      let memoryContext: string | undefined;
+      try {
+        memoryContext = await this.memoryContextProvider?.();
+      } catch {
+        /* best-effort: memória ilegível ⇒ segue sem ela (o boot já avisou a falha). */
+      }
       const buildFor = (nativeToolsActive: boolean) =>
         buildMessages(
           toolList,
@@ -1407,6 +1430,7 @@ export class AgentLoop {
           // tier→provider é segredo do produto.
           this.runtimeInfoProvider?.(),
           nativeToolsActive,
+          memoryContext,
         );
       const messages = buildFor(false);
       const messagesNative = buildFor(true);
@@ -2141,6 +2165,10 @@ export class AgentLoop {
     const detachSignal = this.detachHub?.arm();
     const ctx: ToolRunContext = {
       ...(signal ? { signal } : {}),
+      // ADR 0005 — segredos do `/secret` só no loop principal e só p/ comando de shell.
+      ...(this.injectSecretEnv && name === 'run_command'
+        ? { secretEnv: 'referenced' as const }
+        : {}),
       ...(detachSignal ? { detachSignal } : {}),
       ...(this.detachHub ? { onDetached: (info): void => this.detachHub?.onDetached(info) } : {}),
       // EST-0969 (heartbeat) — cada chunk de stdout/stderr é um SINAL DE VIDA da

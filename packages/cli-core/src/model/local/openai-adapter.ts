@@ -14,6 +14,7 @@
 // headers opcionais `HTTP-Referer`/`X-Title` (boa-praxis de atribuição) — mandamos
 // um identificador honesto do aluy-cli.
 
+import { secretVault } from '../../secrets/vault.js';
 import { BrokerError } from '../errors.js';
 import type { ModelStreamEvent, ModelUsage, NativeToolCall } from '../types.js';
 import { MAX_TRAILER_EVENTS } from './adapter.js';
@@ -178,7 +179,8 @@ export class OpenAiCompatAdapter implements ProviderAdapter {
       headers['http-referer'] = ATTRIBUTION_URL;
       headers['x-title'] = ATTRIBUTION_TITLE;
     }
-    return { url, headers, body: JSON.stringify(body) };
+    // ADR 0005 — último ponto antes do fio: nenhum valor do `/secret` sai na requisição.
+    return { url, headers, body: secretVault.redact(JSON.stringify(body)) };
   }
 
   mapSse(_event: string, data: string, acc: SseAccumulator): readonly ModelStreamEvent[] {

@@ -83,6 +83,7 @@ export type { ThemePickerProps } from './ThemePicker.js';
 export { LangPicker } from './LangPicker.js';
 export type { LangPickerProps } from './LangPicker.js';
 // EST-0962 (/provider) — seletor de provider do modo Custom, espelha o <ThemePicker>.
+export { SecretPrompt } from './SecretPrompt.js';
 export { ProviderPicker } from './ProviderPicker.js';
 export type { ProviderPickerProps } from './ProviderPicker.js';
 export { AttachChips } from './AttachChips.js';

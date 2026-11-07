@@ -15,7 +15,7 @@ import type { PartialCatalog } from './catalog.js';
 export const en: PartialCatalog = {
   // ── Composer ──────────────────────────────────────────────────────────────
   'composer.placeholder': 'type a goal or /command…',
-  'composer.shellHint': '› behind the gate · Enter runs · the gate asks on effect',
+  'composer.shellHint': '› runs directly, no prompt · agent sees the output · !! local only',
   'composer.moreLines': 'lines',
 
   // ── FooterHints ───────────────────────────────────────────────────────────

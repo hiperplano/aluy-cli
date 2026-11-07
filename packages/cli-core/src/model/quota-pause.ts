@@ -383,6 +383,31 @@ export function probeDelayMs(n: number, manual = false): number {
   return ladder[i]!;
 }
 
+/**
+ * Escada de sondagem quando o provider INFORMOU um reset: 1m, 2m e depois a cada 5m. O reset é
+ * promessa para o mais tarde, não para o mais cedo (reset do plano, recarga, janela liberada
+ * antes) — então o aluy confere de tempos em tempos em vez de esperar mudo até o horário.
+ */
+export const KNOWN_RESET_LADDER_MS: readonly number[] = [60_000, 120_000, 300_000];
+
+/**
+ * Quando é a próxima sondagem (epoch ms). Sempre `agora + degrau da escada`; com reset
+ * informado e ainda no futuro, nunca depois dele (sonda NO horário). Reset já vencido não
+ * puxa a sondagem para trás (evita laço apertado): vale só a escada.
+ */
+export function nextProbeAtMs(
+  nowMs: number,
+  probes: number,
+  manual: boolean,
+  resetAtMs: number | undefined,
+): number {
+  const known = resetAtMs !== undefined && !manual;
+  const ladder = known ? KNOWN_RESET_LADDER_MS : manual ? BALANCE_LADDER_MS : PROBE_LADDER_MS;
+  const delay = ladder[Math.max(0, Math.min(probes, ladder.length - 1))]!;
+  const byLadder = nowMs + delay;
+  return resetAtMs !== undefined && resetAtMs > nowMs ? Math.min(byLadder, resetAtMs) : byLadder;
+}
+
 // ── configuração ─────────────────────────────────────────────────────────────
 
 /** Espera total máxima default por episódio de pausa (6h) — anti-runaway (CLI-SEC-8). */

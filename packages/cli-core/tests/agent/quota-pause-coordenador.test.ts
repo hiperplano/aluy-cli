@@ -101,7 +101,7 @@ describe('hold do relógio de inatividade do filho', () => {
 });
 
 describe('horário de reset', () => {
-  it('só cresce: um irmão com reset mais curto não antecipa a retomada', async () => {
+  it('só cresce (exibição): um irmão com reset mais curto não encolhe o horário informado', async () => {
     const co = new QuotaPauseCoordinator({ config: { enabled: true, maxWaitMs: 8 * 3_600_000 } });
     const a = co.forAgent({ label: 'a', kind: 'subagente' });
     const b = co.forAgent({ label: 'b', kind: 'subagente' });
@@ -111,7 +111,8 @@ describe('horário de reset', () => {
     void b.handle(janela(2 * 3_600_000), ctx).catch(() => undefined);
     await vi.advanceTimersByTimeAsync(10);
     expect(co.view?.resetAtMs).toBeGreaterThanOrEqual(t0 + 3 * 3_600_000);
-    expect(co.view?.nextProbeAtMs).toBeGreaterThanOrEqual(t0 + 3 * 3_600_000);
+    // o reset só alimenta a exibição: a sondagem segue a escada (≤5 min), não é empurrada.
+    expect(co.view?.nextProbeAtMs).toBeLessThanOrEqual(t0 + 60_000 + 20);
   });
 
   it('um irmão com reset mais longo adia a retomada', async () => {
@@ -124,5 +125,114 @@ describe('horário de reset', () => {
     void b.handle(janela(4 * 3_600_000), ctx).catch(() => undefined);
     await vi.advanceTimersByTimeAsync(10);
     expect(co.view?.resetAtMs).toBeGreaterThanOrEqual(t0 + 4 * 3_600_000);
+  });
+});
+
+describe('"tentar agora" (↵) e o estado visível da sondagem', () => {
+  const h = { history: () => [] };
+  const cfgH = { enabled: true, maxWaitMs: 7 * 24 * 3_600_000 };
+  const H80 = 80 * 3_600_000;
+
+  it('lastProbeAtMs: ausente antes da 1ª sondagem; preenchido após uma recusa', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfgH });
+    const a = co.forAgent({ label: 'a', kind: 'principal' });
+    void a.handle(janela(H80), h).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(co.view?.lastProbeAtMs).toBeUndefined();
+    co.resumeNow();
+    expect(co.view?.probing).toBe(true); // a TUI vê "verificando" na hora
+    const t = Date.now();
+    void a.handle(janela(H80), h).catch(() => undefined); // a sondagem foi recusada
+    await vi.advanceTimersByTimeAsync(10);
+    expect(co.view?.probing).toBe(false);
+    expect(co.view?.lastProbeAtMs).toBe(t);
+    co.stop('usuario');
+  });
+
+  it('↵ repetido com sondagem em voo é no-op (não empilha e não elege outro)', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfgH });
+    const a = co.forAgent({ label: 'a', kind: 'subagente' });
+    const b = co.forAgent({ label: 'b', kind: 'subagente' });
+    void a.handle(janela(H80), h).catch(() => undefined);
+    void b.handle(janela(H80), h).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(10);
+    co.resumeNow();
+    const quem = co.view?.agents.length;
+    co.resumeNow();
+    co.resumeNow();
+    // só UM foi eleito: o outro segue esperando no portão (view.probing já é true)
+    expect(co.view?.probing).toBe(true);
+    expect(quem).toBe(2);
+    const pend = [a, b].map((x) => x.gate(h).catch(() => 'parou'));
+    await vi.advanceTimersByTimeAsync(10);
+    co.stop('usuario');
+    expect(await Promise.all(pend)).toEqual(['parou', 'parou']);
+    return;
+    co.stop('usuario');
+  });
+
+  it('pai + sub-agentes: ↵ elege UM (aqui um filho) e o sucesso dele libera todos', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfgH });
+    const filho = co.forAgent({ label: 'filho', kind: 'subagente' });
+    const pai = co.forAgent({ label: 'principal', kind: 'principal' });
+    const feito = { filho: false, pai: false };
+    void filho.handle(janela(H80), h).then(() => (feito.filho = true));
+    void pai.handle(janela(H80), h).then(() => (feito.pai = true));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(feito).toEqual({ filho: false, pai: false });
+    co.resumeNow(); // o filho entrou primeiro: ele é o sondador (refaz a própria chamada)
+    await vi.advanceTimersByTimeAsync(10);
+    expect(feito).toEqual({ filho: true, pai: false });
+    expect(co.view?.probing).toBe(true);
+    co.resumeNow(); // no-op: há sondagem em voo, o pai segue esperando
+    await vi.advanceTimersByTimeAsync(10);
+    expect(feito.pai).toBe(false);
+    filho.ok(); // a chamada do filho passou: a cota voltou
+    await vi.advanceTimersByTimeAsync(10);
+    expect(feito.pai).toBe(true); // o pai é liberado junto
+    expect(co.view).toBeNull();
+  });
+
+  it('só um filho aguardando: depois de uma recusa o ↵ seguinte volta a sondar (não trava com probing órfão)', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfgH });
+    const f = co.forAgent({ label: 'f', kind: 'subagente' });
+    let calls = 0;
+    const p = (async () => {
+      await f.handle(janela(H80), h);
+      for (;;) {
+        calls += 1;
+        try {
+          if (calls >= 3) {
+            f.ok();
+            return;
+          }
+          throw janela(H80);
+        } catch (e) {
+          await f.handle(e, h);
+        }
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(10);
+    co.resumeNow();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(calls).toBe(1);
+    co.resumeNow();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(calls).toBe(2);
+    co.resumeNow();
+    await p;
+    expect(calls).toBe(3);
+  });
+
+  it('não reinicia a escada: depois de ↵ recusado a próxima sondagem automática vem de um degrau maior', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfgH });
+    const a = co.forAgent({ label: 'a', kind: 'principal' });
+    void a.handle(janela(H80), h).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(10);
+    co.resumeNow();
+    void a.handle(janela(H80), h).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(co.view!.nextProbeAtMs - Date.now()).toBeGreaterThan(100_000); // 2º degrau (2 min)
+    co.stop('usuario');
   });
 });

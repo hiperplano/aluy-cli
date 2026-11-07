@@ -52,10 +52,10 @@ describe('i18n · Composer nos 2 idiomas', () => {
 
   it('shell-hint em pt-BR e en', () => {
     expect(renderInLang(<Composer value="ls" active={true} shellMode={true} />, 'pt-BR')).toContain(
-      'atrás da catraca',
+      'o agente vê a saída',
     );
     expect(renderInLang(<Composer value="ls" active={true} shellMode={true} />, 'en')).toContain(
-      'behind the gate',
+      'agent sees the output',
     );
   });
 });
