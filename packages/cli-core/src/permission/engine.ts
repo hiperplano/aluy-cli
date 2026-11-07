@@ -191,6 +191,14 @@ const DELEGATION_ALLOW_BY_DEFAULT: ReadonlySet<string> = new Set([
   'report_status',
 ]);
 
+/** ADR 0006 — tools de controle do Concierge (plano de controle, sem efeito próprio). */
+const CONCIERGE_CONTROL_TOOLS: ReadonlySet<string> = new Set([
+  'task_start',
+  'task_send',
+  'task_stop',
+  'task_status',
+]);
+
 /** Tools cujo "sempre permitir" NUNCA pode ser permanente (piso de CLI-SEC-3). */
 export function canRememberTool(tool: string): boolean {
   return tool !== 'run_command' && tool !== 'edit_file' && tool !== 'write_file';
@@ -492,6 +500,34 @@ export class PolicyPermissionEngine implements PermissionEngine {
         'deny',
         `tool "${call.name}" fora do toolset declarado do agente (tools ⊆ pai, GS-MD1) — negada na catraca`,
         'policy:deny',
+        effect,
+      );
+    }
+
+    // -1.8) ADR 0006 — FERRAMENTAS DE CONTROLE DO CONCIERGE (`task_*`). Plano de controle
+    //     puro: criar/enviar/parar/consultar TAREFAS não tem efeito próprio no mundo — o
+    //     trabalho que a tarefa faz re-passa por ESTA `decide()` (e o Plan, quando ativo, vale
+    //     dentro dela). Por isso passam também em Plan (senão o Concierge nem conversaria). Um
+    //     sub-agente nunca as tem (profundidade/toolScope). O dono reverte com
+    //     `policy.defaults.task_start = 'ask'`; regra explícita vence.
+    if (CONCIERGE_CONTROL_TOOLS.has(call.name)) {
+      if (this.denySpawnAgent) {
+        return ok(
+          'deny',
+          'tools task_* são só do Concierge (não de sub-agentes)',
+          'policy:deny',
+          effect,
+        );
+      }
+      const rule = evaluatePolicyRules(this.policy, call.name, primaryArg(call));
+      const chosen = rule?.decision ?? this.policy.defaults?.[call.name];
+      if (chosen === 'ask' || chosen === 'deny') {
+        return ok(chosen, `política do usuário (${call.name})`, 'default', effect);
+      }
+      return ok(
+        'allow',
+        `controle do Concierge (${call.name}) — o trabalho passa por decide()`,
+        'default',
         effect,
       );
     }
