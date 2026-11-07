@@ -47,6 +47,8 @@ export interface PanelInput {
   readonly viewOf: (task: TaskRecord) => SubAgentChildView;
   /** Linhas que o rodapé comporta (recolhe SÓ quando falta espaço). */
   readonly maxRows?: number;
+  /** Tarefa com o pedido de parada armado (aguarda a confirmação). */
+  readonly stopArm?: string | null;
   readonly statusline: 'full' | 'compact' | 'hidden';
   readonly expanded: boolean;
   readonly selected: number;
@@ -115,7 +117,10 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
       if (i.expanded) {
         rows.push({
           kind: 'text',
-          text: '↑↓ escolhe · enter detalhes · p para a tarefa · esc recolhe',
+          text:
+            i.stopArm !== undefined && i.stopArm !== null
+              ? `ctrl+k de novo PARA ${i.stopArm} · qualquer outra tecla cancela`
+              : '↑↓ escolhe · enter detalhes · ctrl+k para a tarefa (confirma) · esc recolhe · digitar sai do painel',
         });
       }
     }
@@ -143,6 +148,18 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
     });
   }
   return rows;
+}
+
+/** Linhas fixas da região viva fora a vista de detalhe e o painel (container, composer, status, hints). */
+export const LIVE_OVERHEAD_ROWS = 16;
+
+/**
+ * Altura útil da vista de DETALHE (blocos) dado o terminal: a região viva inteira
+ * (`room + 3` da vista + painel + o resto) NUNCA passa de `rows`. Se passar, o terminal rola,
+ * o Ink só apaga o que ainda está na tela e, ao fechar, sobra um BURACO em branco.
+ */
+export function taskDetailRoomFor(rows: number, panelRows: number): number {
+  return Math.max(2, Math.min(22, rows - LIVE_OVERHEAD_ROWS - panelRows - 3));
 }
 
 /** Altura (linhas) do painel — sem respiro: statusline e painel ficam juntos. 0 se vazio. */

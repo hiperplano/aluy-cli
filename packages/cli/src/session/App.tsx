@@ -66,7 +66,12 @@ import {
 import type { SubAgentChildView } from '../ui/components/SubAgents.js';
 import { useMcpPicker, type McpSearchPort, type McpInstallPort } from '../ui/hooks/useMcpPicker.js';
 import { McpPicker } from '../ui/components/McpPicker.js';
-import { TaskPanel, buildPanelRows, panelLines } from '../ui/components/ConciergeTasks.js';
+import {
+  TaskPanel,
+  buildPanelRows,
+  panelLines,
+  taskDetailRoomFor,
+} from '../ui/components/ConciergeTasks.js';
 import { Role, useTheme } from '../ui/theme/index.js';
 import { useTick } from '../ui/hooks/useTick.js';
 import { useFilePicker } from '../ui/hooks/useFilePicker.js';
@@ -1108,6 +1113,8 @@ export function App(props: AppProps): React.ReactElement {
   const [taskExpanded, setTaskExpanded] = useState(false);
   const [taskSel, setTaskSel] = useState(0);
   const [taskDetail, setTaskDetail] = useState<string | null>(null);
+  // Parar tarefa pede CONFIRMAÇÃO: o 1º ctrl+k arma (id da tarefa), o 2º confirma.
+  const [taskStopArm, setTaskStopArm] = useState<string | null>(null);
   const [taskScroll, setTaskScroll] = useState(0);
   useEffect(() => {
     if (!conciergeRt) return;
@@ -1259,6 +1266,7 @@ export function App(props: AppProps): React.ReactElement {
           statusline: statuslineMode,
           columns,
           expanded: taskExpanded,
+          stopArm: taskStopArm,
           selected: taskSel,
           now: Date.now(),
         })
@@ -3364,25 +3372,44 @@ export function App(props: AppProps): React.ReactElement {
         if (key.downArrow) return setTaskScroll((s) => Math.max(0, s - 1));
         if (key.pageUp) return setTaskScroll((s) => s + 5);
         if (key.pageDown) return setTaskScroll((s) => Math.max(0, s - 5));
-      } else if (taskExpanded && input === '') {
-        if (key.escape || vis.length === 0) {
+      } else if (taskExpanded) {
+        // FOCO do painel: só com o composer vazio. Qualquer caractere IMPRIMÍVEL (digitar
+        // "parou?") tira o foco e vai para o composer — atalho de letra NUNCA dispara enquanto
+        // o dono escreve. Parar uma tarefa é um acorde não-imprimível (ctrl+k) com CONFIRMAÇÃO.
+        const imprimivel = char !== '' && !key.ctrl && !key.meta && !key.return && !key.escape;
+        if (input !== '' || imprimivel) {
           setTaskExpanded(false);
-          return;
-        }
-        if (key.upArrow) return setTaskSel((s) => Math.max(0, s - 1));
-        if (key.downArrow) return setTaskSel((s) => Math.min(vis.length - 1, s + 1));
-        if (key.return) {
-          const t = vis[Math.min(taskSel, vis.length - 1)];
-          if (t) {
-            setTaskDetail(t.id);
-            setTaskScroll(0);
+          setTaskStopArm(null);
+          // cai para o composer (sem `return`): a tecla digitada não se perde.
+        } else {
+          if (key.escape || vis.length === 0) {
+            setTaskExpanded(false);
+            setTaskStopArm(null);
+            return;
           }
-          return;
-        }
-        if (char === 'p') {
-          const t = vis[Math.min(taskSel, vis.length - 1)];
-          if (t) conciergeRt.stopTask(t.id);
-          return;
+          if (key.ctrl && char === 'k') {
+            const t = vis[Math.min(taskSel, vis.length - 1)];
+            if (t && t.endedAt === undefined) {
+              if (taskStopArm !== null && taskStopArm === t.id) {
+                setTaskStopArm(null);
+                conciergeRt.stopTask(t.id);
+              } else {
+                setTaskStopArm(t.id);
+              }
+            }
+            return;
+          }
+          if (taskStopArm !== null) setTaskStopArm(null); // qualquer outra tecla cancela o pedido
+          if (key.upArrow) return setTaskSel((s) => Math.max(0, s - 1));
+          if (key.downArrow) return setTaskSel((s) => Math.min(vis.length - 1, s + 1));
+          if (key.return) {
+            const t = vis[Math.min(taskSel, vis.length - 1)];
+            if (t) {
+              setTaskDetail(t.id);
+              setTaskScroll(0);
+            }
+            return;
+          }
         }
       } else if (
         key.downArrow &&
@@ -5319,7 +5346,7 @@ export function App(props: AppProps): React.ReactElement {
     state.pendingAsks.length > 0 ? queuedInputsLines(state.pendingAsks.length) + 1 : 0;
   // ADR 0006 — o painel de tarefas e a vista de detalhe moram abaixo do composer: entram no
   // desconto do teto da fala (anti-flicker).
-  const taskDetailRoom = Math.max(6, Math.min(rows - 14, 22));
+  const taskDetailRoom = taskDetailRoomFor(rows, taskPanelRows);
   const conciergeTasksShown = taskPanelRows + (taskDetail !== null ? taskDetailRoom + 3 : 0);
   const stagedLines = queueLines + pendingInjectLines + pendingAskLines + conciergeTasksShown;
   // EST-1015 (anti-flicker) — o <SlashMenu> mora ABAIXO do composer e PODE coexistir com o stream
@@ -5922,8 +5949,7 @@ export function App(props: AppProps): React.ReactElement {
   // (`paddingBottom` do bloco). O contêiner vivo somava mais 2 (topo + base) ⇒ 3 em branco
   // entre a resposta e o composer. Sem região viva ele não paga respiro nenhum: o gap é 1.
   const ultimoFechaEmBranco =
-    state.blocks.length === 0 ||
-    blockEndsWithBlankLine(previousVisibleKind(state.blocks, state.blocks.length) ?? 'note');
+    done.length === 0 || blockEndsWithBlankLine(previousVisibleKind(done, done.length) ?? 'note');
   const liveChatColumn = (
     <>
       {/* F-SEM-SAUDACAO (decisão do dono: "eu não pedi essas msgs") — a tela de sessão
@@ -6150,18 +6176,27 @@ export function App(props: AppProps): React.ReactElement {
           // `i` inclui o sentinela (índice 0); o índice absoluto do bloco é i-1.
           const blockIndex = i - 1;
           return (
-            <Box key={blockIndex} flexDirection="column">
+            <Box
+              key={blockIndex}
+              flexDirection="column"
+              paddingTop={
+                block.kind === 'you' &&
+                blockIndex > 0 &&
+                (() => {
+                  const k = previousVisibleKind(done, blockIndex);
+                  return k !== undefined && k !== 'inject' && !blockEndsWithBlankLine(k);
+                })()
+                  ? 1
+                  : 0
+              }
+            >
               {/* EST-0987 (3/3) — divisória SUTIL de RESPIRO entre turnos do
                   histórico. Antes de cada `you` que NÃO é o 1º turno, um traço
                   CURTO no papel apagado (subtle) separa o turno anterior do novo. */}
-              {block.kind === 'you' && blockIndex > 0 && (
-                <Box
-                  paddingBottom={1}
-                  paddingTop={previousVisibleKind(done, blockIndex) === 'inject' ? 1 : 0}
-                >
-                  <Divider columns={columns} subtle />
-                </Box>
-              )}
+              {/* A divisória subtle entre turnos era uma linha VAZIA com `paddingBottom`: somada ao
+                  respiro do bloco de cima dava 3 linhas em branco entre a resposta e o `você`
+                  seguinte. O respiro é UM só e vem do bloco de cima (block-rhythm); só quando o
+                  de cima NÃO fecha em branco (ferramenta) o `você` paga a linha. */}
               {/* RESPIRO (achado do dono) — o vizinho de CIMA no HISTÓRICO. `done` é
                   prefixo de `state.blocks`, então `done[blockIndex-1]` é o MESMO bloco
                   que a região viva consultava antes deste descer p/ o scrollback ⇒ a
@@ -6174,11 +6209,7 @@ export function App(props: AppProps): React.ReactElement {
                 columns={columns}
                 // `you` com divisória: o respiro após `inject` vai ACIMA da divisória (acima), não
                 // entre ela e a fala — o BlockView não repete.
-                prevKind={
-                  block.kind === 'you' && blockIndex > 0
-                    ? undefined
-                    : previousVisibleKind(done, blockIndex)
-                }
+                prevKind={previousVisibleKind(done, blockIndex)}
                 settled
               />
             </Box>
@@ -6217,7 +6248,7 @@ export function App(props: AppProps): React.ReactElement {
         // (`LIVE_CHROME_BASE_ROWS`) segue contando o respiro cheio ⇒ só sobra folga.
         <Box
           flexDirection="column"
-          paddingTop={telaBaixa || (regiaoVivaVazia && ultimoFechaEmBranco) ? 0 : 1}
+          paddingTop={telaBaixa || ultimoFechaEmBranco ? 0 : 1}
           paddingBottom={regiaoVivaVazia ? 0 : 1}
         >
           {liveChatColumn}

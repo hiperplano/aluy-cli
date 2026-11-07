@@ -23,6 +23,7 @@ import { App } from '../../src/session/App.js';
 import { SessionController } from '../../src/session/controller.js';
 import { ConciergeRuntime } from '../../src/session/concierge-runtime.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
+import { taskDetailRoomFor, LIVE_OVERHEAD_ROWS } from '../../src/ui/components/ConciergeTasks.js';
 import {
   aluyNeedsLeadingBlank,
   blankAfterInject,
@@ -588,5 +589,89 @@ describe('Ordem do rodapé: composer → statusline → painel; sem linha em bra
       g.resolve();
       s.unmount();
     }
+  });
+});
+
+describe('Atalho de letra nunca dispara enquanto o dono digita', () => {
+  async function foco() {
+    const g = defer();
+    const task = taskSession({ iters: () => 'ok', gates: () => g.promise });
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      concierge: () => text('Iniciei.', startTask('g')),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('1 tarefa:'));
+    await sleep(200);
+    s.stdin.write(DOWN); // foca/expande o painel (❯ na tarefa)
+    await waitFor(() => s.frame().includes('enter detalhes'));
+    await sleep(300);
+    return { s, g, task };
+  }
+
+  it('digitar "parou?" com o painel focado NUNCA para a tarefa e o texto vai inteiro ao composer', async () => {
+    const { s, g } = await foco();
+    for (const ch of 'parou?') {
+      s.stdin.write(ch);
+      await sleep(60);
+    }
+    await sleep(200);
+    expect(s.rt.registry.get('t1')!.status).toBe('running');
+    expect(s.frame()).toContain('parou?'); // inclusive o `p` inicial
+    expect(s.frame()).not.toContain('enter detalhes'); // digitar tira o foco do painel
+    g.resolve();
+    s.unmount();
+  });
+
+  it('parar exige ctrl+k DUAS vezes (confirmação); outra tecla no meio cancela', async () => {
+    const { s, g } = await foco();
+    s.stdin.write('\x0b'); // ctrl+k: arma
+    await waitFor(() => s.frame().includes('ctrl+k de novo PARA t1'));
+    expect(s.rt.registry.get('t1')!.status).toBe('running');
+    await sleep(300);
+    s.stdin.write(DOWN); // outra tecla cancela
+    await sleep(500);
+    await waitFor(() => !s.frame().includes('ctrl+k de novo PARA'));
+    await sleep(300);
+    s.stdin.write('\x0b');
+    await waitFor(() => s.frame().includes('ctrl+k de novo PARA t1'));
+    await sleep(400);
+    s.stdin.write('\x0b'); // confirma
+    await waitFor(() => s.rt.registry.get('t1')!.status === 'stopped');
+    g.resolve();
+    s.unmount();
+  });
+});
+
+describe('Vista de detalhe nunca passa da altura do terminal (senão sobra buraco ao fechar)', () => {
+  it('região viva (vista + painel + resto) ≤ rows para qualquer terminal e painel', () => {
+    for (let rows = 24; rows <= 80; rows += 2) {
+      for (let painel = 0; painel <= 14; painel += 1) {
+        const room = taskDetailRoomFor(rows, painel);
+        const vivo = room + 3 + painel + LIVE_OVERHEAD_ROWS;
+        // terminais muito baixos (piso de 2 linhas de conteúdo) são o único caso fora da regra
+        if (rows - LIVE_OVERHEAD_ROWS - painel - 3 >= 2) expect(vivo).toBeLessThanOrEqual(rows);
+        expect(room).toBeGreaterThanOrEqual(2);
+      }
+    }
+  });
+});
+
+describe('Entre blocos da conversa: exatamente UMA linha em branco (resposta → você)', () => {
+  it('Λluy → você tem 1 linha em branco, não 3', async () => {
+    const s = build({ mode: 'concierge', concierge: () => text('Certo.') });
+    await type(s, 'um');
+    await waitFor(() => s.frame().includes('Certo.'));
+    await sleep(200);
+    await type(s, 'dois');
+    await waitFor(() => s.conciergeCalls.includes('dois'));
+    await sleep(300);
+    const lines = s.frame().split('\n');
+    const primeira = lines.findIndex((l) => l.includes('Certo.'));
+    const voce = lines.findIndex((l, i) => i > primeira && l.includes('você'));
+    expect(voce).toBeGreaterThan(primeira);
+    expect(lines.slice(primeira + 1, voce).filter((l) => l.trim() === '').length).toBe(1);
+    s.unmount();
   });
 });
