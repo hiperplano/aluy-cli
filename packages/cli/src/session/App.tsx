@@ -5115,13 +5115,15 @@ export function App(props: AppProps): React.ReactElement {
   // usuário escolheu `[r]` (está digitando a nova instrução). No MENU (`[r]/[c]/[n]`)
   // ele fica dim, como no `budget`/`ask` (a DECISÃO tem o foco).
   const stuckTyping = state.phase === 'stuck' && stuckRedirecting;
+  // ADR 0006 — no modo concierge a aprovação é caixa de entrada: o composer segue ATIVO.
+  const asksAsInbox = conciergeOn && state.phase === 'asking';
   const composerActive =
-    state.phase === 'idle' || state.phase === 'done' || isWorkPhase || stuckTyping;
+    state.phase === 'idle' || state.phase === 'done' || isWorkPhase || stuckTyping || asksAsInbox;
   // A dica do composer: em trabalho o composer está ATIVO ⇒ sem `hint` (a dica só
   // aparece quando inativo). Em `ask`/`budget` (composer dim) explica que a decisão
   // acima tem o foco. (O `<Composer>` só mostra `hint` quando `active === false`.)
   const composerHint =
-    state.phase === 'asking'
+    state.phase === 'asking' && !conciergeOn
       ? input !== ''
         ? 'rascunho guardado · esc apaga e volta a responder a caixa'
         : 'aguardando sua decisão acima'
@@ -5155,7 +5157,13 @@ export function App(props: AppProps): React.ReactElement {
   const askEgress = computeEgress(state, props.egress);
   // EST-0982 (semântica do esc) — com SUB-AGENTES VIVOS o footer ensina a nova
   // semântica de parada: esc para SÓ o pai; F8 para tudo.
-  const hintState = hintStateOf(state, slashOpen, palette.open, subAgentsRunning(state.blocks));
+  const hintState = hintStateOf(
+    state,
+    slashOpen,
+    palette.open,
+    subAgentsRunning(state.blocks),
+    conciergeOn,
+  );
 
   // EST-0965 — INDICADOR DE ATIVIDADE (elapsed). Enquanto OCUPADO, o relógio do turno
   // vem da contabilidade VIVA do controller (`durationMs` = clock − início do turno,
@@ -6819,12 +6827,17 @@ function hintStateOf(
   slashOpen: boolean,
   paletteOpen: boolean,
   subAgentsLive = false,
+  conciergeOn = false,
 ): HintState | null {
   // EST-0961 — a palette é modal: seu hint tem prioridade quando aberta.
   if (paletteOpen) return 'palette';
   if (slashOpen) return 'slash';
   // F9 — pausa por cota: dicas próprias (nada de `esc interromper · 0:32` fingindo que roda).
   if (state.quotaPause !== undefined && state.phase !== 'asking') return 'quota-pause';
+  // ADR 0006 — no modo concierge o rodapé ensina o modelo certo (Esc não para nada).
+  if (conciergeOn && (state.phase === 'thinking' || state.phase === 'streaming' || state.phase === 'retrying'))
+    return 'concierge-work';
+  if (conciergeOn && state.phase === 'asking') return 'concierge-ask';
   switch (state.phase) {
     // EST-0948 (auto-retry) — durante o backoff (`retrying`) o footer mostra o mesmo
     // hint do `thinking` ("esc para interromper"): esc cancela a re-tentativa.
