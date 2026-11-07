@@ -12,7 +12,10 @@
 import type { MemoryFact } from './contract.js';
 
 export const MEMORY_USER_HEADER =
-  'MEMÓRIA DO DONO (preferências e instruções que ele pediu para lembrar — siga-as como se ele as dissesse agora, também ao delegar a sub-agentes):';
+  'MEMÓRIA DO DONO (preferências e instruções que ele pediu para lembrar — siga-as como se ele as dissesse agora, também ao delegar a sub-agentes. ' +
+  'ELAS VENCEM as regras gerais de trabalho deste prompt quando conflitam (ex.: "tarefa pequena, faça você mesmo", ' +
+  '"só delegue se…"): se o dono mandou SEMPRE delegar/nunca implementar, DELEGUE até o menor pedido, ' +
+  'por spawn_agent, na primeira ação):';
 export const MEMORY_DERIVED_HEADER =
   'CONTEXTO LEMBRADO (conhecimento de fundo de sessões anteriores — use; se estiver desatualizado, corrija com `remember`):';
 

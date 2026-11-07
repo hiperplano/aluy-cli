@@ -304,6 +304,17 @@ export class StreamingModelCaller implements ModelCaller {
     this.client = client;
   }
 
+  /**
+   * O `ModelClient` VIGENTE agora (muda com `setClient`/`/provider`). Os callers
+   * secundários (sub-agentes, compactação, /ask) leem DAQUI a cada chamada em vez de
+   * capturar o client do boot — senão, depois de um `/provider`, só o pai falava com o
+   * provider novo e os filhos continuavam no ANTERIOR (modelo do provider novo mandado
+   * ao endpoint velho => "Unknown Model").
+   */
+  get currentClient(): ModelClient {
+    return this.client;
+  }
+
   /** O tier corrente da sessão (p/ a status bar/teste). */
   get tier(): LlmTier {
     return this.currentTier;

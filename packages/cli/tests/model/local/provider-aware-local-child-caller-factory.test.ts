@@ -76,7 +76,10 @@ function sseFetch(): { fetch: StreamFetch; calls: RecordedCall[] } {
   return { fetch, calls };
 }
 
-const fakeCredential = async (): Promise<ResolvedCredential> => ({ kind: 'apikey', secret: 'sk-test' });
+const fakeCredential = async (): Promise<ResolvedCredential> => ({
+  kind: 'apikey',
+  secret: 'sk-test',
+});
 
 describe('F-PROV — createProviderAwareLocalChildCallerFactory (fecha a lacuna de callerForLocalModel)', () => {
   it('(a) sub-agente roteado a modelo local usa o provider NOVO depois de um /provider bem-sucedido, não o do boot', async () => {
@@ -154,6 +157,30 @@ describe('F-PROV — createProviderAwareLocalChildCallerFactory (fecha a lacuna 
     });
 
     const caller = factory('slug-qualquer');
-    await expect(caller.call({ messages: [], idempotencyKey: 'k' })).rejects.toThrow(/desconhecido/);
+    await expect(caller.call({ messages: [], idempotencyKey: 'k' })).rejects.toThrow(
+      /desconhecido/,
+    );
+  });
+
+  it('(oauth) provider de API key NÃO monta o provedor OAuth (lançava "não tem config OAuth")', async () => {
+    const { fetch, calls } = sseFetch();
+    let oauthBuilt = 0;
+    const factory = createProviderAwareLocalChildCallerFactory({
+      getActiveProviderId: () => 'provider-b',
+      getActiveCatalog: () => CATALOG,
+      bootProvider: 'provider-a',
+      bootAuth: 'apikey',
+      env: {},
+      // como em run.tsx: o construtor do store OAuth LANÇA p/ provider sem config OAuth.
+      oauthAccessTokenFor: (id) => {
+        oauthBuilt += 1;
+        throw new Error(`backend local: provider "${id}" não tem config OAuth`);
+      },
+      fetch,
+      getCredential: fakeCredential,
+    });
+    await factory('glm-4.6').call({ messages: [], idempotencyKey: 'k' });
+    expect(oauthBuilt).toBe(0);
+    expect(calls[0]!.url).toMatch(/^https:\/\/b\.test\//);
   });
 });

@@ -133,6 +133,23 @@ describe('system prompt', () => {
     expect(sys.indexOf(PROJECT_INSTRUCTIONS_HEADER)).toBeLessThan(sys.indexOf(MEMORY_USER_HEADER));
     expect(sys.indexOf(MEMORY_USER_HEADER)).toBeLessThan(sys.indexOf('REGRA DE SEGURANÇA'));
   });
+  it('a MEMÓRIA DO DONO declara que VENCE as regras gerais ("tarefa pequena, faça você mesmo") no prompt de fio', () => {
+    const msgs = buildMessages(
+      NATIVE_TOOLS,
+      [],
+      'g',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      mem,
+    );
+    const sys = msgs[0]!.content as string;
+    expect(sys).toMatch(/ELAS VENCEM as regras gerais/);
+    expect(sys).toMatch(/DELEGUE até o menor pedido/);
+  });
   it('sem memória ⇒ idêntico ao baseline (cache de prefixo intacto)', () => {
     expect(
       buildSystemPrompt(

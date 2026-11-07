@@ -320,7 +320,9 @@ export function createProviderAwareLocalChildCallerFactory(
     const auth: LocalAuthKind = isBootProvider
       ? opts.bootAuth
       : defaultAuthFor(providerId, catalog);
-    const oauthAccessToken = opts.oauthAccessTokenFor?.(providerId);
+    // Só constrói o provedor OAuth quando o auth É oauth: o construtor do store lança
+    // `não tem config OAuth` p/ providers de chave de API (sub-agente com modelo local quebrava).
+    const oauthAccessToken = auth === 'oauth' ? opts.oauthAccessTokenFor?.(providerId) : undefined;
     const upstreamByModel = opts.upstreamByModelFor?.(providerId);
     const factory = createLocalChildCallerFactory({
       catalog,

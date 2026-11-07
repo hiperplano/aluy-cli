@@ -8507,6 +8507,20 @@ export class SessionController {
       // (`this.defaultChildModel`, `subAgent.model` do config). Ausente em TODAS
       // ⇒ `undefined` (herda o PAI — o comportamento de hoje, zero regressão).
       const effectiveModel = profile.model ?? mdModel ?? this.defaultChildModel;
+      // O modelo veio SÓ do `.md` (nem o spawn nem o dial o pediram). Se ele não existe no
+      // provider ATIVO (o dono trocou de provider depois de escrever o `.md`), o filho herda
+      // o modelo do pai com UMA nota, em vez de falhar: o `.md` é preferência, não exigência.
+      const modelFromMdOnly = profile.model === undefined && mdModel !== undefined;
+      const mdFallbackToParent = (reason: string): boolean => {
+        if (!modelFromMdOnly) return false;
+        this.pushNote('spawn_agent', [
+          `modelo "${mdModel}" do agente "${profile.agent ?? profile.label}" não vale no provider ` +
+            `ativo (${reason}) — "${profile.label}" usa o modelo do pai.`,
+        ]);
+        resolved.push(profile);
+        resolvedIndex.push(i);
+        return true;
+      };
 
       if (effectiveModel !== undefined) {
         // ADR-0152 (D6) — `ctx.backend` é o HINT DE DADO que o controller (que JÁ
@@ -8536,6 +8550,7 @@ export class SessionController {
         // (é o provider BYO dele que o filho herda). Fora disso: erro legível
         // ANTES de rodar (fail-closed), não um 422 do broker no meio.
         if (resolution.kind === 'custom' && this.tier !== 'custom') {
+          if (mdFallbackToParent(`a sessão está no tier "${this.tier}"`)) continue;
           outcomes[i] = errorOutcomeFor(
             profile.label,
             `modelo "${effectiveModel}": "custom"/"custom:<slug>" só vale numa sessão BYO/Custom ` +
@@ -8550,6 +8565,7 @@ export class SessionController {
         // legível ANTES de rodar (fail-closed), espelhando a checagem D3 acima.
         if (resolution.kind === 'local') {
           if (this.state.meta.backend !== 'local') {
+            if (mdFallbackToParent('a sessão não está em backend local')) continue;
             outcomes[i] = errorOutcomeFor(
               profile.label,
               `modelo "${effectiveModel}": "local"/"local:<slug>" só vale numa sessão de backend ` +
@@ -8575,6 +8591,7 @@ export class SessionController {
                 // degenerado) ⇒ preserva EXATAMENTE o comportamento rc.105 — zero
                 // regressão quando a porta de test-then-register não está montada.
                 if (names !== undefined) {
+                  if (mdFallbackToParent('fora do catálogo do provider')) continue;
                   // Caso 1 (0152 D6c) — catálogo LOCAL LISTÁVEL: confronta ANTES de
                   // rodar. Erro FAIL-CLOSED por-filho (GS-SAM-L5) — não derruba os
                   // irmãos (T6).
@@ -8601,6 +8618,7 @@ export class SessionController {
                 this.pushNote('spawn_agent', [`testando modelo "${slug}" no provider local…`]);
                 const result = await this.verifyAndRegisterLocalModel(slug);
                 if (!result.ok) {
+                  if (mdFallbackToParent('o provider não respondeu a esse modelo')) continue;
                   outcomes[i] = errorOutcomeFor(
                     profile.label,
                     `${result.detail}${this.suggestLocalModelTail(slug, names ?? [])}`,
@@ -8640,11 +8658,38 @@ export class SessionController {
     if (resolved.length > 0) {
       const ran = await this.spawnDetachable(spawner, resolved, signal, roomActive, despachar);
       ran.forEach((o, k) => {
-        outcomes[resolvedIndex[k]!] = o;
+        outcomes[resolvedIndex[k]!] = this.annotateInfraFailure(o, resolved[k]!);
       });
     }
     // Todos preenchidos por construção (resolvido OU erro). Coage o tipo.
     return outcomes.map((o, i) => o ?? errorOutcome(profiles[i]!.label));
+  }
+
+  /**
+   * Falha de INFRAESTRUTURA do filho (erro, 0 tokens, nenhuma ferramenta): o texto que volta ao
+   * pai passa a dizer provider + modelo (NUNCA a chave) e, sem rodeio, que é falha de
+   * configuração, que repetir igual não resolve e que o pai deve avisar o dono em vez de
+   * assumir o trabalho. Antes o pai só via "Unknown Model" e tentou 5 vezes (1,3M tokens) e
+   * depois fez sozinho, contra a instrução do dono.
+   */
+  private annotateInfraFailure(o: SubAgentOutcome, profile: SubAgentProfile): SubAgentOutcome {
+    if (o.ok || o.stop !== 'error' || o.usage.tokens !== 0 || o.usage.toolCalls !== 0) return o;
+    const provider = this.activeProviderId ?? this.state.meta.provider ?? 'desconhecido';
+    const resolved = resolveModelTier(profile.model);
+    const model =
+      resolved.kind === 'local' && resolved.slug !== undefined
+        ? resolved.slug
+        : resolved.kind === 'custom' && resolved.slug !== undefined
+          ? resolved.slug
+          : (this.state.meta.model ?? 'modelo do pai');
+    return {
+      ...o,
+      result:
+        `${o.result}\n[falha de CONFIGURAÇÃO/infraestrutura, não da tarefa: o sub-agente não chegou ` +
+        `a rodar (0 tokens). provider "${provider}", modelo "${model}". Repetir do mesmo jeito não ` +
+        `resolve. Diga ao dono o que aconteceu e espere a decisão dele; não assuma o trabalho do ` +
+        `sub-agente por conta própria.]`,
+    };
   }
 
   /**

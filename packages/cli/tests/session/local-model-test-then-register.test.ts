@@ -369,6 +369,110 @@ describe('TESTE DE SEGURANÇA 6 (nível-controller) — slug JÁ CONHECIDO não 
 });
 
 describe('TESTE DE SEGURANÇA 5 (nível-controller) — CRLF/NUL/control NUNCA chega à porta TTR', () => {
+  it('`.md` com model que o provider ATIVO não tem ⇒ o filho herda o modelo do pai (nota de 1 linha), não falha', async () => {
+    const localLog: string[] = [];
+    const parentLog: string[] = [];
+    const ttrCalls: string[] = [];
+    const registry = new AgentRegistry([globalProfile('poliglota', 'glm-4.6')], []);
+    // o PAI delega; o filho herdado cai no mesmo `model` do pai (taggedCaller PARENT)
+    let turn = 0;
+    const parent: ModelCaller = {
+      async call(): Promise<ModelCallResult> {
+        const content =
+          turn === 0
+            ? toolCall(SPAWN_AGENT_TOOL_NAME, {
+                agents: [{ label: 'x', goal: 'g', agent: 'poliglota' }],
+              })
+            : 'consolidei.';
+        turn += 1;
+        parentLog.push(`PAI${turn}`);
+        return {
+          request_id: 'r',
+          content,
+          finish_reason: 'stop',
+          usage: { request_id: 'r', tier: 'aluy-flux', tokens_in: 1, tokens_out: 1 },
+        };
+      },
+    };
+    const controller = new SessionController({
+      model: parent,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: fakePorts().ports,
+      askResolver: askAutoApprove,
+      meta: LOCAL_META,
+      subAgents: { enabled: true },
+      agentRegistry: registry,
+      callerForLocalModel: (slug) => taggedCaller(`LOCAL:${slug}`, localLog),
+      localModelCatalog: { listNames: () => ['deepseek/deepseek-v4-pro'] },
+      verifyAndRegisterLocalModel: fakeTtrPort({ okSlugs: [], calls: ttrCalls }), // provider rejeita glm-4.6
+    });
+    await controller.submit('usa o agente poliglota');
+
+    expect(localLog).toHaveLength(0); // não roteou ao modelo do .md
+    const block = subAgentsBlock(controller.current.blocks);
+    expect(block?.children.find((c) => c.label === 'x')?.status).toBe('done');
+    const notes = controller.current.blocks
+      .filter((b): b is NoteBlock => b.kind === 'note' && b.title === 'spawn_agent')
+      .flatMap((n) => n.lines)
+      .join(' | ');
+    expect(notes).toMatch(/modelo "glm-4\.6" do agente "poliglota" não vale no provider ativo/);
+    expect(notes).toMatch(/usa o modelo do pai/);
+  });
+
+  it('modelo pedido EXPLICITAMENTE no spawn_agent (não do .md) segue falhando alto — sem fallback silencioso', async () => {
+    const ttrCalls: string[] = [];
+    const captured: { messages?: string } = {};
+    const model = parentDelegates(
+      { agents: [{ label: 'x', goal: 'g', model: 'glm-4.6' }] },
+      captured,
+    );
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: fakePorts().ports,
+      askResolver: askAutoApprove,
+      meta: LOCAL_META,
+      subAgents: { enabled: true },
+      callerForLocalModel: (slug) => taggedCaller(`LOCAL:${slug}`, []),
+      localModelCatalog: { listNames: () => ['deepseek/deepseek-v4-pro'] },
+      verifyAndRegisterLocalModel: fakeTtrPort({ okSlugs: [], calls: ttrCalls }),
+    });
+    await controller.submit('spawn explícito com modelo ruim');
+    expect(captured.messages ?? '').toMatch(/não respondeu/);
+  });
+
+  it('filho que falha na infraestrutura (0 tokens) volta nomeando provider+modelo e dizendo que repetir não resolve', async () => {
+    const captured: { messages?: string } = {};
+    const model = parentDelegates(
+      { agents: [{ label: 'x', goal: 'g', model: 'deepseek/deepseek-v4-pro' }] },
+      captured,
+    );
+    const quebrado: ModelCaller = {
+      async call(): Promise<ModelCallResult> {
+        throw new Error('Unknown Model, please check the model code.');
+      },
+    };
+    const controller = new SessionController({
+      model,
+      permission: new PolicyPermissionEngine({ mode: 'unsafe' }),
+      ports: fakePorts().ports,
+      askResolver: askAutoApprove,
+      meta: LOCAL_META,
+      activeProviderId: 'openrouter',
+      subAgents: { enabled: true },
+      callerForLocalModel: () => quebrado,
+      localModelCatalog: { listNames: () => ['deepseek/deepseek-v4-pro'] },
+    });
+    await controller.submit('spawn num modelo que o provider recusa');
+    const m = captured.messages ?? '';
+    expect(m).toMatch(/Unknown Model/);
+    expect(m).toMatch(/CONFIGURAÇÃO\/infraestrutura/);
+    expect(m).toMatch(/provider \\"openrouter\\", modelo \\"deepseek\/deepseek-v4-pro\\"/);
+    expect(m).toMatch(/Repetir do mesmo jeito não resolve/);
+    expect(m).toMatch(/não assuma o trabalho/);
+    expect(m).not.toMatch(/sk-/); // nunca a chave
+  });
+
   it('slug com CRLF/NUL em spawn/`.md`/dial de config ⇒ resolveModelTier dá kind:"unknown"; verifyAndRegisterLocalModel NUNCA chamada', async () => {
     const registry = new AgentRegistry(
       [globalProfile('helper', 'local:evil\r\nX-Injected: 1')], // `.md` malformado
