@@ -54,3 +54,23 @@ describe('flag `manual` (só recarga/ação do dono resolve)', () => {
     expect(classifyQuota(err(429, 'WEEKLY_CAP_EXHAUSTED'), NOW)?.manual).toBe(false);
   });
 });
+
+import { KNOWN_RESET_LADDER_MS, nextProbeAtMs } from '../../src/model/quota-pause.js';
+describe('nextProbeAtMs', () => {
+  it('com reset longe: escada de 1m, 2m, 5m (teto 5 min)', () => {
+    expect(KNOWN_RESET_LADDER_MS).toEqual([60_000, 120_000, 300_000]);
+    const R = 80 * 3_600_000;
+    expect(nextProbeAtMs(0, 0, false, R)).toBe(60_000);
+    expect(nextProbeAtMs(0, 1, false, R)).toBe(120_000);
+    expect(nextProbeAtMs(0, 99, false, R)).toBe(300_000);
+  });
+  it('sonda no horário do reset se ele vem antes do degrau; vencido não puxa para trás', () => {
+    expect(nextProbeAtMs(0, 5, false, 90_000)).toBe(90_000);
+    expect(nextProbeAtMs(1_000_000, 0, false, 500)).toBe(1_060_000);
+  });
+  it('sem reset / saldo usam as escadas de sempre', () => {
+    expect(nextProbeAtMs(0, 0, false, undefined)).toBe(60_000);
+    expect(nextProbeAtMs(0, 99, false, undefined)).toBe(1_800_000);
+    expect(nextProbeAtMs(0, 0, true, undefined)).toBe(300_000);
+  });
+});

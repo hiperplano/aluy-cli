@@ -8,8 +8,8 @@
 //   - UM episódio por sessão (a sessão fala com um provider/credencial). Quando um agente
 //     bate na cota, os IRMÃOS não martelam o provider: ao tentar a próxima chamada eles
 //     esperam no mesmo portão (`gate`). Os que já estavam em voo caem na mesma pausa.
-//   - SONDAGEM controlada: no horário de reset (ou na escada de backoff, se o provider não
-//     disse) UM agente é eleito sondador e refaz a PRÓPRIA chamada pendente. Deu certo ⇒
+//   - SONDAGEM controlada: periódica (escada de backoff; com reset informado, a cada ≤5 min e
+//     também NO horário do reset — o reset é o prazo mais tarde, não o mais cedo) UM agente é eleito sondador e refaz a PRÓPRIA chamada pendente. Deu certo ⇒
 //     `ok()` libera todo mundo. Falhou de novo ⇒ o episódio recalcula e segue. Nunca há
 //     mais de uma chamada de sondagem em voo, e nunca laço apertado (CLI-SEC-8).
 //   - TETO de espera total por episódio (`maxWaitMs`). Estourou ⇒ "parar salvando"
@@ -28,7 +28,7 @@ import {
   BALANCE_MAX_WAIT_MS,
   classifyQuota,
   exceedsShortRetry,
-  probeDelayMs,
+  nextProbeAtMs,
   type QuotaPauseConfig,
   type QuotaScope,
 } from '../model/quota-pause.js';
@@ -65,6 +65,8 @@ export interface QuotaPauseView {
   /** Quando a espera máxima estoura e vira "parar salvando" (epoch ms). */
   readonly deadlineAtMs: number;
   readonly probes: number;
+  /** Quando a última sondagem foi RECUSADA (epoch ms); `undefined` ⇒ ainda nenhuma. */
+  readonly lastProbeAtMs?: number | undefined;
   /** Há uma sondagem em voo agora. */
   readonly probing: boolean;
   /** Só recarga resolve (saldo): a UI diz "recarregue e pressione ↵". */
@@ -129,6 +131,7 @@ interface Episode {
   readonly startedAt: number;
   readonly deadlineAt: number;
   probes: number;
+  lastProbeAt: number | undefined;
   probing: Waiter | null;
   probingLabel: string | null;
   waiters: Waiter[];
@@ -187,11 +190,15 @@ export class QuotaPauseCoordinator {
     this.stopped = null;
   }
 
-  /** "Tentar agora": antecipa a sondagem sem esperar o horário. */
+  /**
+   * "Tentar agora": antecipa a sondagem sem esperar o horário. Se já há uma sondagem em voo é
+   * no-op (nada empilha). NÃO reinicia a escada: um ↵ recusado avança o degrau como qualquer
+   * sondagem, então apertar ↵ repetido nunca vira martelada além de UMA chamada por vez.
+   */
   resumeNow(): void {
     this.stopped = null;
     const ep = this.ep;
-    if (!ep) return;
+    if (!ep || ep.probing) return;
     ep.nextProbeAt = this.now();
     this.elect();
     this.schedule();
@@ -278,7 +285,7 @@ export class QuotaPauseCoordinator {
         reason: verdict.reason,
         manual: verdict.manual,
         resetAtMs: verdict.resetAtMs,
-        nextProbeAt: verdict.resetAtMs ?? now + probeDelayMs(0, verdict.manual),
+        nextProbeAt: nextProbeAtMs(now, 0, verdict.manual, verdict.resetAtMs),
         startedAt: now,
         // Saldo esgotado: esperar não repõe. Não fica horas sondando — teto curto, e o
         // trabalho fica salvo (parar salvando) para retomar depois da recarga.
@@ -286,6 +293,7 @@ export class QuotaPauseCoordinator {
           now +
           (verdict.manual ? Math.min(this.cfg.maxWaitMs, BALANCE_MAX_WAIT_MS) : this.cfg.maxWaitMs),
         probes: 0,
+        lastProbeAt: undefined,
         probing: null,
         probingLabel: null,
         waiters: [],
@@ -300,11 +308,13 @@ export class QuotaPauseCoordinator {
         // A sondagem falhou de novo: recalcula a próxima espera.
         this.dropProbe(ep);
         ep.probes += 1;
+        ep.lastProbeAt = now;
         ep.resetAtMs = verdict.resetAtMs;
-        ep.nextProbeAt = verdict.resetAtMs ?? now + probeDelayMs(ep.probes, ep.manual);
+        ep.nextProbeAt = nextProbeAtMs(now, ep.probes, ep.manual, verdict.resetAtMs);
       } else if (verdict.resetAtMs !== undefined) {
+        // O reset só alimenta a exibição: NÃO empurra a próxima sondagem (ele é o prazo
+        // mais tarde, não o mais cedo).
         ep.resetAtMs = Math.max(ep.resetAtMs ?? 0, verdict.resetAtMs);
-        ep.nextProbeAt = Math.max(ep.nextProbeAt, verdict.resetAtMs);
       }
     }
     if (now >= ep.deadlineAt) {
@@ -458,6 +468,7 @@ export class QuotaPauseCoordinator {
       startedAt: ep.startedAt,
       deadlineAtMs: ep.deadlineAt,
       probes: ep.probes,
+      lastProbeAtMs: ep.lastProbeAt,
       probing: ep.probing !== null,
       manual: ep.manual,
       agents: [...ep.agents.values()].map((a) => ({ label: a.label, kind: a.kind })),

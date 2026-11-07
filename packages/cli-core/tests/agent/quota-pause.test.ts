@@ -11,7 +11,15 @@ import { formatSubAgentResults } from '../../src/agent/tools/spawn-agent.js';
 import { BrokerError, QuotaPauseStoppedError } from '../../src/model/errors.js';
 import type { ModelCallResult } from '../../src/model/types.js';
 import type { ToolPorts } from '../../src/agent/tools/types.js';
-import { MemoryFs, RecordingShell, MemorySearch, allowAllEngine } from './helpers.js';
+import {
+  MemoryFs,
+  RecordingShell,
+  MemorySearch,
+  allowAllEngine,
+  toolCallBlock,
+} from './helpers.js';
+import { injectedInputItem } from '../../src/agent/input-injection.js';
+import type { HistoryItem } from '../../src/agent/context.js';
 
 const ports = (): ToolPorts => ({
   fs: new MemoryFs(),
@@ -202,15 +210,22 @@ describe('Z.ai coding: 429 com corpo de limite de uso', () => {
 
   it('agente PRINCIPAL pausa (não é retry curto) e retoma no horário do corpo', async () => {
     const co = new QuotaPauseCoordinator({ config: cfg });
-    const model = new Script([zai(), ok('feito')]);
+    // reset em 10 min: sondas em 1m, 3m, 8m e NO horário (10m); a última passa.
+    const model = new Script([zai(), zai(), zai(), zai(), ok('feito')]);
     const p = newLoop(model, co).run('x');
     await vi.advanceTimersByTimeAsync(10);
     expect(co.view?.scope).toBe('janela');
-    await vi.advanceTimersByTimeAsync(300_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(model.calls).toBe(1);
-    await vi.advanceTimersByTimeAsync(305_000);
-    expect((await p).stop.kind).toBe('final');
+    await vi.advanceTimersByTimeAsync(31_000);
     expect(model.calls).toBe(2);
+    await vi.advanceTimersByTimeAsync(120_000); // 181s: 2ª sondagem (+2m)
+    expect(model.calls).toBe(3);
+    await vi.advanceTimersByTimeAsync(405_000); // 586s: 3ª (+5m, 480s); a do horário ainda não
+    expect(model.calls).toBe(4);
+    await vi.advanceTimersByTimeAsync(25_000); // 611s: sondou NO horário (600s) e passou
+    expect((await p).stop.kind).toBe('final');
+    expect(model.calls).toBe(5);
   });
 
   it('SUB-AGENTE também pausa', async () => {
@@ -314,9 +329,9 @@ describe('sub-agentes', () => {
     const co = new QuotaPauseCoordinator({ config: cfg });
     const model = new Script([quota(120_000), ok('resultado')]);
     const p = spawner(model, co).spawn([{ label: 'f1', goal: 'tarefa' }]);
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(co.view?.agents[0]).toEqual({ label: 'f1', kind: 'subagente' });
-    await vi.advanceTimersByTimeAsync(61_000);
+    await vi.advanceTimersByTimeAsync(31_000);
     const [o] = await p;
     expect(o).toMatchObject({ ok: true, stop: 'final', result: 'resultado' });
   });
@@ -357,5 +372,164 @@ describe('sub-agentes', () => {
     const model = new Script([new BrokerError({ status: 401, code: 'UNAUTHENTICATED' })]);
     const [o] = await spawner(model, co).spawn([{ label: 'f1', goal: 't' }]);
     expect(o!.stop).toBe('error');
+  });
+});
+
+describe('sondagem periódica com reset informado (o reset é o prazo mais tarde)', () => {
+  const H80 = 80 * 3_600_000;
+  const cfg80 = { enabled: true, maxWaitMs: 7 * 24 * 3_600_000 };
+
+  it('reset a 80h: sonda em 1m, 3m, 8m, 13m… (teto 5 min) e retoma quando a cota volta antes', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg80 });
+    const model = new Script([quota(H80), quota(H80), quota(H80), ok('feito')]);
+    const p = newLoop(model, co).run('x');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(model.calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(model.calls).toBe(2); // 1m
+    await vi.advanceTimersByTimeAsync(119_000);
+    expect(model.calls).toBe(2);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(model.calls).toBe(3); // +2m
+    await vi.advanceTimersByTimeAsync(290_000);
+    expect(model.calls).toBe(3);
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect((await p).stop.kind).toBe('final'); // +5m: a cota voltou, 79h antes do reset
+    expect(model.calls).toBe(4);
+    expect(co.view).toBeNull();
+  });
+
+  it('recusa mantém a espera; o horário informado segue visível e a escada satura em 5 min', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg80 });
+    const model = new Script([quota(H80)]); // sempre recusa
+    void newLoop(model, co)
+      .run('x')
+      .catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(10);
+    const t0 = Date.now();
+    await vi.advanceTimersByTimeAsync(60_000 + 120_000 + 300_000 + 300_000 + 300_000 + 500);
+    expect(model.calls).toBe(6);
+    expect(co.view).not.toBeNull();
+    expect(co.view!.resetAtMs).toBeGreaterThan(t0 + 79 * 3_600_000);
+    expect(co.view!.nextProbeAtMs - Date.now()).toBeLessThanOrEqual(300_000);
+    co.stop('usuario');
+  });
+
+  it('um irmão com reset mais longo não empurra a próxima sondagem', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg80 });
+    const a = co.forAgent({ label: 'a', kind: 'subagente' });
+    const b = co.forAgent({ label: 'b', kind: 'subagente' });
+    void a.handle(quota(3_600_000), { history: () => [] }).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(10);
+    const antes = co.view!.nextProbeAtMs;
+    void b.handle(quota(H80), { history: () => [] }).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(co.view!.nextProbeAtMs).toBe(antes);
+    expect(co.view!.resetAtMs).toBeGreaterThan(Date.now() + 79 * 3_600_000);
+    co.stop('usuario');
+  });
+
+  it('vários sub-agentes: UM sondador por vez e todos são liberados juntos', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg80 });
+    let inflight = 0;
+    let maxInflight = 0;
+    let probes = 0;
+    let liberar = false;
+    const ports3 = ['a', 'b', 'c'].map((l) => co.forAgent({ label: l, kind: 'subagente' }));
+    const run = async (port: (typeof ports3)[number]): Promise<void> => {
+      let sondando = false;
+      for (;;) {
+        if (!sondando) await port.gate({ history: () => [] });
+        inflight += 1;
+        maxInflight = Math.max(maxInflight, inflight);
+        probes += 1;
+        try {
+          if (!liberar) throw quota(H80);
+          port.ok();
+          return;
+        } catch (e) {
+          await port.handle(e, { history: () => [] });
+          sondando = true;
+        } finally {
+          inflight -= 1;
+        }
+      }
+    };
+    const all = ports3.map((p) => run(p));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(probes).toBe(3); // a chamada inicial de cada um
+    await vi.advanceTimersByTimeAsync(60_500);
+    expect(probes).toBe(4); // só UM sondou
+    await vi.advanceTimersByTimeAsync(120_500);
+    expect(probes).toBe(5);
+    liberar = true;
+    await vi.advanceTimersByTimeAsync(300_500);
+    await Promise.all(all);
+    expect(maxInflight).toBeLessThanOrEqual(3);
+    expect(co.view).toBeNull();
+  });
+
+  it('pausa manual (saldo) segue a escada esparsa de saldo, sem reset', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg });
+    const saldo = new BrokerError({ status: 402, code: 'INSUFFICIENT_CREDIT', detail: 'saldo' });
+    const model = new Script([saldo, saldo, ok()]);
+    const p = newLoop(model, co).run('x');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(co.view?.manual).toBe(true);
+    await vi.advanceTimersByTimeAsync(290_000);
+    expect(model.calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(model.calls).toBe(2); // 5 min
+    co.resumeNow();
+    expect((await p).stop.kind).toBe('final');
+  });
+
+  it('reset já vencido nunca vira laço apertado: vale a escada', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg });
+    const model = new Script([quota(-5_000)]);
+    void newLoop(model, co)
+      .run('x')
+      .catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(model.calls).toBeLessThanOrEqual(2);
+    co.stop('usuario');
+  });
+});
+
+describe('sondagem por ↵ no loop real: mensagem enfileirada entra quando a cota volta', () => {
+  it('a mensagem injetada durante a pausa é drenada sozinha após o sucesso do ↵', async () => {
+    const co = new QuotaPauseCoordinator({ config: cfg });
+    let fila: HistoryItem[] = [];
+    const calls: string[] = [];
+    const model: ModelCaller = {
+      async call(args) {
+        calls.push(JSON.stringify(args.messages ?? []));
+        const n = calls.length;
+        if (n === 1) throw quota(80 * 3_600_000);
+        if (n === 2) return ok(`vou ler\n${toolCallBlock('read_file', { path: 'a.txt' })}`);
+        return ok('feito');
+      },
+    };
+    const loop = new AgentLoop({
+      model,
+      permission: allowAllEngine,
+      tools: registry(),
+      ports: { ...ports(), fs: new MemoryFs(new Map([['a.txt', 'x']])) },
+      sessionId: 's',
+      quotaPause: co.forAgent({ label: 'principal', kind: 'principal' }),
+      pollInjected: () => {
+        const out = fila;
+        fila = [];
+        return out;
+      },
+    });
+    const p = loop.run('faça');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(co.view).not.toBeNull();
+    fila = [injectedInputItem('mensagem enfileirada na pausa')!]; // o dono digitou durante a pausa
+    co.resumeNow();
+    expect((await p).stop.kind).toBe('final');
+    expect(calls[2]).toContain('mensagem enfileirada na pausa');
+    expect(co.view).toBeNull();
   });
 });
