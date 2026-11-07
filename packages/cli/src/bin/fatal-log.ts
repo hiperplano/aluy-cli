@@ -13,6 +13,7 @@
 // Best-effort: nunca lança, nunca bloqueia, arquivo 0600, tamanho limitado, sem segredos (só a
 // mensagem/stack do erro; o stack do Node não carrega o conteúdo das mensagens do usuário).
 
+import { secretVault } from '@hiperplano/aluy-cli-core';
 import { appendFileSync, mkdirSync, statSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { aluyHomeDir } from '../sandbox/aluy-home.js';
@@ -52,9 +53,13 @@ export function appendFatalLog(kind: string, detail: unknown, opts: FatalLogOpti
             })();
     const ts = (opts.now?.() ?? new Date()).toISOString();
     const pid = opts.pid ?? process.pid;
-    appendFileSync(file, `[${ts}] pid=${String(pid)} ${kind}: ${text.slice(0, MAX_DETAIL)}\n`, {
-      mode: 0o600,
-    });
+    appendFileSync(
+      file,
+      secretVault.redact(`[${ts}] pid=${String(pid)} ${kind}: ${text.slice(0, MAX_DETAIL)}\n`),
+      {
+        mode: 0o600,
+      },
+    );
     return true;
   } catch {
     return false;

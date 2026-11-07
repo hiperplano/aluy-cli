@@ -15,6 +15,7 @@ import type {
   ToolResult,
 } from './types.js';
 import { redactOutputSecrets } from '../journal/redact.js';
+import { StreamRedactor, secretVault } from '../../secrets/vault.js';
 import { GlobSyntaxError } from './glob-match.js';
 import { PLAN_TOOL } from './plan.js';
 import { QUESTION_TOOL } from './question.js';
@@ -200,9 +201,7 @@ export const readFileTool: NativeTool<ToolPorts> = {
     // nome EXATO do campo. Único candidato de caminho na tool ⇒ sem ambiguidade.
     const path = strReq(input, ['path', 'file', 'filename']);
     if (!path) {
-      return err(
-        `read_file requer "path" (string não-vazia). Recebi: ${descreveRecebido(input)}.`,
-      );
+      return err(`read_file requer "path" (string não-vazia). Recebi: ${descreveRecebido(input)}.`);
     }
     try {
       const content = await ports.fs.readFile(path);
@@ -249,9 +248,7 @@ export const editFileTool: NativeTool<ToolPorts> = {
     const newString = strOpt(input, ['new_string', 'new_text']); // "" é válido (remove trecho)
     const replaceAll = boolDeChave(input, 'replace_all');
     if (!path) {
-      return err(
-        `edit_file requer "path" (string não-vazia). Recebi: ${descreveRecebido(input)}.`,
-      );
+      return err(`edit_file requer "path" (string não-vazia). Recebi: ${descreveRecebido(input)}.`);
     }
     if (oldString === undefined) {
       return err(
@@ -493,12 +490,26 @@ export const runCommandTool: NativeTool<ToolPorts> = {
       // EST-0982 — STREAMING: cada chunk da porta é REDIGIDO (CLI-SEC-6) AQUI, no
       // core portável (ponto único), e só então repassado ao render ao vivo. A porta
       // entrega bruto; a redação não depende de a porta ser confiável.
+      // ADR 0005 — um redator de STREAM por canal: um segredo do `/secret` partido entre dois
+      // chunks não vaza (o sufixo que pode ser começo de segredo fica retido até decidir).
+      const redactors = { stdout: new StreamRedactor(), stderr: new StreamRedactor() };
+      const emit = (stream: 'stdout' | 'stderr', text: string): void => {
+        if (text !== '') ctx?.onShellChunk?.({ stream, text: redactOutputSecrets(text) });
+      };
       const onChunk = ctx?.onShellChunk
         ? (chunk: ShellChunk): void => {
-            ctx.onShellChunk?.({ stream: chunk.stream, text: redactOutputSecrets(chunk.text) });
+            emit(chunk.stream, redactors[chunk.stream].push(chunk.text));
           }
         : undefined;
+      // ADR 0005 — env dos segredos só p/ este comando (nunca no env do processo do Aluy).
+      const secretEnv =
+        ctx?.secretEnv === 'all'
+          ? secretVault.envAll()
+          : ctx?.secretEnv === 'referenced'
+            ? secretVault.envFor(command)
+            : {};
       const r = await ports.shell.exec(command, {
+        ...(Object.keys(secretEnv).length > 0 ? { env: secretEnv } : {}),
         ...(ctx?.signal ? { signal: ctx.signal } : {}),
         ...(onChunk ? { onChunk } : {}),
         // F-BG — SOLTAR: repassados sem interpretação. Quem decide é o dono (Ctrl+B),
@@ -506,6 +517,8 @@ export const runCommandTool: NativeTool<ToolPorts> = {
         ...(ctx?.detachSignal ? { detachSignal: ctx.detachSignal } : {}),
         ...(ctx?.onDetached ? { onDetached: ctx.onDetached } : {}),
       });
+      emit('stdout', redactors.stdout.flush());
+      emit('stderr', redactors.stderr.flush());
 
       // F-BG — SOLTO pelo dono: o processo SEGUE VIVO e não há exit code ainda. Isto
       // NÃO é sucesso nem falha do comando — é um desfecho novo, e precisa chegar ao
@@ -537,7 +550,17 @@ export const runCommandTool: NativeTool<ToolPorts> = {
         stdout ? `stdout:\n${stdout}` : 'stdout: (vazio)',
         stderr ? `stderr:\n${stderr}` : 'stderr: (vazio)',
       ].join('\n');
-      return { ok: r.exitCode === 0, observation: clip(body), display: `$ ${command}` };
+      return {
+        ok: r.exitCode === 0,
+        observation: clip(body),
+        display: `$ ${command}`,
+        shell: {
+          exitCode: r.exitCode,
+          stdout,
+          stderr,
+          ...(r.aborted ? { aborted: true } : {}),
+        },
+      };
     } catch (e) {
       return err(`falha ao executar "${command}": ${errMsg(e)}`);
     }

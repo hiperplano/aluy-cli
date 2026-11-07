@@ -13,7 +13,7 @@ import type { FullCatalog } from './catalog.js';
 export const ptBR: FullCatalog = {
   // ── Composer ──────────────────────────────────────────────────────────────
   'composer.placeholder': 'digite um objetivo ou /comando…',
-  'composer.shellHint': '› atrás da catraca · Enter roda · catraca pergunta no efeito',
+  'composer.shellHint': '› roda direto, sem pedir · o agente vê a saída · !! só local',
   'composer.moreLines': 'linhas',
 
   // ── FooterHints (§4.3) ────────────────────────────────────────────────────

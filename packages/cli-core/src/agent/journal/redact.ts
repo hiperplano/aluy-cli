@@ -15,8 +15,10 @@
 // objetivo é IDENTIFICAR a barreira ("rodou um curl"), não reproduzir o comando
 // fielmente. Quando em dúvida, o segredo vira `‹redigido›`.
 
+import { SECRET_REDACTED, secretVault } from '../../secrets/vault.js';
+
 /** O marcador que substitui um segredo redigido (visível, não-segredo). */
-export const REDACTED = '‹redigido›';
+export const REDACTED = SECRET_REDACTED;
 
 /**
  * Padrões de segredo numa linha de comando. Cada um casa a PARTE sensível e a
@@ -180,7 +182,11 @@ const RULES: readonly SecretRule[] = [
  *          na TUI/feedback do aviso de barreira.
  */
 export function redactCommandSecrets(command: string): string {
-  let out = command;
+  // ADR 0005 — PRIMEIRO a redação por VALOR EXATO dos segredos de `/secret`: este é o
+  // ponto único de CLI-SEC-6 (toda saída/linha de comando passa por aqui), então o valor
+  // do cofre fica coberto em todos os caminhos sem cada um precisar lembrar. Vem antes das
+  // regras por padrão para elas não mutilarem o valor e deixarem um pedaço.
+  let out = secretVault.redact(command);
   for (const rule of RULES) {
     out = out.replace(rule.re, (...args) => {
       // String.replace passa (match, ...groups, offset, fullString); montamos um

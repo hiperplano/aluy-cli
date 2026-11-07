@@ -151,8 +151,10 @@ export interface BangBlock {
   readonly command: string;
   /** `running` enquanto avalia/executa; `ok`/`err` ao concluir; `blocked` se negado. */
   readonly status: 'running' | 'ok' | 'err' | 'blocked';
-  /** Saída bruta (exit/stdout/stderr) ou o motivo do bloqueio. Truncada pelo produtor. */
+  /** Saída em texto simples (ou o motivo do bloqueio). Truncada pelo produtor. */
   readonly output?: string;
+  /** `!!cmd`: a saída NÃO foi (nem será, no resume) entregue ao modelo. */
+  readonly localOnly?: boolean;
   /**
    * EST-0982 — SAÍDA AO VIVO do `!comando` enquanto roda (`status==='running'`).
    * Acumulada pelos chunks do shell (JÁ REDIGIDA, CLI-SEC-6, pelo core); a TUI a mostra

@@ -297,7 +297,11 @@ export function measureConversaBlock(b: SessionBlock, ctx: ConversaCtx): number 
         return head + liveTailLines(b.liveOutput, ctx) + 1; // + paddingBottom do wrapper.
       }
       const stateWord = b.status === 'blocked' ? 'bloqueado' : b.status === 'err' ? 'erro' : 'ok';
-      const head = wrappedLineCount(`x shell $ ${b.command} x ${stateWord}`, c - SPEECH_INDENT);
+      const local = b.localOnly === true ? ' · só local' : '';
+      const head = wrappedLineCount(
+        `x shell $ ${b.command} x ${stateWord}${local}`,
+        c - SPEECH_INDENT,
+      );
       return head + outputBoxLines(b.output, ctx) + 1; // + paddingBottom do wrapper.
     }
     case 'subagents': {

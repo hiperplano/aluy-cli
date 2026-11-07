@@ -56,6 +56,16 @@ export interface ToolResult {
   readonly observation: string;
   /** Pré-visualização exata do efeito p/ confirmação (CLI-SEC-9). Opcional. */
   readonly display?: string;
+  /**
+   * Resultado ESTRUTURADO de um comando de shell (já REDIGIDO): permite à UI do `!` mostrar
+   * a saída crua (sem o envelope `exit=/stdout:/stderr:` feito para o modelo).
+   */
+  readonly shell?: {
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+    readonly aborted?: boolean;
+  };
 }
 
 /**
@@ -84,6 +94,13 @@ export interface ToolResult {
 export interface ToolRunContext {
   /** O MESMO sinal de abort do loop/root-flow (EST-0944/0969/0982). */
   readonly signal?: AbortSignal;
+  /**
+   * ADR 0005 — exporta segredos do `/secret` como env var no shell DESTA execução:
+   * `'referenced'` = só os que o texto do comando cita (comando do MODELO, já aprovado pela
+   * catraca `always-ask:secret-use`); `'all'` = todos (`!` do dono, ação explícita).
+   * Ausente = nenhum (sub-agentes, hooks, MCP e demais tools nunca recebem).
+   */
+  readonly secretEnv?: 'referenced' | 'all';
   /**
    * F-BG (21/09/2026, pedido do dono: "quando ele começar uma task que prende, eu ter a
    * opção de deixar rodando em background") — SOLTAR, que NÃO é matar.
@@ -265,6 +282,11 @@ export interface ShellChunk {
  *  - `onChunk` — callback de saída ao vivo (stdout/stderr), JÁ redigido (CLI-SEC-6).
  */
 export interface ShellExecOptions {
+  /**
+   * ADR 0005 — variáveis de ambiente EXTRAS só para ESTE comando (segredos do `/secret`).
+   * A porta as mescla por cima do env do processo; nunca persiste nem loga.
+   */
+  readonly env?: Readonly<Record<string, string>>;
   readonly signal?: AbortSignal;
   readonly onChunk?: (chunk: ShellChunk) => void;
   /** F-BG — SOLTAR (não matar): ver `ToolRunContext.detachSignal`. */

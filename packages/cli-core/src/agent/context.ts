@@ -19,6 +19,7 @@
 // pela catraca (loop.ts + gate). O aviso é defesa-em-profundidade; a catraca é a
 // garantia. (CA-3 verifica AMBOS: canal e não-bypass.)
 
+import { secretsPromptBlock } from '../secrets/prompt.js';
 import type { ChatMessage, ContentPart, NativeToolCall } from '../model/types.js';
 import type { NativeTool } from './tools/types.js';
 // EST-0983 (extensão · recall) — só a CONSTANTE de nome (contract.ts é puro: tipos +
@@ -569,6 +570,8 @@ export function buildSystemPrompt(
           'extras (você NÃO tem ferramenta para isso).',
         ]
       : []),
+    // ADR 0005 — NOMES dos segredos do `/secret` (nunca o valor), na cauda dinâmica.
+    ...secretsPromptBlock(),
   ].join('\n');
 }
 

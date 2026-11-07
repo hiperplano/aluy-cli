@@ -113,6 +113,7 @@ import {
   type ToolCall,
 } from './gate.js';
 import { isPlanReadAllowed } from './plan.js';
+import { secretVault } from '../secrets/vault.js';
 import { classifyAlwaysAsk, type CategoryMatch } from './categories.js';
 import { DEFAULT_MAX_MEMORY_WRITES_PER_SESSION } from '../agent/limits.js';
 import { REMEMBER_TOOL_NAME, RECALL_TOOL_NAME } from '../agent/memory/contract.js';
@@ -552,6 +553,35 @@ export class PolicyPermissionEngine implements PermissionEngine {
         'ask',
         `comando de sessão destrutivo — confirmação obrigatória (nunca auto-aprovável, nem sob --yolo): ${effect.exact}`,
         'always-ask:destructive',
+        effect,
+      );
+    }
+
+    // -0.8) ADR 0005 — USO DE SEGREDO por comando do MODELO. Um `run_command`/
+    //     `watch_command` cujo texto CITA o nome de um segredo do `/secret` é o ÚNICO caminho
+    //     pelo qual o valor chega a um processo lançado pelo modelo ⇒ SEMPRE `ask`
+    //     (`always-ask:secret-use`), ACIMA do YOLO e de qualquer allow/grant/hook — mesma
+    //     família do `session_command` destrutivo acima. A caixa mostra o comando exato
+    //     (que contém o NOME, nunca o valor). Sub-agente (`denySpawnAgent`): DENY — o valor
+    //     não é repassado a filhos. O `!` do DONO não passa por aqui como ask: o executor
+    //     do bang roda direto (ADR 0003) e este veredito só vale p/ o caminho do modelo.
+    const secretRefs = SECRET_ENV_TOOLS.has(call.name)
+      ? secretVault.referencedBy(commandOf(call))
+      : [];
+    if (secretRefs.length > 0) {
+      const lista = secretRefs.map((n) => `$${n}`).join(', ');
+      if (this.denySpawnAgent) {
+        return ok(
+          'deny',
+          `sub-agentes não recebem segredos (${lista}) — o valor não é repassado a filhos`,
+          'always-ask:secret-use',
+          effect,
+        );
+      }
+      return ok(
+        'ask',
+        `o comando usa o segredo ${lista} (o valor nunca aparece aqui) — confirmação obrigatória, nunca auto-aprovável, nem sob --yolo`,
+        'always-ask:secret-use',
         effect,
       );
     }
@@ -1031,6 +1061,20 @@ function primaryCategory(cats: readonly CategoryMatch[]): PermissionCategory {
 
 function ruleCategory(decision: PermissionVerdict['decision']): PermissionCategory {
   return decision === 'deny' ? 'policy:deny' : 'policy:allow';
+}
+
+/** ADR 0005 — tools cujo comando recebe o env dos segredos de `/secret` (e por isso passam pelo gate). */
+const SECRET_ENV_TOOLS: ReadonlySet<string> = new Set(['run_command', 'watch_command']);
+
+/**
+ * Todo o TEXTO do input de uma tool de comando (qualquer campo string, inclusive os aliases
+ * `cmd`/`bash` que o `run_command` aceita): a checagem de "cita um segredo" olha tudo, não
+ * só `command`, p/ um alias não escapar da catraca.
+ */
+function commandOf(call: ToolCall): string {
+  return Object.values(call.input)
+    .filter((v): v is string => typeof v === 'string')
+    .join('\n');
 }
 
 function primaryArg(call: ToolCall): string {

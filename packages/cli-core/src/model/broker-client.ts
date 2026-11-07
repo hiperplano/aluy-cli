@@ -17,6 +17,7 @@
 // PORTÁVEL (ADR-0053 §8): usa `fetch` injetável + um provedor de token injetável
 // (a LoginService.getAccessToken, EST-0942). Sem Ink/React, sem I/O de terminal.
 
+import { secretVault } from '../secrets/vault.js';
 import {
   BrokerError,
   BrokerTransportError,
@@ -305,7 +306,8 @@ export class BrokerModelClient implements ModelClient {
       return await this.doFetch(`${this.baseUrl}${CHAT_PATH}`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body),
+        // ADR 0005 — último ponto antes do fio: nenhum valor do `/secret` sai na requisição.
+        body: secretVault.redact(JSON.stringify(body)),
         ...(signal ? { signal } : {}),
       });
     } catch (err) {

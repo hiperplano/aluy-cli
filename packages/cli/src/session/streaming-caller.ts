@@ -15,6 +15,7 @@ import {
   newStreamByteCap,
   pushOrMergeToolCall,
   STREAM_CAP_FINISH_REASON,
+  StreamRedactor,
   type ModelClient,
   type ChatMessage,
   type LlmTier,
@@ -538,6 +539,11 @@ export class StreamingModelCaller implements ModelCaller {
     });
 
     let streamedArgs = false;
+    // ADR 0005 — a fala do modelo (e o raciocínio) passa pela redação por VALOR EXATO do cofre
+    // `/secret`, com retenção de sufixo p/ um valor partido entre deltas não vazar. Sem
+    // segredos no cofre é passa-direto (nada retido).
+    const textRedactor = new StreamRedactor();
+    const reasoningRedactor = new StreamRedactor();
     for await (const ev of stream) {
       // Sinal de vida por evento (ver `ModelCaller.call`'s `onActivity`).
       args.onActivity?.();
@@ -547,19 +553,24 @@ export class StreamingModelCaller implements ModelCaller {
           sessionId = ev.session_id;
           if (sessionId !== undefined) this.brokerSessionId = sessionId;
           break;
-        case 'delta':
-          content += ev.content;
-          sink.onDelta(ev.content);
+        case 'delta': {
+          const safe = textRedactor.push(ev.content);
+          content += safe;
+          if (safe !== '') sink.onDelta(safe);
           sink.onGenerated?.('text', ev.content.length);
           guard.push(ev.content);
           if (cap.addText(ev.content)) capped = true;
           break;
+        }
         case 'reasoning':
           // F-RAC — pensamento: vai p/ a UI e NÃO para o `content` do turno. De
           // propósito fora do `guard` (degeneração) e do `cap` (teto de bytes): eles
           // medem a FALA, e um raciocínio longo é normal nesses modelos — contá-lo ali
           // faria o turno ser cortado por "degenerou" sem o modelo ter falado nada.
-          sink.onReasoning?.(ev.content);
+          {
+            const safe = reasoningRedactor.push(ev.content);
+            if (safe !== '') sink.onReasoning?.(safe);
+          }
           sink.onGenerated?.('reasoning', ev.content.length);
           break;
         case 'progress':
@@ -600,6 +611,15 @@ export class StreamingModelCaller implements ModelCaller {
         break;
       }
     }
+
+    // ADR 0005 — o que ficou retido (começo de um valor que não se completou) é só texto comum.
+    const restText = textRedactor.flush();
+    if (restText !== '') {
+      content += restText;
+      sink.onDelta(restText);
+    }
+    const restReasoning = reasoningRedactor.flush();
+    if (restReasoning !== '') sink.onReasoning?.(restReasoning);
 
     sink.onDone?.();
 

@@ -39,8 +39,9 @@ import { readUpdateNote, refreshUpdateCheck } from '../io/update-check.js';
 import { readAutoUpdateNote, runAutoUpdate } from '../io/auto-update.js';
 import { PluginStore } from '../io/plugin-store.js';
 import { carregarAgentesDePlugins } from '../io/plugin-agents.js';
-import { linhasDaListaDePlugins } from '@hiperplano/aluy-cli-core';
+import { linhasDaListaDePlugins, secretVault } from '@hiperplano/aluy-cli-core';
 import { ThemeRoot } from './ThemeRoot.js';
+import { SecretsService } from './secrets.js';
 import { buildSession, type BuildSessionOptions } from './wiring.js';
 // F-PROV-FIX — lógica PURA (sem I/O) do ato explícito `/provider save`: decide o
 // que fixar (provider+modelo) a partir do estado corrente da sessão + do boot.
@@ -4794,6 +4795,20 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // esse papel, dispensamos a fase boot ANTES de montar: splash → cockpit direto,
     // sem flash. (Sem splash — headless/no-TTY — a fase boot segue intacta.)
     if (useSplash) built.controller.dismissBoot();
+    // ADR 0005 — cofre de segredos do `/secret`: só em memória; os salvos (`--save`) DESTE
+    // projeto voltam aqui, do cofre cifrado. Zerado ao sair do processo.
+    const secrets = new SecretsService({ projectDir: cwdAbs });
+    const loadedSecrets = secrets.loadSaved();
+    if (loadedSecrets > 0) {
+      built.controller.pushNote('secret', [
+        `${loadedSecrets} segredo(s) salvo(s) deste projeto carregado(s): ` +
+          `${secrets
+            .list()
+            .map((s) => `$${s.name}`)
+            .join(', ')} (/secret list).`,
+      ]);
+    }
+    process.once('exit', () => secretVault.clear());
     instance = render(
       // EST-0966 — <ThemeRoot> é a raiz STATEFUL do tema: monta com o `initialTheme`
       // (auto-detectado) e re-resolve+re-renderiza a árvore a cada troca do `/theme`.
@@ -4830,6 +4845,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           ]);
         }}
         controller={built.controller}
+        secrets={secrets}
         {...(bootTypedAhead !== '' ? { initialInput: bootTypedAhead } : {})}
         egress={built.egress}
         userCommands={userCommandList}

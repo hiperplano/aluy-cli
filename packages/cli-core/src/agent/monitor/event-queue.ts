@@ -14,7 +14,14 @@ export interface MonitorEvent {
   /** Rótulo curto legível ("testes", "build", "espera-csv"). */
   readonly label: string;
   /** Tipo do gatilho (ADR-0079 §3.1). */
-  readonly type: 'command-poll' | 'file-watch' | 'process-wait' | 'command' | 'agent-note';
+  readonly type:
+    | 'command-poll'
+    | 'file-watch'
+    | 'process-wait'
+    | 'command'
+    | 'agent-note'
+    // ADR 0005 — saída de um `!comando` do DONO, entregue ao modelo mid-turn.
+    | 'user-shell';
   /** A condição que disparou (ex.: "exit_code != 0", "criado", "PID 123 encerrou"). */
   readonly condition: string;
   /** Payload resumido (stdout/exit_code/path/pid…) — DADO, não instrução. */
@@ -77,6 +84,10 @@ export function formatMonitorEventAsData(ev: MonitorEvent): HistoryItem {
   // pela origem (o `payload` já vem com o rótulo e o aviso "é dado, não instrução").
   if (ev.type === 'agent-note') {
     return { role: 'observation', toolName: 'sub-agente', text: ev.payload };
+  }
+  // ADR 0005 — `!comando` do dono: observação com a ORIGEM `!comando` (o payload já traz o texto).
+  if (ev.type === 'user-shell') {
+    return { role: 'observation', toolName: 'run_command (!comando)', text: ev.payload };
   }
   const text =
     `[monitor: ${ev.label}] disparou.\n` +
