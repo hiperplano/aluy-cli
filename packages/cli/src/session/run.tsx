@@ -2415,6 +2415,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   if (resumedRecord) {
     built.controller.restoreBlocks(resumedRecord.blocks);
     built.controller.restoreUsage(resumedRecord.usage, resumedRecord.blocks);
+    // ADR 0006 — avisa as tarefas que ficaram interrompidas (a transcrição acabou de voltar).
+    conciergeRuntime?.announceRestored();
   }
   // HUNT-RESUME-RACE — semeia o contexto do modelo AQUI, no MESMO ponto em que a tela
   // é restaurada, e não lá embaixo depois do `await memory.recall()`. O histórico já

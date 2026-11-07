@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { ChatMessage, NativeToolCall } from '../model/types.js';
-import { buildDigest, clip, describeTask, EMPTY_SNAPSHOT } from './digest.js';
+import { buildDigest, clip, clipPlain, describeTask, EMPTY_SNAPSHOT } from './digest.js';
 import { buildConciergePrompt } from './prompt.js';
 import {
   TERMINAL_STATUSES,
@@ -309,7 +309,7 @@ export class Concierge {
     let line: string | undefined;
     switch (ev.kind) {
       case 'done':
-        line = `✔ ${t.id} concluída${t.summary ? `: ${clip(t.summary, 140)}` : '.'}`;
+        line = `✔ ${t.id} concluída${t.summary ? `: ${clipPlain(t.summary, 100)}` : '.'}`;
         break;
       case 'failed':
         line = `✘ ${t.id} falhou${ev.detail ? `: ${clip(ev.detail, 140)}` : '.'}`;

@@ -131,13 +131,28 @@ export class ConciergeRuntime {
     }
   }
 
+  /**
+   * Depois de restaurar a transcrição (`restoreBlocks` a substitui): avisa, em UMA nota, o que
+   * ficou interrompido ao fechar a sessão anterior. O Concierge oferece reiniciar se o dono quiser.
+   */
+  announceRestored(): void {
+    const interrupted = this.registry.list().filter((t) => t.status === 'interrupted');
+    if (interrupted.length === 0) return;
+    this.d.sink.pushConciergeReply([
+      `↯ ${interrupted.length} tarefa${interrupted.length > 1 ? 's' : ''} ficou interrompida ao fechar: ${interrupted
+        .map((t) => `${t.id} (${clip(t.goal, 40)})`)
+        .join('; ')}. Diga se quer reiniciar.`,
+    ]);
+  }
+
   // ── controle explícito (Esc NUNCA chama isto) ──────────────────────────────
 
   /** F8 — para tudo: tarefas, sub-agentes e (via cancelAllFlows) o turno principal. */
   stopAll(): void {
+    // `stopAll` interrompe o turno de cada tarefa; `cancelAllFlows` derruba também os
+    // sub-agentes (inclusive os desacoplados). Sem um `interrupt` extra (nota duplicada).
     this.engine.stopAll();
     this.d.sink.cancelAllFlows('f8');
-    this.d.sink.interrupt();
   }
 
   /** `/task stop <id>`. Devolve a frase para o dono. */
@@ -178,6 +193,9 @@ export class ConciergeRuntime {
 
   dispose(): void {
     for (const ac of this.inflight) ac.abort();
+    // Quem ainda corre ao sair fica `interrupted` (e não `done` por o abort resolver o submit).
+    for (const t of this.registry.live())
+      this.registry.transition(t.id, 'interrupted', 'sessão encerrada');
     this.engine.dispose();
   }
 
@@ -224,14 +242,6 @@ export class ConciergeRuntime {
       );
       this.registry.restore(tasks, typeof raw.nextId === 'number' ? raw.nextId : tasks.length + 1);
       if (Array.isArray(raw.history)) this.concierge.restoreHistory(raw.history as ChatMessage[]);
-      const interrupted = this.registry.list().filter((t) => t.status === 'interrupted');
-      if (interrupted.length > 0) {
-        this.d.sink.pushConciergeReply([
-          `↯ ${interrupted.length} tarefa${interrupted.length > 1 ? 's' : ''} ficou interrompida ao fechar: ${interrupted
-            .map((t) => `${t.id} (${clip(t.goal, 40)})`)
-            .join('; ')}. Diga se quer reiniciar.`,
-        ]);
-      }
     } catch {
       /* sem arquivo ou ilegível: começa limpo */
     }

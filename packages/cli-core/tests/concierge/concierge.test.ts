@@ -285,6 +285,19 @@ describe('Concierge — relatos', () => {
     expect(lines[2]).toContain('concluída: pronto');
   });
 
+  it('o relato de conclusão é uma linha curta e sem markdown', () => {
+    const { registry, concierge } = setup(() => result('ok'));
+    const lines: string[] = [];
+    concierge.attachRelay((l) => lines.push(l));
+    registry.create({ goal: 'a', kind: 'main' });
+    registry.transition('t1', 'done', undefined, {
+      summary: `**Lista:**\n1. \`a.md\`\n${'x'.repeat(400)}`,
+    });
+    expect(lines[0]).not.toMatch(/[*`]/);
+    expect(lines[0]).not.toContain('\n');
+    expect(lines[0]!.length).toBeLessThan(130);
+  });
+
   it('estado terminal é final (parada tardia não ressuscita)', () => {
     const reg = new TaskRegistry();
     reg.create({ goal: 'a', kind: 'main' });

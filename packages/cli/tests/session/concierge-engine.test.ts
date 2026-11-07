@@ -192,6 +192,7 @@ describe('ConciergeRuntime — persistência e --resume', () => {
     const rt2 = new ConciergeRuntime({ sink: s2, model, storePath: () => path });
     expect(rt2.registry.get('t1')!.status).toBe('interrupted');
     expect(rt2.concierge.getHistory().length).toBe(2);
+    rt2.announceRestored();
     expect(s2.replies.flat().join(' ')).toContain('interrompida');
     // ids novos não colidem com os restaurados
     expect(rt2.registry.create({ goal: 'x', kind: 'detached' }).id).toBe('t2');

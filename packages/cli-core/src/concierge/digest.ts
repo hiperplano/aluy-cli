@@ -39,6 +39,19 @@ export function statusPt(s: TaskStatus): string {
 /** Corta e redige texto de origem não-confiável para entrar no digest. */
 export function clip(text: string, max: number): string {
   const one = redactOutputSecrets(text).replace(/\s+/g, ' ').trim();
+  return cutAt(one, max);
+}
+
+/** Como `clip`, mas também tira marcação markdown (`**`, crases): para relatos de uma linha. */
+export function clipPlain(text: string, max: number): string {
+  const one = redactOutputSecrets(text)
+    .replace(/[*_`#>]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cutAt(one, max);
+}
+
+function cutAt(one: string, max: number): string {
   return one.length > max ? `${one.slice(0, max - 1)}…` : one;
 }
 
