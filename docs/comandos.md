@@ -185,6 +185,11 @@ si roda em **tarefas** (`t1`, `t2`…), que o Concierge abre (`task_start`), cor
   `--classic` força o clássico só naquela sessão. Neste ramo o padrão é `concierge`.
 - **Esc nunca para tarefa**: limpa o rascunho. Parar é explícito: peça ao Concierge ("pare a t1"),
   `/task stop <id>` (ou `all`), ou **F8** (para tudo). Ctrl-C duas vezes sai.
+- O trabalho NÃO aparece na conversa: as tarefas moram num **painel abaixo do composer** (uma linha por
+  tarefa, sub-agentes aninhados; com 3 ou mais, `3 tarefas · 2 rodando · ↓ ver`). `↓` expande, `↑↓`
+  escolhe, `enter` abre o detalhe (o transcrito da tarefa, rolável; `esc` fecha), `p` para a tarefa.
+  A conclusão vira uma linha na conversa (`✔ t1 concluída — …`); `/task show t1` abre o detalhe.
+- No modo clássico, os sub-agentes também saem da conversa e moram nesse rodapé.
 - `/task` lista as tarefas. Aprovações viram uma **caixa de entrada** acima do composer; responda com
   `/a [tarefa] [s]` (aprova; `s` = sempre nesta sessão) ou `/n [tarefa]` (nega) enquanto a conversa segue.
 - Uma correção entra na tarefa "após o passo atual"; se ela está no meio de uma chamada ao modelo, essa

@@ -21,6 +21,9 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
   `task_stop`/`task_status`), com lista compacta ao vivo, relatos de uma linha, caixa de entrada de
   aprovações (`/a` `/n`), `/task`, `/conversation concierge|classic` (persistido), `--classic` e
   reivindicação simples de arquivos entre tarefas. O Esc não para mais tarefas nesse modo.
+- A resposta do Concierge é o bloco `┃ Λluy` normal, em stream. Tarefas rodam em sessões próprias e
+  aparecem num painel no rodapé (recolhível, com vista de detalhe); a conclusão é uma linha dim.
+- Sub-agentes (clássico também) saem da conversa e vão para o rodapé, com uma linha ao terminar.
 
 ## [1.0.0-rc.191] — 2026-11-07
 

@@ -114,3 +114,29 @@ digest envelopados como dado e redigidos (CLI-SEC-6).
 - Retomar no meio de uma chamada ao modelo: `--resume` restaura a lista de tarefas e o histórico da
   conversa; o que estava em voo volta como _interrompida_, com o objetivo guardado, e o Concierge
   oferece reiniciar (a pausa por cota segue retomando de onde parou, como hoje).
+
+## Adendo (2026-11-07) — a conversa é só conversa; o trabalho mora no rodapé
+
+Depois do primeiro teste do dono ("as respostas apareciam incrementalmente dentro do box… agora
+aparece uma linha; o trabalho dos agentes está no meio da conversa"), o desenho ficou assim:
+
+- **Resposta do Concierge = o bloco `┃ Λluy` normal**, transmitido token a token (o caller do Concierge
+  é um `StreamingModelCaller` ligado ao `sink` do controller da TUI), com a mesma linha de "trabalhando".
+  Um bloco por resposta; se nada foi transmitido (erro/cota), entra UM bloco já assentado. As respostas
+  correm uma por vez (cada uma é um bloco em stream); isso não espera tarefa nenhuma.
+- **Toda tarefa roda numa sessão headless própria** (inclusive a primeira). O controller da TUI só
+  conversa: nenhum bloco de turno, ferramenta, raciocínio, sub-agente ou self-check de tarefa entra na
+  transcrição. O custo é uma sessão a mais por tarefa (histórico, catraca e fila de injeção próprios).
+- **Painel de tarefas no rodapé**, logo abaixo do composer (inline e `/fullscreen`: no cockpit é uma
+  região de altura cravada que entra na soma `== rows`): `▸ t1 rodando · bash ls -la · 12s`, sub-agentes
+  aninhados com brilho; com 3 ou mais tarefas (ou statusline `compact`) recolhe em
+  `3 tarefas · 2 rodando · ↓ ver`; `hidden` = só a linha-resumo; aprovações pendentes nunca somem.
+  `↓` expande, `↑↓` escolhe, `enter` abre a **vista de detalhe** (o transcrito da tarefa como seria no
+  clássico, rolável com `↑↓`/PgUp/PgDn, `esc` fecha), `p` para a tarefa. `/task show <id>` abre o detalhe.
+- **Conclusão** = UMA linha dim na conversa (`✔ t1 concluída — resumo`), gerada por template; o Concierge
+  não repete o resultado. Aprovação não vai à conversa: fica na caixa do rodapé (`/a`, `/n`).
+- **Sub-agentes também no rodapé, no modo clássico**: o bloco `+ N sub-agentes` sai da transcrição; o
+  rodapé (com brilho e a correção das linhas congeladas da rc.190) é o único lugar, e cada filho que
+  termina deixa uma linha dim (`✔ [nome] pronto — …`).
+- Esc no repouso apaga o rascunho no modo concierge, e o Esc-Esc do `/rewind` fica desligado enquanto há
+  tarefa viva.
