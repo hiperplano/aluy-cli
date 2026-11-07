@@ -12,11 +12,12 @@
 //
 // Tudo injetável (testes). NÃO toca Ink aqui — o render é em run.tsx.
 
-import type { Quota } from '@hiperplano/aluy-cli-core';
+import type { Quota, ConciergeModel } from '@hiperplano/aluy-cli-core';
 import {
   AgentMemory,
   BrokerModelCaller,
   NativeToolsCapability,
+  CONCIERGE_TOOLS,
   DEFAULT_LIMITS,
   DEFAULT_SUMMARY_MAX_TOKENS,
   MAX_ITERATIONS_CEILING,
@@ -416,6 +417,8 @@ export interface BuildSessionOptions {
    * EST-0960a — id da sessão (subdir do journal `~/.aluy/undo/<session>/`).
    * Default: um novo id. Injetável p/ teste determinístico.
    */
+  /** ADR 0006 — slug do modelo do Concierge (`conciergeModel` da config); ausente ⇒ o da sessão. */
+  readonly conciergeModel?: string;
   readonly sessionId?: string;
   /**
    * EST-0960a — raiz do `~/.aluy/` (default `<home>/.aluy`). Injetável p/ teste
@@ -564,6 +567,8 @@ export interface BuiltSession {
   readonly controller: SessionController;
   readonly login: LoginService;
   readonly engine: PolicyPermissionEngine;
+  /** ADR 0006 — caller do Concierge (só as 4 tools `task_*`; segue o modelo da sessão). */
+  readonly conciergeModel: ConciergeModel;
   readonly egress: EgressAllowlist;
   readonly workspace: WorkspacePort;
   readonly askResolver: TuiAskResolver;
@@ -1251,6 +1256,22 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     maxTokens: 2048,
   });
 
+  // ADR 0006 — caller do CONCIERGE: curto (max_tokens baixo), SÓ com as 4 tools `task_*`
+  // (plano de controle; nenhuma de arquivo/shell). Segue o tier/modelo CORRENTE da sessão
+  // (`tierSource: caller`) salvo `conciergeModel` (slug Custom, mesmo provider). Mesmo
+  // broker/credencial (CLI-SEC-7). Tools não suportadas (422) degradam p/ texto puro.
+  const conciergeTierSource =
+    opts.conciergeModel !== undefined && opts.conciergeModel.trim() !== ''
+      ? { tier: 'custom' as const, model: opts.conciergeModel.trim(), provider: caller.provider }
+      : caller;
+  const conciergeCaller = new BrokerModelCaller({
+    client: liveClient,
+    tier,
+    tierSource: conciergeTierSource,
+    maxTokens: 700,
+    nativeTools: new NativeToolsCapability({ tools: CONCIERGE_TOOLS }),
+  });
+
   // EST-0969 (display) · CLI-SEC-7 — caller DEDICADO dos SUB-AGENTES (filhos):
   // NÃO-streaming. Vai pelo MESMO broker/credencial do pai (sem 2ª rota de modelo), só
   // NÃO usa o sink de stream ao vivo. Sem isto, os N filhos paralelos usariam o caller
@@ -1720,6 +1741,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     controller,
     login,
     engine,
+    conciergeModel: conciergeCaller,
     egress,
     workspace,
     askResolver,

@@ -286,6 +286,8 @@ export interface RunSessionOptions extends BuildSessionOptions {
    * é o DEFAULT do ADR. Só vale em TTY interativo (o não-TTY/CI ignora — segue inline).
    */
   readonly fullscreen?: boolean;
+  /** ADR 0006 — `--classic`: conversa clássica nesta sessão (vence a pref `conversation`). */
+  readonly classic?: boolean;
 
   /**
    * EST-1112 · ADR-0119 — BUDGET de sessão no backend LOCAL. `--budget` LIGA,

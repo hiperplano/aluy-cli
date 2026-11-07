@@ -610,6 +610,8 @@ async function main(): Promise<void> {
         // EST-1000 · ADR-0076 §1 — `--fullscreen` (alias `--cockpit`) ⇒ MODO COCKPIT na
         // largada (precedência flag > ui.fullscreen > INLINE). Só repassa quando a flag veio.
         ...(action.fullscreen !== undefined ? { fullscreen: action.fullscreen } : {}),
+        // ADR 0006 — `--classic` ⇒ conversa clássica só nesta sessão.
+        ...(action.classic !== undefined ? { classic: action.classic } : {}),
         // EST-1112 · ADR-0119 — `--budget` LIGA o orçamento local, `--no-budget`
         // DESLIGA. Só repassa quando a flag veio (ausente ⇒ cai p/ env > config > default).
         ...(action.budget !== undefined ? { budget: action.budget } : {}),
