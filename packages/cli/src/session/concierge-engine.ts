@@ -58,7 +58,10 @@ export class ControllerTaskEngine implements ConciergeEngine {
   constructor(private readonly d: TaskEngineDeps) {}
 
   start(task: TaskRecord): void {
-    const headless = task.kind === 'detached';
+    // O turno do agente principal só serve a UMA tarefa por vez. Se ele está ocupado com algo
+    // que não é tarefa (ex.: o aviso de sub-agentes desacoplados acordou um turno), a nova
+    // tarefa vai para uma sessão paralela em vez de colidir no mesmo turno.
+    const headless = task.kind === 'detached' || this.mainBusy();
     let session: TaskSession | null;
     try {
       session = headless ? (this.d.createHeadless?.(task.id) ?? null) : this.d.main;
@@ -99,6 +102,11 @@ export class ControllerTaskEngine implements ConciergeEngine {
         this.d.registry.transition(task.id, 'failed', msg(e));
       },
     );
+  }
+
+  private mainBusy(): boolean {
+    const p = this.d.main.current.phase;
+    return p !== 'idle' && p !== 'done' && p !== 'error' && p !== 'boot';
   }
 
   send(task: TaskRecord, message: string): { delivered: boolean; note: string } {

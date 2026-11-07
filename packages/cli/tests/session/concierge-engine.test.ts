@@ -150,6 +150,16 @@ describe('ControllerTaskEngine — estado da sessão vira evento do registro', (
     expect(main.injected).toEqual([]);
   });
 
+  it('turno principal ocupado por algo que não é tarefa ⇒ a nova tarefa vai para sessão paralela', () => {
+    const { registry, main, headless, engine } = setup();
+    main.set({ phase: 'streaming' });
+    engine.start(registry.create({ goal: 'a', kind: 'main' }));
+    expect(headless).toHaveLength(1);
+    expect(engine.send(registry.get('t1')!, 'x').delivered).toBe(true);
+    expect(headless[0]!.injected).toEqual(['x']);
+    expect(main.injected).toEqual([]);
+  });
+
   it('sem sessão paralela disponível ⇒ a tarefa falha com motivo (não trava)', () => {
     const registry = new TaskRegistry();
     const engine = new ControllerTaskEngine({ registry, main: new FakeSession() });
