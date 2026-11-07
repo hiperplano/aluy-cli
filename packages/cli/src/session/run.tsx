@@ -43,6 +43,7 @@ import { linhasDaListaDePlugins, secretVault } from '@hiperplano/aluy-cli-core';
 import { ThemeRoot } from './ThemeRoot.js';
 import { SecretsService } from './secrets.js';
 import { buildSession, type BuildSessionOptions } from './wiring.js';
+import { ConciergeRuntime, conciergeStorePath } from './concierge-runtime.js';
 // F-PROV-FIX — lógica PURA (sem I/O) do ato explícito `/provider save`: decide o
 // que fixar (provider+modelo) a partir do estado corrente da sessão + do boot.
 import { planSaveProvider } from './save-provider.js';
@@ -200,6 +201,7 @@ import {
   resolveInitialTier,
   resolveInitialSplitView,
   resolveInitialFullscreen,
+  resolveConversationMode,
   resolveInitialSuggestions,
   resolveInitialStatusline,
   configuredLang,
@@ -2023,8 +2025,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   void _lm;
   void _la;
   void _lbu;
-  const built = buildSession({
+  const buildArgs: BuildSessionOptions = {
     ...optsForBuild,
+    // ADR 0006 — modelo do Concierge (opcional; ausente ⇒ o da sessão).
+    ...(savedConfig.conciergeModel !== undefined
+      ? { conciergeModel: savedConfig.conciergeModel }
+      : {}),
     // ADR aluy-cli 0002 — "sempre permitir" lembrado (lê/grava no config do usuário).
     rememberedAllow: savedConfig.permissions?.alwaysAllow ?? [],
     onRememberTool: (tool: string) => {
@@ -2203,7 +2209,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       heapLimitMb: resolveHeapLimitMb(env),
       sampleHeapUsed: () => process.memoryUsage().heapUsed,
     },
-  });
+  };
+  const built = buildSession(buildArgs);
 
   // ADR-0158 §4.1 (FUNIL) — APLICA o enforcement JÁ RESOLVIDO acima (fail-closed lá:
   // nome desconhecido nunca chega até aqui — a exceção já teria interrompido o boot
@@ -2359,6 +2366,46 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     id: resumedRecord?.id ?? newSessionId(),
     cwd: cwdAbs,
   };
+
+  // ADR 0006 — CONCIERGE: a conversa desacoplada do motor. O modo inicial vem de `--classic` >
+  // `conversation` (pref) > concierge. O runtime existe sempre que há TTY (assim o
+  // `/conversation concierge` funciona mesmo abrindo em clássico); sem TTY/headless nada muda.
+  const initialConversation = resolveConversationMode(opts.classic, savedConfig);
+  const conciergeRuntime: ConciergeRuntime | undefined =
+    isTty && opts.anonymous !== true
+      ? new ConciergeRuntime({
+          sink: built.controller,
+          model: built.conciergeModel,
+          // As 4 tools do Concierge passam pelo MESMO ponto único (`decide()`): só `allow`
+          // executa; `ask`/`deny` viram recusa (o Concierge não abre diálogo próprio).
+          gate: async ({ name, input }) => {
+            const v = built.engine.decide({ name, input });
+            return v.decision === 'allow'
+              ? { allow: true }
+              : { allow: false, reason: v.reason ?? v.decision };
+          },
+          // Tarefas paralelas = sessões headless (histórico, fila de injeção, sub-agentes e
+          // catraca PRÓPRIOS). Sem monitor de heap próprio (o da sessão principal cobre).
+          createHeadless: (taskId) => {
+            const { memoryMonitor: _mm, ...rest } = buildArgs;
+            void _mm;
+            return buildSession({ ...rest, sessionId: `${activeSession.id}-${taskId}` }).controller;
+          },
+          // A memória do dono (ADR 0004) entra curta no prompt do Concierge: só fatos `usuario`.
+          ownerFacts: async () =>
+            (await built.memory.list())
+              .filter((f) => f.provenance === 'usuario')
+              .map((f) => f.text),
+          projectSummary: () => projectInstructions?.slice(0, 600),
+          storePath: () =>
+            opts.anonymous === true
+              ? undefined
+              : conciergeStorePath(
+                  join(serviceScopeDir ?? join(userHome(), '.aluy')),
+                  activeSession.id,
+                ),
+        })
+      : undefined;
 
   // RESTAURA a transcrição visível (se retomou) e SEMEIA o contexto do modelo. O
   // histórico volta como a PRÓPRIA conversa; o conteúdo de tool/`!`/arquivo dentro
@@ -4982,6 +5029,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         }}
         // EST-1000 · ADR-0076 §1/§2/§4 — MODO COCKPIT (tela cheia, alt-screen).
         initialFullscreen={initialFullscreen}
+        // ADR 0006 — Concierge: runtime + modo inicial + persistência do `/conversation`.
+        {...(conciergeRuntime !== undefined ? { concierge: conciergeRuntime } : {})}
+        initialConversation={initialConversation}
+        onConversationChange={(mode) => {
+          configStore.saveConversation(mode);
+        }}
         // EST-1001 · ADR-0076 §2 — o BOOT já entrou no alt-screen (acima, ANTES do render)?
         // Quando sim, a App NÃO re-emite `?1049h` no seu effect de boot (evita duplo enter).
         // Quando o boot pediu cockpit mas a tela NÃO cabe, isto é `false` ⇒ a App degrada

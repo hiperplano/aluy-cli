@@ -6289,6 +6289,33 @@ export class SessionController {
     this.patch({ pendingAsks: this.state.pendingAsks.filter((a) => a.id !== id) });
   }
 
+  // ── ADR 0006 — CONCIERGE: escrita na conversa SEM tocar o turno do agente ────────
+  // O eco da mensagem do dono e a resposta do Concierge entram ANTES do sufixo vivo (como
+  // qualquer bloco de canal paralelo), então nunca desalojam o stream/tool em voo.
+
+  /** Eco da mensagem do dono tratada pelo Concierge (não abre turno). */
+  pushConciergeEcho(text: string): void {
+    this.dismissBoot();
+    this.insertBeforeLiveTail({ kind: 'you', text });
+  }
+
+  /** Resposta/relato do Concierge: uma nota `Λluy`. */
+  pushConciergeReply(lines: readonly string[]): void {
+    this.dismissBoot();
+    this.insertBeforeLiveTail({ kind: 'note', title: 'Λluy', lines });
+  }
+
+  /** Marca "o Concierge está respondendo" na área de pendentes (some quando responde). */
+  conciergePendingStart(id: string, head: string): void {
+    this.patch({
+      pendingAsks: [...this.state.pendingAsks, { id, question: head, concierge: true }],
+    });
+  }
+
+  conciergePendingEnd(id: string): void {
+    this.removePendingAsk(id);
+  }
+
   async askParallel(question: string): Promise<void> {
     const q = question.trim();
     if (q === '') {

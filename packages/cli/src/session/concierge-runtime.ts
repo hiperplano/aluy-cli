@@ -37,7 +37,7 @@ export interface ConciergeRuntimeDeps {
   readonly ownerFacts?: () => Promise<readonly string[]>;
   readonly projectSummary?: () => string | undefined;
   /** Arquivo de persistência (`--resume`); ausente ⇒ sem persistência. */
-  readonly storePath?: string;
+  readonly storePath?: () => string | undefined;
   readonly clock?: () => number;
 }
 
@@ -178,7 +178,7 @@ export class ConciergeRuntime {
   // ── persistência (--resume/--continue) ─────────────────────────────────────
 
   private persist(): void {
-    const path = this.d.storePath;
+    const path = this.d.storePath?.();
     if (!path) return;
     try {
       const snap = this.registry.snapshot();
@@ -204,7 +204,7 @@ export class ConciergeRuntime {
   }
 
   private restore(): void {
-    const path = this.d.storePath;
+    const path = this.d.storePath?.();
     if (!path) return;
     try {
       const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<Persisted>;

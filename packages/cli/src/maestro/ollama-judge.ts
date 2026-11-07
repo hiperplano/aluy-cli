@@ -247,7 +247,8 @@ function toParsedVerdict(obj: Record<string, unknown>, fallback: boolean): Parse
     chosen: String(obj['chosen']),
     // NUNCA lê `obj['confidence']` — ver CONFIANCA_NAO_MEDIDA.
     confidence: CONFIANCA_NAO_MEDIDA,
-    reasoning: typeof obj['reasoning'] === 'string' ? String(obj['reasoning']) : '(sem justificativa)',
+    reasoning:
+      typeof obj['reasoning'] === 'string' ? String(obj['reasoning']) : '(sem justificativa)',
     fallback,
   };
 }

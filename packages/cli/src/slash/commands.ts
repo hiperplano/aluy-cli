@@ -41,6 +41,10 @@ export type NativeCommandId =
   | 'permissions'
   | 'usage'
   | 'notify'
+  | 'task'
+  | 'approve'
+  | 'deny'
+  | 'conversation'
   | 'undo'
   | 'redo'
   | 'rewind'
@@ -654,6 +658,46 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // EST-0982 · ADR-0080 — read-only + caller próprio ⇒ roda JÁ mid-turn (não enfileira).
     parallelWhileBusy: true,
     agentEffect: 'read-only', // ADR-0147
+  },
+  {
+    // ADR 0006 — Concierge: lista/para tarefas. Roda JÁ mid-turn (é o controle explícito).
+    name: 'task',
+    summary: 'tarefas do Concierge: /task · /task stop <id|all>',
+    source: 'native',
+    id: 'task',
+    section: 'sessão',
+    parallelWhileBusy: true,
+    agentEffect: 'human-only', // o agente não gerencia as próprias tarefas por aqui
+  },
+  {
+    // ADR 0006 — aprova a aprovação pendente (a mais antiga, ou a da tarefa dada). Alias `/a`.
+    name: 'approve',
+    summary: 'aprova a permissão pendente: /approve [tarefa] [s=sessão] (alias /a)',
+    source: 'native',
+    id: 'approve',
+    section: 'sessão',
+    parallelWhileBusy: true,
+    agentEffect: 'human-only', // NUNCA o agente aprovando a si mesmo
+  },
+  {
+    // ADR 0006 — nega a aprovação pendente. Alias `/n`.
+    name: 'deny',
+    summary: 'nega a permissão pendente: /deny [tarefa] (alias /n)',
+    source: 'native',
+    id: 'deny',
+    section: 'sessão',
+    parallelWhileBusy: true,
+    agentEffect: 'human-only',
+  },
+  {
+    // ADR 0006 — modo de conversa. Persiste (config `conversation`).
+    name: 'conversation',
+    summary: 'modo de conversa: concierge (nunca trava) | classic',
+    source: 'native',
+    id: 'conversation',
+    section: 'sessão',
+    parallelWhileBusy: true,
+    agentEffect: 'human-only',
   },
   {
     name: 'notify',
@@ -1435,7 +1479,7 @@ export function routeInput(line: string, userCommands: readonly SlashCommand[] =
   const rawName = (spaceIdx === -1 ? withoutSlash : withoutSlash.slice(0, spaceIdx)).toLowerCase();
   // EST-0990 — `/view` é ALIAS de `/split` (mesmo toggle do modo view avançado).
   // EST-1000 · ADR-0076 — `/cockpit` é ALIAS de `/fullscreen` (mesmo toggle do cockpit).
-  const name = rawName === 'view' ? 'split' : rawName === 'cockpit' ? 'fullscreen' : rawName;
+  const name = COMMAND_ALIASES[rawName] ?? rawName;
   const args = spaceIdx === -1 ? '' : withoutSlash.slice(spaceIdx + 1).trim();
   const all = [...NATIVE_COMMANDS, ...userCommands];
   const command = all.find((c) => c.name === name);
@@ -1460,6 +1504,17 @@ export function routeInput(line: string, userCommands: readonly SlashCommand[] =
  *    (após colapsar os espaços) NÃO tem mais nenhum whitespace ⇒ true (digitando o nome
  *    do sub: `/mcp `, `/mcp s`, `/mcp search`). Caso contrário ⇒ false (args).
  */
+/**
+ * Aliases de nome de comando. `view`→`split`, `cockpit`→`fullscreen` (históricos) e, ADR 0006,
+ * `a`→`approve`, `n`→`deny` (responder a caixa de aprovações sem tirar a mão do teclado).
+ */
+export const COMMAND_ALIASES: Readonly<Record<string, string>> = {
+  view: 'split',
+  cockpit: 'fullscreen',
+  a: 'approve',
+  n: 'deny',
+};
+
 export function isSlashMenuQuery(
   line: string,
   userCommands: readonly SlashCommand[] = [],
@@ -1520,9 +1575,15 @@ export function filterCommands(
   const all = menuEntries(userCommands, natives);
   if (q === '') return all;
   const pathOf = (e: SlashMenuEntry): string => entryPath(e).toLowerCase();
+  // Alias exato (`/a`, `/n`) vai PRIMEIRO: Enter no menu aberto escolhe o 1º item, e `/a` tem de
+  // ser `/approve`, não o primeiro comando que começa com "a".
+  const aliased = COMMAND_ALIASES[q.split(' ')[0] ?? ''];
   const starts = all.filter((e) => pathOf(e).startsWith(q));
   const contains = all.filter((e) => !pathOf(e).startsWith(q) && pathOf(e).includes(q));
-  return [...starts, ...contains];
+  const merged = [...starts, ...contains];
+  if (aliased === undefined || q.includes(' ')) return merged;
+  const pri = all.filter((e) => entryPath(e).toLowerCase() === aliased);
+  return [...pri, ...merged.filter((e) => !pri.includes(e))];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

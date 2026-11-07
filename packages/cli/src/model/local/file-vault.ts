@@ -32,12 +32,7 @@
 // PORTÁVEL? Não — toca `node:fs`/`node:child_process`/machine-id do SO (I/O
 // concreto) ⇒ mora em `@hiperplano/aluy-cli` (ADR-0053 §8), igual ao keychain.
 
-import {
-  randomBytes,
-  createCipheriv,
-  createDecipheriv,
-  hkdfSync,
-} from 'node:crypto';
+import { randomBytes, createCipheriv, createDecipheriv, hkdfSync } from 'node:crypto';
 import {
   readFileSync,
   writeFileSync,
@@ -175,7 +170,9 @@ class VaultAuthError extends Error {}
 function open(sealed: string, key: Buffer): string {
   const raw = Buffer.from(sealed, 'base64');
   if (raw.length < IV_BYTES + TAG_BYTES) {
-    throw new VaultCorruptError('cabeçalho cifrado inválido (arquivo truncado ou não é o formato esperado)');
+    throw new VaultCorruptError(
+      'cabeçalho cifrado inválido (arquivo truncado ou não é o formato esperado)',
+    );
   }
   const iv = raw.subarray(0, IV_BYTES);
   const tag = raw.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);

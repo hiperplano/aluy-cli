@@ -14,6 +14,7 @@ import type {
   TaskRegistry,
 } from '@hiperplano/aluy-cli-core';
 import { clip } from '@hiperplano/aluy-cli-core';
+import type { HistoryItem } from '@hiperplano/aluy-cli-core';
 import type { SessionState } from './model.js';
 
 /** O recorte do `SessionController` que o motor usa (permite fake nos testes). */
@@ -24,7 +25,11 @@ export interface TaskSession {
     onToolStart?(call: { name: string }): void;
     onToolEnd?(call: { name: string }, ok: boolean): void;
   }): () => void;
-  submit(goal: string): Promise<void>;
+  submit(
+    goal: string,
+    attachments?: readonly HistoryItem[],
+    opts?: { readonly display?: string },
+  ): Promise<void>;
   injectInput(nodeId: string, input: string): boolean;
   interrupt(): void;
   resolveAsk(r: AskResolution): void;
@@ -87,7 +92,7 @@ export class ControllerTaskEngine implements ConciergeEngine {
         },
       }),
     );
-    session.submit(task.goal).then(
+    session.submit(task.goal, [], { display: `▸ ${task.id}: ${clip(task.goal, 100)}` }).then(
       () => this.finish(task.id, h),
       (e: unknown) => {
         this.cleanup(h);

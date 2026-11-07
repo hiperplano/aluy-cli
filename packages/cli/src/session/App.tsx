@@ -66,6 +66,7 @@ import {
 import type { SubAgentChildView } from '../ui/components/SubAgents.js';
 import { useMcpPicker, type McpSearchPort, type McpInstallPort } from '../ui/hooks/useMcpPicker.js';
 import { McpPicker } from '../ui/components/McpPicker.js';
+import { ConciergeTasks, conciergeTasksLines } from '../ui/components/ConciergeTasks.js';
 import { copiaDoRodapeVale } from './subagentes-visiveis.js';
 import { Role, useTheme } from '../ui/theme/index.js';
 import { useTick } from '../ui/hooks/useTick.js';
@@ -594,6 +595,15 @@ export interface AppProps {
    */
   readonly onFullscreenChange?: (on: boolean) => void;
   /**
+   * ADR 0006 — runtime do CONCIERGE (tarefas, caixa de aprovações, conversa que nunca espera o
+   * trabalho). Ausente ⇒ só o modo clássico existe (testes antigos, não-TTY).
+   */
+  readonly concierge?: import('./concierge-runtime.js').ConciergeRuntime;
+  /** ADR 0006 — modo de conversa inicial (`--classic` > pref > default concierge). */
+  readonly initialConversation?: 'concierge' | 'classic';
+  /** ADR 0006 — persiste o modo ao alternar (`/conversation`). */
+  readonly onConversationChange?: (mode: 'concierge' | 'classic') => void;
+  /**
    * F197 — estado INICIAL da SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab). Resolvido pelo
    * wiring (`ALUY_SUGGESTIONS` > `config.suggestions` > default ON, via
    * `resolveInitialSuggestions`). Ausente ⇒ `true` (default LIGADO — é uma OPÇÃO, mas
@@ -1068,6 +1078,27 @@ export function App(props: AppProps): React.ReactElement {
   // O alt-screen REAL (`?1049h`/restauração) é gerido pelo wiring (props.cockpitScreen);
   // aqui só o estado de UI e a CHAMADA de enter/leave no toggle.
   const [fullscreen, setFullscreen] = useState(props.initialFullscreen === true);
+  // ADR 0006 — MODO DE CONVERSA. `conciergeOn` só vale com o runtime fiado. No modo concierge:
+  // o texto do dono NUNCA entra na fila atrás do trabalho (o Concierge responde na hora), o Esc
+  // só limpa o rascunho (parar é explícito: pedir, `/task stop`, F8) e a aprovação vira caixa de
+  // entrada (`/a` `/n`) em vez de um diálogo que captura o teclado.
+  const [convMode, setConvMode] = useState<'concierge' | 'classic'>(
+    props.initialConversation ?? 'classic',
+  );
+  const conciergeRt = props.concierge;
+  const conciergeOn = conciergeRt !== undefined && convMode === 'concierge';
+  const [, bumpTasks] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (!conciergeRt) return;
+    return conciergeRt.subscribe(() => bumpTasks());
+  }, [conciergeRt]);
+  // Aprovações das tarefas HEADLESS não passam pelo `state` do controller da TUI: o relógio
+  // abaixo só existe com tarefa viva (re-render leve a cada 2s para a caixa e os tempos).
+  useEffect(() => {
+    if (!conciergeOn || !conciergeRt?.hasLiveTasks()) return;
+    const t = setInterval(() => bumpTasks(), 2000);
+    return () => clearInterval(t);
+  }, [conciergeOn, conciergeRt, state.phase]);
   const [cockpitFocus, setCockpitFocus] = useState<CockpitFocus>('conversa');
   const [conversaScroll, setConversaScroll] = useState(0);
 
@@ -1656,7 +1687,8 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       if (s.includes('\x1b[19~') || s.includes('\x1bOW')) {
-        controller.cancelAllFlows();
+        if (conciergeOn && conciergeRt !== undefined) conciergeRt.stopAll();
+        else controller.cancelAllFlows();
         // EST-0982 (P1-2) — F8 = PARAR TUDO: descarta também a fila do type-ahead (os itens
         // que iam auto-submeter ao repousar). Parar o turno + limpar o que ia entrar.
         clearQueue();
@@ -1673,7 +1705,7 @@ export function App(props: AppProps): React.ReactElement {
     return () => {
       stdin.removeListener('data', onData);
     };
-  }, [stdin, controller, clearQueue, setComposer, ciclarRodape]);
+  }, [stdin, controller, clearQueue, setComposer, ciclarRodape, conciergeOn, conciergeRt]);
 
   // Auto-dismiss do splash (spec §2.1: <1s). Some sozinho após `bootMs` mesmo
   // sem tecla — mas a 1ª tecla/objetivo já o dispensa antes (ver useInput/submit).
@@ -2185,11 +2217,86 @@ export function App(props: AppProps): React.ReactElement {
     [props, controller, t, clearScreen],
   );
 
+  // ADR 0006 — `/conversation`, `/task`, `/approve` (/a), `/deny` (/n). Respostas curtas em NOTA
+  // (replaceNote coalesce: não empilha). Nada aqui toca o turno do agente.
+  const runConciergeCommand = useCallback(
+    (id: 'conversation' | 'task' | 'approve' | 'deny', args: string): void => {
+      const rt = props.concierge;
+      const words = args
+        .trim()
+        .split(/\s+/)
+        .filter((w) => w !== '');
+      if (id === 'conversation') {
+        const want = words[0]?.toLowerCase();
+        if (want !== 'concierge' && want !== 'classic') {
+          controller.replaceNote('conversation', [
+            `modo atual: ${convMode}${rt === undefined ? ' (Concierge indisponível nesta sessão)' : ''}`,
+            '/conversation concierge — a conversa nunca espera o trabalho (Esc só limpa o rascunho)',
+            '/conversation classic — um laço só: fila/encaixe como antes (Esc interrompe)',
+          ]);
+          return;
+        }
+        if (want === 'concierge' && rt === undefined) {
+          controller.replaceNote('conversation', [
+            'Concierge indisponível nesta sessão (sem TTY?).',
+          ]);
+          return;
+        }
+        setConvMode(want);
+        props.onConversationChange?.(want);
+        controller.replaceNote('conversation', [
+          want === 'concierge'
+            ? 'modo concierge: suas mensagens são respondidas na hora; o trabalho roda em tarefas.'
+            : rt?.hasLiveTasks()
+              ? 'modo clássico. Atenção: há tarefas vivas; elas seguem até o fim (F8 para tudo).'
+              : 'modo clássico.',
+        ]);
+        return;
+      }
+      if (rt === undefined || convMode !== 'concierge') {
+        controller.replaceNote(id, ['só no modo concierge (/conversation concierge).']);
+        return;
+      }
+      if (id === 'task') {
+        if (words[0]?.toLowerCase() === 'stop') {
+          const target = words[1];
+          if (target === undefined) {
+            controller.replaceNote('task', ['uso: /task stop <id> · /task stop all']);
+          } else if (target === 'all') {
+            rt.stopAll();
+          } else {
+            controller.replaceNote('task', [rt.stopTask(target)]);
+          }
+          return;
+        }
+        controller.replaceNote('task', rt.describeTasks());
+        return;
+      }
+      // /approve [tarefa] [s]  ·  /deny [tarefa]
+      const taskArg = words.find((w) => /^t\d+$/i.test(w))?.toLowerCase();
+      const session = words.some((w) => w.toLowerCase() === 's');
+      controller.replaceNote(id === 'approve' ? 'aprovação' : 'negação', [
+        id === 'approve' ? rt.approve(taskArg, session ? 'session' : 'once') : rt.deny(taskArg),
+      ]);
+    },
+    [props.concierge, props.onConversationChange, controller, convMode],
+  );
+
   const runCommand = useCallback(
     (command: SlashCommand, args: string) => {
       // ADR 0005 — `/secret`: campo mascarado, roteado aqui (nunca vai ao `onCommand`).
       if (command.id === 'secret') {
         runSecretCommand(args);
+        return;
+      }
+      // ADR 0006 — comandos do CONCIERGE (UI/runtime puros; não vão ao `onCommand`).
+      if (
+        command.id === 'conversation' ||
+        command.id === 'task' ||
+        command.id === 'approve' ||
+        command.id === 'deny'
+      ) {
+        runConciergeCommand(command.id, args);
         return;
       }
       // EST-0990 — `/split` (alias `/view`): alterna o MODO VIEW AVANÇADO na hora
@@ -2465,6 +2572,20 @@ export function App(props: AppProps): React.ReactElement {
       setConversaScroll(0);
       setLogScroll(0);
       const route = routeInput(line, userCommands);
+      // ADR 0006 — CONCIERGE: texto puro (sem anexo) é conversa; o Concierge responde na hora e,
+      // se for trabalho, abre uma tarefa. Não aguardamos: a promise resolve sozinha.
+      if (
+        conciergeOn &&
+        conciergeRt !== undefined &&
+        route.kind === 'goal' &&
+        route.text !== '' &&
+        picker.attachments.length === 0 &&
+        parseAtMentions(route.text).length === 0
+      ) {
+        setHistory((h) => [...h, route.text]);
+        void conciergeRt.handleOwnerMessage(route.text);
+        return;
+      }
       if (route.kind === 'goal') {
         // EST-0957 — leva os arquivos anexados (chips) como DADO rotulado/confinado
         // (CLI-SEC-4): observations semeadas ANTES do objetivo. Exige um objetivo
@@ -2564,7 +2685,16 @@ export function App(props: AppProps): React.ReactElement {
       }
       // unknown-command: ignora silenciosamente (o menu já guia o usuário).
     },
-    [controller, userCommands, picker, runCommand, props.attachReader, setComposer],
+    [
+      controller,
+      userCommands,
+      picker,
+      runCommand,
+      props.attachReader,
+      setComposer,
+      conciergeOn,
+      conciergeRt,
+    ],
   );
 
   // ── EST-0982 (type-ahead mid-turn) — ENFILEIRAR vs ENCAIXAR uma linha do composer ──
@@ -2668,6 +2798,20 @@ export function App(props: AppProps): React.ReactElement {
         runIfParallelCommand(line);
         return;
       }
+      // ADR 0006 — CONCIERGE: texto puro vai ao Concierge AGORA, nunca para a fila nem para o
+      // encaixe cego. (Anexos `@`, `/slash` e `!bang` seguem o caminho de sempre.)
+      if (conciergeOn && conciergeRt !== undefined) {
+        const r = routeInput(line, userCommands);
+        if (
+          r.kind === 'goal' &&
+          r.text !== '' &&
+          picker.attachments.length === 0 &&
+          parseAtMentions(r.text).length === 0
+        ) {
+          void conciergeRt.handleOwnerMessage(r.text);
+          return;
+        }
+      }
       // Fila NÃO-vazia ⇒ preserva a ordem: enfileira sem tentar encaixar/paralelizar.
       if (queueRef.current.length > 0) {
         enqueue(line);
@@ -2701,7 +2845,16 @@ export function App(props: AppProps): React.ReactElement {
       // Fila vazia ⇒ encaixe mid-turn (texto puro) / paralelo-seguro / senão enfileira.
       if (!injectIfPlainText(line) && !runIfParallelCommand(line)) enqueue(line);
     },
-    [enqueue, injectIfPlainText, runIfParallelCommand, controller, userCommands, picker],
+    [
+      enqueue,
+      injectIfPlainText,
+      runIfParallelCommand,
+      controller,
+      userCommands,
+      picker,
+      conciergeOn,
+      conciergeRt,
+    ],
   );
 
   // ── EST-0948 — BRACKETED PASTE: cola MULTI-LINHA vira newline LITERAL (não submit) ──
@@ -3370,7 +3523,7 @@ export function App(props: AppProps): React.ReactElement {
     }
 
     // ── ask pendente CAPTURA o foco (handoff §10 regra 3) ───────────────────
-    if (state.phase === 'asking' && state.pendingAsk) {
+    if (state.phase === 'asking' && state.pendingAsk && !conciergeOn) {
       const alwaysAsk = state.pendingAsk.request.alwaysAsk;
       // F6 — TYPE-AHEAD sob a caixa de permissão. REGRA: as teclas de resposta (a/s/l/n/e/Esc)
       // só RESPONDEM como PRIMEIRA tecla (composer vazio). Qualquer outra tecla imprimível
@@ -3645,7 +3798,12 @@ export function App(props: AppProps): React.ReactElement {
     //   • digitar / ←→ / Ctrl+A/E / backspace → edita o composer (sem slash/`@`: estes
     //     são resolvidos no auto-submit, via a MESMA `submit`/`routeInput`).
     // `ask`/`budget` NÃO chegam aqui (capturados ANTES — a decisão tem o foco).
-    if (state.phase === 'thinking' || state.phase === 'streaming' || state.phase === 'retrying') {
+    if (
+      state.phase === 'thinking' ||
+      state.phase === 'streaming' ||
+      state.phase === 'retrying' ||
+      (conciergeOn && state.phase === 'asking')
+    ) {
       // FREIOS (prioridade do controle vivo, antes do type-ahead).
       if (key.ctrl && char === 't') {
         setFlowDrill(null);
@@ -3765,9 +3923,44 @@ export function App(props: AppProps): React.ReactElement {
       }
       // Ctrl+C (turno vivo) = HARD-STOP INALTERADO — para tudo na hora, independente de
       // pendência (mesma garantia do F8). NÃO entra na lógica "acelera" do ESC abaixo.
+      if (key.ctrl && char === 'c' && conciergeOn) {
+        // ADR 0006 — no modo concierge o Ctrl+C NÃO derruba o trabalho: com rascunho, limpa-o;
+        // vazio, o 1º arma a saída e o 2º (na janela) sai. Parar tarefas é explícito (F8,
+        // /task stop, ou pedir ao Concierge).
+        const now = Date.now();
+        const armedNow =
+          ctrlCArmedAtRef.current !== undefined &&
+          now - ctrlCArmedAtRef.current <= CTRL_C_WINDOW_MS;
+        const action = decideCtrlC(input, armedNow);
+        if (action === 'clear') {
+          setText('');
+          setSlashOpen(false);
+          setSlashSel(0);
+          disarmCtrlC();
+        } else if (action === 'exit') {
+          disarmCtrlC();
+          conciergeRt?.dispose();
+          exit();
+        } else {
+          ctrlCArmedAtRef.current = now;
+          setCtrlCArmed(true);
+          if (ctrlCTimerRef.current !== undefined) clearTimeout(ctrlCTimerRef.current);
+          ctrlCTimerRef.current = setTimeout(disarmCtrlC, CTRL_C_WINDOW_MS);
+        }
+        return;
+      }
       if (key.ctrl && char === 'c') {
         controller.interrupt();
         clearQueue();
+        return;
+      }
+      if (key.escape && conciergeOn) {
+        // ADR 0006 — Esc NUNCA para tarefas: só apaga o rascunho (e fecha o overlay, tratado
+        // acima). Parar é explícito: pedir ao Concierge, `/task stop <id>`, ou F8.
+        if (input !== '') {
+          setText('');
+          setHistIdx(-1);
+        }
         return;
       }
       if (key.escape) {
@@ -3869,6 +4062,9 @@ export function App(props: AppProps): React.ReactElement {
           // ADR 0005 — um `/secret …` nunca é encaixado como texto no agente (iria ao modelo).
           if (isSecretCommandLine(line)) {
             runIfParallelCommand(line);
+          } else if (conciergeOn) {
+            // ADR 0006 — sem encaixe cego: o Concierge decide para qual tarefa vai.
+            enqueueOrInject(line);
           } else {
             controller.injectInput('root', line);
             controller.markLastInjectFromComposer();
@@ -3949,7 +4145,7 @@ export function App(props: AppProps): React.ReactElement {
             if (line === '') continue;
             // `\n` (LF) é o ENCAIXAR explícito; `\r` (Enter) segue o type-ahead: TEXTO PURO
             // ENCAIXA mid-turn (EST-0982), PARALELO-SEGURO roda já, o resto ENFILEIRA.
-            if (l.term === '\n' && !isSecretCommandLine(line)) {
+            if (l.term === '\n' && !isSecretCommandLine(line) && !conciergeOn) {
               controller.injectInput('root', line);
               controller.markLastInjectFromComposer();
             } else enqueueOrInject(line);
@@ -5016,7 +5212,15 @@ export function App(props: AppProps): React.ReactElement {
   // `/ask` pendente ocupa a MESMA região (abaixo da fala, acima do composer) ⇒ mesmo desconto.
   const pendingAskLines =
     state.pendingAsks.length > 0 ? queuedInputsLines(state.pendingAsks.length) + 1 : 0;
-  const stagedLines = queueLines + pendingInjectLines + pendingAskLines;
+  // ADR 0006 — a lista de tarefas/aprovações mora na MESMA região (abaixo da fala, acima do
+  // composer): entra no desconto do teto da fala (anti-flicker).
+  const conciergeTasksShown = conciergeOn
+    ? conciergeTasksLines(
+        conciergeRt?.visibleTasks().length ?? 0,
+        conciergeRt?.pendingApprovals().length ?? 0,
+      )
+    : 0;
+  const stagedLines = queueLines + pendingInjectLines + pendingAskLines + conciergeTasksShown;
   // EST-1015 (anti-flicker) — o <SlashMenu> mora ABAIXO do composer e PODE coexistir com o stream
   // (EST-0982). Sua altura (lista filtrada + cabeçalhos + ajuda + o `paddingTop={1}` do contêiner)
   // CONSOME altura do frame: desconta do teto da fala p/ `chrome + fala + menu` caber em `rows`
@@ -5277,7 +5481,7 @@ export function App(props: AppProps): React.ReactElement {
   //
   // `null` quando não há decisão pendente ⇒ o cockpit segue exatamente como hoje.
   const renderDecisionDialog = (): React.ReactElement | null => {
-    if (state.phase === 'asking' && state.pendingAsk) {
+    if (state.phase === 'asking' && state.pendingAsk && !conciergeOn) {
       return <AskDialog request={state.pendingAsk.request} columns={columns} {...askEgress} />;
     }
     if (state.phase === 'questioning' && state.pendingQuestion) {
@@ -5636,7 +5840,7 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
 
-      {state.phase === 'asking' && state.pendingAsk && (
+      {state.phase === 'asking' && state.pendingAsk && !conciergeOn && (
         <Box paddingTop={1}>
           <AskDialog request={state.pendingAsk.request} columns={columns} {...askEgress} />
         </Box>
@@ -6032,6 +6236,15 @@ export function App(props: AppProps): React.ReactElement {
         <Box paddingBottom={1}>
           <PendingInjects items={state.pendingInjects} cycleActive={state.cycleActive === true} />
         </Box>
+      )}
+      {/* ADR 0006 — lista COMPACTA de tarefas do Concierge + CAIXA DE ENTRADA de aprovações. */}
+      {conciergeTasksShown > 0 && conciergeRt !== undefined && (
+        <ConciergeTasks
+          tasks={conciergeRt.visibleTasks()}
+          approvals={conciergeRt.pendingApprovals()}
+          now={Date.now()}
+          columns={columns}
+        />
       )}
       {/* `/ask` EM VOO — área SEPARADA da fila (canal lateral ↗), até a resposta chegar. */}
       {state.pendingAsks.length > 0 && (

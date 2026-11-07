@@ -170,7 +170,10 @@ Notas:
  * (o dono digitou "--group" querendo filtrar; ignorar de mansinho esconderia o erro
  * de digitação). PURO.
  */
-function extractGroupFlag(rest: readonly string[]): { readonly group?: string; readonly error?: string } {
+function extractGroupFlag(rest: readonly string[]): {
+  readonly group?: string;
+  readonly error?: string;
+} {
   const idx = rest.indexOf('--group');
   if (idx === -1) return {};
   const value = rest[idx + 1];
@@ -413,7 +416,10 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
       if (rt.running && rt.pid !== undefined) io.out(`  pid:         ${rt.pid}`);
       if (rt.running && rt.snapshot?.pendingQuestion !== undefined) {
         const since = rt.snapshot.updatedAtIso;
-        const elapsed = since !== undefined ? ` (enviada há ${formatElapsedSince(Date.now() - Date.parse(since))})` : '';
+        const elapsed =
+          since !== undefined
+            ? ` (enviada há ${formatElapsedSince(Date.now() - Date.parse(since))})`
+            : '';
         io.out(`  ⚠ pergunta pendente${elapsed}: ${rt.snapshot.pendingQuestion}`);
       }
       if (m.description !== undefined) io.out(`  descrição:   ${m.description}`);
@@ -470,7 +476,13 @@ export async function runService(argv: readonly string[], deps: ServiceDeps = {}
       return runLogs(cmd.name, cmd.follow, cmd.lines, io, store);
 
     case 'attach':
-      return runAttach(cmd.name, io, store, deps.attachConnect ?? connectAttachSocket, deps.attachStdin ?? process.stdin);
+      return runAttach(
+        cmd.name,
+        io,
+        store,
+        deps.attachConnect ?? connectAttachSocket,
+        deps.attachStdin ?? process.stdin,
+      );
 
     case 'create-redirect':
       for (const l of createRedirectLines()) io.out(l);
@@ -511,7 +523,10 @@ function describeRuntimeStatus(rt: ReturnType<typeof readServiceRuntimeStatus>):
   if (st === 'running-turn') return 'RODANDO · turno em andamento';
   if (st === 'awaiting-owner') {
     const since = rt.snapshot?.updatedAtIso;
-    const suffix = since !== undefined ? ` (pergunta enviada há ${formatElapsedSince(Date.now() - Date.parse(since))})` : '';
+    const suffix =
+      since !== undefined
+        ? ` (pergunta enviada há ${formatElapsedSince(Date.now() - Date.parse(since))})`
+        : '';
     return `RODANDO · ⚠ aguardando dono${suffix}`;
   }
   if (st === 'sleeping' && rt.snapshot?.nextFireIso !== undefined) {
@@ -698,7 +713,9 @@ async function runStart(
   }
   const e: ServiceEntry = entry;
   if (e.manifest.schedule === undefined) {
-    io.err(`aluy: serviço "${name}" não declara "schedule:" — o runner não saberia quando acordar.`);
+    io.err(
+      `aluy: serviço "${name}" não declara "schedule:" — o runner não saberia quando acordar.`,
+    );
     return 1;
   }
   if (readServiceRuntimeStatus(e.dir).running) {
@@ -822,7 +839,9 @@ async function runStartGroup(
       if (code !== 0) failed.push(name);
     } catch (err) {
       failed.push(name);
-      io.err(`aluy: erro inesperado ao iniciar "${name}" — ${err instanceof Error ? err.message : String(err)}`);
+      io.err(
+        `aluy: erro inesperado ao iniciar "${name}" — ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
   io.out('');
@@ -841,7 +860,11 @@ async function runStartGroup(
  * `stop --group <nome>` — mesma disciplina de `runStartGroup`, iterando `runStop`.
  * Um serviço já parado no grupo não é falha (mesmo comportamento do `stop` singular).
  */
-async function runStopGroup(group: string, io: TerminalIO, store: UserServicesStore): Promise<number> {
+async function runStopGroup(
+  group: string,
+  io: TerminalIO,
+  store: UserServicesStore,
+): Promise<number> {
   const members = groupMembers(store, group);
   if (members.length === 0) {
     io.err(`aluy: nenhum serviço com "group: ${group}" encontrado em ${store.servicesDir}.`);
@@ -857,7 +880,9 @@ async function runStopGroup(group: string, io: TerminalIO, store: UserServicesSt
       if (code !== 0) failed.push(name);
     } catch (err) {
       failed.push(name);
-      io.err(`aluy: erro inesperado ao parar "${name}" — ${err instanceof Error ? err.message : String(err)}`);
+      io.err(
+        `aluy: erro inesperado ao parar "${name}" — ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
   io.out('');

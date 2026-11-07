@@ -39,11 +39,14 @@ export interface McpPickerProps {
   readonly maxRows?: number;
 }
 
-const ESCOPOS: readonly { readonly id: EscopoMcp; readonly rotulo: string; readonly onde: string }[] =
-  [
-    { id: 'global', rotulo: 'global', onde: '~/.aluy/mcp.json — vale em todos os projetos' },
-    { id: 'projeto', rotulo: 'projeto', onde: '.mcp.json — vale só neste diretório' },
-  ];
+const ESCOPOS: readonly {
+  readonly id: EscopoMcp;
+  readonly rotulo: string;
+  readonly onde: string;
+}[] = [
+  { id: 'global', rotulo: 'global', onde: '~/.aluy/mcp.json — vale em todos os projetos' },
+  { id: 'projeto', rotulo: 'projeto', onde: '.mcp.json — vale só neste diretório' },
+];
 
 export function McpPicker(props: McpPickerProps): React.ReactElement {
   if (props.carregando === true) {
@@ -105,7 +108,10 @@ export function McpPicker(props: McpPickerProps): React.ReactElement {
   // JANELA (F88/anti-flicker): a lista é ABERTA (o registro tem milhares), então ela precisa
   // de teto — sem isto a região viva estoura `rows` e o Ink repinta a tela a cada quadro.
   const teto = Math.max(3, props.maxRows ?? 8);
-  const inicio = Math.max(0, Math.min(props.selected - Math.floor(teto / 2), props.itens.length - teto));
+  const inicio = Math.max(
+    0,
+    Math.min(props.selected - Math.floor(teto / 2), props.itens.length - teto),
+  );
   const janela = props.itens.slice(Math.max(0, inicio), Math.max(0, inicio) + teto);
   const escondidosAcima = Math.max(0, inicio);
   const escondidosAbaixo = Math.max(0, props.itens.length - (Math.max(0, inicio) + teto));

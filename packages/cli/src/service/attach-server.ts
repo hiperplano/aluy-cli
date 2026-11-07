@@ -149,7 +149,9 @@ export function startAttachServer(
 
   return {
     broadcastLog: (line) => {
-      broadcastRaw(encodeServiceAttachServerEvent({ t: 'log', line, atIso: new Date().toISOString() }));
+      broadcastRaw(
+        encodeServiceAttachServerEvent({ t: 'log', line, atIso: new Date().toISOString() }),
+      );
     },
     broadcastState: (turnState, detail) => {
       lastState = { turnState, ...(detail !== undefined ? { detail } : {}) };

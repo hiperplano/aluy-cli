@@ -99,7 +99,9 @@ export function newServiceEgressLimiter(): EgressRateLimiter {
 async function resolveActiveChannel(
   manifest: ServiceManifest,
   deps: ServiceChannelDeps,
-): Promise<{ readonly chatId: number; readonly client: ServiceChannelClient } | { readonly reason: string }> {
+): Promise<
+  { readonly chatId: number; readonly client: ServiceChannelClient } | { readonly reason: string }
+> {
   const chatId = parseServiceTelegramChatId(manifest.channel);
   if (chatId === undefined) {
     return {
@@ -144,7 +146,10 @@ async function sendChannelText(
   }
   try {
     const ok = await resolved.client.send(resolved.chatId, text);
-    if (!ok) log('[service/channel] falha ao enviar (Bot API recusou/erro de rede) — seguindo (fail-open).');
+    if (!ok)
+      log(
+        '[service/channel] falha ao enviar (Bot API recusou/erro de rede) — seguindo (fail-open).',
+      );
   } catch (err) {
     log(`[service/channel] erro ao enviar — ${resolved.client.safeForLog(String(err))}`);
   }
@@ -307,7 +312,9 @@ export async function waitForOwnerReply(args: {
   // keychain/rede (o smoke-test roda com HOME falso, sem token real).
   const testReply = process.env[ASK_TEST_REPLY_ENV];
   if (testReply !== undefined) {
-    log(`[service/channel] ${ASK_TEST_REPLY_ENV} setado — resposta mockada TEST-ONLY (sem rede real).`);
+    log(
+      `[service/channel] ${ASK_TEST_REPLY_ENV} setado — resposta mockada TEST-ONLY (sem rede real).`,
+    );
     return { kind: 'answered', text: testReply };
   }
 
@@ -340,7 +347,9 @@ export async function waitForOwnerReply(args: {
 
   const askText = formatServiceAskMessage(manifest.name, question);
   if (!deps.egressLimiter.tryConsume(now())) {
-    log('[service/channel] ask-espera: teto anti-spam atingido — pergunta NÃO enviada; aguardando mesmo assim.');
+    log(
+      '[service/channel] ask-espera: teto anti-spam atingido — pergunta NÃO enviada; aguardando mesmo assim.',
+    );
   } else {
     try {
       const ok = await client.send(chatId, askText);
@@ -383,22 +392,28 @@ export async function waitForOwnerReply(args: {
     const onStopAbort = (): void => pollController.abort();
     stop.addEventListener('abort', onStopAbort, { once: true });
 
-    const pollPromise: Promise<{ readonly kind: 'poll'; readonly updates: readonly TelegramUpdate[] }> =
-      client
-        .poll(pollController.signal)
-        .then((updates) => ({ kind: 'poll' as const, updates }))
-        .catch(() => ({ kind: 'poll' as const, updates: [] })); // fail-safe — uma rodada ruim não derruba a espera.
+    const pollPromise: Promise<{
+      readonly kind: 'poll';
+      readonly updates: readonly TelegramUpdate[];
+    }> = client
+      .poll(pollController.signal)
+      .then((updates) => ({ kind: 'poll' as const, updates }))
+      .catch(() => ({ kind: 'poll' as const, updates: [] })); // fail-safe — uma rodada ruim não derruba a espera.
     const localPromise = args.localAnswer
       ?.waitForAnswer(pollController.signal)
       .then((text) => ({ kind: 'local' as const, text }));
 
-    const winner = localPromise ? await Promise.race([pollPromise, localPromise]) : await pollPromise;
+    const winner = localPromise
+      ? await Promise.race([pollPromise, localPromise])
+      : await pollPromise;
     pollController.abort(); // cancela o perdedor da corrida (poll OU espera local).
     stop.removeEventListener('abort', onStopAbort);
     if (stop.aborted) break;
 
     if (winner.kind === 'local') {
-      log('[service/channel] resposta LOCAL recebida via "aluy service attach" — retomando o turno de onde parou.');
+      log(
+        '[service/channel] resposta LOCAL recebida via "aluy service attach" — retomando o turno de onde parou.',
+      );
       return { kind: 'answered', text: winner.text };
     }
 
@@ -411,7 +426,9 @@ export async function waitForOwnerReply(args: {
       if (decision.kind === 'discard') {
         log(`[service/channel] ask-espera: ingresso descartado (${decision.reason}).`);
       } else {
-        log('[service/channel] ask-espera: ingresso classificado como DADO (não-confiável) — ignorado.');
+        log(
+          '[service/channel] ask-espera: ingresso classificado como DADO (não-confiável) — ignorado.',
+        );
       }
     }
   }

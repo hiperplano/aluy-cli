@@ -189,9 +189,7 @@ export class Concierge {
 
   // ── ferramentas ────────────────────────────────────────────────────────────
 
-  private async runTool(
-    call: NativeToolCall,
-  ): Promise<{
+  private async runTool(call: NativeToolCall): Promise<{
     result: string;
     note?: string;
     action: { tool: ConciergeToolName; ok: boolean; taskId?: string };

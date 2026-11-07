@@ -499,7 +499,13 @@ export function useProviderPicker(args: UseProviderPickerArgs): ProviderPickerCo
     resetCredential();
     setOpen(false);
     return id;
-  }, [credentialStep, credentialDraft, credentialProviderId, args.storeCredential, resetCredential]);
+  }, [
+    credentialStep,
+    credentialDraft,
+    credentialProviderId,
+    args.storeCredential,
+    resetCredential,
+  ]);
 
   const cancelCredential = useCallback(() => {
     resetCredential();

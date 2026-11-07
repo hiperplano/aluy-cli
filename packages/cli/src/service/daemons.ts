@@ -13,7 +13,11 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseDaemonManifest, isDaemonManifestError, type DaemonManifest } from '@hiperplano/aluy-cli-core';
+import {
+  parseDaemonManifest,
+  isDaemonManifestError,
+  type DaemonManifest,
+} from '@hiperplano/aluy-cli-core';
 import { daemonLogPath, daemonPidPath, serviceStateDir } from './paths.js';
 import { writePidFile, readPidFile, isProcessAlive, removePidFile } from './pid.js';
 
@@ -25,7 +29,10 @@ export interface DeclaredDaemon {
 /** Lê `daemons/<nome>/daemon.md` do serviço. `daemon.md` ausente/inválido ⇒ IGNORADO com
  * aviso no log (não derruba os demais nem o runner — §6, ciclo de vida best-effort
  * sobre CÓDIGO DO USUÁRIO, que pode estar incompleto durante o desenvolvimento). */
-export function listDeclaredDaemons(serviceDir: string, log: (line: string) => void): DeclaredDaemon[] {
+export function listDeclaredDaemons(
+  serviceDir: string,
+  log: (line: string) => void,
+): DeclaredDaemon[] {
   const daemonsDir = join(serviceDir, 'daemons');
   let entries: string[];
   try {
@@ -83,7 +90,8 @@ export function startDaemons(serviceDir: string, log: (line: string) => void): v
     }
     try {
       const shell = process.platform === 'win32' ? 'cmd' : 'sh';
-      const shellArgs = process.platform === 'win32' ? ['/c', d.manifest.command] : ['-c', d.manifest.command];
+      const shellArgs =
+        process.platform === 'win32' ? ['/c', d.manifest.command] : ['-c', d.manifest.command];
       const child = spawn(shell, shellArgs, {
         cwd: join(serviceDir, 'daemons', d.name),
         detached: true,

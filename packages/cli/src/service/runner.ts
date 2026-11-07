@@ -193,7 +193,11 @@ const MAX_SLEEP_SLICE_MS = 24 * 60 * 60_000; // 1 dia — teto por fatia.
  * mockar relógio/timer. O menor entre o tempo restante até `targetMs` e o teto
  * `capMs`; nunca negativo (alvo já passado ⇒ 0, "dormir zero" = acordar já).
  */
-export function sleepSliceMs(nowMs: number, targetMs: number, capMs: number = MAX_SLEEP_SLICE_MS): number {
+export function sleepSliceMs(
+  nowMs: number,
+  targetMs: number,
+  capMs: number = MAX_SLEEP_SLICE_MS,
+): number {
   const remaining = Math.max(0, targetMs - nowMs);
   return Math.min(remaining, capMs);
 }
@@ -537,7 +541,10 @@ export type SayRoutingDecision =
  * enfileirado p/ a PRÓXIMA atividade que abrir (degrade documentado — sem
  * plumbing de mid-turno de verdade no processo-filho).
  */
-export function decideSayRouting(currentPhase: ServiceTurnState, rawText: string): SayRoutingDecision {
+export function decideSayRouting(
+  currentPhase: ServiceTurnState,
+  rawText: string,
+): SayRoutingDecision {
   const trimmed = rawText.trim();
   if (trimmed === '') return { action: 'ignore' };
   if (currentPhase === 'awaiting-owner') {
@@ -632,7 +639,9 @@ async function runActivityTurn(args: {
   if (stop.aborted) return { ok: false, stop: 'cancelled' };
   const timeDecision = resolveActivityTimeout(untilRemainingMs, activityTimeoutCap);
   if (!timeDecision.hasTime) {
-    log(`atividade ${index + 1}/${total} "${activity.id}": expediente já encerrado (until) — pulada.`);
+    log(
+      `atividade ${index + 1}/${total} "${activity.id}": expediente já encerrado (until) — pulada.`,
+    );
     return { ok: false, stop: 'limit' };
   }
 
@@ -705,14 +714,20 @@ async function runActivityTurn(args: {
       : undefined;
   deadlineTimer?.unref();
 
-  const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-    child.on('close', (code, signal) => resolve({ code, signal }));
-    child.on('error', () => resolve({ code: null, signal: null }));
-  });
+  const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+    (resolve) => {
+      child.on('close', (code, signal) => resolve({ code, signal }));
+      child.on('error', () => resolve({ code: null, signal: null }));
+    },
+  );
   if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
   stop.removeEventListener('abort', onStopAbort);
 
-  const exitClass = classifyActivityExit({ stopAborted: stop.aborted, signal: exit.signal, deadlineFired });
+  const exitClass = classifyActivityExit({
+    stopAborted: stop.aborted,
+    signal: exit.signal,
+    deadlineFired,
+  });
   if (exitClass === 'cancelled') {
     log(`atividade ${index + 1}/${total} "${activity.id}": interrompida (stop do runner).`);
     return { ok: false, stop: 'cancelled' };
@@ -778,8 +793,13 @@ async function runActivityTurn(args: {
  * lança — devolve o exit code. `deps.externalStop` permite teste determinístico sem
  * depender de sinal real de SO.
  */
-export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps = {}): Promise<number> {
-  const store = new UserServicesStore(deps.aluyBaseDir !== undefined ? { baseDir: deps.aluyBaseDir } : {});
+export async function runServiceRunner(
+  name: string,
+  deps: RunServiceRunnerDeps = {},
+): Promise<number> {
+  const store = new UserServicesStore(
+    deps.aluyBaseDir !== undefined ? { baseDir: deps.aluyBaseDir } : {},
+  );
   const entry = store.get(name);
   if (entry === undefined || isServiceEntryError(entry)) {
     process.stderr.write(
@@ -810,10 +830,16 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
   const channelBaseDeps: ServiceChannelDeps = {
     egressLimiter: deps.channelDeps?.egressLimiter ?? newServiceEgressLimiter(),
     log,
-    ...(deps.channelDeps?.secretStore !== undefined ? { secretStore: deps.channelDeps.secretStore } : {}),
-    ...(deps.channelDeps?.clientFactory !== undefined ? { clientFactory: deps.channelDeps.clientFactory } : {}),
+    ...(deps.channelDeps?.secretStore !== undefined
+      ? { secretStore: deps.channelDeps.secretStore }
+      : {}),
+    ...(deps.channelDeps?.clientFactory !== undefined
+      ? { clientFactory: deps.channelDeps.clientFactory }
+      : {}),
     ...(deps.channelDeps?.now !== undefined ? { now: deps.channelDeps.now } : {}),
-    ...(deps.channelDeps?.askTimeoutMs !== undefined ? { askTimeoutMs: deps.channelDeps.askTimeoutMs } : {}),
+    ...(deps.channelDeps?.askTimeoutMs !== undefined
+      ? { askTimeoutMs: deps.channelDeps.askTimeoutMs }
+      : {}),
   };
 
   if (service.manifest.schedule === undefined) {
@@ -1009,15 +1035,15 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
           fimExpediente !== undefined &&
           fimExpediente > 0 &&
           Date.now() + fimExpediente < next.getTime();
-        const alvoSoneca = acordaNoFimDoExpediente
-          ? new Date(Date.now() + fimExpediente)
-          : next;
+        const alvoSoneca = acordaNoFimDoExpediente ? new Date(Date.now() + fimExpediente) : next;
 
         const wake = await sleepUntil(alvoSoneca, stopController.signal);
         if (wake === 'stopped') break;
 
         if (acordaNoFimDoExpediente) {
-          log(`fim do expediente ("until: ${service.manifest.until}") — derrubando daemons próprios…`);
+          log(
+            `fim do expediente ("until: ${service.manifest.until}") — derrubando daemons próprios…`,
+          );
           stopDaemons(serviceDir, log);
           continue; // volta ao topo: recalcula o próximo cron e dorme de verdade.
         }
@@ -1072,9 +1098,7 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         // ADR-0158 — o modo declarado no manifesto vira o modo do turno-filho
         // (propagado até `buildActivityEnv` → env `ALUY_SERVICE_AUTONOMY`). Ausente/
         // `ask` ⇒ comportamento de hoje, byte a byte.
-        ...(service.manifest.autonomy !== undefined
-          ? { autonomy: service.manifest.autonomy }
-          : {}),
+        ...(service.manifest.autonomy !== undefined ? { autonomy: service.manifest.autonomy } : {}),
         // ADR-0158 — raízes `workspace:` JÁ resolvidas/validadas (`resolvedWorkspaceRoots`,
         // `io/services-store.ts` — o piso "~/.aluy/ nunca vira raiz" já foi aplicado
         // ali). Propagado até `buildActivityEnv` → env `ALUY_SERVICE_WORKSPACE_ROOTS`.
@@ -1101,7 +1125,9 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
           pendingQuestion: outcome.question,
           lastReportSummary: `aguardando dono: ${outcome.question}`,
         });
-        log('turno pausado — AGUARDANDO DONO — enviando a pergunta ao canal e entrando em modo espera…');
+        log(
+          'turno pausado — AGUARDANDO DONO — enviando a pergunta ao canal e entrando em modo espera…',
+        );
 
         const ask = await waitForOwnerReply({
           manifest: service.manifest,
@@ -1151,10 +1177,16 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         }
 
         // ask.kind === 'answered' — retoma a atividade que perguntou.
-        log(`dono respondeu pelo canal — retomando a atividade ${outcome.activityIndex + 1} do workflow.`);
+        log(
+          `dono respondeu pelo canal — retomando a atividade ${outcome.activityIndex + 1} do workflow.`,
+        );
         outcome = await runOneWorkflow({
           ...baseWorkflowArgs,
-          resume: { activityIndex: outcome.activityIndex, question: outcome.question, answer: ask.text },
+          resume: {
+            activityIndex: outcome.activityIndex,
+            question: outcome.question,
+            answer: ask.text,
+          },
         });
       }
 
@@ -1170,7 +1202,12 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         if (outcome.kind === 'ok') {
           await sendServiceReport(
             service.manifest,
-            { serviceName: service.manifest.name, ok: true, critical: false, summary: outcome.summary },
+            {
+              serviceName: service.manifest.name,
+              ok: true,
+              critical: false,
+              summary: outcome.summary,
+            },
             channelBaseDeps,
           );
         } else if (outcome.critical) {
@@ -1178,7 +1215,12 @@ export async function runServiceRunner(name: string, deps: RunServiceRunnerDeps 
         } else {
           await sendServiceReport(
             service.manifest,
-            { serviceName: service.manifest.name, ok: false, critical: false, summary: outcome.summary },
+            {
+              serviceName: service.manifest.name,
+              ok: false,
+              critical: false,
+              summary: outcome.summary,
+            },
             channelBaseDeps,
           );
         }
@@ -1308,7 +1350,11 @@ async function runOneWorkflow(args: {
   /** ADR-0158 §5 pt.4 (FASE 3) — RETOMADA pós ASK-ESPERA: a atividade em
    * `activityIndex` reexecuta com pergunta+resposta anexadas ao `goal` (as
    * atividades ANTERIORES já concluíram no turno original — não rodam de novo). */
-  readonly resume?: { readonly activityIndex: number; readonly question: string; readonly answer: string };
+  readonly resume?: {
+    readonly activityIndex: number;
+    readonly question: string;
+    readonly answer: string;
+  };
   /** ADR-0158 §11 (FASE 4) — fila MUTÁVEL (array compartilhado, o mesmo em todo o
    * processo do runner) de falas do dono via `aluy service attach` ainda não
    * entregues. DRENADA (splice) na PRÓXIMA atividade que abrir — ver `runner.
@@ -1346,7 +1392,11 @@ async function runOneWorkflow(args: {
   }
   if (!existsSync(wfPath)) {
     log(`FATAL do turno: workflows/${workflowName}.md não encontrado.`);
-    return { kind: 'stopped', critical: true, summary: `workflow "${workflowName}" não encontrado.` };
+    return {
+      kind: 'stopped',
+      critical: true,
+      summary: `workflow "${workflowName}" não encontrado.`,
+    };
   }
   const raw = readFileSync(wfPath, 'utf8');
   const parsed = parseWorkflow(`${workflowName}.md`, raw, 'project');
@@ -1357,11 +1407,14 @@ async function runOneWorkflow(args: {
 
   const resumeSlice = resolveResumeSlice(parsed.activities.length, args.resume?.activityIndex);
   if (!resumeSlice.ok) {
-    log('retomada: a atividade pendente não existe mais no workflow (editado entre a pergunta e a resposta) — turno encerrado.');
+    log(
+      'retomada: a atividade pendente não existe mais no workflow (editado entre a pergunta e a resposta) — turno encerrado.',
+    );
     return {
       kind: 'stopped',
       critical: true,
-      summary: 'a atividade da retomada não existe mais no workflow (editado entre a pergunta e a resposta).',
+      summary:
+        'a atividade da retomada não existe mais no workflow (editado entre a pergunta e a resposta).',
     };
   }
   const startOffset = resumeSlice.startOffset;
@@ -1372,9 +1425,9 @@ async function runOneWorkflow(args: {
   // dono só descobre quando o teto MATA uma atividade e o turno leva os daemons junto.
   const avisoTeto = avisoActivityTimeout(args.activityTimeoutRaw);
   if (avisoTeto !== undefined) args.log(`[manifesto] ${avisoTeto}`);
-  const activityTimeoutCap = parseServiceActivityTimeout(args.activityTimeoutRaw) ?? MAX_ACTIVITY_MS;
-  const orchestratorPreamble =
-    `Você coordena o serviço "${args.serviceName}" — rege, não opera:\n${args.orchestratorBody}`;
+  const activityTimeoutCap =
+    parseServiceActivityTimeout(args.activityTimeoutRaw) ?? MAX_ACTIVITY_MS;
+  const orchestratorPreamble = `Você coordena o serviço "${args.serviceName}" — rege, não opera:\n${args.orchestratorBody}`;
 
   const pendingQuestionRef: { current?: string } = {};
   let pendingActivityIndex: number | undefined;
@@ -1401,7 +1454,8 @@ async function runOneWorkflow(args: {
       // entrega numa retomada pós-ask-espera (`runOneWorkflow` chamado de novo com
       // `resume` — a fila só é preenchida por `onSay`, nunca por este loop).
       const drainedSay = args.ownerSay?.splice(0, args.ownerSay.length) ?? [];
-      const ownerSayContext = drainedSay.length > 0 ? formatOwnerSayInjection(drainedSay) : undefined;
+      const ownerSayContext =
+        drainedSay.length > 0 ? formatOwnerSayInjection(drainedSay) : undefined;
       const outcome = await runActivityTurn({
         serviceDir,
         serviceName: args.serviceName,

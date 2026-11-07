@@ -9,14 +9,20 @@
 // — sem tocar no registro oficial nem no `~/.aluy/mcp.json` de quem roda os testes.
 
 import { useCallback, useState } from 'react';
-import { itensDaBusca, motivoParaNaoInstalar, type ItemMcp, type EscopoMcp } from '../../mcp/mcp-picker-model.js';
+import {
+  itensDaBusca,
+  motivoParaNaoInstalar,
+  type ItemMcp,
+  type EscopoMcp,
+} from '../../mcp/mcp-picker-model.js';
 import type { RegistrySearchResult } from '@hiperplano/aluy-cli-core';
 
 /** Busca no registro. Devolve os resultados CRUS (a dedup é do modelo). */
 export type McpSearchPort = (
   query: string,
 ) => Promise<
-  { readonly ok: true; readonly results: readonly RegistrySearchResult[] } | { readonly ok: false; readonly reason: string }
+  | { readonly ok: true; readonly results: readonly RegistrySearchResult[] }
+  | { readonly ok: false; readonly reason: string }
 >;
 
 /** Escreve o server na config do escopo escolhido. */

@@ -68,7 +68,8 @@ export function CycleCeilingGate(props: CycleCeilingGateProps): React.ReactEleme
         <Glyph name="clock" role="accent" />
         <Role name="accent">
           {' '}
-          {props.ceilingLabel} atingido {preencher(11 + displayWidth(props.ceilingLabel) + 7)} pausado
+          {props.ceilingLabel} atingido {preencher(11 + displayWidth(props.ceilingLabel) + 7)}{' '}
+          pausado
         </Role>
       </Box>
       <Box>

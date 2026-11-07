@@ -317,9 +317,7 @@ function isLocalBackend(deps: DoctorProbeDeps): boolean {
 // por `GET /models`, a mesma prova que a troca de provider usa: não depende de um modelo
 // específico estar vivo (um catálogo envelhecido não pode reprovar um provider saudável) e
 // ainda devolve a lista, que serve para dizer se o modelo ATIVO ainda existe do outro lado.
-async function gatherLocalProvider(
-  deps: DoctorProbeDeps,
-): Promise<LocalProviderFact | undefined> {
+async function gatherLocalProvider(deps: DoctorProbeDeps): Promise<LocalProviderFact | undefined> {
   if (!isLocalBackend(deps)) return undefined;
   const env = deps.env ?? process.env;
   const cfg = new UserConfigStore({ baseDir: aluyHomeOf(deps) }).load();
@@ -359,9 +357,7 @@ async function gatherLocalProvider(
     hasCredential: true,
     reachable: true,
     modelCount: slugs.length,
-    ...(alvo !== ''
-      ? { modelListed: slugs.some((sl) => sl.trim().toLowerCase() === alvo) }
-      : {}),
+    ...(alvo !== '' ? { modelListed: slugs.some((sl) => sl.trim().toLowerCase() === alvo) } : {}),
   };
 }
 

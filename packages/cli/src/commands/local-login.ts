@@ -22,10 +22,7 @@ import {
   type LocalProviderKind,
 } from '@hiperplano/aluy-cli-core';
 import { realTerminalIO, PromptInterruptedError, type TerminalIO } from '../auth/io.js';
-import {
-  storeApiKey,
-  type KeyringEntry,
-} from '../model/local/credential-resolver.js';
+import { storeApiKey, type KeyringEntry } from '../model/local/credential-resolver.js';
 import type { VolatileKeychainProbeOptions } from '../auth/keychain-volatility.js';
 import type { FileVaultOptions } from '../model/local/file-vault.js';
 import { loadLocalProviderCatalog } from '../io/providers-config.js';
@@ -129,7 +126,9 @@ async function runApiKeyLogin(
     // clique esquerdo seleciona — quem cola é o botão DIREITO), e o dono passou uma noite
     // concluindo que o CLI estava quebrado quando o campo só estava vazio. Dizer aqui
     // custa uma linha e resolve antes de virar suporte.
-    io.out(`  (cole com o botão direito no cmd.exe; ou use --token <chave> para não depender disso)`);
+    io.out(
+      `  (cole com o botão direito no cmd.exe; ou use --token <chave> para não depender disso)`,
+    );
     try {
       key = (await io.prompt(`Cole a API key de ${provider}: `, { secret: true })).trim();
     } catch (err) {
@@ -138,7 +137,9 @@ async function runApiKeyLogin(
       // parece defeito e não diz o que fazer em seguida.
       if (err instanceof PromptInterruptedError) {
         io.err('login: cancelado.');
-        io.err(`  para informar a chave sem prompt: aluy login --provider ${provider} --token <chave>`);
+        io.err(
+          `  para informar a chave sem prompt: aluy login --provider ${provider} --token <chave>`,
+        );
         return 1;
       }
       throw err;
@@ -172,9 +173,7 @@ async function runApiKeyLogin(
       // F165, emendado — o keychain respondeu mas só tem o cofre volátil do kernel
       // (sem Secret Service): o cofre em arquivo é quem garante persistência real.
       // O aviso antigo ("some no reboot") deixaria de ser verdade — não o repetimos.
-      io.out(
-        '  (o keychain do SO aqui só é volátil — sem Secret Service — mas o cofre em arquivo',
-      );
+      io.out('  (o keychain do SO aqui só é volátil — sem Secret Service — mas o cofre em arquivo');
       io.out('   cifrado garante que a chave sobrevive a um reboot.)');
     }
   }

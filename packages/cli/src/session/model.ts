@@ -835,7 +835,12 @@ export interface SessionState {
    * Renderizadas numa área SEPARADA da fila do agente principal (a fila é só pedido sem `/ask`).
    * Some quando a resposta chega (vira nota `↗ /ask:`). `{id, question}` (head redigido/curto).
    */
-  readonly pendingAsks: readonly { readonly id: string; readonly question: string }[];
+  readonly pendingAsks: readonly {
+    readonly id: string;
+    readonly question: string;
+    /** ADR 0006 — é uma resposta do Concierge (não um `/ask`). */
+    readonly concierge?: boolean;
+  }[];
 }
 
 /**

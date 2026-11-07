@@ -759,6 +759,21 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           ],
         },
       };
+    case 'task':
+    case 'approve':
+    case 'deny':
+    case 'conversation':
+      // ADR 0006 — UI/runtime puros: a App os intercepta no `runCommand` (precisam do
+      // runtime do Concierge). Cair aqui = sem TUI (não-TTY/linear) ou modo clássico.
+      return {
+        kind: 'note',
+        note: {
+          title: id,
+          lines: [
+            'disponível só na TUI interativa com o Concierge ativo (/conversation concierge).',
+          ],
+        },
+      };
     case 'notify':
       // EST-0963 — o `/notify` é roteado ANTES (run.tsx) via `buildNotifyEffect`,
       // que precisa do estado do sino + arg. Cair aqui só acontece sem esse

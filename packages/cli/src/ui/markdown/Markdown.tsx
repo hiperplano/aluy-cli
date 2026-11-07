@@ -59,13 +59,14 @@ export function Markdown(props: MarkdownProps): React.ReactElement {
           block={b}
           base={base}
           {...(props.columns !== undefined ? { columns: props.columns } : {})}
-          {...(props.backgroundColor !== undefined ? { backgroundColor: props.backgroundColor } : {})}
+          {...(props.backgroundColor !== undefined
+            ? { backgroundColor: props.backgroundColor }
+            : {})}
         />
       ))}
     </Box>
   );
 }
-
 
 /**
  * Quebra spans em LINHAS visuais de no máximo `cols` colunas, preservando o tipo de cada
@@ -168,7 +169,7 @@ function BlockView(props: {
         return (
           <BlocoPintado
             spans={b.spans}
-            base={"accent"}
+            base={'accent'}
             mono={mono}
             columns={props.columns}
             backgroundColor={props.backgroundColor}
@@ -189,7 +190,7 @@ function BlockView(props: {
         return (
           <BlocoPintado
             spans={b.spans}
-            base={"fgDim"}
+            base={'fgDim'}
             mono={mono}
             columns={props.columns}
             backgroundColor={props.backgroundColor}
@@ -215,7 +216,10 @@ function BlockView(props: {
             mono={mono}
             columns={props.columns}
             backgroundColor={props.backgroundColor}
-            prefixo={{ text: `${b.ordered ? b.marker : theme.unicode ? '•' : '-'} `, role: 'accent' }}
+            prefixo={{
+              text: `${b.ordered ? b.marker : theme.unicode ? '•' : '-'} `,
+              role: 'accent',
+            }}
             indent={b.indent * 2}
           />
         );
@@ -278,7 +282,9 @@ function BlocoPintado(props: {
   const linhas = quebrarSpans(props.spans, util);
 
   /** Estilo ANSI de um span, no papel que ele teria como componente. */
-  const estiloDe = (span: Inline): { color?: string | undefined; bold?: boolean; dim?: boolean } => {
+  const estiloDe = (
+    span: Inline,
+  ): { color?: string | undefined; bold?: boolean; dim?: boolean } => {
     const papel: TermRole =
       span.kind === 'code' ? 'depth' : span.kind === 'link' ? 'accent' : props.base;
     const r = theme.role(papel);
