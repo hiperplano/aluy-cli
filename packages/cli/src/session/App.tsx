@@ -2267,7 +2267,10 @@ export function App(props: AppProps): React.ReactElement {
     if (rt === undefined) return;
     const md = buildTranscript(rt.taskBlocks(id));
     const corpo = md.includes('\n---\n') ? md.slice(md.indexOf('\n---\n') + 5) : md;
-    const linhas = corpo.split('\n').map((l) => l.trimEnd());
+    const linhas = corpo
+      .replace(/^\n+|\n+$/g, '')
+      .split('\n')
+      .map((l) => l.trimEnd());
     const cauda = linhas.length > 160 ? ['… (início omitido)', ...linhas.slice(-160)] : linhas;
     controller.pushNote(
       `${id} · detalhe`,

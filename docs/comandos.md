@@ -187,7 +187,7 @@ si roda em **tarefas** (`t1`, `t2`…), que o Concierge abre (`task_start`), cor
   `/task stop <id>` (ou `all`), ou **F8** (para tudo). Ctrl-C duas vezes sai.
 - O trabalho NÃO aparece na conversa: as tarefas moram num **painel abaixo do composer** (uma linha por
   tarefa, sub-agentes aninhados; com 3 ou mais, `3 tarefas · 2 rodando · ↓ ver`). `↓` expande, `↑↓`
-  escolhe, `enter` abre o detalhe (o transcrito da tarefa, rolável; `esc` fecha), `p` para a tarefa.
+  escolhe, `enter` abre o detalhe (no inline vira uma nota no histórico; no `/fullscreen`, vista rolável), `ctrl+k` para a tarefa (pede confirmação com um 2º `ctrl+k`). Digitar tira o foco do painel: atalho de letra nunca dispara.
   A conclusão vira uma linha na conversa (`✔ t1 concluída — …`); `/task show t1` abre o detalhe.
 - No modo clássico, os sub-agentes também saem da conversa e moram nesse rodapé.
 - `/task` lista as tarefas. Aprovações viram uma **caixa de entrada** acima do composer; responda com
