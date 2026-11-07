@@ -320,6 +320,28 @@ describe('Concierge — prompt pequeno e memória do dono', () => {
     expect(p).toContain('sempre delegue');
     expect(Math.ceil(p.length / 4)).toBeLessThan(1200);
   });
+  it('o prompt manda dizer o que de fato fez: tarefa não é sub-agente; sem enrolação', () => {
+    const p = buildConciergePrompt({});
+    expect(p).toContain('NÃO diga que criou sub-agentes');
+    expect(p).toContain('Sem enrolação');
+    expect(p).toContain('a tela já mostra uma linha de conclusão');
+  });
+
+  it('separa a fala (reply, que a TUI transmite) dos avisos do motor (notes)', async () => {
+    let n = 0;
+    const { concierge } = setup(() =>
+      n++ === 0
+        ? result('Iniciei a A.', [call('task_start', { goal: 'A', files: ['x.ts'] })])
+        : result('Iniciei a B.', [call('task_start', { goal: 'B', files: ['x.ts'] })]),
+    );
+    await concierge.handle('A');
+    const r = await concierge.handle('B');
+    expect(r.reply).toBe('Iniciei a B.');
+    expect(r.notes).toHaveLength(1);
+    expect(r.notes[0]).toContain('espera t1');
+    expect(r.text).toBe(`${r.reply}\n${r.notes[0]}`);
+  });
+
   it('restaura histórico só com user/assistant', () => {
     const { concierge } = setup(() => result('ok'));
     concierge.restoreHistory([
