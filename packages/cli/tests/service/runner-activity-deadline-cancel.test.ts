@@ -26,7 +26,9 @@ import {
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
+function fakeClient(): ServiceChannelClient & {
+  readonly sent: { chatId: number; text: string }[];
+} {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,
@@ -96,7 +98,9 @@ describe('runActivityTurn — "activity-timeout:" vence primeiro (a atividade nu
     expect(linhaTeto).toMatch(/ATINGIU O TETO de \d+s/); // quanto tempo, concretamente.
     expect(linhaTeto).toContain('encerrada pelo runner'); // QUEM matou — não foi o filho.
     expect(linhaTeto).toContain('activity-timeout'); // o que fazer a respeito.
-    expect(logs.some((l) => l.startsWith('turno encerrado — parou em 1/1 atividades (limit).'))).toBe(true);
+    expect(
+      logs.some((l) => l.startsWith('turno encerrado — parou em 1/1 atividades (limit).')),
+    ).toBe(true);
     const report = client.sent.find((m) => m.text.includes('parou em 1/1 atividades (limit).'));
     expect(report).toBeDefined();
     expect(report!.text).not.toContain('ALERTA'); // "limit" é parada NEUTRA — reporte, não alerta.
@@ -136,18 +140,25 @@ describe('runActivityTurn — `stop` do runner dispara COM uma atividade em voo 
     });
 
     await waitFor(() => logs.some((l) => l.startsWith('acordou')));
-    await waitFor(() => logs.some((l) => l.includes('iniciando turno (') && l.includes('"trava"')), 10_000);
+    await waitFor(
+      () => logs.some((l) => l.includes('iniciando turno (') && l.includes('"trava"')),
+      10_000,
+    );
     externalStop.abort(); // SIGTERM simulado — enquanto a atividade ainda roda.
 
     await waitFor(() => logs.includes('runner encerrado.'), 10_000);
     const code = await promise;
 
     expect(code).toBe(0);
-    expect(logs.some((l) => l.includes('atividade 1/1 "trava": interrompida (stop do runner).'))).toBe(true);
+    expect(
+      logs.some((l) => l.includes('atividade 1/1 "trava": interrompida (stop do runner).')),
+    ).toBe(true);
     // NUNCA classificado como "deadline" — `stopAborted` tem prioridade (mesmo
     // motivo — o SIGTERM — poderia ter vindo de qualquer um dos dois).
     expect(logs.some((l) => l.includes('ATINGIU O TETO'))).toBe(false);
-    expect(logs.some((l) => l.startsWith('turno encerrado — parou em 1/1 atividades (cancelled).'))).toBe(true);
+    expect(
+      logs.some((l) => l.startsWith('turno encerrado — parou em 1/1 atividades (cancelled).')),
+    ).toBe(true);
     // limpeza de recursos completa: pidfile removido MESMO num shutdown no meio de
     // uma atividade (não só nos caminhos fatais/sem-canal já cobertos alhures).
     expect(existsSync(runnerPidPath(dir))).toBe(false);

@@ -64,9 +64,9 @@ describe('F-TETO-DE-SAÍDA · finish_reason=length no loop', () => {
     expect(answer).toContain('--max-output-tokens');
     expect(sinais).toContainEqual({ kind: 'truncated', hadContent: false });
     // A nota entra no histórico como OBSERVAÇÃO (dado), não como fala do modelo.
-    expect(r.history.some((h) => h.role === 'observation' && h.text.includes('teto de saída'))).toBe(
-      true,
-    );
+    expect(
+      r.history.some((h) => h.role === 'observation' && h.text.includes('teto de saída')),
+    ).toBe(true);
   });
 
   it('fala CORTADA ⇒ sinal com hadContent=true e o loop segue (a fala não se perde)', async () => {

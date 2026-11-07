@@ -50,7 +50,11 @@ describe('tela 1 — qual server', () => {
 
   it('avisa o que o server PEDE, antes de instalar', () => {
     const t = texto(
-      <McpPicker query="q" itens={[item({ name: 'x', envObrigatorias: ['API_KEY'] })]} selected={0} />,
+      <McpPicker
+        query="q"
+        itens={[item({ name: 'x', envObrigatorias: ['API_KEY'] })]}
+        selected={0}
+      />,
     );
     expect(t).toContain('pede API_KEY');
   });
@@ -81,14 +85,22 @@ describe('tela 1 — qual server', () => {
 
   it('buscando e falha têm tela própria (o erro não vai para um stderr apagado)', () => {
     expect(texto(<McpPicker query="q" itens={[]} selected={0} carregando />)).toContain('buscando');
-    expect(texto(<McpPicker query="q" itens={[]} selected={0} erro="sem rede" />)).toContain('sem rede');
+    expect(texto(<McpPicker query="q" itens={[]} selected={0} erro="sem rede" />)).toContain(
+      'sem rede',
+    );
   });
 });
 
 describe('tela 2 — ONDE gravar (perguntado, nunca adivinhado)', () => {
   it('oferece global e projeto, dizendo o CAMINHO de cada um', () => {
     const t = texto(
-      <McpPicker query="q" itens={[item({ name: 'x' })]} selected={0} escopoDe={item({ name: 'x' })} escopoSelecionado={0} />,
+      <McpPicker
+        query="q"
+        itens={[item({ name: 'x' })]}
+        selected={0}
+        escopoDe={item({ name: 'x' })}
+        escopoSelecionado={0}
+      />,
     );
     expect(t).toContain('global');
     expect(t).toContain('~/.aluy/mcp.json');
@@ -98,7 +110,13 @@ describe('tela 2 — ONDE gravar (perguntado, nunca adivinhado)', () => {
 
   it('marca o escopo selecionado', () => {
     const t = texto(
-      <McpPicker query="q" itens={[]} selected={0} escopoDe={item({ name: 'x' })} escopoSelecionado={1} />,
+      <McpPicker
+        query="q"
+        itens={[]}
+        selected={0}
+        escopoDe={item({ name: 'x' })}
+        escopoSelecionado={1}
+      />,
     );
     // Ancorado no CAMINHO, não na palavra: a linha do `global` diz "vale em todos os
     // projetos", então procurar por "projeto" casava com ela primeiro e o teste reprovava

@@ -14,7 +14,9 @@ describe('Concierge — as tools task_* passam pelo ponto único (decide)', () =
   it('negadas para sub-agentes (profundidade) e quando a política pede ask', () => {
     const child = new PolicyPermissionEngine({ denySpawnAgent: true });
     expect(child.decide(call('task_start')).decision).toBe('deny');
-    const ask = new PolicyPermissionEngine({ policy: { rules: [], defaults: { task_start: 'ask' } } });
+    const ask = new PolicyPermissionEngine({
+      policy: { rules: [], defaults: { task_start: 'ask' } },
+    });
     expect(ask.decide(call('task_start')).decision).toBe('ask');
   });
   it('não afrouxa nada: run_command continua pedindo confirmação', () => {

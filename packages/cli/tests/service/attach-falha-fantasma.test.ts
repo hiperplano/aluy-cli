@@ -63,8 +63,9 @@ describe('sanitizeBlock — `running` NÃO é `err` (o save não pode inventar f
   it('status DESCONHECIDO/lixo continua virando `err` — fail-closed preservado', () => {
     // A tolerância é só para `running`, que é estado LEGÍTIMO do tipo. Qualquer outra
     // coisa vinda do disco (corrupção, versão futura) segue degradando p/ `err`.
-    expect(sanitizeBlock({ kind: 'tool', verb: 'x', target: '', result: '', status: 'voando' }))
-      .toMatchObject({ status: 'err' });
+    expect(
+      sanitizeBlock({ kind: 'tool', verb: 'x', target: '', result: '', status: 'voando' }),
+    ).toMatchObject({ status: 'err' });
     expect(sanitizeBlock({ kind: 'bang', command: 'x', status: 42 })).toMatchObject({
       status: 'err',
     });

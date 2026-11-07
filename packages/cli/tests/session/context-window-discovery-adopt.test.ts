@@ -74,7 +74,9 @@ describe('adoptDiscoveredModelWindow — a descoberta chegando na sessão viva',
     expect(windowOf(s.controller)).toBe(0);
     expect(maxRecentOf(s.controller)).toBe(0);
 
-    expect(s.controller.adoptDiscoveredModelWindow('acme/modelo-sem-janela-catalogada', 128_000)).toBe(true);
+    expect(
+      s.controller.adoptDiscoveredModelWindow('acme/modelo-sem-janela-catalogada', 128_000),
+    ).toBe(true);
 
     expect(windowOf(s.controller)).toBe(128_000);
     // Os orçamentos window-relativos acompanham (senão a compactação dimensionaria por

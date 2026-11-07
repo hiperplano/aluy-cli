@@ -113,4 +113,3 @@ describe('CONSUMO AO VIVO — os três elos do fio existem', () => {
     expect(corpoDoHandler(), 'atualiza o nó mas não o bloco').toContain('upsertSubAgentChild');
   });
 });
-

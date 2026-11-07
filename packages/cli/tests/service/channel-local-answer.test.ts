@@ -5,12 +5,22 @@
 // aqui só ESTENDEMOS a cobertura do novo parâmetro opcional `localAnswer`.
 
 import { describe, it, expect } from 'vitest';
-import { waitForOwnerReply, newServiceEgressLimiter, type ServiceChannelClient } from '../../src/service/channel.js';
+import {
+  waitForOwnerReply,
+  newServiceEgressLimiter,
+  type ServiceChannelClient,
+} from '../../src/service/channel.js';
 import type { LocalAnswerSource } from '../../src/service/channel.js';
 import type { ServiceManifest, TelegramUpdate } from '@hiperplano/aluy-cli-core';
 
 function manifest(overrides: Partial<ServiceManifest> = {}): ServiceManifest {
-  return { name: 'trader', tunables: [], ignoredFrontmatterKeys: [], orchestrator: 'Rege, não opera.', ...overrides };
+  return {
+    name: 'trader',
+    tunables: [],
+    ignoredFrontmatterKeys: [],
+    orchestrator: 'Rege, não opera.',
+    ...overrides,
+  };
 }
 
 function fakeSecretStore(token: string | null): { get(): Promise<string | null> } {
@@ -20,7 +30,9 @@ function fakeSecretStore(token: string | null): { get(): Promise<string | null> 
 /** Client cujo `poll` NUNCA resolve sozinho — só quando `signal` abortar (a mesma
  * disciplina de `client.poll(signal)` real: long-poll cancelável). Usado p/ provar
  * que a resposta LOCAL vence mesmo com o canal remoto "preso" à espera. */
-function neverRespondingClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
+function neverRespondingClient(): ServiceChannelClient & {
+  readonly sent: { chatId: number; text: string }[];
+} {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,

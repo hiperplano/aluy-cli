@@ -37,7 +37,9 @@ import {
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
+function fakeClient(): ServiceChannelClient & {
+  readonly sent: { chatId: number; text: string }[];
+} {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,
@@ -101,8 +103,14 @@ describe('runServiceRunner — ASK-ESPERA respondida LOCALMENTE via "aluy servic
     const conn = connectAttachSocket(sockPath, { onLine: () => {}, onClose: () => {} });
     conn.send('sim, pode aumentar até 2 lotes.');
 
-    await waitFor(() => logs.some((l) => l.includes('resposta LOCAL recebida via "aluy service attach"')), 10_000);
-    await waitFor(() => logs.some((l) => l.includes('dono respondeu pelo canal — retomando')), 10_000);
+    await waitFor(
+      () => logs.some((l) => l.includes('resposta LOCAL recebida via "aluy service attach"')),
+      10_000,
+    );
+    await waitFor(
+      () => logs.some((l) => l.includes('dono respondeu pelo canal — retomando')),
+      10_000,
+    );
     await waitFor(() => logs.some((l) => l.includes('fim do expediente')), 10_000);
 
     conn.close();
@@ -112,11 +120,17 @@ describe('runServiceRunner — ASK-ESPERA respondida LOCALMENTE via "aluy servic
     expect(code).toBe(0);
     // fase ASK-ESPERA tratou o "say" como resposta LOCAL — nunca enfileirou (não é
     // "sleeping"/"running-turn", é "awaiting-owner" — decideSayRouting tem um 3º ramo).
-    expect(logs).toContain('[attach] "say" recebido durante ASK-ESPERA — tratado como resposta LOCAL do dono.');
-    expect(logs.some((l) => l.startsWith('turno encerrado — 1/1 atividades concluídas.'))).toBe(true);
-    expect(client.sent.some((m) => m.text.includes('2/2 atividades') || m.text.includes('1/1 atividades'))).toBe(
+    expect(logs).toContain(
+      '[attach] "say" recebido durante ASK-ESPERA — tratado como resposta LOCAL do dono.',
+    );
+    expect(logs.some((l) => l.startsWith('turno encerrado — 1/1 atividades concluídas.'))).toBe(
       true,
     );
+    expect(
+      client.sent.some(
+        (m) => m.text.includes('2/2 atividades') || m.text.includes('1/1 atividades'),
+      ),
+    ).toBe(true);
     const report = client.sent.find((m) => m.text.includes('1/1 atividades concluídas.'));
     expect(report).toBeDefined();
     expect(report!.text).not.toContain('ALERTA');
@@ -209,7 +223,10 @@ describe('runServiceRunner — ASK-ESPERA sem "channel:" ⇒ ESPERA LOCAL (PR #7
     const conn = connectAttachSocket(sockPath, { onLine: () => {}, onClose: () => {} });
     conn.send('pode aumentar, sim.');
 
-    await waitFor(() => logs.some((l) => l.includes('resposta recebida via "aluy service attach"')), 10_000);
+    await waitFor(
+      () => logs.some((l) => l.includes('resposta recebida via "aluy service attach"')),
+      10_000,
+    );
     await waitFor(() => logs.some((l) => l.includes('fim do expediente')), 10_000);
 
     conn.close();
@@ -217,7 +234,9 @@ describe('runServiceRunner — ASK-ESPERA sem "channel:" ⇒ ESPERA LOCAL (PR #7
     const code = await promise;
 
     expect(code).toBe(0);
-    expect(logs.some((l) => l.startsWith('turno encerrado — 1/1 atividades concluídas.'))).toBe(true);
+    expect(logs.some((l) => l.startsWith('turno encerrado — 1/1 atividades concluídas.'))).toBe(
+      true,
+    );
     // Fail-open antigo (derrubar o runner) NUNCA acontece mais aqui — `localAnswer`
     // sempre está fiado por `runServiceRunner` (só sobra p/ quem chama
     // `waitForOwnerReply` isolado sem essa peça, ver `channel-sem-canal-attach.test.ts`).

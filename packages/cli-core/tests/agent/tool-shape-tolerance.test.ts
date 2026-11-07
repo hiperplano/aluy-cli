@@ -26,7 +26,10 @@ import {
 } from '../../src/agent/tools/native.js';
 import { normalizeQuestionInput, QUESTION_TOOL } from '../../src/agent/tools/question.js';
 import { spawnAgentTool, type SubAgentPort } from '../../src/agent/tools/spawn-agent.js';
-import { sessionCommandTool, type SessionCommandPort } from '../../src/agent/tools/session-command.js';
+import {
+  sessionCommandTool,
+  type SessionCommandPort,
+} from '../../src/agent/tools/session-command.js';
 import type { ToolPorts } from '../../src/agent/tools/types.js';
 import type { TodoStorePort } from '../../src/agent/todo/contract.js';
 import { MemoryFs, RecordingShell, MemorySearch, MemoryCwd, makePorts } from './helpers.js';
@@ -58,10 +61,7 @@ describe('read_file — sinônimos de "path" + erro acionável', () => {
 describe('edit_file — sinônimos SEM reviver a ambiguidade da API antiga', () => {
   it('aceita old_text/new_text como sinônimo de old_string/new_string', async () => {
     const { ports } = makePorts({ fs: new MemoryFs(new Map([['a.ts', 'linha1\nlinha2']])) });
-    const r = await editFileTool.run(
-      { path: 'a.ts', old_text: 'linha1', new_text: 'X' },
-      ports,
-    );
+    const r = await editFileTool.run({ path: 'a.ts', old_text: 'linha1', new_text: 'X' }, ports);
     expect(r.ok).toBe(true);
   });
 
@@ -99,10 +99,7 @@ describe('write_file — sinônimo de content + booleano tolerante', () => {
 
   it('overwrite:"true" (string) funciona igual a overwrite:true (booleano)', async () => {
     const { ports } = makePorts({ fs: new MemoryFs(new Map([['x.txt', 'antigo']])) });
-    const r = await writeFileTool.run(
-      { path: 'x.txt', content: 'novo', overwrite: 'true' },
-      ports,
-    );
+    const r = await writeFileTool.run({ path: 'x.txt', content: 'novo', overwrite: 'true' }, ports);
     expect(r.ok).toBe(true);
     expect(r.observation).toContain('reescrito');
   });
@@ -185,14 +182,17 @@ describe('perguntar — options tolera forma serializada, NUNCA degrada silencio
     expect(r.spec.options?.map((o) => o.label)).toEqual(['a', 'b']);
   });
 
-  it('REGRESSÃO — options presente mas irreconhecível (texto solto) ⇒ ERRO VISÍVEL, ' +
-    'NÃO mais um "kind:text" silencioso que perde as opções pedidas', () => {
-    const r = normalizeQuestionInput({ question: 'qual?', options: 'sim ou não' });
-    expect('error' in r).toBe(true);
-    if (!('error' in r)) throw new Error('deveria ter falhado');
-    expect(r.error).toContain('options');
-    expect(r.error).toContain('sim ou não');
-  });
+  it(
+    'REGRESSÃO — options presente mas irreconhecível (texto solto) ⇒ ERRO VISÍVEL, ' +
+      'NÃO mais um "kind:text" silencioso que perde as opções pedidas',
+    () => {
+      const r = normalizeQuestionInput({ question: 'qual?', options: 'sim ou não' });
+      expect('error' in r).toBe(true);
+      if (!('error' in r)) throw new Error('deveria ter falhado');
+      expect(r.error).toContain('options');
+      expect(r.error).toContain('sim ou não');
+    },
+  );
 
   it('sem "options" (ausente de verdade) segue inferindo kind:"text" sem erro (não-regressão)', () => {
     const r = normalizeQuestionInput({ question: 'descreva' });
@@ -227,7 +227,12 @@ describe('perguntar — options tolera forma serializada, NUNCA degrada silencio
 // ── spawn_agent ──────────────────────────────────────────────────────────────
 
 function spawnPorts(spawner: SubAgentPort): ToolPorts {
-  return { fs: new MemoryFs(), shell: new RecordingShell(), search: new MemorySearch(), subAgents: spawner };
+  return {
+    fs: new MemoryFs(),
+    shell: new RecordingShell(),
+    search: new MemorySearch(),
+    subAgents: spawner,
+  };
 }
 
 function echoSpawner(): SubAgentPort {
@@ -284,12 +289,21 @@ describe('spawn_agent — agents tolera forma serializada (mesma classe do updat
 // ── session_command ──────────────────────────────────────────────────────────
 
 function sessionPorts(port: SessionCommandPort): ToolPorts {
-  return { fs: new MemoryFs(), shell: new RecordingShell(), search: new MemorySearch(), sessionCommand: port };
+  return {
+    fs: new MemoryFs(),
+    shell: new RecordingShell(),
+    search: new MemorySearch(),
+    sessionCommand: port,
+  };
 }
 
 describe('session_command — sinônimo "cmd" + args tolera número', () => {
   it('aceita "cmd" como sinônimo de "command"', async () => {
-    const port: SessionCommandPort = { async run(command) { return { ok: true, text: `ran ${command}` }; } };
+    const port: SessionCommandPort = {
+      async run(command) {
+        return { ok: true, text: `ran ${command}` };
+      },
+    };
     const r = await sessionCommandTool.run({ cmd: 'doctor' }, sessionPorts(port));
     expect(r.ok).toBe(true);
     expect(r.observation).toContain('doctor');
@@ -317,10 +331,18 @@ function todoPorts(todo: TodoStorePort): ToolPorts {
 describe('add_todo/done_todo — sinônimos de item/id', () => {
   it('add_todo aceita "text"/"todo" como sinônimo de "item"', async () => {
     const todo: TodoStorePort = {
-      async add(text) { return `id:${text}`; },
-      async list() { return []; },
-      async done() { return true; },
-      async clearDone() { return 0; },
+      async add(text) {
+        return `id:${text}`;
+      },
+      async list() {
+        return [];
+      },
+      async done() {
+        return true;
+      },
+      async clearDone() {
+        return 0;
+      },
     };
     const r1 = await addTodoTool.run({ text: 'fazer X' }, todoPorts(todo));
     expect(r1.ok).toBe(true);
@@ -330,10 +352,18 @@ describe('add_todo/done_todo — sinônimos de item/id', () => {
 
   it('done_todo aceita "todo_id" como sinônimo de "id"', async () => {
     const todo: TodoStorePort = {
-      async add() { return 'id1'; },
-      async list() { return []; },
-      async done(id) { return id === 'abc'; },
-      async clearDone() { return 0; },
+      async add() {
+        return 'id1';
+      },
+      async list() {
+        return [];
+      },
+      async done(id) {
+        return id === 'abc';
+      },
+      async clearDone() {
+        return 0;
+      },
     };
     const r = await doneTodoTool.run({ todo_id: 'abc' }, todoPorts(todo));
     expect(r.ok).toBe(true);

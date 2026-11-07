@@ -275,9 +275,14 @@ describe('runService — list/status', () => {
     mkdirSync(join(servicesDir, 'trader'), { recursive: true });
     writeFileSync(
       join(servicesDir, 'trader', 'service.md'),
-      ['---', 'name: trader', 'group: mesa-trading', 'model: deepseek/deepseek-chat', '---', 'Rege.'].join(
-        '\n',
-      ),
+      [
+        '---',
+        'name: trader',
+        'group: mesa-trading',
+        'model: deepseek/deepseek-chat',
+        '---',
+        'Rege.',
+      ].join('\n'),
     );
     const io = fakeIO();
     const exit = await runService(['status', 'trader'], {
@@ -639,7 +644,10 @@ describe('runService — start/stop/logs (fase 2, sem tocar processo real)', () 
     const store = new UserServicesStore({ baseDir: base });
     const dir = join(base, SERVICES_DIRNAME, 'trader');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'service.md'), ['---', 'name: trader', 'schedule: "0 9 * * *"', '---', 'Rege.'].join('\n'));
+    writeFileSync(
+      join(dir, 'service.md'),
+      ['---', 'name: trader', 'schedule: "0 9 * * *"', '---', 'Rege.'].join('\n'),
+    );
     const io = fakeIO();
     const exit = await runService(['status', 'trader'], { io, store });
     expect(exit).toBe(0);
@@ -870,7 +878,9 @@ describe('runService — attach (fase 4, ADR-0158 §11)', () => {
       stdin.end();
       const exit = await donePromise;
       expect(exit).toBe(0);
-      expect(io.outLines.some((l) => l.includes('— detach — o serviço segue rodando —'))).toBe(true);
+      expect(io.outLines.some((l) => l.includes('— detach — o serviço segue rodando —'))).toBe(
+        true,
+      );
     } finally {
       server.close();
     }

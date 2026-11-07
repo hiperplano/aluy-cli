@@ -51,11 +51,15 @@ describe('detectLocalEnvOverrides — o ambiente venceu o arquivo', () => {
   });
 
   it('config SILENCIOSO ⇒ nada a reportar (env é só a fonte, não sobreposição)', () => {
-    expect(detectLocalEnvOverrides({ env: { ALUY_LOCAL_PROVIDER: 'openai' }, config: cfg() })).toEqual([]);
+    expect(
+      detectLocalEnvOverrides({ env: { ALUY_LOCAL_PROVIDER: 'openai' }, config: cfg() }),
+    ).toEqual([]);
   });
 
   it('env ausente ⇒ nada (o arquivo já é quem vale)', () => {
-    expect(detectLocalEnvOverrides({ env: {}, config: cfg({ localProvider: 'tokenrouter' }) })).toEqual([]);
+    expect(
+      detectLocalEnvOverrides({ env: {}, config: cfg({ localProvider: 'tokenrouter' }) }),
+    ).toEqual([]);
   });
 
   it('valores IGUAIS ⇒ silêncio, mesmo com caixa diferente', () => {

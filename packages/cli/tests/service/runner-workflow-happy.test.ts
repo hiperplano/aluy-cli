@@ -36,7 +36,9 @@ import {
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
+function fakeClient(): ServiceChannelClient & {
+  readonly sent: { chatId: number; text: string }[];
+} {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,
@@ -84,7 +86,11 @@ describe('runServiceRunner — workflow feliz de ponta a ponta (processo-filho R
   });
 
   it('2 atividades OK (uma com [agente]) + budget→--max-tokens + say não duplicado + reporte de fechamento', async () => {
-    const dir = writeServiceManifest(base, { workflow: 'turno', channel: 'telegram:555', budget: '77k' });
+    const dir = writeServiceManifest(base, {
+      workflow: 'turno',
+      channel: 'telegram:555',
+      budget: '77k',
+    });
     writeWorkflow(dir, 'turno', [
       { id: 'abrir', goal: 'FAKE_MODE_OK abra o livro do dia.' },
       { id: 'analisar', goal: 'FAKE_MODE_OK analise o risco.', agent: 'risco' },
@@ -128,16 +134,22 @@ describe('runServiceRunner — workflow feliz de ponta a ponta (processo-filho R
     expect(logs.some((l) => l.includes('atividade 2/2 "analisar": entregando fala'))).toBe(false);
 
     // (b) a 2ª atividade, com [agente], nasce TRAVADA na persona.
-    expect(logs.some((l) => l.includes('atividade 2/2 "analisar": iniciando turno TRAVADO na persona "risco"'))).toBe(
-      true,
-    );
-    expect(logs.some((l) => l.includes('atividade 1/2 "abrir": iniciando turno (') && !l.includes('TRAVADO'))).toBe(
-      true,
-    );
+    expect(
+      logs.some((l) =>
+        l.includes('atividade 2/2 "analisar": iniciando turno TRAVADO na persona "risco"'),
+      ),
+    ).toBe(true);
+    expect(
+      logs.some(
+        (l) => l.includes('atividade 1/2 "abrir": iniciando turno (') && !l.includes('TRAVADO'),
+      ),
+    ).toBe(true);
 
     expect(logs).toContain('atividade 1/2 "abrir": ok.');
     expect(logs).toContain('atividade 2/2 "analisar": ok.');
-    expect(logs.some((l) => l.startsWith('turno encerrado — 2/2 atividades concluídas.'))).toBe(true);
+    expect(logs.some((l) => l.startsWith('turno encerrado — 2/2 atividades concluídas.'))).toBe(
+      true,
+    );
 
     // (c) o CANAL recebeu o reporte de fechamento (§8.2), não um alerta.
     expect(client.sent).toHaveLength(1);

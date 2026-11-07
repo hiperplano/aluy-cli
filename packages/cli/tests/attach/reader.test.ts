@@ -290,9 +290,7 @@ describe('AttachReader — confinamento + path-deny + truncamento + rótulo', ()
     const messages = buildMessages(tools, [res.item, { role: 'goal', text: 'descreva a imagem' }]);
     const system = messages.find((m) => m.role === 'system');
     expect(JSON.stringify(system?.content)).not.toContain(PNG_BYTES.toString('base64'));
-    const imageMsg = messages.find(
-      (m) => m.role === 'user' && Array.isArray(m.content),
-    );
+    const imageMsg = messages.find((m) => m.role === 'user' && Array.isArray(m.content));
     expect(imageMsg).toBeDefined();
     const parts = imageMsg!.content as readonly { type: string }[];
     expect(parts.some((p) => p.type === 'text')).toBe(true);

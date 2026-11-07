@@ -38,6 +38,8 @@ describe('onboarding — idioma vindo do instalador', () => {
   // O `LANG` do sistema NÃO pula: ele é palpite, não resposta. Pular por ele tiraria o
   // passo de idioma de toda máquina do mundo — ninguém escolheu nada ali.
   it('o LANG do SISTEMA não vale como resposta explícita', () => {
-    expect(idiomaExplicitoDoAmbiente({ LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' })).toBeUndefined();
+    expect(
+      idiomaExplicitoDoAmbiente({ LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' }),
+    ).toBeUndefined();
   });
 });

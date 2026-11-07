@@ -68,7 +68,9 @@ describe('runServiceRunner — SIGTERM REAL entregue ao processo (não o `extern
     const code = await promise;
 
     expect(code).toBe(0);
-    expect(logs.some((l) => l.startsWith('sinal SIGTERM recebido — encerrando graciosamente'))).toBe(true);
+    expect(
+      logs.some((l) => l.startsWith('sinal SIGTERM recebido — encerrando graciosamente')),
+    ).toBe(true);
     expect(existsSync(runnerPidPath(dir))).toBe(false);
     expect(process.listenerCount('SIGTERM')).toBe(sigtermBefore); // o shutdown() removeu o listener.
   }, 20_000);
@@ -89,7 +91,10 @@ describe('runServiceRunner — `deps.log` OMITIDO ⇒ escreve no ARQUIVO de log 
     // "schedule:") — precisamos do campo AUSENTE de verdade, não vazio.
     const dir = join(base, SERVICES_DIRNAME, 'trader');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'service.md'), ['---', 'name: trader', '---', 'Rege, não opera.'].join('\n'));
+    writeFileSync(
+      join(dir, 'service.md'),
+      ['---', 'name: trader', '---', 'Rege, não opera.'].join('\n'),
+    );
     // NENHUM `deps.log` — o runner tem que cair no `appendLog(runnerLogPath(...))` default.
     const code = await runServiceRunner('trader', {
       aluyBaseDir: base,

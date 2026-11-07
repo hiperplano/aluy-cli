@@ -14,7 +14,15 @@
 //     também é alcançável no POSIX real, com um processo cujo pid NÃO é líder de
 //     grupo (não-detached) — `kill(-pid)` falha por ESRCH, cai pro `kill(pid)` direto.
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, realpathSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -79,7 +87,10 @@ describe('daemonMdExists — sem NENHUM teste antes desta auditoria', () => {
 
   it('daemon.md existe ⇒ true', () => {
     mkdirSync(join(serviceDir, 'daemons', 'guard'), { recursive: true });
-    writeFileSync(join(serviceDir, 'daemons', 'guard', 'daemon.md'), '---\ncommand: sleep 1\n---\n');
+    writeFileSync(
+      join(serviceDir, 'daemons', 'guard', 'daemon.md'),
+      '---\ncommand: sleep 1\n---\n',
+    );
     expect(daemonMdExists(serviceDir, 'guard')).toBe(true);
   });
 
@@ -268,7 +279,9 @@ describe('stopDaemons — só toca arquivos *.pid; o nome logado nunca leva ".pi
 
     // o fallback (kill DIRETO, não de grupo) tem sua PRÓPRIA linha de log —
     // distinta da mensagem "enviado ao grupo do processo".
-    expect(logs.some((l) => l.includes(`daemon "guard": SIGTERM enviado (pid ${pid}).`))).toBe(true);
+    expect(logs.some((l) => l.includes(`daemon "guard": SIGTERM enviado (pid ${pid}).`))).toBe(
+      true,
+    );
     expect(logs.some((l) => l.includes('enviado ao grupo do processo'))).toBe(false);
 
     await waitFor(() => !isProcessAlive(pid));

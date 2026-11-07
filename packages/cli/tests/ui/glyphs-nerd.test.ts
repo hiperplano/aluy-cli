@@ -8,7 +8,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { resolveTheme, detectNerdGlyphs } from '../../src/ui/theme/theme.js';
-import { UNICODE_GLYPHS, SAFE_GLYPHS, NERD_GLYPHS, ASCII_GLYPHS } from '../../src/ui/theme/glyphs.js';
+import {
+  UNICODE_GLYPHS,
+  SAFE_GLYPHS,
+  NERD_GLYPHS,
+  ASCII_GLYPHS,
+} from '../../src/ui/theme/glyphs.js';
 
 const UTF8 = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color', COLORTERM: 'truecolor' };
 
@@ -185,12 +190,15 @@ describe('não-regressão — quem não pediu NERD nunca recebe glifo novo', () 
     ['light theme', { ...UTF8 }],
   ];
 
-  it.each(scenarios)('%s ⇒ todos os glifos batem com UNICODE_GLYPHS (sem NERD vazando)', (_label, env) => {
-    const t = resolveTheme({ env });
-    for (const name of Object.keys(UNICODE_GLYPHS) as (keyof typeof UNICODE_GLYPHS)[]) {
-      expect(t.glyph(name)).toBe(UNICODE_GLYPHS[name]);
-    }
-  });
+  it.each(scenarios)(
+    '%s ⇒ todos os glifos batem com UNICODE_GLYPHS (sem NERD vazando)',
+    (_label, env) => {
+      const t = resolveTheme({ env });
+      for (const name of Object.keys(UNICODE_GLYPHS) as (keyof typeof UNICODE_GLYPHS)[]) {
+        expect(t.glyph(name)).toBe(UNICODE_GLYPHS[name]);
+      }
+    },
+  );
 
   it('SAFE_GLYPHS (opt-in existente) continua intacto — F-NERD-GLYPHS não mexeu nele', () => {
     const t = resolveTheme({ env: { ...UTF8, ALUY_SAFE_GLYPHS: '1' } });

@@ -150,12 +150,7 @@ describe('o que é enviado quando ele É chamado', () => {
     expect(input!.question).toBeTruthy();
     // As quatro opções de regência, com ids estáveis — é sobre elas que o schema
     // enviado ao Ollama monta o `enum` (ver `judgeResponseSchema`).
-    expect(input!.options.map((o) => o.id)).toEqual([
-      'continuar',
-      'pausar',
-      'recuperar',
-      'parar',
-    ]);
+    expect(input!.options.map((o) => o.id)).toEqual(['continuar', 'pausar', 'recuperar', 'parar']);
   });
 });
 

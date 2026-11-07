@@ -11,7 +11,11 @@
 // A queda ANTES do primeiro byte (conexão recusada) NÃO tem esse problema — medido na TUI
 // real a 40/30/20 linhas: zero redesenhos, nada empilha. É só o meio do stream.
 import { describe, expect, it } from 'vitest';
-import { PolicyPermissionEngine, type ModelCaller, type ToolPorts } from '@hiperplano/aluy-cli-core';
+import {
+  PolicyPermissionEngine,
+  type ModelCaller,
+  type ToolPorts,
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 
 function buildController(): SessionController {
@@ -52,7 +56,9 @@ describe('retry no MEIO do stream — o bloco parcial não pode empilhar', () =>
     // A 4ª tentativa começa: mais um `onStart`.
     c.sink.onStart?.();
     const vivos = blocosAluy(c);
-    expect(vivos.length, 'blocos Λluy na tela: ' + JSON.stringify(vivos.map((b) => b.text))).toBe(1);
+    expect(vivos.length, 'blocos Λluy na tela: ' + JSON.stringify(vivos.map((b) => b.text))).toBe(
+      1,
+    );
   });
 
   it('o aviso de retry continua ÚNICO (não empilha caixas de erro)', () => {

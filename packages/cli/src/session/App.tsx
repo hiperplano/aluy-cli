@@ -6835,7 +6835,10 @@ function hintStateOf(
   // F9 — pausa por cota: dicas próprias (nada de `esc interromper · 0:32` fingindo que roda).
   if (state.quotaPause !== undefined && state.phase !== 'asking') return 'quota-pause';
   // ADR 0006 — no modo concierge o rodapé ensina o modelo certo (Esc não para nada).
-  if (conciergeOn && (state.phase === 'thinking' || state.phase === 'streaming' || state.phase === 'retrying'))
+  if (
+    conciergeOn &&
+    (state.phase === 'thinking' || state.phase === 'streaming' || state.phase === 'retrying')
+  )
     return 'concierge-work';
   if (conciergeOn && state.phase === 'asking') return 'concierge-ask';
   switch (state.phase) {

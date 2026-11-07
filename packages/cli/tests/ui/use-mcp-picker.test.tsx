@@ -50,7 +50,16 @@ function montar(over: Parameters<typeof useMcpPicker>[0] = {}) {
     }
     throw new Error('condição não chegou a tempo');
   };
-  return { get api(): Api { return api!; }, notas, install, search, esperar, unmount: r.unmount };
+  return {
+    get api(): Api {
+      return api!;
+    },
+    notas,
+    install,
+    search,
+    esperar,
+    unmount: r.unmount,
+  };
 }
 
 describe('o fluxo do picker de MCP', () => {
@@ -116,7 +125,9 @@ describe('o fluxo do picker de MCP', () => {
     const h = montar({
       search: async () => ({
         ok: true as const,
-        results: [achado('r/remoto', { run: { args: [], env: [], remoteUrls: ['https://x/sse'] } })],
+        results: [
+          achado('r/remoto', { run: { args: [], env: [], remoteUrls: ['https://x/sse'] } }),
+        ],
       }),
     });
     h.api.abrir('q');

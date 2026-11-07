@@ -23,10 +23,12 @@ describe('decideLocalLogin', () => {
   });
 
   it('backend local sem provider ativo ⇒ no-active-provider (defensivo, nunca inventa)', () => {
-    expect(decideLocalLogin({ backend: 'local', localProvider: undefined, hasExistingKey: true })).toEqual(
-      { kind: 'no-active-provider' },
-    );
-    expect(decideLocalLogin({ backend: 'local', localProvider: '', hasExistingKey: false })).toEqual({
+    expect(
+      decideLocalLogin({ backend: 'local', localProvider: undefined, hasExistingKey: true }),
+    ).toEqual({ kind: 'no-active-provider' });
+    expect(
+      decideLocalLogin({ backend: 'local', localProvider: '', hasExistingKey: false }),
+    ).toEqual({
       kind: 'no-active-provider',
     });
   });

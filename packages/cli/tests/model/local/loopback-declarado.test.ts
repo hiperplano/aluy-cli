@@ -99,7 +99,9 @@ describe('todo chamador do fetch pinado decide sobre loopback', () => {
 
   it('a guarda ENXERGA os chamadores (senão ela passaria vazia, sem provar nada)', () => {
     const encontrados = arquivos(raiz).filter(
-      (a) => !a.endsWith('pinned-stream-fetch.ts') && readFileSync(a, 'utf8').includes('createPinnedStreamFetch('),
+      (a) =>
+        !a.endsWith('pinned-stream-fetch.ts') &&
+        readFileSync(a, 'utf8').includes('createPinnedStreamFetch('),
     );
     // Um teste que varre e não acha nada é verde por vacuidade — o pior tipo.
     expect(encontrados.length).toBeGreaterThanOrEqual(4);

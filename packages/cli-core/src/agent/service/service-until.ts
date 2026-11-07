@@ -9,7 +9,9 @@
 
 /** `undefined` quando `hhmm` não casa `HH:MM` (RES-MD-3 do parser já valida a forma;
  * aqui é defesa extra — nunca lança). */
-export function parseHHMM(hhmm: string): { readonly hour: number; readonly minute: number } | undefined {
+export function parseHHMM(
+  hhmm: string,
+): { readonly hour: number; readonly minute: number } | undefined {
   const m = /^(\d{2}):(\d{2})$/.exec(hhmm.trim());
   if (!m) return undefined;
   const hour = Number(m[1]);

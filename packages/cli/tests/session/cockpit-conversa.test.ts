@@ -42,8 +42,22 @@ describe('GUARD DURO — dimensões degeneradas de columns NÃO lançam RangeErr
     you('oi'),
     aluy('Oi.\n\nTchau.'),
     aluy('prévia em stream', true),
-    { kind: 'tool', verb: 'read', target: 'a.ts', result: 'ok', status: 'running', liveOutput: 'x'.repeat(500) },
-    { kind: 'tool', verb: 'bash', target: 'npm test', result: '1 falha', status: 'err', output: 'FAIL\n'.repeat(20) },
+    {
+      kind: 'tool',
+      verb: 'read',
+      target: 'a.ts',
+      result: 'ok',
+      status: 'running',
+      liveOutput: 'x'.repeat(500),
+    },
+    {
+      kind: 'tool',
+      verb: 'bash',
+      target: 'npm test',
+      result: '1 falha',
+      status: 'err',
+      output: 'FAIL\n'.repeat(20),
+    },
     { kind: 'bang', command: 'ls', status: 'running', liveOutput: 'y'.repeat(500) },
     { kind: 'bang', command: 'cat x', status: 'ok', output: 'linha\n'.repeat(20) },
     note(['linha 1', 'linha 2']),
@@ -63,10 +77,13 @@ describe('GUARD DURO — dimensões degeneradas de columns NÃO lançam RangeErr
         expect(() => {
           n = measureConversaBlock(b, ctx);
         }, `bloco kind="${b.kind}" lançou com columns=${columns}`).not.toThrow();
-        expect(Number.isFinite(n), `measureConversaBlock devolveu ${n} (não-finito) p/ kind="${b.kind}"`).toBe(
+        expect(
+          Number.isFinite(n),
+          `measureConversaBlock devolveu ${n} (não-finito) p/ kind="${b.kind}"`,
+        ).toBe(true);
+        expect(n! >= 0, `measureConversaBlock devolveu ${n} (negativo) p/ kind="${b.kind}"`).toBe(
           true,
         );
-        expect(n! >= 0, `measureConversaBlock devolveu ${n} (negativo) p/ kind="${b.kind}"`).toBe(true);
       }
     });
 

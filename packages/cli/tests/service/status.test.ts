@@ -25,7 +25,10 @@ describe('status.ts', () => {
 
   it('pidfile de processo VIVO (o próprio teste) + status.json ⇒ running:true + snapshot', () => {
     writePidFile(runnerPidPath(serviceDir), process.pid);
-    writeServiceStatus(serviceDir, { turnState: 'sleeping', nextFireIso: '2026-08-01T09:00:00.000Z' });
+    writeServiceStatus(serviceDir, {
+      turnState: 'sleeping',
+      nextFireIso: '2026-08-01T09:00:00.000Z',
+    });
     const rt = readServiceRuntimeStatus(serviceDir);
     expect(rt.running).toBe(true);
     expect(rt.pid).toBe(process.pid);

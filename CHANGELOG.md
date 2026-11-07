@@ -14,6 +14,14 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Adicionado
+
+- **Concierge** (ADR 0006): a conversa deixa de esperar o trabalho. Cada mensagem tem resposta
+  imediata por uma chamada curta ao modelo; o trabalho roda em tarefas (`task_start`/`task_send`/
+  `task_stop`/`task_status`), com lista compacta ao vivo, relatos de uma linha, caixa de entrada de
+  aprovações (`/a` `/n`), `/task`, `/conversation concierge|classic` (persistido), `--classic` e
+  reivindicação simples de arquivos entre tarefas. O Esc não para mais tarefas nesse modo.
+
 ## [1.0.0-rc.191] — 2026-11-07
 
 ### Adicionado

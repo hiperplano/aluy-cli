@@ -15,10 +15,17 @@ import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
-import { FooterAgents, recorteDoRodape, agentesQueCabem } from '../../src/ui/components/FooterAgents.js';
+import {
+  FooterAgents,
+  recorteDoRodape,
+  agentesQueCabem,
+} from '../../src/ui/components/FooterAgents.js';
 import { linhasDoRodapeAgentes } from '../../src/session/footer-agents-layout.js';
 import { SubAgents, type SubAgentChildView } from '../../src/ui/components/SubAgents.js';
-import { blocoSubagentesNaTela, ultimoBlocoSubagentes } from '../../src/session/subagentes-visiveis.js';
+import {
+  blocoSubagentesNaTela,
+  ultimoBlocoSubagentes,
+} from '../../src/session/subagentes-visiveis.js';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
 import type { SessionBlock } from '../../src/session/model.js';
@@ -30,7 +37,10 @@ const painel = (
     <Text>{'uso'}</Text>
   </Box>
 );
-const filho = (label: string, status: SubAgentChildView['status'] = 'running'): SubAgentChildView => ({
+const filho = (
+  label: string,
+  status: SubAgentChildView['status'] = 'running',
+): SubAgentChildView => ({
   label,
   status,
   summary: '1.2k tokens',
@@ -40,7 +50,7 @@ const filho = (label: string, status: SubAgentChildView['status'] = 'running'): 
 function linhas(node: React.ReactElement): string[] {
   const { lastFrame } = render(<ThemeProvider theme={tema}>{node}</ThemeProvider>);
   // eslint-disable-next-line no-control-regex
-  return ((lastFrame() ?? '').replace(/\u001b\[[0-9;]*m/g, '')).split('\n');
+  return (lastFrame() ?? '').replace(/\u001b\[[0-9;]*m/g, '').split('\n');
 }
 
 describe('a cópia é IDÊNTICA ao original — não um segundo desenho', () => {
@@ -53,7 +63,9 @@ describe('a cópia é IDÊNTICA ao original — não um segundo desenho', () => 
   });
 
   it('sem filhos é PASSAGEM DIRETA (a tela de quem não dispara agente não muda)', () => {
-    expect(linhas(<FooterAgents filhos={[]}>{painel}</FooterAgents>)).toEqual(linhas(<>{painel}</>));
+    expect(linhas(<FooterAgents filhos={[]}>{painel}</FooterAgents>)).toEqual(
+      linhas(<>{painel}</>),
+    );
   });
 });
 
@@ -70,9 +82,13 @@ describe('recorte — o rodapé mora no chrome e não pode crescer sem limite', 
     const r = recorteDoRodape(fs, 24);
     expect(r.mostrados.length).toBeLessThan(fs.length);
     expect(r.mostrados.length + r.sobra).toBe(fs.length);
-    expect(linhas(<FooterAgents filhos={fs} rows={24}>{painel}</FooterAgents>).join('\n')).toContain(
-      `+${String(r.sobra)} outros`,
-    );
+    expect(
+      linhas(
+        <FooterAgents filhos={fs} rows={24}>
+          {painel}
+        </FooterAgents>,
+      ).join('\n'),
+    ).toContain(`+${String(r.sobra)} outros`);
   });
 
   // Enquanto há trabalho, quem trabalha é a notícia — e é ele que o corte precisa preservar.
@@ -113,18 +129,29 @@ describe('QUANDO fixar — só depois que o de cima sai da tela', () => {
   it('tela BAIXA empurra mais rápido — a mesma saída já o tira de vista', () => {
     const blocks = [bloco(), fala(12)];
     expect(blocoSubagentesNaTela({ blocks, rows: 40, columns: 100, linhasDoRodape: 8 })).toBe(true);
-    expect(blocoSubagentesNaTela({ blocks, rows: 14, columns: 100, linhasDoRodape: 8 })).toBe(false);
+    expect(blocoSubagentesNaTela({ blocks, rows: 14, columns: 100, linhasDoRodape: 8 })).toBe(
+      false,
+    );
   });
 
   // Conservador: na dúvida, "ainda visível" — errar assim custa não ver a cópia por um
   // instante; errar ao contrário põe as duas na tela, que é o que o dono pediu para acabar.
   it('sem bloco nenhum ⇒ trata como visível (não há o que fixar)', () => {
-    expect(blocoSubagentesNaTela({ blocks: [fala(3)], rows: 40, columns: 100, linhasDoRodape: 8 })).toBe(true);
+    expect(
+      blocoSubagentesNaTela({ blocks: [fala(3)], rows: 40, columns: 100, linhasDoRodape: 8 }),
+    ).toBe(true);
     expect(ultimoBlocoSubagentes([fala(3)])).toBe(-1);
   });
 
   it('altura degenerada (resize em curso) ⇒ visível, sem fixar nada', () => {
-    expect(blocoSubagentesNaTela({ blocks: [bloco(), fala(200)], rows: 0, columns: 100, linhasDoRodape: 8 })).toBe(true);
+    expect(
+      blocoSubagentesNaTela({
+        blocks: [bloco(), fala(200)],
+        rows: 0,
+        columns: 100,
+        linhasDoRodape: 8,
+      }),
+    ).toBe(true);
   });
 
   it('pega o ÚLTIMO lote, não o primeiro', () => {
@@ -168,4 +195,3 @@ describe('o teto do rodapé acompanha a altura do terminal', () => {
     expect(linhasDoRodapeAgentes(-5)).toBe(8);
   });
 });
-

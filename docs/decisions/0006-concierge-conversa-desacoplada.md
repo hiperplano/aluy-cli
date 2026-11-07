@@ -2,14 +2,14 @@
 
 - **Status:** Proposto — implementado no ramo `feat/concierge`; o default final é decisão do dono depois de testar
 - **Data:** 2026-11-07
-- **Origem:** relato do dono — *"quero conversar fluido com o terminal do aluy, mas fico travado o
+- **Origem:** relato do dono — _"quero conversar fluido com o terminal do aluy, mas fico travado o
   tempo todo: algo está processando e minha mensagem vai pra fila, agentes trabalhando, e quando
   aperto Esc para encaixar uma mensagem ele para o turno inteiro. O terminal não deveria ser
   desacoplado do motor de execução — uma interface conversacional fluida que nunca trava e sempre
-  gerencia o que acontece por trás?"*
+  gerencia o que acontece por trás?"_
 - **Antecedentes:** ADR 0001 (o `spawn_agent` não prende o turno), ADR 0002 (conversa pai-filho),
-  ADR 0004 (memória do dono é seguida). Estes tiraram o bloqueio do *fan-out*; este tira o bloqueio
-  do *turno*.
+  ADR 0004 (memória do dono é seguida). Estes tiraram o bloqueio do _fan-out_; este tira o bloqueio
+  do _turno_.
 
 ## Contexto
 
@@ -34,12 +34,12 @@ Duas peças, com nomes internos (na tela segue sendo só "Λluy"):
 - **Concierge** — a frente. Cada mensagem do dono ganha **uma chamada curta ao modelo**,
   concorrente ao trabalho, que responde em segundos. Nunca edita arquivo nem roda ferramenta longa.
   Ferramentas dele (só plano de controle): `task_start(goal, files?)`, `task_send(task_id,
-  message)`, `task_stop(task_id)`, `task_status(task_id?)`. Lê o estado vivo (tarefas, sub-agentes,
-  aprovações pendentes, pausas de cota, eventos recentes) como um *digest* compacto.
+message)`, `task_stop(task_id)`, `task_status(task_id?)`. Lê o estado vivo (tarefas, sub-agentes,
+  aprovações pendentes, pausas de cota, eventos recentes) como um _digest_ compacto.
 - **Task** — a unidade de trabalho. É o laço de agente que já existe: a primeira tarefa roda como o
   turno do agente principal (`SessionController`, intocado); tarefas paralelas rodam como
   sub-agentes desacoplados (mesma máquina do ADR 0001: histórico próprio, fila de injeção própria,
-  parar-um, orçamento agregado). Não há reescrita do controller: o motor é *envolvido*.
+  parar-um, orçamento agregado). Não há reescrita do controller: o motor é _envolvido_.
 
 ### Núcleo portátil (`cli-core/src/concierge/`)
 
@@ -52,7 +52,7 @@ do motor sobre o `SessionController`.
 
 Tarefas publicam eventos: passo concluído, ferramenta, esperando aprovação, pausada por cota,
 concluída/falhou (com resumo). A TUI mostra uma **lista compacta de tarefas** na região viva e o
-Concierge **relata na conversa o que importa**, em uma linha, sem spam: o relato é por *template*
+Concierge **relata na conversa o que importa**, em uma linha, sem spam: o relato é por _template_
 (zero chamada ao modelo), com dedupe por tarefa+estado. Só `concluída`, `falhou`, `esperando
 aprovação` e `pausada por cota` relatam; passos e ferramentas ficam só na lista.
 
@@ -109,8 +109,8 @@ digest envelopados como dado e redigidos (CLI-SEC-6).
 
 - **Daemon em processo separado** (conversa sobrevivendo ao terminal): adiado. Aqui o desacoplamento
   é lógico, dentro do processo.
-- Tarefas paralelas que, elas mesmas, delegam a sub-agentes; trabalho em *worktree* por tarefa.
+- Tarefas paralelas que, elas mesmas, delegam a sub-agentes; trabalho em _worktree_ por tarefa.
 - Detecção de conflito de arquivo em tempo de execução (só o declarado).
 - Retomar no meio de uma chamada ao modelo: `--resume` restaura a lista de tarefas e o histórico da
-  conversa; o que estava em voo volta como *interrompida*, com o objetivo guardado, e o Concierge
+  conversa; o que estava em voo volta como _interrompida_, com o objetivo guardado, e o Concierge
   oferece reiniciar (a pausa por cota segue retomando de onde parou, como hoje).

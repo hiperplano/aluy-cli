@@ -28,7 +28,9 @@ import {
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
+function fakeClient(): ServiceChannelClient & {
+  readonly sent: { chatId: number; text: string }[];
+} {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,
@@ -86,7 +88,10 @@ describe('runOneWorkflow — workflow EDITADO (encolhido) durante a ASK-ESPERA �
 
     await waitFor(() => logs.some((l) => l.startsWith('acordou')));
     await waitFor(() => logs.includes('atividade 1/2 "abrir": ok.'), 10_000);
-    await waitFor(() => logs.some((l) => l.includes('AGUARDANDO DONO — enviando a pergunta')), 10_000);
+    await waitFor(
+      () => logs.some((l) => l.includes('AGUARDANDO DONO — enviando a pergunta')),
+      10_000,
+    );
 
     // O dono edita o workflow ENQUANTO pensa na resposta — a atividade "decidir"
     // (índice 1) deixa de existir; só sobra "abrir" (índice 0).
@@ -116,12 +121,16 @@ describe('runOneWorkflow — workflow EDITADO (encolhido) durante a ASK-ESPERA �
         ),
       ),
     ).toBe(true);
-    expect(logs.some((l) => l.includes('a atividade da retomada não existe mais no workflow'))).toBe(true);
+    expect(
+      logs.some((l) => l.includes('a atividade da retomada não existe mais no workflow')),
+    ).toBe(true);
 
     // CRÍTICO ⇒ ALERTA (não reporte de fechamento neutro).
-    expect(client.sent.some((m) => m.text.includes('ALERTA') && m.text.includes('editado entre a pergunta'))).toBe(
-      true,
-    );
+    expect(
+      client.sent.some(
+        (m) => m.text.includes('ALERTA') && m.text.includes('editado entre a pergunta'),
+      ),
+    ).toBe(true);
     expect(client.sent.some((m) => m.text.includes('concluídas'))).toBe(false);
   }, 20_000);
 });

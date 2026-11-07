@@ -27,7 +27,9 @@ import {
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
+function fakeClient(): ServiceChannelClient & {
+  readonly sent: { chatId: number; text: string }[];
+} {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,
@@ -85,7 +87,10 @@ describe('runServiceRunner — manifesto vira INVÁLIDO entre o boot e o 1º des
 
     // Quebra o manifesto AINDA dormindo (a janela até o cron disparar é curta e
     // determinística — ver `workflow-harness.ts`).
-    writeFileSync(join(base, SERVICES_DIRNAME, 'trader', 'service.md'), ['---', '---', 'Rege.'].join('\n'));
+    writeFileSync(
+      join(base, SERVICES_DIRNAME, 'trader', 'service.md'),
+      ['---', '---', 'Rege.'].join('\n'),
+    );
 
     await waitFor(() => logs.some((l) => l.includes('FALHA ao abrir o turno')), 10_000);
     externalStop.abort();
@@ -95,9 +100,11 @@ describe('runServiceRunner — manifesto vira INVÁLIDO entre o boot e o 1º des
     expect(logs.some((l) => l.includes('manifesto inválido pós-edição'))).toBe(true);
     expect(logs.some((l) => l.startsWith('acordou'))).toBe(false); // o turno NUNCA chegou a abrir.
     expect(logs.some((l) => l.includes('subindo daemons'))).toBe(false);
-    expect(client.sent.some((m) => m.text.includes('ALERTA') && m.text.includes('manifesto inválido pós-edição'))).toBe(
-      true,
-    );
+    expect(
+      client.sent.some(
+        (m) => m.text.includes('ALERTA') && m.text.includes('manifesto inválido pós-edição'),
+      ),
+    ).toBe(true);
     // o runner continuou VIVO (voltou a dormir) — só saiu quando NÓS abortamos.
     expect(logs).toContain('runner encerrado.');
   }, 20_000);

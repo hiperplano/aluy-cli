@@ -34,7 +34,9 @@ describe('classifyBrokerError — backend LOCAL diz o MOTIVO', () => {
 
   it('o motivo é REDIGIDO — um eco de payload pode trazer o Authorization junto', () => {
     const c = classifyBrokerError(
-      new Error('401 from provider: {"headers":{"authorization":"Bearer sk-or-v1-abcdef1234567890"}}'),
+      new Error(
+        '401 from provider: {"headers":{"authorization":"Bearer sk-or-v1-abcdef1234567890"}}',
+      ),
       'local',
     );
     expect(c.message).not.toContain('sk-or-v1-abcdef1234567890');

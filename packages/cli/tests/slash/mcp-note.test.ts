@@ -129,7 +129,13 @@ describe('buildMcpNote — reorganização da lista (resumo + grupos + tabela)',
       {
         server: 'alpha',
         ok: true,
-        tools: [{ server: 'alpha', descriptor: { name: 'do', description: 'faz algo' }, transport: {} as never }],
+        tools: [
+          {
+            server: 'alpha',
+            descriptor: { name: 'do', description: 'faz algo' },
+            transport: {} as never,
+          },
+        ],
       },
       { server: 'gamma', ok: false, tools: [], error: 'timeout' },
       // zeta: sem entrada ⇒ fica 'unknown'.
@@ -197,11 +203,12 @@ describe('buildMcpNote — reorganização da lista (resumo + grupos + tabela)',
     expect(linhas[iCab + 1]).toMatch(/^\s*─+\s+─+\s*$/);
 
     // ALINHAMENTO — a coluna da descrição começa na MESMA coluna em todas as linhas.
-    const col = (l: string): number => l.indexOf('descrição') >= 0
-      ? l.indexOf('descrição')
-      : l.search(/\S+\s{2,}\S/) >= 0
-        ? l.replace(/^(\s*\S+\s+)/, '$1').length - l.replace(/^\s*\S+\s+/, '').length
-        : -1;
+    const col = (l: string): number =>
+      l.indexOf('descrição') >= 0
+        ? l.indexOf('descrição')
+        : l.search(/\S+\s{2,}\S/) >= 0
+          ? l.replace(/^(\s*\S+\s+)/, '$1').length - l.replace(/^\s*\S+\s+/, '').length
+          : -1;
     const linhaDo = linhas.find((l) => l.includes('mcp__alpha__do'))!;
     expect(col(linhaDo)).toBe(col(linhas[iCab]!));
   });

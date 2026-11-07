@@ -18,7 +18,10 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { addLocalProviderOverride, loadLocalProviderCatalog } from '../../src/io/providers-config.js';
+import {
+  addLocalProviderOverride,
+  loadLocalProviderCatalog,
+} from '../../src/io/providers-config.js';
 import { findProvider } from '@hiperplano/aluy-cli-core';
 import { buildLocalProviderEntries } from '../../src/model/providers.js';
 
@@ -39,7 +42,12 @@ describe('F-PROV — "+ adicionar provider custom" persiste via addLocalProvider
     };
 
     addLocalProviderOverride(
-      { id: input.id, wireFormat: 'openai-compat', baseUrl: input.baseUrl, defaultModel: input.defaultModel },
+      {
+        id: input.id,
+        wireFormat: 'openai-compat',
+        baseUrl: input.baseUrl,
+        defaultModel: input.defaultModel,
+      },
       base,
     );
 
@@ -75,7 +83,12 @@ describe('F-PROV — "+ adicionar provider custom" persiste via addLocalProvider
   it('built-ins seguem presentes junto do custom (merge, não substituição)', () => {
     base = mkdtempSync(join(tmpdir(), 'aluy-add-provider-'));
     addLocalProviderOverride(
-      { id: 'meuprovider', wireFormat: 'openai-compat', baseUrl: 'https://x.example/v1', defaultModel: 'x' },
+      {
+        id: 'meuprovider',
+        wireFormat: 'openai-compat',
+        baseUrl: 'https://x.example/v1',
+        defaultModel: 'x',
+      },
       base,
     );
     const catalog = loadLocalProviderCatalog({ baseDir: base });

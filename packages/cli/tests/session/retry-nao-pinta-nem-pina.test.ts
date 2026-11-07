@@ -14,7 +14,11 @@
 //    a região cresce a cada turno e o relógio do rodapé (1×/s) reescreve tudo. Agora ele
 //    sai no primeiro byte (mesmo patch da caixa nova) e, por segurança, no fim do turno.
 import { describe, expect, it } from 'vitest';
-import { PolicyPermissionEngine, type ModelCaller, type ToolPorts } from '@hiperplano/aluy-cli-core';
+import {
+  PolicyPermissionEngine,
+  type ModelCaller,
+  type ToolPorts,
+} from '@hiperplano/aluy-cli-core';
 import { SessionController } from '../../src/session/controller.js';
 import { splitBlocks } from '../../src/session/render-split.js';
 
@@ -58,7 +62,10 @@ describe('1 · onStart sem byte NÃO pinta nada (a altura do frame não oscila)'
       retry(c, n);
       c.sink.onStart?.(); // a tentativa seguinte começa — e ainda não chegou byte nenhum
       expect(c.current.phase, 'tentativa ' + n).not.toBe('streaming');
-      expect(kinds(c).filter((k) => k === 'aluy'), 'tentativa ' + n).toHaveLength(0);
+      expect(
+        kinds(c).filter((k) => k === 'aluy'),
+        'tentativa ' + n,
+      ).toHaveLength(0);
       // Só o aviso de retry, e só UM.
       expect(kinds(c).filter((k) => k === 'broker-error')).toHaveLength(1);
     }

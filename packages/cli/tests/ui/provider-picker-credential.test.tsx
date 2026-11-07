@@ -133,7 +133,9 @@ describe('<ProviderPicker> — passo de credencial (render)', () => {
 
   it('credentialStep null/ausente ⇒ mostra a LISTA normal, não o campo', () => {
     const out = plain(
-      wrap(<ProviderPicker providers={PROVIDERS} selected={0} credentialStep={null} />).lastFrame() ?? '',
+      wrap(
+        <ProviderPicker providers={PROVIDERS} selected={0} credentialStep={null} />,
+      ).lastFrame() ?? '',
     );
     expect(out).toContain('OpenRouter');
   });

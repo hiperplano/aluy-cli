@@ -81,7 +81,10 @@ describe('a linha que o picker mostra', () => {
   });
 
   it('a lista da busca já vem deduplicada', () => {
-    const itens = itensDaBusca([res({ name: 'a', version: '1' }), res({ name: 'a', version: '2' })]);
+    const itens = itensDaBusca([
+      res({ name: 'a', version: '1' }),
+      res({ name: 'a', version: '2' }),
+    ]);
     expect(itens).toHaveLength(1);
   });
 });

@@ -16,7 +16,13 @@ import { writeServiceStatus } from '../../src/service/status.js';
 function fakeIO(): TerminalIO & { outLines: string[]; errLines: string[] } {
   const outLines: string[] = [];
   const errLines: string[] = [];
-  return { outLines, errLines, out: (l) => outLines.push(l), err: (l) => errLines.push(l), prompt: async () => '' };
+  return {
+    outLines,
+    errLines,
+    out: (l) => outLines.push(l),
+    err: (l) => errLines.push(l),
+    prompt: async () => '',
+  };
 }
 
 describe('status/list — "aguardando dono (pergunta enviada há X)" (ADR-0158 §5 pt.4)', () => {
@@ -44,7 +50,10 @@ describe('status/list — "aguardando dono (pergunta enviada há X)" (ADR-0158 �
 
   it('"status <nome>" mostra a pergunta pendente com "(enviada há Xmin)"', async () => {
     const io = fakeIO();
-    const exit = await runService(['status', 'trader'], { io, store: new UserServicesStore({ baseDir: base }) });
+    const exit = await runService(['status', 'trader'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
     expect(exit).toBe(0);
     const t = io.outLines.join('\n');
     expect(t).toContain('pergunta pendente');
@@ -56,7 +65,10 @@ describe('status/list — "aguardando dono (pergunta enviada há X)" (ADR-0158 �
 
   it('"list" mostra "aguardando dono (pergunta enviada há X)"', async () => {
     const io = fakeIO();
-    const exit = await runService(['list'], { io, store: new UserServicesStore({ baseDir: base }) });
+    const exit = await runService(['list'], {
+      io,
+      store: new UserServicesStore({ baseDir: base }),
+    });
     expect(exit).toBe(0);
     const t = io.outLines.join('\n');
     expect(t).toContain('aguardando dono');

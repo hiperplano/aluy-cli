@@ -343,4 +343,3 @@ describe('mandar mensagem com agentes VIVOS não apaga o rodapé', () => {
     c.dispose();
   });
 });
-

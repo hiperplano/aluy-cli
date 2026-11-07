@@ -16,19 +16,35 @@ import type { SessionBlock } from '../../src/session/model.js';
 
 describe('summarizeSessionBlockForAttach', () => {
   it('you/aluy — texto direto', () => {
-    expect(summarizeSessionBlockForAttach({ kind: 'you', text: 'oi' })).toEqual({ role: 'you', text: 'oi' });
-    expect(summarizeSessionBlockForAttach({ kind: 'aluy', text: 'olá', streaming: false })).toEqual({
-      role: 'aluy',
-      text: 'olá',
+    expect(summarizeSessionBlockForAttach({ kind: 'you', text: 'oi' })).toEqual({
+      role: 'you',
+      text: 'oi',
     });
+    expect(summarizeSessionBlockForAttach({ kind: 'aluy', text: 'olá', streaming: false })).toEqual(
+      {
+        role: 'aluy',
+        text: 'olá',
+      },
+    );
   });
   it('you/aluy vazios ⇒ undefined (nada a mostrar)', () => {
     expect(summarizeSessionBlockForAttach({ kind: 'you', text: '  ' })).toBeUndefined();
-    expect(summarizeSessionBlockForAttach({ kind: 'aluy', text: '', streaming: false })).toBeUndefined();
+    expect(
+      summarizeSessionBlockForAttach({ kind: 'aluy', text: '', streaming: false }),
+    ).toBeUndefined();
   });
   it('tool — verbo+alvo+resultado', () => {
-    const b: SessionBlock = { kind: 'tool', verb: 'read', target: 'a.ts', result: '10 linhas', status: 'ok' };
-    expect(summarizeSessionBlockForAttach(b)).toEqual({ role: 'tool', text: 'read a.ts → 10 linhas' });
+    const b: SessionBlock = {
+      kind: 'tool',
+      verb: 'read',
+      target: 'a.ts',
+      result: '10 linhas',
+      status: 'ok',
+    };
+    expect(summarizeSessionBlockForAttach(b)).toEqual({
+      role: 'tool',
+      text: 'read a.ts → 10 linhas',
+    });
   });
   it('bang — comando+status', () => {
     const b: SessionBlock = { kind: 'bang', command: 'ls', status: 'ok' };
@@ -36,7 +52,10 @@ describe('summarizeSessionBlockForAttach', () => {
   });
   it('note — título+linhas', () => {
     const b: SessionBlock = { kind: 'note', title: 'aviso', lines: ['linha 1', 'linha 2'] };
-    expect(summarizeSessionBlockForAttach(b)).toEqual({ role: 'note', text: 'aviso: linha 1 linha 2' });
+    expect(summarizeSessionBlockForAttach(b)).toEqual({
+      role: 'note',
+      text: 'aviso: linha 1 linha 2',
+    });
   });
   it('inject (F193 — encaixe mid-turno) ⇒ voz "you"', () => {
     expect(summarizeSessionBlockForAttach({ kind: 'inject', text: 'na verdade...' })).toEqual({
@@ -51,7 +70,9 @@ describe('summarizeSessionBlockForAttach', () => {
     });
   });
   it('deny/doctor/subagents ⇒ undefined (UI/sistema, sem sentido no espelho textual)', () => {
-    expect(summarizeSessionBlockForAttach({ kind: 'deny', verb: 'run', exact: 'rm -rf /' })).toBeUndefined();
+    expect(
+      summarizeSessionBlockForAttach({ kind: 'deny', verb: 'run', exact: 'rm -rf /' }),
+    ).toBeUndefined();
     expect(summarizeSessionBlockForAttach({ kind: 'doctor', checks: [] })).toBeUndefined();
   });
 });
@@ -82,7 +103,12 @@ describe('pollNewServiceBlocks', () => {
   });
 
   it('1ª chamada devolve TODOS os blocos existentes; a 2ª só os NOVOS', () => {
-    store.save({ id: 'sess1', cwd: serviceDir, tier: 'default', blocks: [{ kind: 'you', text: 'oi' }] });
+    store.save({
+      id: 'sess1',
+      cwd: serviceDir,
+      tier: 'default',
+      blocks: [{ kind: 'you', text: 'oi' }],
+    });
     const state = newAttachBlockTailState();
     const first = pollNewServiceBlocks(serviceDir, state);
     expect(first).toEqual([{ role: 'you', text: 'oi' }]);
@@ -100,17 +126,29 @@ describe('pollNewServiceBlocks', () => {
         { kind: 'aluy', text: 'olá, tudo bem?', streaming: false },
       ],
     });
-    expect(pollNewServiceBlocks(serviceDir, state)).toEqual([{ role: 'aluy', text: 'olá, tudo bem?' }]);
+    expect(pollNewServiceBlocks(serviceDir, state)).toEqual([
+      { role: 'aluy', text: 'olá, tudo bem?' },
+    ]);
   });
 
   it('sessão NOVA (id diferente, próxima atividade do workflow) reseta o contador — emite tudo dela', () => {
-    store.save({ id: 'sess1', cwd: serviceDir, tier: 'default', blocks: [{ kind: 'you', text: 'atividade 1' }] });
+    store.save({
+      id: 'sess1',
+      cwd: serviceDir,
+      tier: 'default',
+      blocks: [{ kind: 'you', text: 'atividade 1' }],
+    });
     const state = newAttachBlockTailState();
     expect(pollNewServiceBlocks(serviceDir, state)).toEqual([{ role: 'you', text: 'atividade 1' }]);
 
     // `list()` ordena por `updatedAt` DESC — `now` cresce por chamada de `Date.now`
     // real aqui é suficiente (uma sessão nova sempre tem `updatedAt` >= a anterior).
-    store.save({ id: 'sess2', cwd: serviceDir, tier: 'default', blocks: [{ kind: 'you', text: 'atividade 2' }] });
+    store.save({
+      id: 'sess2',
+      cwd: serviceDir,
+      tier: 'default',
+      blocks: [{ kind: 'you', text: 'atividade 2' }],
+    });
     expect(pollNewServiceBlocks(serviceDir, state)).toEqual([{ role: 'you', text: 'atividade 2' }]);
   });
 

@@ -14,7 +14,9 @@ import { EgressRateLimiter } from '@hiperplano/aluy-cli-core';
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
+function fakeClient(): ServiceChannelClient & {
+  readonly sent: { chatId: number; text: string }[];
+} {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,
@@ -68,9 +70,14 @@ describe('runServiceRunner — alerta de falha no canal (ADR-0158 §8.1)', () =>
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, 'service.md'),
-      ['---', 'name: trader', 'schedule: "0 0 30 2 *"', 'channel: "telegram:555"', '---', 'Rege, não opera.'].join(
-        '\n',
-      ),
+      [
+        '---',
+        'name: trader',
+        'schedule: "0 0 30 2 *"',
+        'channel: "telegram:555"',
+        '---',
+        'Rege, não opera.',
+      ].join('\n'),
     );
     const client = fakeClient();
     const code = await runServiceRunner('trader', {
@@ -93,7 +100,10 @@ describe('runServiceRunner — alerta de falha no canal (ADR-0158 §8.1)', () =>
   it('sem "channel:" declarado ⇒ segue fail-open (nenhum client é tocado, sem exceção)', async () => {
     const dir = join(base, SERVICES_DIRNAME, 'trader');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'service.md'), ['---', 'name: trader', '---', 'Rege, não opera.'].join('\n'));
+    writeFileSync(
+      join(dir, 'service.md'),
+      ['---', 'name: trader', '---', 'Rege, não opera.'].join('\n'),
+    );
     const logs: string[] = [];
     const code = await runServiceRunner('trader', { aluyBaseDir: base, log: (l) => logs.push(l) });
     expect(code).toBe(1);

@@ -130,7 +130,12 @@ async function drive(
   let last!: ProviderPickerController;
   let consumed = false;
   render(
-    <Probe args={args} steps={steps} onState={(c) => (last = c)} onConsumed={(d) => (consumed = d)} />,
+    <Probe
+      args={args}
+      steps={steps}
+      onState={(c) => (last = c)}
+      onConsumed={(d) => (consumed = d)}
+    />,
   );
   const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
   const deadline = Date.now() + 2000;
@@ -286,7 +291,11 @@ describe('useProviderPicker — passo de credencial (integrado ao catálogo loca
 
   it('backspace apaga do campo de chave', async () => {
     const c = await drive(
-      { localCatalog: () => [localEntry('g')], hasStoredKey: () => false, storeCredential: () => {} },
+      {
+        localCatalog: () => [localEntry('g')],
+        hasStoredKey: () => false,
+        storeCredential: () => {},
+      },
       [
         (p) => p.openPicker(),
         (p) => p.confirm(),
@@ -328,7 +337,8 @@ describe('useProviderPicker — passo de credencial (integrado ao catálogo loca
     const c = await drive({ localCatalog: () => [localEntry('google')] }, [
       (p) => p.openPicker(),
       (p) => p.closePicker(), // simula: picker já fechou, troca aplicada, teste vai falhar depois (async).
-      (p) => p.retryCredential('google', 'provider "google" NÃO respondeu ao teste: 401 unauthorized'),
+      (p) =>
+        p.retryCredential('google', 'provider "google" NÃO respondeu ao teste: 401 unauthorized'),
     ]);
     expect(c.open).toBe(true);
     expect(c.credentialStep).toBe('key');

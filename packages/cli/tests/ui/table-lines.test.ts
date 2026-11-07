@@ -26,7 +26,12 @@ describe('tableLines — alinhamento de colunas', () => {
     expect(out[2]).toBe('a    bb'); // 'a' padEnd à largura de 'NOME'
 
     // `rule: false` devolve o formato anterior, para quem não quiser a régua.
-    const semRegua = tableLines([['a', 'bb']], { indent: '', gap: ' ', headers: ['NOME', 'X'], rule: false });
+    const semRegua = tableLines([['a', 'bb']], {
+      indent: '',
+      gap: ' ',
+      headers: ['NOME', 'X'],
+      rule: false,
+    });
     expect(semRegua[1]).toBe('a    bb');
   });
 });

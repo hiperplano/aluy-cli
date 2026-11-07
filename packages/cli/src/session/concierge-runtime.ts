@@ -56,9 +56,11 @@ export class ConciergeRuntime {
   private seq = 0;
   private readonly listeners = new Set<() => void>();
   private inflight = new Set<AbortController>();
+  private readonly clock: () => number;
 
   constructor(private readonly d: ConciergeRuntimeDeps) {
     const clock = d.clock ?? Date.now;
+    this.clock = clock;
     this.registry = new TaskRegistry({ clock });
     this.engine = new ControllerTaskEngine({
       registry: this.registry,
@@ -96,7 +98,11 @@ export class ConciergeRuntime {
   visibleTasks(): readonly TaskRecord[] {
     const all = this.registry.list();
     const live = all.filter((t) => !TERMINAL_STATUSES.has(t.status));
-    const ended = all.filter((t) => TERMINAL_STATUSES.has(t.status)).slice(-2);
+    const now = this.clock();
+    // Terminadas somem da lista 60s depois (o relato já foi para a conversa; `/task` mostra tudo).
+    const ended = all
+      .filter((t) => TERMINAL_STATUSES.has(t.status) && now - (t.endedAt ?? 0) < 60_000)
+      .slice(-2);
     return [...ended, ...live];
   }
 

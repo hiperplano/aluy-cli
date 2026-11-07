@@ -37,8 +37,7 @@ const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');
 const plain = (s: string | undefined): string => (s ?? '').replace(ANSI, '');
 
-const DETALHE_401 =
-  'provider "tokenrouter" NÃO respondeu ao teste: HTTP 401 — chave inválida?';
+const DETALHE_401 = 'provider "tokenrouter" NÃO respondeu ao teste: HTTP 401 — chave inválida?';
 
 function fakePorts(): ToolPorts {
   const fs: FileSystemPort = {

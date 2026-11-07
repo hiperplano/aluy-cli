@@ -85,7 +85,7 @@ describe('F-BG · NodeShellPort — soltar para segundo plano', () => {
       const ctl = new AbortController();
       let info: DetachedShellInfo | undefined;
       const p = porta(raiz).exec(
-        'node -e "let i=0;const t=setInterval(()=>{console.log(\'linha\'+(i++)+\' \'.repeat(500));if(i>200){clearInterval(t)}},1)"',
+        "node -e \"let i=0;const t=setInterval(()=>{console.log('linha'+(i++)+' '.repeat(500));if(i>200){clearInterval(t)}},1)\"",
         {
           detachSignal: ctl.signal,
           onDetached: (i) => {
@@ -155,7 +155,7 @@ describe('F-BG · NodeShellPort — soltar para segundo plano', () => {
       const ctl = new AbortController();
       let info: DetachedShellInfo | undefined;
       const p = porta(raiz).exec(
-        'node -e "console.log(\'ANTES-DE-SOLTAR\');setTimeout(()=>console.log(\'DEPOIS\'),400)"',
+        "node -e \"console.log('ANTES-DE-SOLTAR');setTimeout(()=>console.log('DEPOIS'),400)\"",
         {
           detachSignal: ctl.signal,
           onDetached: (i) => {

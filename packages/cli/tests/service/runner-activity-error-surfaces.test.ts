@@ -28,7 +28,9 @@ import {
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
+function fakeClient(): ServiceChannelClient & {
+  readonly sent: { chatId: number; text: string }[];
+} {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,
@@ -95,11 +97,15 @@ describe('runActivityTurn — "until:" já vencido quando o turno abre ⇒ ativi
 
     expect(code).toBe(0);
     expect(
-      logs.some((l) => l.includes('atividade 1/1 "tardedemais": expediente já encerrado (until) — pulada.')),
+      logs.some((l) =>
+        l.includes('atividade 1/1 "tardedemais": expediente já encerrado (until) — pulada.'),
+      ),
     ).toBe(true);
     // NUNCA chegou a iniciar um turno de verdade p/ essa atividade.
     expect(logs.some((l) => l.includes('"tardedemais": iniciando turno'))).toBe(false);
-    expect(logs.some((l) => l.startsWith('turno encerrado — parou em 1/1 atividades (limit).'))).toBe(true);
+    expect(
+      logs.some((l) => l.startsWith('turno encerrado — parou em 1/1 atividades (limit).')),
+    ).toBe(true);
     const report = client.sent.find((m) => m.text.includes('parou em 1/1 atividades (limit).'));
     expect(report).toBeDefined();
     expect(report!.text).not.toContain('ALERTA');
@@ -194,6 +200,8 @@ describe('runActivityTurn — o próprio `spawn` falha (ENOENT) ⇒ evento "erro
 
     expect(code).toBe(0);
     expect(logs.some((l) => l.includes('atividade 1/1 "unica": saída ilegível'))).toBe(true);
-    expect(client.sent.some((m) => m.text.includes('ALERTA') && m.text.includes('parou em 1/1'))).toBe(true);
+    expect(
+      client.sent.some((m) => m.text.includes('ALERTA') && m.text.includes('parou em 1/1')),
+    ).toBe(true);
   }, 20_000);
 });

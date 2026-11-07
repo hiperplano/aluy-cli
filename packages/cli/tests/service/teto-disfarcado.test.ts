@@ -37,9 +37,9 @@ describe('classifyActivityExit — teto é teto, mesmo com saída graciosa', () 
 
   it('STOP do runner vence o teto — parada do dono não vira "estourou o tempo"', () => {
     // Precedência importa: se o dono mandou parar, a causa é essa, não o relógio.
-    expect(classifyActivityExit({ stopAborted: true, signal: 'SIGTERM', deadlineFired: true })).toBe(
-      'cancelled',
-    );
+    expect(
+      classifyActivityExit({ stopAborted: true, signal: 'SIGTERM', deadlineFired: true }),
+    ).toBe('cancelled');
   });
 
   it('saída normal continua "continue" — nada vira teto por engano', () => {

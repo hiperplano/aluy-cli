@@ -10,7 +10,8 @@ import { buildActivityGoal, buildActivityEnv } from '../../src/service/runner.js
 
 describe('buildActivityGoal — PURA (ADR-0158 §4.1)', () => {
   const base = {
-    orchestratorPreamble: 'Você coordena o serviço "trader" (ADR-0158) — rege, não opera:\nCORPO-ORQUESTRADOR',
+    orchestratorPreamble:
+      'Você coordena o serviço "trader" (ADR-0158) — rege, não opera:\nCORPO-ORQUESTRADOR',
     index: 0,
     total: 2,
   };
@@ -61,7 +62,9 @@ describe('buildActivityGoal — PURA (ADR-0158 §4.1)', () => {
       activity: { id: 'x', goal: 'faça x', agent: undefined },
       resumeContext: 'RETOMADA: pergunta/resposta anexadas.',
     });
-    expect(withoutAgent.indexOf('CORPO-ORQUESTRADOR')).toBeLessThan(withoutAgent.indexOf('RETOMADA'));
+    expect(withoutAgent.indexOf('CORPO-ORQUESTRADOR')).toBeLessThan(
+      withoutAgent.indexOf('RETOMADA'),
+    );
     expect(withoutAgent.indexOf('RETOMADA')).toBeLessThan(withoutAgent.indexOf('[Atividade'));
   });
 });
