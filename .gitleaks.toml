@@ -217,3 +217,10 @@ regexes = [
   '''__set_[a-z0-9_]+__''',
   '''CHANGE[_-]?ME''',
 ]
+
+[[allowlists]]
+description = "Fixtures sintéticas da redação do `!`/`/secret` e da cauda do stream (ADR 0005) — só estes paths, nunca segredo real."
+paths = [
+  '''packages/cli-core/tests/agent/bang-feed\.test\.ts$''',
+  '''packages/cli/tests/session/cauda-da-resposta\.test\.ts$''',
+]
