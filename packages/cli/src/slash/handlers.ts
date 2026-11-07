@@ -572,7 +572,7 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
           lines: [
             'vejo/edito/esqueço/fixo os fatos que o agente lembra entre sessões',
             '(global + projeto), por este comando — o agente não lê esses arquivos direto.',
-            'o agente usa a memória como contexto, nunca como ordem.',
+            'o que você pediu para lembrar (origem usuario) o agente segue; o derivado é só contexto.',
             'uso: /memory [forget|edit|pin|unpin <id>]',
           ],
         },

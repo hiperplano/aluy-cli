@@ -1467,6 +1467,9 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     ...(opts.projectInstructions !== undefined
       ? { projectInstructions: opts.projectInstructions }
       : {}),
+    // ADR 0004 — a MEMÓRIA (preferências do dono + contexto) entra no `system` a cada chamada,
+    // no boot, na retomada e nos sub-agentes.
+    memoryContextProvider: () => memory.contextBlock(),
     // EST-1109 — agentes DISPONÍVEIS no contexto: nota já formatada pelo core.
     ...(opts.availableAgents !== undefined ? { availableAgents: opts.availableAgents } : {}),
     // EST-1149 — comandos da SESSÃO no contexto: nota já formatada.

@@ -160,10 +160,14 @@ describe('buildSession — `--anonymous` deixa a memória de agente INERTE', () 
       env: {},
       anonymous: true,
     });
-    const outcome = await s.memory.remember('fato que NÃO pode sobrar no disco', 'global', 'usuario');
+    const outcome = await s.memory.remember(
+      'fato que NÃO pode sobrar no disco',
+      'global',
+      'usuario',
+    );
     expect(outcome.ok).toBe(true); // o modelo/usuário não veem erro dentro da sessão.
-    const recalled = await s.memory.recall();
-    expect(recalled.length).toBe(1); // e o fato SEGUE visível NESTA sessão (RAM).
+    const recalled = await s.memory.contextBlock();
+    expect(recalled).toContain('fato que NÃO pode sobrar no disco'); // e SEGUE visível NESTA sessão (RAM).
     // mas em disco — nada. Nem o diretório nasceu.
     expect(existsSync(join(memoryBaseDir, 'memory'))).toBe(false);
     expect(existsSync(join(memoryBaseDir, 'memory', 'global.md'))).toBe(false);
