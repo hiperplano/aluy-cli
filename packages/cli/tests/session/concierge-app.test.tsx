@@ -187,7 +187,11 @@ describe('Concierge na TUI — a conversa nunca espera o trabalho', () => {
       concierge: (m) =>
         /async/.test(m)
           ? text('Enviei à t1.', [
-              { id: '2', name: 'task_send', input: { task_id: 't1', message: 'use async' } },
+              {
+                id: '2',
+                name: 'task_send',
+                input: { task_id: 't1', message: 'usar async/await (correção)' },
+              },
             ])
           : text('Iniciei.', [{ id: '1', name: 'task_start', input: { goal: 'g' } }]),
     });
@@ -196,7 +200,9 @@ describe('Concierge na TUI — a conversa nunca espera o trabalho', () => {
     await waitFor(() => s.controller.current.phase === 'streaming');
     await type(s, 'use async');
     await waitFor(() => injectSpy.mock.calls.length > 0);
-    expect(injectSpy).toHaveBeenCalledWith('root', 'use async');
+    // Quem decidiu foi o Concierge (o texto injetado é o do task_send, não o cru do dono).
+    expect(injectSpy).toHaveBeenCalledWith('root', 'usar async/await (correção)');
+    expect(s.conciergeCalls).toContain('use async');
     expect(s.controller.current.phase).toBe('streaming');
     g0.resolve();
     s.unmount();
