@@ -243,7 +243,8 @@ export class UserServicesStore {
           kind: 'error',
           error: {
             dirName,
-            reason: `"workflow: ${parsed.workflow}" aponta para fora de workflows/ do serviço — recusado.`,
+            reason:
+              `"workflow: ${parsed.workflow}" aponta para fora de workflows/ do serviço — recusado.`,
           },
         };
       }

@@ -113,13 +113,12 @@ describe('runServiceRunner — status.json E comportamento durante "dormindo at�
     try {
       await waitFor(() => existsSync(sockPath));
       const onCloseReasons: string[] = [];
-      const conn = connectAttachSocket(sockPath, {
-        onLine: () => {},
-        onClose: (r) => onCloseReasons.push(r),
-      });
+      const conn = connectAttachSocket(sockPath, { onLine: () => {}, onClose: (r) => onCloseReasons.push(r) });
       conn.send('dono falando via attach');
       await waitFor(() => logs.some((l) => l.includes('"say" recebido com o serviço DORMINDO')));
-      expect(logs).toContain(
+      expect(
+        logs,
+      ).toContain(
         '[attach] "say" recebido com o serviço DORMINDO — vira instrução do PRÓXIMO despertar.',
       );
       conn.close();

@@ -117,10 +117,7 @@ export function sanitizeSuggestion(raw: string | undefined): string | undefined 
   s = primeira;
   // Marcador de lista (`- `, `1. `, `• `) e aspas/crases envolventes.
   s = s.replace(/^([-*•]|\d+[.)])\s+/, '').trim();
-  s = s
-    .replace(/^["'`«]+/, '')
-    .replace(/["'`»]+$/, '')
-    .trim();
+  s = s.replace(/^["'`«]+/, '').replace(/["'`»]+$/, '').trim();
   if (s === '') return undefined;
   // O "sem próximo passo" combinado no prompt — em qualquer caixa, com ou sem pontuação.
   if (/^nada[.!]?$/i.test(s)) return undefined;

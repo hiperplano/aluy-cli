@@ -19,9 +19,7 @@ import { ThemeProvider, resolveTheme } from '../../src/ui/theme/index.js';
 
 /** Renderiza o divisor e devolve o frame já sem códigos de cor. */
 function frameDe(node: React.ReactElement): string {
-  const { lastFrame } = render(
-    <ThemeProvider theme={resolveTheme('escuro')}>{node}</ThemeProvider>,
-  );
+  const { lastFrame } = render(<ThemeProvider theme={resolveTheme('escuro')}>{node}</ThemeProvider>);
   // eslint-disable-next-line no-control-regex
   return (lastFrame() ?? '').replace(/\[[0-9;]*m/g, '');
 }

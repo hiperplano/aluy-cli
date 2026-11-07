@@ -242,7 +242,11 @@ describe('UserServicesStore — workspace: (raiz extra além da própria pasta)'
   });
 
   it('workspace: apontando p/ a pasta de OUTRO serviço (também sob "~/.aluy/") ⇒ recusado', () => {
-    writeService(servicesDir, 'espiao', ['---', 'name: espiao', '---', 'orq'].join('\n')); // outro serviço já instalado.
+    writeService(
+      servicesDir,
+      'espiao',
+      ['---', 'name: espiao', '---', 'orq'].join('\n'),
+    ); // outro serviço já instalado.
     writeService(
       servicesDir,
       'trader',

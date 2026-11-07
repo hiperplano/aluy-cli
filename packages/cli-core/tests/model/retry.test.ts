@@ -182,3 +182,4 @@ describe('ALUY_RETRY numérico — cada número vale ele mesmo', () => {
     expect(resolveRetry({}).attempts).toBe(DEFAULT_RETRY_ATTEMPTS);
   });
 });
+

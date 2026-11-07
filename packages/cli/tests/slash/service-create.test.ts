@@ -6,10 +6,7 @@
 // este arquivo é a evidência de que o TEXTO do comando está correto — a fumaça
 // (relatório da missão) cobre o resto: staging → install → start.
 import { describe, expect, it } from 'vitest';
-import {
-  buildServiceCreateSystemPrompt,
-  SERVICE_DRAFTS_DIRNAME,
-} from '../../src/slash/service-create.js';
+import { buildServiceCreateSystemPrompt, SERVICE_DRAFTS_DIRNAME } from '../../src/slash/service-create.js';
 
 describe('SERVICE_DRAFTS_DIRNAME', () => {
   it('é um nome de diretório RELATIVO simples, sem prefixo `.aluy`', () => {
@@ -41,9 +38,7 @@ describe('buildServiceCreateSystemPrompt — PURA', () => {
     // também foi aparada (mata o mutante que troca `descricao.trim()` por
     // `descricao` cru em `buildServiceCreateSystemPrompt`).
     const prompt = buildServiceCreateSystemPrompt('   um pesquisador que lê fontes toda manhã');
-    const descLine = prompt
-      .split('\n')
-      .find((l) => l.includes('um pesquisador que lê fontes toda manhã'));
+    const descLine = prompt.split('\n').find((l) => l.includes('um pesquisador que lê fontes toda manhã'));
     expect(descLine).toBe('um pesquisador que lê fontes toda manhã');
   });
 

@@ -260,16 +260,22 @@ describe('live-budget — orçamento dinâmico da região viva (anti-flicker EST
   });
 
   it('liveOverheadLines: tool running = 1 linha', () => {
-    expect(liveOverheadLines({ live: [runningTool()], phase: 'done', hasBlocks: true })).toBe(1);
+    expect(liveOverheadLines({ live: [runningTool()], phase: 'done', hasBlocks: true })).toBe(
+      1,
+    );
   });
 
   it('liveOverheadLines: sub-agentes = cabeçalho + N filhos + paddingBottom', () => {
     // 3 filhos ⇒ 1(cab) + 3 + 1(pad) = 5.
-    expect(liveOverheadLines({ live: [subagents(3)], phase: 'done', hasBlocks: true })).toBe(5);
+    expect(liveOverheadLines({ live: [subagents(3)], phase: 'done', hasBlocks: true })).toBe(
+      5,
+    );
   });
 
   it('liveOverheadLines: a prévia de fala soma cabeçalho+cursor+paddingBottom (3)', () => {
-    expect(liveOverheadLines({ live: [longSpeech(10)], phase: 'done', hasBlocks: true })).toBe(3);
+    expect(liveOverheadLines({ live: [longSpeech(10)], phase: 'done', hasBlocks: true })).toBe(
+      3,
+    );
   });
 
   it('constantes documentadas: chrome=9 (base 8 + respiro 1, EST-0989), folga=2, piso=4, banner base=1/unsafe=2', () => {
@@ -313,7 +319,9 @@ describe('EST-0982 — saída ao vivo do comando entra no orçamento da região 
   });
 
   it('tool running SEM saída = 1 linha (não-regressão); COM saída soma as linhas', () => {
-    expect(liveOverheadLines({ live: [runningTool()], phase: 'done', hasBlocks: true })).toBe(1);
+    expect(liveOverheadLines({ live: [runningTool()], phase: 'done', hasBlocks: true })).toBe(
+      1,
+    );
     // 3 linhas de saída ⇒ 1 (in-flight) + 3 = 4.
     expect(
       liveOverheadLines({
@@ -884,6 +892,7 @@ describe('F196 — liveRegionMinRows: piso estrutural que decide pular o clearSc
 // linha só existe QUANDO há agentes — então o estouro acontecia exatamente no cenário em
 // que ela aparece, e sumia sozinho depois, o que faz o defeito parecer intermitente.
 describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
+
   // Não há mais limiar CRAVADO: a medida sai da linha que o render compõe. Uma constante
   // de largura é uma medida congelada — bastava reescrever a frase para o número mentir em
   // silêncio, que é como este defeito nasceu.
@@ -907,33 +916,16 @@ describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
   it('sem sub-agentes ⇒ desconto ZERO (não-regressão de quem nunca dispara agente)', () => {
     expect(subagentNoticeOverhead(undefined, 80, 'idle')).toBe(0);
     expect(subagentNoticeOverhead(0, 80, 'idle')).toBe(0);
-    const base = {
-      rows: 40,
-      live: [],
-      phase: 'idle' as const,
-      hasBlocks: true,
-      mode: 'normal' as SessionMode,
-      columns: 80,
-    };
+    const base = { rows: 40, live: [], phase: 'idle' as const, hasBlocks: true, mode: 'normal' as SessionMode, columns: 80 };
     expect(speechMaxLines({ ...base, detachedSubagents: 0 })).toBe(speechMaxLines(base));
   });
 
   it('com sub-agentes ⇒ a fala cede 1 linha (2 em terminal estreito)', () => {
-    const base = {
-      rows: 40,
-      live: [],
-      phase: 'idle' as const,
-      hasBlocks: true,
-      mode: 'normal' as SessionMode,
-    };
-    expect(
-      speechMaxLines({ ...base, columns: 80 }) -
-        speechMaxLines({ ...base, columns: 80, detachedSubagents: 3 }),
-    ).toBe(1);
-    expect(
-      speechMaxLines({ ...base, columns: 40 }) -
-        speechMaxLines({ ...base, columns: 40, detachedSubagents: 3 }),
-    ).toBe(2);
+    const base = { rows: 40, live: [], phase: 'idle' as const, hasBlocks: true, mode: 'normal' as SessionMode };
+    expect(speechMaxLines({ ...base, columns: 80 })
+      - speechMaxLines({ ...base, columns: 80, detachedSubagents: 3 })).toBe(1);
+    expect(speechMaxLines({ ...base, columns: 40 })
+      - speechMaxLines({ ...base, columns: 40, detachedSubagents: 3 })).toBe(2);
   });
 
   // O CENÁRIO DO DONO: mandar mensagem (fila) com agentes trabalhando (aviso + bloco de
@@ -958,13 +950,7 @@ describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
           modeIndicatorOverhead(args.mode) +
           narrowChromeOverhead(columns) +
           subagentNoticeOverhead(3, columns, 'streaming') +
-          liveOverheadLines({
-            live: args.live,
-            phase: args.phase,
-            hasBlocks: true,
-            rows,
-            columns,
-          }) +
+          liveOverheadLines({ live: args.live, phase: args.phase, hasBlocks: true, rows, columns }) +
           speechMaxLines({ ...args, queuedLines }) +
           queuedLines;
         expect(total).toBeLessThanOrEqual(rows - 1);
@@ -988,15 +974,7 @@ describe('FLICKER-F8 — o aviso de sub-agentes entra no orçamento', () => {
     const live = [longSpeech(300), subagents(3)];
     const queuedLines = 0;
     // `speechMaxLines` SEM `detachedSubagents` = o orçamento antigo.
-    const cego = speechMaxLines({
-      rows,
-      live,
-      phase: 'idle',
-      hasBlocks: true,
-      mode: 'normal',
-      columns,
-      queuedLines,
-    });
+    const cego = speechMaxLines({ rows, live, phase: 'idle', hasBlocks: true, mode: 'normal', columns, queuedLines });
     const semAviso =
       LIVE_CHROME_BASE_ROWS +
       respiroOverhead(rows) +
@@ -1059,3 +1037,4 @@ describe('mostraIndicadorTrabalho — tabela de verdade', () => {
     }
   });
 });
+

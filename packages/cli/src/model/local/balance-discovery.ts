@@ -203,7 +203,10 @@ export function parseOpenRouterCredits(body: unknown): LocalBalance | undefined 
  * `authorization` (nunca na URL/corpo) e nunca é interpolada em mensagem alguma —
  * falhas são ENGOLIDAS aqui, nunca relançadas (CLI-SEC-10).
  */
-async function fetchBalanceJson(deps: BalanceIoDeps, path: string): Promise<unknown> {
+async function fetchBalanceJson(
+  deps: BalanceIoDeps,
+  path: string,
+): Promise<unknown> {
   const base = deps.baseUrl.replace(/\/+$/, '');
   if (base === '') return undefined;
   const ctrl = new AbortController();

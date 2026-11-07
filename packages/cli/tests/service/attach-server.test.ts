@@ -124,11 +124,7 @@ describe('startAttachServer', () => {
     const client = await connectRetrying(attachSocketPath(serviceDir));
     await waitFor(() => client.lines.length >= 1);
     expect(client.lines[0]).toEqual(
-      expect.objectContaining({
-        t: 'state',
-        turnState: 'sleeping',
-        detail: 'próximo turno amanhã 9h',
-      }),
+      expect.objectContaining({ t: 'state', turnState: 'sleeping', detail: 'próximo turno amanhã 9h' }),
     );
     client.close();
   });

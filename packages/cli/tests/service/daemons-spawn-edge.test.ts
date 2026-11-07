@@ -74,9 +74,7 @@ describe('startDaemons — cenários de falha de spawn/openSync (mock)', () => {
 
   it('spawn devolve child SEM pid ⇒ loga "spawn não devolveu pid", NENHUM pidfile é gravado', async () => {
     writeDaemon('guard', 'sleep 30');
-    mockSpawn.mockReturnValue({ pid: undefined, unref: vi.fn() } as unknown as ReturnType<
-      typeof spawn
-    >);
+    mockSpawn.mockReturnValue({ pid: undefined, unref: vi.fn() } as unknown as ReturnType<typeof spawn>);
     startDaemons(serviceDir, log);
 
     expect(mockSpawn).toHaveBeenCalledTimes(1);

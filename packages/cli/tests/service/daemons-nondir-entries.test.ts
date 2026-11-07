@@ -30,10 +30,7 @@ describe('listDeclaredDaemons — entradas que NÃO são diretório em daemons/ 
 
   it('um ARQUIVO solto (não-diretório) dentro de daemons/ nunca aparece na lista NEM no log — só o daemon de verdade entra', () => {
     mkdirSync(join(serviceDir, 'daemons'), { recursive: true });
-    writeFileSync(
-      join(serviceDir, 'daemons', 'README.txt'),
-      'não é um daemon, é só um arquivo solto',
-    );
+    writeFileSync(join(serviceDir, 'daemons', 'README.txt'), 'não é um daemon, é só um arquivo solto');
     mkdirSync(join(serviceDir, 'daemons', 'real'), { recursive: true });
     writeFileSync(join(serviceDir, 'daemons', 'real', 'daemon.md'), '---\ncommand: sleep 1\n---\n');
 

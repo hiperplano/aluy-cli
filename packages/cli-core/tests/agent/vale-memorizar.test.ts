@@ -12,7 +12,10 @@
 // zeloso descarta fato real, e fato descartado não volta nunca.
 
 import { describe, expect, it } from 'vitest';
-import { ehContinuacaoPura, valeMemorizar } from '../../src/agent/memory/vale-memorizar.js';
+import {
+  ehContinuacaoPura,
+  valeMemorizar,
+} from '../../src/agent/memory/vale-memorizar.js';
 
 describe('ehContinuacaoPura — o que só destrava o turno seguinte', () => {
   it('reconhece o caso REAL que entupiu a memória do dono', () => {
@@ -20,20 +23,7 @@ describe('ehContinuacaoPura — o que só destrava o turno seguinte', () => {
   });
 
   it('reconhece as continuações comuns, com e sem pontuação', () => {
-    for (const t of [
-      'ok',
-      'ok.',
-      'OK!',
-      'beleza',
-      'pode seguir',
-      'vamos',
-      'sim',
-      'aprovado',
-      'continua',
-      'próximo',
-      'blz',
-      'isso',
-    ]) {
+    for (const t of ['ok', 'ok.', 'OK!', 'beleza', 'pode seguir', 'vamos', 'sim', 'aprovado', 'continua', 'próximo', 'blz', 'isso']) {
       expect(ehContinuacaoPura(t), `deveria ser continuação: ${t}`).toBe(true);
     }
   });
@@ -51,14 +41,16 @@ describe('ehContinuacaoPura — o que só destrava o turno seguinte', () => {
       'roda os testes',
       'ok, corrige o telegram', // tem "corrige" fora do vocabulário
       'pode publicar a rc.158',
-      'segue o token npm', // "token"/"npm" carregam informação
+      'segue o token npm',      // "token"/"npm" carregam informação
     ]) {
       expect(ehContinuacaoPura(t), `NÃO deveria ser continuação: ${t}`).toBe(false);
     }
   });
 
   it('frase longa nunca é continuação, mesmo começando com "ok"', () => {
-    expect(ehContinuacaoPura('ok entao vamos agora ver o que falta no picker de mcp')).toBe(false);
+    expect(
+      ehContinuacaoPura('ok entao vamos agora ver o que falta no picker de mcp'),
+    ).toBe(false);
   });
 });
 

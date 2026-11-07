@@ -29,11 +29,9 @@ import { tableLines } from '../../src/ui/table-lines.js';
 
 /** Linhas do bloco, sem cor. */
 function linhas(node: React.ReactElement): string[] {
-  const { lastFrame } = render(
-    <ThemeProvider theme={resolveTheme('escuro')}>{node}</ThemeProvider>,
-  );
+  const { lastFrame } = render(<ThemeProvider theme={resolveTheme('escuro')}>{node}</ThemeProvider>);
   // eslint-disable-next-line no-control-regex
-  return (lastFrame() ?? '').replace(/\u001b\[[0-9;]*m/g, '').split('\n');
+  return ((lastFrame() ?? '').replace(/\u001b\[[0-9;]*m/g, '')).split('\n');
 }
 
 /** Coluna da primeira letra (o recuo VISUAL de fato). */
@@ -41,7 +39,9 @@ const recuo = (l: string): number => l.search(/\S/);
 
 describe('<NoteBlock> — recuo da continuação', () => {
   it('título LONGO: a continuação alinha sob o TÍTULO, não sob uma coluna inexistente', () => {
-    const l = linhas(<NoteBlock title="fan-out concluído" lines={['3 sub-agentes terminaram.']} />);
+    const l = linhas(
+      <NoteBlock title="fan-out concluído" lines={['3 sub-agentes terminaram.']} />,
+    );
     expect(noteTitleFitsColumn('fan-out concluído')).toBe(false);
     expect(recuo(l[0]!)).toBe(0); // o glifo na margem
     expect(recuo(l[1]!)).toBe(NOTE_TITLE_COL);

@@ -19,13 +19,7 @@ import type { ServiceManifest, TelegramUpdate } from '@hiperplano/aluy-cli-core'
 import { EgressRateLimiter } from '@hiperplano/aluy-cli-core';
 
 function manifest(overrides: Partial<ServiceManifest> = {}): ServiceManifest {
-  return {
-    name: 'trader',
-    tunables: [],
-    ignoredFrontmatterKeys: [],
-    orchestrator: 'Rege, não opera.',
-    ...overrides,
-  };
+  return { name: 'trader', tunables: [], ignoredFrontmatterKeys: [], orchestrator: 'Rege, não opera.', ...overrides };
 }
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
@@ -83,15 +77,9 @@ describe('sendChannelText (via sendServiceReport) — client.send falha', () => 
     await sendServiceReport(
       manifest({ channel: 'telegram:100' }),
       { serviceName: 'trader', ok: true, critical: false, summary: 'ok.' },
-      baseDeps({
-        secretStore: { get: async () => TOKEN },
-        clientFactory: () => client,
-        log: (l) => logs.push(l),
-      }),
+      baseDeps({ secretStore: { get: async () => TOKEN }, clientFactory: () => client, log: (l) => logs.push(l) }),
     );
-    expect(logs.some((l) => l.includes('falha ao enviar') && l.includes('Bot API recusou'))).toBe(
-      true,
-    );
+    expect(logs.some((l) => l.includes('falha ao enviar') && l.includes('Bot API recusou'))).toBe(true);
   });
 
   it('client.send LANÇA (erro de rede) ⇒ loga via safeForLog, NÃO propaga a exceção', async () => {
@@ -107,11 +95,7 @@ describe('sendChannelText (via sendServiceReport) — client.send falha', () => 
       sendServiceReport(
         manifest({ channel: 'telegram:100' }),
         { serviceName: 'trader', ok: true, critical: false, summary: 'ok.' },
-        baseDeps({
-          secretStore: { get: async () => TOKEN },
-          clientFactory: () => client,
-          log: (l) => logs.push(l),
-        }),
+        baseDeps({ secretStore: { get: async () => TOKEN }, clientFactory: () => client, log: (l) => logs.push(l) }),
       ),
     ).resolves.toBeUndefined();
     expect(logs.some((l) => l.includes('erro ao enviar'))).toBe(true);
@@ -276,11 +260,7 @@ describe('waitForOwnerReply — timeout: catraca nega o ALERTA de timeout, e cli
   it('client.send LANÇA ao mandar o alerta de timeout ⇒ engolido (fail-open), ainda assim kind "timeout"', async () => {
     const client: ServiceChannelClient = {
       send: async (_chatId, text) => {
-        if (
-          text.includes('SEM RESPOSTA') ||
-          text.includes('timeout') ||
-          text.includes('não respondeu')
-        ) {
+        if (text.includes('SEM RESPOSTA') || text.includes('timeout') || text.includes('não respondeu')) {
           throw new Error('erro de rede ao mandar o alerta de timeout');
         }
         return true; // a pergunta inicial passa normalmente.

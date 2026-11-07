@@ -17,14 +17,7 @@ import { resolveContextWindow, CONTEXT_WINDOW_ENV } from '../../src/model/catalo
 describe('resolveContextWindow — degrau EMBUTIDO (F-WIN)', () => {
   it('o caso reportado: "deepseek/deepseek-v4-pro-0813" em custom, sem NADA declarado ⇒ 128k (não mais 0)', () => {
     expect(
-      resolveContextWindow(
-        'custom',
-        {},
-        undefined,
-        undefined,
-        undefined,
-        'deepseek/deepseek-v4-pro-0813',
-      ),
+      resolveContextWindow('custom', {}, undefined, undefined, undefined, 'deepseek/deepseek-v4-pro-0813'),
     ).toBe(128_000);
   });
 
@@ -45,14 +38,7 @@ describe('resolveContextWindow — degrau EMBUTIDO (F-WIN)', () => {
 
   it('outras famílias prioritárias (qwen/claude/gpt/gemini/llama) resolvem pelo embutido', () => {
     expect(
-      resolveContextWindow(
-        'custom',
-        {},
-        undefined,
-        undefined,
-        undefined,
-        'qwen/qwen2.5-72b-instruct',
-      ),
+      resolveContextWindow('custom', {}, undefined, undefined, undefined, 'qwen/qwen2.5-72b-instruct'),
     ).toBe(128_000);
     expect(
       resolveContextWindow(
@@ -65,14 +51,7 @@ describe('resolveContextWindow — degrau EMBUTIDO (F-WIN)', () => {
       ),
     ).toBe(200_000);
     expect(
-      resolveContextWindow(
-        'custom',
-        {},
-        undefined,
-        undefined,
-        undefined,
-        'openai/gpt-4o-2024-11-20',
-      ),
+      resolveContextWindow('custom', {}, undefined, undefined, undefined, 'openai/gpt-4o-2024-11-20'),
     ).toBe(128_000);
   });
 
@@ -108,23 +87,16 @@ describe('resolveContextWindow — degrau EMBUTIDO (F-WIN)', () => {
 
   it('tier CANÔNICO conhecido VENCE o embutido (broker é a fonte da verdade)', () => {
     // aluy-strata resolve 128k pelo fallback do tier, INDEPENDENTE do slug/embutido.
-    expect(resolveContextWindow('aluy-strata', {}, undefined, undefined, undefined, 'gpt-4o')).toBe(
-      128_000,
-    );
+    expect(
+      resolveContextWindow('aluy-strata', {}, undefined, undefined, undefined, 'gpt-4o'),
+    ).toBe(128_000);
   });
 
   // ── NÃO-REGRESSÃO F134: slug DESCONHECIDO continua 0/inerte ──────────────────────
 
   it('F134 preservado — slug DESCONHECIDO em custom continua 0 (size-aware do Compactor OFF)', () => {
     expect(
-      resolveContextWindow(
-        'custom',
-        {},
-        undefined,
-        undefined,
-        undefined,
-        'acme/modelo-inventado-xyz',
-      ),
+      resolveContextWindow('custom', {}, undefined, undefined, undefined, 'acme/modelo-inventado-xyz'),
     ).toBe(0);
   });
 
@@ -137,14 +109,7 @@ describe('resolveContextWindow — degrau EMBUTIDO (F-WIN)', () => {
 
   it('F134 preservado — custom SEM env/config/modelWindow e SEM slug reconhecido: mesma cadeia de antes', () => {
     expect(
-      resolveContextWindow(
-        'custom',
-        { [CONTEXT_WINDOW_ENV]: 'lixo' },
-        undefined,
-        -5,
-        undefined,
-        'x/y-z',
-      ),
+      resolveContextWindow('custom', { [CONTEXT_WINDOW_ENV]: 'lixo' }, undefined, -5, undefined, 'x/y-z'),
     ).toBe(0);
   });
 });

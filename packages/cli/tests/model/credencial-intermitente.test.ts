@@ -34,9 +34,7 @@ import {
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-const COFRE_ISOLADO = {
-  vaultPath: join(mkdtempSync(join(tmpdir(), 'aluy-cred-iso2-')), 'credentials.enc'),
-};
+const COFRE_ISOLADO = { vaultPath: join(mkdtempSync(join(tmpdir(), 'aluy-cred-iso2-')), 'credentials.enc') };
 
 /** Entry de keychain controlável: valor corrente + erro programável na leitura. */
 function entradaFake(estado: { valor?: string; erro?: Error }): {

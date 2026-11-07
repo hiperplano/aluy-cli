@@ -74,11 +74,7 @@ function tierControlCaller(): ModelCaller & {
   setProvider(name: string | undefined): void;
   setClient(client: ModelClient): void;
 } {
-  const state = {
-    tier: 'aluy-flux',
-    model: undefined as string | undefined,
-    provider: undefined as string | undefined,
-  };
+  const state = { tier: 'aluy-flux', model: undefined as string | undefined, provider: undefined as string | undefined };
   const setClientCalls: ModelClient[] = [];
   return {
     async call(): Promise<ModelCallResult> {
@@ -123,21 +119,12 @@ describe('F-PROV — SessionController.setLocalProvider (fix do no-op silencioso
       model: caller,
       permission: new PolicyPermissionEngine(),
       ports: fakePorts(),
-      askResolver: {
-        async resolve() {
-          return { kind: 'approve-once' as const };
-        },
-      },
+      askResolver: { async resolve() { return { kind: 'approve-once' as const }; } },
       meta: LOCAL_META,
       flush: { intervalMs: 0 },
       switchLocalProvider: async (name: string) => {
         expect(name).toBe('deepseek');
-        return {
-          ok: true,
-          detail: `provider ativo agora: ${name}.`,
-          client: newClient,
-          defaultModel: 'deepseek-chat',
-        };
+        return { ok: true, detail: `provider ativo agora: ${name}.`, client: newClient, defaultModel: 'deepseek-chat' };
       },
     });
 
@@ -158,17 +145,10 @@ describe('F-PROV — SessionController.setLocalProvider (fix do no-op silencioso
       model: caller,
       permission: new PolicyPermissionEngine(),
       ports: fakePorts(),
-      askResolver: {
-        async resolve() {
-          return { kind: 'approve-once' as const };
-        },
-      },
+      askResolver: { async resolve() { return { kind: 'approve-once' as const }; } },
       meta: LOCAL_META,
       flush: { intervalMs: 0 },
-      switchLocalProvider: async () => ({
-        ok: false,
-        detail: 'provider "bogus" não está no catálogo local.',
-      }),
+      switchLocalProvider: async () => ({ ok: false, detail: 'provider "bogus" não está no catálogo local.' }),
     });
 
     const result = await controller.setLocalProvider('bogus');
@@ -186,11 +166,7 @@ describe('F-PROV — SessionController.setLocalProvider (fix do no-op silencioso
       model: caller,
       permission: new PolicyPermissionEngine(),
       ports: fakePorts(),
-      askResolver: {
-        async resolve() {
-          return { kind: 'approve-once' as const };
-        },
-      },
+      askResolver: { async resolve() { return { kind: 'approve-once' as const }; } },
       meta: LOCAL_META,
       flush: { intervalMs: 0 },
       // switchLocalProvider AUSENTE de propósito.
@@ -210,11 +186,7 @@ describe('F-PROV — SessionController.setLocalProvider (fix do no-op silencioso
       model: caller,
       permission: new PolicyPermissionEngine(),
       ports: fakePorts(),
-      askResolver: {
-        async resolve() {
-          return { kind: 'approve-once' as const };
-        },
-      },
+      askResolver: { async resolve() { return { kind: 'approve-once' as const }; } },
       meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPct: 0 }, // sem backend:'local'
       flush: { intervalMs: 0 },
       switchLocalProvider: async () => {
@@ -246,11 +218,7 @@ describe('F-PROV — SessionController.setLocalProvider (fix do no-op silencioso
       model: caller,
       permission: new PolicyPermissionEngine(),
       ports: fakePorts(),
-      askResolver: {
-        async resolve() {
-          return { kind: 'approve-once' as const };
-        },
-      },
+      askResolver: { async resolve() { return { kind: 'approve-once' as const }; } },
       meta: LOCAL_META,
       flush: { intervalMs: 0 },
       localModelCatalog: { listNames },
@@ -292,11 +260,7 @@ describe('F-PROV — o provider trocado APARECE no rodapé, na hora', () => {
       model: caller,
       permission: new PolicyPermissionEngine(),
       ports: fakePorts(),
-      askResolver: {
-        async resolve() {
-          return { kind: 'approve-once' as const };
-        },
-      },
+      askResolver: { async resolve() { return { kind: 'approve-once' as const }; } },
       meta: LOCAL_META,
       flush: { intervalMs: 0 },
       switchLocalProvider: async (name: string) => ({
@@ -337,3 +301,4 @@ describe('F-PROV — o provider trocado APARECE no rodapé, na hora', () => {
     controller.dispose();
   });
 });
+

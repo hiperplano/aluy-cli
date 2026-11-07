@@ -11,11 +11,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  connectAttachSocket,
-  formatSocketErrorReason,
-  decodeDataChunk,
-} from '../../src/service/attach-client.js';
+import { connectAttachSocket, formatSocketErrorReason, decodeDataChunk } from '../../src/service/attach-client.js';
 import { parseServiceAttachClientLine } from '@hiperplano/aluy-cli-core';
 
 /** Espera até `cond()` virar `true` ou o timeout estourar (poll de 10ms) — mesmo
@@ -138,7 +134,10 @@ describe('connectAttachSocket', () => {
     });
 
     await waitFor(() => onLines.length >= 2);
-    expect(onLines).toEqual(['· olá', '── estado: aguardando o dono — pergunta pendente ──']);
+    expect(onLines).toEqual([
+      '· olá',
+      '── estado: aguardando o dono — pergunta pendente ──',
+    ]);
 
     conn.send('pode prosseguir');
     await waitFor(() => received.length >= 1);

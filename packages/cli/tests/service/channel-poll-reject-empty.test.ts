@@ -10,22 +10,11 @@
 // como DADO"); a ausência dessas linhas prova que a rodada rejeitada não injetou
 // nada. Arquivo SEPARADO — só ESTENDE a cobertura.
 import { describe, expect, it } from 'vitest';
-import {
-  waitForOwnerReply,
-  newServiceEgressLimiter,
-  type ServiceChannelClient,
-  type ServiceChannelDeps,
-} from '../../src/service/channel.js';
+import { waitForOwnerReply, newServiceEgressLimiter, type ServiceChannelClient, type ServiceChannelDeps } from '../../src/service/channel.js';
 import type { ServiceManifest } from '@hiperplano/aluy-cli-core';
 
 function manifest(overrides: Partial<ServiceManifest> = {}): ServiceManifest {
-  return {
-    name: 'trader',
-    tunables: [],
-    ignoredFrontmatterKeys: [],
-    orchestrator: 'Rege, não opera.',
-    ...overrides,
-  };
+  return { name: 'trader', tunables: [], ignoredFrontmatterKeys: [], orchestrator: 'Rege, não opera.', ...overrides };
 }
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';

@@ -124,9 +124,7 @@ describe('parse puro — dialeto de billing legado (tokenrouter, medido ao vivo)
   it('teto ausente ⇒ undefined (corpo do /api/user/self, sessão — NÃO é este dialeto)', () => {
     // MEDIDO: /api/user/self com a API key devolve 401 "Session validation failed" —
     // mesmo que o corpo fosse alcançado, ele não tem `hard_limit_usd` (formato errado).
-    expect(
-      parseOpenAiCompatBillingSubscription(JSON.parse(TOKENROUTER_USER_SELF_401)),
-    ).toBeUndefined();
+    expect(parseOpenAiCompatBillingSubscription(JSON.parse(TOKENROUTER_USER_SELF_401))).toBeUndefined();
   });
 
   it('corpo de erro (401 real) não tem hard_limit_usd ⇒ undefined', () => {
@@ -214,11 +212,7 @@ describe('dialeto de billing legado — I/O isolado', () => {
 
   it('teto não encontrado (1ª chamada falha) ⇒ NÃO faz a 2ª chamada (poupa rede)', async () => {
     const { fetchImpl, calls } = routedFetch({
-      '/dashboard/billing/subscription': {
-        ok: false,
-        status: 401,
-        text: TOKENROUTER_SUBSCRIPTION_401,
-      },
+      '/dashboard/billing/subscription': { ok: false, status: 401, text: TOKENROUTER_SUBSCRIPTION_401 },
     });
     const result = await openAiCompatBillingDialect(deps({ fetchImpl }));
     expect(result).toBeUndefined();
@@ -255,9 +249,7 @@ describe('dialeto OpenRouter — I/O isolado', () => {
   });
 
   it('401 real ⇒ undefined, sem lançar', async () => {
-    const { fetchImpl } = routedFetch({
-      '/credits': { ok: false, status: 401, text: OPENROUTER_CREDITS_401 },
-    });
+    const { fetchImpl } = routedFetch({ '/credits': { ok: false, status: 401, text: OPENROUTER_CREDITS_401 } });
     await expect(openRouterCreditsDialect(deps({ fetchImpl }))).resolves.toBeUndefined();
   });
 });

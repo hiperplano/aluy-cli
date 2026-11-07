@@ -28,13 +28,7 @@ describe('dica do Ctrl+B na linha viva', () => {
   it('comando de shell rodando ⇒ "ctrl-b solta" na própria linha', () => {
     const out = plain(
       wrap(
-        <ToolLine
-          verb="bash"
-          target="npm run dev"
-          result=""
-          status="running"
-          verbGerund="rodando"
-        />,
+        <ToolLine verb="bash" target="npm run dev" result="" status="running" verbGerund="rodando" />,
       ).lastFrame() ?? '',
     );
     expect(out).toContain('rodando npm run dev');
@@ -43,9 +37,8 @@ describe('dica do Ctrl+B na linha viva', () => {
 
   it('leitura em voo NÃO promete (não há o que soltar)', () => {
     const out = plain(
-      wrap(
-        <ToolLine verb="read" target="a.ts" result="" status="running" verbGerund="lendo" />,
-      ).lastFrame() ?? '',
+      wrap(<ToolLine verb="read" target="a.ts" result="" status="running" verbGerund="lendo" />)
+        .lastFrame() ?? '',
     );
     expect(out).not.toContain('ctrl-b');
   });
@@ -58,7 +51,9 @@ describe('dica do Ctrl+B na linha viva', () => {
   });
 
   it('`!comando` rodando ⇒ a mesma dica', () => {
-    const out = plain(wrap(<BangBlock command="npm test" status="running" />).lastFrame() ?? '');
+    const out = plain(
+      wrap(<BangBlock command="npm test" status="running" />).lastFrame() ?? '',
+    );
     expect(out).toContain('ctrl-b solta');
   });
 });

@@ -8,12 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
-import {
-  UNICODE_GLYPHS,
-  SAFE_GLYPHS,
-  ASCII_GLYPHS,
-  NERD_GLYPHS,
-} from '../../src/ui/theme/glyphs.js';
+import { UNICODE_GLYPHS, SAFE_GLYPHS, ASCII_GLYPHS, NERD_GLYPHS } from '../../src/ui/theme/glyphs.js';
 
 const UTF8 = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color', COLORTERM: 'truecolor' };
 

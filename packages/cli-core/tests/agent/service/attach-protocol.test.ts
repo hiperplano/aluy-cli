@@ -14,11 +14,7 @@ import {
 
 describe('encode/parse round-trip (servidor → cliente)', () => {
   it('log: codifica e faz o parse de volta idêntico', () => {
-    const ev: ServiceAttachServerEvent = {
-      t: 'log',
-      line: 'runner iniciado',
-      atIso: '2026-08-01T00:00:00.000Z',
-    };
+    const ev: ServiceAttachServerEvent = { t: 'log', line: 'runner iniciado', atIso: '2026-08-01T00:00:00.000Z' };
     const line = encodeServiceAttachServerEvent(ev);
     expect(line.endsWith('\n')).toBe(true);
     expect(parseServiceAttachServerLine(line)).toEqual(ev);
@@ -118,20 +114,11 @@ describe('formatServiceAttachEventForTerminal', () => {
     expect(s).toContain('atividade 1/3');
   });
   it('state sem detail', () => {
-    const s = formatServiceAttachEventForTerminal({
-      t: 'state',
-      turnState: 'sleeping',
-      atIso: 'y',
-    });
+    const s = formatServiceAttachEventForTerminal({ t: 'state', turnState: 'sleeping', atIso: 'y' });
     expect(s).toContain('dormindo');
   });
   it('block', () => {
-    const s = formatServiceAttachEventForTerminal({
-      t: 'block',
-      role: 'you',
-      text: 'oi',
-      atIso: 'y',
-    });
+    const s = formatServiceAttachEventForTerminal({ t: 'block', role: 'you', text: 'oi', atIso: 'y' });
     expect(s).toBe('[you] oi');
   });
 });

@@ -39,14 +39,7 @@ async function drive(
 ): Promise<EffortPickerController> {
   let last!: EffortPickerController;
   let consumed = false;
-  render(
-    <Probe
-      args={args}
-      steps={steps}
-      onState={(c) => (last = c)}
-      onConsumed={(d) => (consumed = d)}
-    />,
-  );
+  render(<Probe args={args} steps={steps} onState={(c) => (last = c)} onConsumed={(d) => (consumed = d)} />);
   const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
   const deadline = Date.now() + 2000;
   while (Date.now() < deadline) {

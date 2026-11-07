@@ -123,10 +123,7 @@ export function buildAgentsNote(input: AgentsListInput): AgentsListNote {
       agentPersonaLine(p),
     ]);
     lines.push(
-      ...tableLines(rows, {
-        headers: ['agente', 'escopo', 'tools', 'sobre'],
-        ...{ maxWidths: [18, 8, 24, 44] },
-      }),
+      ...tableLines(rows, { headers: ['agente', 'escopo', 'tools', 'sobre'], ...{ maxWidths: [18, 8, 24, 44] } }),
     );
   }
 

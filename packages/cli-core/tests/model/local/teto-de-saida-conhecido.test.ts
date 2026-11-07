@@ -25,10 +25,7 @@ const SSE =
 async function corpoEnviado(model: string, over: Partial<ModelCallRequest> = {}) {
   const { fetch, calls } = makeBrokerFetch({ status: 200, sse: SSE });
   const client = new LocalModelClient({
-    adapter: new OpenAiCompatAdapter({
-      provider: 'compat',
-      defaultBaseUrl: 'https://p.exemplo/v1',
-    }),
+    adapter: new OpenAiCompatAdapter({ provider: 'compat', defaultBaseUrl: 'https://p.exemplo/v1' }),
     config: { provider: 'compat', model },
     baseUrl: 'https://p.exemplo/v1',
     getCredential: cred,

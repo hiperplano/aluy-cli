@@ -43,11 +43,7 @@ describe('buildServicesNote — válidos', () => {
       services: [
         {
           name: 'trader',
-          manifest: manifest({
-            name: 'trader',
-            group: 'mesa-trading',
-            model: 'deepseek/deepseek-chat',
-          }),
+          manifest: manifest({ name: 'trader', group: 'mesa-trading', model: 'deepseek/deepseek-chat' }),
         },
       ],
       errors: [],

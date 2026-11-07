@@ -62,17 +62,11 @@ describe('killGracefully — filho IGNORA SIGTERM ⇒ escala p/ SIGKILL após ~G
       externalStop: externalStop.signal,
       execPath: process.execPath,
       aluyEntrypoint: FAKE_TURN_ENTRYPOINT,
-      channelDeps: {
-        egressLimiter: new EgressRateLimiter(20, 60_000),
-        clientFactory: () => fakeClient(),
-      },
+      channelDeps: { egressLimiter: new EgressRateLimiter(20, 60_000), clientFactory: () => fakeClient() },
     });
 
     await waitFor(() => logs.some((l) => l.startsWith('acordou')));
-    await waitFor(
-      () => logs.some((l) => l.includes('iniciando turno (') && l.includes('"trava"')),
-      10_000,
-    );
+    await waitFor(() => logs.some((l) => l.includes('iniciando turno (') && l.includes('"trava"')), 10_000);
     // Folga p/ o processo-FILHO de fato terminar de subir (Node startup + carregar
     // o módulo) e rodar sua própria linha `process.on('SIGTERM', ...)` ANTES de
     // mandarmos o sinal — senão a disposição DEFAULT do SO (que mata na hora)
@@ -93,8 +87,6 @@ describe('killGracefully — filho IGNORA SIGTERM ⇒ escala p/ SIGKILL após ~G
     // (que mataria em milissegundos). Teto generoso (6s) evita flake por jitter de
     // CPU, mas ainda distingue com folga de um SIGTERM instantâneo.
     expect(elapsedMs).toBeGreaterThan(6_000);
-    expect(
-      logs.some((l) => l.includes('atividade 1/1 "trava": interrompida (stop do runner).')),
-    ).toBe(true);
+    expect(logs.some((l) => l.includes('atividade 1/1 "trava": interrompida (stop do runner).'))).toBe(true);
   }, 30_000);
 });

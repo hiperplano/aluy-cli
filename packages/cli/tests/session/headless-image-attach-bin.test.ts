@@ -144,7 +144,14 @@ describe('binário aluy — anexo de IMAGEM ponta a ponta (`@mention` + `--image
     { timeout: EXIT_TIMEOUT_MS + 10_000 },
     async () => {
       const r = await runBinary(
-        ['-p', 'descreva @screenshot1.png', '--image', 'screenshot2.png', '--tier', 'aluy-flux'],
+        [
+          '-p',
+          'descreva @screenshot1.png',
+          '--image',
+          'screenshot2.png',
+          '--tier',
+          'aluy-flux',
+        ],
         env(),
         workspaceDir,
       );

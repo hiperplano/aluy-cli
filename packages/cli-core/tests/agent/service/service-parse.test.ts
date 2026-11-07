@@ -131,20 +131,14 @@ describe('parseServiceManifest — FALHA FECHADA (RES-MD-3)', () => {
     // troca por `<=`/`>=` (limite EXCLUSIVO) passa despercebido, já que os
     // outros testes só cobrem valor estritamente DENTRO (2 em [1..5]) ou
     // estritamente FORA (9 em [1..5]), nunca exatamente NO limite.
-    const atMin = ok(
-      'service.md',
-      '---\nname: trader\ntamanho-posicao: 1 [1..5]\n---\nOrquestrador.',
-    );
+    const atMin = ok('service.md', '---\nname: trader\ntamanho-posicao: 1 [1..5]\n---\nOrquestrador.');
     expect(atMin.tunables.find((t) => t.key === 'tamanho-posicao')).toEqual({
       key: 'tamanho-posicao',
       value: 1,
       min: 1,
       max: 5,
     });
-    const atMax = ok(
-      'service.md',
-      '---\nname: trader\ntamanho-posicao: 5 [1..5]\n---\nOrquestrador.',
-    );
+    const atMax = ok('service.md', '---\nname: trader\ntamanho-posicao: 5 [1..5]\n---\nOrquestrador.');
     expect(atMax.tunables.find((t) => t.key === 'tamanho-posicao')).toEqual({
       key: 'tamanho-posicao',
       value: 5,
@@ -243,10 +237,7 @@ describe('parseServiceManifest — group: (descoberta entre serviços)', () => {
 // (existe? é diretório? cai dentro de `~/.aluy/`?) é do @hiperplano/aluy-cli.
 describe('parseServiceManifest — workspace: (raiz extra além da própria pasta)', () => {
   it('uma única raiz (linha simples) ⇒ lista de 1 item', () => {
-    const m = ok(
-      'service.md',
-      '---\nname: trader\nworkspace: ~/projects/fluider\n---\nOrquestrador.',
-    );
+    const m = ok('service.md', '---\nname: trader\nworkspace: ~/projects/fluider\n---\nOrquestrador.');
     expect(m.workspaceRoots).toEqual(['~/projects/fluider']);
   });
 
@@ -283,31 +274,25 @@ describe('parseServiceManifest — workspace: (raiz extra além da própria past
   });
 
   it('caminho ABSOLUTO é aceito na FORMA (é o caso de uso — apontar pra fora da pasta)', () => {
-    const m = ok(
-      'service.md',
-      '---\nname: trader\nworkspace: /home/dono/projects/fluider\n---\nOrq.',
-    );
+    const m = ok('service.md', '---\nname: trader\nworkspace: /home/dono/projects/fluider\n---\nOrq.');
     expect(m.workspaceRoots).toEqual(['/home/dono/projects/fluider']);
   });
 
   it('".." relativo é aceito na FORMA (ao contrário de workflow:, aqui é legítimo)', () => {
-    const m = ok(
-      'service.md',
-      '---\nname: trader\nworkspace: ../outro-projeto\n---\nOrquestrador.',
-    );
+    const m = ok('service.md', '---\nname: trader\nworkspace: ../outro-projeto\n---\nOrquestrador.');
     expect(m.workspaceRoots).toEqual(['../outro-projeto']);
   });
 
   it('byte de controle numa entrada ⇒ erro (fail-closed)', () => {
-    const reason = fail(
-      'service.md',
-      '---\nname: trader\nworkspace: "~/x\x01y"\n---\nOrquestrador.',
-    );
+    const reason = fail('service.md', '---\nname: trader\nworkspace: "~/x\x01y"\n---\nOrquestrador.');
     expect(reason).toMatch(/workspace/);
   });
 
   it('dedup preservando ordem quando a mesma raiz aparece 2x', () => {
-    const m = ok('service.md', '---\nname: trader\nworkspace: ~/a, ~/b, ~/a\n---\nOrquestrador.');
+    const m = ok(
+      'service.md',
+      '---\nname: trader\nworkspace: ~/a, ~/b, ~/a\n---\nOrquestrador.',
+    );
     expect(m.workspaceRoots).toEqual(['~/a', '~/b']);
   });
 });
@@ -344,10 +329,7 @@ describe('isSafeGroupLabel', () => {
 // `model:` — fixa o modelo do TURNO do serviço (não depende do default global).
 describe('parseServiceManifest — model: (modelo fixo por serviço)', () => {
   it('"model: xiaomi/mimo-v2.5-pro" ⇒ campo cru pass-through (slug com "/")', () => {
-    const m = ok(
-      'service.md',
-      '---\nname: trader\nmodel: xiaomi/mimo-v2.5-pro\n---\nOrquestrador.',
-    );
+    const m = ok('service.md', '---\nname: trader\nmodel: xiaomi/mimo-v2.5-pro\n---\nOrquestrador.');
     expect(m.model).toBe('xiaomi/mimo-v2.5-pro');
   });
 
@@ -357,10 +339,7 @@ describe('parseServiceManifest — model: (modelo fixo por serviço)', () => {
   });
 
   it('"model:" com byte de controle ⇒ erro (fail-closed)', () => {
-    const reason = fail(
-      'service.md',
-      '---\nname: trader\nmodel: "bad\x01slug"\n---\nOrquestrador.',
-    );
+    const reason = fail('service.md', '---\nname: trader\nmodel: "bad\x01slug"\n---\nOrquestrador.');
     expect(reason).toMatch(/model/);
   });
 

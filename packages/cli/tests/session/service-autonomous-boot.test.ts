@@ -55,10 +55,7 @@ function scriptedBroker(toolCall: { id: string; name: string; input: Record<stri
 }
 
 class MemoryStore implements CredentialStore {
-  cred: StoredCredential | null = {
-    token: 'pat_test',
-    org: 'org_test',
-  } as unknown as StoredCredential;
+  cred: StoredCredential | null = { token: 'pat_test', org: 'org_test' } as unknown as StoredCredential;
   async get(): Promise<StoredCredential | null> {
     return this.cred;
   }

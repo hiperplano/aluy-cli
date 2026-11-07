@@ -88,11 +88,7 @@ export function itensDaBusca(results: readonly RegistrySearchResult[]): readonly
  * exercício de digitação. Ficamos com o último segmento, saneado.
  */
 export function nomeParaConfig(name: string): string {
-  const ultimo =
-    name
-      .split('/')
-      .filter((p) => p !== '')
-      .pop() ?? name;
+  const ultimo = name.split('/').filter((p) => p !== '').pop() ?? name;
   const limpo = ultimo.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+|-+$/g, '');
   return limpo === '' ? 'mcp-server' : limpo;
 }

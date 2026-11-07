@@ -61,7 +61,10 @@ describe('runHeadlessPrint — o desfecho é DESTE turno', () => {
   it('turno que deu CERTO não herda erro de broker do histórico restaurado', async () => {
     // O caso exato da máquina do dono.
     const ctrl = controllerRetomado(
-      [{ kind: 'you', text: 'objetivo de ontem' }, ERRO_ANTIGO],
+      [
+        { kind: 'you', text: 'objetivo de ontem' },
+        ERRO_ANTIGO,
+      ],
       [
         { kind: 'you', text: 'responda apenas: ok' },
         { kind: 'aluy', text: 'ok', streaming: false },
@@ -91,12 +94,7 @@ describe('runHeadlessPrint — o desfecho é DESTE turno', () => {
       [{ kind: 'aluy', text: 'tudo certo ontem', streaming: false }],
       [
         { kind: 'you', text: 'tente agora' },
-        {
-          kind: 'broker-error',
-          message: 'o provider recusou (429).',
-          status: 429,
-          backend: 'local',
-        },
+        { kind: 'broker-error', message: 'o provider recusou (429).', status: 429, backend: 'local' },
       ],
     );
     const res = await runHeadlessPrint(ctrl, 'tente agora');

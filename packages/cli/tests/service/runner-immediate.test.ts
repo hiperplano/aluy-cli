@@ -73,11 +73,7 @@ describe('runServiceRunner — immediate: true (integração, processo-filho REA
   });
 
   it('COM immediate: true — o turno roda ANTES do primeiro "dormindo até" (e só na 1ª volta)', async () => {
-    const dir = writeServiceManifest(base, {
-      workflow: 'turno',
-      channel: 'telegram:1',
-      immediate: true,
-    });
+    const dir = writeServiceManifest(base, { workflow: 'turno', channel: 'telegram:1', immediate: true });
     writeWorkflow(dir, 'turno', [{ id: 'abrir', goal: 'FAKE_MODE_OK primeira atividade.' }]);
 
     const client = fakeClient();
@@ -100,9 +96,7 @@ describe('runServiceRunner — immediate: true (integração, processo-filho REA
 
     // (b) o turno IMEDIATO abre e conclui SEM nunca logar "dormindo até" antes dele.
     await waitFor(() => logs.some((l) => l.startsWith('turno encerrado')));
-    const idxImediato = logs.findIndex((l) =>
-      l.includes('"immediate: true" declarado — turno IMEDIATO'),
-    );
+    const idxImediato = logs.findIndex((l) => l.includes('"immediate: true" declarado — turno IMEDIATO'));
     const idxDormindo1 = logs.findIndex((l) => l.startsWith('dormindo até'));
     expect(idxImediato).toBeGreaterThanOrEqual(0);
     expect(idxDormindo1).toBeGreaterThanOrEqual(0);
@@ -156,9 +150,7 @@ describe('runServiceRunner — immediate: true (integração, processo-filho REA
 
     expect(logs.some((l) => l.includes('turno IMEDIATO'))).toBe(false);
     // a PRIMEIRA linha de interesse do laço é "dormindo até" — argv/fluxo idêntico ao de hoje.
-    const firstRelevant = logs.find(
-      (l) => l.startsWith('dormindo até') || l.includes('turno IMEDIATO'),
-    );
+    const firstRelevant = logs.find((l) => l.startsWith('dormindo até') || l.includes('turno IMEDIATO'));
     expect(firstRelevant).toMatch(/^dormindo até/);
   }, 20_000);
 

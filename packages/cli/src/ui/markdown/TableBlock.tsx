@@ -108,19 +108,13 @@ export function TableBlock(props: TableBlockProps): React.ReactElement {
     /** Uma linha da tabela, pintada e completada até a borda. */
     const faixa = (texto: string, chave: string): React.ReactElement => (
       <Text key={chave} backgroundColor={bg}>
-        {' ' +
-          texto +
-          (util !== undefined ? ' '.repeat(Math.max(0, util - 1 - stringWidth(texto))) : '')}
+        {' ' + texto + (util !== undefined ? ' '.repeat(Math.max(0, util - 1 - stringWidth(texto))) : '')}
       </Text>
     );
     const linhaCabecalho = props.header
       .map((h, c) =>
         vestir(
-          padCell(
-            truncateToWidth(visibleText(h), widths[c] ?? 0),
-            widths[c] ?? 0,
-            props.align[c] ?? 'left',
-          ),
+          padCell(truncateToWidth(visibleText(h), widths[c] ?? 0), widths[c] ?? 0, props.align[c] ?? 'left'),
           { color: estAccent.color, bold: true },
         ),
       )

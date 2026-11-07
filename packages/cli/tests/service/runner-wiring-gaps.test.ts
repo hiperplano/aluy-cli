@@ -20,9 +20,7 @@ import type { ServiceChannelClient } from '../../src/service/channel.js';
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeClient(): ServiceChannelClient & {
-  readonly sent: { chatId: number; text: string }[];
-} {
+function fakeClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,
@@ -132,9 +130,7 @@ describe('runServiceRunner — schedule VÁLIDO + `externalStop` JÁ abortado �
 
     expect(code).toBe(0);
     expect(logs.some((l) => l.startsWith('runner iniciado (pid'))).toBe(true);
-    expect(logs.some((l) => l.startsWith('dormindo até') && l.includes('próximo turno'))).toBe(
-      true,
-    );
+    expect(logs.some((l) => l.startsWith('dormindo até') && l.includes('próximo turno'))).toBe(true);
     expect(logs.some((l) => l.includes('nunca dispara'))).toBe(false);
     expect(logs).toContain('runner encerrado.');
     expect(existsSync(runnerPidPath(dir))).toBe(false);

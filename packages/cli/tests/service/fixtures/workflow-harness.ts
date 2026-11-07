@@ -95,10 +95,7 @@ export function writeWorkflow(
     const agentPart = a.agent !== undefined ? `[${a.agent}] ` : '';
     return `${i + 1}. ${a.id} ${agentPart}— ${a.goal}`;
   });
-  writeFileSync(
-    join(dir, `${workflowName}.md`),
-    ['---', `name: ${workflowName}`, '---', ...lines].join('\n'),
-  );
+  writeFileSync(join(dir, `${workflowName}.md`), ['---', `name: ${workflowName}`, '---', ...lines].join('\n'));
 }
 
 /** tmpdir novo, sob o prefixo padrão dos testes deste módulo — o CALLER remove
@@ -134,8 +131,7 @@ export function disarmFakeClock(): void {
 export async function waitFor(cond: () => boolean, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!cond()) {
-    if (Date.now() > deadline)
-      throw new Error(`waitFor: timeout (${timeoutMs}ms) esperando a condição.`);
+    if (Date.now() > deadline) throw new Error(`waitFor: timeout (${timeoutMs}ms) esperando a condição.`);
     await new Promise((r) => setTimeout(r, 20));
   }
 }

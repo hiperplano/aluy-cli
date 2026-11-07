@@ -64,11 +64,7 @@ function readSnapshot(serviceDir: string): ServiceStatusSnapshot | undefined {
   if (!existsSync(path)) return undefined;
   try {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<ServiceStatusSnapshot>;
-    if (
-      raw.turnState !== 'sleeping' &&
-      raw.turnState !== 'running-turn' &&
-      raw.turnState !== 'awaiting-owner'
-    ) {
+    if (raw.turnState !== 'sleeping' && raw.turnState !== 'running-turn' && raw.turnState !== 'awaiting-owner') {
       return undefined;
     }
     return raw as ServiceStatusSnapshot;
@@ -94,9 +90,5 @@ export function readServiceRuntimeStatus(serviceDir: string): ServiceRuntimeStat
     pid = undefined;
   }
   const snapshot = readSnapshot(serviceDir);
-  return {
-    running: true,
-    ...(pid !== undefined ? { pid } : {}),
-    ...(snapshot ? { snapshot } : {}),
-  };
+  return { running: true, ...(pid !== undefined ? { pid } : {}), ...(snapshot ? { snapshot } : {}) };
 }

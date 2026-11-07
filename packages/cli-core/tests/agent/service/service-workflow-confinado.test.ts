@@ -11,11 +11,7 @@
 // recusa é ESCAPAR.
 
 import { describe, expect, it } from 'vitest';
-import {
-  parseServiceManifest,
-  isServiceManifestError,
-  isSafeWorkflowRef,
-} from '../../../src/index.js';
+import { parseServiceManifest, isServiceManifestError, isSafeWorkflowRef } from '../../../src/index.js';
 
 function manifestoCom(workflow: string): ReturnType<typeof parseServiceManifest> {
   return parseServiceManifest(

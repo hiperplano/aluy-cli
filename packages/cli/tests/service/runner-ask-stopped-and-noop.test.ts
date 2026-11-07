@@ -30,9 +30,7 @@ import {
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeClient(): ServiceChannelClient & {
-  readonly sent: { chatId: number; text: string }[];
-} {
+function fakeClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,
@@ -95,9 +93,7 @@ describe('runServiceRunner — `stop` dispara DURANTE a ASK-ESPERA (nenhuma resp
     // um turno que ainda está "aguardando dono" no momento do stop NÃO fechou.
     expect(logs.some((l) => l.startsWith('turno encerrado —'))).toBe(false);
     expect(client.sent.every((m) => !m.text.includes('ALERTA'))).toBe(true);
-    expect(
-      client.sent.some((m) => m.text.includes('concluídas') || m.text.includes('SEM RESPOSTA')),
-    ).toBe(false);
+    expect(client.sent.some((m) => m.text.includes('concluídas') || m.text.includes('SEM RESPOSTA'))).toBe(false);
     expect(existsSync(runnerPidPath(dir))).toBe(false); // shutdown() gracioso ainda limpa tudo.
   }, 20_000);
 });
@@ -140,9 +136,7 @@ describe('runServiceRunner — manifesto SEM "workflow:" declarado ⇒ turno "no
 
     expect(code).toBe(0);
     expect(logs).toContain('sem "workflow:" declarado — nada a executar neste turno.');
-    expect(
-      logs.some((l) => l.startsWith('turno encerrado — sem workflow declarado (no-op).')),
-    ).toBe(true);
+    expect(logs.some((l) => l.startsWith('turno encerrado — sem workflow declarado (no-op).'))).toBe(true);
     expect(client.sent.some((m) => m.text.includes('sem workflow declarado (no-op).'))).toBe(true);
     expect(client.sent.every((m) => !m.text.includes('ALERTA'))).toBe(true);
   }, 20_000);

@@ -3,16 +3,7 @@
 // identidade da MÁQUINA) e os TRÊS caminhos de erro exigidos: máquina diferente,
 // machine-id ilegível, permissão aberta. Usa tmpdir REAL (nunca `~/.aluy` real —
 // mesma disciplina do F167 nos testes de local-login).
-import {
-  mkdirSync,
-  chmodSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -185,9 +176,9 @@ describe('file-vault — os TRÊS caminhos de erro (honestos, nunca crasham, nun
     const vaultPath = tmpVaultPath();
     writeFileVaultAccount('anthropic:apikey', 'sk-x', { ...MAQUINA_A, vaultPath });
     chmodSync(vaultPath, 0o644);
-    expect(() =>
-      writeFileVaultAccount('openai:apikey', 'sk-y', { ...MAQUINA_A, vaultPath }),
-    ).toThrow(/permiss/i);
+    expect(() => writeFileVaultAccount('openai:apikey', 'sk-y', { ...MAQUINA_A, vaultPath })).toThrow(
+      /permiss/i,
+    );
   });
 });
 

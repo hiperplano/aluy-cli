@@ -26,9 +26,7 @@ import {
 // imprimia a credencial INTEIRA em texto claro no relatório — que vai para o terminal, para
 // o log da CI e para qualquer captura de tela. Um teste nunca pode ser o caminho pelo qual
 // um segredo sai da máquina.
-const COFRE_ISOLADO = {
-  vaultPath: join(mkdtempSync(join(tmpdir(), 'aluy-cred-iso-')), 'credentials.enc'),
-};
+const COFRE_ISOLADO = { vaultPath: join(mkdtempSync(join(tmpdir(), 'aluy-cred-iso-')), 'credentials.enc') };
 
 /** Fake de keychain em memória (account → senha). */
 function fakeKeyring(store: Record<string, string>) {

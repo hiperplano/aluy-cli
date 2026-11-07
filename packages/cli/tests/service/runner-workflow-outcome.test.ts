@@ -51,11 +51,7 @@ describe('buildWorkflowOutcome — PURA (ADR-0158 §5 pt.4/§8.1/§8.2)', () => 
       pendingQuestionText: 'Aumento a posição?',
       pendingActivityIndex: 1,
     });
-    expect(outcome).toEqual({
-      kind: 'awaiting-owner',
-      question: 'Aumento a posição?',
-      activityIndex: 1,
-    });
+    expect(outcome).toEqual({ kind: 'awaiting-owner', question: 'Aumento a posição?', activityIndex: 1 });
   });
 
   it('awaiting-owner TEM PRIORIDADE sobre "stopped" mesmo quando ambos são verdadeiros', () => {

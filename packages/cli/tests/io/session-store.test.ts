@@ -487,7 +487,9 @@ describe('SessionStore — disabled (`--anonymous`, não grava sessão)', () => 
   it('save() repetido segue no-op (nunca "esquece" de estar desligado)', () => {
     const store = new SessionStore({ baseDir: aluyDir, disabled: true });
     for (let i = 0; i < 5; i++) {
-      expect(store.save({ id: `anon-${i}`, cwd: '/proj', tier: 't', blocks: [youHi] })).toBe(false);
+      expect(
+        store.save({ id: `anon-${i}`, cwd: '/proj', tier: 't', blocks: [youHi] }),
+      ).toBe(false);
     }
     expect(existsSync(store.sessionsDir)).toBe(false);
   });

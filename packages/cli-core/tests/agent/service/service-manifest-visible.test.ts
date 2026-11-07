@@ -80,9 +80,7 @@ describe('buildServiceManifestVisibleNote', () => {
       skills: [],
       hasMcp: false,
     });
-    expect(text(semModelo.lines)).toContain(
-      'modelo: (não declarado — usa o default global da config)',
-    );
+    expect(text(semModelo.lines)).toContain('modelo: (não declarado — usa o default global da config)');
   });
 
   it('teto por atividade: default (30min) quando ausente, valor cru quando declarado', () => {

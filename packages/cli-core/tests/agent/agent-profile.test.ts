@@ -93,9 +93,7 @@ describe('parseAgentProfile — frontmatter + corpo (EST-0977)', () => {
 // ausência continuam com o mesmo comportamento de sempre.
 describe('parseAgentProfile — tools: lista YAML EM BLOCO (equivalente à forma de uma linha)', () => {
   it('"tools:" + "  - a" / "  - b" ⇒ IDÊNTICO a "tools: a, b"', () => {
-    const bloco = ['---', 'name: a', 'tools:', '  - read_file', '  - grep', '---', 'corpo'].join(
-      '\n',
-    );
+    const bloco = ['---', 'name: a', 'tools:', '  - read_file', '  - grep', '---', 'corpo'].join('\n');
     const linha = ['---', 'name: a', 'tools: read_file, grep', '---', 'corpo'].join('\n');
     expect(ok('a.md', bloco).tools).toEqual(ok('a.md', linha).tools);
     expect(ok('a.md', bloco).tools).toEqual(['read_file', 'grep']);

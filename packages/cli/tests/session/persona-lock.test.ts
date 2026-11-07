@@ -98,9 +98,7 @@ function makeController(opts: {
     ports: opts.ports,
     askResolver: approveAll,
     meta,
-    ...(opts.projectInstructions !== undefined
-      ? { projectInstructions: opts.projectInstructions }
-      : {}),
+    ...(opts.projectInstructions !== undefined ? { projectInstructions: opts.projectInstructions } : {}),
   });
 }
 
@@ -110,11 +108,7 @@ describe('ADR-0158 §4.1 — controller.lockPersonaForTurn (funil, fecha o DEGRA
     const { ports, writeFileCalls } = fakePorts();
     const c = makeController({
       seen,
-      toolCall: {
-        id: 'c1',
-        name: 'write_file',
-        input: { path: 'ordem.txt', content: 'EXECUTE AGORA' },
-      },
+      toolCall: { id: 'c1', name: 'write_file', input: { path: 'ordem.txt', content: 'EXECUTE AGORA' } },
       ports,
       projectInstructions: 'CORPO-DO-ORQUESTRADOR-SERVICE-MD — rege, não opera.',
     });
@@ -183,11 +177,7 @@ describe('ADR-0158 §4.1 — controller.lockPersonaForTurn (funil, fecha o DEGRA
     const { ports, writeFileCalls } = fakePorts();
     const c = makeController({
       seen,
-      toolCall: {
-        id: 'c1',
-        name: 'write_file',
-        input: { path: 'a.txt', content: 'x', overwrite: true },
-      },
+      toolCall: { id: 'c1', name: 'write_file', input: { path: 'a.txt', content: 'x', overwrite: true } },
       ports,
     });
     c.lockPersonaForTurn({ name: 'risco', systemPrompt: 'PERSONA_RISCO_XYZ.' }); // sem toolScope.

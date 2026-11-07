@@ -50,3 +50,4 @@ export function hexParaRgb(hex: string | undefined): readonly [number, number, n
     parseInt(hex.slice(5, 7), 16),
   ];
 }
+

@@ -44,11 +44,7 @@ describe('listDeclaredDaemons — o `.sort()` é quem ordena (não um acidente d
   it('readdirSync devolve os Dirents FORA de ordem alfabética ⇒ listDeclaredDaemons devolve ORDENADO mesmo assim', () => {
     // Ordem PROPOSITALMENTE não-alfabética (nem a ordem de criação: mistura tudo)
     // — só o `.sort()` de dentro de `listDeclaredDaemons` pode corrigir isto.
-    mockReaddirSync.mockReturnValueOnce([
-      fakeDirent('zulu'),
-      fakeDirent('alpha'),
-      fakeDirent('mike'),
-    ] as never);
+    mockReaddirSync.mockReturnValueOnce([fakeDirent('zulu'), fakeDirent('alpha'), fakeDirent('mike')] as never);
 
     const names = listDeclaredDaemons(serviceDir, () => {}).map((d) => d.name);
 
@@ -56,11 +52,7 @@ describe('listDeclaredDaemons — o `.sort()` é quem ordena (não um acidente d
   });
 
   it('mesmo com a entrada JÁ invertida (z, m, a) ⇒ ainda sai alfabética (prova que não é "só inverter")', () => {
-    mockReaddirSync.mockReturnValueOnce([
-      fakeDirent('zulu'),
-      fakeDirent('mike'),
-      fakeDirent('alpha'),
-    ] as never);
+    mockReaddirSync.mockReturnValueOnce([fakeDirent('zulu'), fakeDirent('mike'), fakeDirent('alpha')] as never);
 
     const names = listDeclaredDaemons(serviceDir, () => {}).map((d) => d.name);
 

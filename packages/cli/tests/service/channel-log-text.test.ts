@@ -20,13 +20,7 @@ import {
 import type { ServiceManifest, TelegramUpdate } from '@hiperplano/aluy-cli-core';
 
 function manifest(overrides: Partial<ServiceManifest> = {}): ServiceManifest {
-  return {
-    name: 'trader',
-    tunables: [],
-    ignoredFrontmatterKeys: [],
-    orchestrator: 'Rege, não opera.',
-    ...overrides,
-  };
+  return { name: 'trader', tunables: [], ignoredFrontmatterKeys: [], orchestrator: 'Rege, não opera.', ...overrides };
 }
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
@@ -64,19 +58,11 @@ describe('resolveActiveChannel — token vazio: ambos os ramos do "||" importam'
 describe('sendChannelText — envio COM SUCESSO nunca loga "falha ao enviar"', () => {
   it('client.send devolve true ⇒ NENHUM log de falha (distingue de "sempre loga")', async () => {
     const logs: string[] = [];
-    const client: ServiceChannelClient = {
-      send: async () => true,
-      poll: async () => [],
-      safeForLog: (s) => s,
-    };
+    const client: ServiceChannelClient = { send: async () => true, poll: async () => [], safeForLog: (s) => s };
     await sendServiceReport(
       manifest({ channel: 'telegram:100' }),
       { serviceName: 'trader', ok: true, critical: false, summary: 'ok.' },
-      baseDeps({
-        secretStore: { get: async () => TOKEN },
-        clientFactory: () => client,
-        log: (l) => logs.push(l),
-      }),
+      baseDeps({ secretStore: { get: async () => TOKEN }, clientFactory: () => client, log: (l) => logs.push(l) }),
     );
     expect(logs.some((l) => l.includes('falha ao enviar'))).toBe(false);
   });
@@ -125,11 +111,7 @@ describe('waitForOwnerReply — textos EXATOS de log em cada ramo', () => {
       manifest: manifest({ channel: 'telegram:100' }),
       question: 'q?',
       stop: new AbortController().signal,
-      deps: baseDeps({
-        secretStore: { get: async () => TOKEN },
-        clientFactory: () => client,
-        log: (l) => logs.push(l),
-      }),
+      deps: baseDeps({ secretStore: { get: async () => TOKEN }, clientFactory: () => client, log: (l) => logs.push(l) }),
     });
     expect(logs).toContain(
       '[service/channel] pergunta enviada ao canal (chat 100) — aguardando resposta do dono.',
@@ -189,21 +171,13 @@ describe('waitForOwnerReply — textos EXATOS de log em cada ramo', () => {
       },
       safeForLog: (s) => s,
     };
-    const localAnswer: LocalAnswerSource = {
-      async waitForAnswer() {
-        return 'sim (local)';
-      },
-    };
+    const localAnswer: LocalAnswerSource = { async waitForAnswer() { return 'sim (local)'; } };
     const logs: string[] = [];
     const result = await waitForOwnerReply({
       manifest: manifest({ channel: 'telegram:100' }),
       question: 'q?',
       stop: new AbortController().signal,
-      deps: baseDeps({
-        secretStore: { get: async () => TOKEN },
-        clientFactory: () => client,
-        log: (l) => logs.push(l),
-      }),
+      deps: baseDeps({ secretStore: { get: async () => TOKEN }, clientFactory: () => client, log: (l) => logs.push(l) }),
       localAnswer,
     });
     expect(result).toEqual({ kind: 'answered', text: 'sim (local)' });
@@ -223,16 +197,10 @@ describe('waitForOwnerReply — textos EXATOS de log em cada ramo', () => {
       manifest: manifest({ channel: 'telegram:100' }),
       question: 'q?',
       stop: new AbortController().signal,
-      deps: baseDeps({
-        secretStore: { get: async () => TOKEN },
-        clientFactory: () => client,
-        log: (l) => logs.push(l),
-      }),
+      deps: baseDeps({ secretStore: { get: async () => TOKEN }, clientFactory: () => client, log: (l) => logs.push(l) }),
     });
     expect(result).toEqual({ kind: 'answered', text: 'sim, prossiga' });
-    expect(logs).toContain(
-      '[service/channel] dono respondeu no canal — retomando o turno de onde parou.',
-    );
+    expect(logs).toContain('[service/channel] dono respondeu no canal — retomando o turno de onde parou.');
   });
 
   it('update FORA da allowlist ⇒ classificado "discard", loga a linha EXATA com o MOTIVO', async () => {
@@ -263,11 +231,7 @@ describe('waitForOwnerReply — textos EXATOS de log em cada ramo', () => {
       manifest: manifest({ channel: 'telegram:100' }),
       question: 'q?',
       stop: stop.signal,
-      deps: baseDeps({
-        secretStore: { get: async () => TOKEN },
-        clientFactory: () => client,
-        log: (l) => logs.push(l),
-      }),
+      deps: baseDeps({ secretStore: { get: async () => TOKEN }, clientFactory: () => client, log: (l) => logs.push(l) }),
     });
     await new Promise((r) => setTimeout(r, 30));
     stop.abort();
@@ -284,9 +248,7 @@ describe('waitForOwnerReply — textos EXATOS de log em cada ramo', () => {
       poll(signal?: AbortSignal) {
         if (calls === 0) {
           calls++;
-          return Promise.resolve([
-            { chatId: 100, fromId: 100, text: 'repassando algo', forwarded: true },
-          ]);
+          return Promise.resolve([{ chatId: 100, fromId: 100, text: 'repassando algo', forwarded: true }]);
         }
         return new Promise((resolve) => {
           signal?.addEventListener('abort', () => resolve([]), { once: true });
@@ -300,11 +262,7 @@ describe('waitForOwnerReply — textos EXATOS de log em cada ramo', () => {
       manifest: manifest({ channel: 'telegram:100' }),
       question: 'q?',
       stop: stop.signal,
-      deps: baseDeps({
-        secretStore: { get: async () => TOKEN },
-        clientFactory: () => client,
-        log: (l) => logs.push(l),
-      }),
+      deps: baseDeps({ secretStore: { get: async () => TOKEN }, clientFactory: () => client, log: (l) => logs.push(l) }),
     });
     await new Promise((r) => setTimeout(r, 30));
     stop.abort();

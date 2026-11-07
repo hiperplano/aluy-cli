@@ -29,9 +29,7 @@ function fakeSecretStore(token: string | null): { get(): Promise<string | null> 
   return { get: async () => token };
 }
 
-function fakeClient(
-  pollBatches: readonly (readonly TelegramUpdate[])[] = [],
-): ServiceChannelClient & {
+function fakeClient(pollBatches: readonly (readonly TelegramUpdate[])[] = []): ServiceChannelClient & {
   readonly sent: { chatId: number; text: string }[];
   readonly pollCalls: number;
 } {

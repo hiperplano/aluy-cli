@@ -392,11 +392,11 @@ export const spawnAgentTool: NativeTool<ToolPorts> = {
         : undefined;
 
     try {
-      const outcomes = await port.spawn(parsed, undefined, {
-        room,
-        ...(pattern !== undefined ? { pattern } : {}),
-        ...(wait ? {} : { wait: false }),
-      });
+      const outcomes = await port.spawn(
+        parsed,
+        undefined,
+        { room, ...(pattern !== undefined ? { pattern } : {}), ...(wait ? {} : { wait: false }) },
+      );
       const anyOk = outcomes.some((o) => o.ok);
       return {
         ok: anyOk,

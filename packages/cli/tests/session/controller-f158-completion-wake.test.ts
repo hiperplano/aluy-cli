@@ -467,3 +467,4 @@ describe('nota de término — singular e plural concordam', () => {
     expect(t).not.toContain('fan-out');
   });
 });
+

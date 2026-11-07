@@ -316,8 +316,7 @@ export interface DoctorReport {
  * conserto correspondente, em vez de um `N/A` verde.
  */
 function checkLocalProvider(f: LocalProviderFact): DoctorCheck {
-  const alvo =
-    f.model !== undefined && f.model !== '' ? `${f.providerId} · ${f.model}` : f.providerId;
+  const alvo = f.model !== undefined && f.model !== '' ? `${f.providerId} · ${f.model}` : f.providerId;
   if (!f.hasCredential) {
     return {
       id: 'provider-local',

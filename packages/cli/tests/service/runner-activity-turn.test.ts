@@ -42,21 +42,12 @@ describe('resolveActivityTimeout — PURA (ADR-0158 §5 pt.4)', () => {
 
   it('cap default (sem 2º argumento) é MAX_ACTIVITY_MS (30 minutos)', () => {
     const THIRTY_MIN_MS = 30 * 60_000;
-    expect(resolveActivityTimeout(THIRTY_MIN_MS + 1)).toEqual({
-      hasTime: true,
-      timeoutMs: THIRTY_MIN_MS,
-    });
-    expect(resolveActivityTimeout(THIRTY_MIN_MS - 1)).toEqual({
-      hasTime: true,
-      timeoutMs: THIRTY_MIN_MS - 1,
-    });
+    expect(resolveActivityTimeout(THIRTY_MIN_MS + 1)).toEqual({ hasTime: true, timeoutMs: THIRTY_MIN_MS });
+    expect(resolveActivityTimeout(THIRTY_MIN_MS - 1)).toEqual({ hasTime: true, timeoutMs: THIRTY_MIN_MS - 1 });
   });
 
   it('cap:"unlimited" e untilRemainingMs undefined (sem "until:" declarado) ⇒ unlimited:true, SEM timeoutMs', () => {
-    expect(resolveActivityTimeout(undefined, 'unlimited')).toEqual({
-      hasTime: true,
-      unlimited: true,
-    });
+    expect(resolveActivityTimeout(undefined, 'unlimited')).toEqual({ hasTime: true, unlimited: true });
   });
 
   it('cap:"unlimited" COM "until:" declarado ainda respeita o until (regras independentes)', () => {
@@ -106,17 +97,12 @@ describe('parseActivityTurnOutput — PURA (ADR-0158 §5)', () => {
   });
 
   it('só a ÚLTIMA linha de stdout importa (logs/ruído em linhas anteriores são ignorados)', () => {
-    const stdout = ['algum log de ruído', '{"parcial": true}', '{"result":"final","ok":true}'].join(
-      '\n',
-    );
+    const stdout = ['algum log de ruído', '{"parcial": true}', '{"result":"final","ok":true}'].join('\n');
     expect(parseActivityTurnOutput(stdout)).toEqual({ result: 'final', ok: true });
   });
 
   it('trailing newline/whitespace ao redor da última linha não quebra o parse', () => {
-    expect(parseActivityTurnOutput('{"result":"ok","ok":true}\n\n  ')).toEqual({
-      result: 'ok',
-      ok: true,
-    });
+    expect(parseActivityTurnOutput('{"result":"ok","ok":true}\n\n  ')).toEqual({ result: 'ok', ok: true });
   });
 
   it('stdout vazio ⇒ undefined (linha vazia não é JSON válido)', () => {

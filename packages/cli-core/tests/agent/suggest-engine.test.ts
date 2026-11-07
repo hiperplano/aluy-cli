@@ -21,9 +21,7 @@ import type { ModelCallResult } from '../../src/model/types.js';
 
 function callerQueResponde(content: string): SuggestCaller {
   return {
-    call: vi.fn(
-      async () => ({ request_id: 'r', content, finish_reason: 'stop' }) as ModelCallResult,
-    ),
+    call: vi.fn(async () => ({ request_id: 'r', content, finish_reason: 'stop' }) as ModelCallResult),
   };
 }
 
@@ -53,8 +51,7 @@ describe('sanitizeSuggestion — o texto do modelo dobrado numa linha de compose
   });
 
   it('"NADA" (o combinado do prompt p/ sem próximo passo) ⇒ undefined, não a palavra', () => {
-    for (const v of ['NADA', 'nada', 'Nada.', 'NADA!'])
-      expect(sanitizeSuggestion(v)).toBeUndefined();
+    for (const v of ['NADA', 'nada', 'Nada.', 'NADA!']) expect(sanitizeSuggestion(v)).toBeUndefined();
   });
 
   it('vazio, só espaço ou undefined ⇒ undefined', () => {

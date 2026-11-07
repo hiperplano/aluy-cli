@@ -106,9 +106,7 @@ export function buildSkillsNote(input: SkillsListInput): SkillsListNote {
       s.origin === 'global' ? 'global' : 'projeto',
       skillDescriptionLine(s),
     ]);
-    lines.push(
-      ...tableLines(rows, { headers: ['skill', 'escopo', 'sobre'], ...{ maxWidths: [20, 8, 50] } }),
-    );
+    lines.push(...tableLines(rows, { headers: ['skill', 'escopo', 'sobre'], ...{ maxWidths: [20, 8, 50] } }));
   }
 
   if (rejected.length > 0) {

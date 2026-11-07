@@ -57,12 +57,7 @@ async function drive(
   let last!: ProviderPickerController;
   let consumed = false;
   render(
-    <Probe
-      args={args}
-      steps={steps}
-      onState={(c) => (last = c)}
-      onConsumed={(d) => (consumed = d)}
-    />,
+    <Probe args={args} steps={steps} onState={(c) => (last = c)} onConsumed={(d) => (consumed = d)} />,
   );
   const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
   const deadline = Date.now() + 2000;
@@ -88,9 +83,10 @@ describe('useProviderPicker — catálogo LOCAL (backend BYO)', () => {
   it('presença de localCatalog IGNORA providersClient por completo', async () => {
     const catalog = [localEntry('minhaapi')];
     const fakeClient = { list: async () => [{ name: 'openrouter', adapter: 'openrouter' }] };
-    const c = await drive({ localCatalog: () => catalog, providersClient: fakeClient }, [
-      (p) => p.openPicker(),
-    ]);
+    const c = await drive(
+      { localCatalog: () => catalog, providersClient: fakeClient },
+      [(p) => p.openPicker()],
+    );
     const names = c.providers.map((p) => p.name);
     expect(names).toContain('minhaapi');
     expect(names).not.toContain('openrouter');

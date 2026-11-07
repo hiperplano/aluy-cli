@@ -28,9 +28,7 @@ import {
 
 const TOKEN = '123456789:AAHk-abcdefghijklmnopqrstuvwxyz012345';
 
-function fakeClient(): ServiceChannelClient & {
-  readonly sent: { chatId: number; text: string }[];
-} {
+function fakeClient(): ServiceChannelClient & { readonly sent: { chatId: number; text: string }[] } {
   const sent: { chatId: number; text: string }[] = [];
   return {
     sent,

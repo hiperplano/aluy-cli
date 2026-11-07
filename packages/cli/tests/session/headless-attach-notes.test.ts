@@ -76,9 +76,7 @@ describe('runHeadlessPrint/runHeadlessStreamJson — nota de anexo/recusa vai pr
   it('runHeadlessPrint: @caminho FORA do workspace ⇒ nota de recusa no stderr (não no stdout/result)', async () => {
     setup();
     try {
-      const ctrl = fakeController([
-        { kind: 'aluy', text: 'não recebi imagem nenhuma', streaming: false },
-      ]);
+      const ctrl = fakeController([{ kind: 'aluy', text: 'não recebi imagem nenhuma', streaming: false }]);
       const { result, stderr } = await withStderrCapture(() =>
         runHeadlessPrint(ctrl, 'descreva @../fora.txt', { attachReader: reader() }),
       );

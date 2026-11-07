@@ -32,7 +32,9 @@ describe('windowTitleSeq — monta a sequência OSC 0', () => {
   it('título vazio (ou que vira vazio após saneamento) ⇒ ESC]0;BEL (sem texto)', () => {
     expect(windowTitleSeq('')).toBe(`${ESC}]0;${BEL}`);
     // só control chars ⇒ tudo removido ⇒ vazio.
-    expect(windowTitleSeq(String.fromCharCode(1) + String.fromCharCode(2))).toBe(`${ESC}]0;${BEL}`);
+    expect(windowTitleSeq(String.fromCharCode(1) + String.fromCharCode(2))).toBe(
+      `${ESC}]0;${BEL}`,
+    );
   });
 });
 

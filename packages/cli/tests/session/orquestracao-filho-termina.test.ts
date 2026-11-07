@@ -122,19 +122,9 @@ function cenario() {
           // A ÚLTIMA chamada do pai: ele ainda está "fazendo a própria atividade" quando o
           // filho termina. Só devolve a resposta final depois disso.
           await finalDoPai;
-          return {
-            request_id: 'r',
-            content: 'terminei a minha parte.',
-            finish_reason: 'stop',
-            usage,
-          };
+          return { request_id: 'r', content: 'terminei a minha parte.', finish_reason: 'stop', usage };
         }
-        return {
-          request_id: 'r',
-          content: 'incorporei o resultado.',
-          finish_reason: 'stop',
-          usage,
-        };
+        return { request_id: 'r', content: 'incorporei o resultado.', finish_reason: 'stop', usage };
       }
       await filhoPode;
       filhoTerminou = true;
@@ -224,12 +214,7 @@ describe('orquestração — o resultado do filho NÃO pode sumir se o turno que
             liberarFilho();
             await waitFor(() => filhoTerminou);
             await new Promise((r) => setTimeout(r, 30));
-            return {
-              request_id: 'r',
-              content: toolCall('list_todos', {}),
-              finish_reason: 'stop',
-              usage,
-            };
+            return { request_id: 'r', content: toolCall('list_todos', {}), finish_reason: 'stop', usage };
           }
           if (n === 3) {
             // A chamada que JÁ recebeu o resultado do filho morre (o 429 da sessão real).
@@ -249,9 +234,7 @@ describe('orquestração — o resultado do filho NÃO pode sumir se o turno que
     if (controller.current.phase === 'error') controller.dismissError();
     await controller.submit('retomar');
     const ultima = chamadasDoPai[chamadasDoPai.length - 1]!;
-    expect(ultima, 'o turno de retomada não viu o resultado do filho').toContain(
-      'RELATORIO-VISUAL',
-    );
+    expect(ultima, 'o turno de retomada não viu o resultado do filho').toContain('RELATORIO-VISUAL');
   });
 });
 
@@ -288,12 +271,7 @@ describe('orquestração — auto-retry e agents_status', () => {
             liberarFilho();
             await waitFor(() => filhoTerminou);
             await new Promise((r) => setTimeout(r, 30));
-            return {
-              request_id: 'r',
-              content: toolCall('list_todos', {}),
-              finish_reason: 'stop',
-              usage,
-            };
+            return { request_id: 'r', content: toolCall('list_todos', {}), finish_reason: 'stop', usage };
           }
           if (n === 3) falha();
           return { request_id: 'r', content: 'segui.', finish_reason: 'stop', usage };
@@ -337,9 +315,7 @@ describe('orquestração — auto-retry e agents_status', () => {
     if (controller.current.phase === 'error') controller.dismissError();
     await controller.submit('retomar');
     const lista = (
-      controller as unknown as {
-        listaFilhosParaGestao(): { label: string; phase: string; note?: string }[];
-      }
+      controller as unknown as { listaFilhosParaGestao(): { label: string; phase: string; note?: string }[] }
     ).listaFilhosParaGestao();
     const visual = lista.find((x) => x.label === 'visual');
     expect(visual, 'o filho concluído sumiu do agents_status').toBeDefined();

@@ -36,10 +36,7 @@ describe('F-PROV — createProviderAwareDiscoverContextWindowPort (fecha a lacun
   it('(b) descoberta consulta o provider NOVO depois de um /provider bem-sucedido, não o do boot', async () => {
     const { fetchImpl: fetchA, calls: callsA } = fakeFetch(LIST_A);
     const { fetchImpl: fetchB, calls: callsB } = fakeFetch(LIST_B);
-    const persistedByProvider: Record<string, [string, number][]> = {
-      'provider-a': [],
-      'provider-b': [],
-    };
+    const persistedByProvider: Record<string, [string, number][]> = { 'provider-a': [], 'provider-b': [] };
 
     let activeProviderId = 'provider-a';
     const depsForProvider = (providerId: string): ProviderDiscoveryDeps => {
