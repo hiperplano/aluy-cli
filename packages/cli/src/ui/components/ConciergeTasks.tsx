@@ -14,11 +14,10 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
-import { Role } from '../theme/index.js';
+import { Glyph, Role } from '../theme/index.js';
 import { truncateToWidth } from '../markdown/table-layout.js';
-import { ShimmerText } from './ShimmerText.js';
 import { ChildLine, type SubAgentChildView } from './SubAgents.js';
-import { clip, formatElapsed, statusPt, type TaskRecord } from '@hiperplano/aluy-cli-core';
+import type { TaskRecord } from '@hiperplano/aluy-cli-core';
 
 export const MAX_APPROVAL_ROWS = 2;
 const MAX_EFFECT_LINES = 4;
@@ -34,12 +33,8 @@ export interface ApprovalRow {
 
 export type PanelRow =
   | { readonly kind: 'summary'; readonly text: string }
-  | {
-      readonly kind: 'task';
-      readonly task: TaskRecord;
-      readonly selected: boolean;
-      readonly now: number;
-    }
+  | { readonly kind: 'header'; readonly total: number; readonly running: number }
+  | { readonly kind: 'task'; readonly view: SubAgentChildView; readonly selected: boolean }
   | { readonly kind: 'child'; readonly child: SubAgentChildView }
   | { readonly kind: 'approval'; readonly text: string }
   | { readonly kind: 'text'; readonly text: string };
@@ -48,6 +43,10 @@ export interface PanelInput {
   readonly tasks: readonly TaskRecord[];
   readonly approvals: readonly ApprovalRow[];
   readonly childrenOf: (taskId: string) => readonly SubAgentChildView[];
+  /** A tarefa na MESMA gramática de linha dos sub-agentes (nome, estado, modelo, tokens, tools, tempo). */
+  readonly viewOf: (task: TaskRecord) => SubAgentChildView;
+  /** Linhas que o rodapé comporta (recolhe SÓ quando falta espaço). */
+  readonly maxRows?: number;
   readonly statusline: 'full' | 'compact' | 'hidden';
   readonly expanded: boolean;
   readonly selected: number;
@@ -75,23 +74,44 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
   const rows: PanelRow[] = [];
   const tasks = i.tasks;
   if (tasks.length > 0) {
-    const collapse = !i.expanded && (i.statusline !== 'full' || tasks.length >= COLLAPSE_AT);
-    if (collapse) {
-      rows.push({ kind: 'summary', text: summaryText(tasks) });
-    } else {
-      const shown = i.expanded ? tasks.slice(-MAX_EXPANDED_TASKS) : tasks;
+    const shown = i.expanded ? tasks.slice(-MAX_EXPANDED_TASKS) : tasks;
+    const kidsOf = (t: TaskRecord): readonly SubAgentChildView[] =>
+      t.endedAt === undefined ? i.childrenOf(t.id) : [];
+    // Nível 1 = TAREFAS; nível 2 = os agentes da tarefa, na MESMA linha do clássico.
+    const build = (withAgents: boolean): PanelRow[] => {
+      const out: PanelRow[] = [
+        {
+          kind: 'header',
+          total: tasks.length,
+          running: tasks.filter((t) => t.status === 'running').length,
+        },
+      ];
       shown.forEach((t, idx) => {
-        rows.push({
-          kind: 'task',
-          task: t,
-          selected: i.expanded && idx === i.selected,
-          now: i.now,
-        });
-        if (t.endedAt === undefined) {
-          const kids = i.childrenOf(t.id).slice(0, MAX_CHILD_ROWS);
-          for (const c of kids) rows.push({ kind: 'child', child: c });
-        }
+        const kids = kidsOf(t);
+        const v = i.viewOf(t);
+        const view =
+          !withAgents && kids.length > 0
+            ? {
+                ...v,
+                summary: `${v.summary ?? ''} · ${kids.length} agente${kids.length > 1 ? 's' : ''}`,
+              }
+            : v;
+        out.push({ kind: 'task', view, selected: i.expanded && idx === i.selected });
+        if (withAgents)
+          for (const c of kids.slice(0, MAX_CHILD_ROWS)) out.push({ kind: 'child', child: c });
       });
+      return out;
+    };
+    const room = i.maxRows ?? 8;
+    const compactOk = i.statusline === 'full';
+    let list = build(true);
+    // Falta espaço? Primeiro recolhe os AGENTES (a tarefa ganha `· N agentes`, com brilho);
+    // só se nem as tarefas couberem vira a linha-resumo.
+    if (!i.expanded && list.length > room) list = build(false);
+    const collapse = !i.expanded && (!compactOk || list.length > room);
+    if (collapse) rows.push({ kind: 'summary', text: summaryText(tasks) });
+    else {
+      rows.push(...list);
       if (i.expanded) {
         rows.push({
           kind: 'text',
@@ -130,50 +150,6 @@ export function panelLines(rows: readonly PanelRow[]): number {
   return rows.length === 0 ? 0 : rows.length + 1;
 }
 
-const GLYPH: Readonly<Record<string, string>> = {
-  running: '▸',
-  blocked: '⏳',
-  waiting_approval: '⚠',
-  paused_quota: '⏸',
-  done: '✔',
-  failed: '✘',
-  stopped: '■',
-  interrupted: '↯',
-};
-
-function TaskRow(props: {
-  readonly task: TaskRecord;
-  readonly selected: boolean;
-  readonly now: number;
-  readonly width: number;
-  readonly frame: number;
-}): React.ReactElement {
-  const t = props.task;
-  const ended = t.endedAt !== undefined;
-  const what = ended ? clip(t.goal, 40) : (t.current ?? clip(t.goal, 40));
-  const head = `${GLYPH[t.status] ?? '·'} ${t.id} ${statusPt(t.status)}`;
-  const tail = ` · ${what} · ${formatElapsed((t.endedAt ?? props.now) - t.startedAt)}`;
-  const mark = props.selected ? '❯ ' : '  ';
-  const fits = (s: string): string => truncateToWidth(s, Math.max(10, props.width - mark.length));
-  const role =
-    t.status === 'failed' ? 'danger' : t.status === 'waiting_approval' ? 'accent' : 'fgDim';
-  return (
-    <Box>
-      <Role name={props.selected ? 'accent' : 'fgDim'}>{mark}</Role>
-      {t.status === 'running' ? (
-        <>
-          <ShimmerText text={head} frame={props.frame} papelEstatico="accent" />
-          <Role name="fgDim">
-            {fits(tail).slice(0, Math.max(0, props.width - mark.length - head.length))}
-          </Role>
-        </>
-      ) : (
-        <Role name={ended ? 'fgDim' : role}>{fits(head + tail)}</Role>
-      )}
-    </Box>
-  );
-}
-
 export interface TaskPanelProps {
   readonly rows: readonly PanelRow[];
   readonly columns: number;
@@ -193,16 +169,24 @@ export function TaskPanel(props: TaskPanelProps): React.ReactElement | null {
                 <Role name="depth">{truncateToWidth(r.text, width)}</Role>
               </Box>
             );
+          case 'header':
+            return (
+              <Box key={idx} paddingLeft={0}>
+                <Glyph name="subagents" role="accent" />
+                <Role name="fg">
+                  {' '}
+                  {r.total} tarefa{r.total === 1 ? '' : 's'}:
+                </Role>
+                {r.running > 0 && <Role name="fgDim">{` (${r.running} rodando)`}</Role>}
+              </Box>
+            );
           case 'task':
             return (
-              <TaskRow
-                key={idx}
-                task={r.task}
-                selected={r.selected}
-                now={r.now}
-                width={width}
-                frame={props.frame}
-              />
+              <Box key={idx}>
+                {/* Mesma linha dos sub-agentes (brilho enquanto roda); o marcador só no expandido. */}
+                {r.selected && <Role name="accent">❯</Role>}
+                <ChildLine child={r.view} frame={props.frame} />
+              </Box>
             );
           case 'child':
             return (

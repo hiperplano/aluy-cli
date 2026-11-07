@@ -11,6 +11,7 @@ import {
   TERMINAL_STATUSES,
   TaskRegistry,
   clip,
+  formatElapsed,
   statusPt,
   type AskResolution,
   type ChatMessage,
@@ -18,6 +19,7 @@ import {
   type ConciergeModel,
   type TaskRecord,
 } from '@hiperplano/aluy-cli-core';
+import { abbreviateCount } from './model.js';
 import type { SubAgentChildView } from '../ui/components/SubAgents.js';
 import type { SessionBlock } from './model.js';
 import { ControllerTaskEngine, type TaskSession } from './concierge-engine.js';
@@ -114,6 +116,39 @@ export class ConciergeRuntime {
       if (b?.kind === 'subagents') return b.children;
     }
     return [];
+  }
+
+  /**
+   * A tarefa na MESMA gramática de linha dos sub-agentes (`<ChildLine>`): nome, estado com
+   * brilho enquanto roda, modelo (`herdado (…)`), atividade atual, tokens, tools e tempo.
+   */
+  taskView(t: TaskRecord): SubAgentChildView {
+    const s = this.engine.sessionOf(t.id)?.current;
+    const ended = t.endedAt !== undefined;
+    const parts: string[] = [];
+    if (t.status === 'waiting_approval') parts.push('aguardando aprovação');
+    else if (t.status === 'blocked') parts.push(`espera ${t.blockedBy ?? 'outra tarefa'}`);
+    else if (t.current) parts.push(t.current);
+    parts.push(`${abbreviateCount(s?.meta?.tokens ?? 0)} tokens`);
+    if (t.steps > 0) parts.push(`${t.steps} tools`);
+    if (ended) parts.push(formatElapsed((t.endedAt ?? 0) - t.startedAt));
+    const status: SubAgentChildView['status'] =
+      t.status === 'done'
+        ? 'done'
+        : t.status === 'failed'
+          ? 'fail'
+          : t.status === 'stopped' || t.status === 'interrupted' || t.status === 'paused_quota'
+            ? 'cancelled'
+            : 'running';
+    const tier = s?.meta?.activeModel ?? s?.meta?.model ?? s?.meta?.tier;
+    return {
+      label: `${t.id} ${clip(t.goal, 22)}`,
+      status,
+      summary: parts.join(' · '),
+      ...(t.status === 'paused_quota' ? { stop: 'paused' as const } : {}),
+      ...(tier !== undefined ? { model: `herdado (${tier})` } : {}),
+      ...(!ended ? { startedAt: t.startedAt } : {}),
+    };
   }
 
   /** O transcrito da tarefa (como teria aparecido no clássico), p/ a vista de detalhe. */

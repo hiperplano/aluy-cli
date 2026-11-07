@@ -7,6 +7,7 @@ import {
   summaryText,
   type PanelInput,
 } from '../../src/ui/components/ConciergeTasks.js';
+import type { SubAgentChildView } from '../../src/ui/components/SubAgents.js';
 import { cockpitRegionSum, resolveCockpitLayout } from '../../src/session/cockpit-layout.js';
 
 const task = (id: string, over: Partial<TaskRecord> = {}): TaskRecord => ({
@@ -20,10 +21,17 @@ const task = (id: string, over: Partial<TaskRecord> = {}): TaskRecord => ({
   steps: 0,
   ...over,
 });
+const view = (t: TaskRecord): SubAgentChildView => ({
+  label: t.id,
+  status: t.endedAt !== undefined ? 'done' : 'running',
+  summary: '0 tokens',
+});
 const base = (tasks: TaskRecord[], over: Partial<PanelInput> = {}): PanelInput => ({
   tasks,
   approvals: [],
   childrenOf: () => [],
+  viewOf: view,
+  maxRows: 8,
   statusline: 'full',
   expanded: false,
   selected: 0,
@@ -31,42 +39,54 @@ const base = (tasks: TaskRecord[], over: Partial<PanelInput> = {}): PanelInput =
   ...over,
 });
 const kinds = (i: PanelInput): string[] => buildPanelRows(i).map((r) => r.kind);
+const kid = (label: string) => ({ label, status: 'running' as const });
 
-describe('painel de tarefas — linhas', () => {
-  it('1–2 tarefas: uma linha por tarefa; com sub-agentes aninhados enquanto rodam', () => {
-    const kids = [{ label: 'a', status: 'running' as const }];
+describe('painel de tarefas — hierarquia por TAREFA, agentes aninhados', () => {
+  it('com espaço: cabeçalho + tarefa + os agentes dela (nível 2), tarefa a tarefa', () => {
     const rows = buildPanelRows(
-      base([task('t1'), task('t2', { status: 'done', endedAt: 5 })], {
-        childrenOf: (id) => (id === 't1' ? kids : []),
+      base([task('t1'), task('t2')], {
+        childrenOf: (id) => (id === 't1' ? [kid('a'), kid('b')] : []),
       }),
     );
-    expect(rows.map((r) => r.kind)).toEqual(['task', 'child', 'task']);
+    expect(rows.map((r) => r.kind)).toEqual(['header', 'task', 'child', 'child', 'task']);
   });
 
-  it('3+ tarefas recolhem em UMA linha `3 tarefas · 2 rodando · ↓ ver`', () => {
-    const ts = [task('t1'), task('t2'), task('t3', { status: 'waiting_approval' })];
-    const rows = buildPanelRows(base(ts));
+  it('falta espaço: os AGENTES recolhem para `· N agentes` na linha da tarefa (uma linha por tarefa)', () => {
+    const ts = [task('t1'), task('t2'), task('t3')];
+    const rows = buildPanelRows(
+      base(ts, { maxRows: 4, childrenOf: (id) => (id === 't1' ? [kid('a'), kid('b')] : []) }),
+    );
+    expect(rows.map((r) => r.kind)).toEqual(['header', 'task', 'task', 'task']);
+    const t1 = rows[1] as { view: SubAgentChildView };
+    expect(t1.view.summary).toContain('2 agentes');
+    expect(t1.view.status).toBe('running'); // segue vivo (brilho)
+  });
+
+  it('nem as tarefas cabem: UMA linha-resumo `3 tarefas · 3 rodando · ↓ ver`', () => {
+    const rows = buildPanelRows(base([task('t1'), task('t2'), task('t3')], { maxRows: 2 }));
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      kind: 'summary',
-      text: '3 tarefas · 2 rodando · 1 aguardando aprovação · ↓ ver',
-    });
+    expect(rows[0]).toMatchObject({ kind: 'summary', text: '3 tarefas · 3 rodando · ↓ ver' });
     expect(summaryText([task('t1')], false)).toBe('1 tarefa · 1 rodando');
   });
 
-  it('expandido: lista todas + dica de teclas; seleção marcada', () => {
+  it('expandido: tarefas COM os agentes + dica de teclas; seleção marcada', () => {
     const ts = [task('t1'), task('t2'), task('t3')];
-    const rows = buildPanelRows(base(ts, { expanded: true, selected: 1 }));
+    const rows = buildPanelRows(
+      base(ts, { expanded: true, selected: 1, maxRows: 2, childrenOf: () => [kid('a')] }),
+    );
     expect(rows.filter((r) => r.kind === 'task')).toHaveLength(3);
-    expect(rows.find((r) => r.kind === 'task' && r.selected)).toMatchObject({ task: { id: 't2' } });
+    expect(rows.filter((r) => r.kind === 'child')).toHaveLength(3);
+    expect(rows.find((r) => r.kind === 'task' && r.selected)).toMatchObject({
+      view: { label: 't2' },
+    });
     expect(rows.at(-1)).toMatchObject({ kind: 'text' });
   });
 
-  it('statusline compact/hidden: só a linha-resumo (mesmo com 1 tarefa); aprovações nunca somem', () => {
+  it('statusline compact/hidden: só a linha-resumo; aprovações nunca somem', () => {
     const ap = [{ taskId: 't1', summary: 'run_command: $ ls' }];
     expect(kinds(base([task('t1')], { statusline: 'hidden', approvals: ap }))).toEqual([
       'summary',
-      'approval', // cabeçalho do pedido
+      'approval', // cabeçalho do pedido (`⚠ t1 pede aprovação`)
       'approval', // o efeito exato
     ]);
     expect(kinds(base([task('t1')], { statusline: 'compact' }))).toEqual(['summary']);
@@ -102,7 +122,7 @@ describe('painel de tarefas — linhas', () => {
 
   it('altura: 0 sem nada; linhas + 1 de respiro', () => {
     expect(panelLines([])).toBe(0);
-    expect(panelLines(buildPanelRows(base([task('t1'), task('t2')])))).toBe(3);
+    expect(panelLines(buildPanelRows(base([task('t1'), task('t2')])))).toBe(4); // cabeçalho + 2 + respiro
   });
 });
 

@@ -135,6 +135,7 @@ import {
 import { buildActivityLog, countActivityLines } from './activity-log.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
 import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
+import { linhasDoRodapeAgentes } from './footer-agents-layout.js';
 import { clip, statusPt } from '@hiperplano/aluy-cli-core';
 import { truncateToWidth } from '../ui/markdown/table-layout.js';
 import { Cockpit, type CockpitFocus } from './Cockpit.js';
@@ -1248,6 +1249,8 @@ export function App(props: AppProps): React.ReactElement {
           tasks: conciergeRt.visibleTasks(),
           approvals: conciergeRt.pendingApprovals(),
           childrenOf: (id) => conciergeRt.taskChildren(id),
+          viewOf: (t) => conciergeRt.taskView(t),
+          maxRows: linhasDoRodapeAgentes(rows),
           statusline: statuslineMode,
           columns,
           expanded: taskExpanded,

@@ -218,3 +218,69 @@ describe('ConciergeRuntime — persistência e --resume', () => {
     expect(rt.registry.list()).toHaveLength(0);
   });
 });
+
+describe('ConciergeRuntime.taskView — a tarefa na linha dos agentes', () => {
+  const sink = (): ConversationSink => {
+    const s = new FakeSession() as unknown as ConversationSink;
+    s.pushConciergeEcho = () => {};
+    s.pushConciergeLine = () => {};
+    s.conciergeReplyStart = () => {};
+    s.conciergeReplyEnd = () => {};
+    s.cancelAllFlows = () => {};
+    return s;
+  };
+
+  it('traz modelo `herdado (…)`, atividade, tokens, tools; vivo tem startedAt; fim tem tempo', () => {
+    const sessions: FakeSession[] = [];
+    const rt = new ConciergeRuntime({
+      sink: sink(),
+      model: { call: async () => ({ request_id: 'r', content: '', finish_reason: 'stop' }) },
+      createHeadless: () => {
+        const f = new FakeSession();
+        f.state = {
+          blocks: [],
+          phase: 'idle',
+          meta: { tokens: 1234, activeModel: 'glm-5.3-flash' },
+        } as never;
+        sessions.push(f);
+        return f;
+      },
+      clock: () => 20_000,
+    });
+    const t = rt.registry.create({ goal: 'refatorar auth', kind: 'main' });
+    rt.engine.start(t);
+    sessions[0]!.toolObs[0]!.onToolStart!({ name: 'run_command', input: { command: 'ls -la' } });
+    const live = rt.taskView(rt.registry.get('t1')!);
+    expect(live).toMatchObject({ status: 'running', model: 'herdado (glm-5.3-flash)' });
+    expect(live.label).toBe('t1 refatorar auth');
+    expect(live.summary).toContain('bash ls -la');
+    expect(live.summary).toContain('1.2k tokens');
+    expect(live.startedAt).toBeDefined();
+    sessions[0]!.toolObs[0]!.onToolEnd!({ name: 'run_command' }, true);
+    rt.registry.transition('t1', 'done', undefined, { summary: 'ok' });
+    const done = rt.taskView(rt.registry.get('t1')!);
+    expect(done.status).toBe('done');
+    expect(done.summary).toContain('1 tools');
+    expect(done.summary).toMatch(/\d+s$/);
+    expect(done.startedAt).toBeUndefined();
+  });
+
+  it('estados: aprovação, cota e parada têm a palavra certa', () => {
+    const rt = new ConciergeRuntime({
+      sink: sink(),
+      model: { call: async () => ({ request_id: 'r', content: '', finish_reason: 'stop' }) },
+      createHeadless: () => new FakeSession(),
+    });
+    for (const g of ['a', 'b', 'c'])
+      rt.engine.start(rt.registry.create({ goal: g, kind: 'detached' }));
+    rt.registry.transition('t1', 'waiting_approval');
+    rt.registry.transition('t2', 'paused_quota');
+    rt.registry.transition('t3', 'stopped');
+    expect(rt.taskView(rt.registry.get('t1')!).summary).toContain('aguardando aprovação');
+    expect(rt.taskView(rt.registry.get('t2')!)).toMatchObject({
+      status: 'cancelled',
+      stop: 'paused',
+    });
+    expect(rt.taskView(rt.registry.get('t3')!).status).toBe('cancelled');
+  });
+});

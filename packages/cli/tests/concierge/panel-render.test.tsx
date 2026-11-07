@@ -1,0 +1,97 @@
+// ADR 0006 — o painel de tarefas usa a MESMA linha dos sub-agentes (brilho, modelo, tokens,
+// tools, tempo, atividade) e aninha os agentes sob a tarefa.
+import React from 'react';
+import { describe, expect, it } from 'vitest';
+import { render } from 'ink-testing-library';
+import chalk from 'chalk';
+import { ThemeProvider } from '../../src/ui/theme/context.js';
+import { resolveTheme } from '../../src/ui/theme/theme.js';
+import { SubAgents, type SubAgentChildView } from '../../src/ui/components/SubAgents.js';
+import { TaskPanel, type PanelRow } from '../../src/ui/components/ConciergeTasks.js';
+
+const ENV = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' };
+const theme = resolveTheme({ env: ENV });
+const ESC = String.fromCharCode(27);
+const SGR = new RegExp(`${ESC}\\[[0-9;]*m`, 'g');
+const plain = (s: string | undefined): string => (s ?? '').replace(SGR, '');
+
+const running: SubAgentChildView = {
+  label: 't1 refatorar auth',
+  status: 'running',
+  model: 'herdado (glm-5.3-flash)',
+  summary: 'bash ls · 1.2k tokens · 3 tools',
+  startedAt: Date.now() - 12_000,
+};
+const rows = (v: SubAgentChildView, kids: SubAgentChildView[] = []): PanelRow[] => [
+  { kind: 'header', total: 1, running: v.status === 'running' ? 1 : 0 },
+  { kind: 'task', view: v, selected: false },
+  ...kids.map((c) => ({ kind: 'child' as const, child: c })),
+];
+const mount = (r: PanelRow[], frame: number) =>
+  render(
+    <ThemeProvider theme={theme}>
+      <TaskPanel rows={r} columns={140} frame={frame} />
+    </ThemeProvider>,
+  );
+
+describe('painel de tarefas — mesma gramática de linha dos agentes', () => {
+  it('a linha da tarefa tem o MESMO conteúdo da linha de um sub-agente (estado, modelo, resumo, tempo)', () => {
+    const a = mount(rows(running), 0);
+    const b = render(
+      <ThemeProvider theme={theme}>
+        <SubAgents childrenStatus={[running]} frame={0} />
+      </ThemeProvider>,
+    );
+    const line = (f: string | undefined): string =>
+      plain(f)
+        .split('\n')
+        .find((l) => l.includes('[t1 refatorar auth]')) ?? '';
+    expect(line(a.lastFrame())).toBe(line(b.lastFrame()));
+    for (const parte of ['rodando', 'herdado (glm-5.3-flash)', 'bash ls', '1.2k tokens', '3 tools'])
+      expect(line(a.lastFrame())).toContain(parte);
+    expect(plain(a.lastFrame())).toContain('1 tarefa:');
+    a.unmount();
+    b.unmount();
+  });
+
+  it('BRILHO: tarefa rodando anima com o frame (SGR muda); concluída não anima', () => {
+    const old = chalk.level;
+    chalk.level = 3;
+    try {
+      const sgrLine = (r: PanelRow[], frame: number): string => {
+        const m = mount(r, frame);
+        const l = (m.lastFrame() ?? '').split('\n').find((x) => plain(x).includes('[t1')) ?? '';
+        m.unmount();
+        return l;
+      };
+      expect(sgrLine(rows(running), 0)).not.toEqual(sgrLine(rows(running), 7));
+      const done: SubAgentChildView = { ...running, status: 'done', summary: '1.2k tokens · 9s' };
+      expect(sgrLine(rows(done), 0)).toEqual(sgrLine(rows(done), 7));
+    } finally {
+      chalk.level = old;
+    }
+  });
+
+  it('agentes da tarefa aninhados (mais à direita que a tarefa), também com brilho', () => {
+    const old = chalk.level;
+    chalk.level = 3;
+    try {
+      const kid: SubAgentChildView = { label: 'revisor', status: 'running', summary: '0 tokens' };
+      const m0 = mount(rows(running, [kid]), 0);
+      const lines = plain(m0.lastFrame()).split('\n');
+      const col = (needle: string): number => lines.find((l) => l.includes(needle))!.indexOf('[');
+      expect(col('[revisor]')).toBeGreaterThan(col('[t1 refatorar auth]'));
+      const sgr = (f: number): string => {
+        const m = mount(rows(running, [kid]), f);
+        const l =
+          (m.lastFrame() ?? '').split('\n').find((x) => plain(x).includes('[revisor]')) ?? '';
+        m.unmount();
+        return l;
+      };
+      expect(sgr(0)).not.toEqual(sgr(7));
+      m0.unmount();
+    } finally {
+      chalk.level = old;
+    }
+  });
+});
