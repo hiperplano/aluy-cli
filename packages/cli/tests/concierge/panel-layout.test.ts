@@ -122,7 +122,7 @@ describe('painel de tarefas — hierarquia por TAREFA, agentes aninhados', () =>
 
   it('altura: 0 sem nada; linhas + 1 de respiro', () => {
     expect(panelLines([])).toBe(0);
-    expect(panelLines(buildPanelRows(base([task('t1'), task('t2')])))).toBe(4); // cabeçalho + 2 + respiro
+    expect(panelLines(buildPanelRows(base([task('t1'), task('t2')])))).toBe(3); // cabeçalho + 2, sem respiro
   });
 });
 

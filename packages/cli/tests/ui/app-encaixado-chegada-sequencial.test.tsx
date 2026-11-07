@@ -165,7 +165,7 @@ describe('App — encaixados chegando em instantes DIFERENTES', () => {
     ]);
     // respiro, divisória (vazia sem largura no teste), respiro, rótulo — mesma estrutura de
     // quando o respiro era pago pela nota; só mudou QUEM paga.
-    expect(l.slice(0, 6)).toEqual(['↳ encaixado: um', '', '', '', '▌ você', 'VOCE']);
+    expect(l.slice(0, 4)).toEqual(['↳ encaixado: um', '', '▌ você', 'VOCE']); // 1 respiro (era 3)
   });
 
   it('fim do turno: sobra o MESMO nº de linhas em branco até o composer que após uma tool', async () => {
