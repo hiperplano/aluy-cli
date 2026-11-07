@@ -35,6 +35,8 @@ export interface TaskSession {
   /** Derruba o turno E os sub-agentes da tarefa (cessar ≠ agir: só aborta). */
   cancelAllFlows?(origin: 'f8' | 'panel' | 'exit'): void;
   resolveAsk(r: AskResolution): void;
+  /** Tokens do turno até agora (vivo); ausente em sessões falsas. */
+  turnAccounting?(): { readonly tokens: number } | undefined;
   dispose?(): void;
 }
 

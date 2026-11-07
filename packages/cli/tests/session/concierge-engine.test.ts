@@ -265,7 +265,7 @@ describe('ConciergeRuntime.taskView — a tarefa na linha dos agentes', () => {
     expect(done.startedAt).toBeUndefined();
   });
 
-  it('estados: aprovação, cota e parada têm a palavra certa', () => {
+  it('estados: aprovação, cota, parada e fila por arquivo têm a palavra certa', () => {
     const rt = new ConciergeRuntime({
       sink: sink(),
       model: { call: async () => ({ request_id: 'r', content: '', finish_reason: 'stop' }) },
@@ -276,7 +276,8 @@ describe('ConciergeRuntime.taskView — a tarefa na linha dos agentes', () => {
     rt.registry.transition('t1', 'waiting_approval');
     rt.registry.transition('t2', 'paused_quota');
     rt.registry.transition('t3', 'stopped');
-    expect(rt.taskView(rt.registry.get('t1')!).summary).toContain('aguardando aprovação');
+    // não é "rodando": palavra própria e SEM brilho (word)
+    expect(rt.taskView(rt.registry.get('t1')!)).toMatchObject({ word: 'aguardando aprovação' });
     expect(rt.taskView(rt.registry.get('t2')!)).toMatchObject({
       status: 'cancelled',
       stop: 'paused',

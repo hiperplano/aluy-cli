@@ -379,15 +379,17 @@ describe('Painel de tarefas do rodapé', () => {
     return { s, gs, tasks };
   }
 
-  it('3 tarefas ⇒ UMA linha recolhida; ↓ expande com a lista e a dica; enter abre o detalhe; esc fecha', async () => {
+  it('3 tarefas: com espaço, as TAREFAS aparecem na linha dos agentes; ↓ expande (dica); enter abre o detalhe; esc fecha', async () => {
     const { s, gs } = await three();
     await sleep(200);
-    await waitFor(() => s.frame().includes('3 tarefas · 3 rodando · ↓ ver'));
-    expect(s.frame()).not.toContain('▸ t1 rodando'); // recolhido
+    await waitFor(() => s.frame().includes('3 tarefas:'));
+    expect(s.frame()).toContain('[t1 tarefa 1]');
+    expect(s.frame()).toContain('herdado');
+    expect(s.frame()).not.toContain('enter detalhes'); // não expandido
     s.stdin.write(DOWN);
-    await waitFor(() => s.frame().includes('▸ t1 rodando') && s.frame().includes('enter detalhes'));
+    await waitFor(() => s.frame().includes('enter detalhes'));
     await sleep(300);
-    s.stdin.write(CR); // abre o detalhe da escolhida
+    s.stdin.write(CR);
     await waitFor(() => s.frame().includes('── t3 · rodando'));
     expect(s.frame()).toContain('esc fecha');
     await sleep(300);
@@ -395,7 +397,7 @@ describe('Painel de tarefas do rodapé', () => {
     await waitFor(() => !s.frame().includes('── t3 · rodando'));
     await sleep(600);
     s.stdin.write(ESC); // recolhe
-    await waitFor(() => s.frame().includes('↓ ver'));
+    await waitFor(() => !s.frame().includes('enter detalhes'));
     gs.forEach((g) => g.resolve());
     s.unmount();
   });

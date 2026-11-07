@@ -33,6 +33,8 @@ export interface SubAgentChildView {
   readonly model?: string;
   /** F13 — início (epoch ms) do filho vivo: a linha mostra `· 7s` mesmo sem tokens ainda. */
   readonly startedAt?: number;
+  /** ADR 0006 — palavra de estado própria (`aguardando aprovação`, `espera t1`): não é "rodando", então sem brilho. */
+  readonly word?: string;
 }
 
 export interface SubAgentsProps {
@@ -53,6 +55,7 @@ export interface SubAgentsProps {
 
 /** Palavra do estado (a11y): glifo NUNCA sozinho. `timeout`/`limit` ⇒ palavra honesta. */
 function statusWord(child: SubAgentChildView, settled = false): string {
+  if (child.word !== undefined) return child.word;
   if (child.status === 'running') return settled ? 'em segundo plano' : 'rodando';
   if (child.status === 'done') return 'pronto';
   // EST-0982 — PARADO pelo usuário: cessar≠falha (a11y honesta).
@@ -91,7 +94,7 @@ export function ChildLine(props: {
       <Glyph name="err" role="danger" />
     );
   // Só quem está RODANDO brilha — `settled` (scrollback) é história, nunca repinta.
-  const viva = c.status === 'running' && props.settled !== true;
+  const viva = c.status === 'running' && c.word === undefined && props.settled !== true;
   const rotulo = `[${c.label}]`;
   const total = rotulo.length + 1 + word.length;
   const wordRole = c.status === 'done' ? 'success' : c.status === 'fail' ? 'danger' : 'fgDim';

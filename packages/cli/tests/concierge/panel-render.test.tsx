@@ -72,6 +72,29 @@ describe('painel de tarefas — mesma gramática de linha dos agentes', () => {
     }
   });
 
+  it('tarefa aguardando aprovação/arquivo mostra a palavra própria e NÃO brilha', () => {
+    const old = chalk.level;
+    chalk.level = 3;
+    try {
+      const w: SubAgentChildView = {
+        label: 't1 x',
+        status: 'running',
+        word: 'aguardando aprovação',
+      };
+      const sgr = (f: number): string => {
+        const m = mount(rows(w), f);
+        const l = (m.lastFrame() ?? '').split('\n').find((x) => plain(x).includes('[t1')) ?? '';
+        m.unmount();
+        return l;
+      };
+      expect(plain(sgr(0))).toContain('aguardando aprovação');
+      expect(plain(sgr(0))).not.toContain('rodando');
+      expect(sgr(0)).toEqual(sgr(7));
+    } finally {
+      chalk.level = old;
+    }
+  });
+
   it('agentes da tarefa aninhados (mais à direita que a tarefa), também com brilho', () => {
     const old = chalk.level;
     chalk.level = 3;

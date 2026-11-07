@@ -2397,6 +2397,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               .filter((f) => f.provenance === 'usuario')
               .map((f) => f.text),
           projectSummary: () => projectInstructions?.slice(0, 600),
+          modelLabel: () => {
+            const m = built.controller.current.meta;
+            return m.model ?? m.activeModel ?? m.tier;
+          },
           storePath: () =>
             opts.anonymous === true
               ? undefined

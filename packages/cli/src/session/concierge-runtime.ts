@@ -43,6 +43,8 @@ export interface ConciergeRuntimeDeps {
   /** Arquivo de persistência (`--resume`); ausente ⇒ sem persistência. */
   readonly storePath?: () => string | undefined;
   readonly clock?: () => number;
+  /** Rótulo do modelo herdado (o MESMO que os sub-agentes mostram: `herdado (<modelo>)`). */
+  readonly modelLabel?: () => string | undefined;
 }
 
 interface Persisted {
@@ -126,10 +128,15 @@ export class ConciergeRuntime {
     const s = this.engine.sessionOf(t.id)?.current;
     const ended = t.endedAt !== undefined;
     const parts: string[] = [];
-    if (t.status === 'waiting_approval') parts.push('aguardando aprovação');
-    else if (t.status === 'blocked') parts.push(`espera ${t.blockedBy ?? 'outra tarefa'}`);
-    else if (t.current) parts.push(t.current);
-    parts.push(`${abbreviateCount(s?.meta?.tokens ?? 0)} tokens`);
+    const word =
+      t.status === 'waiting_approval'
+        ? 'aguardando aprovação'
+        : t.status === 'blocked'
+          ? `espera ${t.blockedBy ?? 'outra tarefa'}`
+          : undefined;
+    if (word === undefined && t.current) parts.push(t.current);
+    const live = this.engine.sessionOf(t.id)?.turnAccounting?.()?.tokens;
+    parts.push(`${abbreviateCount(live ?? s?.meta?.tokens ?? 0)} tokens`);
     if (t.steps > 0) parts.push(`${t.steps} tools`);
     if (ended) parts.push(formatElapsed((t.endedAt ?? 0) - t.startedAt));
     const status: SubAgentChildView['status'] =
@@ -140,11 +147,12 @@ export class ConciergeRuntime {
           : t.status === 'stopped' || t.status === 'interrupted' || t.status === 'paused_quota'
             ? 'cancelled'
             : 'running';
-    const tier = s?.meta?.activeModel ?? s?.meta?.model ?? s?.meta?.tier;
+    const tier = this.d.modelLabel?.() ?? s?.meta?.activeModel ?? s?.meta?.model ?? s?.meta?.tier;
     return {
       label: `${t.id} ${clip(t.goal, 22)}`,
       status,
       summary: parts.join(' · '),
+      ...(word !== undefined ? { word } : {}),
       ...(t.status === 'paused_quota' ? { stop: 'paused' as const } : {}),
       ...(tier !== undefined ? { model: `herdado (${tier})` } : {}),
       ...(!ended ? { startedAt: t.startedAt } : {}),
