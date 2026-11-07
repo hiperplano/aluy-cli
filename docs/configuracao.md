@@ -49,6 +49,26 @@ lugar é um blob inútil.
 
 Isso vale também para o token do conector Telegram, e o `logout` apaga dos dois.
 
+## Segredos para o agente (`/secret`)
+
+Para dar uma chave ao agente **sem colá-la no chat** (onde ela iria ao modelo, à sessão em disco, ao
+histórico e ao export): `/secret API_KEY` abre um campo mascarado. O agente vê só o **nome** e usa
+`$API_KEY` nos comandos.
+
+- Por padrão o valor vive **só em memória** e some ao sair. `--save` o grava no cofre cifrado
+  (`credentials.enc`, o mesmo da credencial, conta própria por projeto) e ele volta no próximo boot
+  **nesse projeto**. `/secret list` mostra os nomes; `/secret remove NOME` apaga de tudo.
+- O valor é exportado como variável de ambiente **só** no shell do `run_command`, do
+  `watch_command` e do `!` — nunca em MCP, sub-agentes, hooks ou outras tools. Num comando do
+  agente, só chega se o texto do comando **citar** o nome, e então a catraca **pergunta sempre**
+  (mostra o nome, nunca o valor; vale também sob `--yolo`).
+- Toda saída é redigida por **valor exato** (`‹redigido›`) além das regras por padrão. Valor com
+  menos de 8 caracteres é recusado (use `--force`).
+- Limites: um comando aprovado pode transformar o valor (base64…) e o processo que ele lança recebe
+  o valor de verdade — leia o comando antes de aprovar. Detalhes e limites honestos:
+  [ADR 0005](decisions/0005-segredos-do-dono-sem-passar-pelo-chat.md).
+- Não digite `/secret NOME valor`: o valor ficaria visível no terminal. O Aluy recusa, não guarda e avisa.
+
 ## Hooks
 
 `~/.aluy/hooks.json` liga comandos seus a eventos do agente. Sete eventos, e a lista

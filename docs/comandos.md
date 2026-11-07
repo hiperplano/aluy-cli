@@ -66,16 +66,17 @@ Dentro da sessão, sem sair do fluxo.
 
 ### Permissão e workspace
 
-|                               |                                                                                     |
-| ----------------------------- | ----------------------------------------------------------------------------------- |
-| `/permissions`                | painel: modo, grants e tools seguras                                                |
-| `/tools`                      | inventário unificado — nativas, MCP e o que a catraca diz de cada uma               |
-| `/add-dir`                    | autoriza um diretório **extra** para o agente nesta sessão                          |
-| `/init`                       | cria o `ALUY.md` e a estrutura `.aluy/` do projeto                                  |
-| `/inventory`                  | o que foi carregado da `.aluy/` (agentes · comandos · skills · workflows · memória) |
-| `/memory`                     | vê (com a origem `usuario`/`derivado`), edita, esquece e fixa a memória do agente   |
-| `/todo`                       | backlog de tarefas anotadas                                                         |
-| `/undo` · `/redo` · `/rewind` | desfaz edições do agente; `/rewind` volta a um ponto da sessão (Esc Esc)            |
+|                               |                                                                                                                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/permissions`                | painel: modo, grants e tools seguras                                                                                                                              |
+| `/tools`                      | inventário unificado — nativas, MCP e o que a catraca diz de cada uma                                                                                             |
+| `/add-dir`                    | autoriza um diretório **extra** para o agente nesta sessão                                                                                                        |
+| `/init`                       | cria o `ALUY.md` e a estrutura `.aluy/` do projeto                                                                                                                |
+| `/secret`                     | entrega um segredo ao agente por um campo **mascarado** (`list` · `remove NOME` · `--save`) — [ADR 0005](decisions/0005-segredos-do-dono-sem-passar-pelo-chat.md) |
+| `/inventory`                  | o que foi carregado da `.aluy/` (agentes · comandos · skills · workflows · memória)                                                                               |
+| `/memory`                     | vê (com a origem `usuario`/`derivado`), edita, esquece e fixa a memória do agente                                                                                 |
+| `/todo`                       | backlog de tarefas anotadas                                                                                                                                       |
+| `/undo` · `/redo` · `/rewind` | desfaz edições do agente; `/rewind` volta a um ponto da sessão (Esc Esc)                                                                                          |
 
 ### Frota e extensões
 
@@ -101,6 +102,19 @@ Dentro da sessão, sem sair do fluxo.
 | `/login` · `/logout` · `/whoami`                                                       | conta                                     |
 | `/theme` · `/lang` · `/split` · `/fullscreen` · `/notify` · `/suggest` · `/statusline` | interface                                 |
 | `/help` · `/quit`                                                                      |                                           |
+
+## Atalho de shell: `!` e `!!`
+
+|                     |                                                                                                    |
+| ------------------- | -------------------------------------------------------------------------------------------------- |
+| `!cmd`              | roda no terminal **sem pedir permissão** (você digitou) e o agente **vê** a saída no próximo passo |
+| `!!cmd`             | idem, mas **só local**: o agente não vê a saída (marcado `· só local` no bloco)                    |
+| `!cd dir` · `!cd -` | muda o diretório **da sessão** (confinado às raízes; vale também para o agente)                    |
+
+O que **não** persiste: `export VAR=…` (cada `!` é um shell de um comando só). O `!` **não é
+interativo** — sem teclado nem terminal; `ssh`, `sudo`, `vim`, `read`… rode em outro terminal (o bloco
+avisa quando detecta). O bloco mostra a saída pura: `exit N` só se ≠ 0, stderr só se houver. Modo
+Plan e os pisos de `~/.aluy` continuam bloqueando. Ver [ADR 0003](decisions/0003-bang-do-usuario-sem-caixa-de-permissao.md).
 
 ## Ferramentas nativas
 

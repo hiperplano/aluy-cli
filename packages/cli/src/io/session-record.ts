@@ -184,6 +184,7 @@ export function sanitizeBlock(raw: unknown): SessionBlock | null {
         command: o.command,
         status, // 'running' restaurado vira 'err'.
         ...(isStr(o.output) ? { output: o.output } : {}),
+        ...(o.localOnly === true ? { localOnly: true } : {}),
       };
     }
     case 'broker-error':
@@ -292,6 +293,8 @@ export function blocksToHistory(blocks: readonly SessionBlock[]): HistoryItem[] 
         break;
       }
       case 'bang': {
+        // `!!cmd` (só local): o dono pediu que o agente NÃO veja — vale também no resume.
+        if (b.localOnly) break;
         // Idem tool acima — órfão restaurado é "interrompido", não `running` nem `err`.
         const parts = [`! ${b.command} (${b.status === 'running' ? 'interrompido' : b.status})`];
         if (b.output) parts.push(b.output);

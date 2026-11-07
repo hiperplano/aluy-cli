@@ -86,6 +86,12 @@ export type PermissionCategory =
   // motivo do `journal-read-deny`: o `--unsafe` libera EFEITOS de trabalho, NÃO a
   // auto-modificação do sistema de confiança do próprio Aluy.
   | 'always-ask:aluy-config-write-deny'
+  // ADR 0005 — comando do MODELO que CITA o nome de um segredo de `/secret` (`$API_KEY`).
+  // É o único jeito de o valor chegar a um processo lançado pelo modelo, então é ASK sempre,
+  // não-relaxável por allow-list/hook/grant de sessão e — decisão consciente, mesma família
+  // do `session_command` destrutivo (ADR-0147) — nem sob `--yolo`. A caixa mostra o NOME,
+  // nunca o valor. Sub-agente: DENY (não recebe segredos).
+  | 'always-ask:secret-use'
   // EST-0970 · ADR-0058 · CLI-SEC-12 — tool de um SERVER MCP de terceiro. EFEITO
   // por padrão (E-B2): a natureza real é não-confiável (o server pode declarar
   // "readonly" e mesmo assim escrever/POST). ⇒ `ask`, NUNCA allow silencioso, e

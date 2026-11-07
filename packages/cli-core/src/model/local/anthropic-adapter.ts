@@ -20,6 +20,7 @@
 // oauth-2025-04-20` e SEM `x-api-key`. ⚠ a via OAuth de assinatura em cliente
 // não-oficial é zona cinzenta de ToS (opção consciente do usuário).
 
+import { secretVault } from '../../secrets/vault.js';
 import { BrokerError } from '../errors.js';
 import type { ModelStreamEvent, ModelUsage, NativeToolCall, ToolFunctionSchema } from '../types.js';
 import type { ProviderAdapter, BuiltRequest, SseAccumulator } from './adapter.js';
@@ -79,7 +80,8 @@ export class AnthropicAdapter implements ProviderAdapter {
     } else {
       headers['x-api-key'] = credential.secret;
     }
-    return { url, headers, body: JSON.stringify(body) };
+    // ADR 0005 — último ponto antes do fio: nenhum valor do `/secret` sai na requisição.
+    return { url, headers, body: secretVault.redact(JSON.stringify(body)) };
   }
 
   mapSse(event: string, data: string, acc: SseAccumulator): readonly ModelStreamEvent[] {

@@ -62,7 +62,10 @@ describe('Composer — indicador de MODO SHELL (`!`)', () => {
     const out = plain(lastFrame() ?? '');
     expect(out).toContain('shell');
     expect(out).toContain('!git status');
-    expect(out.toLowerCase()).toContain('catraca'); // deixa claro que passa pela catraca
+    // ADR 0003: a dica é VERDADEIRA — roda direto, o agente vê a saída, `!!` é só local.
+    expect(out).toContain('roda direto');
+    expect(out).toContain('!! só local');
+    expect(out.toLowerCase()).not.toContain('catraca pergunta');
   });
 
   it('sem shellMode, o composer é o prompt normal (sem selo shell)', () => {

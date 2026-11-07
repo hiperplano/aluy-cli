@@ -30,8 +30,10 @@ export interface BangBlockProps {
   readonly command: string;
   /** running (in-flight) · ok/err (executou) · blocked (catraca negou). */
   readonly status: 'running' | 'ok' | 'err' | 'blocked';
-  /** Saída bruta (exit/stdout/stderr) ou o motivo do bloqueio. */
+  /** Saída em texto simples (stdout; stderr/exit só quando relevantes) ou o motivo do bloqueio. */
   readonly output?: string;
+  /** `!!cmd` — a saída ficou só na tela, o agente não a viu. */
+  readonly localOnly?: boolean;
   /** Frame do tick central (anima a onda do in-flight). Puro. */
   readonly frame?: number;
   /**
@@ -115,6 +117,7 @@ export function BangBlock(props: BangBlockProps): React.ReactElement {
           <Glyph name="ok" role="success" />
         )}
         <Role name={isBlocked || isErr ? 'danger' : 'fgDim'}> {stateWord}</Role>
+        {props.localOnly === true && <Role name="fgDim"> · só local</Role>}
       </Box>
       {output.trim() !== '' && (
         <Box flexDirection="column" paddingLeft={2}>

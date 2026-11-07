@@ -29,6 +29,7 @@ import {
 } from 'node:fs';
 import {
   redactOutputSecrets,
+  secretVault,
   type HistoryItem,
   type PausedAgentSnapshot,
 } from '@hiperplano/aluy-cli-core';
@@ -111,7 +112,7 @@ export class PausaStore {
           fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
           FILE_MODE,
         );
-        writeSync(fd, JSON.stringify(record) + '\n');
+        writeSync(fd, secretVault.redact(JSON.stringify(record)) + '\n');
         closeSync(fd);
         fd = undefined;
         renameSync(tmp, file);

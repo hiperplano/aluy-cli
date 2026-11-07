@@ -18,6 +18,7 @@
 //   - sem log/telemetria do conteúdo: este módulo NUNCA imprime/loga o conteúdo
 //     dos blobs nem o caminho-com-conteúdo (CLI-SEC-6).
 
+import { secretVault } from '@hiperplano/aluy-cli-core';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -180,7 +181,7 @@ export class NodeJournalStore implements JournalStorePort {
     const sep = this.stackHasTornTail() ? '\n' : '';
     // Append-log da pilha (JSONL). O arquivo já nasce 0600 (criado no ensure);
     // appendFileSync com mode preserva (não relaxa). NUNCA logamos isto em stdout.
-    const line = sep + JSON.stringify(entry) + '\n';
+    const line = sep + secretVault.redact(JSON.stringify(entry)) + '\n';
     try {
       appendFileSync(this.stackFile, line, { mode: FILE_MODE });
     } catch {

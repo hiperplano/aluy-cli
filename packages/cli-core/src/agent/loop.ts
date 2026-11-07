@@ -678,6 +678,12 @@ export interface AgentLoopOptions {
    */
   readonly delegationNudge?: boolean;
   /**
+   * ADR 0005 — este loop exporta os segredos do `/secret` (só os que o comando cita, já
+   * aprovados pela catraca) como env var no shell do `run_command`. Só o loop PRINCIPAL liga;
+   * sub-agentes (loops criados no core) e o foco `/subagent` ficam sem — default `false`.
+   */
+  readonly injectSecretEnv?: boolean;
+  /**
    * EST-SEC-HARDEN (F21) · AG-0008 — GUARDRAIL do combo perigoso `yolo + tier-fraco +
    * conteúdo não-confiável no contexto`. O estado de YOLO é DINÂMICO (lido de
    * `permission.isUnsafe` a cada iteração — pega o Tab); aqui passamos só o `tier`
@@ -807,6 +813,7 @@ export class AgentLoop {
   // SELF_CHECK_OFF ⇒ baseline (sem overhead). Já vem resolvida pelo gating externo.
   private readonly selfCheck: SelfCheckConfig;
   private readonly delegationNudge: boolean;
+  private readonly injectSecretEnv: boolean;
   // EST-SEC-HARDEN (F21) — config do guardrail do combo perigoso (yolo+tier-fraco+
   // untrusted). undefined ⇒ inerte (baseline). O YOLO é lido de permission.isUnsafe.
   private readonly weakYoloGuardrail?: WeakYoloGuardrailConfig;
@@ -861,6 +868,7 @@ export class AgentLoop {
     if (opts.monitorQueue) this.monitorQueue = opts.monitorQueue;
     this.selfCheck = opts.selfCheck ?? SELF_CHECK_OFF;
     this.delegationNudge = opts.delegationNudge === true;
+    this.injectSecretEnv = opts.injectSecretEnv === true;
     if (opts.weakYoloGuardrail) this.weakYoloGuardrail = opts.weakYoloGuardrail;
     if (opts.stuckResolver) this.stuckResolver = opts.stuckResolver;
     if (opts.env) this.watchdogEnv = opts.env;
@@ -2157,6 +2165,10 @@ export class AgentLoop {
     const detachSignal = this.detachHub?.arm();
     const ctx: ToolRunContext = {
       ...(signal ? { signal } : {}),
+      // ADR 0005 — segredos do `/secret` só no loop principal e só p/ comando de shell.
+      ...(this.injectSecretEnv && name === 'run_command'
+        ? { secretEnv: 'referenced' as const }
+        : {}),
       ...(detachSignal ? { detachSignal } : {}),
       ...(this.detachHub ? { onDetached: (info): void => this.detachHub?.onDetached(info) } : {}),
       // EST-0969 (heartbeat) — cada chunk de stdout/stderr é um SINAL DE VIDA da

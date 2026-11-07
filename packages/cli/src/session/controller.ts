@@ -186,7 +186,7 @@ import {
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { sep as pathSep } from 'node:path';
-import { redactOutputSecrets, canRememberTool } from '@hiperplano/aluy-cli-core';
+import { redactOutputSecrets, canRememberTool, secretVault } from '@hiperplano/aluy-cli-core';
 import type { StreamSink } from './streaming-caller.js';
 import type { ModelCaller, ModelClient } from '@hiperplano/aluy-cli-core';
 import { withToolReport, targetOf, type ToolReporter } from './tool-reporter.js';
@@ -1368,6 +1368,8 @@ export class SessionController {
   // do bang reusa a fila do resolver; este flag faz a resolução voltar ao composer
   // (idle) em vez de `streaming` (não há turno de modelo no atalho de shell).
   private bangInFlight = false;
+  // ADR 0005 — contador p/ ids únicos (sem coalescência) das saídas de `!` na fila do monitor.
+  private bangSeq = 0;
   // Fase em que a sessão estava quando um ask abriu — o repouso a devolver quando o ask se
   // resolve SEM turno vivo (ask de sub-agente em segundo plano). Ver `onAskChange`.
   private phaseBeforeAsk: SessionState['phase'] | undefined;
@@ -1919,15 +1921,22 @@ export class SessionController {
         // o processo). `process.kill(-pid)` (grupo POSIX) também não existe no Windows —
         // lá o kill é via `taskkill /T /F` (mata a árvore).
         const isWin = process.platform === 'win32';
+        // ADR 0005 — `watch_command` recebe SÓ os segredos que o comando cita (a catraca já
+        // perguntou: `always-ask:secret-use`). Nada entra no env do processo do Aluy.
+        const secretEnv = secretVault.envFor(command);
+        const envOpt =
+          Object.keys(secretEnv).length > 0 ? { env: { ...process.env, ...secretEnv } } : {};
         const child = isWin
           ? spawn(command, {
               shell: true,
               stdio: ['ignore', 'pipe', 'pipe'],
               windowsHide: true,
+              ...envOpt,
             })
           : spawn('/bin/sh', ['-c', command], {
               detached: true,
               stdio: ['ignore', 'pipe', 'pipe'],
+              ...envOpt,
             });
         let outTail = '';
         const MAX_TAIL = 4096;
@@ -2376,6 +2385,9 @@ export class SessionController {
         // EST-MON-5 · ADR-0079 — a fila do MONITOR: o loop a drena ENTRE turnos e injeta
         // os disparos como DADO (observation). Os tools monitor* enfileiram nela via o store.
         monitorQueue,
+        // ADR 0005 — só o loop PRINCIPAL exporta segredos do `/secret` ao shell (o foco
+        // `/subagent` desliga abaixo; sub-agentes do core nunca ligam).
+        injectSecretEnv: true,
         limits: this.limits,
         // EST-0948 · EST-0969 (E-A2) — o loop do PAI usa o budget que o CONTROLLER owns:
         // com sub-agentes ligados é o MESMO `SharedBudget` agregado do spawner (pai +
@@ -2515,6 +2527,8 @@ export class SessionController {
       permission: opts.permission,
       ports: opts.ports,
       askResolver: opts.askResolver,
+      // ADR 0003 (emenda) — `!cd ~/x`: o core não lê o ambiente, o HOME entra por aqui.
+      ...(process.env.HOME ? { homeDir: process.env.HOME } : {}),
       // F-BG — o MESMO hub do loop: o `!comando` é onde o dono mais se prende (é ele
       // quem digita `!npm run dev`), e a tecla não pode funcionar em só um dos caminhos.
       detachHub,
@@ -4305,11 +4319,21 @@ export class SessionController {
    * (phase `asking`) via `onAskChange`. Marcamos `bangInFlight` p/ que, ao resolver,
    * a fase volte ao composer (idle) em vez de `streaming` (não há stream de modelo).
    */
-  async runBang(command: string, signal?: AbortSignal): Promise<void> {
+  async runBang(
+    command: string,
+    signal?: AbortSignal,
+    opts: { readonly localOnly?: boolean } = {},
+  ): Promise<void> {
     if (command.trim() === '') return;
     this.dismissBoot();
+    const localOnly = opts.localOnly === true;
     // Bloco de saída do atalho (ação do usuário, §2.6): começa em `running`.
-    this.pushBlock({ kind: 'bang', command, status: 'running' });
+    this.pushBlock({
+      kind: 'bang',
+      command,
+      status: 'running',
+      ...(localOnly ? { localOnly: true } : {}),
+    });
     // #13 (ghost "rodando", 2ª RAIZ — DRIFT de índice) — NÃO capturamos o índice do bang
     // aqui. Um bloco PARALELO inserido ANTES do sufixo vivo enquanto o bang roda (uma nota
     // `↳ encaixado`/`turno interrompido` via `insertBeforeLiveTail`, um sub-agente, …)
@@ -4338,6 +4362,9 @@ export class SessionController {
           status: outcome.ok ? 'ok' : 'err',
           output: outcome.output,
         });
+        // ADR 0003/0005 — o que o dono rodou com `!` ENTRA na conversa (o agente passa a saber
+        // do resultado); `!!` fica só na tela. Saída já redigida e limitada pelo executor.
+        if (!localOnly) this.feedBangToModel(outcome.observation);
       }
     } catch (err) {
       // Defensivo: o executor não deveria lançar, mas se lançar, o bloco vira `err`.
@@ -4348,13 +4375,41 @@ export class SessionController {
     } finally {
       this.bangInFlight = false;
       this.abort = null;
-      // Volta ao composer (a menos que algo já tenha mudado a fase).
-      if (this.state.phase === 'asking' || this.state.phase === 'thinking') {
+      // Volta ao composer (a menos que algo já tenha mudado a fase). Com um TURNO VIVO
+      // (o `!` rodou mid-turn) a fase é do turno: mexer nela viraria `idle` no meio dele e
+      // acordaria o monitor (turno duplicado) — só desfaz a fase se foi o `ask` do bang.
+      if (this.isTurnLive() && this.state.phase !== 'asking') {
+        // fase do turno intacta.
+      } else if (this.state.phase === 'asking' || this.state.phase === 'thinking') {
         this.setPhase('idle');
       } else if (this.state.phase !== 'budget' && this.state.phase !== 'error') {
         this.setPhase('done');
       }
     }
+  }
+
+  /**
+   * ADR 0005 — entrega a observação do `!` ao modelo pelo canal de DADO (CLI-SEC-4).
+   *  - turno VIVO: pela fila do monitor, que o loop drena no topo da próxima iteração como
+   *    `observation` (a fila de inject do loop só aceita `user_inject`, instrução do dono);
+   *  - PARADO: guardada em `pendingInjected`, anexada ao PRÓXIMO `submit` — sem acordar o
+   *    modelo (o `!` não é um pedido ao agente, só contexto).
+   * Sobrevive ao resume/compactação porque o bloco `bang` persiste e `blocksToHistory` o
+   * reconstrói; `!!` (`localOnly`) é excluído lá.
+   */
+  private feedBangToModel(observation: HistoryItem): void {
+    if (this.isTurnLive()) {
+      this.monitorQueue.enqueue({
+        monitorId: `user-shell:${++this.bangSeq}`,
+        label: 'terminal',
+        type: 'user-shell',
+        condition: 'comando rodado pelo usuário',
+        payload: observation.role === 'observation' ? observation.text : '',
+        firedAt: new Date(this.clock()).toISOString(),
+      });
+      return;
+    }
+    this.pendingInjected.push(observation);
   }
 
   /**
@@ -6071,6 +6126,7 @@ export class SessionController {
     const engine = childEngineOf(this.permissionEngine, toolScope);
     const loop = this.makeLoop({
       permission: engine,
+      injectSecretEnv: false,
       ...(systemPrompt.trim() !== '' ? { projectInstructions: systemPrompt } : {}),
     });
     this.focus = { label: name, loop, history: [] };
