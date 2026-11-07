@@ -1249,6 +1249,7 @@ export function App(props: AppProps): React.ReactElement {
           approvals: conciergeRt.pendingApprovals(),
           childrenOf: (id) => conciergeRt.taskChildren(id),
           statusline: statuslineMode,
+          columns,
           expanded: taskExpanded,
           selected: taskSel,
           now: Date.now(),
@@ -3340,6 +3341,54 @@ export function App(props: AppProps): React.ReactElement {
     // `anyPickerOpen`, que é a lista COMPLETA de modais e já era calculada logo acima
     // (mesma fonte que o `queueAtRest` usa p/ pausar a fila enquanto há overlay) — assim
     // um modal novo entra na exclusão de graça, em vez de precisar lembrar de somá-lo aqui.
+    // ── ADR 0006 — PAINEL DE TAREFAS do rodapé: expandir (↓), escolher (↑↓), abrir o detalhe
+    // (enter), parar (p) e a vista de detalhe rolável (↑↓/PgUp/PgDn, esc fecha). Só com o
+    // composer VAZIO (↓ e as letras são do texto quando há rascunho) e sem menu/picker aberto.
+    if (conciergeOn && conciergeRt !== undefined && !slashOpen && !palette.open && !anyPickerOpen) {
+      const vis = conciergeRt.visibleTasks();
+      if (taskDetail !== null) {
+        if (key.escape) {
+          setTaskDetail(null);
+          setTaskScroll(0);
+          return;
+        }
+        if (key.upArrow) return setTaskScroll((s) => s + 1);
+        if (key.downArrow) return setTaskScroll((s) => Math.max(0, s - 1));
+        if (key.pageUp) return setTaskScroll((s) => s + 5);
+        if (key.pageDown) return setTaskScroll((s) => Math.max(0, s - 5));
+      } else if (taskExpanded && input === '') {
+        if (key.escape || vis.length === 0) {
+          setTaskExpanded(false);
+          return;
+        }
+        if (key.upArrow) return setTaskSel((s) => Math.max(0, s - 1));
+        if (key.downArrow) return setTaskSel((s) => Math.min(vis.length - 1, s + 1));
+        if (key.return) {
+          const t = vis[Math.min(taskSel, vis.length - 1)];
+          if (t) {
+            setTaskDetail(t.id);
+            setTaskScroll(0);
+          }
+          return;
+        }
+        if (char === 'p') {
+          const t = vis[Math.min(taskSel, vis.length - 1)];
+          if (t) conciergeRt.stopTask(t.id);
+          return;
+        }
+      } else if (
+        key.downArrow &&
+        input === '' &&
+        histIdx === -1 &&
+        vis.length > 0 &&
+        conversaScroll === 0
+      ) {
+        setTaskExpanded(true);
+        setTaskSel(Math.max(0, vis.length - 1));
+        return;
+      }
+    }
+
     if (cockpitActive && !slashOpen && !anyPickerOpen && state.phase !== 'asking') {
       // Tab — alterna o foco da região de scroll (conversa↔log).
       if (key.tab && !key.shift) {
@@ -3548,48 +3597,6 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       return;
-    }
-
-    // ── ADR 0006 — PAINEL DE TAREFAS do rodapé: expandir (↓), escolher (↑↓), abrir o detalhe
-    // (enter), parar (p) e a vista de detalhe rolável (↑↓/PgUp/PgDn, esc fecha). Só com o
-    // composer VAZIO (↓ e as letras são do texto quando há rascunho) e sem menu/picker aberto.
-    if (conciergeOn && conciergeRt !== undefined && !slashOpen && !palette.open) {
-      const vis = conciergeRt.visibleTasks();
-      if (taskDetail !== null) {
-        if (key.escape) {
-          setTaskDetail(null);
-          setTaskScroll(0);
-          return;
-        }
-        if (key.upArrow) return setTaskScroll((s) => s + 1);
-        if (key.downArrow) return setTaskScroll((s) => Math.max(0, s - 1));
-        if (key.pageUp) return setTaskScroll((s) => s + 5);
-        if (key.pageDown) return setTaskScroll((s) => Math.max(0, s - 5));
-      } else if (taskExpanded && input === '') {
-        if (key.escape || vis.length === 0) {
-          setTaskExpanded(false);
-          return;
-        }
-        if (key.upArrow) return setTaskSel((s) => Math.max(0, s - 1));
-        if (key.downArrow) return setTaskSel((s) => Math.min(vis.length - 1, s + 1));
-        if (key.return) {
-          const t = vis[Math.min(taskSel, vis.length - 1)];
-          if (t) {
-            setTaskDetail(t.id);
-            setTaskScroll(0);
-          }
-          return;
-        }
-        if (char === 'p') {
-          const t = vis[Math.min(taskSel, vis.length - 1)];
-          if (t) conciergeRt.stopTask(t.id);
-          return;
-        }
-      } else if (key.downArrow && input === '' && histIdx === -1 && vis.length > 0) {
-        setTaskExpanded(true);
-        setTaskSel(Math.max(0, vis.length - 1));
-        return;
-      }
     }
 
     // ── ask pendente CAPTURA o foco (handoff §10 regra 3) ───────────────────

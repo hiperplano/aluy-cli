@@ -1265,7 +1265,8 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     client: liveClient,
     tier,
     maxTokens: 700,
-    sink: delegatingSink(() => controllerRef?.sink),
+    // Raciocínio do modelo NÃO aparece na resposta do Concierge (só a fala).
+    sink: { ...delegatingSink(() => controllerRef?.sink), onReasoning: () => {} },
     nativeTools: new NativeToolsCapability({ tools: CONCIERGE_TOOLS }),
   });
   const conciergeCaller: ConciergeModel = {

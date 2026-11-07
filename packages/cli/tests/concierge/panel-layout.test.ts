@@ -69,14 +69,34 @@ describe('painel de tarefas — linhas', () => {
       'approval',
     ]);
     expect(kinds(base([task('t1')], { statusline: 'compact' }))).toEqual(['summary']);
-    expect(kinds(base([], { statusline: 'hidden', approvals: ap }))).toEqual(['approval']);
+    expect(kinds(base([], { statusline: 'hidden', approvals: ap }))).toEqual([
+      'approval',
+      'approval',
+    ]);
   });
 
-  it('aprovações: no máximo 2 linhas + contagem do excedente', () => {
+  it('aprovações: no máximo 2 pedidos (cabeçalho + efeito) e a contagem do excedente', () => {
     const ap = ['t1', 't2', 't3'].map((taskId) => ({ taskId, summary: 'x' }));
     const rows = buildPanelRows(base([], { approvals: ap }));
-    expect(rows.filter((r) => r.kind === 'approval')).toHaveLength(3); // 2 + "…+1"
-    expect(rows.at(-1)).toMatchObject({ text: expect.stringContaining('+1') });
+    const texts = rows.map((r) => (r.kind === 'approval' ? r.text : ''));
+    expect(texts.filter((t) => t.includes('pede aprovação'))).toHaveLength(2);
+    expect(texts.at(-1)).toContain('+1');
+  });
+
+  it('aprovação mostra o efeito EXATO, quebrado em linhas (até 4) — nunca cortado cedo', () => {
+    const cmd = `run_command: $ ${'find . -name "*.md" && '.repeat(8)}echo FIM-DO-COMANDO`;
+    const rows = buildPanelRows(
+      base([], { approvals: [{ taskId: 't1', summary: cmd }], columns: 100 }),
+    );
+    const texts = rows.map((r) => (r.kind === 'approval' ? r.text : ''));
+    expect(texts[0]).toContain('t1 pede aprovação');
+    expect(texts.slice(1).join('')).toContain('FIM-DO-COMANDO'); // cabe: aparece inteiro
+    const huge = buildPanelRows(
+      base([], { approvals: [{ taskId: 't1', summary: 'a'.repeat(5000) }], columns: 100 }),
+    );
+    const h = huge.map((r) => (r.kind === 'approval' ? r.text : ''));
+    expect(h.length).toBeLessThanOrEqual(1 + 4); // cabeçalho + no máximo 4 linhas do efeito
+    expect(h.at(-1)).toMatch(/…$/); // e avisa que passou do limite
   });
 
   it('altura: 0 sem nada; linhas + 1 de respiro', () => {

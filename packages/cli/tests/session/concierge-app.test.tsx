@@ -283,7 +283,7 @@ describe('A conversa nunca espera o trabalho; o trabalho nunca entra na conversa
     await type(s, 'faça o trabalho');
     await waitFor(() => task.current.phase === 'asking');
     // aprovação na caixa de entrada (rodapé), com o comando visível
-    await waitFor(() => /t1 pede aprovação: .*ls -la/.test(s.frame()));
+    await waitFor(() => s.frame().includes('t1 pede aprovação') && /\$ ls -la/.test(s.frame()));
     expect(s.conversation.current.phase).not.toBe('asking'); // a conversa NÃO é bloqueada
     await type(s, '/a');
     await waitFor(() => task.current.phase !== 'asking');

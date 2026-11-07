@@ -243,7 +243,8 @@ export class ControllerTaskEngine implements ConciergeEngine {
 function askSummary(s: SessionState): string {
   const r = s.pendingAsk?.request;
   if (!r) return '';
-  return `${r.call.name}: ${clip(r.effect.exact ?? '', 70)}`;
+  // O comando EXATO, não truncado cedo: quem aprova precisa ver o que está aprovando.
+  return `${r.call.name}: ${clip(r.effect.exact ?? '', 600)}`;
 }
 
 function msg(e: unknown): string {

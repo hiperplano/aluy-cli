@@ -21,6 +21,7 @@ import { ChildLine, type SubAgentChildView } from './SubAgents.js';
 import { clip, formatElapsed, statusPt, type TaskRecord } from '@hiperplano/aluy-cli-core';
 
 export const MAX_APPROVAL_ROWS = 2;
+const MAX_EFFECT_LINES = 4;
 /** A partir de quantas tarefas a lista recolhe numa linha só. */
 export const COLLAPSE_AT = 3;
 const MAX_CHILD_ROWS = 3;
@@ -51,6 +52,8 @@ export interface PanelInput {
   readonly expanded: boolean;
   readonly selected: number;
   readonly now: number;
+  /** Largura do terminal: a aprovação mostra o efeito EXATO, quebrado em linhas. */
+  readonly columns?: number;
 }
 
 /** `3 tarefas · 2 rodando · ↓ ver`. */
@@ -97,14 +100,22 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
       }
     }
   }
-  i.approvals
-    .slice(0, MAX_APPROVAL_ROWS)
-    .forEach((a) =>
+  const width = Math.max(30, (i.columns ?? 100) - 8);
+  i.approvals.slice(0, MAX_APPROVAL_ROWS).forEach((a) => {
+    // 1ª linha: quem pede e como responder; abaixo, o efeito EXATO (até 4 linhas, quebrado).
+    rows.push({
+      kind: 'approval',
+      text: `⚠ ${a.taskId} pede aprovação  ·  /a aprova · /n nega`,
+    });
+    const chunks: string[] = [];
+    for (let k = 0; k < a.summary.length; k += width) chunks.push(a.summary.slice(k, k + width));
+    chunks.slice(0, MAX_EFFECT_LINES).forEach((c, idx) =>
       rows.push({
         kind: 'approval',
-        text: `⚠ ${a.taskId} pede aprovação: ${a.summary}  ·  /a aprova · /n nega`,
+        text: `   ${c}${idx === MAX_EFFECT_LINES - 1 && chunks.length > MAX_EFFECT_LINES ? '…' : ''}`,
       }),
     );
+  });
   if (i.approvals.length > MAX_APPROVAL_ROWS) {
     rows.push({
       kind: 'approval',
