@@ -137,6 +137,15 @@ describe('segredo: ZERO ocorrências do canário em tudo que persiste ou sai', (
     await waitFor(() => plain(lastFrame() ?? '').length > 0);
     await tick(200); // deixa o useInput montar
 
+    // uma entrada comum ANTES dos /secret: é a mais antiga do histórico ↑↓ e prova, no fim, que o
+    // recall atravessa o lugar onde as linhas /secret estariam se tivessem sido guardadas.
+    stdin.write('!echo antes-dos-segredos');
+    await waitFor(() => plain(lastFrame() ?? '').includes('!echo antes-dos-segredos'));
+    stdin.write('\r');
+    await waitFor(() =>
+      controller.current.blocks.some((b) => b.kind === 'bang' && b.status !== 'running'),
+    );
+
     // ── 1) /secret API_KEY → campo mascarado; digita o valor ─────────────────────
     stdin.write('/secret API_KEY');
     await waitFor(() => plain(lastFrame() ?? '').includes('/secret API_KEY'));
@@ -184,11 +193,13 @@ describe('segredo: ZERO ocorrências do canário em tudo que persiste ou sai', (
     stdin.write('!echo $API_KEY');
     await waitFor(() => plain(lastFrame() ?? '').includes('!echo $API_KEY'));
     stdin.write('\r');
-    await waitFor(() =>
-      controller.current.blocks.some((b) => b.kind === 'bang' && b.status !== 'running'),
+    await waitFor(
+      () =>
+        controller.current.blocks.filter((b) => b.kind === 'bang' && b.status !== 'running')
+          .length >= 2,
     );
-    expect(envVisto[0]?.API_KEY).toBe(CANARY); // exportado ao shell
-    const bang = controller.current.blocks.find((b) => b.kind === 'bang');
+    expect(envVisto[envVisto.length - 1]?.API_KEY).toBe(CANARY); // exportado ao shell
+    const bang = controller.current.blocks.filter((b) => b.kind === 'bang').at(-1);
     expect(bang?.kind === 'bang' && bang.output).toBe('‹redigido›');
 
     // ── 5) turno do modelo com o `!` no contexto ─────────────────────────────────
@@ -200,9 +211,9 @@ describe('segredo: ZERO ocorrências do canário em tudo que persiste ou sai', (
 
     // ── 6) histórico ↑↓: recalca tudo; nenhuma linha /secret nem valor ───────────
     const antes = frames.length;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 8; i++) {
       stdin.write(`${ESC}[A`);
-      await tick();
+      await tick(80);
     }
     const recall = frames.slice(antes).map(plain).join('\n');
     // (as notas do transcript citam `/secret NOME` como instrução; o que NUNCA pode voltar é a
@@ -210,8 +221,9 @@ describe('segredo: ZERO ocorrências do canário em tudo que persiste ou sai', (
     for (const l of ['/secret API_KEY', '/secret DB_PASS', '/secret TOKEN_X']) {
       expect(recall).not.toContain(l);
     }
-    // sanidade: o recall funciona (traz o que NÃO é /secret)
+    // sanidade: o recall funciona e ATRAVESSA o ponto onde as linhas /secret estariam
     expect(recall).toContain('resuma o que saiu');
+    expect(recall).toContain('!echo antes-dos-segredos');
     expect(recall).not.toContain(CANARY);
 
     // ── varredura final ──────────────────────────────────────────────────────────
