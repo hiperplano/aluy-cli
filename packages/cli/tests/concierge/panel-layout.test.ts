@@ -66,7 +66,8 @@ describe('painel de tarefas — linhas', () => {
     const ap = [{ taskId: 't1', summary: 'run_command: $ ls' }];
     expect(kinds(base([task('t1')], { statusline: 'hidden', approvals: ap }))).toEqual([
       'summary',
-      'approval',
+      'approval', // cabeçalho do pedido
+      'approval', // o efeito exato
     ]);
     expect(kinds(base([task('t1')], { statusline: 'compact' }))).toEqual(['summary']);
     expect(kinds(base([], { statusline: 'hidden', approvals: ap }))).toEqual([
