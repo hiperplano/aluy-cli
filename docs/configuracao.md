@@ -14,24 +14,24 @@ flag de CLI  >  env ALUY_*  >  ~/.aluy/config.json  >  default
 
 ## `~/.aluy/`
 
-| Arquivo / pasta                                   | Conteúdo                                                              |
-| ------------------------------------------------- | --------------------------------------------------------------------- |
-| `config.json`                                     | preferências duráveis: idioma, tema, provider/modelo, perfil, limites |
-| `providers.json`                                  | seus providers BYO (override do catálogo)                             |
-| `mcp.json`                                        | servers MCP globais — ver [MCP](mcp.md)                               |
-| `hooks.json`                                      | hooks. O agente **nunca** escreve aqui                                |
-| `credentials.enc`                                 | cofre cifrado (AES-256-GCM), quando não há keychain utilizável        |
-| `sessions/`                                       | histórico das conversas (retomável com `--resume`)                    |
-| `pausas/`                                         | trabalho pausado por cota esgotada, retomado junto com a sessão       |
-| `audit.jsonl`                                     | trilha append-only dos efeitos                                        |
-| `services/`                                       | serviços instalados                                                   |
-| `cron/`                                           | tarefas agendadas                                                     |
-| `agents/` · `skills/` · `workflows/` · `plugins/` | o que você instalou, global                                           |
-| `memory/`                                         | store da memória persistente (modo turbo)                             |
-| `exports/`                                        | transcrições do `/export`                                             |
-| `undo/`                                           | pilha de undo das edições do agente                                   |
-| `logs/`                                           | logs dos sidecars                                                     |
-| `update-check.json`                               | cache do verificador de versão                                        |
+| Arquivo / pasta                                   | Conteúdo                                                                      |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `config.json`                                     | preferências duráveis: idioma, tema, provider/modelo, perfil, limites         |
+| `providers.json`                                  | seus providers BYO (override do catálogo)                                     |
+| `mcp.json`                                        | servers MCP globais — ver [MCP](mcp.md)                                       |
+| `hooks.json`                                      | hooks. O agente **nunca** escreve aqui                                        |
+| `credentials.enc`                                 | cofre cifrado (AES-256-GCM), quando não há keychain utilizável                |
+| `sessions/`                                       | histórico das conversas (retomável com `--resume`)                            |
+| `pausas/`                                         | trabalho pausado por cota esgotada, retomado junto com a sessão               |
+| `audit.jsonl`                                     | trilha append-only dos efeitos                                                |
+| `services/`                                       | serviços instalados                                                           |
+| `cron/`                                           | tarefas agendadas                                                             |
+| `agents/` · `skills/` · `workflows/` · `plugins/` | o que você instalou, global                                                   |
+| `memory/`                                         | memória persistente: `global.md` (fatos globais) + store do mem0 (modo turbo) |
+| `exports/`                                        | transcrições do `/export`                                                     |
+| `undo/`                                           | pilha de undo das edições do agente                                           |
+| `logs/`                                           | logs dos sidecars                                                             |
+| `update-check.json`                               | cache do verificador de versão                                                |
 
 ## Credencial
 
@@ -79,6 +79,16 @@ ALUY.md  →  AGENTS.md  →  CLAUDE.md
 Isso é deliberado: adotar o aluy não obriga a reescrever o que você já mantém para
 outro agente. A ordem só decide a sequência no `system` e o desempate quando é
 preciso cortar pelo teto de contexto.
+
+### Memória: o que o dono pede para lembrar é seguido
+
+`~/.aluy/memory/global.md` e `.aluy/memory/project.md` entram no `system` em **toda** sessão
+(nova, `--resume`, `--continue`) e nos **sub-agentes**. Quando você diz "a partir de agora…" ou "não
+implemente, chame subagentes", o agente grava na hora (`remember`, origem `usuario`, sem caixa de
+confirmação) e avisa em uma linha. Fatos `usuario` são seguidos como instrução sua; os `derivado`
+são só contexto de fundo. Veja e apague tudo com `/memory`. Teto de 8.000 caracteres (os seus têm
+prioridade; o que ficar de fora é avisado). Motivo e risco aceito em
+[ADR 0004](decisions/0004-memoria-do-dono-e-seguida.md).
 
 > O alias `AGENT.md` (singular) era aceito até a rc.181 e **não é mais lido**. Se
 > você tem um, renomeie para `ALUY.md`.

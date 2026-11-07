@@ -247,6 +247,7 @@ import { runInit, buildScaffoldSystemPrompt } from '../slash/init.js';
 import { buildServiceCreateSystemPrompt, SERVICE_DRAFTS_DIRNAME } from '../slash/service-create.js';
 import { parseMemoryCommand, runMemoryCommand } from '../slash/memory.js';
 import { parseTodoCommand, runTodoCommand } from '../slash/todo.js';
+import { onSemanticMemoryNotice } from '../maestro/semantic-memory-notice.js';
 import { runCron } from '../commands/cron.js';
 import {
   parseClearCommand,
@@ -5314,6 +5315,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // ficar refém deste await. Aqui só a memória entra — PREPENDANDO, o que mantém a
     // ordem original (memória, depois histórico) sem apagar o que já está lá.
     if (memorySeed.length > 0) built.controller.prependSeed(memorySeed);
+    // Memória semântica indisponível (mem0/Ollama fora no boot): UMA nota honesta, sem spam.
+    onSemanticMemoryNotice((lines) => built.controller.pushNote('memória', [...lines]));
     const unsubSave = built.controller.subscribe(() => saveNow());
 
     // EST-1012 — ROBUSTEZ DE MEMÓRIA · liga o MONITOR DE PRESSÃO de heap agora que a TUI

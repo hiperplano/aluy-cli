@@ -231,6 +231,22 @@ export class NodeBootSupervisor implements BootSupervisor {
 
     for (const kind of kinds) {
       const config = paths[kind];
+      // O mem0 usa o Ollama como embedder: sem o Ollama de pé ele não abre o store. Em vez de
+      // spawnar um servidor que vai falhar (e, no passado, "curar" o store movendo-o), pula
+      // com motivo claro — o store fica INTACTO e o aviso honesto explica. Se o mem0 JÁ está
+      // de pé (processo anterior), segue o caminho normal.
+      if (kind === 'mem0') {
+        const oll = states.find((s) => s.kind === 'ollama');
+        if (oll !== undefined && !oll.running && !(await this.healthCheck(config))) {
+          states.push({
+            kind,
+            running: false,
+            error:
+              'ollama indisponível (embedder da memória semântica) — mem0 não iniciado; store intacto',
+          });
+          continue;
+        }
+      }
       const state = await this.ensureSidecar(kind, config);
       states.push(state);
     }

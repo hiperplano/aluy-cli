@@ -499,6 +499,8 @@ export interface SessionControllerOptions {
    * do dono, como o AGENT.md). Ausente ⇒ prompt baseline (não-regressão).
    */
   readonly availableAgents?: string;
+  /** ADR 0004 — thunk do bloco de MEMÓRIA do dono (system; vale p/ pai e filhos). */
+  readonly memoryContextProvider?: () => Promise<string | undefined>;
   /**
    * EST-1149 · ADR-0127 — COMANDOS DA SESSÃO: nota já formatada (camada cli, do registro
    * de comandos) com os `/comandos` que o HUMANO digita. Repassada ao AgentLoop (canal
@@ -2036,6 +2038,9 @@ export class SessionController {
       delete (childPorts as { question?: unknown }).question;
       const spawner = new SubAgentSpawner({
         model: opts.model,
+        ...(opts.memoryContextProvider
+          ? { memoryContextProvider: opts.memoryContextProvider }
+          : {}),
         // display: os filhos usam o caller DEDICADO (sem o sink ao vivo do pai). MESMO
         // broker/credencial (CLI-SEC-7) — só não vaza tokens na região viva do pai.
         ...(opts.subAgentModel ? { childModel: opts.subAgentModel } : {}),
@@ -2437,6 +2442,9 @@ export class SessionController {
           : {}),
         // EST-1109 — agentes DISPONÍVEIS no contexto: nota já formatada → canal `system`.
         ...(opts.availableAgents !== undefined ? { availableAgents: opts.availableAgents } : {}),
+        ...(opts.memoryContextProvider
+          ? { memoryContextProvider: opts.memoryContextProvider }
+          : {}),
         // EST-1149 — comandos da SESSÃO no contexto: nota já formatada → canal `system`.
         ...(opts.sessionCommands !== undefined ? { sessionCommands: opts.sessionCommands } : {}),
         // ADR-0145 (frente c) — thunk do TIER corrente (mesmo padrão do

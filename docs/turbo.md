@@ -66,15 +66,16 @@ até os três ficarem ✓ — adaptando-se ao que a sua máquina precisar.
 
 ## Problemas comuns e como resolver
 
-| Sintoma (no `doctor`)                                                               | Causa                                                        | Conserto                                                                                                                |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `mem0 ✗ (fora)` + log `can't open file '…/aluy-mem0-server.py'`                     | o script do servidor não está no venv                        | `aluy bootstrap` (copia o script). Em rc ≥ 33 o boot também o copia sozinho ao abrir o aluy.                            |
-| `mem0 ✗` + log `KeyError: '_type'` ou `no such column: prev_value`                  | store de versão anterior, incompatível                       | `mv ~/.aluy/memory{,.bak}; mv ~/.mem0/history.db{,.bak}` e reabra. Em rc ≥ 29 o servidor faz isso sozinho (self-heal).  |
-| `ollama ✓` mas `ollama list` → _command not found_                                  | serviço sobe em `:11434`, mas o binário ficou fora do `PATH` | rc ≥ 30 cria um symlink em `~/.local/bin`. Ou abra um shell novo / `source ~/.bashrc`.                                  |
-| `bootstrap` trava em _"verificando ollama"_ + `erro de broker: provider local`      | instalação _via agente_ sem um modelo acessível              | use `aluy bootstrap --no-agent` (rc ≥ 35 cai nisso sozinho).                                                            |
-| `headroom ✗` + log `No module named 'fastapi'` / `Proxy dependencies not installed` | o venv instalou `headroom-ai` sem o extra `[proxy]`          | `~/.aluy/hr-venv/bin/pip install 'headroom-ai[proxy]==0.25.0'` e reabra. Corrigido na fonte em rc ≥ 36.                 |
-| `headroom ✗ (fora)` (outros)                                                        | venv sem deps, ou core sem wheel pro SO/arch                 | `aluy bootstrap --no-agent`; veja `~/.aluy/logs/headroom.log`. No Windows, suba com `HEADROOM_REQUIRE_RUST_CORE=false`. |
-| os três `✗` numa máquina nova                                                       | nada provisionado ainda                                      | `aluy bootstrap --no-agent`.                                                                                            |
+| Sintoma (no `doctor`)                                                                 | Causa                                                        | Conserto                                                                                                                                                               |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mem0 ✗ (fora)` + log `can't open file '…/aluy-mem0-server.py'`                       | o script do servidor não está no venv                        | `aluy bootstrap` (copia o script). Em rc ≥ 33 o boot também o copia sozinho ao abrir o aluy.                                                                           |
+| `mem0 ✗` + log `KeyError: '_type'` ou `no such column: prev_value`                    | store de versão anterior, incompatível                       | o servidor põe em **quarentena** só os arquivos do store (`memory.incompat-<ts>/`) e recria fresco; nunca apaga e nunca toca `global.md`. Para restaurar, veja abaixo. |
+| `mem0 ✗` + log `Failed to connect to Ollama` / aviso "memória semântica indisponível" | o Ollama não estava no ar quando o mem0 subiu                | **nada foi movido** (a quarentena só ocorre em incompatibilidade reconhecida). Abra o Ollama e reabra o aluy, ou `/doctor fix`.                                        |
+| `ollama ✓` mas `ollama list` → _command not found_                                    | serviço sobe em `:11434`, mas o binário ficou fora do `PATH` | rc ≥ 30 cria um symlink em `~/.local/bin`. Ou abra um shell novo / `source ~/.bashrc`.                                                                                 |
+| `bootstrap` trava em _"verificando ollama"_ + `erro de broker: provider local`        | instalação _via agente_ sem um modelo acessível              | use `aluy bootstrap --no-agent` (rc ≥ 35 cai nisso sozinho).                                                                                                           |
+| `headroom ✗` + log `No module named 'fastapi'` / `Proxy dependencies not installed`   | o venv instalou `headroom-ai` sem o extra `[proxy]`          | `~/.aluy/hr-venv/bin/pip install 'headroom-ai[proxy]==0.25.0'` e reabra. Corrigido na fonte em rc ≥ 36.                                                                |
+| `headroom ✗ (fora)` (outros)                                                          | venv sem deps, ou core sem wheel pro SO/arch                 | `aluy bootstrap --no-agent`; veja `~/.aluy/logs/headroom.log`. No Windows, suba com `HEADROOM_REQUIRE_RUST_CORE=false`.                                                |
+| os três `✗` numa máquina nova                                                         | nada provisionado ainda                                      | `aluy bootstrap --no-agent`.                                                                                                                                           |
 
 > **Não rode `aluy` com `sudo`.** Os sidecars **recusam** rodar como root (segurança), e o `sudo`
 > ainda manda o aluy procurar a config em `/root/.aluy` — outro lugar. Instale como seu usuário;
@@ -117,6 +118,15 @@ curl -s http://127.0.0.1:11435/health     # → {"ok": true}
 O mem0 usa o Ollama (`:11434`) como embedder/LLM — instale o Ollama **antes**. O store fica em
 `~/.aluy/memory` (chromadb + history). Se um store antigo travar o boot, mova-o para backup
 (veja a tabela acima).
+
+**Quarentena do store.** Só uma incompatibilidade _reconhecida_ (`KeyError '_type'` do chromadb,
+`no such column`, dimensão do vetor ≠ da collection, sqlite ilegível) move o store — e move
+**apenas** `chroma.sqlite3*`, `history.db*`, `.embedder` e os diretórios UUID para
+`~/.aluy/memory.incompat-<timestamp>/`, com os mesmos nomes. `global.md` (fatos globais) e
+qualquer outro arquivo ficam onde estão, e nada é criado se não há o que mover. Erro de rede/
+timeout até o Ollama **não** é incompatibilidade: o servidor espera alguns segundos (variável
+`ALUY_MEM0_OLLAMA_WAIT_S`, padrão 12) e, se o Ollama não vier, sai sem tocar em nada. Restaurar =
+com o aluy fechado, mover de volta os itens do `.incompat-<ts>/` para `~/.aluy/memory/`.
 
 ### headroom (Python ≥ 3.10)
 

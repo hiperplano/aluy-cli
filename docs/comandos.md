@@ -73,7 +73,7 @@ Dentro da sessão, sem sair do fluxo.
 | `/add-dir`                    | autoriza um diretório **extra** para o agente nesta sessão                          |
 | `/init`                       | cria o `ALUY.md` e a estrutura `.aluy/` do projeto                                  |
 | `/inventory`                  | o que foi carregado da `.aluy/` (agentes · comandos · skills · workflows · memória) |
-| `/memory`                     | vê, edita, esquece e fixa a memória do agente                                       |
+| `/memory`                     | vê (com a origem `usuario`/`derivado`), edita, esquece e fixa a memória do agente   |
 | `/todo`                       | backlog de tarefas anotadas                                                         |
 | `/undo` · `/redo` · `/rewind` | desfaz edições do agente; `/rewind` volta a um ponto da sessão (Esc Esc)            |
 

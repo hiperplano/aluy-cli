@@ -23,6 +23,7 @@ Store: chromadb em ~/.aluy/memory.
 import argparse
 import json
 import os
+import re
 import signal
 import sys
 import traceback
@@ -396,33 +397,154 @@ def _write_embedder_marker() -> None:
         pass
 
 
+# ── Classificação de erro ao abrir o store ─────────────────────────────────
+# REGRA DE OURO: só uma incompatibilidade RECONHECIDA do store justifica movê-lo. Qualquer outro
+# erro (Ollama fora do ar, timeout, disco, permissão, bug) deixa os dados EXATAMENTE onde estão.
+# Achado ao vivo: com o Ollama parado, o `from_config` do mem0 estourou `ConnectionError` e o
+# antigo `except Exception` tratou isso como "store incompatível" ⇒ o store inteiro (48 docs)
+# foi renomeado para `memory.incompat-<ts>` e a memória semântica sumiu em silêncio.
+_TRANSPORT_CLASS_NAMES = frozenset({
+    "ConnectError", "ConnectTimeout", "ReadTimeout", "ReadError", "WriteError", "PoolTimeout",
+    "TimeoutException", "NetworkError", "RemoteProtocolError", "ProtocolError",
+    "NewConnectionError", "MaxRetryError", "ProxyError", "ChunkedEncodingError",
+})
+_TRANSPORT_MESSAGE_MARKERS = (
+    "failed to connect to ollama", "connection refused", "connection reset",
+    "connection aborted", "name or service not known", "temporary failure in name resolution",
+    "timed out", "max retries exceeded",
+)
+_INCOMPAT_MESSAGE_MARKERS = (
+    "no such column",                 # sqlite do history de versão antiga (prev_value…)
+    "no such table",
+    "file is not a database",         # sqlite ilegível
+    "database disk image is malformed",
+    "invaliddimensionexception",      # chromadb: dimensão do vetor ≠ da collection
+    "embedding dimension",
+    "dimension mismatch",
+    "expecting embedding with dimension",
+)
+
+
+def _exc_chain(exc: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        chain.append(cur)
+        cur = cur.__cause__ or cur.__context__
+    return chain
+
+
+def is_transport_error(exc: BaseException) -> bool:
+    """Falha de rede/transporte até o embedder (Ollama fora, timeout, DNS…). NUNCA é store."""
+    import socket
+    for e in _exc_chain(exc):
+        if isinstance(e, (ConnectionError, TimeoutError, socket.timeout, socket.gaierror)):
+            return True
+        if type(e).__name__ in _TRANSPORT_CLASS_NAMES:
+            return True
+        msg = str(e).lower()
+        if any(m in msg for m in _TRANSPORT_MESSAGE_MARKERS):
+            return True
+    return False
+
+
+def is_store_incompatible(exc: BaseException) -> bool:
+    """True SÓ para as incompatibilidades documentadas do store (chromadb KeyError '_type',
+    sqlite `no such column`, dimensão do vetor…). Erro de transporte ⇒ sempre False."""
+    if is_transport_error(exc):
+        return False
+    for e in _exc_chain(exc):
+        if isinstance(e, KeyError) and e.args and e.args[0] == "_type":
+            return True
+        msg = f"{type(e).__name__}: {e}".lower()
+        if any(m in msg for m in _INCOMPAT_MESSAGE_MARKERS):
+            return True
+    return False
+
+
+_UUID_DIR = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def _is_store_artifact(name: str, is_dir: bool) -> bool:
+    """Só o que é do STORE (chromadb/history). `global.md`, `*.md` e qualquer outro arquivo do
+    usuário em `~/.aluy/memory` NÃO são store e jamais se movem."""
+    if ".incompat-" in name:
+        return False
+    if is_dir:
+        return bool(_UUID_DIR.match(name))
+    return name == ".embedder" or name.startswith("chroma.sqlite3") or name.startswith("history.db")
+
+
+def _legacy_history_path() -> str:
+    return os.path.expanduser("~/.mem0/history.db")
+
+
 def _reset_incompatible_stores() -> None:
-    """Move os stores de memória p/ backup, p/ recriar frescos. Chamado quando a versão atual
-    do chromadb/mem0 não lê o store de uma versão anterior (KeyError '_type' no chromadb /
-    sqlite 'no such column' no history). Best-effort — nunca lança. Limpa OS DOIS lugares:
-    `~/.aluy/memory` (chromadb + history novo) E `~/.mem0/history.db` (history default ANTIGO,
-    de antes de consolidarmos o path — senão a 2ª tentativa ainda bate nele)."""
+    """Quarentena (NÃO apaga) dos artefatos do store incompatível, p/ recriar fresco.
+    Move só os artefatos do store para `<memória>.incompat-<ts>/` (mesmo nome de arquivo ⇒
+    restaurar é mover de volta) e só cria o diretório se HÁ o que mover. Não toca `global.md`
+    nem outros arquivos. Também o `~/.mem0/history.db` legado. Best-effort — nunca lança e
+    NUNCA apaga: se o move falhar, deixa como está."""
+    import shutil
     import time
     try:
         ts = int(time.time())
     except Exception:  # noqa: BLE001
         ts = 0
-    targets = [ALUY_MEMORY_DIR, os.path.expanduser("~/.mem0/history.db")]
-    for path in targets:
-        if not os.path.exists(path):
-            continue
+    try:
+        if os.path.isdir(ALUY_MEMORY_DIR):
+            movable = [
+                n for n in sorted(os.listdir(ALUY_MEMORY_DIR))
+                if _is_store_artifact(n, os.path.isdir(os.path.join(ALUY_MEMORY_DIR, n)))
+            ]
+            if movable:
+                backup = f"{ALUY_MEMORY_DIR}.incompat-{ts}"
+                os.makedirs(backup, mode=0o700, exist_ok=True)
+                for n in movable:
+                    try:
+                        shutil.move(os.path.join(ALUY_MEMORY_DIR, n), os.path.join(backup, n))
+                    except Exception:  # noqa: BLE001
+                        pass
+    except Exception:  # noqa: BLE001
+        pass
+    legacy = _legacy_history_path()
+    try:
+        if os.path.exists(legacy):
+            os.rename(legacy, f"{legacy}.incompat-{ts}")
+    except OSError:
+        pass
+
+
+def _open_memory(memory_cls: Any, config: dict[str, Any], *, sleep: Any = None,
+                 wait_s: float | None = None) -> Any:
+    """Abre o Memory(). Erro de TRANSPORTE (Ollama ainda subindo) ⇒ espera/tenta de novo até
+    `wait_s` e, esgotado, sai SEM tocar no store. Incompatibilidade reconhecida ⇒ propaga
+    `StoreIncompatible`. Qualquer outro erro ⇒ propaga intacto (store preservado)."""
+    import time
+    sleep = sleep or time.sleep
+    if wait_s is None:
         try:
-            os.rename(path, f"{path}.incompat-{ts}")
-        except OSError:
-            # rename pode falhar (cross-device/permissão) ⇒ apaga o conteúdo problemático.
-            import shutil
-            try:
-                if os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
-                else:
-                    os.remove(path)
-            except Exception:  # noqa: BLE001
-                pass
+            wait_s = float(os.environ.get("ALUY_MEM0_OLLAMA_WAIT_S", "12"))
+        except ValueError:
+            wait_s = 12.0
+    waited = 0.0
+    while True:
+        try:
+            return memory_cls.from_config(config)
+        except Exception as exc:  # noqa: BLE001
+            if is_transport_error(exc):
+                if waited >= wait_s:
+                    raise EmbedderUnavailable(str(exc)) from exc
+                sleep(1.0)
+                waited += 1.0
+                continue
+            raise
+
+
+class EmbedderUnavailable(Exception):
+    """Embedder (Ollama) inalcançável: o store NÃO foi tocado; tente de novo mais tarde."""
 
 
 def main() -> None:
@@ -458,8 +580,22 @@ def main() -> None:
     # mas o serviço SOBE. Achado ao vivo na máquina do dono (dois stores de jun/antigo).
     config = _build_mem0_config()
     try:
-        memory = Memory.from_config(config)
-    except Exception as exc:  # noqa: BLE001 — qualquer erro ao ler o store antigo
+        memory = _open_memory(Memory, config)
+    except EmbedderUnavailable as exc:
+        # Ollama fora do ar: NÃO é store ruim. Dados intactos; sai p/ o supervisor/próximo boot
+        # tentar de novo (o serviço volta sozinho quando o Ollama estiver de pé).
+        sys.stderr.write(
+            f"aluy-mem0: embedder (Ollama) indisponível ({exc}); store INTACTO, nada movido.\n"
+        )
+        sys.exit(75)
+    except Exception as exc:  # noqa: BLE001
+        if not is_store_incompatible(exc):
+            # Erro não reconhecido como incompatibilidade: não adivinha, não move nada.
+            sys.stderr.write(
+                f"aluy-mem0: falha ao abrir o store ({type(exc).__name__}: {exc}); "
+                "não é incompatibilidade reconhecida — store INTACTO.\n"
+            )
+            raise
         if os.environ.get("ALUY_MEM0_RESET_DONE") == "1":
             # JÁ resetamos uma vez e AINDA falha ⇒ não é store velho; propaga (não loopa).
             raise

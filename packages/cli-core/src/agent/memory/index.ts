@@ -27,3 +27,9 @@ export {
 export { rememberTool, type MemoryWritePort } from './remember-tool.js';
 export { recallTool, type MemoryReadPort } from './recall-tool.js';
 export { looksImperative } from './imperative.js';
+export {
+  buildMemoryContext,
+  MAX_MEMORY_CONTEXT_CHARS,
+  MEMORY_USER_HEADER,
+  MEMORY_DERIVED_HEADER,
+} from './context-block.js';

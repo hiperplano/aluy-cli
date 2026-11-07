@@ -81,7 +81,7 @@ export function parseMemoryCommand(args: string): MemoryCommand {
 function factRow(f: MemoryFact): readonly string[] {
   const sinais = [
     ...(f.pinned ? ['📌 fixado'] : []),
-    ...(looksImperative(f.text) ? ['⚠ diretiva'] : []),
+    ...(looksImperative(f.text, f.provenance) ? ['⚠ diretiva'] : []),
   ];
   return [f.id, f.scope, f.provenance, sinais.length > 0 ? sinais.join(' · ') : '—', f.text];
 }

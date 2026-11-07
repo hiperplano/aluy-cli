@@ -586,6 +586,12 @@ export interface AgentLoopOptions {
    */
   readonly projectInstructions?: string;
   /**
+   * MEMÓRIA (ADR 0004) — thunk ASSÍNCRONO do bloco de memória (`buildMemoryContext`), lido A CADA
+   * chamada ao modelo: um `remember` vale no turno seguinte, a retomada o relê do disco e os
+   * sub-agentes recebem o mesmo. Erro ⇒ sem bloco (nunca derruba o turno).
+   */
+  readonly memoryContextProvider?: () => Promise<string | undefined>;
+  /**
    * EST-1109 — AGENTES DISPONÍVEIS: nota COMPACTA (já formatada por
    * `buildAvailableAgentsNote`) que lista os sub-agentes nomeados que o modelo
    * pode delegar via `spawn_agent` (campo `agent: <nome>`). CONFIG CONFIÁVEL
@@ -771,6 +777,8 @@ export class AgentLoop {
   }) => void;
   // EST-0964 — AGENT.md confiável (já clampado). undefined ⇒ nada a injetar.
   private readonly projectInstructions?: string;
+  // MEMÓRIA — thunk lido a cada chamada ao modelo.
+  private readonly memoryContextProvider?: () => Promise<string | undefined>;
   // EST-1109 — agentes DISPONÍVEIS (nota já formatada). undefined ⇒ nada a injetar.
   // NÃO é `readonly`: pode ser TROCADA depois via `setAvailableAgents` (ver o método).
   private availableAgents: string | undefined;
@@ -841,6 +849,7 @@ export class AgentLoop {
     if (opts.quotaPause) this.quotaPause = opts.quotaPause;
     if (opts.onUsage) this.onUsage = opts.onUsage;
     if (opts.projectInstructions !== undefined) this.projectInstructions = opts.projectInstructions;
+    if (opts.memoryContextProvider) this.memoryContextProvider = opts.memoryContextProvider;
     if (opts.availableAgents !== undefined) this.availableAgents = opts.availableAgents;
     if (opts.sessionCommands !== undefined) this.sessionCommands = opts.sessionCommands;
     if (opts.tierProvider) this.tierProvider = opts.tierProvider;
@@ -1393,6 +1402,12 @@ export class AgentLoop {
         /* best-effort: nunca derruba o turno. */
       }
       const toolList = this.tools.list();
+      let memoryContext: string | undefined;
+      try {
+        memoryContext = await this.memoryContextProvider?.();
+      } catch {
+        /* best-effort: memória ilegível ⇒ segue sem ela (o boot já avisou a falha). */
+      }
       const buildFor = (nativeToolsActive: boolean) =>
         buildMessages(
           toolList,
@@ -1407,6 +1422,7 @@ export class AgentLoop {
           // tier→provider é segredo do produto.
           this.runtimeInfoProvider?.(),
           nativeToolsActive,
+          memoryContext,
         );
       const messages = buildFor(false);
       const messagesNative = buildFor(true);
