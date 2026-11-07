@@ -71,7 +71,7 @@ function statusWord(child: SubAgentChildView, settled = false): string {
 }
 
 /** UMA linha de filho: `  [rust] ◷ rodando` / `  [rust] ✓ pronto · 1.2k tokens · 3 tools`. */
-function ChildLine(props: {
+export function ChildLine(props: {
   readonly child: SubAgentChildView;
   readonly settled?: boolean;
   readonly frame?: number;

@@ -22,7 +22,7 @@ export interface TaskSession {
   readonly current: SessionState;
   subscribe(observer: (s: SessionState) => void): () => void;
   addToolObserver(observer: {
-    onToolStart?(call: { name: string }): void;
+    onToolStart?(call: { name: string; input?: Readonly<Record<string, unknown>> }): void;
     onToolEnd?(call: { name: string }, ok: boolean): void;
   }): () => void;
   submit(
@@ -32,15 +32,15 @@ export interface TaskSession {
   ): Promise<void>;
   injectInput(nodeId: string, input: string): boolean;
   interrupt(): void;
+  /** Derruba o turno E os sub-agentes da tarefa (cessar ≠ agir: só aborta). */
+  cancelAllFlows?(origin: 'f8' | 'panel' | 'exit'): void;
   resolveAsk(r: AskResolution): void;
   dispose?(): void;
 }
 
 export interface TaskEngineDeps {
   readonly registry: TaskRegistry;
-  /** O controller da TUI — roda a tarefa `main`. */
-  readonly main: TaskSession;
-  /** Constrói uma sessão headless para uma tarefa paralela; `null` ⇒ indisponível. */
+  /** Constrói a sessão headless de uma tarefa; `null` ⇒ indisponível. */
   readonly createHeadless?: (taskId: string) => TaskSession | null;
 }
 
@@ -58,22 +58,22 @@ export class ControllerTaskEngine implements ConciergeEngine {
   constructor(private readonly d: TaskEngineDeps) {}
 
   start(task: TaskRecord): void {
-    // O turno do agente principal só serve a UMA tarefa por vez. Se ele está ocupado com algo
-    // que não é tarefa (ex.: o aviso de sub-agentes desacoplados acordou um turno), a nova
-    // tarefa vai para uma sessão paralela em vez de colidir no mesmo turno.
-    const headless = task.kind === 'detached' || this.mainBusy();
+    // TODA tarefa roda numa sessão headless PRÓPRIA (histórico, fila de injeção, sub-agentes e
+    // catraca próprios). O controller da TUI só conversa: nada do trabalho (blocos de turno,
+    // ferramentas, raciocínio, self-check) entra na transcrição — vai para o painel do rodapé.
     let session: TaskSession | null;
     try {
-      session = headless ? (this.d.createHeadless?.(task.id) ?? null) : this.d.main;
+      session = this.d.createHeadless?.(task.id) ?? null;
     } catch (e) {
       session = null;
-      this.d.registry.transition(task.id, 'failed', `sessão paralela falhou: ${msg(e)}`);
+      this.d.registry.transition(task.id, 'failed', `sessão da tarefa falhou: ${msg(e)}`);
       return;
     }
     if (!session) {
-      this.d.registry.transition(task.id, 'failed', 'sessões paralelas indisponíveis neste modo');
+      this.d.registry.transition(task.id, 'failed', 'sessões de tarefa indisponíveis neste modo');
       return;
     }
+    const headless = true;
     const h: Handle = {
       session,
       headless,
@@ -86,11 +86,11 @@ export class ControllerTaskEngine implements ConciergeEngine {
     h.unsubs.push(
       session.addToolObserver({
         onToolStart: (c) => {
-          this.d.registry.touch(task.id, { phase: 'tool' });
+          this.d.registry.touch(task.id, { phase: 'tool', current: toolLabel(c) });
           this.d.registry.note(task.id, 'tool', c.name);
         },
         onToolEnd: () => {
-          this.d.registry.touch(task.id, { phase: 'idle' });
+          this.d.registry.touch(task.id, { phase: 'idle', current: null });
           this.d.registry.note(task.id, 'step');
         },
       }),
@@ -102,11 +102,6 @@ export class ControllerTaskEngine implements ConciergeEngine {
         this.d.registry.transition(task.id, 'failed', msg(e));
       },
     );
-  }
-
-  private mainBusy(): boolean {
-    const p = this.d.main.current.phase;
-    return p !== 'idle' && p !== 'done' && p !== 'error' && p !== 'boot';
   }
 
   send(task: TaskRecord, message: string): { delivered: boolean; note: string } {
@@ -122,7 +117,8 @@ export class ControllerTaskEngine implements ConciergeEngine {
     const h = this.handles.get(task.id);
     if (!h) return false;
     h.stopRequested = true;
-    h.session.interrupt();
+    if (h.session.cancelAllFlows) h.session.cancelAllFlows('panel');
+    else h.session.interrupt();
     return true;
   }
 
@@ -152,6 +148,11 @@ export class ControllerTaskEngine implements ConciergeEngine {
       }
     }
     return { approvals, quotaPauses, subAgents };
+  }
+
+  /** A sessão da tarefa (para a vista de detalhe do rodapé). */
+  sessionOf(taskId: string): TaskSession | undefined {
+    return this.handles.get(taskId)?.session;
   }
 
   /** Aprovações pendentes na ordem das tarefas (a caixa de entrada). */
@@ -247,4 +248,14 @@ function askSummary(s: SessionState): string {
 
 function msg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** `bash ls -la` / `read_file src/x.ts`: a ferramenta em curso, em poucas palavras. */
+function toolLabel(c: { name: string; input?: Readonly<Record<string, unknown>> }): string {
+  const i = c.input ?? {};
+  const arg = [i['command'], i['path'], i['pattern'], i['query'], i['url']].find(
+    (v) => typeof v === 'string' && v !== '',
+  );
+  const name = c.name === 'run_command' ? 'bash' : c.name;
+  return clip(typeof arg === 'string' ? `${name} ${arg}` : name, 48);
 }

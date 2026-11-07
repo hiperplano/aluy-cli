@@ -68,6 +68,8 @@ export interface CockpitChromeOpts {
   readonly statusline?: StatuslineMode;
   /** Em `hidden`: reserva a linha de hints (yolo ativo ou dica "F2 volta"). */
   readonly hintsRow?: boolean;
+  /** ADR 0006 — linhas do PAINEL DE TAREFAS (abaixo do composer). Sai da área gerida. */
+  readonly taskRows?: number;
 }
 
 /**
@@ -151,6 +153,8 @@ export type CockpitLayout =
       readonly statusRows: number;
       readonly composerRows: number;
       readonly hintsRows: number;
+      /** ADR 0006 — painel de tarefas (0 = ausente). */
+      readonly taskRows: number;
       readonly regions: ManagedRegions;
     }
   | {
@@ -249,8 +253,10 @@ export function resolveCockpitLayout(
   const statusRows = statusRowsFor(rows, chrome.statusline);
   const hintsRows =
     chrome.statusline === 'hidden' ? (chrome.hintsRow === true ? HINTS_ROWS : 0) : HINTS_ROWS;
-  const baseManaged =
-    rows - (HEADER_ROWS + COMPOSER_ROWS + SEPARATOR_ROWS) - statusRows - hintsRows;
+  // O painel de tarefas nunca come a área gerida abaixo de 2 linhas (1 conversa + 1 log).
+  const rawBase = rows - (HEADER_ROWS + COMPOSER_ROWS + SEPARATOR_ROWS) - statusRows - hintsRows;
+  const taskRows = Math.max(0, Math.min(Math.floor(chrome.taskRows ?? 0), rawBase - 2));
+  const baseManaged = rawBase - taskRows;
   const wantExtra = composerRowsForLines(composerLines) - COMPOSER_ROWS;
   const extra = Math.max(0, Math.min(wantExtra, baseManaged - 2));
   const composerRows = COMPOSER_ROWS + extra;
@@ -270,6 +276,7 @@ export function resolveCockpitLayout(
     statusRows,
     composerRows,
     hintsRows,
+    taskRows,
     regions: { conversaRows, logRows },
   };
 }
@@ -285,6 +292,7 @@ export function cockpitRegionSum(layout: Extract<CockpitLayout, { kind: 'cockpit
     layout.statusRows +
     layout.composerRows +
     layout.hintsRows +
+    layout.taskRows +
     SEPARATOR_ROWS +
     layout.regions.conversaRows +
     layout.regions.logRows

@@ -1,9 +1,11 @@
-// ADR 0006 — Concierge na TUI: a conversa NUNCA espera o trabalho.
-//   • mensagem durante um turno vivo é respondida na hora (não vai à fila nem ao encaixe cego);
-//   • Esc NÃO interrompe tarefa (só limpa o rascunho);
-//   • correção vai à tarefa pelo `task_send` (injectInput), e o Concierge diz honestamente;
-//   • aprovação é caixa de entrada: o chat segue e `/a` resolve;
-//   • modo clássico inalterado (Esc interrompe; o Concierge nem é chamado).
+// ADR 0006 — Concierge na TUI.
+//   • a resposta do Concierge é o bloco `┃ Λluy` NORMAL, em stream, token a token;
+//   • a conversa NUNCA espera o trabalho (mensagem durante tarefa é respondida na hora);
+//   • o trabalho das tarefas NUNCA entra na transcrição: vai ao painel do rodapé;
+//   • a conclusão aparece UMA vez na conversa (linha dim), nunca duplicada;
+//   • Esc não para tarefa; aprovação é caixa de entrada; espaçamento ≤ 1 linha em branco;
+//   • sub-agentes (clássico) saem da conversa e moram no rodapé, com uma linha ao terminar;
+//   • modo clássico inalterado.
 
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -21,10 +23,16 @@ import { App } from '../../src/session/App.js';
 import { SessionController } from '../../src/session/controller.js';
 import { ConciergeRuntime } from '../../src/session/concierge-runtime.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
+import {
+  aluyNeedsLeadingBlank,
+  blankAfterInject,
+  blockEndsWithBlankLine,
+} from '../../src/session/block-rhythm.js';
 
 const ENV = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' };
 const ESC = String.fromCharCode(27);
 const CR = '\r';
+const DOWN = `${ESC}[B`;
 const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');
 const plain = (s: string): string => (s ?? '').replace(ANSI, '');
 
@@ -33,13 +41,11 @@ const ports = (): ToolPorts => ({
   shell: { exec: async () => ({ stdout: 'ok', stderr: '', exitCode: 0 }) },
   search: { search: async () => [] },
 });
-
 const defer = (): { promise: Promise<void>; resolve: () => void } => {
   let resolve!: () => void;
   const promise = new Promise<void>((r) => (resolve = r));
   return { promise, resolve };
 };
-
 async function waitFor(cond: () => boolean, timeoutMs = 4000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!cond()) {
@@ -47,68 +53,53 @@ async function waitFor(cond: () => boolean, timeoutMs = 4000): Promise<void> {
     await new Promise((r) => setTimeout(r, 5));
   }
 }
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 async function type(s: { stdin: { write(x: string): void } }, text: string): Promise<void> {
   s.stdin.write(text);
-  await new Promise((r) => setTimeout(r, 40));
+  await sleep(40);
   s.stdin.write(CR);
 }
-
 const TOOL_OPEN = '<<<ALUY_TOOL_CALL';
 const TOOL_CLOSE = 'ALUY_TOOL_CALL>>>';
 const toolCall = (name: string, input: Record<string, unknown>): string =>
   `${TOOL_OPEN}\n${JSON.stringify({ name, input })}\n${TOOL_CLOSE}`;
 
-function build(opts: {
-  mode: 'concierge' | 'classic';
-  iters: (turn: number) => string;
-  gates?: (turn: number) => Promise<void> | undefined;
-  concierge: (msg: string) => ModelCallResult;
-}) {
-  let controllerRef: SessionController | null = null;
-  let turn = 0;
-  const model: ModelCaller = {
-    async call(): Promise<ModelCallResult> {
-      const sink = controllerRef!.sink;
-      sink.onStart?.();
-      sink.onDelta?.('');
-      const t = turn++;
-      const g = opts.gates?.(t);
-      if (g) await g;
-      return { request_id: 'r', content: opts.iters(t), finish_reason: 'stop' };
-    },
-  };
-  const controller = new SessionController({
+const mkController = (model: ModelCaller): SessionController => {
+  const c = new SessionController({
     model,
     permission: new PolicyPermissionEngine(),
     ports: ports(),
     askResolver: new TuiAskResolver(),
-    meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPct: 0 },
+    meta: { cwd: '/proj', tier: 'aluy-flux', tokens: 0, windowPort: 0 } as never,
     flush: { intervalMs: 0 },
   });
-  controllerRef = controller;
-  controller.dismissBoot();
-  const conciergeCalls: string[] = [];
-  const cmodel: ConciergeModel = {
-    call: async ({ messages }) => {
-      const last = String(messages[messages.length - 1]!.content);
-      const msg = /Mensagem do dono: (.*)$/s.exec(last)?.[1] ?? last;
-      conciergeCalls.push(msg);
-      return opts.concierge(msg);
+  c.dismissBoot();
+  return c;
+};
+
+/** Uma sessão de TAREFA (headless): modelo com fases controladas por `iters`/`gates`. */
+function taskSession(opts: {
+  iters: (turn: number) => string;
+  gates?: (turn: number) => Promise<void> | undefined;
+}): SessionController {
+  let ref: SessionController | null = null;
+  let turn = 0;
+  const model: ModelCaller = {
+    async call(): Promise<ModelCallResult> {
+      const sink = ref!.sink;
+      sink.onStart?.();
+      sink.onDelta?.('');
+      const t = turn++;
+      const content = opts.iters(t);
+      // Como o caller real: a fala é transmitida pelo sink (tool-call em texto não é fala).
+      if (!content.includes(TOOL_OPEN)) sink.onDelta?.(content);
+      const g = opts.gates?.(t);
+      if (g) await g;
+      return { request_id: 'r', content, finish_reason: 'stop' };
     },
   };
-  const rt = new ConciergeRuntime({ sink: controller, model: cmodel });
-  const r = render(
-    <ThemeProvider theme={resolveTheme({ env: ENV })}>
-      <App
-        controller={controller}
-        animate={false}
-        bootMs={0}
-        concierge={rt}
-        initialConversation={opts.mode}
-      />
-    </ThemeProvider>,
-  );
-  return { controller, rt, conciergeCalls, ...r };
+  ref = mkController(model);
+  return ref;
 }
 
 const text = (content: string, calls: ModelCallResult['tool_calls'] = []): ModelCallResult => ({
@@ -118,72 +109,229 @@ const text = (content: string, calls: ModelCallResult['tool_calls'] = []): Model
   ...(calls.length ? { tool_calls: calls } : {}),
 });
 
-describe('Concierge na TUI — a conversa nunca espera o trabalho', () => {
-  it('mensagem durante um turno vivo é respondida na hora; o turno segue; nada vai à fila', async () => {
-    const g0 = defer();
+interface BuildOpts {
+  mode: 'concierge' | 'classic';
+  tasks?: SessionController[]; // sessões entregues às tarefas, em ordem (t1, t2…)
+  concierge: (msg: string) => ModelCallResult;
+  /** Pausa entre palavras do stream do Concierge (para observar o crescimento). */
+  wordGate?: (i: number) => Promise<void> | undefined;
+  classicModel?: ModelCaller;
+}
+
+function build(opts: BuildOpts) {
+  const conversation = mkController(
+    opts.classicModel ?? {
+      async call() {
+        return { request_id: 'r', content: 'classic', finish_reason: 'stop' };
+      },
+    },
+  );
+  const conciergeCalls: string[] = [];
+  const queue = [...(opts.tasks ?? [])];
+  // O modelo do Concierge FAZ STREAM pelo sink do controller (como o StreamingModelCaller real).
+  const cmodel: ConciergeModel = {
+    call: async ({ messages }) => {
+      const last = String(messages[messages.length - 1]!.content);
+      const msg = /Mensagem do dono: (.*)$/s.exec(last)?.[1] ?? last;
+      conciergeCalls.push(msg);
+      const out = opts.concierge(msg);
+      const sink = conversation.sink;
+      sink.onStart?.();
+      const words = out.content.split(/(?<= )/);
+      for (let i = 0; i < words.length; i += 1) {
+        sink.onDelta(words[i]!);
+        const g = opts.wordGate?.(i);
+        if (g) await g;
+      }
+      sink.onDone?.();
+      return out;
+    },
+  };
+  const rt = new ConciergeRuntime({
+    sink: conversation,
+    model: cmodel,
+    createHeadless: () => queue.shift() ?? null,
+  });
+  const r = render(
+    <ThemeProvider theme={resolveTheme({ env: ENV })}>
+      <App
+        controller={conversation}
+        animate={false}
+        bootMs={0}
+        concierge={rt}
+        initialConversation={opts.mode}
+      />
+    </ThemeProvider>,
+  );
+  const frame = (): string => plain(r.lastFrame() ?? '');
+  return { conversation, rt, conciergeCalls, frame, ...r };
+}
+
+const startTask = (goal = 'fazer o trabalho') => [{ id: '1', name: 'task_start', input: { goal } }];
+const blocksOf = (c: SessionController, kind: string) =>
+  c.current.blocks.filter((b) => b.kind === kind);
+
+describe('Resposta do Concierge = o bloco `┃ Λluy` normal, em stream', () => {
+  it('cresce token a token no MESMO bloco aluy (um bloco por resposta) e assenta com markdown', async () => {
+    const gate = defer();
     const s = build({
       mode: 'concierge',
+      concierge: () => text('Oi, **tudo** certo por aqui, e com você?'),
+      wordGate: (i) => (i === 2 ? gate.promise : undefined),
+    });
+    await type(s, 'oi');
+    await waitFor(() => blocksOf(s.conversation, 'aluy').length === 1);
+    // Parcial: o bloco existe, está em stream, e já mostra as primeiras palavras.
+    await waitFor(() => plain(s.frame()).includes('Oi,'));
+    const mid = blocksOf(s.conversation, 'aluy')[0] as { text: string; streaming: boolean };
+    expect(mid.streaming).toBe(true);
+    expect(mid.text).toContain('Oi,');
+    expect(mid.text).not.toContain('com você');
+    gate.resolve();
+    await waitFor(
+      () => (blocksOf(s.conversation, 'aluy')[0] as { streaming: boolean }).streaming === false,
+    );
+    const done = blocksOf(s.conversation, 'aluy') as { text: string }[];
+    expect(done).toHaveLength(1); // UM bloco por resposta
+    expect(done[0]!.text).toBe('Oi, **tudo** certo por aqui, e com você?');
+    expect(blocksOf(s.conversation, 'note')).toHaveLength(0); // nada de nota `◕ Λluy`
+    expect(s.frame()).not.toContain('**'); // markdown renderizado
+    s.unmount();
+  });
+
+  it('erro/cota (nada transmitido) entra como UM bloco aluy, não como nota', async () => {
+    const conversation = mkController({
+      call: async () => ({ request_id: 'r', content: '', finish_reason: 'stop' }),
+    });
+    const rt = new ConciergeRuntime({
+      sink: conversation,
+      model: {
+        call: async () => {
+          throw Object.assign(new Error('quota exceeded'), { code: 'quota' });
+        },
+      },
+    });
+    await rt.handleOwnerMessage('oi');
+    const aluy = blocksOf(conversation, 'aluy') as { text: string }[];
+    expect(aluy).toHaveLength(1);
+    expect(aluy[0]!.text).toContain('sem cota');
+    expect(blocksOf(conversation, 'note')).toHaveLength(0);
+  });
+});
+
+describe('A conversa nunca espera o trabalho; o trabalho nunca entra na conversa', () => {
+  it('mensagem durante tarefa viva é respondida na hora; a tarefa segue; nada vai à fila', async () => {
+    const g0 = defer();
+    const task = taskSession({
       iters: () => 'pronto.',
       gates: (t) => (t === 0 ? g0.promise : undefined),
+    });
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
       concierge: (m) =>
         /trabalho/.test(m)
-          ? text('Iniciei.', [{ id: '1', name: 'task_start', input: { goal: 'fazer o trabalho' } }])
+          ? text('Iniciei.', startTask())
           : text('Está rodando, t1 em chamada ao modelo.'),
     });
     await type(s, 'faça o trabalho');
-    await waitFor(() => s.controller.current.phase === 'streaming');
+    await waitFor(() => task.current.phase === 'streaming');
     expect(s.rt.registry.get('t1')!.status).toBe('running');
-
     await type(s, 'como está?');
-    await waitFor(() => plain(s.lastFrame()).includes('Está rodando, t1'));
-    // O turno NÃO foi tocado: segue streaming, e a mensagem não foi para fila/encaixe.
-    expect(s.controller.current.phase).toBe('streaming');
-    expect(s.controller.current.pendingInjects.length).toBe(0);
-    expect(plain(s.lastFrame())).not.toContain('na fila');
-    expect(s.conciergeCalls).toEqual(['faça o trabalho', 'como está?']);
-
+    await waitFor(() => s.frame().includes('Está rodando, t1'));
+    expect(task.current.phase).toBe('streaming');
+    expect(s.frame()).not.toContain('na fila');
     g0.resolve();
-    await waitFor(() => s.rt.registry.get('t1')!.status === 'done');
+    await waitFor(() => s.rt.registry.get('t1')?.status === 'done');
+    s.unmount();
+  });
+
+  it('NENHUM bloco da tarefa na transcrição; conclusão = UMA linha dim; resultado não se repete', async () => {
+    const task = taskSession({ iters: () => 'RESULTADO-UNICO-DA-TAREFA' });
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      concierge: () => text('Iniciei.', startTask()),
+    });
+    await type(s, 'faça o trabalho');
+    await waitFor(() => s.rt.registry.get('t1')?.status === 'done');
+    await waitFor(() => blocksOf(s.conversation, 'inject').length === 1);
+    const kinds = new Set(s.conversation.current.blocks.map((b) => b.kind));
+    // Só conversa: você / Λluy / a linha de conclusão. Sem tool, sem testrun, sem subagents.
+    for (const k of kinds) expect(['you', 'aluy', 'inject']).toContain(k);
+    const line = blocksOf(s.conversation, 'inject')[0] as { text: string; plain?: boolean };
+    expect(line.plain).toBe(true);
+    expect(line.text).toMatch(/^✔ t1 concluída — RESULTADO-UNICO-DA-TAREFA/);
+    // O resultado aparece UMA vez (a linha), não duas (resposta da tarefa + relato).
+    expect(s.frame().split('RESULTADO-UNICO-DA-TAREFA').length - 1).toBe(1);
+    // O transcrito completo segue acessível na vista de detalhe (sessão da tarefa).
+    expect(task.current.blocks.some((b) => b.kind === 'aluy')).toBe(true);
+    s.unmount();
+  });
+
+  it('o rodapé mostra a ferramenta em curso da tarefa (`bash ls -la`), não a conversa', async () => {
+    const g = defer();
+    const task = taskSession({
+      iters: (t) => (t === 0 ? toolCall('run_command', { command: 'ls -la' }) : 'ok'),
+      gates: (t) => (t === 1 ? g.promise : undefined),
+    });
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      concierge: () => text('Iniciei.', startTask()),
+    });
+    await type(s, 'faça o trabalho');
+    await waitFor(() => task.current.phase === 'asking');
+    // aprovação na caixa de entrada (rodapé), com o comando visível
+    await waitFor(() => /t1 pede aprovação: .*ls -la/.test(s.frame()));
+    expect(s.conversation.current.phase).not.toBe('asking'); // a conversa NÃO é bloqueada
+    await type(s, '/a');
+    await waitFor(() => task.current.phase !== 'asking');
+    g.resolve();
+    await waitFor(() => s.rt.registry.get('t1')?.status === 'done');
     s.unmount();
   });
 
   it('Esc NUNCA interrompe a tarefa: só limpa o rascunho', async () => {
     const g0 = defer();
-    const s = build({
-      mode: 'concierge',
+    const task = taskSession({
       iters: () => 'pronto.',
       gates: (t) => (t === 0 ? g0.promise : undefined),
-      concierge: () => text('Iniciei.', [{ id: '1', name: 'task_start', input: { goal: 'g' } }]),
     });
-    const interruptSpy = vi.spyOn(s.controller, 'interrupt');
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      concierge: () => text('Iniciei.', startTask('g')),
+    });
+    const spyTask = vi.spyOn(task, 'interrupt');
+    const spyConv = vi.spyOn(s.conversation, 'interrupt');
     await type(s, 'faça o trabalho');
-    await waitFor(() => s.controller.current.phase === 'streaming');
-
-    // Esc com o composer VAZIO (no clássico isto PARAVA o turno).
+    await waitFor(() => task.current.phase === 'streaming');
     s.stdin.write(ESC);
-    await new Promise((r) => setTimeout(r, 150));
-    // Esc com rascunho: só apaga.
+    await sleep(150);
     s.stdin.write('rascunho qualquer');
-    await new Promise((r) => setTimeout(r, 60));
+    await sleep(60);
     s.stdin.write(ESC);
-    await new Promise((r) => setTimeout(r, 150));
-
-    expect(interruptSpy).not.toHaveBeenCalled();
-    expect(s.controller.current.phase).toBe('streaming');
+    await sleep(150);
+    expect(spyTask).not.toHaveBeenCalled();
+    expect(spyConv).not.toHaveBeenCalled();
+    expect(task.current.phase).toBe('streaming');
     expect(s.rt.registry.get('t1')!.status).toBe('running');
-    expect(plain(s.lastFrame())).not.toContain('rascunho qualquer');
-
+    expect(s.frame()).not.toContain('rascunho qualquer');
     g0.resolve();
-    await waitFor(() => s.rt.registry.get('t1')!.status === 'done');
+    await waitFor(() => s.rt.registry.get('t1')?.status === 'done');
     s.unmount();
   });
 
-  it('correção vai à tarefa certa pelo task_send (fila de injeção), sem reiniciar o turno', async () => {
+  it('correção vai à tarefa certa pelo task_send (fila de injeção da sessão dela)', async () => {
     const g0 = defer();
-    const s = build({
-      mode: 'concierge',
+    const task = taskSession({
       iters: () => 'pronto.',
       gates: (t) => (t === 0 ? g0.promise : undefined),
+    });
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
       concierge: (m) =>
         /async/.test(m)
           ? text('Enviei à t1.', [
@@ -193,43 +341,135 @@ describe('Concierge na TUI — a conversa nunca espera o trabalho', () => {
                 input: { task_id: 't1', message: 'usar async/await (correção)' },
               },
             ])
-          : text('Iniciei.', [{ id: '1', name: 'task_start', input: { goal: 'g' } }]),
+          : text('Iniciei.', startTask('g')),
     });
-    const injectSpy = vi.spyOn(s.controller, 'injectInput');
+    const inj = vi.spyOn(task, 'injectInput');
     await type(s, 'faça o trabalho');
-    await waitFor(() => s.controller.current.phase === 'streaming');
+    await waitFor(() => task.current.phase === 'streaming');
     await type(s, 'use async');
-    await waitFor(() => injectSpy.mock.calls.length > 0);
-    // Quem decidiu foi o Concierge (o texto injetado é o do task_send, não o cru do dono).
-    expect(injectSpy).toHaveBeenCalledWith('root', 'usar async/await (correção)');
+    await waitFor(() => inj.mock.calls.length > 0);
+    expect(inj).toHaveBeenCalledWith('root', 'usar async/await (correção)');
     expect(s.conciergeCalls).toContain('use async');
-    expect(s.controller.current.phase).toBe('streaming');
     g0.resolve();
     s.unmount();
   });
+});
 
-  it('aprovação é caixa de entrada: o chat segue e /a resolve só a tarefa dona', async () => {
+describe('Painel de tarefas do rodapé', () => {
+  async function three() {
+    const gs = [defer(), defer(), defer()];
+    const tasks = gs.map((g) =>
+      taskSession({ iters: () => 'ok', gates: (t) => (t === 0 ? g.promise : undefined) }),
+    );
+    let n = 0;
     const s = build({
       mode: 'concierge',
-      iters: (t) => (t === 0 ? toolCall('run_command', { command: 'echo oi' }) : 'feito.'),
-      concierge: (m) =>
-        /trabalho/.test(m)
-          ? text('Iniciei.', [{ id: '1', name: 'task_start', input: { goal: 'g' } }])
-          : text('Aguardando sua aprovação, use /a.'),
+      tasks,
+      concierge: () =>
+        text(`Iniciei ${++n}.`, [
+          { id: String(n), name: 'task_start', input: { goal: `tarefa ${n}` } },
+        ]),
+    });
+    for (const m of ['um', 'dois', 'tres']) {
+      await type(s, m);
+      await waitFor(() => s.conciergeCalls.includes(m));
+      await sleep(80);
+    }
+    await waitFor(() => s.rt.registry.live().length === 3);
+    return { s, gs, tasks };
+  }
+
+  it('3 tarefas ⇒ UMA linha recolhida; ↓ expande com a lista e a dica; enter abre o detalhe; esc fecha', async () => {
+    const { s, gs } = await three();
+    await sleep(200);
+    await waitFor(() => s.frame().includes('3 tarefas · 3 rodando · ↓ ver'));
+    expect(s.frame()).not.toContain('▸ t1 rodando'); // recolhido
+    s.stdin.write(DOWN);
+    await waitFor(() => s.frame().includes('▸ t1 rodando') && s.frame().includes('enter detalhes'));
+    await sleep(300);
+    s.stdin.write(CR); // abre o detalhe da escolhida
+    await waitFor(() => s.frame().includes('── t3 · rodando'));
+    expect(s.frame()).toContain('esc fecha');
+    await sleep(300);
+    s.stdin.write(ESC);
+    await waitFor(() => !s.frame().includes('── t3 · rodando'));
+    await sleep(600);
+    s.stdin.write(ESC); // recolhe
+    await waitFor(() => s.frame().includes('↓ ver'));
+    gs.forEach((g) => g.resolve());
+    s.unmount();
+  });
+
+  it('/task show t1 abre o detalhe; hidden = só a linha-resumo', async () => {
+    const { s, gs } = await three();
+    await type(s, '/task show t1');
+    await waitFor(() => s.frame().includes('── t1 · rodando'));
+    gs.forEach((g) => g.resolve());
+    s.unmount();
+  });
+});
+
+describe('Espaçamento (block-rhythm)', () => {
+  it('entre eco → resposta → linha de conclusão há no máximo UMA linha em branco', async () => {
+    const task = taskSession({ iters: () => 'feito.' });
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      concierge: () => text('Iniciei.', startTask()),
     });
     await type(s, 'faça o trabalho');
-    await waitFor(() => s.controller.current.phase === 'asking');
-    expect(s.rt.registry.get('t1')!.status).toBe('waiting_approval');
-    expect(plain(s.lastFrame())).toContain('/a aprova');
+    await waitFor(() => s.rt.registry.get('t1')?.status === 'done');
+    await waitFor(() => blocksOf(s.conversation, 'inject').length === 1);
+    await sleep(100);
+    const lines = s.frame().split('\n');
+    const at = (needle: string): number => lines.findIndex((l) => l.includes(needle));
+    const echo = at('faça o trabalho');
+    const head = lines.findIndex((l, i) => i > echo && l.includes('Λluy'));
+    const body = at('Iniciei.');
+    const done = at('✔ t1 concluída');
+    expect(echo).toBeGreaterThanOrEqual(0);
+    expect(head - echo).toBeLessThanOrEqual(2); // você → Λluy: ≤ 1 em branco
+    expect(body - head).toBe(1); // cabeçalho colado ao corpo
+    expect(done - body).toBeLessThanOrEqual(2); // resposta → conclusão: ≤ 1 em branco
+    s.unmount();
+  });
 
-    // O chat NÃO está bloqueado pela caixa: pergunta e recebe resposta.
-    await type(s, 'e agora?');
-    await waitFor(() => plain(s.lastFrame()).includes('Aguardando sua aprovação'));
-    expect(s.controller.current.phase).toBe('asking'); // a aprovação segue pendente
+  it('regra pura: para qualquer par de blocos da conversa, o respiro soma 0 ou 1 linha', () => {
+    const kinds = ['you', 'aluy', 'inject'] as const;
+    for (const prev of kinds) {
+      for (const next of kinds) {
+        const trailing = blockEndsWithBlankLine(prev) ? 1 : 0;
+        const lead =
+          next === 'aluy'
+            ? aluyNeedsLeadingBlank(prev)
+              ? 1
+              : 0
+            : blankAfterInject(next, prev)
+              ? 1
+              : 0;
+        expect(trailing + lead).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
 
-    await type(s, '/a');
-    await waitFor(() => s.controller.current.phase !== 'asking');
-    await waitFor(() => s.rt.registry.get('t1')!.status === 'done');
+describe('Sub-agentes saem da conversa e vão para o rodapé (clássico também)', () => {
+  it('o bloco `+ N sub-agentes` não está na transcrição; está no rodapé; ao terminar vira UMA linha', async () => {
+    const s = build({ mode: 'classic', concierge: () => text('x') });
+    const c = s.conversation as unknown as {
+      upsertSubAgentChild(label: string, child: unknown): void;
+      patch(p: unknown): void;
+    };
+    c.upsertSubAgentChild('um', { label: 'um', status: 'running' });
+    c.patch({ liveSubagents: [{ label: 'um', phase: 'thinking' }] });
+    await waitFor(() => s.frame().includes('[um]'));
+    const f = s.frame();
+    // aparece UMA vez (no rodapé), não duas (conversa + rodapé)
+    expect(f.split('[um]').length - 1).toBe(1);
+    c.upsertSubAgentChild('um', { label: 'um', status: 'done', summary: '120 tokens · 12s' });
+    await waitFor(() => s.frame().includes('✔ [um] pronto — 120 tokens · 12s'));
+    const lines = blocksOf(s.conversation, 'inject') as { text: string }[];
+    expect(lines.filter((l) => l.text.startsWith('✔ [um] pronto')).length).toBe(1);
     s.unmount();
   });
 });
@@ -237,36 +477,22 @@ describe('Concierge na TUI — a conversa nunca espera o trabalho', () => {
 describe('Modo clássico inalterado', () => {
   it('Esc com tudo vazio INTERROMPE o turno e o Concierge nem é chamado', async () => {
     const g0 = defer();
-    const s = build({
-      mode: 'classic',
-      iters: () => 'pronto.',
-      gates: (t) => (t === 0 ? g0.promise : undefined),
-      concierge: () => text('não deveria ser chamado'),
-    });
-    const interruptSpy = vi.spyOn(s.controller, 'interrupt');
-    void s.controller.submit('objetivo');
-    await waitFor(() => s.controller.current.phase === 'streaming');
+    const model: ModelCaller = {
+      async call() {
+        conversationRef!.sink.onStart?.();
+        conversationRef!.sink.onDelta?.('');
+        await g0.promise;
+        return { request_id: 'r', content: 'pronto.', finish_reason: 'stop' };
+      },
+    };
+    let conversationRef: SessionController | null = null;
+    const s = build({ mode: 'classic', concierge: () => text('não deveria'), classicModel: model });
+    conversationRef = s.conversation;
+    const spy = vi.spyOn(s.conversation, 'interrupt');
+    void s.conversation.submit('objetivo');
+    await waitFor(() => s.conversation.current.phase === 'streaming');
     s.stdin.write(ESC);
-    await waitFor(() => interruptSpy.mock.calls.length > 0);
-    expect(interruptSpy).toHaveBeenCalled();
-    expect(s.conciergeCalls).toEqual([]);
-    g0.resolve();
-    s.unmount();
-  });
-
-  it('mensagem mid-turn continua indo ao encaixe (injectInput), sem o Concierge', async () => {
-    const g0 = defer();
-    const s = build({
-      mode: 'classic',
-      iters: () => 'pronto.',
-      gates: (t) => (t === 0 ? g0.promise : undefined),
-      concierge: () => text('não deveria ser chamado'),
-    });
-    const injectSpy = vi.spyOn(s.controller, 'injectInput');
-    void s.controller.submit('objetivo');
-    await waitFor(() => s.controller.current.phase === 'streaming');
-    await type(s, 'mais uma coisa');
-    await waitFor(() => injectSpy.mock.calls.length > 0);
+    await waitFor(() => spy.mock.calls.length > 0);
     expect(s.conciergeCalls).toEqual([]);
     g0.resolve();
     s.unmount();

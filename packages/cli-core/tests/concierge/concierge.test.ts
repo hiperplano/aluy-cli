@@ -273,7 +273,7 @@ describe('Concierge — segurança', () => {
 });
 
 describe('Concierge — relatos', () => {
-  it('relata concluída/aprovação/cota, uma linha cada, sem spam de passos', () => {
+  it('relata cota e conclusão (uma linha cada); aprovação e passos NÃO vão à conversa', () => {
     const { registry, concierge } = setup(() => result('ok'));
     const lines: string[] = [];
     concierge.attachRelay((l) => lines.push(l));
@@ -284,9 +284,9 @@ describe('Concierge — relatos', () => {
     registry.transition('t1', 'running');
     registry.transition('t1', 'paused_quota', 'cota');
     registry.transition('t1', 'done', undefined, { summary: 'pronto' });
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain('/a');
-    expect(lines[2]).toContain('concluída: pronto');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('pausada por cota');
+    expect(lines[1]).toBe('✔ t1 concluída — pronto');
   });
 
   it('o relato de conclusão é uma linha curta e sem markdown', () => {

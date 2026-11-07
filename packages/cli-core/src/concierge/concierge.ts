@@ -40,8 +40,12 @@ export interface ConciergeOptions {
 }
 
 export interface ConciergeReply {
-  /** O que mostrar ao dono (já pronto). */
+  /** O que mostrar ao dono (já pronto): `reply` + `notes`. */
   readonly text: string;
+  /** A fala do Concierge (a que a TUI faz stream no bloco `Λluy`). */
+  readonly reply: string;
+  /** Avisos de uma linha sobre o que o motor fez (ex.: tarefa esperando arquivos). */
+  readonly notes: readonly string[];
   /** Chamadas ao modelo gastas nesta mensagem (0 se falhou antes). */
   readonly modelCalls: number;
   readonly actions: readonly { tool: ConciergeToolName; ok: boolean; taskId?: string }[];
@@ -170,13 +174,21 @@ export class Concierge {
     } catch (e) {
       const aborted = signal?.aborted === true;
       if (aborted) {
-        return { text: '', modelCalls, actions, tokens };
+        return { text: '', reply: '', notes: [], modelCalls, actions, tokens };
       }
       const quota = (this.o.isQuotaError ?? defaultIsQuotaError)(e);
       const text1 = quota
         ? 'Estou sem cota no meu modelo agora; as tarefas seguem. Use /task para ver e /a /n para aprovações.'
         : `Não consegui responder agora (${clip(e instanceof Error ? e.message : String(e), 100)}). As tarefas seguem.`;
-      return { text: text1, modelCalls, actions, tokens, ...(quota ? { quota: true } : {}) };
+      return {
+        text: text1,
+        reply: text1,
+        notes: [],
+        modelCalls,
+        actions,
+        tokens,
+        ...(quota ? { quota: true } : {}),
+      };
     }
     const full = [reply, ...notes].join('\n');
     const turn: ChatMessage[] = [
@@ -184,7 +196,7 @@ export class Concierge {
       { role: 'assistant', content: reply },
     ];
     this.history = [...this.history, ...turn].slice(-MAX_HISTORY_MESSAGES);
-    return { text: full, modelCalls, actions, tokens };
+    return { text: full, reply, notes, modelCalls, actions, tokens };
   }
 
   // ── ferramentas ────────────────────────────────────────────────────────────
@@ -310,19 +322,17 @@ export class Concierge {
     let line: string | undefined;
     switch (ev.kind) {
       case 'done':
-        line = `✔ ${t.id} concluída${t.summary ? `: ${clipPlain(t.summary, 100)}` : '.'}`;
+        line = `✔ ${t.id} concluída${t.summary ? ` — ${clipPlain(t.summary, 100)}` : ''}`;
         break;
       case 'failed':
-        line = `✘ ${t.id} falhou${ev.detail ? `: ${clip(ev.detail, 140)}` : '.'}`;
+        line = `✘ ${t.id} falhou${ev.detail ? ` — ${clipPlain(ev.detail, 100)}` : ''}`;
         break;
-      case 'waiting_approval':
-        line = `⚠ ${t.id} espera sua aprovação${ev.detail ? ` (${clip(ev.detail, 80)})` : ''}: /a aprova, /n nega.`;
-        break;
+      // Aprovação NÃO vai à conversa: mora na caixa de entrada do rodapé.
       case 'paused_quota':
-        line = `⏸ ${t.id} pausada por cota${ev.detail ? ` (${clip(ev.detail, 80)})` : ''}.`;
+        line = `⏸ ${t.id} pausada por cota${ev.detail ? ` — ${clipPlain(ev.detail, 80)}` : ''}`;
         break;
       case 'interrupted':
-        line = `↯ ${t.id} ficou interrompida: ${clip(t.goal, 80)}. Quer reiniciar?`;
+        line = `↯ ${t.id} interrompida — ${clipPlain(t.goal, 80)}`;
         break;
       case 'started':
         // Só relata quando era uma tarefa bloqueada que acabou de ser liberada.

@@ -307,6 +307,8 @@ export interface DoctorBlock {
 export interface InjectBlock {
   readonly kind: 'inject';
   readonly text: string;
+  /** ADR 0006 — `text` é a linha INTEIRA (`✔ t1 concluída — …`), sem o rótulo `↳ encaixado`. */
+  readonly plain?: boolean;
 }
 
 /**

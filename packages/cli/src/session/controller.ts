@@ -6299,10 +6299,37 @@ export class SessionController {
     this.insertBeforeLiveTail({ kind: 'you', text });
   }
 
-  /** Resposta/relato do Concierge: uma nota `Λluy`. */
-  pushConciergeReply(lines: readonly string[]): void {
+  /** Linha dim de uma só linha na conversa (`✔ t1 concluída — …`); sem cabeçalho nem respiro. */
+  pushConciergeLine(text: string): void {
     this.dismissBoot();
-    this.insertBeforeLiveTail({ kind: 'note', title: 'Λluy', lines });
+    this.insertBeforeLiveTail({ kind: 'inject', text, plain: true });
+  }
+
+  /** O Concierge vai responder: mesma linha de "trabalhando" do clássico até o 1º token. */
+  conciergeReplyStart(): void {
+    this.dismissBoot();
+    this.conciergeActive = true;
+    this.conciergeChars = 0;
+    this.sortearVerboDoTurno();
+    this.patch({ phase: 'thinking', workingLabel: 'pensando', workingSince: this.clock() });
+  }
+
+  /**
+   * Fim da resposta do Concierge. O texto já chegou token a token pelo `sink` (um bloco
+   * `Λluy`); se NADA foi transmitido (erro, cota, ack por template) e há `fallback`, ele
+   * entra como UM bloco `Λluy` já assentado. Nunca duplica o que foi transmitido.
+   */
+  conciergeReplyEnd(fallback = ''): void {
+    const transmitiu = this.conciergeChars > 0;
+    this.conciergeActive = false;
+    this.turnoAluyPendente = false;
+    const last = this.state.blocks[this.state.blocks.length - 1];
+    if (last && last.kind === 'aluy' && last.streaming === true) this.finishAluyTurn('done');
+    if (!transmitiu && fallback.trim() !== '') {
+      this.insertBeforeLiveTail({ kind: 'aluy', text: fallback, streaming: false });
+    }
+    this.patch({ workingLabel: undefined, workingSince: undefined });
+    this.setPhase('idle');
   }
 
   /** Marca "o Concierge está respondendo" na área de pendentes (some quando responde). */
@@ -7188,7 +7215,11 @@ export class SessionController {
     }
   }
 
+  private conciergeActive = false;
+  private conciergeChars = 0;
+
   private appendAluyDelta(content: string): void {
+    if (this.conciergeActive) this.conciergeChars += content.length;
     this.abrirTurnoAluy();
     const blocks = [...this.state.blocks];
     const last = blocks[blocks.length - 1];
@@ -9576,6 +9607,13 @@ export class SessionController {
           // `exactOptionalPropertyTypes` — não atribuir `model: undefined` explícito;
           // omite a chave quando nem o novo nem o anterior têm modelo.
           children[ci] = model !== undefined ? { ...child, model } : child;
+          blocks[idx] = { kind: 'subagents', children };
+          this.patch({ blocks });
+          // O bloco mora no rodapé; na conversa fica UMA linha quando o filho acaba.
+          if (prev.status === 'running' && child.status !== 'running') {
+            this.pushSubAgentEndLine(child);
+          }
+          return;
         } else children.push(child);
         blocks[idx] = { kind: 'subagents', children };
         this.patch({ blocks });
@@ -9585,6 +9623,20 @@ export class SessionController {
     // 1º filho deste fan-out: cria o bloco. F144 — ANTES do sufixo vivo (spawn-tool running /
     // aluy streaming no rabo), p/ não desalojar o stream-handling position-based.
     this.insertBeforeLiveTail({ kind: 'subagents', children: [child] });
+  }
+
+  /** `✔ [nome] pronto — resumo` / `✘ [nome] falhou — …` / `■ [nome] parado` (uma linha dim). */
+  private pushSubAgentEndLine(c: SubAgentChild): void {
+    const tail = c.summary !== undefined && c.summary !== '' ? ` — ${c.summary}` : '';
+    const text =
+      c.status === 'done'
+        ? `✔ [${c.label}] pronto${tail}`
+        : c.status === 'cancelled'
+          ? c.stop === 'paused'
+            ? `⏸ [${c.label}] pausado (cota)`
+            : `■ [${c.label}] parado`
+          : `✘ [${c.label}] ${c.stop === 'timeout' ? 'timeout' : c.stop === 'limit' ? 'teto' : 'falhou'}${tail}`;
+    this.insertBeforeLiveTail({ kind: 'inject', text, plain: true });
   }
 
   // ── helpers de patch ──────────────────────────────────────────────────────────

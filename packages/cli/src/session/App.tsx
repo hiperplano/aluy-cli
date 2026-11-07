@@ -66,8 +66,7 @@ import {
 import type { SubAgentChildView } from '../ui/components/SubAgents.js';
 import { useMcpPicker, type McpSearchPort, type McpInstallPort } from '../ui/hooks/useMcpPicker.js';
 import { McpPicker } from '../ui/components/McpPicker.js';
-import { ConciergeTasks, conciergeTasksLines } from '../ui/components/ConciergeTasks.js';
-import { copiaDoRodapeVale } from './subagentes-visiveis.js';
+import { TaskPanel, buildPanelRows, panelLines } from '../ui/components/ConciergeTasks.js';
 import { Role, useTheme } from '../ui/theme/index.js';
 import { useTick } from '../ui/hooks/useTick.js';
 import { useFilePicker } from '../ui/hooks/useFilePicker.js';
@@ -115,7 +114,6 @@ import { animTickEnabled, elapsedTickEnabled } from './tick-policy.js';
 import { splitBlocks } from './render-split.js';
 import { aluyNeedsLeadingBlank, previousVisibleKind } from './block-rhythm.js';
 import {
-  LIVE_CHROME_BASE_ROWS,
   mostraIndicadorTrabalho,
   workingIndicator,
   speechMaxLines,
@@ -136,6 +134,9 @@ import {
 } from './split-budget.js';
 import { buildActivityLog, countActivityLines } from './activity-log.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
+import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
+import { clip, statusPt } from '@hiperplano/aluy-cli-core';
+import { truncateToWidth } from '../ui/markdown/table-layout.js';
 import { Cockpit, type CockpitFocus } from './Cockpit.js';
 import { onRenderFault } from './render-fault.js';
 import { resolveCockpitLayout } from './cockpit-layout.js';
@@ -736,7 +737,17 @@ export function App(props: AppProps): React.ReactElement {
   // vivos do frame). `LIVE_CHROME_ROWS` (chrome fixo do rodapé) vive lá, re-derivado
   // pós-EST-0989 (header e suas divisórias saíram p/ o `<Static>` no topo).
 
-  const [state, setState] = useState<SessionState>(controller.current);
+  const [rawState, setState] = useState<SessionState>(controller.current);
+  // ADR 0006 / "padronizar os agentes" — sub-agentes NÃO aparecem no meio da conversa: o
+  // bloco `+ N sub-agentes` sai da transcrição e mora no rodapé (`filhosRodape`, abaixo). Aqui
+  // a conversa é a visão SEM esses blocos; o dado cru (`rawState`) segue alimentando o rodapé.
+  const state = useMemo<SessionState>(
+    () =>
+      rawState.blocks.some((b) => b.kind === 'subagents')
+        ? { ...rawState, blocks: rawState.blocks.filter((b) => b.kind !== 'subagents') }
+        : rawState,
+    [rawState],
+  );
   // EST-0948 (composer/sessão) — o composer deixou de ser append-only. O TEXTO e a
   // POSIÇÃO DO CURSOR moram num ÚNICO estado (`{text, cursor}`) p/ as mutações serem
   // ATÔMICAS via updater funcional: em xrdp/SSH/paste o Ink entrega vários eventos de
@@ -1088,6 +1099,11 @@ export function App(props: AppProps): React.ReactElement {
   const conciergeRt = props.concierge;
   const conciergeOn = conciergeRt !== undefined && convMode === 'concierge';
   const [, bumpTasks] = useReducer((n: number) => n + 1, 0);
+  // Painel de tarefas do rodapé: recolhido/expandido, tarefa escolhida e vista de detalhe.
+  const [taskExpanded, setTaskExpanded] = useState(false);
+  const [taskSel, setTaskSel] = useState(0);
+  const [taskDetail, setTaskDetail] = useState<string | null>(null);
+  const [taskScroll, setTaskScroll] = useState(0);
   useEffect(() => {
     if (!conciergeRt) return;
     return conciergeRt.subscribe(() => bumpTasks());
@@ -1225,7 +1241,22 @@ export function App(props: AppProps): React.ReactElement {
   // COMPOSER_MAX_ROWS, casando com a janela visual que o <Composer> renderiza.
   // RODAPÉ no cockpit — o MESMO modo (pref/env/F2//statusline) redimensiona status/hints; em
   // `hidden` a linha de hints só existe p/ o `⚠ yolo` (nunca some) e a dica de como voltar.
+  // ADR 0006 — PAINEL DE TAREFAS (rodapé): linhas puras, as MESMAS no inline e no cockpit.
+  const panelRows =
+    conciergeOn && conciergeRt !== undefined
+      ? buildPanelRows({
+          tasks: conciergeRt.visibleTasks(),
+          approvals: conciergeRt.pendingApprovals(),
+          childrenOf: (id) => conciergeRt.taskChildren(id),
+          statusline: statuslineMode,
+          expanded: taskExpanded,
+          selected: taskSel,
+          now: Date.now(),
+        })
+      : [];
+  const taskPanelRows = panelLines(panelRows);
   const cockpitLayout = resolveCockpitLayout(rows, columns, composerVisualLines, cockpitLogHint, {
+    taskRows: taskPanelRows,
     statusline: statuslineMode,
     hintsRow: state.mode === 'unsafe' || dicaOculto,
   });
@@ -1472,22 +1503,9 @@ export function App(props: AppProps): React.ReactElement {
     // começo do turno seguinte. Sem ele, o bloco da conversa (que fica na história para
     // sempre) manteria a cópia fixada eternamente no rodapé, muito depois de ela importar.
     if (state.liveSubagents === undefined) return [];
-    // SÓ QUANDO O DE CIMA SUMIU. "os agentes no footer deveriam aparecer embaixo somente
-    // quando os de cima sumirem" — a cópia é socorro, não um segundo painel.
-    // EXCEÇÃO: bloco congelado no `<Static>` com filho AINDA rodando — a original não
-    // anima mais, a cópia é a única que mostra vida (ver `copiaDoRodapeVale`).
-    if (
-      !copiaDoRodapeVale({
-        blocks: state.blocks,
-        rows,
-        columns,
-        linhasDoRodape: LIVE_CHROME_BASE_ROWS,
-      })
-    ) {
-      return [];
-    }
-    for (let i = state.blocks.length - 1; i >= 0; i -= 1) {
-      const b = state.blocks[i];
+    // O bloco da conversa não existe mais (sai da transcrição): o rodapé é o ÚNICO lugar.
+    for (let i = rawState.blocks.length - 1; i >= 0; i -= 1) {
+      const b = rawState.blocks[i];
       if (b?.kind === 'subagents') return b.children;
     }
     return [];
@@ -2258,6 +2276,16 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       if (id === 'task') {
+        if (words[0]?.toLowerCase() === 'show') {
+          const id = words[1]?.toLowerCase();
+          if (id === undefined || rt.registry.get(id) === undefined) {
+            controller.replaceNote('task', ['uso: /task show <id> — ex.: /task show t1']);
+          } else {
+            setTaskDetail(id);
+            setTaskScroll(0);
+          }
+          return;
+        }
         if (words[0]?.toLowerCase() === 'stop') {
           const target = words[1];
           if (target === undefined) {
@@ -3520,6 +3548,48 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       return;
+    }
+
+    // ── ADR 0006 — PAINEL DE TAREFAS do rodapé: expandir (↓), escolher (↑↓), abrir o detalhe
+    // (enter), parar (p) e a vista de detalhe rolável (↑↓/PgUp/PgDn, esc fecha). Só com o
+    // composer VAZIO (↓ e as letras são do texto quando há rascunho) e sem menu/picker aberto.
+    if (conciergeOn && conciergeRt !== undefined && !slashOpen && !palette.open) {
+      const vis = conciergeRt.visibleTasks();
+      if (taskDetail !== null) {
+        if (key.escape) {
+          setTaskDetail(null);
+          setTaskScroll(0);
+          return;
+        }
+        if (key.upArrow) return setTaskScroll((s) => s + 1);
+        if (key.downArrow) return setTaskScroll((s) => Math.max(0, s - 1));
+        if (key.pageUp) return setTaskScroll((s) => s + 5);
+        if (key.pageDown) return setTaskScroll((s) => Math.max(0, s - 5));
+      } else if (taskExpanded && input === '') {
+        if (key.escape || vis.length === 0) {
+          setTaskExpanded(false);
+          return;
+        }
+        if (key.upArrow) return setTaskSel((s) => Math.max(0, s - 1));
+        if (key.downArrow) return setTaskSel((s) => Math.min(vis.length - 1, s + 1));
+        if (key.return) {
+          const t = vis[Math.min(taskSel, vis.length - 1)];
+          if (t) {
+            setTaskDetail(t.id);
+            setTaskScroll(0);
+          }
+          return;
+        }
+        if (char === 'p') {
+          const t = vis[Math.min(taskSel, vis.length - 1)];
+          if (t) conciergeRt.stopTask(t.id);
+          return;
+        }
+      } else if (key.downArrow && input === '' && histIdx === -1 && vis.length > 0) {
+        setTaskExpanded(true);
+        setTaskSel(Math.max(0, vis.length - 1));
+        return;
+      }
     }
 
     // ── ask pendente CAPTURA o foco (handoff §10 regra 3) ───────────────────
@@ -4834,7 +4904,19 @@ export function App(props: AppProps): React.ReactElement {
     // Claude Code. Só quando a fonte de checkpoints está fiada (senão Esc-Esc é inerte).
     // Um Esc com texto no composer NÃO arma (esc ali é p/ outras affordances/no-op).
     if (key.escape) {
-      if (props.rewindSource !== undefined && props.onRewind !== undefined && input === '') {
+      // ADR 0006 — modo concierge: Esc APAGA o rascunho (nunca para tarefa), e o Esc-Esc do
+      // `/rewind` fica desligado enquanto há tarefa viva (reverter código por baixo dela).
+      if (conciergeOn && input !== '') {
+        setText('');
+        setHistIdx(-1);
+        return;
+      }
+      if (
+        props.rewindSource !== undefined &&
+        props.onRewind !== undefined &&
+        input === '' &&
+        !(conciergeOn && conciergeRt?.hasLiveTasks() === true)
+      ) {
         if (escPendingRef.current) {
           // 2º Esc dentro da janela ⇒ abre o picker.
           escPendingRef.current = false;
@@ -5161,7 +5243,7 @@ export function App(props: AppProps): React.ReactElement {
     state,
     slashOpen,
     palette.open,
-    subAgentsRunning(state.blocks),
+    subAgentsRunning(rawState.blocks),
     conciergeOn,
   );
 
@@ -5220,14 +5302,10 @@ export function App(props: AppProps): React.ReactElement {
   // `/ask` pendente ocupa a MESMA região (abaixo da fala, acima do composer) ⇒ mesmo desconto.
   const pendingAskLines =
     state.pendingAsks.length > 0 ? queuedInputsLines(state.pendingAsks.length) + 1 : 0;
-  // ADR 0006 — a lista de tarefas/aprovações mora na MESMA região (abaixo da fala, acima do
-  // composer): entra no desconto do teto da fala (anti-flicker).
-  const conciergeTasksShown = conciergeOn
-    ? conciergeTasksLines(
-        conciergeRt?.visibleTasks().length ?? 0,
-        conciergeRt?.pendingApprovals().length ?? 0,
-      )
-    : 0;
+  // ADR 0006 — o painel de tarefas e a vista de detalhe moram abaixo do composer: entram no
+  // desconto do teto da fala (anti-flicker).
+  const taskDetailRoom = Math.max(6, Math.min(rows - 14, 22));
+  const conciergeTasksShown = taskPanelRows + (taskDetail !== null ? taskDetailRoom + 3 : 0);
   const stagedLines = queueLines + pendingInjectLines + pendingAskLines + conciergeTasksShown;
   // EST-1015 (anti-flicker) — o <SlashMenu> mora ABAIXO do composer e PODE coexistir com o stream
   // (EST-0982). Sua altura (lista filtrada + cabeçalhos + ajuda + o `paddingTop={1}` do contêiner)
@@ -5507,6 +5585,56 @@ export function App(props: AppProps): React.ReactElement {
     return null;
   };
 
+  // ADR 0006 — VISTA DE DETALHE de uma tarefa: o transcrito dela (blocos como no clássico),
+  // numa janela de `room` linhas que o dono rola e fecha. Reusa `fitConversaWindow` + `BlockView`.
+  const renderTaskDetail = (room: number): React.ReactElement | null => {
+    const task = taskDetail !== null ? conciergeRt?.registry.get(taskDetail) : undefined;
+    if (task === undefined || conciergeRt === undefined) return null;
+    const blocks = partitionCockpitBlocks(conciergeRt.taskBlocks(task.id)).conversation;
+    const vp = fitConversaWindow(blocks, Math.max(2, room - 1), taskScroll, {
+      columns: columns - 4,
+      rows,
+      mono: false,
+      streamMaxLines: streamPreviewMaxLines(room),
+    });
+    return (
+      <Box
+        flexDirection="column"
+        paddingLeft={2}
+        height={room + 3}
+        overflow="hidden"
+        flexShrink={0}
+      >
+        <Role name="accent">
+          {truncateToWidth(
+            `── ${task.id} · ${statusPt(task.status)} · ${clip(task.goal, 70)}`,
+            Math.max(20, columns - 6),
+          )}
+        </Role>
+        <Box flexDirection="column" height={room} overflow="hidden">
+          {vp.hiddenAbove > 0 && <Role name="fgDim">{`↑ ${vp.hiddenAbove} acima`}</Role>}
+          {blocks.length === 0 && <Role name="fgDim">(a tarefa ainda não produziu nada)</Role>}
+          {vp.blocks.map((b, i) => (
+            <BlockView
+              key={`${vp.start + i}`}
+              block={b}
+              isCurrent={false}
+              frame={frame}
+              columns={columns - 4}
+              rows={rows}
+              settled
+              prevKind={i > 0 ? previousVisibleKind(vp.blocks, i) : undefined}
+              semCursor
+            />
+          ))}
+        </Box>
+        <Role name="fgDim">
+          {`↑↓ rolam · PgUp/PgDn · esc fecha${vp.hiddenBelow > 0 ? ` · ↓ ${vp.hiddenBelow} abaixo` : ''}`}
+        </Role>
+      </Box>
+    );
+  };
+
   const renderOverlays = (pad: 'top' | 'bottom'): React.ReactElement => {
     const box = pad === 'top' ? { paddingTop: 1 } : { paddingBottom: 1 };
     return (
@@ -5721,7 +5849,17 @@ export function App(props: AppProps): React.ReactElement {
         // se há permissão/pergunta esperando, é ELA que precisa da tela. Sem isto o
         // fullscreen escondia o pedido e a sessão parecia travada (ver
         // `renderDecisionDialog`).
-        overlay={renderDecisionDialog() ?? (overlayOpen ? renderOverlays('bottom') : null)}
+        overlay={
+          renderDecisionDialog() ??
+          (taskDetail !== null
+            ? renderTaskDetail(Math.max(3, cockpitLayout.regions.conversaRows - 5))
+            : overlayOpen
+              ? renderOverlays('bottom')
+              : null)
+        }
+        {...(panelRows.length > 0
+          ? { taskPanel: <TaskPanel rows={panelRows} columns={columns} frame={frame} /> }
+          : {})}
         {...(props.version !== undefined ? { version: props.version } : {})}
       />
     );
@@ -6245,15 +6383,6 @@ export function App(props: AppProps): React.ReactElement {
           <PendingInjects items={state.pendingInjects} cycleActive={state.cycleActive === true} />
         </Box>
       )}
-      {/* ADR 0006 — lista COMPACTA de tarefas do Concierge + CAIXA DE ENTRADA de aprovações. */}
-      {conciergeTasksShown > 0 && conciergeRt !== undefined && (
-        <ConciergeTasks
-          tasks={conciergeRt.visibleTasks()}
-          approvals={conciergeRt.pendingApprovals()}
-          now={Date.now()}
-          columns={columns}
-        />
-      )}
       {/* `/ask` EM VOO — área SEPARADA da fila (canal lateral ↗), até a resposta chegar. */}
       {state.pendingAsks.length > 0 && (
         <Box paddingBottom={1}>
@@ -6300,6 +6429,10 @@ export function App(props: AppProps): React.ReactElement {
             do dono: o composer é para COMPOR; o que o turno fez já está na conversa. O custo
             vive no cabeçalho da caixa da resposta (F-CONTA-NO-BLOCO). */}
       </ComposerBox>
+      {/* ADR 0006 — vista de DETALHE de uma tarefa (o transcrito dela, rolável) e PAINEL de
+          tarefas do rodapé (compacto, ao vivo). Nada do trabalho entra na conversa. */}
+      {taskDetail !== null && renderTaskDetail(taskDetailRoom)}
+      {panelRows.length > 0 && <TaskPanel rows={panelRows} columns={columns} frame={frame} />}
       {/* F-COMPOSER-SOMBRA — TIRADA a pedido do dono ("achei que a sombra não ficou
           legal"). A técnica (meio-bloco deslocado, a mesma da marca 3D) funciona numa
           FIGURA, que tem contorno fechado; sob uma faixa de largura total ela vira só
@@ -6757,7 +6890,7 @@ function BlockBody(props: BlockViewProps): React.ReactElement {
       // EST-0982 (mid-turn) — confirmação "↳ encaixado": o "btw" do usuário ENTROU no
       // turno vivo (incorporado entre iterações). Nota leve/dim — feedback, não fala do
       // agente. O eco já vem REDIGIDO (CLI-SEC-6); vazio ⇒ só o rótulo.
-      return <InjectAck text={b.text} />;
+      return <InjectAck text={b.text} {...(b.plain === true ? { plain: true } : {})} />;
   }
 }
 
@@ -6766,9 +6899,16 @@ function BlockBody(props: BlockViewProps): React.ReactElement {
  * eco REDIGIDO do que entrou (truncado p/ não inundar a região viva). Avisa o usuário
  * que o input foi incorporado no turno em curso (e não engolido / adiado).
  */
-function InjectAck(props: { readonly text: string }): React.ReactElement {
+function InjectAck(props: { readonly text: string; readonly plain?: boolean }): React.ReactElement {
   const echo = props.text.trim();
   const shown = echo.length > 80 ? `${echo.slice(0, 80)}…` : echo;
+  if (props.plain === true) {
+    return (
+      <Box paddingLeft={2}>
+        <Role name="fgDim">{echo.length > 140 ? `${echo.slice(0, 139)}…` : echo}</Role>
+      </Box>
+    );
+  }
   return (
     // Sem `paddingBottom`: a nota é uma LINHA. O respiro depois dela é de quem vem a seguir
     // (`blankAfterInject`) — pagar de cima dependia de a próxima já existir quando esta foi

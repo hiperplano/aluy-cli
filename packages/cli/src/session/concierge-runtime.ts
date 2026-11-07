@@ -18,14 +18,16 @@ import {
   type ConciergeModel,
   type TaskRecord,
 } from '@hiperplano/aluy-cli-core';
+import type { SubAgentChildView } from '../ui/components/SubAgents.js';
+import type { SessionBlock } from './model.js';
 import { ControllerTaskEngine, type TaskSession } from './concierge-engine.js';
 
 /** O recorte da sessão da TUI que o runtime escreve na conversa. */
-export interface ConversationSink extends TaskSession {
+export interface ConversationSink {
   pushConciergeEcho(text: string): void;
-  pushConciergeReply(lines: readonly string[]): void;
-  conciergePendingStart(id: string, head: string): void;
-  conciergePendingEnd(id: string): void;
+  pushConciergeLine(text: string): void;
+  conciergeReplyStart(): void;
+  conciergeReplyEnd(fallback?: string): void;
   cancelAllFlows(origin: 'f8' | 'panel' | 'exit'): void;
 }
 
@@ -53,7 +55,6 @@ export class ConciergeRuntime {
   readonly engine: ControllerTaskEngine;
   readonly concierge: Concierge;
   private facts: readonly string[] = [];
-  private seq = 0;
   private readonly listeners = new Set<() => void>();
   private inflight = new Set<AbortController>();
   private readonly clock: () => number;
@@ -64,7 +65,6 @@ export class ConciergeRuntime {
     this.registry = new TaskRegistry({ clock });
     this.engine = new ControllerTaskEngine({
       registry: this.registry,
-      main: d.sink,
       ...(d.createHeadless ? { createHeadless: d.createHeadless } : {}),
     });
     this.concierge = new Concierge({
@@ -77,7 +77,7 @@ export class ConciergeRuntime {
       clock,
     });
     // Relatos: uma linha por evento que importa, na conversa (sem chamar o modelo).
-    this.concierge.attachRelay((line) => d.sink.pushConciergeReply([line]));
+    this.concierge.attachRelay((line) => d.sink.pushConciergeLine(line));
     this.registry.subscribe(() => {
       this.persist();
       for (const l of [...this.listeners]) l();
@@ -106,6 +106,21 @@ export class ConciergeRuntime {
     return [...ended, ...live];
   }
 
+  /** Sub-agentes da tarefa (último lote do bloco `subagents` da sessão dela), p/ o painel. */
+  taskChildren(id: string): readonly SubAgentChildView[] {
+    const blocks = this.engine.sessionOf(id)?.current.blocks ?? [];
+    for (let i = blocks.length - 1; i >= 0; i -= 1) {
+      const b = blocks[i];
+      if (b?.kind === 'subagents') return b.children;
+    }
+    return [];
+  }
+
+  /** O transcrito da tarefa (como teria aparecido no clássico), p/ a vista de detalhe. */
+  taskBlocks(id: string): readonly SessionBlock[] {
+    return this.engine.sessionOf(id)?.current.blocks ?? [];
+  }
+
   hasLiveTasks(): boolean {
     return this.registry.live().length > 0;
   }
@@ -115,18 +130,35 @@ export class ConciergeRuntime {
    * trabalho. Resolve quando a resposta foi escrita; quem chama NÃO precisa aguardar.
    */
   async handleOwnerMessage(text: string): Promise<void> {
-    const id = `c${++this.seq}`;
+    // Eco IMEDIATO (a mensagem aparece na hora, mesmo que a resposta anterior ainda corra).
+    this.d.sink.pushConciergeEcho(text);
+    // As respostas do Concierge correm UMA POR VEZ (cada uma é um bloco `Λluy` em stream; duas
+    // ao mesmo tempo se misturariam). Isso NÃO espera tarefa nenhuma: só a fala anterior,
+    // que dura segundos.
+    const run = this.replyChain.then(() => this.reply(text));
+    this.replyChain = run.catch(() => undefined);
+    return run;
+  }
+
+  private replyChain: Promise<void> = Promise.resolve();
+
+  private async reply(text: string): Promise<void> {
     const ac = new AbortController();
     this.inflight.add(ac);
-    this.d.sink.pushConciergeEcho(text);
-    this.d.sink.conciergePendingStart(id, clip(text, 56));
+    this.d.sink.conciergeReplyStart();
+    let fallback = '';
     try {
       this.facts = (await this.d.ownerFacts?.().catch(() => [])) ?? [];
       const r = await this.concierge.handle(text, ac.signal);
-      if (r.text.trim() !== '') this.d.sink.pushConciergeReply(r.text.split('\n'));
+      fallback = r.reply;
+      this.d.sink.conciergeReplyEnd(fallback);
+      for (const n of r.notes) this.d.sink.pushConciergeLine(n);
       this.persist();
+    } catch (e) {
+      this.d.sink.conciergeReplyEnd(
+        `Não consegui responder agora (${e instanceof Error ? e.message : String(e)}).`,
+      );
     } finally {
-      this.d.sink.conciergePendingEnd(id);
       this.inflight.delete(ac);
     }
   }
@@ -138,11 +170,11 @@ export class ConciergeRuntime {
   announceRestored(): void {
     const interrupted = this.registry.list().filter((t) => t.status === 'interrupted');
     if (interrupted.length === 0) return;
-    this.d.sink.pushConciergeReply([
-      `↯ ${interrupted.length} tarefa${interrupted.length > 1 ? 's' : ''} ficou interrompida ao fechar: ${interrupted
+    this.d.sink.pushConciergeLine(
+      `↯ ${interrupted.length} tarefa${interrupted.length > 1 ? 's' : ''} interrompida${interrupted.length > 1 ? 's' : ''} ao fechar — ${interrupted
         .map((t) => `${t.id} (${clip(t.goal, 40)})`)
-        .join('; ')}. Diga se quer reiniciar.`,
-    ]);
+        .join('; ')}`,
+    );
   }
 
   // ── controle explícito (Esc NUNCA chama isto) ──────────────────────────────

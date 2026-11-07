@@ -63,70 +63,77 @@ const ask = (name = 'run_command') =>
 
 function setup() {
   const registry = new TaskRegistry();
-  const main = new FakeSession();
   const headless: FakeSession[] = [];
   const engine = new ControllerTaskEngine({
     registry,
-    main,
     createHeadless: () => {
       const h = new FakeSession();
       headless.push(h);
       return h;
     },
   });
-  return { registry, main, headless, engine };
+  return { registry, headless, engine };
 }
 
 describe('ControllerTaskEngine — estado da sessão vira evento do registro', () => {
+  it('TODA tarefa roda numa sessão própria (nada no controller da conversa)', () => {
+    const { registry, headless, engine } = setup();
+    engine.start(registry.create({ goal: 'a', kind: 'main' }));
+    engine.start(registry.create({ goal: 'b', kind: 'detached' }));
+    expect(headless).toHaveLength(2);
+    expect(engine.sessionOf('t1')).toBe(headless[0]);
+    expect(engine.sessionOf('t2')).toBe(headless[1]);
+  });
+
   it('pedido de aprovação ⇒ waiting_approval só da tarefa dona; responder volta a running', async () => {
-    const { registry, main, headless, engine } = setup();
-    const t1 = registry.create({ goal: 'a', kind: 'main' });
-    const t2 = registry.create({ goal: 'b', kind: 'detached' });
-    engine.start(t1);
-    engine.start(t2);
-    main.set({ pendingAsk: ask(), phase: 'asking' });
+    const { registry, headless, engine } = setup();
+    engine.start(registry.create({ goal: 'a', kind: 'main' }));
+    engine.start(registry.create({ goal: 'b', kind: 'detached' }));
+    headless[0]!.set({ pendingAsk: ask(), phase: 'asking' });
     expect(registry.get('t1')!.status).toBe('waiting_approval');
     expect(registry.get('t2')!.status).toBe('running'); // só ela espera
     expect(engine.pendingApprovals().map((p) => p.taskId)).toEqual(['t1']);
     expect(engine.resolveApproval('t2', { kind: 'approve-once' })).toBeUndefined(); // t2 não pediu
     expect(engine.resolveApproval(undefined, { kind: 'approve-once' })).toBe('t1');
-    expect(main.resolved).toHaveLength(1);
-    expect(headless[0]!.resolved).toHaveLength(0);
+    expect(headless[0]!.resolved).toHaveLength(1);
+    expect(headless[1]!.resolved).toHaveLength(0);
     expect(registry.get('t1')!.status).toBe('running');
   });
 
   it('cota pausada ⇒ paused_quota na tarefa; as outras seguem', () => {
-    const { registry, main, engine } = setup();
+    const { registry, headless, engine } = setup();
     engine.start(registry.create({ goal: 'a', kind: 'main' }));
     engine.start(registry.create({ goal: 'b', kind: 'detached' }));
-    main.set({ quotaPause: { reason: 'cota 5h' } as SessionState['quotaPause'] });
+    headless[0]!.set({ quotaPause: { reason: 'cota 5h' } as SessionState['quotaPause'] });
     expect(registry.get('t1')!.status).toBe('paused_quota');
     expect(registry.get('t2')!.status).toBe('running');
-    main.set({ quotaPause: undefined });
+    headless[0]!.set({ quotaPause: undefined });
     expect(registry.get('t1')!.status).toBe('running');
   });
 
-  it('tool start/end viram eventos e passos', () => {
-    const { registry, main, engine } = setup();
+  it('tool start/end viram eventos, passos e o rótulo `bash ls -la` do painel', () => {
+    const { registry, headless, engine } = setup();
     engine.start(registry.create({ goal: 'a', kind: 'main' }));
-    main.toolObs[0]!.onToolStart!({ name: 'read_file' });
+    headless[0]!.toolObs[0]!.onToolStart!({ name: 'run_command', input: { command: 'ls -la' } });
     expect(registry.get('t1')!.phase).toBe('tool');
-    main.toolObs[0]!.onToolEnd!({ name: 'read_file' }, true);
+    expect(registry.get('t1')!.current).toBe('bash ls -la');
+    headless[0]!.toolObs[0]!.onToolEnd!({ name: 'run_command' }, true);
     expect(registry.get('t1')!.steps).toBe(1);
     expect(registry.get('t1')!.phase).toBe('idle');
+    expect(registry.get('t1')!.current).toBeUndefined();
   });
 
   it('fim do turno ⇒ done com o resumo da última fala; erro ⇒ failed; parada ⇒ stopped', async () => {
     const a = setup();
     a.engine.start(a.registry.create({ goal: 'a', kind: 'main' }));
-    a.main.finish([{ kind: 'aluy', text: 'refatorei tudo', streaming: false } as never]);
+    a.headless[0]!.finish([{ kind: 'aluy', text: 'refatorei tudo', streaming: false } as never]);
     await new Promise((r) => setTimeout(r, 5));
     expect(a.registry.get('t1')!.status).toBe('done');
     expect(a.registry.get('t1')!.summary).toBe('refatorei tudo');
 
     const b = setup();
     b.engine.start(b.registry.create({ goal: 'a', kind: 'main' }));
-    b.main.finish([{ kind: 'broker-error', message: 'sem crédito' } as never], 'error');
+    b.headless[0]!.finish([{ kind: 'broker-error', message: 'sem crédito' } as never], 'error');
     await new Promise((r) => setTimeout(r, 5));
     expect(b.registry.get('t1')!.status).toBe('failed');
 
@@ -134,35 +141,25 @@ describe('ControllerTaskEngine — estado da sessão vira evento do registro', (
     const t = c.registry.create({ goal: 'a', kind: 'main' });
     c.engine.start(t);
     c.engine.stop(t);
-    c.main.finish([]);
+    c.headless[0]!.finish([]);
     await new Promise((r) => setTimeout(r, 5));
-    expect(c.main.interrupted).toBe(1);
+    expect(c.headless[0]!.interrupted).toBe(1);
     expect(c.registry.get('t1')!.status).toBe('stopped');
   });
 
   it('send entrega pela fila de injeção da sessão da tarefa (a certa, não a outra)', () => {
-    const { registry, main, headless, engine } = setup();
+    const { registry, headless, engine } = setup();
     engine.start(registry.create({ goal: 'a', kind: 'main' }));
     const t2 = registry.create({ goal: 'b', kind: 'detached' });
     engine.start(t2);
     expect(engine.send(t2, 'corrige').delivered).toBe(true);
-    expect(headless[0]!.injected).toEqual(['corrige']);
-    expect(main.injected).toEqual([]);
+    expect(headless[1]!.injected).toEqual(['corrige']);
+    expect(headless[0]!.injected).toEqual([]);
   });
 
-  it('turno principal ocupado por algo que não é tarefa ⇒ a nova tarefa vai para sessão paralela', () => {
-    const { registry, main, headless, engine } = setup();
-    main.set({ phase: 'streaming' });
-    engine.start(registry.create({ goal: 'a', kind: 'main' }));
-    expect(headless).toHaveLength(1);
-    expect(engine.send(registry.get('t1')!, 'x').delivered).toBe(true);
-    expect(headless[0]!.injected).toEqual(['x']);
-    expect(main.injected).toEqual([]);
-  });
-
-  it('sem sessão paralela disponível ⇒ a tarefa falha com motivo (não trava)', () => {
+  it('sem fábrica de sessão ⇒ a tarefa falha com motivo (não trava)', () => {
     const registry = new TaskRegistry();
-    const engine = new ControllerTaskEngine({ registry, main: new FakeSession() });
+    const engine = new ControllerTaskEngine({ registry });
     engine.start(registry.create({ goal: 'x', kind: 'detached' }));
     expect(registry.get('t1')!.status).toBe('failed');
   });
@@ -173,9 +170,9 @@ describe('ConciergeRuntime — persistência e --resume', () => {
     const s = new FakeSession() as unknown as ConversationSink & { replies: string[][] };
     s.replies = [];
     s.pushConciergeEcho = () => {};
-    s.pushConciergeReply = (l) => void s.replies.push([...l]);
-    s.conciergePendingStart = () => {};
-    s.conciergePendingEnd = () => {};
+    s.pushConciergeLine = (l) => void s.replies.push([l]);
+    s.conciergeReplyStart = () => {};
+    s.conciergeReplyEnd = (f) => void (f ? s.replies.push([`reply:${f}`]) : undefined);
     s.cancelAllFlows = () => {};
     return s;
   };
@@ -192,7 +189,12 @@ describe('ConciergeRuntime — persistência e --resume', () => {
     const dir = mkdtempSync(join(tmpdir(), 'conc-'));
     const path = join(dir, 'c', 's.json');
     const s1 = sink();
-    const rt1 = new ConciergeRuntime({ sink: s1, model, storePath: () => path });
+    const rt1 = new ConciergeRuntime({
+      sink: s1,
+      model,
+      storePath: () => path,
+      createHeadless: () => new FakeSession(),
+    });
     await rt1.handleOwnerMessage('migre o banco');
     expect(rt1.registry.get('t1')!.status).toBe('running');
     const raw = JSON.parse(readFileSync(path, 'utf8'));

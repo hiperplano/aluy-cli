@@ -156,6 +156,8 @@ export interface CockpitProps {
    * §5). O ESTADO/navegação (↑↓/Enter/esc) é o MESMO do inline — só a posição mudou.
    */
   readonly overlay?: React.ReactNode;
+  /** ADR 0006 — painel de tarefas (altura = `layout.taskRows`), logo abaixo do composer. */
+  readonly taskPanel?: React.ReactNode;
 }
 
 /** Régua horizontal de 1 linha (borda entre regiões — papel `fgDim` do DS). */
@@ -514,6 +516,13 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
             : {})}
         />
       </Box>
+
+      {/* ADR 0006 — PAINEL DE TAREFAS (altura cravada em `taskRows`, parte da soma == rows). */}
+      {layout.taskRows > 0 && (
+        <Box height={clampH(layout.taskRows)} overflow="hidden" flexShrink={0}>
+          {props.taskPanel}
+        </Box>
+      )}
 
       {/* ── 6) HINTS (fixo, contextual) ──────────────────────────────────────── */}
       {layout.hintsRows > 0 && props.statuslineMode === 'hidden' && (

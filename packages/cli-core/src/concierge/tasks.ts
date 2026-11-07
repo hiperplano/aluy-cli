@@ -37,6 +37,8 @@ export interface TaskRecord {
   readonly startedAt: number;
   readonly endedAt?: number;
   readonly steps: number;
+  /** O que a tarefa está fazendo AGORA (ferramenta em curso, p.ex. `bash ls -la`). */
+  readonly current?: string;
 }
 
 export type TaskEventKind =
@@ -150,13 +152,17 @@ export class TaskRegistry {
   }
 
   /** Atualiza fase/passos sem evento de transição (alimenta a lista viva). */
-  touch(id: string, patch: { phase?: TaskPhase; steps?: number }): void {
+  touch(id: string, patch: { phase?: TaskPhase; steps?: number; current?: string | null }): void {
     const t = this.tasks.get(id);
     if (!t || TERMINAL_STATUSES.has(t.status)) return;
+    const { current: _c, ...rest } = t;
+    void _c;
+    const current = patch.current === undefined ? t.current : (patch.current ?? undefined);
     this.tasks.set(id, {
-      ...t,
+      ...rest,
       ...(patch.phase !== undefined ? { phase: patch.phase } : {}),
       ...(patch.steps !== undefined ? { steps: patch.steps } : {}),
+      ...(current !== undefined ? { current } : {}),
     });
   }
 
@@ -181,8 +187,9 @@ export class TaskRegistry {
     if (TERMINAL_STATUSES.has(t.status)) return t; // terminal é final
     if (t.status === to && extra?.summary === undefined) return t;
     const terminal = TERMINAL_STATUSES.has(to);
-    const { blockedBy: _drop, ...rest } = t;
+    const { blockedBy: _drop, current: _cur, ...rest } = t;
     void _drop;
+    void _cur;
     const next: TaskRecord = {
       ...rest,
       status: to,

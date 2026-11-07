@@ -1256,21 +1256,28 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     maxTokens: 2048,
   });
 
-  // ADR 0006 — caller do CONCIERGE: curto (max_tokens baixo), SÓ com as 4 tools `task_*`
-  // (plano de controle; nenhuma de arquivo/shell). Segue o tier/modelo CORRENTE da sessão
-  // (`tierSource: caller`) salvo `conciergeModel` (slug Custom, mesmo provider). Mesmo
-  // broker/credencial (CLI-SEC-7). Tools não suportadas (422) degradam p/ texto puro.
-  const conciergeTierSource =
-    opts.conciergeModel !== undefined && opts.conciergeModel.trim() !== ''
-      ? { tier: 'custom' as const, model: opts.conciergeModel.trim(), provider: caller.provider }
-      : caller;
-  const conciergeCaller = new BrokerModelCaller({
+  // ADR 0006 — caller do CONCIERGE: STREAMING (a resposta aparece token a token no bloco
+  // `Λluy` normal, pelo sink do controller da TUI — que não roda tarefas, só conversa), curto
+  // (max_tokens baixo) e SÓ com as 4 tools `task_*` (plano de controle). Segue o tier/modelo
+  // CORRENTE da sessão (sincronizado a cada chamada) salvo `conciergeModel` (slug Custom).
+  // Mesmo broker/credencial (CLI-SEC-7). Tools não suportadas (422) degradam p/ texto puro.
+  const conciergeStream = new StreamingModelCaller({
     client: liveClient,
     tier,
-    tierSource: conciergeTierSource,
     maxTokens: 700,
+    sink: delegatingSink(() => controllerRef?.sink),
     nativeTools: new NativeToolsCapability({ tools: CONCIERGE_TOOLS }),
   });
+  const conciergeCaller: ConciergeModel = {
+    call: (args) => {
+      const override = opts.conciergeModel?.trim();
+      if (override !== undefined && override !== '') conciergeStream.setTier('custom', override);
+      else conciergeStream.setTier(caller.tier, caller.model);
+      conciergeStream.setProvider(caller.provider);
+      conciergeStream.setClient(caller.currentClient);
+      return conciergeStream.call(args);
+    },
+  };
 
   // EST-0969 (display) · CLI-SEC-7 — caller DEDICADO dos SUB-AGENTES (filhos):
   // NÃO-streaming. Vai pelo MESMO broker/credencial do pai (sem 2ª rota de modelo), só
