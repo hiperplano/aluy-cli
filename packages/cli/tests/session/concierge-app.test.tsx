@@ -382,7 +382,7 @@ describe('Painel de tarefas do rodapé', () => {
     return { s, gs, tasks };
   }
 
-  it('3 tarefas: com espaço, as TAREFAS aparecem na linha dos agentes; ↓ expande (dica); enter abre o detalhe; esc fecha', async () => {
+  it('3 tarefas: com espaço, as TAREFAS aparecem na linha dos agentes; ↓ expande (dica); enter abre o detalhe (nota no histórico)', async () => {
     const { s, gs } = await three();
     await sleep(200);
     await waitFor(() => s.frame().includes('3 tarefas:'));
@@ -392,15 +392,27 @@ describe('Painel de tarefas do rodapé', () => {
     s.stdin.write(DOWN);
     await waitFor(() => s.frame().includes('enter detalhes'));
     await sleep(300);
+    const alturaAntes = ((): number => {
+      const l = s.frame().split('\n');
+      return l.length - l.findIndex((x) => x.includes('❯'));
+    })();
     s.stdin.write(CR);
-    await waitFor(() => s.frame().includes('── t3 · rodando'));
-    expect(s.frame()).toContain('esc fecha');
-    await sleep(300);
-    s.stdin.write(ESC);
-    await waitFor(() => !s.frame().includes('── t3 · rodando'));
-    await sleep(600);
-    s.stdin.write(ESC); // recolhe
-    await waitFor(() => !s.frame().includes('enter detalhes'));
+    // INLINE: o detalhe vai como UMA nota no histórico (vista que crescesse deixaria um buraco).
+    await waitFor(() => blocksOf(s.conversation, 'note').length > 0);
+    await sleep(200);
+    expect(s.frame()).not.toContain('esc fecha'); // não há overlay a fechar
+    // A região viva (do composer p/ baixo) tem a MESMA altura antes e depois: nada cresce, logo
+    // nada vira buraco em branco ao fechar.
+    const vivo = (f: string): number => {
+      const l = f.split('\n');
+      return l.length - l.findIndex((x) => x.includes('❯'));
+    };
+    expect(vivo(s.frame())).toBe(alturaAntes);
+    expect(
+      blocksOf(s.conversation, 'note').some(
+        (n) => (n as { title: string }).title === 't3 · detalhe',
+      ),
+    ).toBe(true);
     gs.forEach((g) => g.resolve());
     s.unmount();
   });
@@ -408,7 +420,7 @@ describe('Painel de tarefas do rodapé', () => {
   it('/task show t1 abre o detalhe; hidden = só a linha-resumo', async () => {
     const { s, gs } = await three();
     await type(s, '/task show t1');
-    await waitFor(() => s.frame().includes('── t1 · rodando'));
+    await waitFor(() => s.frame().includes('t1 · detalhe'));
     gs.forEach((g) => g.resolve());
     s.unmount();
   });
@@ -651,7 +663,7 @@ describe('Vista de detalhe nunca passa da altura do terminal (senão sobra burac
         const room = taskDetailRoomFor(rows, painel);
         const vivo = room + 3 + painel + LIVE_OVERHEAD_ROWS;
         // terminais muito baixos (piso de 2 linhas de conteúdo) são o único caso fora da regra
-        if (rows - LIVE_OVERHEAD_ROWS - painel - 3 >= 2) expect(vivo).toBeLessThanOrEqual(rows);
+        if (rows - LIVE_OVERHEAD_ROWS - painel - 4 >= 2) expect(vivo).toBeLessThan(rows); // ESTRITAMENTE menor
         expect(room).toBeGreaterThanOrEqual(2);
       }
     }

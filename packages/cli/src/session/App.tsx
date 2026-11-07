@@ -145,6 +145,7 @@ import { buildActivityLog, countActivityLines } from './activity-log.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
 import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
 import { linhasDoRodapeAgentes } from './footer-agents-layout.js';
+import { buildTranscript } from './export-transcript.js';
 import { clip, statusPt } from '@hiperplano/aluy-cli-core';
 import { truncateToWidth } from '../ui/markdown/table-layout.js';
 import { Cockpit, type CockpitFocus } from './Cockpit.js';
@@ -2252,6 +2253,28 @@ export function App(props: AppProps): React.ReactElement {
     [props, controller, t, clearScreen],
   );
 
+  // ADR 0006 — DETALHE de uma tarefa. No COCKPIT é uma vista rolável (região de altura fixa, sem
+  // reflow). No INLINE uma vista que crescesse empurraria a conversa para o scrollback e, ao
+  // fechar, deixaria um BURACO em branco (o Ink só apaga o que ainda está na tela): por isso o
+  // inline despeja o transcrito (redigido) como UMA nota no histórico — o scroll é o do terminal.
+  const openTaskDetail = (id: string): void => {
+    if (cockpitActive) {
+      setTaskDetail(id);
+      setTaskScroll(0);
+      return;
+    }
+    const rt = props.concierge;
+    if (rt === undefined) return;
+    const md = buildTranscript(rt.taskBlocks(id));
+    const corpo = md.includes('\n---\n') ? md.slice(md.indexOf('\n---\n') + 5) : md;
+    const linhas = corpo.split('\n').map((l) => l.trimEnd());
+    const cauda = linhas.length > 160 ? ['… (início omitido)', ...linhas.slice(-160)] : linhas;
+    controller.pushNote(
+      `${id} · detalhe`,
+      cauda.length > 0 ? cauda : ['(a tarefa ainda não produziu nada)'],
+    );
+  };
+
   // ADR 0006 — `/conversation`, `/task`, `/approve` (/a), `/deny` (/n). Respostas curtas em NOTA
   // (replaceNote coalesce: não empilha). Nada aqui toca o turno do agente.
   const runConciergeCommand = useCallback(
@@ -2298,8 +2321,7 @@ export function App(props: AppProps): React.ReactElement {
           if (id === undefined || rt.registry.get(id) === undefined) {
             controller.replaceNote('task', ['uso: /task show <id> — ex.: /task show t1']);
           } else {
-            setTaskDetail(id);
-            setTaskScroll(0);
+            openTaskDetail(id);
           }
           return;
         }
@@ -3404,10 +3426,7 @@ export function App(props: AppProps): React.ReactElement {
           if (key.downArrow) return setTaskSel((s) => Math.min(vis.length - 1, s + 1));
           if (key.return) {
             const t = vis[Math.min(taskSel, vis.length - 1)];
-            if (t) {
-              setTaskDetail(t.id);
-              setTaskScroll(0);
-            }
+            if (t) openTaskDetail(t.id);
             return;
           }
         }
@@ -6483,7 +6502,6 @@ export function App(props: AppProps): React.ReactElement {
       </ComposerBox>
       {/* ADR 0006 — vista de DETALHE de uma tarefa (o transcrito dela, rolável) e PAINEL de
           tarefas do rodapé (compacto, ao vivo). Nada do trabalho entra na conversa. */}
-      {taskDetail !== null && renderTaskDetail(taskDetailRoom)}
       {/* F-COMPOSER-SOMBRA — TIRADA a pedido do dono ("achei que a sombra não ficou
           legal"). A técnica (meio-bloco deslocado, a mesma da marca 3D) funciona numa
           FIGURA, que tem contorno fechado; sob uma faixa de largura total ela vira só

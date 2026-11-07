@@ -159,7 +159,9 @@ export const LIVE_OVERHEAD_ROWS = 16;
  * o Ink só apaga o que ainda está na tela e, ao fechar, sobra um BURACO em branco.
  */
 export function taskDetailRoomFor(rows: number, panelRows: number): number {
-  return Math.max(2, Math.min(22, rows - LIVE_OVERHEAD_ROWS - panelRows - 3));
+  // -1: a região viva tem de ficar ESTRITAMENTE abaixo de `rows` (com `>= rows` o Ink limpa o
+  // terminal inteiro e some a conversa acima).
+  return Math.max(2, Math.min(22, rows - LIVE_OVERHEAD_ROWS - panelRows - 3 - 1));
 }
 
 /** Altura (linhas) do painel — sem respiro: statusline e painel ficam juntos. 0 se vazio. */
