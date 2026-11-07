@@ -116,6 +116,7 @@ interface BuildOpts {
   /** Pausa entre palavras do stream do Concierge (para observar o crescimento). */
   wordGate?: (i: number) => Promise<void> | undefined;
   classicModel?: ModelCaller;
+  statusline?: 'full' | 'compact' | 'hidden';
 }
 
 function build(opts: BuildOpts) {
@@ -160,6 +161,7 @@ function build(opts: BuildOpts) {
         bootMs={0}
         concierge={rt}
         initialConversation={opts.mode}
+        {...(opts.statusline ? { initialStatusline: opts.statusline } : {})}
       />
     </ThemeProvider>,
   );
@@ -498,5 +500,93 @@ describe('Modo clássico inalterado', () => {
     expect(s.conciergeCalls).toEqual([]);
     g0.resolve();
     s.unmount();
+  });
+});
+
+describe('Ordem do rodapé: composer → statusline → painel; sem linha em branco entre eles', () => {
+  async function comTarefa(statusline: 'full' | 'compact' | 'hidden', approval = false) {
+    const g = defer();
+    const task = taskSession({
+      iters: (t) => (approval && t === 0 ? toolCall('run_command', { command: 'echo oi' }) : 'ok'),
+      gates: (t) => (t === 0 && !approval ? g.promise : undefined),
+    });
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      statusline,
+      concierge: () => text('Iniciei.', startTask('fazer')),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.rt.registry.get('t1') !== undefined);
+    const marca = statusline === 'full' ? '1 tarefa:' : '1 tarefa ·';
+    await waitFor(() => s.frame().includes(marca));
+    if (approval) await waitFor(() => s.frame().includes('pede aprovação'));
+    await sleep(150);
+    return { s, g };
+  }
+  const idx = (lines: string[], needle: string): number =>
+    lines.findIndex((l) => l.includes(needle));
+
+  for (const modo of ['full', 'compact'] as const) {
+    it(`statusline ${modo}: painel por ÚLTIMO, colado à statusline (sem linha em branco)`, async () => {
+      const { s, g } = await comTarefa(modo);
+      const lines = s.frame().split('\n');
+      const composer = idx(lines, '❯');
+      const painel = idx(lines, modo === 'full' ? '1 tarefa:' : '1 tarefa ·');
+      const status = lines.findIndex((l, i) => i > composer && /sessão|janela|comandos/.test(l));
+      expect(composer).toBeGreaterThan(-1);
+      expect(status).toBeGreaterThan(composer);
+      expect(painel).toBeGreaterThan(status); // composer → statusline → painel
+      expect(lines[painel - 1]!.trim()).not.toBe(''); // nada em branco entre statusline e painel
+      g.resolve();
+      s.unmount();
+    });
+  }
+
+  it('statusline hidden: sem statusline, o painel fica logo sob o composer', async () => {
+    const { s, g } = await comTarefa('hidden');
+    const lines = s.frame().split('\n');
+    const composer = idx(lines, '❯');
+    const painel = idx(lines, '1 tarefa ·');
+    expect(painel - composer).toBeLessThanOrEqual(3); // barra do composer + painel
+    expect(lines.slice(composer, painel).every((l) => !/sessão/.test(l))).toBe(true);
+    g.resolve();
+    s.unmount();
+  });
+
+  it('aprovação pendente aparece no fim do painel, também com o painel recolhido (compact)', async () => {
+    const { s } = await comTarefa('compact', true);
+    const lines = s.frame().split('\n');
+    expect(idx(lines, 't1 pede aprovação')).toBeGreaterThan(idx(lines, '❯'));
+    await type(s, '/n');
+    s.unmount();
+  });
+
+  it('a resposta do Concierge → composer: exatamente UMA linha em branco (com e sem tarefa viva)', async () => {
+    for (const comTask of [false, true]) {
+      const g = defer();
+      const tasks = comTask ? [taskSession({ iters: () => 'ok', gates: () => g.promise })] : [];
+      const s = build({
+        mode: 'concierge',
+        tasks,
+        concierge: (m) =>
+          comTask && /faça/.test(m) ? text('Iniciei.', startTask()) : text('Certo.'),
+      });
+      if (comTask) {
+        await type(s, 'faça');
+        await waitFor(() => s.frame().includes('1 tarefa:'));
+      }
+      await type(s, 'oi');
+      await waitFor(() => s.frame().includes('Certo.'));
+      await sleep(250);
+      const lines = s.frame().split('\n');
+      const resp = idx(lines, 'Certo.');
+      const topo = lines.findIndex((l, i) => i > resp && l.includes('┃')); // barra do composer
+      const brancos = lines.slice(resp + 1, topo).filter((l) => l.trim() === '').length;
+      expect(topo).toBeGreaterThan(resp);
+      expect(brancos).toBe(1);
+      g.resolve();
+      s.unmount();
+    }
   });
 });

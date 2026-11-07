@@ -51,6 +51,8 @@ export interface SubAgentsProps {
   readonly settled?: boolean;
   /** Frame do tick central (brilho dos filhos rodando). Ausente ⇒ frame 0. */
   readonly frame?: number;
+  /** Rodapé: sem o respiro de baixo (o painel fica colado ao que vem antes/depois). */
+  readonly flush?: boolean;
 }
 
 /** Palavra do estado (a11y): glifo NUNCA sozinho. `timeout`/`limit` ⇒ palavra honesta. */
@@ -162,7 +164,7 @@ export function SubAgents(props: SubAgentsProps): React.ReactElement {
   const headTail =
     running > 0 ? ` (${running} ${props.settled === true ? 'em segundo plano' : 'rodando'})` : '';
   return (
-    <Box flexDirection="column" paddingLeft={2} paddingBottom={1}>
+    <Box flexDirection="column" paddingLeft={2} paddingBottom={props.flush === true ? 0 : 1}>
       <Box>
         <Glyph name="subagents" role="accent" />
         <Role name="fg">

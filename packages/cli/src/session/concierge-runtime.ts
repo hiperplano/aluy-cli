@@ -124,7 +124,7 @@ export class ConciergeRuntime {
    * A tarefa na MESMA gramática de linha dos sub-agentes (`<ChildLine>`): nome, estado com
    * brilho enquanto roda, modelo (`herdado (…)`), atividade atual, tokens, tools e tempo.
    */
-  taskView(t: TaskRecord): SubAgentChildView {
+  taskView(t: TaskRecord, labelMax = 22): SubAgentChildView {
     const s = this.engine.sessionOf(t.id)?.current;
     const ended = t.endedAt !== undefined;
     const parts: string[] = [];
@@ -149,7 +149,7 @@ export class ConciergeRuntime {
             : 'running';
     const tier = this.d.modelLabel?.() ?? s?.meta?.activeModel ?? s?.meta?.model ?? s?.meta?.tier;
     return {
-      label: `${t.id} ${clip(t.goal, 22)}`,
+      label: `${t.id} ${clip(t.goal, labelMax)}`,
       status,
       summary: parts.join(' · '),
       ...(word !== undefined ? { word } : {}),

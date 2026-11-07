@@ -145,9 +145,9 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
   return rows;
 }
 
-/** Altura (linhas) do painel, com 1 de respiro no fim. 0 quando não há o que mostrar. */
+/** Altura (linhas) do painel — sem respiro: statusline e painel ficam juntos. 0 se vazio. */
 export function panelLines(rows: readonly PanelRow[]): number {
-  return rows.length === 0 ? 0 : rows.length + 1;
+  return rows.length;
 }
 
 export interface TaskPanelProps {
@@ -160,7 +160,7 @@ export function TaskPanel(props: TaskPanelProps): React.ReactElement | null {
   if (props.rows.length === 0) return null;
   const width = Math.max(30, props.columns - 4);
   return (
-    <Box flexDirection="column" paddingLeft={2} paddingBottom={1}>
+    <Box flexDirection="column" paddingLeft={2}>
       {props.rows.map((r, idx) => {
         switch (r.kind) {
           case 'summary':

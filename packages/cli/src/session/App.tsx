@@ -112,7 +112,11 @@ import { formatElapsed, queueAtRest } from './model.js';
 import { decideEscAction } from './esc-redirect.js';
 import { animTickEnabled, elapsedTickEnabled } from './tick-policy.js';
 import { splitBlocks } from './render-split.js';
-import { aluyNeedsLeadingBlank, previousVisibleKind } from './block-rhythm.js';
+import {
+  aluyNeedsLeadingBlank,
+  blockEndsWithBlankLine,
+  previousVisibleKind,
+} from './block-rhythm.js';
 import {
   mostraIndicadorTrabalho,
   workingIndicator,
@@ -1249,7 +1253,8 @@ export function App(props: AppProps): React.ReactElement {
           tasks: conciergeRt.visibleTasks(),
           approvals: conciergeRt.pendingApprovals(),
           childrenOf: (id) => conciergeRt.taskChildren(id),
-          viewOf: (t) => conciergeRt.taskView(t),
+          // O objetivo ganha a largura que a linha comporta (o resto da linha ocupa ~90 colunas).
+          viewOf: (t) => conciergeRt.taskView(t, Math.max(22, Math.min(70, columns - 90))),
           maxRows: linhasDoRodapeAgentes(rows),
           statusline: statuslineMode,
           columns,
@@ -5913,6 +5918,12 @@ export function App(props: AppProps): React.ReactElement {
     live.length === 0 &&
     !haFilhoVivo &&
     state.quotaPause === undefined;
+  // REPOUSO (nada vivo): a resposta que acabou de assentar JÁ fecha com 1 linha em branco
+  // (`paddingBottom` do bloco). O contêiner vivo somava mais 2 (topo + base) ⇒ 3 em branco
+  // entre a resposta e o composer. Sem região viva ele não paga respiro nenhum: o gap é 1.
+  const ultimoFechaEmBranco =
+    state.blocks.length === 0 ||
+    blockEndsWithBlankLine(previousVisibleKind(state.blocks, state.blocks.length) ?? 'note');
   const liveChatColumn = (
     <>
       {/* F-SEM-SAUDACAO (decisão do dono: "eu não pedi essas msgs") — a tela de sessão
@@ -6206,8 +6217,8 @@ export function App(props: AppProps): React.ReactElement {
         // (`LIVE_CHROME_BASE_ROWS`) segue contando o respiro cheio ⇒ só sobra folga.
         <Box
           flexDirection="column"
-          paddingTop={telaBaixa ? 0 : 1}
-          paddingBottom={telaBaixa && regiaoVivaVazia ? 0 : 1}
+          paddingTop={telaBaixa || (regiaoVivaVazia && ultimoFechaEmBranco) ? 0 : 1}
+          paddingBottom={regiaoVivaVazia ? 0 : 1}
         >
           {liveChatColumn}
         </Box>
@@ -6442,7 +6453,6 @@ export function App(props: AppProps): React.ReactElement {
       {/* ADR 0006 — vista de DETALHE de uma tarefa (o transcrito dela, rolável) e PAINEL de
           tarefas do rodapé (compacto, ao vivo). Nada do trabalho entra na conversa. */}
       {taskDetail !== null && renderTaskDetail(taskDetailRoom)}
-      {panelRows.length > 0 && <TaskPanel rows={panelRows} columns={columns} frame={frame} />}
       {/* F-COMPOSER-SOMBRA — TIRADA a pedido do dono ("achei que a sombra não ficou
           legal"). A técnica (meio-bloco deslocado, a mesma da marca 3D) funciona numa
           FIGURA, que tem contorno fechado; sob uma faixa de largura total ela vira só
@@ -6572,16 +6582,6 @@ export function App(props: AppProps): React.ReactElement {
           />
         </Box>
       )}
-      {/* Cópia viva dos sub-agentes nos modos SEM painel (compact/hidden): o <FooterAgents>
-          do modo `full` envolve o painel; aqui não há painel para envolver, mas o brilho
-          dos filhos rodando não pode depender do modo do rodapé. */}
-      {statuslineMode !== 'full' && filhosRodape.length > 0 && (
-        <Box paddingLeft={2} flexDirection="column">
-          <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
-            {null}
-          </FooterAgents>
-        </Box>
-      )}
       {/* RODAPÉ oculto — nada além do necessário: o `⚠ yolo` NUNCA some (catraca desligada) e,
           na 1ª vez, uma dica mínima de como voltar. */}
       {statuslineMode === 'hidden' && (state.mode === 'unsafe' || dicaOculto) && (
@@ -6596,7 +6596,7 @@ export function App(props: AppProps): React.ReactElement {
           {/* FOOTER-AGENTES — os sub-agentes VIVOS ganham uma coluna À ESQUERDA do painel,
             separados por uma barra vertical (pedido do dono). Sem agentes vivos o
             <FooterAgents> é passagem direta: a tela de quem não dispara agente não muda. */}
-          <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
+          <>
             {/* `busy`/`frame` NÃO são mais passados: o único consumidor deles no painel era o
             pulso âmbar, que saiu. Continuar passando faria o painel re-renderizar a cada
             quadro sem desenhar nada diferente, e deixaria dois campos aceitos-e-ignorados
@@ -6646,7 +6646,7 @@ export function App(props: AppProps): React.ReactElement {
                   { sidecarUsage: state.sidecarUsage }
                 : {})}
             />
-          </FooterAgents>
+          </>
           {/* EST-0959 · ADR-0055 / EST-0989 — INDICADOR DE MODO no RODAPÉ (onde o olho
           descansa). Sempre visível (glifo+palavra, a11y): plan=read-only (petrol),
           normal=catraca (neutro), unsafe=BANNER gritante e persistente (CLI-SEC-3 —
@@ -6688,6 +6688,17 @@ export function App(props: AppProps): React.ReactElement {
           {showHints && (hintState === 'ask' || hintState === 'ask-destructive') && (
             <Box height={1} />
           )}
+        </Box>
+      )}
+      {/* ORDEM (decisão do dono, como no Claude Code): composer → statusline → PAINEL. O painel
+          fica por ÚLTIMO e cresce para baixo; a statusline não se mexe. Sem linha em branco
+          entre os dois. Aprovações pendentes entram nas linhas do painel (nunca somem). */}
+      {panelRows.length > 0 && <TaskPanel rows={panelRows} columns={columns} frame={frame} />}
+      {panelRows.length === 0 && filhosRodape.length > 0 && (
+        <Box paddingLeft={2} flexDirection="column">
+          <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
+            {null}
+          </FooterAgents>
         </Box>
       )}
     </Box>
