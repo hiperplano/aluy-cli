@@ -58,6 +58,8 @@ export interface FooterAgentsProps {
   readonly rows?: number;
   /** Frame do tick central — o brilho dos agentes rodando. */
   readonly frame?: number;
+  /** Células disponíveis ao bloco (largura do terminal menos recuos/folga). */
+  readonly maxWidth?: number;
   /** O painel de status, que fica ABAIXO do bloco fixado. */
   readonly children: React.ReactNode;
 }
@@ -76,6 +78,7 @@ export function FooterAgents(props: FooterAgentsProps): React.ReactElement {
       <SubAgents
         childrenStatus={mostrados}
         flush
+        {...(props.maxWidth !== undefined ? { maxWidth: props.maxWidth } : {})}
         {...(props.frame !== undefined ? { frame: props.frame } : {})}
       />
       {sobra > 0 && (

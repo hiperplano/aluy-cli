@@ -3,12 +3,16 @@
 import React from 'react';
 import { Box } from 'ink';
 import stringWidth from 'string-width';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render } from 'ink-testing-library';
 import chalk from 'chalk';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveTheme } from '../../src/ui/theme/theme.js';
-import { SubAgents, type SubAgentChildView } from '../../src/ui/components/SubAgents.js';
+import {
+  SubAgents,
+  ajustarLinhaDoFilho,
+  type SubAgentChildView,
+} from '../../src/ui/components/SubAgents.js';
 import { TaskPanel, type PanelRow } from '../../src/ui/components/ConciergeTasks.js';
 
 const ENV = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' };
@@ -186,4 +190,76 @@ describe('painel de tarefas — nenhuma linha chega à borda do terminal (fantas
       unmount();
     });
   }
+});
+
+describe('painel de tarefas — o texto visível não muda com o brilho (linha ajustada em TEXTO PLANO)', () => {
+  // Relato do dono (tmux, 110 colunas): a cada quadro do brilho a linha da tarefa perdia letras, o
+  // modelo e o rótulo `tools`. O Ink encolhia cada pedaço da linha por conta própria quando ela
+  // não cabia. Agora a linha é cortada em texto plano ANTES de pintar; o brilho só põe cor.
+  it('em 110 colunas, 12 quadros de brilho ⇒ o mesmo texto visível em todos', () => {
+    const old = chalk.level;
+    chalk.level = 3;
+    const agora = Date.now();
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(agora);
+    try {
+      const tarefa: SubAgentChildView = {
+        label: 't3 Somente leitura: listar os 10 maiores arquivos do disco',
+        status: 'running',
+        model: 'herdado (z-ai/glm-5.3-flash)',
+        summary: 'bash find "$HOME" -xdev -type f -printf · 18.8k tokens (95% cache) · 1 tools',
+        startedAt: agora - 49_000,
+      };
+      const r: PanelRow[] = [
+        { kind: 'header', total: 1, running: 1 },
+        { kind: 'task', view: tarefa, selected: false },
+        { kind: 'child', child: { ...tarefa, label: 'um agente com nome comprido' } },
+      ];
+      const visivel = (frame: number): string => {
+        const { lastFrame, unmount } = render(
+          <ThemeProvider theme={theme}>
+            <Box width={110}>
+              <TaskPanel rows={r} columns={110} frame={frame} />
+            </Box>
+          </ThemeProvider>,
+        );
+        const out = plain(lastFrame());
+        unmount();
+        return out;
+      };
+      const base = visivel(0);
+      expect(base.split('\n')).toHaveLength(r.length);
+      for (let f = 1; f <= 12; f++) expect(visivel(f), `quadro ${f}`).toBe(base);
+      // a linha foi cortada com `…` inteira (nada de letras soltas faltando) e tem o modelo OU foi cortada limpa
+      for (const l of base.split('\n')) expect(stringWidth(l)).toBeLessThanOrEqual(109);
+      expect(base).toContain('rodando');
+      expect(base).not.toMatch(/rodndo|rodano/);
+    } finally {
+      spy.mockRestore();
+      chalk.level = old;
+    }
+  });
+
+  it('ajustarLinhaDoFilho: o resumo é cortado primeiro; o rótulo `tools` e o modelo só somem por inteiro', () => {
+    const f = (celulas: number) =>
+      ajustarLinhaDoFilho({
+        rotulo: '[t3 x]',
+        word: 'rodando',
+        model: 'herdado (m)',
+        summary: 'bash ls · 18.8k tokens · 1 tools',
+        tempo: '49s',
+        celulas,
+        glifo: 4,
+      });
+    expect(f(200)).toEqual({
+      rotulo: '[t3 x]',
+      model: 'herdado (m)',
+      summary: 'bash ls · 18.8k tokens · 1 tools',
+      tempo: '49s',
+    });
+    const apertado = f(50);
+    expect(apertado.model).toBe('herdado (m)');
+    expect(apertado.summary!.endsWith('…')).toBe(true);
+    const minimo = f(24);
+    expect(minimo.summary).toBeUndefined();
+  });
 });

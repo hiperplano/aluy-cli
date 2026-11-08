@@ -46,6 +46,9 @@ export function clip(text: string, max: number): string {
 export function clipPlain(text: string, max: number): string {
   const one = redactOutputSecrets(text)
     .replace(/[*_`#>]+/g, '')
+    // Tabela markdown vira texto corrido: `| a | b |` / `|---|---|` não pode poluir a nota de 1 linha.
+    .replace(/\|/g, ' ')
+    .replace(/[-=─]{3,}/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   return cutAt(one, max);

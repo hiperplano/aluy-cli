@@ -279,13 +279,21 @@ export function TaskPanel(props: TaskPanelProps): React.ReactElement | null {
               <Box key={idx} height={1} overflow="hidden">
                 {/* Mesma linha dos sub-agentes (brilho enquanto roda); o marcador só no expandido. */}
                 {r.selected && <Role name="accent">❯</Role>}
-                <ChildLine child={r.view} frame={props.frame} />
+                <ChildLine
+                  child={r.view}
+                  frame={props.frame}
+                  maxWidth={Math.max(20, props.columns - 5 - (r.selected ? 1 : 0))}
+                />
               </Box>
             );
           case 'child':
             return (
               <Box key={idx} paddingLeft={2} height={1} overflow="hidden">
-                <ChildLine child={r.child} frame={props.frame} />
+                <ChildLine
+                  child={r.child}
+                  frame={props.frame}
+                  maxWidth={Math.max(20, props.columns - 7)}
+                />
               </Box>
             );
           case 'approval':

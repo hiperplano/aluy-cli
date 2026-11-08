@@ -958,6 +958,20 @@ describe('Composer estável durante a fala do Concierge (tela NÃO cheia)', () =
     s.unmount();
   });
 
+  it('a nota `✔ tN concluída — …` é UMA linha (cortada na largura), mesmo longa', async () => {
+    const s = build({ mode: 'concierge', concierge: () => text('ok') });
+    await type(s, 'oi');
+    await waitFor(() => s.frame().includes('ok'));
+    const longa = `✔ t9 concluída — ${'Arquivo Tamanho calc.py 1.2k '.repeat(12)}`;
+    s.conversation.pushConciergeLine(longa);
+    await waitFor(() => s.frame().includes('✔ t9 concluída'));
+    const ls = s.frame().split('\n');
+    const i = ls.findIndex((l) => l.includes('✔ t9 concluída'));
+    expect(ls[i]!.trimEnd().endsWith('…')).toBe(true);
+    expect(ls[i + 1]!.includes('Arquivo Tamanho')).toBe(false); // sem continuação na linha de baixo
+    s.unmount();
+  });
+
   it('pensando logo depois do `você`: exatamente 1 linha em branco antes da linha de trabalho', async () => {
     const gate = defer();
     const s = build({

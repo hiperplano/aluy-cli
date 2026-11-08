@@ -5,6 +5,7 @@ import {
   buildConciergePrompt,
   buildDigest,
   clipBlock,
+  clipPlain,
   type ConciergeEngine,
   type ConciergeModel,
   type TaskRecord,
@@ -530,6 +531,17 @@ describe('Concierge — resultado da tarefa chega ÍNTEGRO ao relato (regressão
     const p = buildConciergePrompt({});
     expect(p).toContain('task_status');
     expect(p).toContain('NUNCA diga ao dono que a informação');
+  });
+});
+
+describe('clipPlain — nota de 1 linha sem lixo de tabela markdown', () => {
+  it('pipes e traços de tabela somem; o texto das células fica', () => {
+    const out = clipPlain('| Arquivo | Tamanho |\n|---|---|\n| calc.py | 1.2k |\n', 200);
+    expect(out).toBe('Arquivo Tamanho calc.py 1.2k');
+    expect(out).not.toMatch(/[|]|-{3}/);
+  });
+  it('hífen de palavra e de flag continuam', () => {
+    expect(clipPlain('ls -la e well-known', 50)).toBe('ls -la e well-known');
   });
 });
 

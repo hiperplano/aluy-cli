@@ -7078,7 +7078,12 @@ export function App(props: AppProps): React.ReactElement {
       )}
       {panelRows.length === 0 && filhosRodape.length > 0 && (
         <Box paddingLeft={2} flexDirection="column" width={Math.max(20, columns - 3)}>
-          <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
+          <FooterAgents
+            filhos={filhosRodape}
+            rows={rows}
+            frame={frame}
+            maxWidth={Math.max(20, columns - 5)}
+          >
             {null}
           </FooterAgents>
         </Box>
@@ -7308,7 +7313,10 @@ function InjectAck(props: { readonly text: string; readonly plain?: boolean }): 
   if (props.plain === true) {
     return (
       <Box paddingLeft={2}>
-        <Role name="fgDim">{echo.length > 140 ? `${echo.slice(0, 139)}…` : echo}</Role>
+        {/* UMA linha: cortada na largura do terminal (a nota `✔ tN concluída — …` quebrava em 2). */}
+        <Role name="fgDim" wrap="truncate-end">
+          {echo.replace(/\s+/g, ' ')}
+        </Role>
       </Box>
     );
   }
