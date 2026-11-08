@@ -1443,7 +1443,18 @@ export function filterPalette(
   const q = query.trim();
   if (q === '') return items.map((it) => ({ ...it, score: 0, matched: [] }));
   const hits: PaletteHit[] = [];
+  const qFold = fold(q);
   for (const it of items) {
+    // Comando: o MESMO ranking do menu `/` (nome exato > prefixo > alias > substring > palavra-chave
+    // PT-BR > descrição) manda na ordem; o fuzzy só resolve o que o ranking não conhece e o realce.
+    if (it.action.kind === 'command') {
+      const rank = entryRank({ kind: 'command', command: it.action.command }, qFold);
+      if (rank !== undefined) {
+        const onLabel = fuzzyScore(q, it.label);
+        hits.push({ ...it, score: 1_000_000 - rank * 1_000, matched: onLabel ? onLabel.matched : [] });
+        continue;
+      }
+    }
     const onLabel = fuzzyScore(q, it.label);
     const onDesc = fuzzyScore(q, [it.description, ...(it.keywords ?? [])].join(' · '));
     if (!onLabel && !onDesc) continue;

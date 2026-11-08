@@ -111,6 +111,38 @@ describe('App — command palette (Ctrl+P)', () => {
     h.unmount();
   });
 
+  it('a palette aparece UMA vez (antes era desenhada duas: acima e abaixo do composer)', async () => {
+    const h = mount();
+    await flush();
+    h.stdin.write(CTRL_P);
+    await flush();
+    const f = h.lastFrame() ?? '';
+    expect(f.split('⌘ comandos').length - 1).toBe(1);
+    h.unmount();
+  });
+
+  it('a palette só lista comandos do modo atual (clássico: /ask sim, /task não)', async () => {
+    const h = mount();
+    await flush();
+    h.stdin.write(CTRL_P);
+    await flush();
+    for (const ch of 'tarefa') {
+      h.stdin.write(ch);
+      await flush();
+    }
+    expect(h.lastFrame()).not.toContain('/task');
+    h.stdin.write(CTRL_P); // fecha
+    await flush();
+    h.stdin.write(CTRL_P);
+    await flush();
+    for (const ch of 'pergunta') {
+      h.stdin.write(ch);
+      await flush();
+    }
+    expect(h.lastFrame()).toContain('/ask');
+    h.unmount();
+  });
+
   it('o leader Ctrl+X também abre (alias trivial)', async () => {
     const h = mount();
     await flush();

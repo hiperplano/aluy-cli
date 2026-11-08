@@ -60,6 +60,12 @@ describe('busca do menu / (PT-BR, alias, descrição)', () => {
     expect(t[0]).toBe('theme');
   });
 
+  it('prefixo do nome vem antes de quem só contém o trecho (/in: init e inventory antes de rewind)', () => {
+    const r = search('in');
+    expect(r.slice(0, 2)).toEqual(['init', 'inventory']);
+    expect(r.indexOf('rewind')).toBeGreaterThan(1);
+  });
+
   it('1 letra só casa nome/alias (não polui com descrição)', () => {
     const r = search('s');
     expect(r.every((p) => p.toLowerCase().includes('s') || p === 'approve')).toBe(true);
@@ -85,6 +91,9 @@ describe('busca do menu / (PT-BR, alias, descrição)', () => {
   it('palette (ctrl+p) também acha por palavra-chave PT-BR', () => {
     expect(filterPalette('tema')[0]?.label).toBe('/theme');
     expect(filterPalette('senha').map((h) => h.label)).toContain('/secret');
+    // e na mesma ordem do menu: palavra-chave exata antes de quem só cita a palavra na descrição
+    expect(filterPalette('tarefa')[0]?.label).toBe('/task');
+    expect(filterPalette('sair')[0]?.label).toBe('/quit');
   });
 });
 

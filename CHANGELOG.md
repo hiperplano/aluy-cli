@@ -14,6 +14,25 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Adicionado
+
+- 🔎 **Menu `/` mais útil.** Mostra até 18 comandos quando há espaço (eram 4 de 99) e busca pelo nome, pelo apelido (`/view`, `/cockpit`, `/a`, `/n`), pela descrição e por palavras em português: `/tema`, `/sair`, `/parar`, `/senha`, `/resumir`… Nome exato e prefixo vêm primeiro. A dica anuncia `ctrl+p`, que agora também funciona de dentro do menu (abre a paleta com a mesma busca).
+- 🗂️ **Seções novas:** conversa, interface, modelo, trabalho, extensões e conta. Os raros (`/rooms`, `/service`, `/upgrade`, `/window`, `/telegram`, `/agents`, `/skills`, `/redo`) saem da lista padrão, mas seguem buscáveis e funcionando; `/task`, `/approve` e `/deny` só aparecem no concierge, `/ask` no clássico e `/back` só com um sub-agente em foco.
+- ☰ **Seletores para comandos sem argumento**, na mesma moldura de `/theme` e `/effort`, com o valor atual marcado: `/conversation`, `/notify`, `/statusline`, `/suggest`, `/split`, `/window`, `/clear`, `/telegram`, `/cycle` (com ciclo ativo), `/task` e `/approve`/`/deny` (2+ pedidos). Para listas, "escolha o item e depois a ação", sem decorar id: `/memory`, `/todo`, `/cron`, `/plugin`, `/workflows`, `/service`, `/subagent`, `/rooms`, `/secret`. Cada item roda o mesmo comando que você digitaria; ações destrutivas pedem confirmação. Com argumento, nada muda.
+- `/split on|off` (sem argumento abre o seletor), e `/help all` para incluir os comandos raros.
+
+### Alterado
+
+- Descrições de todos os comandos reescritas em infinitivo, sem jargão (`tier`, `BYO`, `ghost`, `alt-screen`, `jobs`…), com o apelido junto (`/view`, `/cockpit`, `/a`, `/n`). `/window` agora diz que define a janela, `/todo` e `/task` têm descrições distintas.
+- `/help` agrupa por seção, lista só os comandos principais do modo e traz os atalhos **do modo**: no concierge, `ctrl-t` abre o painel de tarefas e não se fala em `ctrl-b`.
+- `/statusline`, `/clear` e `/split` sem argumento agora abrem o seletor (antes alternavam ou agiam às cegas). `F2` segue ciclando o rodapé.
+
+### Corrigido
+
+- No concierge, `ctrl-t` (anunciado no `/help`) não fazia nada; agora abre e fecha o painel de tarefas. Com só tarefas rodando, o rodapé mostrava a dica de ocioso; agora ensina `F8`, `ctrl-t` e `/task`.
+- A paleta (`ctrl+p`) era desenhada duas vezes; agora uma, e só lista comandos do modo atual, ordenados como o menu.
+- `/skills` não cita mais o inexistente `/skill <nome>`.
+
 ## [1.0.0-rc.192] — 2026-11-08
 
 ### Adicionado

@@ -52,6 +52,9 @@ describe('seletores estáticos: rótulo PT-BR → argumento em inglês', () => {
     expect(item(s, 'classic').current).toBe(true);
     expect(item(s, 'concierge').current).toBe(false);
     expect(initialIndex(s)).toBe(1);
+    const c = step('conversation', { conversation: 'concierge' });
+    expect(item(c, 'concierge').current).toBe(true);
+    expect(initialIndex(c)).toBe(0);
   });
 
   it('/conversation sem concierge disponível cai no comportamento antigo (nota)', () => {

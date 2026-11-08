@@ -92,6 +92,7 @@ import { useThemePicker } from '../ui/hooks/useThemePicker.js';
 import { useLangPicker } from '../ui/hooks/useLangPicker.js';
 import { useMenuPicker, type MenuPick } from '../ui/hooks/useMenuPicker.js';
 import { buildHelpLines } from '../slash/handlers.js';
+import { availableIn } from '../slash/command-meta.js';
 import { menuStepFor, type MenuCtx, type MenuDataPort } from '../slash/menu-pickers.js';
 import {
   useProviderPicker,
@@ -1495,13 +1496,22 @@ export function App(props: AppProps): React.ReactElement {
     [rewindPicker.target, rewindSource],
   );
 
+  const paletteNatives = useMemo(
+    () =>
+      localizedNatives.filter((c) =>
+        availableIn(c, { concierge: conciergeOn, subagentFocused: state.meta.focus !== undefined }),
+      ),
+    [localizedNatives, conciergeOn, state.meta.focus],
+  );
   // EST-0961 — command palette (Ctrl+P): índice fuzzy de TODOS os comandos/ações.
   // Lê a FONTE ÚNICA (mesmos comandos do slash-menu, via filterPalette) + as ações
   // puras. Modal: captura o foco quando aberta (gated contra os outros overlays).
   const palette = useCommandPalette({
     ...(props.userCommands !== undefined ? { userCommands: props.userCommands } : {}),
-    // EST-0989 (i18n) — a palette mostra os summaries dos nativos no idioma ativo.
-    natives: localizedNatives,
+    // EST-0989 (i18n) — a palette mostra os summaries dos nativos no idioma ativo. Comandos de
+    // outro modo (task/approve/deny fora do concierge, /ask nele, /back sem foco) não entram:
+    // a palette é "busca por tudo", não "busca por tudo que não funciona aqui".
+    natives: paletteNatives,
   });
 
   // ── EST-0965 (FLICKER, causa-raiz medida no PTY) — DOIS ticks, não um ───────────
@@ -6544,17 +6554,8 @@ export function App(props: AppProps): React.ReactElement {
           incomodava). O menu cresce/encolhe PRA BAIXO. Ver o bloco "MENU/PICKERS
           DE `/` ABAIXO DO COMPOSER" depois do <Composer>. */}
 
-      {/* EST-0961 — command palette (Ctrl+P): índice fuzzy de comandos/ações. */}
-      {palette.open && (
-        <Box flexDirection="column" paddingBottom={1}>
-          <CommandPalette
-            hits={palette.hits}
-            selected={palette.selected}
-            query={palette.query}
-            maxRows={Math.min(8, slashMenuRowCap)}
-          />
-        </Box>
-      )}
+      {/* EST-0961 — a command palette (Ctrl+P) renderiza em `renderOverlays` (abaixo do composer);
+          esta cópia acima dele DUPLICAVA a paleta na tela. */}
 
       {/* EST-0974 — `/model` (ModelPicker) migrou p/ ABAIXO do composer (junto do
           <SlashMenu>). Ver o bloco depois do <Composer>. */}

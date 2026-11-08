@@ -1,6 +1,6 @@
 # Comandos
 
-Referência dos subcomandos, das flags de sessão e dos 46 slash-commands.
+Referência dos subcomandos, das flags de sessão e dos slash-commands.
 `aluy --help` traz a mesma coisa no terminal, sempre gerada do código.
 
 ## Subcomandos
@@ -46,63 +46,115 @@ Precedência: **flag > env `ALUY_*` > `config.json` > default**.
 
 ## Slash-commands
 
-Dentro da sessão, sem sair do fluxo.
+Dentro da sessão, sem sair do fluxo. Digite `/` para abrir o menu: ele lista o que cabe na tela,
+agrupado por seção, e **busca** enquanto você digita — pelo nome, pelo apelido (`/view`, `/cockpit`,
+`/a`, `/n`), pela descrição e por palavras em português: `/tema` acha `/theme`, `/sair` acha `/quit`,
+`/parar` acha `/task`, `/senha` acha `/secret`, `/resumir` acha `/compact`. O nome exato e o prefixo
+vêm primeiro. `ctrl+p` (de dentro do menu ou com ele fechado) abre a paleta, que busca por tudo.
+`/help` mostra as mesmas seções com os atalhos do modo em que você está; `/help all` inclui os raros.
 
-### Modelo e sessão
+Ficam fora da lista padrão (mas aparecem ao buscar e funcionam digitados): `/rooms`, `/service`,
+`/upgrade`, `/window`, `/telegram`, `/agents`, `/skills`, `/redo`. Alguns só valem em certo modo:
+`/task`, `/approve` e `/deny` no concierge (no clássico, `/ask`), `/back` só com um sub-agente em foco.
 
-|             |                                                                    |
-| ----------- | ------------------------------------------------------------------ |
-| `/model`    | trocar o tier                                                      |
-| `/provider` | seta o provider do modelo Custom · `save` fixa como padrão         |
-| `/effort`   | seta o `reasoning_effort` (low/medium/high/custom)                 |
-| `/window`   | informa a janela de contexto do modelo ativo (ex.: `/window 128k`) |
-| `/usage`    | tokens e janela desta sessão                                       |
-| `/compact`  | compacta o contexto (resume a conversa e continua)                 |
-| `/clear`    | limpa a sessão · `full` também apaga a memória do agente           |
-| `/history`  | navega e retoma uma sessão anterior, sem sair do aluy              |
-| `/rename`   | dá nome + cor à sessão                                             |
-| `/export`   | exporta o transcript **redigido** para `~/.aluy/exports/` (0600)   |
-| `/ask`      | pergunta paralela (read-only) sem parar o trabalho em curso        |
+### Seletores
 
-### Permissão e workspace
+Rodar o comando **sem argumento** abre uma lista (a mesma moldura de `/theme` e `/effort`), com o valor
+atual marcado por `●`; `↑↓` navega, `enter` escolhe, `esc` volta. Cada item roda exatamente o comando
+que você teria digitado (`/notify` → "nada" executa `/notify off`), então o que você digita continua
+valendo, para script e para quem já sabe os argumentos.
 
-|                               |                                                                                                                                                                   |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/permissions`                | painel: modo, grants e tools seguras                                                                                                                              |
-| `/tools`                      | inventário unificado — nativas, MCP e o que a catraca diz de cada uma                                                                                             |
-| `/add-dir`                    | autoriza um diretório **extra** para o agente nesta sessão                                                                                                        |
-| `/init`                       | cria o `ALUY.md` e a estrutura `.aluy/` do projeto                                                                                                                |
-| `/secret`                     | entrega um segredo ao agente por um campo **mascarado** (`list` · `remove NOME` · `--save`) — [ADR 0005](decisions/0005-segredos-do-dono-sem-passar-pelo-chat.md) |
-| `/inventory`                  | o que foi carregado da `.aluy/` (agentes · comandos · skills · workflows · memória)                                                                               |
-| `/memory`                     | vê (com a origem `usuario`/`derivado`), edita, esquece e fixa a memória do agente                                                                                 |
-| `/todo`                       | backlog de tarefas anotadas                                                                                                                                       |
-| `/undo` · `/redo` · `/rewind` | desfaz edições do agente; `/rewind` volta a um ponto da sessão (Esc Esc)                                                                                          |
+| Sem argumento                                                                       | O que o seletor oferece                                                               |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `/conversation`                                                                     | concierge · clássico                                                                  |
+| `/notify`                                                                           | tudo · só atenção · nada                                                              |
+| `/statusline`                                                                       | completo · compacto · oculto (com a prévia de cada um)                                |
+| `/suggest` · `/split`                                                               | ligada/desligada · mostrar/ocultar log (`/split on\|off` também existe)               |
+| `/window`                                                                           | 32k · 64k · 128k · 200k · 1M · outro valor (preenche o composer)                      |
+| `/clear`                                                                            | só a conversa · conversa + memória · só a memória (as duas últimas pedem confirmação) |
+| `/task`                                                                             | a tarefa → ver detalhe · parar (e "parar todas")                                      |
+| `/approve` · `/deny`                                                                | com 2 ou mais pedidos pendentes: o pedido → aprovar / aprovar para a sessão / negar   |
+| `/memory` · `/todo` · `/cron` · `/plugin` · `/workflows` · `/service` · `/subagent` | o item → a ação (nada de decorar id); remover/esquecer pede confirmação               |
+| `/rooms` · `/secret`                                                                | a sala → ler/acompanhar · os nomes salvos → remover (o valor nunca aparece)           |
+| `/telegram`                                                                         | status · liberar · bloquear · desconectar                                             |
+| `/cycle`                                                                            | com um ciclo ativo: status · pausar · retomar · editar · parar                        |
 
-### Frota e extensões
+Sem seletor por enquanto: `/rename` (a cor), `/add-dir` (escolher a pasta) e `/permissions` (o painel
+dele já troca o modo).
 
-|                       |                                                                              |
-| --------------------- | ---------------------------------------------------------------------------- |
-| `/agents`             | perfis `.md` de sub-agente mapeados (válidos **e** rejeitados, com o motivo) |
-| `/subagent` · `/back` | conversa 1:1 com um sub-agente numa sub-sessão focada, e volta               |
-| `/rooms`              | salas entre agentes — cria, lê e observa ao vivo a conversa da frota         |
-| `/skills`             | skills `SKILL.md` mapeadas                                                   |
-| `/workflows`          | fluxos de atividades — lista, executa e ativa                                |
-| `/plugin`             | plugins instalados (bundles em `~/.aluy/plugins`)                            |
-| `/mcp`                | lista e gerencia servers MCP · `search <termo>`                              |
-| `/service`            | serviços plugáveis — ver abaixo                                              |
-| `/cycle` · `/cron`    | ciclos autônomos com teto duro; agendamento persistente                      |
-| `/telegram`           | status, allowlist e logout do conector                                       |
+### Conversa
 
-### Instalação e aparência
+|                 |                                                               |
+| --------------- | ------------------------------------------------------------- |
+| `/help`         | ver comandos e atalhos                                        |
+| `/ask`          | fazer uma pergunta sem interromper o trabalho (modo clássico) |
+| `/task`         | ver e parar tarefas em segundo plano (concierge)              |
+| `/approve` `/a` | aprovar o pedido pendente (concierge)                         |
+| `/deny` `/n`    | negar o pedido pendente (concierge)                           |
+| `/conversation` | escolher o modo de conversa                                   |
+| `/history`      | retomar uma sessão anterior                                   |
+| `/rename`       | dar nome e cor à sessão                                       |
+| `/clear`        | limpar a conversa (mantém a memória) · `full` · `memory`      |
+| `/compact`      | resumir a conversa para liberar contexto                      |
+| `/export`       | exportar a conversa (sem segredos) para `~/.aluy/exports/`    |
+| `/quit`         | sair do aluy                                                  |
 
-|                                                                                        |                                                                                            |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `/doctor`                                                                              | diagnóstico da instalação                                                                  |
-| `/upgrade`                                                                             | atualiza para a versão mais nova do canal                                                  |
-| `/login` · `/logout` · `/whoami`                                                       | conta                                                                                      |
-| `/theme` · `/lang` · `/split` · `/fullscreen` · `/notify` · `/suggest` · `/statusline` | interface                                                                                  |
-| `/conversation` · `/task` · `/approve` (`/a`) · `/deny` (`/n`)                         | Concierge: conversa que nunca espera o trabalho — ver [`### /conversation`](#conversation) |
-| `/help` · `/quit`                                                                      |                                                                                            |
+### Interface
+
+|               |                                                     |
+| ------------- | --------------------------------------------------- |
+| `/theme`      | trocar o tema de cores                              |
+| `/lang`       | trocar o idioma                                     |
+| `/fullscreen` | alternar tela cheia (cockpit) · `/cockpit`          |
+| `/split`      | mostrar ou ocultar o painel de log · `/view`        |
+| `/statusline` | escolher o rodapé (completo, compacto, oculto) · F2 |
+| `/suggest`    | ligar ou desligar a sugestão do próximo prompt      |
+| `/notify`     | escolher quando o aluy avisa                        |
+
+### Modelo
+
+|             |                                                    |
+| ----------- | -------------------------------------------------- |
+| `/model`    | trocar o modelo                                    |
+| `/provider` | trocar o provedor (OpenRouter, Ollama…) · `save`   |
+| `/effort`   | ajustar o esforço de raciocínio                    |
+| `/window`   | definir a janela de contexto do modelo (ex.: 128k) |
+| `/usage`    | ver tokens e janela de contexto da sessão          |
+
+### Trabalho
+
+|                               |                                                                                                                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/undo` · `/redo` · `/rewind` | desfazer a última edição do agente · refazer · voltar a um ponto da sessão (Esc Esc)                                                                             |
+| `/cycle` · `/cron`            | repetir uma tarefa a cada intervalo, com limites · agendar tarefas recorrentes                                                                                   |
+| `/permissions`                | ver e ajustar as permissões do agente                                                                                                                            |
+| `/add-dir`                    | liberar mais uma pasta para o agente nesta sessão                                                                                                                |
+| `/init`                       | criar o `ALUY.md` e a estrutura `.aluy/` do projeto                                                                                                              |
+| `/secret`                     | passar um segredo ao agente por um campo **mascarado** (`list` · `remove NOME` · `--save`) — [ADR 0005](decisions/0005-segredos-do-dono-sem-passar-pelo-chat.md) |
+| `/todo`                       | ver e concluir os pedidos anotados (≠ `/task`, que é trabalho em segundo plano)                                                                                  |
+
+### Extensões
+
+|                       |                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| `/memory`             | ver (com a origem `usuario`/`derivado`), editar, esquecer e fixar                     |
+| `/mcp`                | gerenciar servidores MCP · `search <termo>`                                           |
+| `/plugin`             | gerenciar plugins (bundles em `~/.aluy/plugins`)                                      |
+| `/workflows`          | executar fluxos de trabalho salvos                                                    |
+| `/subagent` · `/back` | conversar 1:1 com um sub-agente; voltar ao principal                                  |
+| `/inventory`          | ver tudo que foi carregado de `.aluy/`                                                |
+| `/tools`              | listar as ferramentas — nativas, MCP e o que a catraca diz de cada uma                |
+| `/agents` · `/skills` | listar os agentes `.md` e as skills `SKILL.md` mapeados (os rejeitados, com o motivo) |
+| `/service` · `/rooms` | serviços em segundo plano (ver abaixo) · salas de conversa entre agentes              |
+
+### Conta
+
+|                                  |                                                       |
+| -------------------------------- | ----------------------------------------------------- |
+| `/login` · `/logout` · `/whoami` | entrar · sair e apagar a credencial local · ver conta |
+| `/doctor`                        | diagnosticar a instalação                             |
+| `/upgrade`                       | atualizar o aluy para a versão mais nova              |
+| `/telegram`                      | conectar o Telegram (status, liberar, bloquear)       |
 
 ## Atalho de shell: `!` e `!!`
 
@@ -190,7 +242,7 @@ si roda em **tarefas** (`t1`, `t2`…), que o Concierge abre (`task_start`), cor
   escolhe, `enter` abre o detalhe (no inline vira uma nota no histórico; no `/fullscreen`, vista rolável), `ctrl+k` para a tarefa (pede confirmação com um 2º `ctrl+k`). Digitar tira o foco do painel: atalho de letra nunca dispara.
   A conclusão vira uma linha na conversa (`✔ t1 concluída — …`); `/task show t1` abre o detalhe.
 - No modo clássico, os sub-agentes também saem da conversa e moram nesse rodapé.
-- `/task` lista as tarefas. Aprovações viram uma **caixa de entrada** acima do composer; responda com
+- `/task` (sem argumento) abre a lista de tarefas: escolha a tarefa e depois a ação. Aprovações viram uma **caixa de entrada** acima do composer; responda com
   `/a [tarefa] [s]` (aprova; `s` = sempre nesta sessão) ou `/n [tarefa]` (nega) enquanto a conversa segue.
 - Uma correção entra na tarefa "após o passo atual"; se ela está no meio de uma chamada ao modelo, essa
   chamada não muda (o Concierge diz isso). Duas tarefas no mesmo arquivo: a segunda espera a primeira.
