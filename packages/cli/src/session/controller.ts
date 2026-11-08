@@ -803,6 +803,11 @@ export interface SessionControllerOptions {
    * a catraca (`decide()`) e as demais tools seguem iguais. Ausente ⇒ toolset completo.
    */
   readonly excludeTools?: readonly string[];
+  /** Rastro de uso (opt-in): rotula o caller de cada sub-agente (ver `usage-trace.ts`). */
+  readonly labelChildCaller?: <T extends { call: (...a: never[]) => unknown }>(
+    caller: T,
+    label: string,
+  ) => T;
   /**
    * EST-1119 · ADR-0121 §5 — store de SALAS multi-agente (RoomStore).
    * Injetável p/ wiring selecionar o backend (memory/file/loopback/broker)
@@ -2053,6 +2058,11 @@ export class SessionController {
       delete (childPorts as { question?: unknown }).question;
       const spawner = new SubAgentSpawner({
         model: opts.model,
+        ...(opts.labelChildCaller
+          ? {
+              labelCaller: (c: ModelCaller, l: string): ModelCaller => opts.labelChildCaller!(c, l),
+            }
+          : {}),
         ...(opts.memoryContextProvider
           ? { memoryContextProvider: opts.memoryContextProvider }
           : {}),

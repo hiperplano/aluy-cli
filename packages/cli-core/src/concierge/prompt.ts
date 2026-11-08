@@ -45,7 +45,7 @@ export function buildConciergePrompt(args: {
  * da tarefa delegou a sub-agentes. Delegar só compensa em trabalho amplo e dividido.
  */
 export const TASK_COST_HINT =
-  '[Orientação do Concierge — custo] Se o trabalho é pequeno (poucos arquivos ou passos), FAÇA você mesmo, direto, sem spawn_agent: ler, editar e rodar os testes custa muito menos do que subir agentes. Delegue a sub-agentes só se for amplo e dividido em partes realmente independentes.';
+  '[Orientação do Concierge — custo] Se o trabalho é pequeno (poucos arquivos ou passos), FAÇA você mesmo, direto, sem spawn_agent: ler, editar e rodar os testes custa muito menos do que subir agentes. Delegue a sub-agentes só se for amplo e dividido em partes realmente independentes. NÃO monte plano (update_plan) nem lista de tarefas para trabalho pequeno: vá direto — ler o arquivo, editar, rodar o teste UMA vez e responder. Cada chamada de ferramenta reenvia todo o contexto ao modelo; evite releituras e verificações redundantes.';
 
 /** O objetivo como o agente da tarefa o recebe: o pedido + a orientação de custo. */
 export function taskGoalForAgent(goal: string): string {
@@ -60,7 +60,8 @@ export function taskGoalForAgent(goal: string): string {
  * uma tool ausente (a catraca `decide()` é a mesma).
  *  · `perguntar` — a tarefa é headless: não há quem responda (travaria);
  *  · `session_command`, `capabilities`, `list_tools` — meta/UI da sessão interativa;
- *  · `room_*`, `monitor*`, `headroom_retrieve` — salas, monitores e proxy auxiliar.
+ *  · `room_*`, `monitor*`, `headroom_retrieve` — salas, monitores e proxy auxiliar;
+ *  · `add_todo`/`done_todo`/`list_todos` — a lista de afazeres não aparece numa tarefa headless.
  */
 export const TASK_EXCLUDED_TOOLS: readonly string[] = [
   'perguntar',
@@ -73,4 +74,8 @@ export const TASK_EXCLUDED_TOOLS: readonly string[] = [
   'monitor_cancel',
   'monitors',
   'headroom_retrieve',
+  // lista de tarefas do agente: ninguém a vê numa tarefa headless e cada chamada custa uma ida ao modelo
+  'add_todo',
+  'done_todo',
+  'list_todos',
 ];

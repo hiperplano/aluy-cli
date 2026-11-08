@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- linhas JSONL lidas em teste */
 // ADR 0006 — "aprovar sempre nesta tarefa" pela fiação REAL da sessão de tarefa (buildSession),
 // não só pela engine isolada: a flag ligada via `/a!` tem de valer para as próximas
 // ferramentas do MESMO turno, inclusive as de sub-agentes da tarefa.
 
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TASK_EXCLUDED_TOOLS } from '@hiperplano/aluy-cli-core';
@@ -212,5 +213,87 @@ describe('"aprovar sempre nesta tarefa" na fiação real da sessão', () => {
     ])
       expect(task).toContain(t);
     expect(task.length).toBeLessThan(full.length);
+  });
+
+  it('rastro de uso (ALUY_DEBUG_USAGE): tarefa e sub-agente saem rotulados, sem conteúdo; desligado não escreve', async () => {
+    const trace = join(ws, 'trace', 'usage.jsonl');
+    const outputs = [
+      tool('spawn_agent', {
+        agents: [{ label: 'fix', goal: 'LEIA-ME-SECRETO corrige calc.py' }],
+        wait: true,
+      }),
+      'filho terminou.',
+      'consolidei.',
+    ];
+    const mk = (env: Record<string, string>) => {
+      let n = 0;
+      return buildSession({
+        workspaceRoot: ws,
+        store,
+        brokerFetch: (async (url: string) =>
+          url.endsWith('/v1/chat')
+            ? sse(outputs[Math.min(n++, outputs.length - 1)]!)
+            : { ...sse(''), body: undefined, json: async () => ({}) }) as never,
+        mode: 'unsafe',
+        subAgents: { enabled: true, maxConcurrency: 1 },
+        traceLabel: 'task t1',
+        env: {
+          ALUY_MEM0_URL: 'http://127.0.0.1:1',
+          ALUY_BROKER_URL: 'https://broker.mock.local',
+          ALUY_IDENTITY_URL: 'https://id.mock.local',
+          ...env,
+        },
+      });
+    };
+    // desligado: nada é escrito
+    await mk({}).controller.submit('delegue');
+    expect(existsSync(trace)).toBe(false);
+    // ligado
+    await mk({ ALUY_DEBUG_USAGE: trace }).controller.submit('delegue');
+    const ls = readFileSync(trace, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as Record<string, any>);
+    const sessions = [...new Set(ls.map((l) => l['session'] as string))].sort();
+    expect(sessions).toEqual(['task t1', 'task t1/sub:fix']);
+    for (const l of ls) {
+      expect(l['tool_names'].length).toBeGreaterThan(0);
+      expect(l['chars'].system).toBeGreaterThan(0);
+      expect(l['usage']).toMatchObject({ prompt_tokens: 5, completion_tokens: 9 });
+    }
+    expect(readFileSync(trace, 'utf8')).not.toContain('LEIA-ME-SECRETO');
+  });
+
+  it('rastro de uso cobre o Concierge (sessão `concierge`)', async () => {
+    const trace = join(ws, 'trace', 'c.jsonl');
+    const b = buildSession({
+      workspaceRoot: ws,
+      store,
+      brokerFetch: (async (url: string) =>
+        url.endsWith('/v1/chat')
+          ? sse('Oi!')
+          : { ...sse(''), body: undefined, json: async () => ({}) }) as never,
+      mode: 'normal',
+      env: {
+        ALUY_MEM0_URL: 'http://127.0.0.1:1',
+        ALUY_BROKER_URL: 'https://broker.mock.local',
+        ALUY_IDENTITY_URL: 'https://id.mock.local',
+        ALUY_DEBUG_USAGE: trace,
+      },
+    });
+    await b.conciergeModel.call({
+      messages: [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'MENSAGEM-PRIVADA' },
+      ],
+      idempotencyKey: 'k',
+    });
+    const [l] = readFileSync(trace, 'utf8')
+      .trim()
+      .split('\n')
+      .map((x) => JSON.parse(x) as Record<string, any>);
+    expect(l).toMatchObject({ session: 'concierge', request: 1 });
+    expect(l!['tool_names']).toEqual(['task_start', 'task_send', 'task_stop', 'task_status']);
+    expect(readFileSync(trace, 'utf8')).not.toContain('MENSAGEM-PRIVADA');
   });
 });

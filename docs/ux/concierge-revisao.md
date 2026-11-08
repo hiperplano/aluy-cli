@@ -106,3 +106,27 @@ concluída`) coladas e 1 em branco antes do bloco seguinte — conferido no tmux
 
 - **Esc no menu `/`**: se o composer tem só `/`, o Esc fecha o menu e limpa o gatilho; com `/mod…` o
   texto fica.
+
+## Quinta rodada (medir o custo ao vivo)
+
+- **Rastro de uso opt-in**: `ALUY_DEBUG_USAGE=<arquivo>` grava UMA linha JSONL por request ao modelo
+  (`ts`, `session` = `concierge` | `main` | `task tN` | `task tN/sub:<agente>`, `request` = índice na
+  sessão, `tier`/`provider`/`model`, `messages`, `chars{system,tools,history,last}`, `last_role`,
+  `tool_names`, `head_hash`, `prefix_same_chars`/`prefix_prev_chars` e `usage{prompt_tokens,
+cached_tokens, cache_write_tokens, completion_tokens, reasoning_tokens}` quando o provider
+  reporta). Só tamanhos, nomes e hashes curtos: nunca conteúdo, chave ou cabeçalho. Desligado não
+  envolve nada e não cria arquivo. `prefix_same_chars == prefix_prev_chars` ⇒ o prefixo
+  (tools+system) é idêntico ao do request anterior da sessão (o cache de prefixo pode acertar).
+- **O que o `N tokens` da linha da tarefa soma**: prompt + completion de TODA chamada ao modelo da
+  tarefa (agente principal e sub-agentes, sem contar duas vezes), com o prompt em cache contado por
+  inteiro. É volume processado, não o que foi cobrado; por isso a linha passou a mostrar `(X% cache)`
+  quando o provider reporta cache.
+- **Cache de prompt** (leitura do código): o system é montado com o conteúdo estável primeiro e a
+  cauda dinâmica (modelo, raízes, segredos) por último; sem data/hora nem plano no system; o histórico
+  só cresce por append. O adaptador OpenAI-compatível/OpenRouter manda `session_id` fixo (roteamento
+  pegajoso), `stream_options.include_usage` e `cache_control` no system quando ele passa do piso.
+  Ressalva: o bloco de memória do dono fica no MEIO do system — se uma tarefa grava memória
+  (`remember`), o prefixo muda dali em diante.
+- **Planejamento**: a orientação de custo da tarefa agora também diz para NÃO montar plano
+  (`update_plan`) nem lista de afazeres em trabalho pequeno e para rodar o teste uma vez; as tools
+  `add_todo`/`done_todo`/`list_todos` saíram das sessões de tarefa.

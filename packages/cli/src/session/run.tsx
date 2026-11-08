@@ -2400,6 +2400,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               ...rest,
               sessionId: `${activeSession.id}-${taskId}`,
               excludeTools: TASK_EXCLUDED_TOOLS,
+              traceLabel: `task ${taskId}`,
             }).controller;
           },
           // A memória do dono (ADR 0004) entra curta no prompt do Concierge: só fatos `usuario`.

@@ -473,6 +473,11 @@ export interface SubAgentSpawnerOptions {
    */
   readonly callerForTier?: (tier: string) => ModelCaller;
   /**
+   * Rastro de uso (opt-in): envolve o caller de CADA filho com o rótulo dele (`profile.label`).
+   * Só rotula/mede; não muda mensagens nem permissões. Ausente ⇒ o caller segue como é.
+   */
+  readonly labelCaller?: (caller: ModelCaller, label: string) => ModelCaller;
+  /**
    * ADR-0146 (D3) — FÁBRICA de caller CUSTOM/BYO por-filho. Quando o `model:` de um
    * filho resolve em `kind:'custom'` (sentinela `custom`/`custom:<slug>`), o spawner
    * usa `customCallerFor(slug)` PRA AQUELE FILHO: o locus concreto (@hiperplano/aluy-cli)
@@ -893,6 +898,7 @@ export class SubAgentSpawner {
    * Quando o `.md` do filho declara `model:` que resolve num tier, o spawner usa
    * `callerForTier(tier)` PRA AQUELE FILHO; ausente ⇒ todos os filhos usam o do pai. */
   private readonly callerForTier?: (tier: string) => ModelCaller;
+  private readonly labelCaller?: (caller: ModelCaller, label: string) => ModelCaller;
   /** ADR-0146 (D3) — fábrica de caller CUSTOM/BYO por-filho (porta injetada do
    * @hiperplano/aluy-cli). Quando o `model` do filho resolve em `kind:'custom'`, o
    * spawner usa `customCallerFor(slug)` PRA AQUELE FILHO; ausente ⇒ cai no caller do pai. */
@@ -1027,6 +1033,7 @@ export class SubAgentSpawner {
     // EST-SUBAGENT-MODEL — fábrica POR TIER (porta). Ausente ⇒ todos os filhos usam o
     // caller do pai (`this.model`) — comportamento de hoje (back-compat).
     if (opts.callerForTier) this.callerForTier = opts.callerForTier;
+    if (opts.labelCaller) this.labelCaller = opts.labelCaller;
     if (opts.customCallerFor) this.customCallerFor = opts.customCallerFor;
     if (opts.callerForLocalModel) this.callerForLocalModel = opts.callerForLocalModel;
     this.permission = opts.permission;
@@ -1346,7 +1353,7 @@ export class SubAgentSpawner {
       // EST-SUBAGENT-MODEL — o caller POR FILHO (tier do `.md` dele, ou o do pai como
       // fallback). Era `this.model` (UM caller p/ TODOS); agora cada filho roteia ao
       // tier do PRÓPRIO perfil.
-      model: childCaller,
+      model: this.labelCaller ? this.labelCaller(childCaller, profile.label) : childCaller,
       permission: childEngine,
       tools,
       // EST-1098 (WT-1) — ports ENRAIZADAS no worktree do filho quando isolado; senão

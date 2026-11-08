@@ -469,6 +469,37 @@ describe('Custo: o agente da tarefa recebe a orientação "faça você mesmo"', 
     expect(sent).toContain('FAÇA você mesmo');
     expect(sent).toContain('sem spawn_agent');
     expect(sent).toContain('Delegue a sub-agentes só se for amplo');
+    expect(sent).toContain('NÃO monte plano (update_plan)');
+    expect(sent).toContain('rodar o teste UMA vez');
     expect(registry.get('t1')!.goal).toBe('corrigir o bug do calc.py');
+  });
+});
+
+describe('A linha viva explica o número: tokens (volume) e % de cache', () => {
+  it('mostra `N tokens (X% cache)` quando o provider reporta cache; sem cache, só `N tokens`', () => {
+    const sessions: FakeSession[] = [];
+    const sink = new FakeSession() as unknown as ConversationSink;
+    sink.pushConciergeEcho = () => {};
+    sink.pushConciergeLine = () => {};
+    sink.conciergeReplyStart = () => {};
+    sink.conciergeReplyEnd = () => {};
+    sink.cancelAllFlows = () => {};
+    const rt = new ConciergeRuntime({
+      sink,
+      model: { call: async () => ({ request_id: 'r', content: '', finish_reason: 'stop' }) },
+      createHeadless: () => {
+        const f = new FakeSession();
+        f.state = { blocks: [], phase: 'idle', meta: { tokens: 0 } } as never;
+        sessions.push(f);
+        return f;
+      },
+    });
+    rt.engine.start(rt.registry.create({ goal: 'g', kind: 'main' }));
+    const s = sessions[0]! as FakeSession & { turnAccounting?: () => unknown };
+    s.turnAccounting = () => ({ tokens: 230_900, cachePct: 83.4 });
+    expect(rt.taskView(rt.registry.get('t1')!).summary).toContain('230.9k tokens (83% cache)');
+    s.turnAccounting = () => ({ tokens: 1500 });
+    expect(rt.taskView(rt.registry.get('t1')!).summary).toContain('1.5k tokens');
+    expect(rt.taskView(rt.registry.get('t1')!).summary).not.toContain('cache');
   });
 });

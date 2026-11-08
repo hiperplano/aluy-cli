@@ -151,7 +151,14 @@ export class ConciergeRuntime {
       ? { tokens: s?.meta?.tokens ?? 0, estimated: false }
       : this.engine.liveTokens(t.id);
     if (lt.tokens > 0 || ended) {
-      parts.push(`${lt.estimated ? '~' : ''}${abbreviateCount(lt.tokens)} tokens`);
+      // Soma de prompt+completion de TODAS as chamadas (pai e sub-agentes), com o prompt em cache
+      // contado por inteiro: é volume processado, não o que foi cobrado. O `% cache` (quando o
+      // provider reporta) mostra quanto desse prompt veio do cache.
+      parts.push(
+        `${lt.estimated ? '~' : ''}${abbreviateCount(lt.tokens)} tokens${
+          lt.cachePct !== undefined && lt.cachePct > 0 ? ` (${Math.round(lt.cachePct)}% cache)` : ''
+        }`,
+      );
     }
     if (t.steps > 0) parts.push(`${t.steps} tools`);
     if (!ended && this.engine.isAllowAll(t.id)) parts.push('aprova tudo');

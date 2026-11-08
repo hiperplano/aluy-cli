@@ -38,7 +38,7 @@ export interface TaskSession {
   /** "Aprovar sempre NESTA tarefa" (liga a flag da engine DESTA sessão); `false` se não dá. */
   allowAllInTask?(): boolean;
   /** Tokens do turno até agora (vivo); ausente em sessões falsas. */
-  turnAccounting?(): { readonly tokens: number } | undefined;
+  turnAccounting?(): { readonly tokens: number; readonly cachePct?: number } | undefined;
   dispose?(): void;
 }
 
@@ -192,11 +192,21 @@ export class ControllerTaskEngine implements ConciergeEngine {
    * Tokens da tarefa AGORA: o uso reportado (agregado pai+filhos) ou, se o provider não
    * reporta uso em stream, uma ESTIMATIVA pelos caracteres gerados (≈4 por token), marcada.
    */
-  liveTokens(taskId: string): { readonly tokens: number; readonly estimated: boolean } {
+  liveTokens(taskId: string): {
+    readonly tokens: number;
+    readonly estimated: boolean;
+    readonly cachePct?: number;
+  } {
     const h = this.handles.get(taskId);
     if (!h) return { tokens: 0, estimated: false };
-    const real = h.session.turnAccounting?.()?.tokens ?? h.session.current.meta?.tokens ?? 0;
-    if (real > 0) return { tokens: real, estimated: false };
+    const acc = h.session.turnAccounting?.();
+    const real = acc?.tokens ?? h.session.current.meta?.tokens ?? 0;
+    if (real > 0)
+      return {
+        tokens: real,
+        estimated: false,
+        ...(acc?.cachePct !== undefined ? { cachePct: acc.cachePct } : {}),
+      };
     let chars = 0;
     for (const b of h.session.current.blocks.slice(h.startBlocks)) {
       if (b.kind === 'aluy') chars += b.text.length + (b.reasoning?.length ?? 0);

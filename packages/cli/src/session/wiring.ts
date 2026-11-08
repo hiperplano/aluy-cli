@@ -94,6 +94,7 @@ import {
   type HeadroomNotice,
   type StreamSink,
 } from './streaming-caller.js';
+import { makeUsageTracer, withTraceLabel } from './usage-trace.js';
 import { SessionController } from './controller.js';
 import { HooksConfigStore } from '../io/index.js';
 import { FileRoomStore } from './rooms/file-room-store.js';
@@ -246,6 +247,8 @@ export interface BuildSessionOptions {
   readonly mode?: SessionMode;
   /** ADR 0006 — tools que a sessão NÃO expõe (sessão de tarefa do Concierge). */
   readonly excludeTools?: readonly string[];
+  /** Rótulo da sessão no rastro de uso (`ALUY_DEBUG_USAGE`): `main` | `task tN`. */
+  readonly traceLabel?: string;
   /**
    * LEGADO — `--unsafe` como booleano. Equivale a `mode='unsafe'` se `mode`
    * ausente. ⚠ desliga CLI-SEC-3 — revisar com `seguranca`. Default false.
@@ -1184,6 +1187,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // p/ montar a parte ESTÁTICA da visão do chip.
   let ollamaLigado = false;
   let mem0Ligado = false;
+  // Rastro de uso por request (opt-in, `ALUY_DEBUG_USAGE=<arquivo>`): sem a variável é `undefined`
+  // e NADA é envolvido. Cobre o pai, o Concierge e os sub-agentes (ver `usage-trace.ts`).
+  const tracer = makeUsageTracer(env);
+  const traceLabel = opts.traceLabel ?? 'main';
   const caller = new StreamingModelCaller({
     client: brokerClient,
     tier,
@@ -1219,6 +1226,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // SILÊNCIO (ver `delegatingSink`); agora todo canal do `StreamSink` é encaminhado
     // por construção, e o alvo continua sendo resolvido por chamada (o controller nasce
     // depois deste caller — era essa a razão do `controllerRef?.`).
+    ...(tracer ? { traceWith: (c: ModelClient) => tracer(c, () => traceLabel) } : {}),
     sink: delegatingSink(() => controllerRef?.sink),
     // F-RETRY-VISÍVEL — o caller retenta SOZINHO (laço `decideRetry`), e este aviso era
     // declarado e nunca ligado: a razão da falha morria ali dentro e o dono via só
@@ -1230,10 +1238,11 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // callers secundários abaixo (compactação, /ask, sub-agentes, por-tier, custom) NÃO
   // podem capturar `brokerClient` do boot: delegam, a CADA chamada, ao client VIGENTE do
   // pai — assim um filho herdado fala com o MESMO provider ativo do pai.
-  const liveClient: ModelClient = {
+  const liveClientRaw: ModelClient = {
     stream: (args) => caller.currentClient.stream(args),
     call: (args) => caller.currentClient.call(args),
   };
+  const liveClient: ModelClient = tracer ? tracer(liveClientRaw, () => traceLabel) : liveClientRaw;
 
   // EST-0973 — caller DEDICADO da compactação (`/compact`): NÃO-streaming (o resumo
   // é interno, não vaza tokens na UI como turno) e com TETO próprio (CLI-SEC-8). Vai
@@ -1284,6 +1293,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     maxTokens: 700,
     // Raciocínio do modelo NÃO aparece na resposta do Concierge (só a fala).
     sink: conciergeSink,
+    ...(tracer ? { traceWith: (c: ModelClient) => tracer(c, () => 'concierge') } : {}),
     nativeTools: new NativeToolsCapability({ tools: CONCIERGE_TOOLS }),
   });
   const conciergeCaller: ConciergeModel = {
@@ -1656,6 +1666,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // que o agente pode chamar (HG-2: catálogo, não credencial). Desligável por env.
     disableNativeTools: env.ALUY_NATIVE_TOOLS_OFF === '1' || env.ALUY_NATIVE_TOOLS_OFF === 'true',
     ...(opts.excludeTools !== undefined ? { excludeTools: opts.excludeTools } : {}),
+    ...(tracer ? { labelChildCaller: withTraceLabel } : {}),
     // EST-0969 (watchdog de TRAVAMENTO) — o env da sessão alimenta os limiares/toggle
     // do watchdog (`ALUY_STUCK_*` / `ALUY_STUCK_OFF`). Ligado por default: quando o
     // agente gira sem avançar, a sessão PAUSA e PEDE DIREÇÃO (não morre no teto).
