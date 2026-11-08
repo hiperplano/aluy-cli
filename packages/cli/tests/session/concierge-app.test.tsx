@@ -10,7 +10,7 @@
 import { parseFrases } from '../../src/session/frases-espera.js';
 import { resolveText } from '../../src/i18n/translate.js';
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'ink-testing-library';
 import {
   PolicyPermissionEngine,
@@ -123,6 +123,8 @@ interface BuildOpts {
   ownerBusy?: () => boolean;
   reportSettleMs?: number;
   reportBatchMs?: number;
+  fullscreen?: boolean;
+  onConversationChange?: (m: 'concierge' | 'classic') => void;
   /** Segura o modelo ANTES do 1º token (o dono vê só `você` + a linha de trabalho). */
   preGate?: Promise<void>;
 }
@@ -174,6 +176,14 @@ function build(opts: BuildOpts) {
         bootMs={0}
         concierge={rt}
         initialConversation={opts.mode}
+        {...(opts.onConversationChange ? { onConversationChange: opts.onConversationChange } : {})}
+        {...(opts.fullscreen
+          ? {
+              initialFullscreen: true,
+              cockpitEnteredAtBoot: true,
+              cockpitScreen: { enter: () => {}, leave: () => {} },
+            }
+          : {})}
         {...(opts.statusline ? { initialStatusline: opts.statusline } : {})}
       />
     </ThemeProvider>,
@@ -1135,6 +1145,94 @@ describe('Composer estável durante a fala do Concierge (tela NÃO cheia)', () =
     expect(iw, 'a linha de trabalho sumiu com a tarefa aguardando aprovação').toBeGreaterThan(0);
     expect(ls[iw]).toContain('aguardando aprovação');
     g.resolve();
+    s.unmount();
+  });
+});
+
+describe('Cockpit /fullscreen em modo Concierge', () => {
+  beforeEach(() => vi.stubEnv('ALUY_FULLSCREEN', '1'));
+  afterEach(() => vi.unstubAllEnvs());
+  it('sem o painel LOG vazio; ordem composer → statusline (como no inline)', async () => {
+    const s = build({ mode: 'concierge', fullscreen: true, concierge: () => text('oi') });
+    await sleep(100);
+    const f = s.frame();
+    expect(f).toContain('conversa');
+    expect(f).not.toContain('LOG');
+    expect(f).not.toContain('sem atividade ainda');
+    const ls = f.split('\n');
+    const comp = ls.findIndex((l) => l.includes('❯'));
+    const status = ls.findIndex((l) => /sessão|janela/.test(l));
+    expect(comp).toBeGreaterThan(-1);
+    expect(status).toBeGreaterThan(comp);
+    s.unmount();
+  });
+  for (const modo of ['concierge', 'classic'] as const) {
+    it(`${modo}: a linha de trabalho aparece no cockpit entre o envio e o 1º token, no slot fixo acima do composer`, async () => {
+      const gate = defer();
+      const s = build({
+        mode: modo,
+        fullscreen: true,
+        concierge: () => text('Oi.'),
+        preGate: gate.promise,
+        classicModel: {
+          async call() {
+            await gate.promise;
+            return { request_id: 'r', content: 'oi', finish_reason: 'stop' };
+          },
+        },
+      });
+      await sleep(80);
+      const antes = s.frame().split('\n');
+      await type(s, 'oi');
+      await waitFor(() => /^Λ (?!luy)/m.test(s.frame()));
+      const ls = s.frame().split('\n');
+      const w = ls.findIndex((l) => /^Λ (?!luy)/.test(l.trim()));
+      const comp = ls.findIndex((l) => l.includes('❯'));
+      expect(comp - w).toBe(1); // imediatamente acima do composer
+      expect(ls.length).toBe(antes.length); // a grade não cresce nem pula
+      expect(ls.findIndex((l) => l.includes('❯'))).toBe(antes.findIndex((l) => l.includes('❯')));
+      gate.resolve();
+      s.unmount();
+    });
+  }
+  it('no clássico o LOG segue existindo', async () => {
+    const s = build({ mode: 'classic', fullscreen: true, concierge: () => text('oi') });
+    await sleep(100);
+    expect(s.frame()).toContain('LOG');
+    s.unmount();
+  });
+});
+
+describe('/classic e /concierge trocam o modo como /conversation', () => {
+  it('/classic com tarefa viva: persiste via onConversationChange e avisa que as tarefas seguem', async () => {
+    const g = defer();
+    const mudou: string[] = [];
+    const s = build({
+      mode: 'concierge',
+      tasks: [taskSession({ iters: () => 'ok', gates: () => g.promise })],
+      concierge: () => text('Iniciei.', startTask()),
+      onConversationChange: (m) => mudou.push(m),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    await type(s, '/classic');
+    await waitFor(() => s.frame().includes('modo clássico'));
+    expect(mudou).toEqual(['classic']);
+    expect(s.frame()).toContain('seguem e terminam sozinhas');
+    expect(s.rt.registry.get('t1')!.status).toBe('running'); // não interrompeu
+    g.resolve();
+    s.unmount();
+  });
+  it('/concierge no clássico liga o concierge e persiste', async () => {
+    const mudou: string[] = [];
+    const s = build({
+      mode: 'classic',
+      concierge: () => text('oi'),
+      onConversationChange: (m) => mudou.push(m),
+    });
+    await type(s, '/concierge');
+    await waitFor(() => s.frame().includes('modo concierge'));
+    expect(mudou).toEqual(['concierge']);
     s.unmount();
   });
 });

@@ -53,6 +53,8 @@ export type NativeCommandId =
   | 'approve'
   | 'deny'
   | 'conversation'
+  | 'classic'
+  | 'concierge'
   | 'undo'
   | 'redo'
   | 'rewind'
@@ -705,6 +707,24 @@ const RAW_NATIVE_COMMANDS: readonly SlashCommand[] = [
     usage: '[concierge|classic]',
     source: 'native',
     id: 'conversation',
+    parallelWhileBusy: true,
+    agentEffect: 'human-only',
+  },
+  {
+    // Atalho de `/conversation classic` (mesmo efeito e persistência).
+    name: 'classic',
+    summary: 'voltar ao modo clássico (um laço só, como antes)',
+    source: 'native',
+    id: 'classic',
+    parallelWhileBusy: true,
+    agentEffect: 'human-only',
+  },
+  {
+    // Atalho de `/conversation concierge` (mesmo efeito e persistência).
+    name: 'concierge',
+    summary: 'usar o concierge (a conversa nunca espera o trabalho)',
+    source: 'native',
+    id: 'concierge',
     parallelWhileBusy: true,
     agentEffect: 'human-only',
   },
@@ -1451,7 +1471,11 @@ export function filterPalette(
       const rank = entryRank({ kind: 'command', command: it.action.command }, qFold);
       if (rank !== undefined) {
         const onLabel = fuzzyScore(q, it.label);
-        hits.push({ ...it, score: 1_000_000 - rank * 1_000, matched: onLabel ? onLabel.matched : [] });
+        hits.push({
+          ...it,
+          score: 1_000_000 - rank * 1_000,
+          matched: onLabel ? onLabel.matched : [],
+        });
         continue;
       }
     }

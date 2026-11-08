@@ -1271,7 +1271,8 @@ export function App(props: AppProps): React.ReactElement {
   // o log RECOLHIA p/ 1 linha (hasActivity=false) e as notas relocadas ficavam
   // INVISÍVEIS (a feature morria). 1 linha por título + 1 por linha de nota (o mesmo
   // que o <ActivityLog> pinta no empty-state).
-  const cockpitBootNotes = fullscreen ? partitionCockpitBlocks(state.blocks).startupNotes : [];
+  const cockpitBootNotes =
+    fullscreen && !conciergeOn ? partitionCockpitBlocks(state.blocks).startupNotes : [];
   // +1 = a linha do rótulo `LOG · …` (o <ActivityLog> a pinta ANTES do conteúdo e ela
   // consome 1 das `visibleRows`); sem ela na conta, a última linha de nota vira `…`.
   const cockpitBootLines =
@@ -1330,6 +1331,10 @@ export function App(props: AppProps): React.ReactElement {
     taskRows: taskPanelRows,
     statusline: statuslineMode,
     hintsRow: state.mode === 'unsafe' || dicaOculto,
+    // Concierge: as tarefas moram no painel do rodapé; o LOG nunca teria o que mostrar.
+    hideLog: conciergeOn,
+    // 1 linha fixa acima do composer para a linha de trabalho (a grade não pula).
+    workRow: true,
   });
   // ATIVO = o usuário pediu fullscreen E o layout cabe (não recusou). Se recusou, a App
   // renderiza o INLINE (degrada) e mostra o aviso. O alt-screen real (entrar/sair) é
@@ -2475,7 +2480,7 @@ export function App(props: AppProps): React.ReactElement {
           want === 'concierge'
             ? 'modo concierge: suas mensagens são respondidas na hora; o trabalho roda em tarefas.'
             : rt?.hasLiveTasks()
-              ? 'modo clássico. Atenção: há tarefas vivas; elas seguem até o fim (F8 para tudo).'
+              ? 'modo clássico. As tarefas em andamento seguem e terminam sozinhas (F8 para tudo).'
               : 'modo clássico.',
         ]);
         return;
@@ -2603,6 +2608,10 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       // ADR 0006 — comandos do CONCIERGE (UI/runtime puros; não vão ao `onCommand`).
+      if (command.id === 'classic' || command.id === 'concierge') {
+        runConciergeCommand('conversation', command.id);
+        return;
+      }
       if (
         command.id === 'conversation' ||
         command.id === 'task' ||
@@ -6311,6 +6320,20 @@ export function App(props: AppProps): React.ReactElement {
         {...(panelRows.length > 0
           ? { taskPanel: <TaskPanel rows={panelRows} columns={columns} frame={frame} /> }
           : {})}
+        workingLine={
+          state.quotaPause !== undefined ? (
+            <QuotaPauseLine view={state.quotaPause} columns={columns} />
+          ) : linhaDeTrabalhoViva ? (
+            <Working
+              glyph="aluy"
+              glyphRole="accent"
+              label={linhaAjustada.label}
+              {...(linhaAjustada.detalhe !== undefined ? { detalhe: linhaAjustada.detalhe } : {})}
+              {...(linhaAjustada.suffix !== undefined ? { suffix: linhaAjustada.suffix } : {})}
+              frame={frame}
+            />
+          ) : null
+        }
         {...(props.version !== undefined ? { version: props.version } : {})}
       />
     );

@@ -379,7 +379,10 @@ export function buildHelpLines(opts: HelpOptions): string[] {
   const visible = commands.filter((c) => availableIn(c, ctx));
   const shown = visible.filter((c) => opts.all || c.rare !== true);
   const hidden = visible.length - shown.length;
-  const lines: string[] = ['/ abre o menu com busca (tema, sair, parar…) · ctrl-p busca em tudo', ''];
+  const lines: string[] = [
+    '/ abre o menu com busca (tema, sair, parar…) · ctrl-p busca em tudo',
+    '',
+  ];
   for (const section of SECTION_ORDER) {
     const inSection = shown.filter((c) => c.section === section);
     if (inSection.length === 0) continue;
@@ -799,6 +802,8 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
     case 'approve':
     case 'deny':
     case 'conversation':
+    case 'classic':
+    case 'concierge':
       // ADR 0006 — UI/runtime puros: a App os intercepta no `runCommand` (precisam do
       // runtime do Concierge). Cair aqui = sem TUI (não-TTY/linear) ou modo clássico.
       return {

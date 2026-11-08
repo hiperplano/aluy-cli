@@ -399,3 +399,33 @@ describe('resolveCockpitLayout — rodapé (statusline) no cockpit', () => {
     expect(statusRowsFor(45, 'hidden')).toBe(0);
   });
 });
+
+describe('LOG escondido (modo Concierge)', () => {
+  it('logRows 0, conversa ganha a linha da régua e a soma continua == rows', () => {
+    for (const rows of [24, 30, 50]) {
+      const a = resolveCockpitLayout(rows, 120, 1, undefined, { taskRows: 2 });
+      const b = resolveCockpitLayout(rows, 120, 1, undefined, { taskRows: 2, hideLog: true });
+      if (a.kind !== 'cockpit' || b.kind !== 'cockpit') throw new Error('layout');
+      expect(b.logHidden).toBe(true);
+      expect(b.regions.logRows).toBe(0);
+      expect(b.regions.conversaRows).toBe(a.regions.conversaRows + a.regions.logRows + 1);
+      expect(cockpitRegionSum(b)).toBe(rows);
+    }
+  });
+});
+
+describe('linha de trabalho reservada (workRow)', () => {
+  it('reserva 1 linha, tira da conversa, e a soma continua == rows', () => {
+    for (const rows of [24, 40]) {
+      const a = resolveCockpitLayout(rows, 120);
+      const b = resolveCockpitLayout(rows, 120, 1, undefined, { workRow: true });
+      if (a.kind !== 'cockpit' || b.kind !== 'cockpit') throw new Error('layout');
+      expect(a.workRows).toBe(0);
+      expect(b.workRows).toBe(1);
+      expect(cockpitRegionSum(b)).toBe(rows);
+      expect(b.regions.conversaRows + b.regions.logRows).toBe(
+        a.regions.conversaRows + a.regions.logRows - 1,
+      );
+    }
+  });
+});

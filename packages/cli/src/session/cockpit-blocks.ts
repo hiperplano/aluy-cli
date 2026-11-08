@@ -40,7 +40,12 @@ export interface CockpitBlockPartition {
  * Tudo o mais (turnos, notas acionáveis, notas pós-objetivo) segue na CONVERSA, na ordem.
  * PURO. Preserva a ordem relativa dentro de cada lado.
  */
-export function partitionCockpitBlocks(blocks: readonly SessionBlock[]): CockpitBlockPartition {
+export function partitionCockpitBlocks(
+  blocks: readonly SessionBlock[],
+  opts: { readonly notesToLog?: boolean } = {},
+): CockpitBlockPartition {
+  // Sem LOG (modo Concierge) as notas de boot ficam na transcrição, como no inline.
+  if (opts.notesToLog === false) return { startupNotes: [], conversation: blocks };
   let seenUserTurn = false;
   const startupNotes: NoteBlock[] = [];
   const conversation: SessionBlock[] = [];

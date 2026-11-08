@@ -6,6 +6,7 @@ import {
   buildConciergePrompt,
   buildDigest,
   clipBlock,
+  formatCapabilityInventory,
   clipPlain,
   type ConciergeEngine,
   type ConciergeModel,
@@ -658,5 +659,141 @@ describe('orientação de custo da tarefa — sem fan-out em pesquisa (regressã
     const g = taskGoalForAgent('pesquise a assinatura do VW Nivus');
     expect(g.startsWith('pesquise a assinatura do VW Nivus')).toBe(true);
     expect(g).toContain('NUNCA usam sub-agentes');
+  });
+});
+
+describe('Concierge — histórico inteiro e task_status devolve o resultado ao modelo (regressão live)', () => {
+  const fim = (reg: TaskRegistry, n: number): void => {
+    for (let i = 1; i <= n; i++) {
+      reg.create({ goal: `objetivo ${i}`, kind: 'detached' });
+      reg.transition(`t${i}`, 'done', undefined, {
+        summary: `feito ${i}`,
+        result: `RESULTADO-COMPLETO-${i}`,
+      });
+    }
+  };
+
+  it('10 tarefas encerradas: o prompt do pedido de resumo contém t1..t10 e a resposta sai delas', async () => {
+    const { registry, concierge, seen } = setup(() => result('t1 a t10: todas feitas.'));
+    fim(registry, 10);
+    const r = await concierge.handle('resuma tudo desde a t1');
+    const enviado = JSON.stringify(seen[0]);
+    for (let i = 1; i <= 10; i++) expect(enviado).toContain(`t${i} [`);
+    expect(enviado).toContain('objetivo 1');
+    expect(enviado).toContain('feito 10');
+    expect(r.reply).toBe('t1 a t10: todas feitas.');
+  });
+
+  it('digest com mais de 40 encerradas: mostra as 40 mais recentes e `+N antigas (use task_status)`', () => {
+    const reg = new TaskRegistry({ clock: () => 1000 });
+    fim(reg, 45);
+    const d = buildDigest({
+      tasks: reg.list(),
+      events: [],
+      engine: { subAgents: [], approvals: [], quotaPauses: [] },
+      now: 2000,
+    });
+    expect(d).toContain('+5 antigas (use task_status');
+    expect(d).toContain('t45 [');
+    expect(d).not.toContain('t5 [');
+  });
+
+  it('task_status sem texto: o resultado volta ao modelo e a resposta dele é a do dono (nada de "Veja a lista")', async () => {
+    const { registry, concierge, seen } = setup((_m, n) =>
+      n === 0 ? result('', [call('task_status', {})]) : result('Resumo: t1 fez 1, t2 fez 2.'),
+    );
+    fim(registry, 2);
+    const r = await concierge.handle('me dá uma visão geral');
+    expect(r.reply).toBe('Resumo: t1 fez 1, t2 fez 2.');
+    expect(r.reply).not.toContain('Veja a lista');
+    expect(JSON.stringify(seen[1])).toContain('feito 2'); // o resultado da tool chegou ao modelo
+  });
+
+  it('task_status COM texto antes ("vou ver"): ainda assim há a rodada de resposta com o resultado', async () => {
+    const { registry, concierge } = setup((_m, n) =>
+      n === 0
+        ? result('Vou olhar.', [call('task_status', { task_id: 't1' })])
+        : result('A t1 fez X.'),
+    );
+    fim(registry, 1);
+    expect((await concierge.handle('o que a t1 fez?')).reply).toBe('A t1 fez X.');
+  });
+
+  it('task_status com id devolve o resultado completo armazenado', async () => {
+    const { registry, concierge, seen } = setup((_m, n) =>
+      n === 0 ? result('', [call('task_status', { task_id: 't3' })]) : result('ok'),
+    );
+    fim(registry, 3);
+    await concierge.handle('detalhe da t3');
+    expect(JSON.stringify(seen[1])).toContain('RESULTADO-COMPLETO-3');
+  });
+
+  it('se o modelo seguir só chamando task_status, termina em 2 rodadas extras com mensagem honesta', async () => {
+    const { registry, concierge } = setup(() => result('', [call('task_status', {})]));
+    fim(registry, 1);
+    const r = await concierge.handle('x');
+    expect(r.modelCalls).toBe(3);
+    expect(r.reply).not.toContain('Veja a lista');
+  });
+});
+
+describe('inventário de capacidades no prompt do Concierge', () => {
+  const snap = {
+    tools: [
+      { name: 'read_file', effect: 'read', group: 'arquivo' },
+      { name: 'edit_file', effect: 'write', group: 'arquivo' },
+      { name: 'run_command', effect: 'exec', group: 'execucao' },
+      { name: 'web_search', effect: 'net', group: 'web' },
+      { name: 'spawn_agent', effect: 'exec', group: 'delegacao' },
+      { name: 'session_command', effect: 'exec', group: 'outro' },
+      { name: 'mcp__playwright__click', effect: 'exec', group: 'mcp' },
+    ],
+    agents: [{ name: 'ux-frontend', summary: 'x', origin: 'project' }],
+    skills: [{ name: 'deploy', summary: 'y', origin: 'global' }],
+    mcpServers: [
+      { server: 'playwright', toolCount: 21, prefix: 'mcp__playwright__' },
+      { server: 'filesystem', toolCount: 11, prefix: 'mcp__filesystem__' },
+    ],
+  } as never;
+
+  it('reflete tools agrupadas, 2 servers MCP com contagem, perfil e skill; sem as excluídas', () => {
+    const inv = formatCapabilityInventory(snap, ['session_command'])!;
+    expect(inv).toContain('arquivos: read_file/edit_file');
+    expect(inv).toContain('comandos: run_command');
+    expect(inv).toContain('web: web_search');
+    expect(inv).toContain('sub-agentes: spawn_agent');
+    expect(inv).toContain('MCP: playwright (21), filesystem (11)');
+    expect(inv).toContain('perfis de agente: ux-frontend');
+    expect(inv).toContain('skills: deploy');
+    expect(inv).not.toContain('session_command');
+    expect(inv).not.toContain('mcp__playwright__click');
+    expect(inv.length).toBeLessThan(600);
+  });
+
+  it('entra no system prompt (parte estável) com a orientação de descrever as tarefas', () => {
+    const p = buildConciergePrompt({ capabilities: formatCapabilityInventory(snap) });
+    expect(p).toContain('O QUE SUAS TAREFAS FAZEM');
+    expect(p).toContain('playwright (21)');
+    expect(p).toContain('não liste as suas 4 meta-ferramentas');
+    expect(buildConciergePrompt({})).not.toContain('O QUE SUAS TAREFAS FAZEM');
+  });
+
+  it('o Concierge envia o inventário real da sessão no system', async () => {
+    const registry = new TaskRegistry({ clock: () => 1000 });
+    const seen: string[] = [];
+    const c = new Concierge({
+      registry,
+      engine: new FakeEngine(),
+      clock: () => 1000,
+      capabilities: () => formatCapabilityInventory(snap),
+      model: {
+        call: async ({ messages }) => {
+          seen.push(JSON.stringify(messages[0]));
+          return result('ok');
+        },
+      },
+    });
+    await c.handle('o que você sabe fazer?');
+    expect(seen[0]).toContain('filesystem (11)');
   });
 });

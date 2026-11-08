@@ -44,6 +44,7 @@ export interface ConciergeRuntimeDeps {
   readonly createHeadless?: (taskId: string) => TaskSession | null;
   readonly ownerFacts?: () => Promise<readonly string[]>;
   readonly projectSummary?: () => string | undefined;
+  readonly capabilities?: () => string | undefined;
   /** Arquivo de persistência (`--resume`); ausente ⇒ sem persistência. */
   readonly storePath?: () => string | undefined;
   readonly clock?: () => number;
@@ -97,6 +98,7 @@ export class ConciergeRuntime {
       ...(d.gate ? { gate: d.gate } : {}),
       ownerFacts: () => this.facts,
       ...(d.projectSummary ? { projectSummary: d.projectSummary } : {}),
+      ...(d.capabilities ? { capabilities: d.capabilities } : {}),
       clock,
     });
     // Relatos: uma linha por evento que importa, na conversa (sem chamar o modelo).

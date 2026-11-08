@@ -102,20 +102,22 @@ exatamente o `/add-dir <caminho>` digitado: as mesmas validações e o mesmo con
 
 ### Conversa
 
-|                 |                                                               |
-| --------------- | ------------------------------------------------------------- |
-| `/help`         | ver comandos e atalhos                                        |
-| `/ask`          | fazer uma pergunta sem interromper o trabalho (modo clássico) |
-| `/task`         | ver e parar tarefas em segundo plano (concierge)              |
-| `/approve` `/a` | aprovar o pedido pendente (concierge)                         |
-| `/deny` `/n`    | negar o pedido pendente (concierge)                           |
-| `/conversation` | escolher o modo de conversa                                   |
-| `/history`      | retomar uma sessão anterior                                   |
-| `/rename`       | dar nome e cor à sessão                                       |
-| `/clear`        | limpar a conversa (mantém a memória) · `full` · `memory`      |
-| `/compact`      | resumir a conversa para liberar contexto                      |
-| `/export`       | exportar a conversa (sem segredos) para `~/.aluy/exports/`    |
-| `/quit`         | sair do aluy                                                  |
+|                 |                                                                        |
+| --------------- | ---------------------------------------------------------------------- |
+| `/help`         | ver comandos e atalhos                                                 |
+| `/ask`          | fazer uma pergunta sem interromper o trabalho (modo clássico)          |
+| `/task`         | ver e parar tarefas em segundo plano (concierge)                       |
+| `/approve` `/a` | aprovar o pedido pendente (concierge)                                  |
+| `/deny` `/n`    | negar o pedido pendente (concierge)                                    |
+| `/conversation` | escolher o modo de conversa                                            |
+| `/classic`      | voltar ao modo clássico (um laço só, como antes) (só no concierge)     |
+| `/concierge`    | usar o concierge (a conversa nunca espera o trabalho) (só no clássico) |
+| `/history`      | retomar uma sessão anterior                                            |
+| `/rename`       | dar nome e cor à sessão                                                |
+| `/clear`        | limpar a conversa (mantém a memória) · `full` · `memory`               |
+| `/compact`      | resumir a conversa para liberar contexto                               |
+| `/export`       | exportar a conversa (sem segredos) para `~/.aluy/exports/`             |
+| `/quit`         | sair do aluy                                                           |
 
 ### Interface
 
@@ -251,6 +253,7 @@ catálogo de ferramentas do agente) que responde **na hora**, mesmo com trabalho
 si roda em **tarefas** (`t1`, `t2`…), que o Concierge abre (`task_start`), corrige (`task_send`), para
 (`task_stop`) e consulta (`task_status`).
 
+- `/classic` e `/concierge` são atalhos diretos de `/conversation classic|concierge` (mesmo efeito e persistência); o menu `/` mostra só o que serve ao modo atual. Trocar com tarefas rodando **não as interrompe**: elas seguem e terminam sozinhas (a nota avisa; F8 para tudo).
 - `/conversation concierge | classic` troca o modo e **persiste** (`conversation` no `config.json`);
   `--classic` força o clássico só naquela sessão. Neste ramo o padrão é `concierge`.
 - **Esc nunca para tarefa**: limpa o rascunho. Parar é explícito: peça ao Concierge ("pare a t1"),
