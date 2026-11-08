@@ -14,6 +14,11 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+### Adicionado
+
+- 📁 **`/add-dir` sem argumento abre um navegador de pastas.** Começa na pasta-mãe da raiz do workspace, lista só pastas (ordenadas, sem as ocultas) e usa `↑↓`, `enter`/`→` para entrar, `←`/`backspace` para subir e a primeira linha `✓ adicionar esta pasta (…)` para autorizar. Digitar filtra; `/srv/x`, `~` ou `../y` + `enter` pulam para o caminho. Pastas já autorizadas mostram `● já adicionada`; as ilegíveis, `(sem permissão)`. Leitura assíncrona, no máximo 500 pastas por lista (`… +N`) e seguro contra laços de symlink. Escolher roda o mesmo `/add-dir <caminho>`, então validação e confinamento não mudam.
+- 🏠 **`/rooms` sem argumento lista as salas** (código, mensagens, atividade, participantes) e oferece `ler` e `observar`, em vez do texto de ajuda.
+
 ## [1.0.0-rc.193] — 2026-11-08
 
 ### Adicionado

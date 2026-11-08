@@ -48,6 +48,7 @@ import {
 import { ThemeRoot } from './ThemeRoot.js';
 import { SecretsService } from './secrets.js';
 import { buildSession, type BuildSessionOptions } from './wiring.js';
+import { roomsMenuData } from './rooms/room-menu-data.js';
 import { ConciergeRuntime, conciergeStorePath } from './concierge-runtime.js';
 // F-PROV-FIX — lógica PURA (sem I/O) do ato explícito `/provider save`: decide o
 // que fixar (provider+modelo) a partir do estado corrente da sessão + do boot.
@@ -5139,6 +5140,10 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         }}
         onExportTranscript={exportTranscript}
         currentNotify={() => notifyPort.mode ?? (notifyPort.enabled ? 'all' : 'off')}
+        addDirPicker={{
+          roots: () => built.workspace.roots,
+          ...(process.env.HOME !== undefined ? { home: process.env.HOME } : {}),
+        }}
         menuData={{
           // Listas dos seletores de comando (`/memory`, `/todo`, `/cron`…). Só LEITURA: o efeito
           // continua sendo o do comando digitado (o seletor roda `runCommand` com os mesmos args).
@@ -5176,6 +5181,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
             ].map((w) => ({ id: w.name, label: w.name })),
           services: async () =>
             new UserServicesStore().list().services.map((s) => ({ id: s.name, label: s.name })),
+          rooms: roomsMenuData(built.roomStore),
           subagents: async () =>
             [...globalAgents.profiles, ...projectAgents.profiles, ...pluginAgents.profiles].map(
               (p) => ({
