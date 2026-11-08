@@ -101,6 +101,7 @@ export function describeTask(t: TaskRecord, now: number): string {
   const parts = [STATUS_PT[t.status]];
   if (live && t.status === 'running') parts.push(PHASE_PT[t.phase] ?? t.phase);
   if (t.blockedBy) parts.push(`depois de ${t.blockedBy}`);
+  else if (t.queued === true && t.status === 'blocked') parts.push('na fila');
   parts.push(`${t.steps} passo${t.steps === 1 ? '' : 's'}`);
   parts.push(formatElapsed((t.endedAt ?? now) - t.startedAt));
   let line = `- ${t.id} [${parts.join(' · ')}] ${clip(t.goal, 120)}`;

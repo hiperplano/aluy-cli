@@ -1582,7 +1582,7 @@ export function App(props: AppProps): React.ReactElement {
 
   // VERBOS DE ESPERA — o rótulo genérico (`pensando`…) vira um gerúndio sorteado 1× por PASSO
   // (a identidade do passo é o `workingSince`). Rótulos funcionais ficam como estão.
-  // FRASES DE ESPERA — a linha de trabalho gira uma frase brincalhona a cada ~4s enquanto algo
+  // FRASES DE ESPERA — a linha de trabalho gira uma frase brincalhona a cada minuto enquanto algo
   // processa (turno, tool, tarefa do Concierge em segundo plano, pausa por cota sondando).
   const frasesDaEspera = useMemo(() => parseFrases(resolveText('pt-BR', 'working.quips')), []);
   const seedDasFrases = useMemo(() => seedPadrao(), []);

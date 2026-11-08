@@ -7413,7 +7413,9 @@ export class SessionController {
         // iniciada): sem aparar, cada um virava uma linha `┃` órfã no histórico.
         blocks[blocks.length - 1] = {
           ...last,
-          text: last.text.trimEnd(),
+          // Também some o rabo de TABELA cortada (`|` sozinho, linha só de espaços/pipes): sobravam linhas
+          // em branco entre a resposta e o composer.
+          text: last.text.replace(/(?:\n[\s|]*)+$/, '').trimEnd(),
           streaming: false,
           ...(conta !== undefined ? { accounting: conta } : {}),
           ...(motivo === 'cancelled' ? { interrupted: true } : {}),

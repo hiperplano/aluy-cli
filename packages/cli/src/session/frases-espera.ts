@@ -12,8 +12,8 @@
 import { displayWidth } from './visual-lines.js';
 import { criarRng } from './verbos.js';
 
-/** Quanto tempo cada frase fica na tela. */
-export const PERIODO_FRASE_MS = 4000;
+/** Quanto tempo cada frase fica na tela (pedido do dono: 1 minuto). O detalhe `(fase · Ns)` segue andando a cada 1s. */
+export const PERIODO_FRASE_MS = 60_000;
 
 /** Quebra a string do catálogo (`a|b|c`). */
 export function parseFrases(catalogo: string): readonly string[] {

@@ -1290,7 +1290,11 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   const conciergeStream = new StreamingModelCaller({
     client: liveClient,
     tier,
-    maxTokens: 700,
+    // Teto de SAÍDA do Concierge. Era 700: cortava a resposta no meio da palavra quando o dono pedia
+    // uma tabela/lista do resultado de uma tarefa, e um modelo que raciocina gastava tudo pensando
+    // (`finish_reason: length` sem texto ⇒ "não consegui formular"). A brevidade vem do PROMPT; o
+    // teto só protege contra descontrole.
+    maxTokens: 4096,
     // Raciocínio do modelo NÃO aparece na resposta do Concierge (só a fala).
     sink: conciergeSink,
     ...(tracer ? { traceWith: (c: ModelClient) => tracer(c, () => 'concierge') } : {}),

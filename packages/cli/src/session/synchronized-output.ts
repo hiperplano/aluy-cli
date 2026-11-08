@@ -43,6 +43,7 @@ export const BEGIN_SYNC = '\x1b[?2026h';
 /** ESU — End Synchronized Update (DECRST 2026). Fecha/pinta o frame atômico. */
 export const END_SYNC = '\x1b[?2026l';
 
+import { debugFrameWrite, debugRenderEnabled } from './debug-render.js';
 import { displayWidth } from './visual-lines.js';
 
 const ESC = '\x1b[';
@@ -1050,6 +1051,19 @@ export function wrapStdoutWithSync(
     //  diff por-linha repinta SÓ o que mudou ⇒ zera o flicker em QUALQUER terminal.)
     // ÂNCORA DO COMPOSER — só no inline, ANTES do overwrite (que traduz o `eraseLines` já
     // ampliado pela reserva).
+    if (!cockpitActive && debugRenderEnabled()) {
+      const em = matchEraseLines(body);
+      debugFrameWrite(
+        em === undefined
+          ? 'sem-erase'
+          : body.length === em.bodyStart
+            ? 'erase-puro'
+            : 'erase+quadro',
+        em?.lines,
+        em === undefined ? body : body.slice(em.bodyStart),
+        original.columns,
+      );
+    }
     const inlineBody = !cockpitActive && useAnchor ? frameAnchor.transform(body) : body;
     const transformed = !useOverwrite
       ? inlineBody

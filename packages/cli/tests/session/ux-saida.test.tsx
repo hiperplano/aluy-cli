@@ -134,7 +134,7 @@ describe('UX de saída', () => {
     const f1 = plain(r.lastFrame());
     const v1 = controller.current.workingVerb;
     expect(v1).toBeDefined();
-    // A linha mostra uma FRASE de espera (gira a cada ~4s), não mais o gerúndio do passo.
+    // A linha mostra uma FRASE de espera (gira a cada minuto), não mais o gerúndio do passo.
     const frases = parseFrases(resolveText('pt-BR', 'working.quips'));
     expect(frases.some((f) => f1.includes(`${f}…`))).toBe(true);
     // novo passo dentro do mesmo turno (model-call): mesmo verbo

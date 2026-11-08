@@ -140,7 +140,7 @@ cached_tokens, cache_write_tokens, completion_tokens, reasoning_tokens}` quando 
   resumo contava só as listadas; agora soma as ocultas (`hiddenEnded`).
 - **Relato único**: `reportSettleMs` (1500 ms em produção) agrupa tarefas que terminam juntas num só turno
   automático; cada término reinicia a espera (teto 4×).
-- **Frase de espera** (`session/frases-espera.ts`, lista em `working.quips`, 56 frases): gira a cada 4 s na
+- **Frase de espera** (`session/frases-espera.ts`, lista em `working.quips`, 56 frases): gira a cada 1 min na
   linha de trabalho; existe também com tarefa em segundo plano (conversa ociosa) e na pausa por cota. Sem
   rotação com `ALUY_NO_ANIM`; `ALUY_SPINNER_VERBS=plain` volta aos rótulos planos.
 - **Composer**: o respiro de 1 linha acima da linha de trabalho já era constante (o `paddingBottom` do bloco do

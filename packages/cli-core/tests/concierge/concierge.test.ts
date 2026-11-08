@@ -145,7 +145,7 @@ describe('Concierge — correção vai para a tarefa certa', () => {
 });
 
 describe('Concierge — tarefas paralelas e arquivos', () => {
-  it('duas tarefas paralelas sobem juntas; a quinta é recusada', async () => {
+  it('tarefas paralelas sobem juntas; a quinta com 4 rodando vai para a FILA (não é recusada)', async () => {
     const { engine, concierge } = setup(() =>
       result('ok', [
         call('task_start', { goal: 'um' }, 'a'),
@@ -158,8 +158,10 @@ describe('Concierge — tarefas paralelas e arquivos', () => {
     const again = setup(() => result('ok', [call('task_start', { goal: 'x' })]));
     for (let i = 0; i < 4; i++) again.registry.create({ goal: `g${i}`, kind: 'detached' });
     const r = await again.concierge.handle('mais um');
-    expect(r.actions[0]!.ok).toBe(false);
-    expect(again.engine.started).toHaveLength(0);
+    expect(r.actions[0]!.ok).toBe(true);
+    expect(again.registry.get('t5')!.status).toBe('blocked');
+    expect(again.registry.get('t5')!.queued).toBe(true);
+    expect(again.engine.started).toHaveLength(0); // sem vaga: só inicia quando uma terminar
   });
 
   it('mesmo arquivo: a segunda espera a primeira, avisa, e começa quando a primeira termina', async () => {
@@ -545,6 +547,36 @@ describe('clipPlain — nota de 1 linha sem lixo de tabela markdown', () => {
   });
 });
 
+describe('Concierge — resposta cortada pelo limite de saída (finish_reason: length)', () => {
+  const cortada = (content: string): ModelCallResult => ({
+    request_id: 'r',
+    content,
+    finish_reason: 'length',
+  });
+  it('texto cortado ⇒ a resposta sai e o dono é AVISADO (nada de parar no meio em silêncio)', async () => {
+    const { concierge } = setup(() => cortada('| 3 | Argo | Fiat'));
+    const r = await concierge.handle('mostra a tabela');
+    expect(r.reply).toBe('| 3 | Argo | Fiat');
+    expect(r.notes.join('\n')).toContain('cortada pelo limite de tamanho');
+    expect(r.notes.join('\n')).toContain('/task show');
+  });
+  it('só raciocínio gastou o teto (vazio + length, duas vezes) ⇒ mensagem honesta sobre o limite', async () => {
+    const { concierge } = setup(() => cortada(''));
+    const r = await concierge.handle('oi');
+    expect(r.reply).toContain('estourou o limite de tamanho');
+    expect(r.reply).not.toContain('Não consegui formular');
+  });
+  it('finish normal não ganha aviso', async () => {
+    const { concierge } = setup(() => result('ok'));
+    expect((await concierge.handle('oi')).notes).toEqual([]);
+  });
+  it('o prompt manda ser breve por padrão, mas mostrar completo o que o dono pedir', () => {
+    const p = buildConciergePrompt({});
+    expect(p).toContain('BREVE por padrão');
+    expect(p).toContain('mostre-o completo');
+  });
+});
+
 describe('Concierge — resposta vazia do modelo', () => {
   it('vazia na 1ª chamada ⇒ tenta de novo e usa a resposta (sem o "não consegui formular")', async () => {
     const { concierge } = setup((_m, n) => (n === 0 ? result('') : result('Oi, tudo certo.')));
@@ -563,5 +595,54 @@ describe('Concierge — resposta vazia do modelo', () => {
     const r = await concierge.handle('faça x');
     expect(r.reply).not.toContain('Não consegui formular');
     expect(r.modelCalls).toBe(2);
+  });
+});
+
+describe('Concierge — fila de tarefas: nenhuma é perdida (regressão live: "t8 não chegou a abrir")', () => {
+  const oito = Array.from({ length: 8 }, (_, i) =>
+    call('task_start', { goal: `tarefa ${i + 1}` }, `c${i + 1}`),
+  );
+
+  it('8 task_start de uma vez: 4 rodam, 4 nascem NA FILA (nada de recusa) e o dono é avisado', async () => {
+    const { registry, engine, concierge } = setup((_m, n) =>
+      n === 0 ? result('', oito) : result('Disparei 8; 4 estão na fila.'),
+    );
+    const r = await concierge.handle('rode 8 tarefas em paralelo');
+    expect(registry.list()).toHaveLength(8);
+    expect(registry.list().filter((t) => t.status === 'running')).toHaveLength(4);
+    const fila = registry.list().filter((t) => t.status === 'blocked');
+    expect(fila.map((t) => t.id)).toEqual(['t5', 't6', 't7', 't8']);
+    expect(fila.every((t) => t.queued === true && t.blockedBy === undefined)).toBe(true);
+    expect(engine.started).toEqual(['t1', 't2', 't3', 't4']); // só as 4 com vaga foram iniciadas
+    expect(r.actions.every((a) => a.ok)).toBe(true);
+    expect(r.notes.join('\n')).toContain('na fila');
+  });
+
+  it('cada vaga que abre inicia a próxima da fila, na ordem — as 8 acabam iniciadas', async () => {
+    const { registry, engine, concierge } = setup((_m, n) =>
+      n === 0 ? result('', oito) : result('ok'),
+    );
+    await concierge.handle('rode 8');
+    registry.transition('t1', 'done');
+    expect(engine.started).toEqual(['t1', 't2', 't3', 't4', 't5']);
+    registry.transition('t2', 'done');
+    registry.transition('t3', 'failed');
+    expect(engine.started).toEqual(['t1', 't2', 't3', 't4', 't5', 't6', 't7']);
+    registry.transition('t4', 'stopped');
+    expect(engine.started).toContain('t8');
+    expect(registry.list().filter((t) => t.status === 'blocked')).toHaveLength(0);
+    expect(registry.list().find((t) => t.id === 't8')!.queued).toBeUndefined();
+  });
+
+  it('o teto de vivas+fila continua (16): as que passam do teto são recusadas, com motivo', async () => {
+    const quatro = Array.from({ length: 4 }, (_, i) =>
+      call('task_start', { goal: `n ${i}` }, `n${i}`),
+    );
+    const { registry, concierge } = setup((_m, n) => (n === 0 ? result('', quatro) : result('ok')));
+    for (let i = 0; i < 14; i++)
+      registry.create({ goal: `g${i}`, kind: 'detached', queued: i >= 4 });
+    const r = await concierge.handle('mais quatro');
+    expect(registry.list()).toHaveLength(16);
+    expect(r.actions.filter((a) => !a.ok)).toHaveLength(2);
   });
 });

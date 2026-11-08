@@ -122,6 +122,7 @@ interface BuildOpts {
   statusline?: 'full' | 'compact' | 'hidden';
   ownerBusy?: () => boolean;
   reportSettleMs?: number;
+  reportBatchMs?: number;
   /** Segura o modelo ANTES do 1º token (o dono vê só `você` + a linha de trabalho). */
   preGate?: Promise<void>;
 }
@@ -163,6 +164,7 @@ function build(opts: BuildOpts) {
     ...(opts.ownerBusy ? { ownerBusy: opts.ownerBusy } : {}),
     reportRetryMs: 20,
     ...(opts.reportSettleMs ? { reportSettleMs: opts.reportSettleMs } : {}),
+    ...(opts.reportBatchMs ? { reportBatchMs: opts.reportBatchMs } : {}),
   });
   const r = render(
     <ThemeProvider theme={resolveTheme({ env: ENV })}>
@@ -781,6 +783,66 @@ describe('Relato automático: o Concierge resume o resultado quando a tarefa ter
     s.unmount();
   });
 
+  it('lote: com outras tarefas vivas os términos esperam e saem num relato só, quando a última acaba', async () => {
+    const g3 = defer();
+    const t1 = taskSession({ iters: () => 'um' });
+    const t2 = taskSession({ iters: () => 'dois', gates: () => sleep(150) });
+    const t3 = taskSession({ iters: () => 'tres', gates: () => g3.promise });
+    const seen: string[] = [];
+    const s = build({
+      mode: 'concierge',
+      tasks: [t1, t2, t3],
+      reportBatchMs: 5000,
+      concierge: (m) => {
+        seen.push(m);
+        return /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Placar final.')
+          : text('Iniciei.', [
+              ...startTask('a'),
+              { id: '2', name: 'task_start', input: { goal: 'b' } },
+              { id: '3', name: 'task_start', input: { goal: 'c' } },
+            ]);
+      },
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.rt.registry.get('t2')?.status === 'done');
+    await sleep(500);
+    expect(seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m))).toHaveLength(0); // t3 viva ⇒ segura
+    g3.resolve();
+    await waitFor(() => s.frame().includes('Placar final.'), 6000);
+    const eventos = seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m));
+    expect(eventos).toHaveLength(1);
+    expect(eventos[0]).toContain('t1, t2, t3');
+    s.unmount();
+  });
+
+  it('lote: passado o prazo reporta o que já terminou, mesmo com outra tarefa viva', async () => {
+    const g = defer();
+    const seen: string[] = [];
+    const s = build({
+      mode: 'concierge',
+      tasks: [
+        taskSession({ iters: () => 'um' }),
+        taskSession({ iters: () => 'x', gates: () => g.promise }),
+      ],
+      reportBatchMs: 400,
+      concierge: (m) => {
+        seen.push(m);
+        return /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Parcial.')
+          : text('Iniciei.', [
+              ...startTask('a'),
+              { id: '2', name: 'task_start', input: { goal: 'b' } },
+            ]);
+      },
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('Parcial.'), 4000);
+    expect(seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m))).toHaveLength(1);
+    g.resolve();
+    s.unmount();
+  });
+
   it('anti-laço: o turno automático não inicia tarefa nova que gere outro relato com tarefas', async () => {
     const t1 = taskSession({ iters: () => 'primeira.' });
     const t2 = taskSession({ iters: () => 'segunda.' });
@@ -969,6 +1031,26 @@ describe('Composer estável durante a fala do Concierge (tela NÃO cheia)', () =
     const i = ls.findIndex((l) => l.includes('✔ t9 concluída'));
     expect(ls[i]!.trimEnd().endsWith('…')).toBe(true);
     expect(ls[i + 1]!.includes('Arquivo Tamanho')).toBe(false); // sem continuação na linha de baixo
+    s.unmount();
+  });
+
+  it('resposta com tabela cortada no meio e rabo de pipes/linhas vazias: nada de linhas em branco sobrando antes do composer', async () => {
+    const s = build({
+      mode: 'concierge',
+      concierge: () => text('Tabela:\n| N | Modelo |\n|---|---|\n| 3 | Argo\n|\n \n\n\n'),
+    });
+    await type(s, 'mostra a tabela');
+    await waitFor(() => blocksOf(s.conversation, 'aluy').length === 1);
+    await waitFor(
+      () => (blocksOf(s.conversation, 'aluy')[0] as { streaming?: boolean }).streaming === false,
+    );
+    await sleep(100);
+    const b = blocksOf(s.conversation, 'aluy')[0] as { text: string };
+    expect(b.text.endsWith('| 3 | Argo')).toBe(true);
+    const ls = s.frame().split('\n');
+    const i = ls.findIndex((l) => l.includes('Argo'));
+    const c = ls.findIndex((l, k) => k > i && /^[┃|]\s*[❯>]/.test(l));
+    expect(ls.slice(i + 1, c).filter((l) => l.trim() === '').length).toBeLessThanOrEqual(2); // respiro + borda do composer
     s.unmount();
   });
 

@@ -32,6 +32,8 @@ export interface TaskRecord {
   readonly files: readonly string[];
   /** Tarefa que segura os arquivos desta (status `blocked`). */
   readonly blockedBy?: string;
+  /** Esperando uma VAGA (já há `MAX_LIVE_TASKS` rodando): começa sozinha quando uma terminar. */
+  readonly queued?: boolean;
   /** Resumo curto do desfecho (já redigido por quem publica). DADO, nunca instrução. */
   readonly summary?: string;
   /** Resultado mais longo (até ~1500 chars) para o Concierge relatar ao dono. DADO. */
@@ -66,7 +68,10 @@ export interface TaskEvent {
 
 export type TaskListener = (ev: TaskEvent, task: TaskRecord) => void;
 
+/** Tarefas rodando ao mesmo tempo; as demais ficam NA FILA e começam quando uma vaga abre. */
 export const MAX_LIVE_TASKS = 4;
+/** Teto de tarefas vivas (rodando + fila + bloqueadas). */
+export const MAX_QUEUED_TASKS = 16;
 const MAX_EVENTS = 60;
 
 export interface TaskRegistryOptions {
@@ -107,23 +112,34 @@ export class TaskRegistry {
   }
 
   /** Cria a tarefa. Já nasce `blocked` se algum arquivo está reivindicado por tarefa viva. */
-  create(args: { goal: string; kind: 'main' | 'detached'; files?: readonly string[] }): TaskRecord {
+  create(args: {
+    goal: string;
+    kind: 'main' | 'detached';
+    files?: readonly string[];
+    /** Sem vaga: nasce `blocked` + `queued` (não `running`). */
+    queued?: boolean;
+  }): TaskRecord {
     const files = [...new Set((args.files ?? []).map(normalizeClaimPath).filter((f) => f !== ''))];
     const holder = this.findClaimHolder(files);
     const id = `t${this.nextId++}`;
     const rec: TaskRecord = {
       id,
       goal: args.goal,
-      status: holder ? 'blocked' : 'running',
+      status: holder || args.queued === true ? 'blocked' : 'running',
       phase: 'idle',
       kind: args.kind,
       files,
       ...(holder ? { blockedBy: holder.id } : {}),
+      ...(args.queued === true ? { queued: true } : {}),
       startedAt: this.clock(),
       steps: 0,
     };
     this.tasks.set(id, rec);
-    this.emit(holder ? 'blocked' : 'started', rec, holder ? `espera ${holder.id}` : undefined);
+    this.emit(
+      rec.status === 'blocked' ? 'blocked' : 'started',
+      rec,
+      holder ? `espera ${holder.id}` : args.queued === true ? 'na fila' : undefined,
+    );
     return rec;
   }
 
@@ -189,9 +205,10 @@ export class TaskRegistry {
     if (TERMINAL_STATUSES.has(t.status)) return t; // terminal é final
     if (t.status === to && extra?.summary === undefined) return t;
     const terminal = TERMINAL_STATUSES.has(to);
-    const { blockedBy: _drop, current: _cur, ...rest } = t;
+    const { blockedBy: _drop, current: _cur, queued: _q, ...rest } = t;
     void _drop;
     void _cur;
+    void _q;
     const next: TaskRecord = {
       ...rest,
       status: to,
@@ -213,6 +230,7 @@ export class TaskRegistry {
           ? { result: t.result }
           : {}),
       ...(to === 'blocked' && t.blockedBy !== undefined ? { blockedBy: t.blockedBy } : {}),
+      ...(to === 'blocked' && t.queued === true ? { queued: true } : {}),
     };
     this.tasks.set(id, next);
     const kind: TaskEventKind =
@@ -222,11 +240,12 @@ export class TaskRegistry {
   }
 
   /** Tarefas bloqueadas cujos arquivos agora estão livres (na ordem de criação). */
-  releasable(): readonly TaskRecord[] {
+  releasable(slots = Number.POSITIVE_INFINITY): readonly TaskRecord[] {
     const out: TaskRecord[] = [];
     const claimed: TaskRecord[] = [];
     for (const t of this.tasks.values()) {
       if (t.status !== 'blocked') continue;
+      if (out.length >= slots) break; // sem vaga: o resto segue na fila
       if (this.findClaimHolder(t.files, t.id)) continue;
       // Duas bloqueadas pelo mesmo arquivo: só a mais antiga sai agora.
       if (claimed.some((c) => c.files.some((f) => t.files.some((g) => claimsOverlap(f, g)))))
@@ -235,6 +254,14 @@ export class TaskRegistry {
       out.push(t);
     }
     return out;
+  }
+
+  /** Quantas tarefas ocupam vaga (vivas e não bloqueadas/na fila). */
+  runningCount(): number {
+    let n = 0;
+    for (const t of this.tasks.values())
+      if (!TERMINAL_STATUSES.has(t.status) && t.status !== 'blocked') n++;
+    return n;
   }
 
   /** Restaura do disco (resume). O que estava vivo volta `interrupted`. */

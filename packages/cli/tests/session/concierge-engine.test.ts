@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { TaskRegistry, type AskResolution, type ConciergeModel } from '@hiperplano/aluy-cli-core';
 import { ControllerTaskEngine, type TaskSession } from '../../src/session/concierge-engine.js';
 import { ConciergeRuntime, type ConversationSink } from '../../src/session/concierge-runtime.js';
+import { summaryText } from '../../src/ui/components/ConciergeTasks.js';
 import type { SessionState } from '../../src/session/model.js';
 
 class FakeSession implements TaskSession {
@@ -76,6 +77,34 @@ function setup() {
   });
   return { registry, headless, engine };
 }
+
+describe('ConciergeRuntime — contagem do resumo do rodapé', () => {
+  it('7 tarefas concluídas em tempos diferentes (algumas há mais de 60s): o resumo conta as 7', () => {
+    let agora = 1_000_000;
+    const sk = new FakeSession() as unknown as ConversationSink;
+    sk.pushConciergeEcho = () => {};
+    sk.pushConciergeLine = () => {};
+    sk.conciergeReplyStart = () => {};
+    sk.conciergeReplyEnd = () => {};
+    sk.cancelAllFlows = () => {};
+    const rt = new ConciergeRuntime({
+      sink: sk,
+      model: { call: async () => ({ request_id: 'r', content: '', finish_reason: 'stop' }) },
+      clock: () => agora,
+    });
+    for (let i = 0; i < 7; i++) {
+      const t = rt.registry.create({ goal: `g${i}`, kind: 'detached' });
+      rt.registry.transition(t.id, 'done', undefined, { summary: 'ok' });
+      agora += 20_000; // as primeiras saem da janela de 60s
+    }
+    rt.registry.create({ goal: 'viva', kind: 'detached' });
+    const vis = rt.visibleTasks();
+    expect(vis.filter((t) => t.endedAt !== undefined).length).toBeLessThanOrEqual(2);
+    expect(summaryText(vis, false, rt.hiddenEndedCount())).toBe(
+      '8 tarefas · 1 rodando · 7 encerradas',
+    );
+  });
+});
 
 describe('ControllerTaskEngine — estado da sessão vira evento do registro', () => {
   it('TODA tarefa roda numa sessão própria (nada no controller da conversa)', () => {

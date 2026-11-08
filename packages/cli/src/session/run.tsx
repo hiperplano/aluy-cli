@@ -2380,6 +2380,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       ? new ConciergeRuntime({
           // Várias tarefas terminando juntas viram UM relato (janela de agrupamento).
           reportSettleMs: 1500,
+          reportBatchMs: 20_000,
           sink: built.controller,
           model: built.conciergeModel,
           // As 4 tools do Concierge passam pelo MESMO ponto único (`decide()`): só `allow`
