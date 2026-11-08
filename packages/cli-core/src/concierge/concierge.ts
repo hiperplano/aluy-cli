@@ -434,6 +434,10 @@ export class Concierge {
       case 'paused_quota':
         line = `⏸ ${t.id} pausada por cota${ev.detail ? ` — ${clipPlain(ev.detail, 80)}` : ''}`;
         break;
+      case 'stopped':
+        // Parada pelo dono: sem turno automático (ele sabe o que pediu; poupa uma chamada).
+        line = `■ ${t.id} parada`;
+        break;
       case 'interrupted':
         line = `↯ ${t.id} interrompida — ${clipPlain(t.goal, 80)}`;
         break;

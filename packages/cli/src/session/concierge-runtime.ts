@@ -147,8 +147,12 @@ export class ConciergeRuntime {
           ? `espera ${t.blockedBy ?? 'outra tarefa'}`
           : undefined;
     if (word === undefined && t.current) parts.push(t.current);
-    const live = this.engine.sessionOf(t.id)?.turnAccounting?.()?.tokens;
-    parts.push(`${abbreviateCount(live ?? s?.meta?.tokens ?? 0)} tokens`);
+    const lt = ended
+      ? { tokens: s?.meta?.tokens ?? 0, estimated: false }
+      : this.engine.liveTokens(t.id);
+    if (lt.tokens > 0 || ended) {
+      parts.push(`${lt.estimated ? '~' : ''}${abbreviateCount(lt.tokens)} tokens`);
+    }
     if (t.steps > 0) parts.push(`${t.steps} tools`);
     if (!ended && this.engine.isAllowAll(t.id)) parts.push('aprova tudo');
     if (ended) parts.push(formatElapsed((t.endedAt ?? 0) - t.startedAt));
@@ -372,7 +376,7 @@ export class ConciergeRuntime {
     const body =
       e.kind === 'diff' || e.kind === 'path'
         ? (e.path ?? '')
-        : (e.lines[0] ?? '').replace(/^\$\s*/, '');
+        : (e.lines[0] ?? '').replace(/^\$\s*/, '').replace(new RegExp(`^${e.tool}\\s+`), '');
     return clip(`${e.tool} ${body}`, 70);
   }
 

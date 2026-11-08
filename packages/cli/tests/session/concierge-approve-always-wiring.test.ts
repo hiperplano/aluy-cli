@@ -1,0 +1,165 @@
+// ADR 0006 — "aprovar sempre nesta tarefa" pela fiação REAL da sessão de tarefa (buildSession),
+// não só pela engine isolada: a flag ligada via `/a!` tem de valer para as próximas
+// ferramentas do MESMO turno, inclusive as de sub-agentes da tarefa.
+
+import { describe, expect, it, afterEach, beforeEach } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buildSession } from '../../src/session/wiring.js';
+import { ConciergeRuntime, type ConversationSink } from '../../src/session/concierge-runtime.js';
+
+const OPEN = '<<<ALUY_TOOL_CALL';
+const CLOSE = 'ALUY_TOOL_CALL>>>';
+const tool = (name: string, input: Record<string, unknown>): string =>
+  `${OPEN}\n${JSON.stringify({ name, input })}\n${CLOSE}`;
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+async function waitFor(cond: () => boolean, ms = 8000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > end) throw new Error('waitFor: prazo');
+    await sleep(10);
+  }
+}
+
+const store = {
+  async get() {
+    return {
+      kind: 'pat',
+      pat: 'aluy_pat_teste_nao_real',
+      organization_id: 'org-t',
+      scopes: ['assistant:session', 'llm:call'],
+      v: 1,
+    };
+  },
+  async set() {},
+  async clear() {},
+};
+
+function sse(text: string) {
+  const ev = [
+    { event: 'start', data: { request_id: 'r', session_id: 's' } },
+    ...text.split('').map((ch) => ({ event: 'delta', data: { content: ch } })),
+    { event: 'usage', data: { request_id: 'r', tier: 'aluy-flux', tokens_in: 5, tokens_out: 9 } },
+    { event: 'done', data: { finish_reason: 'stop' } },
+  ]
+    .map((e) => `event: ${e.event}\ndata: ${JSON.stringify(e.data)}\n\n`)
+    .join('');
+  return {
+    status: 200,
+    ok: true,
+    headers: { get: () => null },
+    body: {
+      async *[Symbol.asyncIterator]() {
+        yield ev;
+      },
+    },
+    json: async () => ({}),
+    text: async () => '',
+  };
+}
+
+describe('"aprovar sempre nesta tarefa" na fiação real da sessão', () => {
+  let ws: string;
+  beforeEach(() => {
+    ws = mkdtempSync(join(tmpdir(), 'aluy-always-'));
+    writeFileSync(
+      join(ws, 'calc.py'),
+      'def add(a, b):\n    return a - b\n\ndef sub(a, b):\n    return a + b\n',
+    );
+  });
+  afterEach(() => rmSync(ws, { recursive: true, force: true }));
+
+  async function run(outputs: string[]): Promise<ConciergeRuntime> {
+    let n = 0;
+    const sink = {
+      pushConciergeEcho() {},
+      pushConciergeLine() {},
+      conciergeReplyStart() {},
+      conciergeReplyEnd() {},
+      cancelAllFlows() {},
+    } as ConversationSink;
+    const mk = () =>
+      buildSession({
+        workspaceRoot: ws,
+        store,
+        brokerFetch: (async (url: string) =>
+          url.endsWith('/v1/chat')
+            ? sse(outputs[Math.min(n++, outputs.length - 1)]!)
+            : { ...sse(''), body: undefined, json: async () => ({}) }) as never,
+        mode: 'normal',
+        subAgents: { enabled: true, maxConcurrency: 1 },
+        env: {
+          ALUY_MEM0_URL: 'http://127.0.0.1:1',
+          ALUY_BROKER_URL: 'https://broker.mock.local',
+          ALUY_IDENTITY_URL: 'https://id.mock.local',
+        },
+      });
+    const rt = new ConciergeRuntime({
+      sink,
+      model: { call: async () => ({ request_id: 'x', content: 'ok', finish_reason: 'stop' }) },
+      createHeadless: () => mk().controller,
+    });
+    rt.engine.start(rt.registry.create({ goal: 'corrige calc.py', kind: 'main' }));
+    return rt;
+  }
+
+  const finishes = async (rt: ConciergeRuntime): Promise<void> => {
+    await waitFor(
+      () => rt.registry.get('t1')?.status === 'done' || rt.pendingApprovals().length > 0,
+    );
+    expect(rt.pendingApprovals().map((p) => p.summary)).toEqual([]);
+    expect(rt.registry.get('t1')!.status).toBe('done');
+  };
+
+  it('agente principal: edit/edit/write/run_command/run_tests NÃO perguntam de novo após /a!', async () => {
+    const rt = await run([
+      tool('read_file', { path: 'calc.py' }),
+      tool('edit_file', {
+        path: 'calc.py',
+        old_string: 'return a - b',
+        new_string: 'return a + b',
+      }),
+      tool('edit_file', {
+        path: 'calc.py',
+        old_string: 'return a + b\n\ndef',
+        new_string: 'return a - b\n\ndef',
+      }),
+      tool('write_file', { path: 'test_calc.py', content: 'print(1)\n' }),
+      tool('run_command', { command: 'python3 -c "print(1)"' }),
+      tool('run_tests', { command: 'python3 -c "print(2)"' }),
+      'tudo certo.',
+    ]);
+    await waitFor(() => rt.pendingApprovals().length === 1); // edit_file #1
+    expect(rt.pendingApprovals()[0]!.effect?.tool).toBe('edit_file');
+    rt.approve('t1', 'always');
+    expect(rt.engine.isAllowAll('t1')).toBe(true);
+    await finishes(rt);
+    expect(readFileSync(join(ws, 'test_calc.py'), 'utf8')).toBe('print(1)\n');
+  });
+
+  it('SUB-AGENTE da tarefa: o /a! feito num pedido do filho vale para os próximos do filho', async () => {
+    const rt = await run([
+      tool('spawn_agent', { agents: [{ label: 'fix', goal: 'corrige calc.py' }], wait: true }),
+      // filho:
+      tool('read_file', { path: 'calc.py' }),
+      tool('edit_file', {
+        path: 'calc.py',
+        old_string: 'return a - b',
+        new_string: 'return a + b',
+      }),
+      tool('edit_file', {
+        path: 'calc.py',
+        old_string: 'return a + b\n\ndef',
+        new_string: 'return a - b\n\ndef',
+      }),
+      tool('run_command', { command: 'python3 -c "print(1)"' }),
+      'filho terminou.',
+      // pai:
+      'consolidei.',
+    ]);
+    await waitFor(() => rt.pendingApprovals().length === 1);
+    rt.approve('t1', 'always');
+    await finishes(rt);
+  });
+});

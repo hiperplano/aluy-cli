@@ -380,3 +380,80 @@ describe('Aprovações: "sempre nesta tarefa", registro por linha e diff estrutu
     ]);
   });
 });
+
+describe('Linha viva da tarefa: atividade humana e tokens (reais ou estimados)', () => {
+  function rig(meta: Record<string, unknown> = { tokens: 0 }) {
+    const sessions: FakeSession[] = [];
+    const lines: string[] = [];
+    const sink = new FakeSession() as unknown as ConversationSink;
+    sink.pushConciergeEcho = () => {};
+    sink.pushConciergeLine = (l) => void lines.push(l);
+    sink.conciergeReplyStart = () => {};
+    sink.conciergeReplyEnd = () => {};
+    sink.cancelAllFlows = () => {};
+    const calls: string[] = [];
+    const rt = new ConciergeRuntime({
+      sink,
+      model: {
+        call: async ({ messages }) => {
+          calls.push(String(messages.at(-1)?.content));
+          return { request_id: 'r', content: 'ok', finish_reason: 'stop' };
+        },
+      },
+      createHeadless: () => {
+        const f = new FakeSession();
+        f.state = { blocks: [], phase: 'idle', meta } as never;
+        sessions.push(f);
+        return f;
+      },
+      reportRetryMs: 5,
+    });
+    rt.engine.start(rt.registry.create({ goal: 'g', kind: 'main' }));
+    return { rt, s: sessions[0]!, lines, calls };
+  }
+
+  it('rótulos humanos: lendo/editando/escrevendo/testes', () => {
+    const { rt, s } = rig();
+    const label = (name: string, input: Record<string, unknown>) => {
+      s.toolObs[0]!.onToolStart!({ name, input } as never);
+      const c = rt.registry.get('t1')!.current;
+      s.toolObs[0]!.onToolEnd!({ name }, true);
+      return c;
+    };
+    expect(label('read_file', { path: 'calc.py' })).toBe('lendo calc.py');
+    expect(label('edit_file', { path: 'calc.py' })).toBe('editando calc.py');
+    expect(label('write_file', { path: 'test_calc.py' })).toBe('escrevendo test_calc.py');
+    expect(label('run_tests', { command: 'uv run pytest' })).toBe('testes uv run pytest');
+  });
+
+  it('sem ferramenta, mostra o que o modelo faz (pensando/escrevendo); nunca fica mudo', () => {
+    const { rt, s } = rig();
+    s.set({ phase: 'thinking' });
+    expect(rt.registry.get('t1')!.current).toBe('pensando');
+    s.set({ phase: 'streaming' });
+    expect(rt.registry.get('t1')!.current).toBe('escrevendo');
+    expect(rt.taskView(rt.registry.get('t1')!).summary).toContain('escrevendo');
+  });
+
+  it('provider sem uso em stream: tokens ESTIMADOS (~) pelos caracteres; real quando existe; omite se 0', () => {
+    const { rt, s } = rig({ tokens: 0 });
+    expect(rt.taskView(rt.registry.get('t1')!).summary ?? '').not.toContain('tokens');
+    s.state = {
+      ...s.state,
+      blocks: [{ kind: 'aluy', text: 'x'.repeat(400), streaming: true }],
+    } as never;
+    expect(rt.taskView(rt.registry.get('t1')!).summary).toContain('~100 tokens');
+    s.state = { ...s.state, meta: { tokens: 2500 } } as never;
+    const sum = rt.taskView(rt.registry.get('t1')!).summary!;
+    expect(sum).toContain('2.5k tokens');
+    expect(sum).not.toContain('~');
+  });
+
+  it('tarefa PARADA pelo dono: 1 linha `■ t1 parada` e NENHUM turno automático do modelo', async () => {
+    const { rt, lines, calls } = rig();
+    rt.stopTask('t1');
+    await new Promise((r) => setTimeout(r, 80));
+    expect(lines).toContain('■ t1 parada');
+    expect(calls).toEqual([]);
+  });
+});

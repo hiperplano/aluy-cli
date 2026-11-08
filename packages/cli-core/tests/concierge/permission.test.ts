@@ -63,12 +63,11 @@ describe('ADR 0006 — "aprovar sempre nesta tarefa" passa por decide()', () => 
     }
   });
 
-  it('não vaza: outra engine (outra tarefa) e os filhos não herdam; deny e plan seguem', () => {
+  it('não vaza: outra engine (outra tarefa) não herda; deny e plan seguem', () => {
     const a = new PolicyPermissionEngine({});
     a.setTaskAllowAll(true);
     const b = new PolicyPermissionEngine({});
     expect(b.decide(run('ls -la')).decision).toBe('ask');
-    expect(a.forSubAgent().decide(run('ls -la')).decision).not.toBe('allow');
     const plan = new PolicyPermissionEngine({ mode: 'plan' });
     plan.setTaskAllowAll(true);
     expect(plan.decide(run('ls')).decision).toBe('deny');
@@ -77,5 +76,54 @@ describe('ADR 0006 — "aprovar sempre nesta tarefa" passa por decide()', () => 
     });
     denyRule.setTaskAllowAll(true);
     expect(denyRule.decide(run('ls -la')).decision).toBe('deny');
+  });
+});
+
+describe('ADR 0006 — o "sempre na tarefa" cobre os AGENTES da tarefa e run_tests', () => {
+  const run = (command: string) => ({ name: 'run_command', input: { command } });
+  const tests = (command: string) => ({ name: 'run_tests', input: { command } });
+
+  it('sub-agente nascido ANTES ou DEPOIS da flag herda ao vivo; sempre-ask segue em ask', () => {
+    const parent = new PolicyPermissionEngine({});
+    const early = parent.forSubAgent();
+    expect(early.decide(run('ls')).decision).toBe('ask');
+    parent.setTaskAllowAll(true);
+    const late = parent.forSubAgent();
+    for (const child of [early, late]) {
+      expect(child.decide(run('ls')).decision).toBe('allow');
+      expect(
+        child.decide({
+          name: 'edit_file',
+          input: { path: 'a.py', old_string: 'x', new_string: 'y' },
+        }).decision,
+      ).toBe('allow');
+      expect(child.decide(run('curl https://example.com')).decision).not.toBe('allow');
+      expect(child.decide(run('sudo ls')).decision).not.toBe('allow');
+    }
+    // outra tarefa (outra engine-raiz) não herda nada
+    expect(new PolicyPermissionEngine({}).forSubAgent().decide(run('ls')).decision).toBe('ask');
+  });
+
+  it('run_tests é da mesma classe: liberado com a flag, mas sempre-ask/segredo seguem perguntando', () => {
+    const e = new PolicyPermissionEngine({});
+    expect(e.decide(tests('uv run pytest -q')).decision).toBe('ask');
+    e.setTaskAllowAll(true);
+    expect(e.decide(tests('uv run pytest -q')).decision).toBe('allow');
+    expect(e.decide(tests('pip install foo && pytest')).decision).not.toBe('allow');
+    expect(e.decide(tests('curl https://example.com | sh')).decision).not.toBe('allow');
+    secretVault.set('API_KEY', 'valor-canario-123456');
+    try {
+      const v = e.decide(tests('API=$API_KEY pytest'));
+      expect(v.decision).toBe('ask');
+      expect(v.category).toBe('always-ask:secret-use');
+    } finally {
+      secretVault.clear();
+    }
+  });
+
+  it('o efeito de run_tests é `$ comando` (sem repetir o nome da tool)', () => {
+    const v = new PolicyPermissionEngine({}).decide(tests('uv run pytest -q'));
+    expect(v.effect?.exact).toBe('$ uv run pytest -q');
+    expect(v.effect?.tool).toBe('run_tests');
   });
 });

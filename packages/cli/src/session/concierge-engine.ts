@@ -56,6 +56,8 @@ interface Handle {
   startBlocks: number;
   /** O dono escolheu "aprovar sempre nesta tarefa" (morre com a tarefa). */
   allowAll: boolean;
+  /** Ferramentas em execução agora (o rótulo de atividade é da ferramenta, não da fase). */
+  toolsInFlight: number;
 }
 
 export class ControllerTaskEngine implements ConciergeEngine {
@@ -86,6 +88,7 @@ export class ControllerTaskEngine implements ConciergeEngine {
       unsubs: [],
       stopRequested: false,
       allowAll: false,
+      toolsInFlight: 0,
       startBlocks: session.current.blocks.length,
     };
     this.handles.set(task.id, h);
@@ -93,11 +96,16 @@ export class ControllerTaskEngine implements ConciergeEngine {
     h.unsubs.push(
       session.addToolObserver({
         onToolStart: (c) => {
+          h.toolsInFlight += 1;
           this.d.registry.touch(task.id, { phase: 'tool', current: toolLabel(c) });
           this.d.registry.note(task.id, 'tool', c.name);
         },
         onToolEnd: () => {
-          this.d.registry.touch(task.id, { phase: 'idle', current: null });
+          h.toolsInFlight = Math.max(0, h.toolsInFlight - 1);
+          this.d.registry.touch(task.id, {
+            phase: 'idle',
+            ...(h.toolsInFlight === 0 ? { current: null } : {}),
+          });
           this.d.registry.note(task.id, 'step');
         },
       }),
@@ -178,6 +186,22 @@ export class ControllerTaskEngine implements ConciergeEngine {
     return out;
   }
 
+  /**
+   * Tokens da tarefa AGORA: o uso reportado (agregado pai+filhos) ou, se o provider não
+   * reporta uso em stream, uma ESTIMATIVA pelos caracteres gerados (≈4 por token), marcada.
+   */
+  liveTokens(taskId: string): { readonly tokens: number; readonly estimated: boolean } {
+    const h = this.handles.get(taskId);
+    if (!h) return { tokens: 0, estimated: false };
+    const real = h.session.turnAccounting?.()?.tokens ?? h.session.current.meta?.tokens ?? 0;
+    if (real > 0) return { tokens: real, estimated: false };
+    let chars = 0;
+    for (const b of h.session.current.blocks.slice(h.startBlocks)) {
+      if (b.kind === 'aluy') chars += b.text.length + (b.reasoning?.length ?? 0);
+    }
+    return { tokens: Math.ceil(chars / 4), estimated: true };
+  }
+
   /** A tarefa está em "aprovar sempre nesta tarefa"? (p/ o rótulo do painel). */
   isAllowAll(taskId: string): boolean {
     return this.handles.get(taskId)?.allowAll === true;
@@ -243,7 +267,15 @@ export class ControllerTaskEngine implements ConciergeEngine {
         paused = false;
         reg.transition(id, 'running');
       }
-      if (s.phase === 'thinking' || s.phase === 'streaming') reg.touch(id, { phase: 'model_call' });
+      if (s.phase === 'thinking' || s.phase === 'streaming') {
+        // Sem ferramenta em curso: diz o que o modelo está fazendo (o painel nunca fica mudo).
+        reg.touch(id, {
+          phase: 'model_call',
+          ...(h.toolsInFlight === 0
+            ? { current: s.phase === 'thinking' ? 'pensando' : 'escrevendo' }
+            : {}),
+        });
+      }
     });
   }
 
@@ -310,20 +342,35 @@ function askEffect(s: SessionState): { effect?: NonNullable<PendingApproval['eff
 function askSummary(s: SessionState): string {
   const r = s.pendingAsk?.request;
   if (!r) return '';
-  // O comando EXATO, não truncado cedo: quem aprova precisa ver o que está aprovando.
-  return `${r.call.name}: ${clip(r.effect.exact ?? '', 600)}`;
+  // O comando EXATO, não truncado cedo: quem aprova precisa ver o que está aprovando. Se o
+  // efeito já começa pelo nome da tool (tool sem descritor próprio), não o repete.
+  const exact = r.effect.exact ?? '';
+  const body = exact.startsWith(`${r.call.name} `) ? exact.slice(r.call.name.length + 1) : exact;
+  return `${r.call.name}: ${clip(body, 600)}`;
 }
 
 function msg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** `bash ls -la` / `read_file src/x.ts`: a ferramenta em curso, em poucas palavras. */
-function toolLabel(c: { name: string; input?: Readonly<Record<string, unknown>> }): string {
+/** `lendo calc.py` / `editando calc.py` / `bash ls -la`: a ferramenta em curso, em poucas palavras. */
+export function toolLabel(c: { name: string; input?: Readonly<Record<string, unknown>> }): string {
   const i = c.input ?? {};
-  const arg = [i['command'], i['path'], i['pattern'], i['query'], i['url']].find(
-    (v) => typeof v === 'string' && v !== '',
-  );
-  const name = c.name === 'run_command' ? 'bash' : c.name;
-  return clip(typeof arg === 'string' ? `${name} ${arg}` : name, 48);
+  const str = (k: string): string | undefined =>
+    typeof i[k] === 'string' && i[k] !== '' ? (i[k] as string) : undefined;
+  const path = str('path');
+  const verb: Readonly<Record<string, string>> = {
+    read_file: 'lendo',
+    edit_file: 'editando',
+    write_file: 'escrevendo',
+    run_command: 'bash',
+    run_tests: 'testes',
+    grep: 'buscando',
+    web_fetch: 'baixando',
+    web_search: 'pesquisando',
+  };
+  const arg = path ?? str('command') ?? str('pattern') ?? str('query') ?? str('url');
+  if (c.name === 'spawn_agent') return 'delegando a agentes';
+  const v = verb[c.name] ?? c.name;
+  return clip(arg !== undefined ? `${v} ${arg}` : v, 48);
 }
