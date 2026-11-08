@@ -157,7 +157,8 @@ function stripSync(write: string): string {
   let s = write;
   if (s.startsWith(BEGIN_SYNC)) s = s.slice(BEGIN_SYNC.length);
   if (s.endsWith(END_SYNC)) s = s.slice(0, -END_SYNC.length);
-  return s;
+  // o auto-wrap por quadro (`?7l` … `?7h`) não é conteúdo
+  return s.replaceAll('\x1b[?7l', '').replaceAll('\x1b[?7h', '');
 }
 
 /**

@@ -157,3 +157,89 @@ describe('um render do Ink (erase + histórico + quadro) sai em UM bloco ?2026',
     expect(writes.join('')).toContain('\x1b[J'); // o erase chegou
   });
 });
+
+describe('auto-wrap OFF em todo quadro do inline: linha larga demais não deixa fantasma', () => {
+  // O terminal (WezTerm, fonte do dono) pode desenhar um glifo mais largo que a conta do Ink: a linha
+  // quebra numa linha física a mais, o cursor do erase relativo fica 1 curto e o topo do quadro
+  // anterior — a frase de trabalho — vira fantasma. Simulamos com uma linha 2 células mais larga.
+  async function roda(): Promise<{ linhas: string[]; escritas: string[] }> {
+    const term = new Terminal({
+      rows: 12,
+      cols: 40,
+      allowProposedApi: true,
+      scrollback: 200,
+      convertEol: true, // \n do tty = CR+LF (onlcr)
+    });
+    const escritas: string[] = [];
+    const stream = {
+      rows: 12,
+      columns: 40,
+      isTTY: true,
+      write: (d: string, cb?: () => void) => {
+        escritas.push(d);
+        term.write(d, () => cb?.());
+        return true;
+      },
+    } as unknown as NodeJS.WriteStream;
+    const w = wrapStdoutWithSync(stream);
+    let prev = 0;
+    const erase = (n: number): string =>
+      n <= 0 ? '' : '\x1b[2K\x1b[1A'.repeat(n - 1) + '\x1b[2K\x1b[G';
+    const frame = (lines: string[]): void => {
+      w.stdout.write(erase(prev) + lines.join('\n') + '\n');
+      prev = lines.length + 1;
+    };
+    const larga = `┃ ${'x'.repeat(41)}`; // 43 células numa tela de 40 (o Ink acha que cabe)
+    // a linha de trabalho é a PRIMEIRA do quadro (o respiro de cima já veio do histórico)
+    const viva = (f: string): string[] => [`Λ ${f}… (1 em segundo plano)`, '', larga, '  status'];
+    w.stdout.write('histórico 1\nhistórico 2\n');
+    prev = 0;
+    frame(viva('a'));
+    for (const f of ['b', 'c', 'd']) frame(viva(f));
+    // a nota sobe ao <Static> e a linha de trabalho some (erase puro + histórico + quadro)
+    w.stdout.write(erase(prev));
+    w.stdout.write('  ✔ t1 concluída — ok\n');
+    const idle = ['', '┃❯ digite', '  status'];
+    w.stdout.write(idle.join('\n') + '\n');
+    prev = idle.length + 1;
+    await Promise.resolve();
+    await new Promise<void>((r) => term.write('', r));
+    const b = term.buffer.active;
+    const linhas: string[] = [];
+    for (let i = 0; i < b.length; i++) linhas.push(b.getLine(i)?.translateToString(true) ?? '');
+    return { linhas, escritas };
+  }
+
+  it('nenhuma frase de trabalho `Λ ` sobra no histórico depois da nota', async () => {
+    const { linhas } = await roda();
+    expect(
+      linhas.filter((l) => /^Λ /.test(l)),
+      linhas.join('\n'),
+    ).toEqual([]);
+    expect(linhas.filter((l) => l.includes('✔ t1 concluída'))).toHaveLength(1);
+  });
+
+  it('todo write de quadro leva ?7l … ?7h (dentro do bloco ?2026)', async () => {
+    const { escritas } = await roda();
+    const quadros = escritas.filter((e) => e.includes(BEGIN_SYNC));
+    expect(quadros.length).toBeGreaterThan(3);
+    for (const q of quadros) {
+      expect(q).toContain('\x1b[?7l');
+      expect(q.lastIndexOf('\x1b[?7h')).toBeGreaterThan(q.indexOf('\x1b[?7l'));
+      expect(q.indexOf(BEGIN_SYNC)).toBeLessThan(q.indexOf('\x1b[?7l'));
+    }
+  });
+
+  it('cleanup() religa o auto-wrap (?7h) — o shell do dono não fica sem wrap', () => {
+    const escritas: string[] = [];
+    const stream = {
+      rows: 10,
+      columns: 40,
+      isTTY: true,
+      write: (d: string) => (escritas.push(d), true),
+    } as unknown as NodeJS.WriteStream;
+    const w = wrapStdoutWithSync(stream);
+    w.cleanup();
+    expect(escritas.join('')).toContain('\x1b[?7h');
+  });
+});

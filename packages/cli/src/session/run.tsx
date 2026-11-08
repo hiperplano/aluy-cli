@@ -4725,6 +4725,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // Âncora do composer (16/09): com a tela cheia, o quadro vivo não encolhe — o composer
           // para de subir e descer quando algo vivo some. `ALUY_COMPOSER_ANCHOR=0` desliga.
           anchor: env.ALUY_COMPOSER_ANCHOR !== '0',
+          // Auto-wrap OFF por quadro (`?7l … ?7h`): linha que o terminal mede mais larga é cortada, não
+          // quebrada ⇒ o erase relativo do Ink não fica 1 linha curto. `ALUY_AUTOWRAP=1` desliga.
+          autowrap: noAutowrapEnabled(env),
         })
       : undefined;
   const renderStdout = sync?.stdout ?? baseStdout;

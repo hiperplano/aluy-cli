@@ -61,6 +61,7 @@ const ERASE_TO_EOS = `${ESC}J`;
  * o terminal ache larga demais é TRUNCADA, nunca quebrada — quebrar na última linha ROLA a tela
  * e dessincroniza o modelo CUP-absoluto do differ (composer duplicado). */
 const DISABLE_AUTOWRAP_SEQ = `${ESC}?7l`;
+const ENABLE_AUTOWRAP_SEQ = `${ESC}?7h`;
 
 // EST-0965 · ADR-0076 §5 — O FLICKER DO COCKPIT é por OUTRO byte que o inline. No
 // alt-screen o frame do cockpit ENCHE `rows` (invariante §3), então o Ink NÃO usa o
@@ -920,6 +921,11 @@ export interface WrapOptions {
    * desliga (o caller resolve a env).
    */
   readonly anchor?: boolean;
+  /**
+   * Auto-wrap OFF em todo quadro do inline (`?7l … ?7h`) e `?7h` no `cleanup()`. Default ON;
+   * `ALUY_AUTOWRAP=1` (o caller resolve a env) desliga.
+   */
+  readonly autowrap?: boolean;
 }
 
 /**
@@ -946,6 +952,7 @@ export function wrapStdoutWithSync(
   const useOverwrite = options.overwrite ?? true;
   const onOverflowRegimeExit = options.onOverflowRegimeExit;
   const useAnchor = options.anchor ?? true;
+  const useNoWrap = options.autowrap ?? true;
   const frameAnchor = createFrameAnchor(() => original.rows);
   // F198 — rastreia o regime clearTerminal (inline) pelos BYTES p/ sinalizar a borda de saída.
   const overflowRegime = createOverflowRegimeTracker();
@@ -1105,6 +1112,14 @@ export function wrapStdoutWithSync(
       clearPendingClearFallback();
       withClear = `${HARD_CLEAR}${transformed}`;
     }
+    // AUTO-WRAP OFF EM TODO QUADRO DO INLINE: o `eraseLines` do Ink sobe N-1 linhas RELATIVAS; se o
+    // terminal desenhar alguma linha mais larga que a conta do Ink (glifo ambíguo/emoji), ela quebra
+    // numa linha física a mais, o cursor para 1 linha curto e o topo do quadro anterior (a frase de
+    // trabalho) fica para trás — um fantasma por quadro. Sem auto-wrap a linha é CORTADA na borda e
+    // as linhas físicas == as do Ink. Por escrita (e não só uma vez na largada) para valer mesmo que
+    // algo religue o `?7` no meio (sair do cockpit, o próprio terminal).
+    if (!cockpitActive && useNoWrap)
+      withClear = `${DISABLE_AUTOWRAP_SEQ}${withClear}${ENABLE_AUTOWRAP_SEQ}`;
     if (!cockpitActive) {
       const em0 = matchEraseLines(body);
       const erasePuro = em0 !== undefined && body.length === em0.bodyStart;
@@ -1137,6 +1152,14 @@ export function wrapStdoutWithSync(
   const cleanup = (): void => {
     flushBatch();
     if (cleanedUp) return;
+    // Auto-wrap SEMPRE religado ao sair (nunca deixa o shell do dono sem wrap), mesmo sem `?2026`.
+    if (useNoWrap) {
+      try {
+        original.write(ENABLE_AUTOWRAP_SEQ);
+      } catch {
+        /* saída já fechada */
+      }
+    }
     cleanedUp = true;
     if (healTimer !== undefined) clearTimeout(healTimer);
     clearPendingClearFallback(); // não deixa o timer da fallback pendurado no exit.

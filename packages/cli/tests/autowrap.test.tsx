@@ -99,7 +99,13 @@ const EMOJI_LINE = '👍🏽'.repeat(14); // Ink: 28 col; "tmux": 56 col
 
 async function runTurn(autowrapOff: boolean, cols: number): Promise<string[]> {
   const { stream, chunks } = fakeStdout(cols);
-  const sync = wrapStdoutWithSync(stream, { sync: true, overwrite: true, anchor: false });
+  // `autowrap: false` = o wrapper SEM o toggle por quadro; o toggle de sessão (chunks) é o que o teste liga/desliga.
+  const sync = wrapStdoutWithSync(stream, {
+    sync: true,
+    overwrite: true,
+    anchor: false,
+    autowrap: false,
+  });
   if (autowrapOff) chunks.push(DISABLE_AUTOWRAP);
   const App = ({ done }: { done: boolean }): React.ReactElement => (
     <>
