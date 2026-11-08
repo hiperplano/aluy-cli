@@ -43,7 +43,7 @@ function plain(s: string): string {
 }
 
 // A "marca" do menu aberto: o cabeçalho fixo do <SlashMenu>. Não colide com o composer.
-const MENU_HEADER = '/ para comandos';
+const MENU_HEADER = 'digite para buscar';
 
 function fakePorts(): ToolPorts {
   const fs: FileSystemPort = {
@@ -196,7 +196,7 @@ async function tap(s: { stdin: { write: (x: string) => void } }, seq: string) {
 
 /** Linha selecionada do menu (a que começa com `› /`), só o nome do comando.
  * EST-0974 — o menu está ABAIXO do composer; o input digitado (`› /mem`) também casa
- * `› /`. Procuramos só DEPOIS do cabeçalho do menu (`/ para comandos`), onde moram os
+ * `› /`. Procuramos só DEPOIS do cabeçalho do menu (`digite para buscar`), onde moram os
  * itens — assim a linha do composer (acima do cabeçalho) não é confundida com a seleção. */
 function selectedCommand(s: { lastFrame: () => string }): string | null {
   const frame = plain(s.lastFrame());

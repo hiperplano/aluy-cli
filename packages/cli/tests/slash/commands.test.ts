@@ -54,7 +54,7 @@ describe('routeInput', () => {
     if (r.kind === 'command') {
       expect(r.command.id).toBe('agents');
       expect(r.command.source).toBe('native');
-      expect(r.command.section).toBe('workspace');
+      expect(r.command.section).toBe('extensões');
     }
   });
 
@@ -73,7 +73,7 @@ describe('routeInput', () => {
     if (r.kind === 'command') {
       expect(r.command.id).toBe('provider');
       expect(r.command.source).toBe('native');
-      expect(r.command.section).toBe('sessão');
+      expect(r.command.section).toBe('modelo');
       expect(r.args).toBe('deepseek');
     }
   });
@@ -176,7 +176,8 @@ describe('filterCommands', () => {
   it('filtra por prefixo incremental', () => {
     const r = filterCommands('lo');
     expect(paths(r)).toEqual(expect.arrayContaining(['login', 'logout']));
-    expect(r.every((e) => entryPath(e).includes('lo'))).toBe(true);
+    // nome que casa vem antes de palavra-chave/descrição (ranking)
+    expect(paths(r).slice(0, 2).sort()).toEqual(['login', 'logout']);
   });
 
   it('EST-1015 — slashMenuVisibleLines = 1 (ajuda) + #entradas + #cabeçalhos de seção', () => {
@@ -319,16 +320,16 @@ describe('filterCommands', () => {
   });
 
   it('/model existe e mostra tier (nunca provider) — presença do comando', () => {
-    expect(NATIVE_COMMANDS.find((c) => c.id === 'model')?.summary).toMatch(/tier|broker/i);
+    expect(NATIVE_COMMANDS.find((c) => c.id === 'model')?.summary).toMatch(/modelo/i);
   });
 
-  it('EST-0960b — /undo e /redo estão no slash-menu (seção workspace)', () => {
+  it('EST-0960b — /undo e /redo estão no slash-menu (seção trabalho)', () => {
     const undo = NATIVE_COMMANDS.find((c) => c.id === 'undo');
     const redo = NATIVE_COMMANDS.find((c) => c.id === 'redo');
     expect(undo?.name).toBe('undo');
     expect(redo?.name).toBe('redo');
-    expect(undo?.section).toBe('workspace');
-    expect(redo?.section).toBe('workspace');
+    expect(undo?.section).toBe('trabalho');
+    expect(redo?.section).toBe('trabalho');
     // roteamento reconhece /undo /redo (não cai em unknown nem em goal).
     expect(routeInput('/undo').kind).toBe('command');
     expect(routeInput('/redo').kind).toBe('command');
@@ -337,7 +338,7 @@ describe('filterCommands', () => {
   it('EST-0972 — /history está no slash-menu (seção sessão) e roteia como comando', () => {
     const history = NATIVE_COMMANDS.find((c) => c.id === 'history');
     expect(history?.name).toBe('history');
-    expect(history?.section).toBe('sessão');
+    expect(history?.section).toBe('conversa');
     expect(history?.summary).toMatch(/retoma|sess(ã|a)o|anterior/i);
     // roteamento reconhece /history e /history <id> (não cai em unknown nem em goal).
     expect(routeInput('/history').kind).toBe('command');
@@ -354,7 +355,7 @@ describe('filterCommands', () => {
   it('EST-0973 — /compact está no slash-menu (seção sessão) e roteia como comando', () => {
     const compact = NATIVE_COMMANDS.find((c) => c.id === 'compact');
     expect(compact?.name).toBe('compact');
-    expect(compact?.section).toBe('sessão');
+    expect(compact?.section).toBe('conversa');
     const r = routeInput('/compact');
     expect(r.kind).toBe('command');
     if (r.kind === 'command') expect(r.command.id).toBe('compact');
@@ -363,7 +364,7 @@ describe('filterCommands', () => {
   it('EST-0981 — /cycle está no slash-menu (seção sessão) e roteia como comando', () => {
     const cycle = NATIVE_COMMANDS.find((c) => c.id === 'cycle');
     expect(cycle?.name).toBe('cycle');
-    expect(cycle?.section).toBe('sessão');
+    expect(cycle?.section).toBe('trabalho');
     const r = routeInput('/cycle 5m "rode os testes"');
     expect(r.kind).toBe('command');
     if (r.kind === 'command') {

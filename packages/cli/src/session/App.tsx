@@ -696,6 +696,13 @@ function safeDim(value: number | undefined, fallback: number): number {
 /** F21 — janela (ms) p/ a sugestão do modelo chegar antes de entrar a heurística. */
 const SUGGEST_MODEL_WINDOW_MS = 2500;
 
+/**
+ * Teto de linhas do `<SlashMenu>` inline. Era 8 (4 comandos úteis de 99); agora o menu usa o
+ * que a região viva deixa (`slashMenuRowCap`, ciente de altura) até este limite — o teto real
+ * continua sendo o orçamento, então telas baixas seguem janelando (↑N/↓N) sem estourar `rows`.
+ */
+export const SLASH_MENU_MAX_ROWS = 18;
+
 export function App(props: AppProps): React.ReactElement {
   const { controller } = props;
   const { exit } = useApp();
@@ -1771,7 +1778,21 @@ export function App(props: AppProps): React.ReactElement {
   const userCommands = props.userCommands ?? [];
   const slashQuery = input.startsWith('/') ? input.slice(1) : '';
   // EST-0989 (i18n) — o slash-menu lista os nativos LOCALIZADOS (summaries no idioma ativo).
-  const slashCommands = filterCommands(slashQuery, userCommands, localizedNatives);
+  // Revisão de menus: contexto de modo (task/approve/deny só no concierge; back só em foco de
+  // sub-agente) + lista padrão sem raros. Os raros seguem buscáveis e executáveis digitados.
+  const menuCtx = {
+    concierge: conciergeOn,
+    subagentFocused: state.meta.focus !== undefined,
+  };
+  const slashCommands = filterCommands(slashQuery, userCommands, localizedNatives, menuCtx);
+  // A dica "ctrl+p" só vale onde o atalho funciona: fora de turno ativo (no trabalho o ramo de
+  // teclas do menu é outro e a paleta não recebe as teclas).
+  const slashPaletteHint = !(
+    state.phase === 'thinking' ||
+    state.phase === 'streaming' ||
+    state.phase === 'retrying' ||
+    (conciergeOn && state.phase === 'asking')
+  );
 
   /**
    * EST-0948 (composer/sessão) — escreve o composer e o cursor de forma COERENTE: ao
@@ -4834,6 +4855,18 @@ export function App(props: AppProps): React.ReactElement {
 
     // ── slash-menu navegação ───────────────────────────────────────────────────
     if (slashOpen) {
+      // Ctrl+P (anunciado na dica do menu): troca o menu pela paleta com a MESMA busca digitada
+      // — `/tema` + ctrl+p abre a paleta já filtrada por "tema". Sem isso o atalho só valia com o
+      // menu FECHADO (a guarda `!slashOpen` lá embaixo) e a dica mentiria.
+      if (key.ctrl && char === 'p') {
+        const q = slashQuery;
+        setSlashOpen(false);
+        setSlashSel(0);
+        setText('');
+        palette.openPalette();
+        if (q !== '') palette.setQuery(q);
+        return;
+      }
       if (key.upArrow) {
         setSlashSel((s) => Math.max(0, s - 1));
         return;
@@ -5743,8 +5776,9 @@ export function App(props: AppProps): React.ReactElement {
               commands={slashCommands}
               selected={slashSel}
               query={slashQuery}
-              maxRows={Math.min(8, slashMenuRowCap)}
+              maxRows={Math.min(SLASH_MENU_MAX_ROWS, slashMenuRowCap)}
               columns={columns}
+              paletteHint={slashPaletteHint}
             />
           </Box>
         )}

@@ -63,7 +63,8 @@ describe('EST-1112 · buildSkillsNote — formatador puro', () => {
     expect(txt).toContain('pdf');
     expect(txt).toContain('global');
     expect(txt).toContain('preenche pdf');
-    expect(txt).toMatch(/invoque por nome com \/skill/);
+    expect(txt).toMatch(/mapeadas/);
+    expect(txt).not.toMatch(/\/skill </);
   });
 
   it('rejeitadas (tabela) com o motivo + dica de conserto', () => {

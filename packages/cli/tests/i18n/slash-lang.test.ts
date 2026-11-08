@@ -10,11 +10,11 @@ import { runLangLinear } from '../../src/session/linear.js';
 import { i18n as makeI18n } from '../../src/i18n/translate.js';
 
 describe('/lang — registro do comando nativo', () => {
-  it('existe no catálogo de nativos, na seção sessão, com summaryKey i18n', () => {
+  it('existe no catálogo de nativos, na seção interface, com summaryKey i18n', () => {
     const lang = NATIVE_COMMANDS.find((c) => c.id === 'lang');
     expect(lang).toBeDefined();
     expect(lang?.name).toBe('lang');
-    expect(lang?.section).toBe('sessão');
+    expect(lang?.section).toBe('interface');
     expect(lang?.summaryKey).toBe('cmd.lang');
   });
 
@@ -84,7 +84,7 @@ describe('localizeCommands — summaries no idioma ativo', () => {
     const out = localizeCommands(NATIVE_COMMANDS, ten);
     expect(out).not.toBe(NATIVE_COMMANDS); // mudou ⇒ ref nova
     expect(out.find((c) => c.id === 'quit')?.summary).toBe('quit aluy');
-    expect(out.find((c) => c.id === 'help')?.summary).toBe('show this list');
+    expect(out.find((c) => c.id === 'help')?.summary).toBe('see commands and shortcuts');
     // `lang` aparece traduzido
     expect(out.find((c) => c.id === 'lang')?.summary).toContain('switch the language');
   });
@@ -94,7 +94,7 @@ describe('localizeCommands — summaries no idioma ativo', () => {
     const out = localizeCommands(NATIVE_COMMANDS, ten);
     // `split`/`agents` não migraram (Fase 2) ⇒ seguem em pt-BR (fallback por omissão)
     const split = out.find((c) => c.id === 'split');
-    if (split) expect(split.summary).toContain('liga/desliga');
+    if (split) expect(split.summary).toContain('painel de log');
   });
 
   // EST-1015 (UX redesign) — o cockpit DEIXOU de ser "experimental" (os gatilhos de

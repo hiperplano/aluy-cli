@@ -118,12 +118,12 @@ open(out, "wb").write(bytes(buf))
 
 const COCKPIT_MARKERS = ['luy', 'conversa|log'];
 // O rótulo de POPOVER (`/menu`, só renderizado no ramo do overlay) + o cabeçalho do
-// SlashMenu (`comandos ·`, exclusivo do menu, não do rodapé) + um comando estável
+// SlashMenu (`para buscar`, exclusivo do menu, não do rodapé) + um comando estável
 // (`/effort`). Esperar por eles garante que a LISTA pintou — não só o hint do rodapé (que
 // muda sem o overlay aparecer). A lista de comandos CRESCEU (/effort, /mcp reconnect/reload)
 // e a janela do menu mostra só o TOPO; `/effort` (alto na lista) é marcador confiável da
 // janela inicial — o antigo `/theme` (fim da lista) caiu pra fora dela.
-const MENU_MARKERS = ['/menu', 'comandos ·'];
+const MENU_MARKERS = ['/menu', 'para buscar'];
 
 async function capture(): Promise<Buffer> {
   const dir = mkdtempSync(join(tmpdir(), 'aluy-ov-'));
@@ -207,12 +207,14 @@ describe.skipIf(!HAS_PY)('FIX #157 — o overlay de `/` PINTA no cockpit (PTY re
     expect(visible.includes('─'), 'sem a régua das regiões — grid corrompido').toBe(true);
     // o POPOVER: rótulo `/menu` sinalizando a sobreposição na região da conversa.
     expect(visible.includes('/menu'), 'sem o rótulo de popover `/menu` no cockpit').toBe(true);
-    // a LISTA do SlashMenu de fato pintou: o cabeçalho do MENU (`comandos ·`) é EXCLUSIVO do
+    // a LISTA do SlashMenu de fato pintou: o cabeçalho do MENU (`para buscar`) é EXCLUSIVO do
     // SlashMenu (não existe no rodapé), então sua presença JÁ prova que a lista do menu
     // renderizou — não só o hint do rodapé. (Antes havia um marcador de comando específico
     // `/theme`, mas a lista de comandos cresceu — /effort, /mcp reconnect/reload — e cravar
     // um comando do fim da lista virou brittle; o cabeçalho é o sinal robusto e imutável.)
-    expect(visible.includes('comandos ·'), 'sem o cabeçalho do SlashMenu no alt-screen').toBe(true);
+    expect(visible.includes('para buscar'), 'sem o cabeçalho do SlashMenu no alt-screen').toBe(
+      true,
+    );
     // o grid NÃO refluiu: a régua/rótulo do LOG segue presente (a soma das regiões == rows).
     expect(
       visible.toLowerCase().includes('log'),

@@ -50,10 +50,10 @@ describe('Esc no menu `/`', () => {
     await sleep(40);
     s.stdin.write('/');
     await sleep(80);
-    expect(plain(s.lastFrame())).toContain('para comandos');
+    expect(plain(s.lastFrame())).toContain('para buscar');
     s.stdin.write(ESC);
     await sleep(120);
-    expect(plain(s.lastFrame())).not.toContain('para comandos');
+    expect(plain(s.lastFrame())).not.toContain('para buscar');
     expect(composerLine(s.lastFrame())).toContain('digite um objetivo'); // vazio: placeholder
     s.unmount();
   });
@@ -65,7 +65,7 @@ describe('Esc no menu `/`', () => {
     await sleep(80);
     s.stdin.write(ESC);
     await sleep(120);
-    expect(plain(s.lastFrame())).not.toContain('para comandos');
+    expect(plain(s.lastFrame())).not.toContain('para buscar');
     expect(composerLine(s.lastFrame())).toContain('/mod');
     s.unmount();
   });

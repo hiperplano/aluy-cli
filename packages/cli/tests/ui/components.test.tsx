@@ -994,7 +994,7 @@ describe('SlashMenu — lista filtrável (CA-3)', () => {
     const out = lastFrame() ?? '';
     expect(out).toContain('/help');
     expect(out).toContain('/model');
-    expect(out).toContain('+ '); // prefixo do selecionado (a11y)
+    expect(out).toContain('› '); // prefixo do selecionado (a11y)
   });
   it('comando do usuário aparece sob a régua "seus comandos" (§2.15)', () => {
     const { lastFrame } = wrap(
@@ -1015,12 +1015,12 @@ describe('SlashMenu — lista filtrável (CA-3)', () => {
     expect(out).toContain('/login');
     expect(out).toContain('/logout');
   });
-  it('seções agrupam os nativos (conta/sessão/workspace)', () => {
+  it('seções agrupam os nativos (conversa/interface/modelo/trabalho/extensões/conta)', () => {
     const { lastFrame } = wrap(<SlashMenu commands={menuEntries()} selected={0} />);
     const out = lastFrame() ?? '';
-    expect(out).toContain('conta');
-    expect(out).toContain('sessão');
-    expect(out).toContain('workspace');
+    for (const sec of ['conversa', 'interface', 'modelo', 'trabalho', 'extensões', 'conta']) {
+      expect(out).toContain(`── ${sec}`);
+    }
   });
 
   // EST-0974 — o menu MOSTRA os subcomandos achatados (`/mcp search`, `/mcp add`, …).
@@ -1056,17 +1056,17 @@ describe('SlashMenu — lista filtrável (CA-3)', () => {
     );
     expect(plain(lastFrame() ?? '')).toMatchInlineSnapshot(`
       "╭─────────────────────────────────────────────────────────────────────────────────────────────────╮
-      │ / para comandos · ↑↓ navega · enter executa · esc fecha                                         │
-      │ ── workspace                                                                                    │
-      │ › /mcp               lista/gerencia servers MCP (add/remove/disable/enable · search <termo>)    │
-      │     /mcp search        busca no registro oficial aberto                                         │
-      │     /mcp add           adiciona um server local (stdio)                                         │
-      │     /mcp list          lista os servers de todas as fontes                                      │
-      │     /mcp remove        remove um server gerenciado pelo aluy                                    │
-      │     /mcp disable       desativa um server sem desinstalar                                       │
-      │     /mcp enable        reativa um server desativado                                             │
-      │     /mcp reconnect     re-sobe + re-handshake os servers (recupera "Not connected")             │
-      │     /mcp reload        re-lê o ~/.aluy/mcp.json + reconecta (aplica edições da config)          │
+      │ digite para buscar · ↑↓ navega · enter executa · esc fecha                                      │
+      │ ── extensões                                                                                    │
+      │ › /mcp               gerenciar servidores MCP                                                   │
+      │     /mcp search        buscar no registro oficial                                               │
+      │     /mcp add           adicionar um servidor local (stdio)                                      │
+      │     /mcp list          listar os servidores de todas as fontes                                  │
+      │     /mcp remove        remover um servidor gerenciado pelo aluy                                 │
+      │     /mcp disable       desativar um servidor sem desinstalar                                    │
+      │     /mcp enable        reativar um servidor desativado                                          │
+      │     /mcp reconnect     reconectar os servidores (resolve "Not connected")                       │
+      │     /mcp reload        reler a configuração MCP e reconectar                                    │
       ╰─────────────────────────────────────────────────────────────────────────────────────────────────╯"
     `);
   });

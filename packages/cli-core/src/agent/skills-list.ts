@@ -94,19 +94,21 @@ export function buildSkillsNote(input: SkillsListInput): SkillsListNote {
         // F189 — `name` é obrigatório; `description` é opcional (senão usa a 1ª linha das instruções).
         'manifesto: frontmatter com `name` (obrigatório); `description` opcional;',
         'o corpo do SKILL.md são as instruções/capacidade injetadas quando invocada.',
-        'invoque por nome: `/skill <nome>` (injeta as instruções no contexto sob demanda).',
+        'ainda não há comando para invocar uma skill pelo nome; o mapeamento já vale.',
       ],
     };
   }
 
   if (valid.length > 0) {
-    lines.push(`válidas (${valid.length}) — invoque por nome com /skill <nome>:`);
+    lines.push(`válidas (${valid.length}) — mapeadas (ainda sem comando para invocar pelo nome):`);
     const rows = valid.map((s) => [
       s.name,
       s.origin === 'global' ? 'global' : 'projeto',
       skillDescriptionLine(s),
     ]);
-    lines.push(...tableLines(rows, { headers: ['skill', 'escopo', 'sobre'], ...{ maxWidths: [20, 8, 50] } }));
+    lines.push(
+      ...tableLines(rows, { headers: ['skill', 'escopo', 'sobre'], ...{ maxWidths: [20, 8, 50] } }),
+    );
   }
 
   if (rejected.length > 0) {

@@ -5,8 +5,7 @@
 //   • Esc FECHA;
 //   • a palette compartilha o REGISTRO com o slash-menu (comando do usuário
 //     aparece nos dois);
-//   • GATING: Ctrl+P não abre a palette enquanto o slash-menu está aberto
-//     (sem conflito de teclas, como o Tab já é gated).
+//   • Ctrl+P de dentro do menu `/` troca o menu pela palette com a mesma busca.
 
 import React from 'react';
 import { describe, expect, it } from 'vitest';
@@ -140,12 +139,12 @@ describe('App — command palette (Ctrl+P)', () => {
     await flush();
     h.stdin.write(CTRL_P);
     await flush();
-    // sem filtro: o 1º item é /help (1º nativo); ↓ vai p/ /login.
+    // sem filtro: o 1º item é /help (1º nativo); ↓ vai p/ /rename (2º da seção conversa).
     h.stdin.write(DOWN);
     await flush();
     h.stdin.write(ENTER);
     await flush();
-    expect(h.commands.map((c) => c.cmd.name)).toContain('login');
+    expect(h.commands.map((c) => c.cmd.name)).toContain('rename');
     h.unmount();
   });
 
@@ -176,16 +175,23 @@ describe('App — command palette (Ctrl+P)', () => {
     h.unmount();
   });
 
-  it('GATING: Ctrl+P NÃO abre a palette enquanto o slash-menu está aberto', async () => {
+  it('o menu `/` anuncia ctrl+p e o atalho FUNCIONA de dentro dele (mantém a busca digitada)', async () => {
     const h = mount();
     await flush();
-    // abre o slash-menu digitando `/`
     h.stdin.write('/');
     await flush();
-    h.stdin.write(CTRL_P); // deve ser ignorado (sem conflito)
+    // a dica só existe porque o atalho vale aqui
+    expect(h.lastFrame()).toContain('ctrl+p tudo');
+    for (const ch of 'tema') h.stdin.write(ch);
     await flush();
-    // a palette NÃO abriu (sua dica própria não aparece)…
-    expect(h.lastFrame()).not.toContain('buscar comando');
+    h.stdin.write(CTRL_P);
+    await flush();
+    const f = h.lastFrame() ?? '';
+    // palette aberta (menu fechou) já filtrada por "tema" ⇒ acha /theme
+    expect(f).toContain('⌘ comandos');
+    expect(f).not.toContain('ctrl+p tudo');
+    expect(f).toContain('/theme');
+    expect(f).toContain('tema');
     h.unmount();
   });
 

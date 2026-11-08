@@ -7,11 +7,11 @@ import type { McpListedServer } from '@hiperplano/aluy-cli-core';
 
 describe('F59 — /tools (inventário unificado)', () => {
   // ── Registro no slash-menu ──────────────────────────────────────────────
-  it('está no NATIVE_COMMANDS com id tools, seção workspace, read-only', () => {
+  it('está no NATIVE_COMMANDS com id tools, seção extensões, read-only', () => {
     const cmd = NATIVE_COMMANDS.find((c) => c.id === 'tools');
     expect(cmd).toBeDefined();
     expect(cmd?.name).toBe('tools');
-    expect(cmd?.section).toBe('workspace');
+    expect(cmd?.section).toBe('extensões');
     expect(cmd?.source).toBe('native');
     // read-only: parallelWhileBusy=true
     expect(cmd?.parallelWhileBusy).toBe(true);
