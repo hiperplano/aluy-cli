@@ -114,7 +114,7 @@ import type {
   EffortChoice,
   LocalProviderEntry,
 } from '@hiperplano/aluy-cli-core';
-import { formatQuota, canRememberTool } from '@hiperplano/aluy-cli-core';
+import { formatQuota, canRememberTool, redactOutputSecrets } from '@hiperplano/aluy-cli-core';
 import { DEFAULT_TIER } from './wiring.js';
 import { tierDisplayName } from '../model/catalog.js';
 import type { SessionController } from './controller.js';
@@ -1596,7 +1596,16 @@ export function App(props: AppProps): React.ReactElement {
   const tarefasNoPlano = [...tarefasRodando, ...tarefasAguardando];
   const tarefaRodando = conciergeTaskAnimates(conciergeOn, tarefasVivas);
   const turnoOcupado = mostraIndicadorTrabalho(state.phase, haFilhoVivo);
-  const soTarefas = !turnoOcupado && tarefasNoPlano.length > 0 && state.quotaPause === undefined;
+  // Relato automático a caminho (janela de agrupamento / dono ocupado / resumo sendo preparado):
+  // a linha de trabalho fica até o resumo começar a sair — senão o composer sobe 1 e desce de novo.
+  const relatoACaminho = conciergeOn && conciergeRt?.reportPending() === true;
+  const relatoDesdeRef = useRef<number | undefined>(undefined);
+  if (relatoACaminho) relatoDesdeRef.current ??= agoraMsDaLinha;
+  else relatoDesdeRef.current = undefined;
+  const soTarefas =
+    !turnoOcupado &&
+    (tarefasNoPlano.length > 0 || relatoACaminho) &&
+    state.quotaPause === undefined;
   const emPausa = state.quotaPause !== undefined;
   // A linha existe: durante o turno OU com tarefa em segundo plano OU na pausa por cota.
   const linhaDeTrabalhoViva = turnoOcupado || soTarefas || emPausa;
@@ -1604,7 +1613,9 @@ export function App(props: AppProps): React.ReactElement {
     ? state.quotaPause!.startedAt
     : turnoOcupado
       ? (state.workingSince ?? agoraMsDaLinha)
-      : Math.min(...tarefasNoPlano.map((t) => t.startedAt), agoraMsDaLinha);
+      : tarefasNoPlano.length > 0
+        ? Math.min(...tarefasNoPlano.map((t) => t.startedAt), agoraMsDaLinha)
+        : (relatoDesdeRef.current ?? agoraMsDaLinha);
   const fraseViva =
     frasesLigadas && linhaDeTrabalhoViva
       ? fraseDaEspera({
@@ -1670,9 +1681,11 @@ export function App(props: AppProps): React.ReactElement {
       : soTarefas || emPausa
         ? `(${
             soTarefas
-              ? tarefasRodando.length === 0
-                ? 'aguardando aprovação · '
-                : `${String(tarefasNoPlano.length)} em segundo plano · `
+              ? tarefasNoPlano.length === 0
+                ? 'preparando o relato · '
+                : tarefasRodando.length === 0
+                  ? 'aguardando aprovação · '
+                  : `${String(tarefasNoPlano.length)} em segundo plano · `
               : 'cota · '
           }${formatSegundos(agoraMsDaLinha - inicioDaEspera)})`
         : undefined;
@@ -1935,12 +1948,21 @@ export function App(props: AppProps): React.ReactElement {
         const ctl = new AbortController();
         suggestAbortRef.current = ctl;
         const ultimoObjetivo = [...state.blocks].reverse().find((b) => b.kind === 'you')?.text;
+        // A fala mais recente do agente (inclui o relato automático do Concierge): sem ela a
+        // sugestão ficava presa ao pedido original ("executa a tarefa" com a tarefa já feita).
+        const ultimaFala = redactOutputSecrets(
+          [...state.blocks].reverse().find((b) => b.kind === 'aluy')?.text ?? '',
+        )
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 400);
         void controller
           .suggestNext(
             {
               lang: activeLang,
               ...(turnRecap !== undefined ? { recap: turnRecap } : {}),
               ...(ultimoObjetivo !== undefined ? { lastGoal: ultimoObjetivo.slice(0, 200) } : {}),
+              ...(ultimaFala !== '' ? { lastReply: ultimaFala } : {}),
             },
             ctl.signal,
           )

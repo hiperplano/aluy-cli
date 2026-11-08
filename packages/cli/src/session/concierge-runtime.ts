@@ -234,6 +234,7 @@ export class ConciergeRuntime {
     this.reported.add(taskId);
     const first = this.reportQueue.length === 0;
     this.reportQueue.push(taskId);
+    this.emitChange();
     const settle = this.d.reportSettleMs ?? 0;
     if (settle <= 0) {
       this.scheduleReports(0);
@@ -250,6 +251,31 @@ export class ConciergeRuntime {
   }
 
   private reportFirstAt = 0;
+
+  /**
+   * Há relato automático a caminho (tarefa terminou e o resumo ainda não começou a sair)? Vale da
+   * hora em que a tarefa entra na fila (janela de agrupamento, dono ocupado) até o relato começar
+   * a fazer stream. A TUI mantém a linha de trabalho nesse intervalo: se ela sumisse, o composer
+   * subia 1 linha e descia de novo quando o resumo começava.
+   */
+  reportPending(): boolean {
+    if (this.reportQueue.length > 0 || this.reportRunning) return true;
+    // A tarefa acabou de terminar mas o relato ainda não entrou na fila (a ordem dos ouvintes do
+    // registro pode pintar o quadro antes): conta como a caminho, por poucos segundos.
+    const now = this.clock();
+    return this.registry
+      .list()
+      .some(
+        (t) =>
+          (t.status === 'done' || t.status === 'failed') &&
+          !this.reported.has(t.id) &&
+          now - (t.endedAt ?? 0) < 5000,
+      );
+  }
+
+  private emitChange(): void {
+    for (const l of [...this.listeners]) l();
+  }
 
   private scheduleReports(delay: number): void {
     if (this.disposed || this.reportTimer !== null || this.reportQueue.length === 0) return;
@@ -276,8 +302,10 @@ export class ConciergeRuntime {
       if (plain.length > 0) await this.autoReply(plain, true);
       if (restricted.length > 0) await this.autoReply(restricted, false);
     };
+    this.emitChange();
     void run().finally(() => {
       this.reportRunning = false;
+      this.emitChange();
       this.scheduleReports(0);
     });
   }

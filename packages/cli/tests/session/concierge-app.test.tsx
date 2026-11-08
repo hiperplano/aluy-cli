@@ -904,6 +904,44 @@ describe('Composer estável durante a fala do Concierge (tela NÃO cheia)', () =
     });
   }
 
+  it('fim da tarefa → relato: a linha de trabalho não some entre o término e o resumo (composer não sobe)', async () => {
+    const g = defer();
+    const s = build({
+      mode: 'concierge',
+      tasks: [taskSession({ iters: () => 'ok', gates: () => g.promise })],
+      reportSettleMs: 500,
+      concierge: (m) =>
+        /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Resumo da tarefa: tudo certo, nada a corrigir por aqui agora.')
+          : text('Iniciei.', startTask()),
+      wordGate: () => sleep(40),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    await sleep(200);
+    const antes = s.frames.length;
+    g.resolve();
+    await waitFor(() => s.frame().includes('Resumo da tarefa'));
+    await waitFor(
+      () =>
+        blocksOf(s.conversation, 'aluy').length === 2 &&
+        (blocksOf(s.conversation, 'aluy')[1] as { streaming?: boolean }).streaming === false,
+    );
+    await sleep(300);
+    // Em NENHUM quadro entre o término e o fim do resumo a linha de trabalho some e volta.
+    const tem: boolean[] = [];
+    for (const f of s.frames.slice(antes)) {
+      const t = plain(f)
+        .split('\n')
+        .some((l) => /^Λ (?!luy)/.test(l.trim()));
+      if (tem[tem.length - 1] !== t) tem.push(t);
+    }
+    const sumiuEVoltou = tem.findIndex((t, i) => i > 0 && t && !tem[i - 1]!);
+    expect(sumiuEVoltou, `presença da linha por quadro: ${tem.join(',')}`).toBe(-1);
+    expect(tem[0], 'a linha já não existia quando a tarefa terminou').toBe(true);
+    s.unmount();
+  });
+
   it('pensando logo depois do `você`: exatamente 1 linha em branco antes da linha de trabalho', async () => {
     const gate = defer();
     const s = build({

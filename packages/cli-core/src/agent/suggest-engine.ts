@@ -56,6 +56,12 @@ export interface SuggestInput {
   readonly recap?: string;
   /** O último objetivo que o dono pediu, já curto e saneado pelo chamador. */
   readonly lastGoal?: string;
+  /**
+   * A ÚLTIMA fala do agente (inclusive o relato automático de uma tarefa que acabou de terminar),
+   * já curta e redigida pelo chamador. Sem ela a sugestão olhava só o pedido original e propunha
+   * "executa a tarefa" depois de a tarefa já ter sido feita e relatada.
+   */
+  readonly lastReply?: string;
   /** Idioma da sessão — a resposta sai nele (texto livre não passa pelo i18n). */
   readonly lang: string;
 }
@@ -69,6 +75,7 @@ const INSTRUCAO_PT = [
   'Você sugere o PRÓXIMO PEDIDO que a pessoa faria a um agente de terminal.',
   'Responda com UMA frase curta, no imperativo, como se fosse a pessoa falando com o agente.',
   'Sem aspas, sem markdown, sem explicação, sem alternativas — só a frase.',
+  'A fala MAIS RECENTE do agente vale mais que o pedido original: se ela diz que algo já foi feito ou concluído, NÃO sugira fazê-lo de novo.',
   'Se não houver um próximo passo óbvio, responda exatamente: NADA',
 ].join(' ');
 
@@ -76,6 +83,7 @@ const INSTRUCAO_EN = [
   'You suggest the NEXT REQUEST a person would make to a terminal agent.',
   'Answer with ONE short imperative sentence, as if the person were talking to the agent.',
   'No quotes, no markdown, no explanation, no alternatives — just the sentence.',
+  "The agent's MOST RECENT message outranks the original request: if it says something is already done, do NOT suggest doing it again.",
   'If there is no obvious next step, answer exactly: NADA',
 ].join(' ');
 
@@ -88,6 +96,10 @@ export function buildSuggestMessages(input: SuggestInput): readonly ChatMessage[
   const contexto: string[] = [];
   if (input.lastGoal) contexto.push(`${en ? 'They asked' : 'A pessoa pediu'}: ${input.lastGoal}`);
   if (input.recap) contexto.push(`${en ? 'The agent did' : 'O agente fez'}: ${input.recap}`);
+  if (input.lastReply)
+    contexto.push(
+      `${en ? 'The agent last said' : 'O agente disse por último'}: ${input.lastReply}`,
+    );
   if (contexto.length === 0) return [];
   return [
     { role: 'system', content: en ? INSTRUCAO_EN : INSTRUCAO_PT },
@@ -117,7 +129,10 @@ export function sanitizeSuggestion(raw: string | undefined): string | undefined 
   s = primeira;
   // Marcador de lista (`- `, `1. `, `• `) e aspas/crases envolventes.
   s = s.replace(/^([-*•]|\d+[.)])\s+/, '').trim();
-  s = s.replace(/^["'`«]+/, '').replace(/["'`»]+$/, '').trim();
+  s = s
+    .replace(/^["'`«]+/, '')
+    .replace(/["'`»]+$/, '')
+    .trim();
   if (s === '') return undefined;
   // O "sem próximo passo" combinado no prompt — em qualquer caixa, com ou sem pontuação.
   if (/^nada[.!]?$/i.test(s)) return undefined;

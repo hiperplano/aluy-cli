@@ -6274,7 +6274,12 @@ export class SessionController {
   }
 
   async suggestNext(
-    input: { readonly recap?: string; readonly lastGoal?: string; readonly lang: string },
+    input: {
+      readonly recap?: string;
+      readonly lastGoal?: string;
+      readonly lastReply?: string;
+      readonly lang: string;
+    },
     signal?: AbortSignal,
   ): Promise<string | undefined> {
     if (this.sideQueryModel === undefined) return undefined;

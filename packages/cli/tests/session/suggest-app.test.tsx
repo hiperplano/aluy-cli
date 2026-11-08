@@ -235,6 +235,27 @@ describe('F197 · App — sugestão de próximo prompt (ghost + Tab)', () => {
     }
   });
 
+  it('a chamada do modelo leva a ÚLTIMA fala do agente (o relato mais recente), não só o pedido', async () => {
+    const vistos: string[] = [];
+    const sideQueryModel: ModelCaller = {
+      call: async (args) => {
+        vistos.push(JSON.stringify((args as { messages: unknown }).messages));
+        return { request_id: 'r', content: 'NADA', finish_reason: 'stop' } as ModelCallResult;
+      },
+    };
+    const { controller, lastFrame, unmount } = mountApp({ sideQueryModel });
+    try {
+      await waitFor(() => plain(lastFrame()).includes(PLACEHOLDER));
+      await runTurn(controller, 'corrige os bugs do calc.py');
+      await waitFor(() => vistos.length > 0, 3000);
+      expect(vistos[0]).toContain('corrige os bugs do calc.py');
+      expect(vistos[0]).toContain('O agente disse por último');
+      expect(vistos[0]).toContain('pronto.');
+    } finally {
+      unmount();
+    }
+  });
+
   it('F21: modelo que chega DEPOIS da janela NÃO troca o ghost já mostrado (estável no turno)', async () => {
     const sideQueryModel: ModelCaller = {
       call: async () => {
