@@ -14,12 +14,17 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.193] — 2026-11-08
+
 ### Adicionado
 
 - 🔎 **Menu `/` mais útil.** Mostra até 18 comandos quando há espaço (eram 4 de 99) e busca pelo nome, pelo apelido (`/view`, `/cockpit`, `/a`, `/n`), pela descrição e por palavras em português: `/tema`, `/sair`, `/parar`, `/senha`, `/resumir`… Nome exato e prefixo vêm primeiro. A dica anuncia `ctrl+p`, que agora também funciona de dentro do menu (abre a paleta com a mesma busca).
 - 🗂️ **Seções novas:** conversa, interface, modelo, trabalho, extensões e conta. Os raros (`/rooms`, `/service`, `/upgrade`, `/window`, `/telegram`, `/agents`, `/skills`, `/redo`) saem da lista padrão, mas seguem buscáveis e funcionando; `/task`, `/approve` e `/deny` só aparecem no concierge, `/ask` no clássico e `/back` só com um sub-agente em foco.
 - ☰ **Seletores para comandos sem argumento**, na mesma moldura de `/theme` e `/effort`, com o valor atual marcado: `/conversation`, `/notify`, `/statusline`, `/suggest`, `/split`, `/window`, `/clear`, `/telegram`, `/cycle` (com ciclo ativo), `/task` e `/approve`/`/deny` (2+ pedidos). Para listas, "escolha o item e depois a ação", sem decorar id: `/memory`, `/todo`, `/cron`, `/plugin`, `/workflows`, `/service`, `/subagent`, `/rooms`, `/secret`. Cada item roda o mesmo comando que você digitaria; ações destrutivas pedem confirmação. Com argumento, nada muda.
 - `/split on|off` (sem argumento abre o seletor), e `/help all` para incluir os comandos raros.
+- 🎭 **Frases de espera.** Enquanto o aluy trabalha — pensando, rodando uma ferramenta, esperando aprovação ou com tarefas em segundo plano — uma frase divertida gira acima do composer a cada 60 s ("Tomando um cafezinho com o código", "Dando um jeitinho brasileiro"…), com o tempo correndo ao lado. `ALUY_SPINNER_VERBS=plain` volta aos rótulos simples.
+- 🩺 `ALUY_DEBUG_RENDER=1` registra, por quadro, as linhas que o Ink acha que desenhou e as que o terminal realmente ocupou (`~/.aluy/render-debug.log`).
+- 📋 O painel de tarefas mostra até 6 tarefas ao mesmo tempo (aprovação primeiro, depois rodando e na fila); as demais viram `… +N tarefas ocultas`.
 
 ### Alterado
 
@@ -28,6 +33,13 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 - `/statusline`, `/clear` e `/split` sem argumento agora abrem o seletor (antes alternavam ou agiam às cegas). `F2` segue ciclando o rodapé.
 
 ### Corrigido
+
+- 🧘 **O composer não sobe e desce mais durante o trabalho.** Um único respiro acima da linha de trabalho, a troca resposta → frase no mesmo quadro, a frase mantida enquanto uma tarefa espera aprovação e até o relato, e cada render do Ink num único bloco sincronizado. Linhas do rodapé (tarefas, agentes, dicas) nunca quebram, nem ao redimensionar a janela.
+- 🕳️ Sem linhas `┃` vazias depois de uma resposta que abre tarefas, nem linhas em branco após uma tabela cortada.
+- 📋 **Concierge:** pedidos de muitas tarefas em paralelo abrem todas (até 4 rodando, as outras `na fila`); a contagem do rodapé conta todas as encerradas; tarefas que terminam juntas viram um relato só; a resposta não para mais no meio da palavra (aviso se bater no limite); o relato da tarefa chega íntegro, com quebras de linha, e o Λluy não reclama mais de "informação truncada"; a sugestão do composer não repete o que já foi feito.
+- ✅ `/a!` não pede mais aprovação para comandos com `2>/dev/null`; `find … -printf` não é mais redigido como senha.
+- 👻 **A frase de espera não fica mais repetida no histórico.** Avisos escritos direto no terminal (o do `--yolo`, repetido por cada tarefa e sub-agente) deslocavam a tela e deixavam a linha de trabalho para trás; agora viram uma nota `aviso` na conversa.
+- 💸 Tarefa de pesquisa não abre sub-agentes (o Concierge já paraleliza em tarefas); uma busca simples tinha chegado a milhões de tokens.
 
 - No concierge, `ctrl-t` (anunciado no `/help`) não fazia nada; agora abre e fecha o painel de tarefas. Com só tarefas rodando, o rodapé mostrava a dica de ocioso; agora ensina `F8`, `ctrl-t` e `/task`.
 - A paleta (`ctrl+p`) era desenhada duas vezes; agora uma, e só lista comandos do modo atual, ordenados como o menu.
