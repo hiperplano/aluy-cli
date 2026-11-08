@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TASK_COST_HINT, taskGoalForAgent } from '../../src/concierge/prompt.js';
 import {
   Concierge,
   TaskRegistry,
@@ -644,5 +645,18 @@ describe('Concierge — fila de tarefas: nenhuma é perdida (regressão live: "t
     const r = await concierge.handle('mais quatro');
     expect(registry.list()).toHaveLength(16);
     expect(r.actions.filter((a) => !a.ok)).toHaveLength(2);
+  });
+});
+
+describe('orientação de custo da tarefa — sem fan-out em pesquisa (regressão live: 953k tokens numa busca)', () => {
+  it('delegar exige 3+ partes independentes e pesadas; pesquisa nunca usa sub-agentes; sem fan-out de novo', () => {
+    expect(TASK_COST_HINT).toContain('3 ou mais partes independentes E pesadas');
+    expect(TASK_COST_HINT).toMatch(/PESQUISA.*NUNCA usam sub-agentes/);
+    expect(TASK_COST_HINT).toContain('não faz fan-out de novo');
+  });
+  it('a orientação acompanha o objetivo que o agente da tarefa recebe', () => {
+    const g = taskGoalForAgent('pesquise a assinatura do VW Nivus');
+    expect(g.startsWith('pesquise a assinatura do VW Nivus')).toBe(true);
+    expect(g).toContain('NUNCA usam sub-agentes');
   });
 });

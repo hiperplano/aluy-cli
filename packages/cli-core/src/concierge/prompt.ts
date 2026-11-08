@@ -47,7 +47,7 @@ export function buildConciergePrompt(args: {
  * da tarefa delegou a sub-agentes. Delegar só compensa em trabalho amplo e dividido.
  */
 export const TASK_COST_HINT =
-  '[Orientação do Concierge — custo] Se o trabalho é pequeno (poucos arquivos ou passos), FAÇA você mesmo, direto, sem spawn_agent: ler, editar e rodar os testes custa muito menos do que subir agentes. Delegue a sub-agentes só se for amplo e dividido em partes realmente independentes. NÃO monte plano (update_plan) nem lista de tarefas para trabalho pequeno: vá direto — ler o arquivo, editar, rodar o teste UMA vez e responder. Cada chamada de ferramenta reenvia todo o contexto ao modelo; evite releituras e verificações redundantes.';
+  '[Orientação do Concierge — custo] Se o trabalho é pequeno (poucos arquivos ou passos), FAÇA você mesmo, direto, sem spawn_agent: ler, editar e rodar os testes custa muito menos do que subir agentes. Delegue a sub-agentes SÓ com 3 ou mais partes independentes E pesadas (cada uma já uma tarefa grande). PESQUISA, consulta, busca na web e leitura de informação NUNCA usam sub-agentes: faça você mesmo. O Concierge já paraleliza no nível das TAREFAS — esta tarefa não faz fan-out de novo (uma busca simples custou ~950k tokens por isso). NÃO monte plano (update_plan) nem lista de tarefas para trabalho pequeno: vá direto — ler o arquivo, editar, rodar o teste UMA vez e responder. Cada chamada de ferramenta reenvia todo o contexto ao modelo; evite releituras e verificações redundantes.';
 
 /** O objetivo como o agente da tarefa o recebe: o pedido + a orientação de custo. */
 export function taskGoalForAgent(goal: string): string {

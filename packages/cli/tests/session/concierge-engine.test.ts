@@ -511,7 +511,7 @@ describe('Custo: o agente da tarefa recebe a orientação "faça você mesmo"', 
     expect(sent.startsWith('corrigir o bug do calc.py')).toBe(true);
     expect(sent).toContain('FAÇA você mesmo');
     expect(sent).toContain('sem spawn_agent');
-    expect(sent).toContain('Delegue a sub-agentes só se for amplo');
+    expect(sent).toContain('Delegue a sub-agentes SÓ com 3 ou mais partes independentes E pesadas');
     expect(sent).toContain('NÃO monte plano (update_plan)');
     expect(sent).toContain('rodar o teste UMA vez');
     expect(registry.get('t1')!.goal).toBe('corrigir o bug do calc.py');

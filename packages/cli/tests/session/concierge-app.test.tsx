@@ -1054,6 +1054,53 @@ describe('Composer estável durante a fala do Concierge (tela NÃO cheia)', () =
     s.unmount();
   });
 
+  it('tarefas que delegam a sub-agentes (blocos aninhados que nascem e somem): nunca 2 linhas de trabalho nem linha mais larga que a tela', async () => {
+    const g = defer();
+    const tasks = [1, 2, 3].map(() => taskSession({ iters: () => 'ok', gates: () => g.promise }));
+    const s = build({
+      mode: 'concierge',
+      tasks,
+      statusline: 'compact',
+      concierge: () =>
+        text('Vou paralelizar.', [
+          ...startTask('um'),
+          { id: '2', name: 'task_start', input: { goal: 'dois' } },
+          { id: '3', name: 'task_start', input: { goal: 'tres' } },
+        ]),
+    });
+    await type(s, 'pesquise 3 coisas');
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    const filho = (label: string, status: 'running' | 'done') =>
+      ({
+        label,
+        status,
+        summary: 'bash find "$HOME" -xdev -type f -printf · 9.6k tokens',
+        model: 'herdado (z-ai/glm-5.3-flash)',
+      }) as never;
+    const patch = (c: SessionController, kids: unknown[]): void =>
+      (c as unknown as { patch(p: Record<string, unknown>): void }).patch({
+        blocks: kids.length ? [{ kind: 'subagents', children: kids }] : [],
+      });
+    const antes = s.frames.length;
+    // lotes nascendo e acabando em instantes diferentes
+    patch(tasks[0]!, [filho('a', 'running'), filho('b', 'running')]);
+    await sleep(60);
+    patch(tasks[1]!, [filho('c', 'running'), filho('d', 'running'), filho('e', 'running')]);
+    await sleep(60);
+    patch(tasks[0]!, [filho('a', 'done'), filho('b', 'done')]);
+    await sleep(60);
+    patch(tasks[1]!, []);
+    patch(tasks[2]!, [filho('f', 'running')]);
+    await sleep(120);
+    for (const f of s.frames.slice(antes)) {
+      const ls = plain(f).split('\n');
+      expect(ls.filter((l) => /^Λ (?!luy)/.test(l.trim())).length).toBeLessThanOrEqual(1);
+      for (const l of ls) expect(l.length).toBeLessThanOrEqual(99);
+    }
+    g.resolve();
+    s.unmount();
+  });
+
   it('pensando logo depois do `você`: exatamente 1 linha em branco antes da linha de trabalho', async () => {
     const gate = defer();
     const s = build({
