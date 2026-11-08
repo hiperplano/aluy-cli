@@ -24,6 +24,8 @@ const MAX_EFFECT_LINES = 4;
 /** A partir de quantas tarefas a lista recolhe numa linha só. */
 export const COLLAPSE_AT = 3;
 const MAX_CHILD_ROWS = 3;
+/** Tarefas rodando que mantêm a linha viva mesmo com o painel recolhido. */
+export const MAX_COLLAPSED_LIVE = 2;
 const MAX_EXPANDED_TASKS = 6;
 
 export interface ApprovalRow {
@@ -111,8 +113,18 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
     // só se nem as tarefas couberem vira a linha-resumo.
     if (!i.expanded && list.length > room) list = build(false);
     const collapse = !i.expanded && (!compactOk || list.length > room);
-    if (collapse) rows.push({ kind: 'summary', text: summaryText(tasks) });
-    else {
+    if (collapse) {
+      rows.push({ kind: 'summary', text: summaryText(tasks) });
+      // Sinal de vida: a linha-resumo é texto parado. Com `compact` (ou sem espaço) quem RODA
+      // segue com a sua linha (brilho + atividade + tempo), no máximo MAX_COLLAPSED_LIVE.
+      // `hidden` é o pedido explícito de silêncio: só o resumo.
+      if (i.statusline !== 'hidden') {
+        tasks
+          .filter((t) => t.status === 'running')
+          .slice(0, MAX_COLLAPSED_LIVE)
+          .forEach((t) => rows.push({ kind: 'task', view: i.viewOf(t), selected: false }));
+      }
+    } else {
       rows.push(...list);
       if (i.expanded) {
         rows.push({

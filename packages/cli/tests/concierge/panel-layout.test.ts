@@ -62,9 +62,9 @@ describe('painel de tarefas — hierarquia por TAREFA, agentes aninhados', () =>
     expect(t1.view.status).toBe('running'); // segue vivo (brilho)
   });
 
-  it('nem as tarefas cabem: UMA linha-resumo `3 tarefas · 3 rodando · ↓ ver`', () => {
+  it('nem as tarefas cabem: linha-resumo `3 tarefas · 3 rodando · ↓ ver` + no máx. 2 linhas vivas', () => {
     const rows = buildPanelRows(base([task('t1'), task('t2'), task('t3')], { maxRows: 2 }));
-    expect(rows).toHaveLength(1);
+    expect(rows.map((r) => r.kind)).toEqual(['summary', 'task', 'task']);
     expect(rows[0]).toMatchObject({ kind: 'summary', text: '3 tarefas · 3 rodando · ↓ ver' });
     expect(summaryText([task('t1')], false)).toBe('1 tarefa · 1 rodando');
   });
@@ -89,7 +89,9 @@ describe('painel de tarefas — hierarquia por TAREFA, agentes aninhados', () =>
       'approval', // cabeçalho do pedido (`⚠ t1 pede aprovação`)
       'approval', // o efeito exato
     ]);
-    expect(kinds(base([task('t1')], { statusline: 'compact' }))).toEqual(['summary']);
+    // compact: o resumo + a linha VIVA de quem roda (sinal de vida); hidden: só o resumo.
+    expect(kinds(base([task('t1')], { statusline: 'compact' }))).toEqual(['summary', 'task']);
+    expect(kinds(base([task('t1')], { statusline: 'hidden' }))).toEqual(['summary']);
     expect(kinds(base([], { statusline: 'hidden', approvals: ap }))).toEqual([
       'approval',
       'approval',

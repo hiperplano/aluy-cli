@@ -115,7 +115,7 @@ import type { SessionController } from './controller.js';
 import type { SessionState, SessionBlock } from './model.js';
 import { formatElapsed, queueAtRest } from './model.js';
 import { decideEscAction } from './esc-redirect.js';
-import { animTickEnabled, elapsedTickEnabled } from './tick-policy.js';
+import { animTickEnabled, conciergeTaskAnimates, elapsedTickEnabled } from './tick-policy.js';
 import { splitBlocks } from './render-split.js';
 import {
   aluyNeedsLeadingBlank,
@@ -1575,8 +1575,11 @@ export function App(props: AppProps): React.ReactElement {
               2),
         })
       : undefined;
+  // ADR 0006 — tarefa do Concierge rodando com o controller da TUI em repouso: sem este pulso a
+  // tela ficava parada (brilho e tempo da linha da tarefa não andavam).
+  const tarefaRodando = conciergeTaskAnimates(conciergeOn, conciergeRt?.registry.live() ?? []);
   const phaseAnimates =
-    (animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo }) &&
+    (animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo || tarefaRodando }) &&
       state.quotaPause === undefined) ||
     doctorRunning(state.blocks);
   const frame = useTick({ enabled: theme.animate && phaseAnimates });

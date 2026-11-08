@@ -6,7 +6,11 @@
 // o harness não dispara). A App liga `useTick` EXATAMENTE a estes predicados.
 
 import { describe, expect, it } from 'vitest';
-import { animTickEnabled, elapsedTickEnabled } from '../../src/session/tick-policy.js';
+import {
+  animTickEnabled,
+  conciergeTaskAnimates,
+  elapsedTickEnabled,
+} from '../../src/session/tick-policy.js';
 import type { SessionState } from '../../src/session/model.js';
 
 type Phase = SessionState['phase'];
@@ -135,5 +139,16 @@ describe('tick-policy — ELAPSED de 1s (indicador de atividade): em TODA fase o
     // com sync, ambos ON (animação religada sobre o frame atômico):
     expect(animTickEnabled('streaming', true)).toBe(true);
     expect(elapsedTickEnabled('streaming')).toBe(true);
+  });
+});
+
+describe('ADR 0006 — pulso da tarefa do Concierge', () => {
+  it('só pulsa com tarefa RODANDO no modo concierge', () => {
+    expect(conciergeTaskAnimates(true, [{ status: 'running' }])).toBe(true);
+    expect(conciergeTaskAnimates(true, [{ status: 'waiting_approval' }, { status: 'done' }])).toBe(
+      false,
+    );
+    expect(conciergeTaskAnimates(false, [{ status: 'running' }])).toBe(false);
+    expect(conciergeTaskAnimates(true, [])).toBe(false);
   });
 });
