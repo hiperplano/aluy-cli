@@ -143,7 +143,10 @@ cached_tokens, cache_write_tokens, completion_tokens, reasoning_tokens}` quando 
 - **Frase de espera** (`session/frases-espera.ts`, lista em `working.quips`, 56 frases): gira a cada 4 s na
   linha de trabalho; existe também com tarefa em segundo plano (conversa ociosa) e na pausa por cota. Sem
   rotação com `ALUY_NO_ANIM`; `ALUY_SPINNER_VERBS=plain` volta aos rótulos planos.
-- **Composer**: respiro fixo (1 linha) acima da linha de trabalho; dicas do rodapé, linhas das tarefas e dos
+- **Composer**: o respiro de 1 linha acima da linha de trabalho já era constante (o `paddingBottom` do bloco do
+  aluy com a prévia viva, o `paddingTop` da linha sem ela) — somar os dois dava 2 em branco; mantido o original.
+  Rodapé de agentes (clássico): as linhas do bloco são reservadas no MESMO quadro da tool-line `processando N
+agentes`. Dicas do rodapé, linhas das tarefas e dos
   agentes cortam em vez de quebrar (antes quebravam em 60 colunas e o composer pulava).
 - **Limites conhecidos**: o 1º crescimento do rodapé (bloco de agentes) chega ~50 ms depois da tool-line
   `processando N agentes` — um sobe/desce de 1 linha por instante, uma vez por lote; o menu `/` aberto sobre

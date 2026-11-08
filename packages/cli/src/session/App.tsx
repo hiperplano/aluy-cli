@@ -145,7 +145,7 @@ import {
 import { buildActivityLog, countActivityLines } from './activity-log.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
 import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
-import { linhasDoRodapeAgentes } from './footer-agents-layout.js';
+import { linhasDoRodapeAgentes, rodapeAgentesOverhead } from './footer-agents-layout.js';
 import { buildTranscript } from './export-transcript.js';
 import { clip, statusPt } from '@hiperplano/aluy-cli-core';
 import { truncateToWidth } from '../ui/markdown/table-layout.js';
@@ -5426,6 +5426,16 @@ export function App(props: AppProps): React.ReactElement {
   // participa do render dinâmico. Isso mata o tremor: sem isto, o Ink redesenhava a
   // árvore inteira (incl. todo o histórico) a cada token E a cada frame.
   const { done, live, liveStart } = splitBlocks(state.blocks);
+  // RODAPÉ RESERVADO — a tool-line `processando N agentes` entra no quadro ANTES de o lote existir
+  // (e do bloco de agentes do rodapé, 1+N linhas). Sem reserva a região viva crescia em dois
+  // tempos (tool-line +1 acima do composer, depois o bloco +N+1 abaixo) e o composer fazia
+  // desce/sobe. Reservamos as linhas do bloco no MESMO quadro da tool-line.
+  const spawnEmVoo = live.reduce((n, b) => {
+    if (b.kind !== 'tool' || b.status !== 'running') return n;
+    const m = /^(\d+) agentes?\b/.exec(b.target);
+    return m ? Math.max(n, Number(m[1])) : n;
+  }, 0);
+  const agentesNoRodapeOrcados = Math.max(filhosRodape.length, spawnEmVoo);
 
   // EST-0965 (anti-flicker) — TETO DINÂMICO da prévia de FALA. A região viva precisa
   // caber INTEIRA em `rows-1`, senão o Ink redesenha tudo (header+histórico+viva) a
@@ -5478,7 +5488,7 @@ export function App(props: AppProps): React.ReactElement {
     ...(state.detachedSubagents !== undefined
       ? { detachedSubagents: state.detachedSubagents }
       : {}),
-    agentesNoRodape: filhosRodape.length,
+    agentesNoRodape: agentesNoRodapeOrcados,
     rows,
     live,
     phase: state.phase,
@@ -5498,7 +5508,7 @@ export function App(props: AppProps): React.ReactElement {
     ...(state.detachedSubagents !== undefined
       ? { detachedSubagents: state.detachedSubagents }
       : {}),
-    agentesNoRodape: filhosRodape.length,
+    agentesNoRodape: agentesNoRodapeOrcados,
     rows,
     live,
     phase: state.phase,
@@ -5540,7 +5550,7 @@ export function App(props: AppProps): React.ReactElement {
       ...(state.detachedSubagents !== undefined
         ? { detachedSubagents: state.detachedSubagents }
         : {}),
-      agentesNoRodape: filhosRodape.length,
+      agentesNoRodape: agentesNoRodapeOrcados,
       rows,
       live,
       phase: state.phase,
@@ -6042,9 +6052,11 @@ export function App(props: AppProps): React.ReactElement {
   // (single/side/tabs) — o conteúdo é IDÊNTICO; só o CONTÊINER muda (1 col vs row vs
   // aba). O `maxLines` é o `splitMaxLines` (= `liveMaxLines` em single; orçado p/ as 2
   // colunas em side/tabs), mantendo a região viva em `rows-1` (anti-flicker).
-  // COMPOSER ESTÁVEL — a linha de trabalho tem SEMPRE o respiro de 1 linha acima (com ou sem prévia
-  // de fala viva). Antes ele sumia com a prévia e voltava com a tool-line: a região viva
-  // crescia/encolhia 1 linha a cada virada de fase e o composer dançava.
+  // A linha de trabalho tem SEMPRE 1 linha em branco acima: com a prévia de fala viva ela vem do
+  // `paddingBottom` do bloco do aluy (por isso aqui o padding é 0); sem a prévia (tool-line,
+  // pensando) vem do `paddingTop` da própria linha. Somar os dois dava 2 em branco.
+  const previaDeFalaViva =
+    state.phase === 'streaming' && live.some((b) => b.kind === 'aluy' && b.streaming);
   const telaBaixa =
     stdout?.rows !== undefined && stdout.rows > 0 && stdout.rows <= STATUSLINE_SHORT_ROWS;
   // F17 — nada vivo na coluna do chat (repouso): usado p/ enxugar o respiro em tela baixa.
@@ -6112,7 +6124,7 @@ export function App(props: AppProps): React.ReactElement {
             os agentes ainda trabalhando. Redundante era mostrar os DOIS juntos, não
             mostrar este quando o outro não existe. */}
       {linhaDeTrabalhoViva && (
-        <Box paddingTop={state.blocks.length > 0 ? 1 : 0}>
+        <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
           <Working
             glyph="aluy"
             glyphRole="accent"
@@ -6830,6 +6842,9 @@ export function App(props: AppProps): React.ReactElement {
           fica por ÚLTIMO e cresce para baixo; a statusline não se mexe. Sem linha em branco
           entre os dois. Aprovações pendentes entram nas linhas do painel (nunca somem). */}
       {panelRows.length > 0 && <TaskPanel rows={panelRows} columns={columns} frame={frame} />}
+      {panelRows.length === 0 && filhosRodape.length === 0 && spawnEmVoo > 0 && (
+        <Box height={Math.max(1, rodapeAgentesOverhead(spawnEmVoo, rows) - 1)} />
+      )}
       {panelRows.length === 0 && filhosRodape.length > 0 && (
         <Box paddingLeft={2} flexDirection="column">
           <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>

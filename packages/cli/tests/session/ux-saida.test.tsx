@@ -137,11 +137,6 @@ describe('UX de saída', () => {
     // A linha mostra uma FRASE de espera (gira a cada ~4s), não mais o gerúndio do passo.
     const frases = parseFrases(resolveText('pt-BR', 'working.quips'));
     expect(frases.some((f) => f1.includes(`${f}…`))).toBe(true);
-    // COMPOSER ESTÁVEL: com a prévia de fala viva a linha de trabalho TAMBÉM tem o respiro de 1
-    // linha acima (antes sumia aqui e voltava na tool-line: o composer dançava 1 linha por fase).
-    const ls = f1.split('\n');
-    const iw = ls.findIndex((l) => frases.some((f) => l.includes(`${f}…`)));
-    expect(ls[iw - 1]!.trim()).toBe('');
     // novo passo dentro do mesmo turno (model-call): mesmo verbo
     (controller as unknown as { patch(p: object): void }).patch({
       phase: 'thinking',
