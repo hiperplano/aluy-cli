@@ -151,3 +151,9 @@ agentes`. Dicas do rodapé, linhas das tarefas e dos
 - **Limites conhecidos**: o 1º crescimento do rodapé (bloco de agentes) chega ~50 ms depois da tool-line
   `processando N agentes` — um sobe/desce de 1 linha por instante, uma vez por lote; o menu `/` aberto sobre
   rodapé alto continua empurrando a tela (o composer sobe ao fechar, já documentado acima).
+
+- **Medido ao vivo (tela não cheia, concierge)**: (1) `você` + pensando tinha 2 linhas em branco (o contêiner da
+  região viva e a linha de trabalho pagavam o respiro cada um) — agora um só dono paga; (2) ao fim da fala com
+  tarefa de fundo a linha passava do turno para a tarefa sem a linha em branco de baixo (composer −1): a região
+  viva não é mais "vazia" enquanto há tarefa de fundo; (3) tarefa aguardando aprovação continua "processando"
+  (`aguardando aprovação · Ns`), então a caixa de aprovação não faz a linha sumir e o composer subir 2.

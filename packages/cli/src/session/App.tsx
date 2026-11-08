@@ -1590,9 +1590,13 @@ export function App(props: AppProps): React.ReactElement {
   // Tarefas do Concierge rodando (a conversa pode estar OCIOSA): a linha tem de existir mesmo assim.
   const tarefasVivas = conciergeOn ? (conciergeRt?.registry.live() ?? []) : [];
   const tarefasRodando = tarefasVivas.filter((t) => t.status === 'running');
+  // Tarefa esperando APROVAÇÃO continua "processando" aos olhos do dono: a linha de trabalho
+  // fica (com `aguardando aprovação`) — se sumisse, a caixa de aprovação subia o composer 2 linhas.
+  const tarefasAguardando = tarefasVivas.filter((t) => t.status === 'waiting_approval');
+  const tarefasNoPlano = [...tarefasRodando, ...tarefasAguardando];
   const tarefaRodando = conciergeTaskAnimates(conciergeOn, tarefasVivas);
   const turnoOcupado = mostraIndicadorTrabalho(state.phase, haFilhoVivo);
-  const soTarefas = !turnoOcupado && tarefaRodando && state.quotaPause === undefined;
+  const soTarefas = !turnoOcupado && tarefasNoPlano.length > 0 && state.quotaPause === undefined;
   const emPausa = state.quotaPause !== undefined;
   // A linha existe: durante o turno OU com tarefa em segundo plano OU na pausa por cota.
   const linhaDeTrabalhoViva = turnoOcupado || soTarefas || emPausa;
@@ -1600,7 +1604,7 @@ export function App(props: AppProps): React.ReactElement {
     ? state.quotaPause!.startedAt
     : turnoOcupado
       ? (state.workingSince ?? agoraMsDaLinha)
-      : Math.min(...tarefasRodando.map((t) => t.startedAt), agoraMsDaLinha);
+      : Math.min(...tarefasNoPlano.map((t) => t.startedAt), agoraMsDaLinha);
   const fraseViva =
     frasesLigadas && linhaDeTrabalhoViva
       ? fraseDaEspera({
@@ -1612,10 +1616,11 @@ export function App(props: AppProps): React.ReactElement {
         })
       : undefined;
   // O rótulo funcional (tentando de novo…) segue como está; só o genérico vira frase.
-  const rotuloVivo = rotuloExibido({
-    label: state.workingLabel,
-    verbo: fraseViva ?? state.workingVerb,
-  });
+  const rotuloVivo =
+    rotuloExibido({
+      label: state.workingLabel,
+      verbo: fraseViva ?? state.workingVerb,
+    }) ?? fraseViva;
   const indicadorBruto = workingIndicator({
     count: state.detachedSubagents ?? 0,
     phase: state.phase,
@@ -1664,7 +1669,11 @@ export function App(props: AppProps): React.ReactElement {
         })
       : soTarefas || emPausa
         ? `(${
-            soTarefas ? `${String(tarefasRodando.length)} em segundo plano · ` : 'cota · '
+            soTarefas
+              ? tarefasRodando.length === 0
+                ? 'aguardando aprovação · '
+                : `${String(tarefasNoPlano.length)} em segundo plano · `
+              : 'cota · '
           }${formatSegundos(agoraMsDaLinha - inicioDaEspera)})`
         : undefined;
   // UMA linha, sempre: nunca quebra (quebrar faz o composer pular).
@@ -6256,12 +6265,29 @@ export function App(props: AppProps): React.ReactElement {
     (state.phase === 'idle' || state.phase === 'done') &&
     live.length === 0 &&
     !haFilhoVivo &&
+    // A linha de trabalho de fundo (tarefa rodando / aguardando aprovação) mantém o MESMO respiro
+    // de baixo do turno: sem isso, ao fim da fala o composer subia 1 linha na passagem.
+    !soTarefas &&
     state.quotaPause === undefined;
   // REPOUSO (nada vivo): a resposta que acabou de assentar JÁ fecha com 1 linha em branco
   // (`paddingBottom` do bloco). O contêiner vivo somava mais 2 (topo + base) ⇒ 3 em branco
   // entre a resposta e o composer. Sem região viva ele não paga respiro nenhum: o gap é 1.
   const ultimoFechaEmBranco =
     done.length === 0 || blockEndsWithBlankLine(previousVisibleKind(done, done.length) ?? 'note');
+  // RESPIRO ACIMA DA LINHA DE TRABALHO — exatamente 1 linha em branco entre o que vem antes e ela,
+  // paga por UM só dono: com blocos vivos acima, pela linha (sem prévia) ou pelo bloco da prévia; sem
+  // blocos vivos (pensando logo após o `você`), pelo fim do histórico ou pelo contêiner da região
+  // viva (`paddingTop` abaixo) — a linha só paga se nenhum dos dois pagou (tela baixa).
+  const respiroDaLinhaDeTrabalho: 0 | 1 =
+    state.blocks.length === 0
+      ? 0
+      : live.length > 0
+        ? previaDeFalaViva
+          ? 0
+          : 1
+        : telaBaixa && !ultimoFechaEmBranco
+          ? 1
+          : 0;
   const liveChatColumn = (
     <>
       {/* F-SEM-SAUDACAO (decisão do dono: "eu não pedi essas msgs") — a tela de sessão
@@ -6316,7 +6342,7 @@ export function App(props: AppProps): React.ReactElement {
             os agentes ainda trabalhando. Redundante era mostrar os DOIS juntos, não
             mostrar este quando o outro não existe. */}
       {linhaDeTrabalhoViva && (
-        <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
+        <Box paddingTop={respiroDaLinhaDeTrabalho}>
           <Working
             glyph="aluy"
             glyphRole="accent"

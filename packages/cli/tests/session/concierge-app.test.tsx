@@ -122,6 +122,8 @@ interface BuildOpts {
   statusline?: 'full' | 'compact' | 'hidden';
   ownerBusy?: () => boolean;
   reportSettleMs?: number;
+  /** Segura o modelo ANTES do 1º token (o dono vê só `você` + a linha de trabalho). */
+  preGate?: Promise<void>;
 }
 
 function build(opts: BuildOpts) {
@@ -141,6 +143,7 @@ function build(opts: BuildOpts) {
       const msg = /Mensagem do dono: (.*)$/s.exec(last)?.[1] ?? last;
       conciergeCalls.push(msg);
       const out = opts.concierge(msg);
+      if (opts.preGate) await opts.preGate;
       const sink = conversation.sink;
       sink.onStart?.();
       const words = out.content.split(/(?<= )/);
@@ -852,6 +855,89 @@ describe('Frase de espera: a linha existe com a conversa ociosa e uma tarefa rod
     expect(i).toBeLessThan(linhas.findIndex((l) => l.includes('❯'))); // acima do composer
     g.resolve();
     await waitFor(() => !s.frame().includes('em segundo plano'));
+    s.unmount();
+  });
+});
+
+describe('Composer estável durante a fala do Concierge (tela NÃO cheia)', () => {
+  const composerRows = (frames: readonly string[]): number[] => {
+    const rows: number[] = [];
+    for (const f of frames) {
+      const i = plain(f)
+        .split('\n')
+        .findIndex((l) => /^[┃|]\s*[❯>]/.test(l));
+      if (i >= 0 && rows[rows.length - 1] !== i) rows.push(i);
+    }
+    return rows;
+  };
+
+  for (const comTarefa of [false, true]) {
+    it(`${comTarefa ? 'com' : 'sem'} tarefa em segundo plano: o composer só desce durante o turno e nunca volta a mexer depois de subir`, async () => {
+      const g = defer();
+      const s = build({
+        mode: 'concierge',
+        tasks: comTarefa ? [taskSession({ iters: () => 'ok', gates: () => g.promise })] : [],
+        concierge: () =>
+          comTarefa
+            ? text('Iniciei a tarefa agora mesmo, com bastante cuidado e atenção.', startTask())
+            : text('Certo, já cuidei disso agora mesmo, com bastante cuidado e atenção.'),
+        wordGate: () => sleep(60),
+      });
+      const antes = s.frames.length;
+      await type(s, 'faça');
+      await waitFor(
+        () =>
+          !s.conversation.current.blocks.some(
+            (b) => b.kind === 'aluy' && (b as { streaming?: boolean }).streaming === true,
+          ) && blocksOf(s.conversation, 'aluy').length === 1,
+      );
+      await sleep(400);
+      const rows = composerRows(s.frames.slice(antes));
+      // Sem reversão: depois de descer (fim do turno) nada sobe de novo; com tarefa de fundo a linha
+      // de trabalho passa do turno para a tarefa no MESMO lugar, então nem desce.
+      const iDesce = rows.findIndex((r, i) => i > 0 && r < rows[i - 1]!);
+      if (comTarefa) expect(iDesce, `linhas do composer: ${rows.join(',')}`).toBe(-1);
+      else if (iDesce >= 0)
+        expect(iDesce, `linhas do composer: ${rows.join(',')}`).toBe(rows.length - 1);
+      g.resolve();
+      s.unmount();
+    });
+  }
+
+  it('pensando logo depois do `você`: exatamente 1 linha em branco antes da linha de trabalho', async () => {
+    const gate = defer();
+    const s = build({
+      mode: 'concierge',
+      concierge: () => text('Oi.'),
+      preGate: gate.promise,
+    });
+    await type(s, 'oi');
+    await waitFor(() => /^Λ (?!luy)/m.test(s.frame()));
+    const ls = s.frame().split('\n');
+    const iw = ls.findIndex((l) => /^Λ (?!luy)/.test(l.trim()));
+    expect(ls[iw - 1]!.trim()).toBe('');
+    expect(ls[iw - 2]!.trim(), 'respiro duplicado').not.toBe('');
+    gate.resolve();
+    s.unmount();
+  });
+
+  it('tarefa aguardando aprovação mantém a linha de trabalho (o composer não sobe)', async () => {
+    const g = defer();
+    const s = build({
+      mode: 'concierge',
+      tasks: [taskSession({ iters: () => 'ok', gates: () => g.promise })],
+      concierge: () => text('Iniciei.', startTask()),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.rt.registry.get('t1') !== undefined);
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    s.rt.registry.transition('t1', 'waiting_approval');
+    await waitFor(() => s.frame().includes('aguardando aprovação'));
+    const ls = s.frame().split('\n');
+    const iw = ls.findIndex((l) => /^Λ (?!luy)/.test(l.trim()));
+    expect(iw, 'a linha de trabalho sumiu com a tarefa aguardando aprovação').toBeGreaterThan(0);
+    expect(ls[iw]).toContain('aguardando aprovação');
+    g.resolve();
     s.unmount();
   });
 });
