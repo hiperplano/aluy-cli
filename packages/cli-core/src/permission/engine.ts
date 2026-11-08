@@ -317,6 +317,13 @@ function intersectToolScope(
   return out;
 }
 
+/** Tools de efeito que "aprovar sempre nesta tarefa" pode liberar (só o ask por default). */
+const TASK_ALLOW_ALL_TOOLS: ReadonlySet<string> = new Set([
+  'run_command',
+  'edit_file',
+  'write_file',
+]);
+
 /**
  * A engine concreta. Imutável após construída (a política é dado injetado). Para
  * ligar/desligar `--unsafe` em runtime, crie outra instância (ou use o setter
@@ -357,6 +364,12 @@ export class PolicyPermissionEngine implements PermissionEngine {
   private memoryWrites = 0;
   // ADR aluy-cli 0002 — "sempre permitir" lembrado (ver `PermissionEngineOptions`).
   private readonly rememberedAllow: Set<string>;
+  // ADR 0006 — "aprovar sempre NESTA TAREFA" (Concierge). Vale só para esta instância
+  // (a engine da sessão headless da tarefa), nunca persiste e NÃO é herdado por filhos
+  // (`forSubAgent` cria engine nova). Só converte o `ask` por DEFAULT de
+  // run_command/edit_file/write_file; categorias sempre-ask, hooks e regras de política
+  // do dono seguem valendo (decididos ANTES, em decideEffect).
+  private taskAllowAll = false;
 
   constructor(opts: PermissionEngineOptions = {}) {
     this.policy = opts.policy ?? EMPTY_POLICY;
@@ -815,7 +828,30 @@ export class PolicyPermissionEngine implements PermissionEngine {
     }
 
     // 7) DEFAULT por tool / piso seguro (CLI-SEC-3).
-    return this.defaultFor(call, effect);
+    const dflt = this.defaultFor(call, effect);
+    if (
+      this.taskAllowAll &&
+      dflt.decision === 'ask' &&
+      dflt.category === 'default' &&
+      TASK_ALLOW_ALL_TOOLS.has(call.name)
+    ) {
+      return ok(
+        'allow',
+        `liberado nesta tarefa (aprovar sempre na tarefa): ${dflt.reason}`,
+        'policy:allow',
+        effect,
+      );
+    }
+    return dflt;
+  }
+
+  /** ADR 0006 — liga/desliga "aprovar sempre nesta tarefa" (estado de sessão, nunca persiste). */
+  setTaskAllowAll(on: boolean): void {
+    this.taskAllowAll = on;
+  }
+
+  get taskAllowAllOn(): boolean {
+    return this.taskAllowAll;
   }
 
   /**
