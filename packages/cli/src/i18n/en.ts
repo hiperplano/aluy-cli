@@ -29,6 +29,7 @@ export const en: PartialCatalog = {
   'hints.budget': 'c continue · n end',
   'hints.error': 'r retry · esc cancel',
   'hints.conciergeWork': 'keep talking · esc only clears the draft · F8 stops all · /task',
+  'hints.conciergeTasks': 'enter sends · F8 stops all · ctrl-t task panel · /task',
   'hints.conciergeAsk': '/a approves · /n denies · keep chatting · F8 stops all',
   'hints.workSubagents': 'esc stops the parent · ctrl-b detach · F8 stops all · /help',
   'hints.quotaPause': 'esc cancels the turn · ctrl-c×2 quit',

@@ -41,6 +41,7 @@ import {
   EffortPicker,
   ThemePicker,
   LangPicker,
+  MenuPicker,
   ProviderPicker,
   SecretPrompt,
   HistoryPicker,
@@ -89,6 +90,9 @@ import {
 } from '../ui/hooks/usePermissionsPanel.js';
 import { useThemePicker } from '../ui/hooks/useThemePicker.js';
 import { useLangPicker } from '../ui/hooks/useLangPicker.js';
+import { useMenuPicker, type MenuPick } from '../ui/hooks/useMenuPicker.js';
+import { buildHelpLines } from '../slash/handlers.js';
+import { menuStepFor, type MenuCtx, type MenuDataPort } from '../slash/menu-pickers.js';
 import {
   useProviderPicker,
   ADD_CUSTOM_PROVIDER_SENTINEL,
@@ -647,6 +651,13 @@ export interface AppProps {
   readonly onExportTranscript?: (
     path?: string,
   ) => Promise<{ ok: boolean; path?: string; error?: string }>;
+  /** Modo de `/notify` em vigor (marca o valor atual no seletor). Ausente ⇒ sem marca. */
+  readonly currentNotify?: () => 'all' | 'attention' | 'off';
+  /**
+   * Leitores das listas dos seletores de comando (memória, agendamentos, plugins…). Cada um
+   * ausente ⇒ aquele comando, sem argumento, segue como antes (nota/lista em texto).
+   */
+  readonly menuData?: MenuDataPort;
 }
 
 /** Stub no-op do picker quando o índice/leitor não foi injetado (teste antigo). */
@@ -1399,6 +1410,8 @@ export function App(props: AppProps): React.ReactElement {
   // idioma ativo vem do contexto i18n (injetado pelo ThemeRoot). Espelha o /theme.
   const currentLang: Lang = props.currentLang ?? activeLang;
   const langPicker = useLangPicker({ currentLang });
+  // Seletor genérico dos comandos sem argumento (`/notify`, `/task`, `/memory`…).
+  const menuPicker = useMenuPicker();
 
   // EST-0962 (/provider) — seletor `/provider`: lista os providers CADASTRADOS no broker
   // (`GET /v1/providers`, ADR-0076), marca o ativo. O provider ATIVO é REATIVO: deriva de
@@ -2390,7 +2403,66 @@ export function App(props: AppProps): React.ReactElement {
   );
 
   const runCommand = useCallback(
-    (command: SlashCommand, args: string) => {
+    (command: SlashCommand, args: string, skipMenu = false) => {
+      // Revisão de menus (§6.2): o comando SEM argumento abre um seletor (com o valor atual
+      // marcado) quando há um para ele. Com argumento digitado nada muda — script e usuário
+      // avançado seguem como hoje. `skipMenu` é o próprio seletor rodando o comando.
+      if (!skipMenu && args.trim() === '' && command.source === 'native' && command.id) {
+        const ctx: MenuCtx = {
+          conversation: convMode,
+          conciergeAvailable: props.concierge !== undefined,
+          ...(props.currentNotify !== undefined ? { notify: props.currentNotify() } : {}),
+          statusline: statuslineModeRef.current,
+          suggestionsOn,
+          splitOn: splitView,
+          ...(conciergeOn && props.concierge !== undefined
+            ? {
+                tasks: props.concierge.tasks().map((t) => ({
+                  id: t.id,
+                  goal: t.goal,
+                  statusLabel: statusPt(t.status),
+                  live: t.endedAt === undefined,
+                })),
+                pending: props.concierge
+                  .pendingApprovals()
+                  .map((p) => ({ taskId: p.taskId, summary: p.summary })),
+              }
+            : {}),
+          cycleActive: state.cycleActive === true,
+          data: {
+            ...props.menuData,
+            ...(props.secrets !== undefined
+              ? {
+                  secrets: async () =>
+                    props.secrets!.list().map((x) => ({
+                      id: x.name,
+                      label: x.name,
+                      hint: x.saved ? 'salvo' : 'só nesta sessão',
+                    })),
+                }
+              : {}),
+          },
+        };
+        const step = menuStepFor(command.id, ctx);
+        if (step !== null) {
+          menuPicker.openFor(command, step);
+          return;
+        }
+      }
+      // `/help`: seções do menu, só os comandos do modo atual e os atalhos que valem NELE.
+      // `/help all` (ou `tudo`) inclui os raros. Roteado aqui porque só a App sabe o modo.
+      if (command.id === 'help') {
+        const want = args.trim().toLowerCase();
+        controller.replaceNote(
+          'comandos',
+          buildHelpLines({
+            concierge: conciergeOn,
+            subagentFocused: state.meta.focus !== undefined,
+            all: want === 'all' || want === 'tudo',
+          }),
+        );
+        return;
+      }
       // ADR 0005 — `/secret`: campo mascarado, roteado aqui (nunca vai ao `onCommand`).
       if (command.id === 'secret') {
         runSecretCommand(args);
@@ -2410,6 +2482,9 @@ export function App(props: AppProps): React.ReactElement {
       // (mesmo efeito do Ctrl+L). É UI pura — não toca o turno/contexto; não vai ao
       // onCommand (sem nota redundante do wiring).
       if (command.id === 'split') {
+        // `on`/`off` (o seletor usa) são idempotentes; sem arg continua alternando.
+        const want = args.trim().toLowerCase();
+        if ((want === 'on' && splitView) || (want === 'off' && !splitView)) return;
         toggleSplit();
         return;
       }
@@ -2646,6 +2721,11 @@ export function App(props: AppProps): React.ReactElement {
       // fechar sobre um valor velho (defensivo — este projeto não força exhaustive-deps).
       suggestionsOn,
       runSecretCommand,
+      menuPicker,
+      convMode,
+      conciergeOn,
+      splitView,
+      state.cycleActive,
     ],
   );
 
@@ -3099,6 +3179,7 @@ export function App(props: AppProps): React.ReactElement {
         mcpPicker.open ||
         themePicker.open ||
         langPicker.open ||
+        menuPicker.open ||
         historyPicker.open ||
         rewindPicker.open
       ) {
@@ -3133,6 +3214,7 @@ export function App(props: AppProps): React.ReactElement {
       permPanel,
       themePicker,
       langPicker,
+      menuPicker,
       historyPicker,
       rewindPicker,
       providerPicker,
@@ -3200,6 +3282,7 @@ export function App(props: AppProps): React.ReactElement {
     mcpPicker.open ||
     themePicker.open ||
     langPicker.open ||
+    menuPicker.open ||
     providerPicker.open ||
     historyPicker.open ||
     rewindPicker.open ||
@@ -3261,6 +3344,19 @@ export function App(props: AppProps): React.ReactElement {
     if (drained > 0) setQueue((q) => q.slice(drained));
     // `injectIfPlainText` é memoizado; `atRest`/`queue`/`phase` são os gatilhos reais.
   }, [atRest, queue, state.phase, injectIfPlainText]);
+
+  /** Aplica a escolha do seletor: o MESMO `runCommand` que digitar o comando faria. */
+  const runMenuPick = (pick: MenuPick): void => {
+    if (pick.kind === 'run') {
+      for (const a of pick.args) runCommand(pick.command, a, true);
+      return;
+    }
+    if (pick.kind === 'prefill') {
+      setText(pick.text);
+      setSlashOpen(false);
+      setSlashSel(0);
+    }
+  };
 
   useInput((char, key) => {
     // F5 — FONTE FRESCA: o closure do `useInput` pode estar VELHO quando várias teclas chegam
@@ -3382,6 +3478,34 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
+    // ── seletor genérico dos comandos CAPTURA o foco ───────────────────────────────
+    // Antes dos ramos de trabalho/idle: comandos paralelo-seguros (`/task`, `/cycle`…) abrem
+    // o seletor com a sessão ocupada, e as setas/Enter não podem ir ao type-ahead.
+    if (menuPicker.open) {
+      if (key.ctrl && char === 'c') {
+        menuPicker.close();
+        return;
+      }
+      if (key.upArrow) {
+        menuPicker.move(-1);
+        return;
+      }
+      if (key.downArrow) {
+        menuPicker.move(1);
+        return;
+      }
+      if (key.return || key.tab) {
+        const pick = menuPicker.confirm();
+        if (pick !== null) runMenuPick(pick);
+        return;
+      }
+      if (key.escape) {
+        menuPicker.back();
+        return;
+      }
+      return; // modal: o resto é ignorado
+    }
+
     // F-BG (21/09/2026) — Ctrl+B: SOLTA a tool de shell em execução para segundo plano.
     //
     // O par do ESC/F8, e o oposto deles: aqueles MATAM, este SOLTA. Nasceu do relato do
@@ -3424,6 +3548,18 @@ export function App(props: AppProps): React.ReactElement {
     // composer VAZIO (↓ e as letras são do texto quando há rascunho) e sem menu/picker aberto.
     if (conciergeOn && conciergeRt !== undefined && !slashOpen && !palette.open && !anyPickerOpen) {
       const vis = conciergeRt.visibleTasks();
+      // Ctrl+T (anunciado na dica de tarefas): abre/fecha o painel de tarefas. Sem isso a tecla
+      // do `/help` e do rodapé só existia no modo clássico (lá abre o painel de fluxos).
+      if (key.ctrl && char === 't' && taskDetail === null && vis.length > 0) {
+        if (taskExpanded) {
+          setTaskExpanded(false);
+          setTaskStopArm(null);
+        } else {
+          setTaskExpanded(true);
+          setTaskSel(Math.max(0, vis.length - 1));
+        }
+        return;
+      }
       if (taskDetail !== null) {
         if (key.escape) {
           setTaskDetail(null);
@@ -5362,6 +5498,7 @@ export function App(props: AppProps): React.ReactElement {
     palette.open,
     subAgentsRunning(rawState.blocks),
     conciergeOn,
+    conciergeOn && conciergeRt?.hasLiveTasks() === true,
   );
 
   // EST-0965 — INDICADOR DE ATIVIDADE (elapsed). Enquanto OCUPADO, o relógio do turno
@@ -5651,6 +5788,7 @@ export function App(props: AppProps): React.ReactElement {
     mcpPicker.open ||
     themePicker.open ||
     langPicker.open ||
+    menuPicker.open ||
     providerPicker.open ||
     historyPicker.open ||
     rewindPicker.open ||
@@ -5875,6 +6013,16 @@ export function App(props: AppProps): React.ReactElement {
               langs={langPicker.langs}
               selected={langPicker.selected}
               currentLang={currentLang}
+            />
+          </Box>
+        )}
+        {menuPicker.open && menuPicker.step !== null && (
+          <Box flexDirection="column" {...box}>
+            <MenuPicker
+              step={menuPicker.step}
+              selected={menuPicker.selected}
+              nested={menuPicker.depth > 1}
+              maxRows={Math.max(4, Math.min(14, slashMenuRowCap - 2))}
             />
           </Box>
         )}
@@ -7095,6 +7243,7 @@ function hintStateOf(
   paletteOpen: boolean,
   subAgentsLive = false,
   conciergeOn = false,
+  conciergeTasksLive = false,
 ): HintState | null {
   // EST-0961 — a palette é modal: seu hint tem prioridade quando aberta.
   if (paletteOpen) return 'palette';
@@ -7108,6 +7257,10 @@ function hintStateOf(
   )
     return 'concierge-work';
   if (conciergeOn && state.phase === 'asking') return 'concierge-ask';
+  // Concierge em repouso mas com tarefas rodando: a dica de idle (`enter envia · / comandos`) não
+  // dizia como parar nem como ver as tarefas (#7 do relatório de UX).
+  if (conciergeOn && conciergeTasksLive && (state.phase === 'idle' || state.phase === 'done'))
+    return 'concierge-tasks';
   switch (state.phase) {
     // EST-0948 (auto-retry) — durante o backoff (`retrying`) o footer mostra o mesmo
     // hint do `thinking` ("esc para interromper"): esc cancela a re-tentativa.

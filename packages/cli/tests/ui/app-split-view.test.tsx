@@ -195,7 +195,7 @@ describe('App — MODO VIEW AVANÇADO (split CHAT | LOG) — EST-0990', () => {
     unmount();
   });
 
-  it('/split (slash) alterna o split igual ao Ctrl+L', async () => {
+  it('/split on (slash) liga o split igual ao Ctrl+L (sem argumento abre o seletor)', async () => {
     const controller = buildController();
     let persisted: boolean | undefined;
     const { stdin, lastFrame, unmount } = renderApp(controller, {
@@ -205,8 +205,8 @@ describe('App — MODO VIEW AVANÇADO (split CHAT | LOG) — EST-0990', () => {
     });
     await waitFor(() => plain(lastFrame() ?? '').length > 0);
     await pressUntil(
-      () => stdin.write('/split'),
-      () => plain(lastFrame() ?? '').includes('/split'),
+      () => stdin.write('/split on'),
+      () => plain(lastFrame() ?? '').includes('/split on'),
     );
     await pressUntil(
       () => stdin.write('\r'),

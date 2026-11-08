@@ -31,6 +31,7 @@ export const ptBR: FullCatalog = {
   'hints.budget': 'c continua · n encerra',
   'hints.error': 'r tentar · esc cancela',
   'hints.conciergeWork': 'fale à vontade · esc só limpa o rascunho · F8 para tudo · /task',
+  'hints.conciergeTasks': 'enter envia · F8 para tudo · ctrl-t painel de tarefas · /task',
   'hints.conciergeAsk': '/a aprova · /n nega · segue conversando · F8 para tudo',
   'hints.workSubagents': 'esc para o pai · ctrl-b soltar · F8 para tudo · /help',
   'hints.quotaPause': 'esc cancela o turno · ctrl-c×2 sair',

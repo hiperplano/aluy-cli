@@ -811,3 +811,67 @@ describe('Ritmo vertical no Concierge: 1 linha entre blocos, notas coladas, sem 
     s.unmount();
   });
 });
+
+describe('Atalhos anunciados valem no modo em que aparecem (#7)', () => {
+  async function comTarefa() {
+    const g = defer();
+    const task = taskSession({ iters: () => 'ok', gates: () => g.promise });
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      concierge: () => text('Iniciei.', startTask('g')),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('1 tarefa:'));
+    await sleep(300);
+    return { s, g };
+  }
+
+  const notas = (c: SessionController): string =>
+    blocksOf(c, 'note')
+      .map((n) => (n as { lines: string[] }).lines.join('\n'))
+      .join('\n');
+
+  it('só com tarefas rodando (Concierge em repouso) o rodapé ensina F8, ctrl-t e /task', async () => {
+    const { s, g } = await comTarefa();
+    await waitFor(() => s.frame().includes('ctrl-t painel de tarefas'));
+    expect(s.frame()).toContain('F8 para tudo');
+    expect(s.frame()).toContain('/task');
+    expect(s.frame()).not.toContain('ctrl-b'); // não existe no concierge
+    g.resolve();
+    s.unmount();
+  });
+
+  it('ctrl-t (anunciado) abre e fecha o painel de tarefas no concierge', async () => {
+    const { s, g } = await comTarefa();
+    expect(s.frame()).not.toContain('enter detalhes');
+    s.stdin.write('\x14'); // ctrl+t
+    await waitFor(() => s.frame().includes('enter detalhes'));
+    await sleep(300);
+    s.stdin.write('\x14');
+    await waitFor(() => !s.frame().includes('enter detalhes'));
+    g.resolve();
+    s.unmount();
+  });
+
+  it('/help lista os atalhos do modo (concierge: ctrl-t e /task, sem ctrl-b; clássico: o inverso)', async () => {
+    const c = build({ mode: 'concierge', concierge: () => text('ok') });
+    await sleep(100);
+    await type(c, '/help');
+    await waitFor(() => notas(c.conversation).includes('── conversa'));
+    const noteC = notas(c.conversation);
+    expect(noteC).toContain('ctrl-t painel de tarefas');
+    expect(noteC).not.toContain('ctrl-b');
+    expect(noteC).toContain('/task');
+    c.unmount();
+
+    const k = build({ mode: 'classic', concierge: () => text('ok') });
+    await sleep(100);
+    await type(k, '/help');
+    await waitFor(() => notas(k.conversation).includes('── conversa'));
+    const noteK = notas(k.conversation);
+    expect(noteK).toContain('ctrl-b solta');
+    expect(noteK).not.toContain('/task ');
+    k.unmount();
+  });
+});

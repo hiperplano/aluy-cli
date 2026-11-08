@@ -163,7 +163,7 @@ describe('App — `/clear` limpa a TELA (terminal + remonta o Static) — EST-09
     // O wiring guarda o `clearScreen` que a App registra (registerClearScreen) e o
     // dispara quando a sessão zera — exatamente como o run.tsx real.
     let clearScreenFn: (() => void) | null = null;
-    const { stdin, stdout, unmount } = render(
+    const { stdin, stdout, lastFrame, unmount } = render(
       <ThemeProvider theme={theme}>
         <App
           controller={controller}
@@ -187,6 +187,12 @@ describe('App — `/clear` limpa a TELA (terminal + remonta o Static) — EST-09
     // digita `/clear` e dá Enter — o caminho real do composer.
     await pressUntil(
       () => stdin.write('/clear\r'),
+      () => (lastFrame() ?? '').includes('só a conversa'),
+    );
+    // sem argumento o `/clear` abre o seletor; "só a conversa" (1º item) limpa a tela
+    await new Promise((r) => setTimeout(r, 150));
+    await pressUntil(
+      () => stdin.write('\r'),
       () => controller.blocks.length === 0,
     );
 

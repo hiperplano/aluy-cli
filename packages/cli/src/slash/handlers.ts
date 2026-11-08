@@ -33,7 +33,8 @@ import {
 import { runMcpSearch } from '../mcp/registry-search.js';
 import type { SessionController } from '../session/controller.js';
 import { parseNotifyMode, type NotifyMode } from '../io/notify-port.js';
-import { NATIVE_COMMANDS, type NativeCommandId } from './commands.js';
+import { NATIVE_COMMANDS, type NativeCommandId, type SlashCommand } from './commands.js';
+import { SECTION_ORDER, availableIn } from './command-meta.js';
 import { THEMES, resolveThemeName, type ThemeName } from '../ui/theme/themes.js';
 import { tableLines } from '../ui/table-lines.js';
 import { LANGS, resolveLang, t as translate, type Lang } from '../i18n/index.js';
@@ -355,6 +356,54 @@ function abbrev(n: number): string {
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
 }
 
+/** Opções do `/help`. */
+export interface HelpOptions {
+  /** Conversa em modo concierge? (muda os comandos listados e o bloco de atalhos.) */
+  readonly concierge: boolean;
+  /** Sub-agente em foco 1:1? (`/back` só vale aí.) */
+  readonly subagentFocused: boolean;
+  /** `/help all`: inclui também os comandos raros. */
+  readonly all: boolean;
+  readonly commands?: readonly SlashCommand[];
+}
+
+/**
+ * `/help`: os comandos por seção (as MESMAS do menu `/`), só os principais (raros em
+ * `/help all`), só os que valem no modo atual, e os atalhos DO MODO — o bloco de atalhos
+ * antigo anunciava `ctrl-t`/`ctrl-b` do modo clássico também no concierge, onde não valiam.
+ * PURA.
+ */
+export function buildHelpLines(opts: HelpOptions): string[] {
+  const commands = opts.commands ?? NATIVE_COMMANDS;
+  const ctx = { concierge: opts.concierge, subagentFocused: opts.subagentFocused };
+  const visible = commands.filter((c) => availableIn(c, ctx));
+  const shown = visible.filter((c) => opts.all || c.rare !== true);
+  const hidden = visible.length - shown.length;
+  const lines: string[] = ['/ abre o menu com busca (tema, sair, parar…) · ctrl-p busca em tudo', ''];
+  for (const section of SECTION_ORDER) {
+    const inSection = shown.filter((c) => c.section === section);
+    if (inSection.length === 0) continue;
+    lines.push(`── ${section}`);
+    for (const c of inSection) lines.push(`  /${c.name.padEnd(12)} ${c.summary}`);
+  }
+  if (hidden > 0) lines.push('', `mais ${hidden} comandos raros: /help all (todos buscáveis em /)`);
+  lines.push(
+    '',
+    opts.concierge
+      ? 'atalhos: enter envia · esc limpa o rascunho (não para tarefa) · F8 para tudo · ctrl-t painel de tarefas · ctrl-c×2 sai'
+      : 'atalhos: esc interrompe o pai · F8 para tudo · ctrl-t ver/parar sub-agentes · ctrl-b solta o comando/agente em segundo plano · ctrl-c×2 sai',
+    '',
+    // ADR 0003/0005 — o `!` do terminal e o cofre de segredos.
+    '!cmd       roda no terminal (sem pedir permissão) e o agente VÊ a saída',
+    '!!cmd      roda no terminal, só local: o agente NÃO vê a saída',
+    '           (`!cd dir` muda o diretório da sessão; não é interativo — sem teclado/TTY:',
+    '           para ssh/sudo/vim/read rode em outro terminal; `export` não persiste)',
+    '/secret    entrega um segredo SEM digitá-lo no chat: /secret NOME (campo mascarado);',
+    '           o agente só vê o nome e usa $NOME; /secret list · /secret remove NOME',
+  );
+  return lines;
+}
+
 /**
  * Constrói o EFEITO de um slash-command nativo SÍNCRONO. Os comandos que exigem
  * I/O assíncrono (`whoami`/`logout`) devolvem `{kind:'async'}` p/ o runner.
@@ -366,20 +415,7 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
         kind: 'note',
         note: {
           title: 'comandos',
-          lines: [
-            ...NATIVE_COMMANDS.map((c) => `/${c.name.padEnd(12)} ${c.summary}`),
-            '',
-            'atalhos: esc interrompe o pai · F8 para tudo · ctrl-t ver/parar sub-agentes ·',
-            '         ctrl-b solta o comando/agente em segundo plano · ctrl-c×2 sai',
-            '',
-            // ADR 0003/0005 — o `!` do terminal e o cofre de segredos.
-            '!cmd       roda no terminal (sem pedir permissão) e o agente VÊ a saída',
-            '!!cmd      roda no terminal, só local: o agente NÃO vê a saída',
-            '           (`!cd dir` muda o diretório da sessão; não é interativo — sem teclado/TTY:',
-            '           para ssh/sudo/vim/read rode em outro terminal; `export` não persiste)',
-            '/secret    entrega um segredo SEM digitá-lo no chat: /secret NOME (campo mascarado);',
-            '           o agente só vê o nome e usa $NOME; /secret list · /secret remove NOME',
-          ],
+          lines: buildHelpLines({ concierge: false, subagentFocused: false, all: false }),
         },
       };
     case 'model':

@@ -236,10 +236,20 @@ describe('App — os 3 modos', () => {
     await esperar(pronto);
   }
 
-  it('/statusline sem argumento cicla (como o F2)', async () => {
+  it('/statusline sem argumento abre o seletor (o F2 é que cicla); "compacto" aplica compact', async () => {
     const { lastFrame, stdin, onStatuslineChange, unmount } = mount({ statusline: 'full' });
     await esperar(() => plain(lastFrame()).includes('estado'));
-    await digitar(stdin, '/statusline', () => onStatuslineChange.mock.calls.length >= 1);
+    await new Promise((r) => setTimeout(r, 250));
+    stdin.write('/statusline');
+    await new Promise((r) => setTimeout(r, 250));
+    stdin.write('\r');
+    await esperar(() => plain(lastFrame()).includes('1 linha com o essencial'));
+    expect(onStatuslineChange).not.toHaveBeenCalled(); // abrir o seletor não muda nada
+    await new Promise((r) => setTimeout(r, 150));
+    stdin.write('\u001B[B'); // completo (atual) → compacto
+    await new Promise((r) => setTimeout(r, 150));
+    stdin.write('\r');
+    await esperar(() => onStatuslineChange.mock.calls.length >= 1);
     expect(onStatuslineChange.mock.calls[0]?.[0]).toBe('compact');
     unmount();
   });
