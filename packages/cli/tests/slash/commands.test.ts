@@ -775,3 +775,25 @@ describe('ADR-0147 §2 — resolveAgentEffect (single-source de classificação 
     }
   });
 });
+
+describe('ADR 0006 — /a! = /approve always', () => {
+  it('roteia `/a!` e `/a! t2` para approve com o argumento `always`', () => {
+    const a = routeInput('/a!');
+    expect(a).toMatchObject({ kind: 'command', args: 'always' });
+    expect((a as { command: { id: string } }).command.id).toBe('approve');
+    expect(routeInput('/a! t2')).toMatchObject({ kind: 'command', args: 'always t2' });
+    expect(routeInput('/a t2')).toMatchObject({ kind: 'command', args: 't2' });
+  });
+});
+
+describe('ADR 0006 — menu "/" aceita /a! (sem "nenhum comando encontrado")', () => {
+  it('`/a!` não abre o menu (Enter roteia a linha crua e preserva o always)', () => {
+    expect(isSlashMenuQuery('/a!')).toBe(false);
+    expect(isSlashMenuQuery('/a')).toBe(true);
+  });
+  it('filterCommands("a!") devolve /approve primeiro', () => {
+    const r = filterCommands('a!');
+    expect(r.length).toBeGreaterThan(0);
+    expect(entryPath(r[0]!)).toBe('approve');
+  });
+});

@@ -33,6 +33,8 @@ export interface SubAgentChildView {
   readonly model?: string;
   /** F13 — início (epoch ms) do filho vivo: a linha mostra `· 7s` mesmo sem tokens ainda. */
   readonly startedAt?: number;
+  /** ADR 0006 — palavra de estado própria (`aguardando aprovação`, `espera t1`): não é "rodando", então sem brilho. */
+  readonly word?: string;
 }
 
 export interface SubAgentsProps {
@@ -49,10 +51,13 @@ export interface SubAgentsProps {
   readonly settled?: boolean;
   /** Frame do tick central (brilho dos filhos rodando). Ausente ⇒ frame 0. */
   readonly frame?: number;
+  /** Rodapé: sem o respiro de baixo (o painel fica colado ao que vem antes/depois). */
+  readonly flush?: boolean;
 }
 
 /** Palavra do estado (a11y): glifo NUNCA sozinho. `timeout`/`limit` ⇒ palavra honesta. */
 function statusWord(child: SubAgentChildView, settled = false): string {
+  if (child.word !== undefined) return child.word;
   if (child.status === 'running') return settled ? 'em segundo plano' : 'rodando';
   if (child.status === 'done') return 'pronto';
   // EST-0982 — PARADO pelo usuário: cessar≠falha (a11y honesta).
@@ -71,7 +76,7 @@ function statusWord(child: SubAgentChildView, settled = false): string {
 }
 
 /** UMA linha de filho: `  [rust] ◷ rodando` / `  [rust] ✓ pronto · 1.2k tokens · 3 tools`. */
-function ChildLine(props: {
+export function ChildLine(props: {
   readonly child: SubAgentChildView;
   readonly settled?: boolean;
   readonly frame?: number;
@@ -91,7 +96,7 @@ function ChildLine(props: {
       <Glyph name="err" role="danger" />
     );
   // Só quem está RODANDO brilha — `settled` (scrollback) é história, nunca repinta.
-  const viva = c.status === 'running' && props.settled !== true;
+  const viva = c.status === 'running' && c.word === undefined && props.settled !== true;
   const rotulo = `[${c.label}]`;
   const total = rotulo.length + 1 + word.length;
   const wordRole = c.status === 'done' ? 'success' : c.status === 'fail' ? 'danger' : 'fgDim';
@@ -159,7 +164,7 @@ export function SubAgents(props: SubAgentsProps): React.ReactElement {
   const headTail =
     running > 0 ? ` (${running} ${props.settled === true ? 'em segundo plano' : 'rodando'})` : '';
   return (
-    <Box flexDirection="column" paddingLeft={2} paddingBottom={1}>
+    <Box flexDirection="column" paddingLeft={2} paddingBottom={props.flush === true ? 0 : 1}>
       <Box>
         <Glyph name="subagents" role="accent" />
         <Role name="fg">

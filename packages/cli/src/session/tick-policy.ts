@@ -87,3 +87,15 @@ export function elapsedTickEnabled(phase: Phase): boolean {
     phase === 'thinking' || phase === 'streaming' || phase === 'retrying' || phase === 'compacting'
   );
 }
+
+/**
+ * ADR 0006 — o Concierge tem tarefa RODANDO? Com o controller da TUI em repouso (o trabalho
+ * mora em sessões headless), só isto mantém o pulso (brilho + relógio) da linha da tarefa.
+ * Tarefa só aguardando aprovação/pausada/bloqueada não pulsa.
+ */
+export function conciergeTaskAnimates(
+  conciergeOn: boolean,
+  tasks: readonly { readonly status: string }[],
+): boolean {
+  return conciergeOn && tasks.some((t) => t.status === 'running');
+}

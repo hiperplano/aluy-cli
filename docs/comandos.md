@@ -95,13 +95,14 @@ Dentro da sessão, sem sair do fluxo.
 
 ### Instalação e aparência
 
-|                                                                                        |                                           |
-| -------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `/doctor`                                                                              | diagnóstico da instalação                 |
-| `/upgrade`                                                                             | atualiza para a versão mais nova do canal |
-| `/login` · `/logout` · `/whoami`                                                       | conta                                     |
-| `/theme` · `/lang` · `/split` · `/fullscreen` · `/notify` · `/suggest` · `/statusline` | interface                                 |
-| `/help` · `/quit`                                                                      |                                           |
+|                                                                                        |                                                                                            |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `/doctor`                                                                              | diagnóstico da instalação                                                                  |
+| `/upgrade`                                                                             | atualiza para a versão mais nova do canal                                                  |
+| `/login` · `/logout` · `/whoami`                                                       | conta                                                                                      |
+| `/theme` · `/lang` · `/split` · `/fullscreen` · `/notify` · `/suggest` · `/statusline` | interface                                                                                  |
+| `/conversation` · `/task` · `/approve` (`/a`) · `/deny` (`/n`)                         | Concierge: conversa que nunca espera o trabalho — ver [`### /conversation`](#conversation) |
+| `/help` · `/quit`                                                                      |                                                                                            |
 
 ## Atalho de shell: `!` e `!!`
 
@@ -171,6 +172,29 @@ aluy --telegram                     # sobe a ponte junto com a sessão
 Com token e allowlist, a ponte faz long-poll do chat autorizado e o agente responde
 pela tool `telegram_send`. **Sem token no keychain a ponte não sobe** — o boot não
 falha, e nada é enviado para `api.telegram.org`.
+
+### `/conversation`
+
+O **Concierge** (ADR [0006](decisions/0006-concierge-conversa-desacoplada.md)) separa a conversa do
+motor de execução. Cada mensagem sua ganha uma chamada curta ao modelo (prompt de ~1,5k tokens, sem o
+catálogo de ferramentas do agente) que responde **na hora**, mesmo com trabalho rodando; o trabalho em
+si roda em **tarefas** (`t1`, `t2`…), que o Concierge abre (`task_start`), corrige (`task_send`), para
+(`task_stop`) e consulta (`task_status`).
+
+- `/conversation concierge | classic` troca o modo e **persiste** (`conversation` no `config.json`);
+  `--classic` força o clássico só naquela sessão. Neste ramo o padrão é `concierge`.
+- **Esc nunca para tarefa**: limpa o rascunho. Parar é explícito: peça ao Concierge ("pare a t1"),
+  `/task stop <id>` (ou `all`), ou **F8** (para tudo). Ctrl-C duas vezes sai.
+- O trabalho NÃO aparece na conversa: as tarefas moram num **painel abaixo do composer** (uma linha por
+  tarefa, sub-agentes aninhados; com 3 ou mais, `3 tarefas · 2 rodando · ↓ ver`). `↓` expande, `↑↓`
+  escolhe, `enter` abre o detalhe (no inline vira uma nota no histórico; no `/fullscreen`, vista rolável), `ctrl+k` para a tarefa (pede confirmação com um 2º `ctrl+k`). Digitar tira o foco do painel: atalho de letra nunca dispara.
+  A conclusão vira uma linha na conversa (`✔ t1 concluída — …`); `/task show t1` abre o detalhe.
+- No modo clássico, os sub-agentes também saem da conversa e moram nesse rodapé.
+- `/task` lista as tarefas. Aprovações viram uma **caixa de entrada** acima do composer; responda com
+  `/a [tarefa] [s]` (aprova; `s` = sempre nesta sessão) ou `/n [tarefa]` (nega) enquanto a conversa segue.
+- Uma correção entra na tarefa "após o passo atual"; se ela está no meio de uma chamada ao modelo, essa
+  chamada não muda (o Concierge diz isso). Duas tarefas no mesmo arquivo: a segunda espera a primeira.
+- `conciergeModel` (opcional, `config.json`) escolhe outro modelo para o Concierge; por padrão ele usa o da sessão.
 
 ### `/notify`
 

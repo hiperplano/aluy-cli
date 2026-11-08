@@ -75,6 +75,7 @@ export function FooterAgents(props: FooterAgentsProps): React.ReactElement {
     <Box flexDirection="column">
       <SubAgents
         childrenStatus={mostrados}
+        flush
         {...(props.frame !== undefined ? { frame: props.frame } : {})}
       />
       {sobra > 0 && (

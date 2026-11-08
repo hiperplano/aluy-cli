@@ -1,7 +1,7 @@
 // F6 — TYPE-AHEAD sob modais: texto digitado durante o splash, a pergunta de retomar e a
 // caixa de permissão NÃO some. Regra: as teclas de RESPOSTA só respondem como PRIMEIRA tecla
 // (rascunho vazio); com rascunho em curso tudo que é imprimível é texto, Enter é ignorado e
-// Esc apaga o rascunho (não responde).
+// Esc responde 'nova' e MANTÉM o rascunho (vai ao composer); backspace apaga.
 
 import React from 'react';
 import { describe, expect, it } from 'vitest';
@@ -96,13 +96,26 @@ describe('F6 — splash / pergunta de retomar guardam o que foi digitado', () =>
     await sleep(60);
     expect(a.answered()).toBeNull();
     expect(store.get().typed).toBe('on');
-    // Esc apaga o rascunho (não responde)
-    stdin.write('\x1b');
+    // Backspace apaga o rascunho; com ele vazio a 1ª tecla de resposta volta a valer
+    stdin.write('\x7f');
+    stdin.write('\x7f');
     await waitFor(() => store.get().typed === '');
     expect(a.answered()).toBeNull();
-    // agora a 1ª tecla de resposta volta a valer
     stdin.write('n');
     await waitFor(() => a.answered() === false);
+    unmount();
+  });
+
+  it('com pergunta e rascunho: Esc RESPONDE (nova/não) e MANTÉM o texto para o composer', async () => {
+    const store = createSplashStore();
+    const { stdin, unmount } = mountSplash(store);
+    const a = askBoot(store);
+    await sleep(60);
+    stdin.write('corrige o calc.py');
+    await waitFor(() => store.get().typed === 'corrige o calc.py');
+    stdin.write('\x1b');
+    await waitFor(() => a.answered() === false);
+    expect(store.get().typed).toBe('corrige o calc.py');
     unmount();
   });
 });

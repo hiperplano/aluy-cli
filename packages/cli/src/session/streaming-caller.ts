@@ -195,6 +195,11 @@ export interface StreamingModelCallerOptions {
    * puro (baseline — não-regressão). É a MESMA `NativeToolsCapability` do core.
    */
   readonly nativeTools?: NativeToolsCapability;
+  /**
+   * Rastro de uso por request (`ALUY_DEBUG_USAGE`, opt-in): envolve o client vigente. Ausente ⇒
+   * o caller usa o client direto (custo zero).
+   */
+  readonly traceWith?: (client: ModelClient) => ModelClient;
 }
 
 export class StreamingModelCaller implements ModelCaller {
@@ -232,6 +237,16 @@ export class StreamingModelCaller implements ModelCaller {
   private reasoningEffort: string | undefined;
   // EST-1075 · HR-SEC-2 — avisa UMA vez quando o destino headroom é recusado (não-loopback).
   private headroomRefusedWarned = false;
+
+  /** Rastro de uso por request (opt-in, `ALUY_DEBUG_USAGE`): o client envolvido, por identidade. */
+  private traced: { readonly src: ModelClient; readonly wrapped: ModelClient } | undefined;
+  private clientForCall(): ModelClient {
+    const wrap = this.opts.traceWith;
+    if (wrap === undefined) return this.client;
+    if (this.traced?.src !== this.client)
+      this.traced = { src: this.client, wrapped: wrap(this.client) };
+    return this.traced.wrapped;
+  }
 
   /** F-RETRY — config resolvida uma vez no boot (env > config > default). */
   private readonly retryCfg: RetryConfig;
@@ -517,7 +532,7 @@ export class StreamingModelCaller implements ModelCaller {
 
     sink.onStart?.();
 
-    const stream = this.client.stream({
+    const stream = this.clientForCall().stream({
       request: {
         tier: this.currentTier,
         // Via Custom: o slug acompanha o tier. O `buildChatBody` re-trava em

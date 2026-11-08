@@ -191,6 +191,14 @@ const DELEGATION_ALLOW_BY_DEFAULT: ReadonlySet<string> = new Set([
   'report_status',
 ]);
 
+/** ADR 0006 — tools de controle do Concierge (plano de controle, sem efeito próprio). */
+const CONCIERGE_CONTROL_TOOLS: ReadonlySet<string> = new Set([
+  'task_start',
+  'task_send',
+  'task_stop',
+  'task_status',
+]);
+
 /** Tools cujo "sempre permitir" NUNCA pode ser permanente (piso de CLI-SEC-3). */
 export function canRememberTool(tool: string): boolean {
   return tool !== 'run_command' && tool !== 'edit_file' && tool !== 'write_file';
@@ -286,6 +294,11 @@ export interface PermissionEngineOptions {
    * toolScope e o piso de `run_command`/`edit_file`/`write_file` seguem acima/valendo.
    */
   readonly rememberedAllow?: Set<string>;
+  /**
+   * ADR 0006 — fonte do "aprovar sempre nesta tarefa" do PAI (só `forSubAgent` preenche): os
+   * sub-agentes da tarefa herdam a flag AO VIVO (ligar depois de o filho nascer vale).
+   */
+  readonly inheritTaskAllowAll?: () => boolean;
 }
 
 /**
@@ -308,6 +321,14 @@ function intersectToolScope(
   for (const name of child) if (parent.has(name)) out.add(name);
   return out;
 }
+
+/** Tools de efeito que "aprovar sempre nesta tarefa" pode liberar (só o ask por default). */
+const TASK_ALLOW_ALL_TOOLS: ReadonlySet<string> = new Set([
+  'run_command',
+  'run_tests',
+  'edit_file',
+  'write_file',
+]);
 
 /**
  * A engine concreta. Imutável após construída (a política é dado injetado). Para
@@ -349,12 +370,20 @@ export class PolicyPermissionEngine implements PermissionEngine {
   private memoryWrites = 0;
   // ADR aluy-cli 0002 — "sempre permitir" lembrado (ver `PermissionEngineOptions`).
   private readonly rememberedAllow: Set<string>;
+  // ADR 0006 — "aprovar sempre NESTA TAREFA" (Concierge). Vale só para esta instância
+  // (a engine da sessão headless da tarefa), nunca persiste e é herdado AO VIVO pelos sub-agentes da
+  // tarefa (`inheritTaskAllowAll`, só leitura). Só converte o `ask` por DEFAULT de
+  // run_command/edit_file/write_file; categorias sempre-ask, hooks e regras de política
+  // do dono seguem valendo (decididos ANTES, em decideEffect).
+  private taskAllowAll = false;
+  private readonly inheritTaskAllowAll: (() => boolean) | undefined;
 
   constructor(opts: PermissionEngineOptions = {}) {
     this.policy = opts.policy ?? EMPTY_POLICY;
     this.hooks = opts.hooks ?? [];
     this.grants = opts.sessionGrants ?? new SessionGrants();
     this.rememberedAllow = opts.rememberedAllow ?? new Set<string>();
+    this.inheritTaskAllowAll = opts.inheritTaskAllowAll;
     // `mode` explícito VENCE o legado `unsafe:boolean`. Sem nenhum dos dois ⇒
     // `normal` (default seguro). `unsafe:true` (sem `mode`) ⇒ `mode='unsafe'`.
     this.modeValue = opts.mode ?? (opts.unsafe ? 'unsafe' : 'normal');
@@ -401,6 +430,7 @@ export class PolicyPermissionEngine implements PermissionEngine {
       mode: this.modeValue, // herda Plan/normal/unsafe do pai (escopo ⊆ pai)
       sessionGrants: new SessionGrants(), // E-A3: grants ISOLADOS por filho
       rememberedAllow: this.rememberedAllow, // o "lembrar" do dono vale para os filhos também
+      inheritTaskAllowAll: () => this.taskAllowAllOn, // "sempre nesta tarefa" cobre os agentes dela
       denySpawnAgent: true, // E-A1: teto de profundidade
       ...(childScope !== undefined ? { toolScope: childScope } : {}), // GS-MD1: tools ⊆ pai
       ...(roomExemptTools !== undefined ? { roomExemptTools } : {}), // GS-MD8: carve-out sala
@@ -492,6 +522,34 @@ export class PolicyPermissionEngine implements PermissionEngine {
         'deny',
         `tool "${call.name}" fora do toolset declarado do agente (tools ⊆ pai, GS-MD1) — negada na catraca`,
         'policy:deny',
+        effect,
+      );
+    }
+
+    // -1.8) ADR 0006 — FERRAMENTAS DE CONTROLE DO CONCIERGE (`task_*`). Plano de controle
+    //     puro: criar/enviar/parar/consultar TAREFAS não tem efeito próprio no mundo — o
+    //     trabalho que a tarefa faz re-passa por ESTA `decide()` (e o Plan, quando ativo, vale
+    //     dentro dela). Por isso passam também em Plan (senão o Concierge nem conversaria). Um
+    //     sub-agente nunca as tem (profundidade/toolScope). O dono reverte com
+    //     `policy.defaults.task_start = 'ask'`; regra explícita vence.
+    if (CONCIERGE_CONTROL_TOOLS.has(call.name)) {
+      if (this.denySpawnAgent) {
+        return ok(
+          'deny',
+          'tools task_* são só do Concierge (não de sub-agentes)',
+          'policy:deny',
+          effect,
+        );
+      }
+      const rule = evaluatePolicyRules(this.policy, call.name, primaryArg(call));
+      const chosen = rule?.decision ?? this.policy.defaults?.[call.name];
+      if (chosen === 'ask' || chosen === 'deny') {
+        return ok(chosen, `política do usuário (${call.name})`, 'default', effect);
+      }
+      return ok(
+        'allow',
+        `controle do Concierge (${call.name}) — o trabalho passa por decide()`,
+        'default',
         effect,
       );
     }
@@ -779,7 +837,31 @@ export class PolicyPermissionEngine implements PermissionEngine {
     }
 
     // 7) DEFAULT por tool / piso seguro (CLI-SEC-3).
-    return this.defaultFor(call, effect);
+    const dflt = this.defaultFor(call, effect);
+    if (
+      this.taskAllowAllOn &&
+      dflt.decision === 'ask' &&
+      dflt.category === 'default' &&
+      TASK_ALLOW_ALL_TOOLS.has(call.name)
+    ) {
+      return ok(
+        'allow',
+        `liberado nesta tarefa (aprovar sempre na tarefa): ${dflt.reason}`,
+        'policy:allow',
+        effect,
+      );
+    }
+    return dflt;
+  }
+
+  /** ADR 0006 — liga/desliga "aprovar sempre nesta tarefa" (estado de sessão, nunca persiste). */
+  setTaskAllowAll(on: boolean): void {
+    this.taskAllowAll = on;
+  }
+
+  /** Ligada nesta engine OU herdada da engine da tarefa (sub-agentes). */
+  get taskAllowAllOn(): boolean {
+    return this.taskAllowAll || this.inheritTaskAllowAll?.() === true;
   }
 
   /**
@@ -941,12 +1023,12 @@ export class PolicyPermissionEngine implements PermissionEngine {
 
   /** Descreve o efeito EXATO p/ a confirmação (CLI-SEC-9). */
   private describeEffect(call: ToolCall): ToolEffectDescriptor {
-    if (call.name === 'run_command') {
+    if (call.name === 'run_command' || call.name === 'run_tests') {
+      // `run_tests` é a mesma CLASSE de efeito (um comando de shell): mostra `$ <cmd>`, sem
+      // repetir o nome da tool no texto ("run_tests run_tests uv run …").
       const command = strInput(call, 'command');
       const host = networkTargetOf(command);
-      return host
-        ? networkEffect('run_command', command, host)
-        : commandEffect('run_command', command);
+      return host ? networkEffect(call.name, command, host) : commandEffect(call.name, command);
     }
     if (call.name === 'edit_file') {
       // EST-0944 — edit_file é str_replace: a confirmação (CLI-SEC-9) mostra o DIFF
@@ -1064,7 +1146,11 @@ function ruleCategory(decision: PermissionVerdict['decision']): PermissionCatego
 }
 
 /** ADR 0005 — tools cujo comando recebe o env dos segredos de `/secret` (e por isso passam pelo gate). */
-const SECRET_ENV_TOOLS: ReadonlySet<string> = new Set(['run_command', 'watch_command']);
+const SECRET_ENV_TOOLS: ReadonlySet<string> = new Set([
+  'run_command',
+  'watch_command',
+  'run_tests',
+]);
 
 /**
  * Todo o TEXTO do input de uma tool de comando (qualquer campo string, inclusive os aliases

@@ -292,6 +292,9 @@ function appendEolEraseToEachLine(body: string): string {
   return out;
 }
 
+/** Maior encolhimento (em linhas) que a âncora ainda segura com linhas em branco. */
+export const MAX_ANCHOR_PAD = 2;
+
 /**
  * ÂNCORA DO COMPOSER (relato do dono, 16/09: "ainda fica movimentando… ele não fica o composer
  * embaixo", "principalmente quando eu mando um texto") — com a tela CHEIA, o quadro vivo do
@@ -341,6 +344,11 @@ export function createFrameAnchor(getRows: () => number | undefined): {
     const rows = getRows();
     if (rows === undefined || !Number.isFinite(rows) || rows <= 0) return real;
     if (!isFull(rows, Math.max(real, keep) - 1)) return real;
+    // Só segura encolhimentos PEQUENOS (indicador "processando", "↳ encaixando…"): o composer
+    // não pula por 1-2 linhas. Um encolhimento maior (menu `/`, seletor, caixa de aprovação,
+    // painel expandido que recolhe) é SOLTO na hora: segurá-lo deixava um BURACO em branco entre
+    // a conversa e o composer.
+    if (keep - real > MAX_ANCHOR_PAD) return real;
     return Math.max(real, Math.min(rows, keep));
   };
 

@@ -286,7 +286,8 @@ describe('App — divisória SUTIL entre turnos concluídos (EST-0987 3/3)', () 
     const rs = rows(f);
     const yous = rs.map((ln, i) => (/^▌ você$/.test(ln.trimEnd()) ? i : -1)).filter((i) => i >= 0);
     expect(yous).toHaveLength(2);
-    expect(blankRunAbove(rs, yous[1]!)).toBeGreaterThan(blankRunAbove(rs, yous[0]!));
+    // ADR 0006: o respiro entre turnos é UMA linha só (antes eram 3: bloco + divisória vazia + pad).
+    expect(blankRunAbove(rs, yous[1]!)).toBe(1);
     // …e o respiro NÃO é um traço: nem curto, nem régua cheia.
     expect(subtleRules(f)).toHaveLength(0);
     expect(chromeRules(f)).toHaveLength(0);

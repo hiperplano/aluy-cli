@@ -134,3 +134,6 @@ export {
 // ADR 0005 — cofre de segredos da sessão (`/secret`): redação por valor exato + env do shell.
 export * from './secrets/vault.js';
 export { secretsPromptBlock } from './secrets/prompt.js';
+
+// ADR 0006 — Concierge: conversa desacoplada do motor (tarefas, eventos, digest, ferramentas).
+export * from './concierge/index.js';

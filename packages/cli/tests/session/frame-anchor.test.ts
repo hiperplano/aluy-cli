@@ -38,42 +38,51 @@ function anchored(rows = 40) {
 }
 
 describe('createFrameAnchor', () => {
-  it('quadro que ENCOLHE com a tela cheia é completado no topo — a altura fica', () => {
+  it('quadro que ENCOLHE POUCO (≤2 linhas) com a tela cheia é completado no topo — a altura fica', () => {
     const a = anchored();
-    const out = a.transform(erase(11) + frame(4));
-    // apaga as 11 que o log-update conhece, completa 6 em branco, escreve as 4.
+    const out = a.transform(erase(11) + frame(8));
+    // apaga as 11 que o log-update conhece, completa 2 em branco, escreve as 8.
     expect(out.startsWith(erase(11))).toBe(true);
-    expect(padOf(out, 11)).toBe(6);
-    expect(out.endsWith(frame(4))).toBe(true);
+    expect(padOf(out, 11)).toBe(2);
+    expect(out.endsWith(frame(8))).toBe(true);
+  });
+
+  it('encolhimento GRANDE (menu, seletor, aprovação, painel) é solto: sem buraco em branco', () => {
+    const a = anchored();
+    const out = a.transform(erase(11) + frame(4)); // 11 → 5 linhas: > MAX_ANCHOR_PAD
+    expect(out).toBe(erase(11) + frame(4));
+    // e a seguir o quadro novo é tratado como o que está na tela (sem reserva escondida)
+    const next = a.transform(erase(5) + frame(4, 'y'));
+    expect(next).toBe(erase(5) + frame(4, 'y'));
   });
 
   it('o próximo erase apaga também a reserva (o log-update não sabe dela)', () => {
     const a = anchored();
-    a.transform(erase(11) + frame(4)); // na tela: 5 (reais) + 6 (reserva) = 11
-    const out = a.transform(erase(5) + frame(4, 'y'));
+    a.transform(erase(11) + frame(8)); // na tela: 9 (reais) + 2 (reserva) = 11
+    const out = a.transform(erase(9) + frame(8, 'y'));
     expect(out.startsWith(erase(11))).toBe(true);
-    expect(padOf(out, 11)).toBe(6);
+    expect(padOf(out, 11)).toBe(2);
   });
 
   it('conteúdo que CRESCE consome a reserva na mesma escrita (sem salto para baixo)', () => {
     const a = anchored();
-    a.transform(erase(11) + frame(4)); // reserva 6
-    const out = a.transform(erase(5) + frame(8)); // cresce 4: sobra reserva 2
-    expect(padOf(out, 11)).toBe(2);
-    const out2 = a.transform(erase(9) + frame(13)); // cresce além da reserva
+    a.transform(erase(11) + frame(8)); // reserva 2
+    const out = a.transform(erase(9) + frame(9)); // cresce 1: sobra reserva 1
+    expect(padOf(out, 11)).toBe(1);
+    const out2 = a.transform(erase(10) + frame(13)); // cresce além da reserva
     expect(out2.startsWith(erase(11))).toBe(true);
     expect(padOf(out2, 11)).toBe(0);
   });
 
   it('histórico escrito desconta da reserva: o fim do quadro fica no mesmo lugar', () => {
     const a = anchored();
-    a.transform(erase(11) + frame(4)); // na tela: 11 (4 reais + 6 reserva + cursor)
-    const clear = a.transform(erase(5));
+    a.transform(erase(11) + frame(8)); // na tela: 11 (9 reais incl. cursor + 2 reserva)
+    const clear = a.transform(erase(9));
     expect(clear).toBe(erase(11)); // o clear apaga a reserva junto
-    expect(a.transform(frame(3, 'h'))).toBe(frame(3, 'h')); // histórico: passa intacto
-    // 10 linhas ocupadas antes; 3 viraram histórico ⇒ o quadro novo ocupa 7.
-    const out = a.transform(frame(5, 'z'));
-    expect(out).toBe('\n'.repeat(2) + frame(5, 'z'));
+    expect(a.transform(frame(1, 'h'))).toBe(frame(1, 'h')); // histórico: passa intacto
+    // 11 linhas ocupadas antes; 1 virou histórico ⇒ o quadro novo ocupa 10.
+    const out = a.transform(frame(8, 'z'));
+    expect(out).toBe('\n'.repeat(1) + frame(8, 'z'));
   });
 
   it('com a tela AINDA NÃO cheia nada muda (o composer acompanha o conteúdo)', () => {
@@ -89,7 +98,7 @@ describe('createFrameAnchor', () => {
     a.transform(erase(2));
     a.transform(frame(20));
     a.transform(frame(19)); // 19 visíveis (+ cursor = 20)
-    const out = a.transform(erase(20) + frame(2));
+    const out = a.transform(erase(20) + frame(18));
     expect(padOf(out, 20)).toBeLessThanOrEqual(20 - 3);
   });
 
@@ -105,16 +114,16 @@ describe('createFrameAnchor', () => {
 
   it('writes que não são quadro (título da janela, sino) não mexem no estado', () => {
     const a = anchored();
-    a.transform(erase(11) + frame(4));
+    a.transform(erase(11) + frame(8));
     expect(a.transform('\x1b]0;aluy\x07')).toBe('\x1b]0;aluy\x07');
     expect(a.transform('\x07')).toBe('\x07');
-    const out = a.transform(erase(5) + frame(4));
+    const out = a.transform(erase(9) + frame(8));
     expect(out.startsWith(erase(11))).toBe(true);
   });
 
   it('contagem do erase diferente da esperada ⇒ não arrisca: segue o Ink sem reserva', () => {
     const a = anchored();
-    a.transform(erase(11) + frame(4));
+    a.transform(erase(11) + frame(8));
     const out = a.transform(erase(7) + frame(4));
     expect(out).toBe(erase(7) + frame(4));
   });

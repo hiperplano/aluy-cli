@@ -146,7 +146,9 @@ describe('brilho dos sub-agentes sobrevive à mensagem do dono', () => {
       r.rerender(ui());
       await new Promise((x) => setTimeout(x, 20));
       expect(r.lastFrame()).toEqual(a);
-      expect((a ?? '').split('\n').filter((l) => l.includes('[a1]')).length).toBe(1); // só o histórico
+      // O bloco `+ N sub-agentes` NÃO está mais na conversa (ADR 0006 / padronizar os agentes): sem
+      // `liveSubagents` não há cópia no rodapé e nada do lote reaparece como linha animada.
+      expect((a ?? '').split('\n').filter((l) => l.includes('[a1]')).length).toBe(0);
       r.unmount();
     } finally {
       chalk.level = nivel;

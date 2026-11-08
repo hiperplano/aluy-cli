@@ -28,6 +28,8 @@ export const en: PartialCatalog = {
   'hints.palette': 'type to search · ↑↓ navigate · enter run · esc close',
   'hints.budget': 'c continue · n end',
   'hints.error': 'r retry · esc cancel',
+  'hints.conciergeWork': 'keep talking · esc only clears the draft · F8 stops all · /task',
+  'hints.conciergeAsk': '/a approves · /n denies · keep chatting · F8 stops all',
   'hints.workSubagents': 'esc stops the parent · ctrl-b detach · F8 stops all · /help',
   'hints.quotaPause': 'esc cancels the turn · ctrl-c×2 quit',
   'hints.detachInline': 'ctrl-b detach',

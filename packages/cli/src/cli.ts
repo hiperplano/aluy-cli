@@ -216,6 +216,9 @@ export type CliAction =
       // `undefined` quando a flag não veio (cai p/ a pref salva). MAPEIA p/ a pref
       // persistida (o toggle `/fullscreen` em runtime persiste igual). INLINE é o DEFAULT.
       fullscreen?: boolean;
+      // ADR 0006 — `--classic` força a conversa CLÁSSICA (um laço só) nesta sessão, vencendo a
+      // pref `conversation`. Não persiste. `undefined` quando a flag não veio.
+      classic?: boolean;
 
       // EST-1112 · ADR-0119 — BUDGET de sessão no backend LOCAL. `--budget` LIGA,
       // `--no-budget` DESLIGA (vetor booleano COM negativa, diferente de split/fullscreen).
@@ -411,6 +414,9 @@ Opções:
                   ≥100 colunas fica lado-a-lado; 60–99 vira abas (Tab/Ctrl+L alterna);
                   <60 desabilita (1 coluna, com aviso). Toggle em runtime com Ctrl+L
                   ou /split. PERSISTE a escolha (ui.splitView). (--view é alias.)
+  --classic       Conversa CLÁSSICA nesta sessão (um laço só: o que você digita durante o
+                  trabalho vai pra fila/encaixe). O padrão é o Concierge, que responde
+                  na hora sem esperar o trabalho. Persistir: /conversation classic.
   --fullscreen    Liga o MODO COCKPIT (tela cheia, alt-screen): a TUI toma a tela
                   inteira em 6 regiões fixas (header/conversa/log/status/composer/
                   hints), cada uma com scroll próprio (pgup/pgdn · Tab foca). Perde o
@@ -735,6 +741,7 @@ const KNOWN_LONG_FLAGS: ReadonlySet<string> = new Set([
   'device',
   'effort',
   'exec',
+  'classic',
   'fullscreen',
   'help',
   'image',
@@ -1074,6 +1081,8 @@ export function parseArgs(argv: readonly string[]): CliAction {
   // Só LIGA (não há `--no-fullscreen`; sair em sessão é o `/fullscreen`); ausente ⇒
   // `undefined` (o wiring cai na pref `ui.fullscreen`). INLINE é o DEFAULT do ADR.
   const fullscreen = argv.includes('--fullscreen') || argv.includes('--cockpit') ? true : undefined;
+  // ADR 0006 — `--classic` desliga o Concierge só nesta sessão.
+  const classic = argv.includes('--classic') ? true : undefined;
   // EST-1112 · ADR-0119 — `--budget` LIGA o orçamento local (gate de tokens/iterações),
   // `--no-budget` DESLIGA (ilimitado). Diferente de `--split`/`--fullscreen` (que só
   // LIGAM), aqui há vetor booleano COM negativa. Ausente ⇒ `undefined` (cai p/ env >
@@ -1140,10 +1149,7 @@ export function parseArgs(argv: readonly string[]): CliAction {
   // Cada ocorrência vira uma `@<path>` acrescentada ao objetivo (bin/aluy.ts), ANTES
   // do `resolveLinearMentions` — mesmo ramo de imagem do `AttachReader` (não introduz
   // mecanismo paralelo, ADR-0159 §Decisão item 4).
-  const { values: images, valueIndices: imageValueIndices } = repeatableFlagValues(
-    argv,
-    'image',
-  );
+  const { values: images, valueIndices: imageValueIndices } = repeatableFlagValues(argv, 'image');
 
   // ADR-0120 / EST-1113 — `--backend <broker|local>`: seleciona o backend de modelo.
   // Cru aqui (string); o wiring resolve flag>env>config>default broker. Valor inválido
@@ -1473,6 +1479,7 @@ export function parseArgs(argv: readonly string[]): CliAction {
     print, // EST-1007 — modo headless one-shot (`-p`/`--print`/`--exec`).
     ...(split !== undefined ? { split } : {}),
     ...(fullscreen !== undefined ? { fullscreen } : {}),
+    ...(classic !== undefined ? { classic } : {}),
     ...(budget !== undefined ? { budget } : {}),
     ...(goal !== undefined ? { goal } : {}),
     ...(tier !== undefined ? { tier } : {}),

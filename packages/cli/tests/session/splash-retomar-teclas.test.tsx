@@ -127,7 +127,7 @@ describe('oferta de retomada · lista de outras sessões', () => {
 });
 
 describe('oferta de retomada · digitação antecipada', () => {
-  it('com rascunho em curso o Enter NÃO responde à oferta; Esc limpa o rascunho antes de qualquer coisa', async () => {
+  it('com rascunho em curso o Enter NÃO responde à oferta; Esc responde «nova» e MANTÉM o texto', async () => {
     const { m, store, escolha } = montar(tres);
     await wait();
     m.stdin.write('oi');
@@ -137,11 +137,8 @@ describe('oferta de retomada · digitação antecipada', () => {
     await wait();
     expect(store.get().resume).toBeDefined(); // a oferta segue pendente
     m.stdin.write(ESC);
-    await wait();
-    expect(store.get().typed).toBe('');
-    expect(store.get().resume).toBeDefined(); // o 1º Esc só limpou o rascunho
-    m.stdin.write('n');
     await expect(escolha).resolves.toEqual({ kind: 'new' });
+    expect(store.get().typed).toBe('oi'); // o texto vai ao composer da sessão nova
     m.unmount();
   });
 

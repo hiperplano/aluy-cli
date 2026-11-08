@@ -12,11 +12,12 @@
 //
 // Tudo injetável (testes). NÃO toca Ink aqui — o render é em run.tsx.
 
-import type { Quota } from '@hiperplano/aluy-cli-core';
+import type { Quota, ConciergeModel } from '@hiperplano/aluy-cli-core';
 import {
   AgentMemory,
   BrokerModelCaller,
   NativeToolsCapability,
+  CONCIERGE_TOOLS,
   DEFAULT_LIMITS,
   DEFAULT_SUMMARY_MAX_TOKENS,
   MAX_ITERATIONS_CEILING,
@@ -87,7 +88,13 @@ import {
 import { AttachReader } from '../attach/index.js';
 import { TuiAskResolver } from '../ask/ask-resolver.js';
 import { TuiQuestionResolver } from '../ask/question-resolver.js';
-import { StreamingModelCaller, delegatingSink, type HeadroomNotice } from './streaming-caller.js';
+import {
+  StreamingModelCaller,
+  delegatingSink,
+  type HeadroomNotice,
+  type StreamSink,
+} from './streaming-caller.js';
+import { makeUsageTracer, withTraceLabel } from './usage-trace.js';
 import { SessionController } from './controller.js';
 import { HooksConfigStore } from '../io/index.js';
 import { FileRoomStore } from './rooms/file-room-store.js';
@@ -238,6 +245,10 @@ export interface BuildSessionOptions {
    * VENCE o legado `unsafe` se ambos vierem (Plan/normal zeram o unsafe).
    */
   readonly mode?: SessionMode;
+  /** ADR 0006 — tools que a sessão NÃO expõe (sessão de tarefa do Concierge). */
+  readonly excludeTools?: readonly string[];
+  /** Rótulo da sessão no rastro de uso (`ALUY_DEBUG_USAGE`): `main` | `task tN`. */
+  readonly traceLabel?: string;
   /**
    * LEGADO — `--unsafe` como booleano. Equivale a `mode='unsafe'` se `mode`
    * ausente. ⚠ desliga CLI-SEC-3 — revisar com `seguranca`. Default false.
@@ -416,6 +427,8 @@ export interface BuildSessionOptions {
    * EST-0960a — id da sessão (subdir do journal `~/.aluy/undo/<session>/`).
    * Default: um novo id. Injetável p/ teste determinístico.
    */
+  /** ADR 0006 — slug do modelo do Concierge (`conciergeModel` da config); ausente ⇒ o da sessão. */
+  readonly conciergeModel?: string;
   readonly sessionId?: string;
   /**
    * EST-0960a — raiz do `~/.aluy/` (default `<home>/.aluy`). Injetável p/ teste
@@ -564,6 +577,8 @@ export interface BuiltSession {
   readonly controller: SessionController;
   readonly login: LoginService;
   readonly engine: PolicyPermissionEngine;
+  /** ADR 0006 — caller do Concierge (só as 4 tools `task_*`; segue o modelo da sessão). */
+  readonly conciergeModel: ConciergeModel;
   readonly egress: EgressAllowlist;
   readonly workspace: WorkspacePort;
   readonly askResolver: TuiAskResolver;
@@ -1172,6 +1187,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // p/ montar a parte ESTÁTICA da visão do chip.
   let ollamaLigado = false;
   let mem0Ligado = false;
+  // Rastro de uso por request (opt-in, `ALUY_DEBUG_USAGE=<arquivo>`): sem a variável é `undefined`
+  // e NADA é envolvido. Cobre o pai, o Concierge e os sub-agentes (ver `usage-trace.ts`).
+  const tracer = makeUsageTracer(env);
+  const traceLabel = opts.traceLabel ?? 'main';
   const caller = new StreamingModelCaller({
     client: brokerClient,
     tier,
@@ -1207,6 +1226,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // SILÊNCIO (ver `delegatingSink`); agora todo canal do `StreamSink` é encaminhado
     // por construção, e o alvo continua sendo resolvido por chamada (o controller nasce
     // depois deste caller — era essa a razão do `controllerRef?.`).
+    ...(tracer ? { traceWith: (c: ModelClient) => tracer(c, () => traceLabel) } : {}),
     sink: delegatingSink(() => controllerRef?.sink),
     // F-RETRY-VISÍVEL — o caller retenta SOZINHO (laço `decideRetry`), e este aviso era
     // declarado e nunca ligado: a razão da falha morria ali dentro e o dono via só
@@ -1218,10 +1238,11 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // callers secundários abaixo (compactação, /ask, sub-agentes, por-tier, custom) NÃO
   // podem capturar `brokerClient` do boot: delegam, a CADA chamada, ao client VIGENTE do
   // pai — assim um filho herdado fala com o MESMO provider ativo do pai.
-  const liveClient: ModelClient = {
+  const liveClientRaw: ModelClient = {
     stream: (args) => caller.currentClient.stream(args),
     call: (args) => caller.currentClient.call(args),
   };
+  const liveClient: ModelClient = tracer ? tracer(liveClientRaw, () => traceLabel) : liveClientRaw;
 
   // EST-0973 — caller DEDICADO da compactação (`/compact`): NÃO-streaming (o resumo
   // é interno, não vaza tokens na UI como turno) e com TETO próprio (CLI-SEC-8). Vai
@@ -1250,6 +1271,44 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     tierSource: caller,
     maxTokens: 2048,
   });
+
+  // ADR 0006 — caller do CONCIERGE: STREAMING (a resposta aparece token a token no bloco
+  // `Λluy` normal, pelo sink do controller da TUI — que não roda tarefas, só conversa), curto
+  // (max_tokens baixo) e SÓ com as 4 tools `task_*` (plano de controle). Segue o tier/modelo
+  // CORRENTE da sessão (sincronizado a cada chamada) salvo `conciergeModel` (slug Custom).
+  // Mesmo broker/credencial (CLI-SEC-7). Tools não suportadas (422) degradam p/ texto puro.
+  // `quiet`: chamadas internas do Concierge (corretiva) não transmitem texto à tela.
+  let conciergeQuiet = false;
+  const conciergeBase = delegatingSink(() => controllerRef?.sink);
+  const conciergeSink: StreamSink = {
+    ...conciergeBase,
+    onDelta: (c) => {
+      if (!conciergeQuiet) conciergeBase.onDelta(c);
+    },
+    onReasoning: () => {},
+  };
+  const conciergeStream = new StreamingModelCaller({
+    client: liveClient,
+    tier,
+    maxTokens: 700,
+    // Raciocínio do modelo NÃO aparece na resposta do Concierge (só a fala).
+    sink: conciergeSink,
+    ...(tracer ? { traceWith: (c: ModelClient) => tracer(c, () => 'concierge') } : {}),
+    nativeTools: new NativeToolsCapability({ tools: CONCIERGE_TOOLS }),
+  });
+  const conciergeCaller: ConciergeModel = {
+    call: (args) => {
+      const override = opts.conciergeModel?.trim();
+      if (override !== undefined && override !== '') conciergeStream.setTier('custom', override);
+      else conciergeStream.setTier(caller.tier, caller.model);
+      conciergeStream.setProvider(caller.provider);
+      conciergeStream.setClient(caller.currentClient);
+      conciergeQuiet = args.quiet === true;
+      return conciergeStream.call(args).finally(() => {
+        conciergeQuiet = false;
+      });
+    },
+  };
 
   // EST-0969 (display) · CLI-SEC-7 — caller DEDICADO dos SUB-AGENTES (filhos):
   // NÃO-streaming. Vai pelo MESMO broker/credencial do pai (sem 2ª rota de modelo), só
@@ -1606,6 +1665,8 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // degrade no 422 p/ toda a árvore). A pista `tools` reflete EXATAMENTE as tools
     // que o agente pode chamar (HG-2: catálogo, não credencial). Desligável por env.
     disableNativeTools: env.ALUY_NATIVE_TOOLS_OFF === '1' || env.ALUY_NATIVE_TOOLS_OFF === 'true',
+    ...(opts.excludeTools !== undefined ? { excludeTools: opts.excludeTools } : {}),
+    ...(tracer ? { labelChildCaller: withTraceLabel } : {}),
     // EST-0969 (watchdog de TRAVAMENTO) — o env da sessão alimenta os limiares/toggle
     // do watchdog (`ALUY_STUCK_*` / `ALUY_STUCK_OFF`). Ligado por default: quando o
     // agente gira sem avançar, a sessão PAUSA e PEDE DIREÇÃO (não morre no teto).
@@ -1720,6 +1781,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     controller,
     login,
     engine,
+    conciergeModel: conciergeCaller,
     egress,
     workspace,
     askResolver,

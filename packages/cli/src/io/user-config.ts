@@ -90,6 +90,14 @@ export interface UserConfig {
    */
   readonly fullscreen?: boolean;
   /**
+   * ADR 0006 — MODO DE CONVERSA: `concierge` (a conversa nunca espera o trabalho) ou
+   * `classic` (um laço só, fila/encaixe como antes). Persistido por `/conversation`.
+   * Ausente ⇒ `concierge` neste ramo. Precedência: `--classic` > esta pref > default.
+   */
+  readonly conversation?: ConversationMode;
+  /** ADR 0006 — modelo (slug Custom) do Concierge; ausente ⇒ o da sessão. */
+  readonly conciergeModel?: string;
+  /**
    * F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab, estilo "suggested next steps"). Ao
    * fim de um turno, com o composer vazio, a TUI mostra uma sugestão dim do que pedir a
    * seguir; Tab a aceita. É uma OPÇÃO togglável (`/suggest on|off`), default LIGADO
@@ -891,6 +899,8 @@ function sanitize(raw: unknown): UserConfig {
     splitView?: boolean;
     lang?: Lang;
     fullscreen?: boolean;
+    conversation?: ConversationMode;
+    conciergeModel?: string;
     suggestions?: boolean;
     notify?: NotifyMode;
     statusline?: StatuslineMode;
@@ -946,6 +956,11 @@ function sanitize(raw: unknown): UserConfig {
   // EST-1000 · ADR-0076 §1 — fullscreen (cockpit): booleano de UI, MESMA disciplina do
   // splitView. Só sobrevive como boolean genuíno; lixo/ausente ⇒ default INLINE. NUNCA lança.
   if (typeof obj.fullscreen === 'boolean') out.fullscreen = obj.fullscreen;
+  // ADR 0006 — só os 2 modos canônicos sobrevivem (lixo ⇒ descartado ⇒ default).
+  if (obj.conversation === 'concierge' || obj.conversation === 'classic')
+    out.conversation = obj.conversation;
+  if (typeof obj.conciergeModel === 'string' && obj.conciergeModel.trim() !== '')
+    out.conciergeModel = obj.conciergeModel.trim();
   // F197 — suggestions (próximo prompt): booleano de UI, MESMA disciplina do split/
   // fullscreen. Só sobrevive como boolean genuíno; lixo/ausente ⇒ default ON (resolvido
   // em `resolveInitialSuggestions`, não aqui — aqui só preservamos o que foi salvo). NUNCA lança.
@@ -1216,6 +1231,11 @@ export class UserConfigStore {
    */
   saveFullscreen(fullscreen: boolean): boolean {
     return this.save({ fullscreen });
+  }
+
+  /** ADR 0006 — persiste o modo de conversa (`/conversation`), preservando as demais. */
+  saveConversation(conversation: ConversationMode): boolean {
+    return this.save({ conversation });
   }
 
   /**
@@ -1490,6 +1510,22 @@ export function resolveInitialSplitView(flag: boolean | undefined, config: UserC
 export function resolveInitialFullscreen(flag: boolean | undefined, config: UserConfig): boolean {
   if (flag === true) return true;
   return config.fullscreen ?? false;
+}
+
+/** ADR 0006 — modos de conversa. */
+export type ConversationMode = 'concierge' | 'classic';
+
+/**
+ * ADR 0006 — modo de conversa inicial. Precedência: `--classic` (flag) > `conversation`
+ * (pref persistida) > default. O default neste ramo é `concierge` (o dono testa com
+ * `aluy-dev`; o default final é decisão dele). PURO.
+ */
+export function resolveConversationMode(
+  classicFlag: boolean | undefined,
+  config: UserConfig,
+): ConversationMode {
+  if (classicFlag === true) return 'classic';
+  return config.conversation ?? 'concierge';
 }
 
 /** Os 3 modos do rodapé (tudo abaixo do composer). */

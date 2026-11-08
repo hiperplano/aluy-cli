@@ -249,7 +249,7 @@ describe('App — a moldura do composer NÃO colapsa em sessão vazia (EST-0985)
     const rs = rows(frame);
     const yous = rs.map((l, i) => (/^▌ você$/.test(l.trimEnd()) ? i : -1)).filter((i) => i >= 0);
     expect(yous).toHaveLength(2);
-    expect(blankRunAbove(rs, yous[1]!)).toBeGreaterThan(blankRunAbove(rs, yous[0]!));
+    expect(blankRunAbove(rs, yous[1]!)).toBe(1); // ADR 0006: exatamente 1 linha entre turnos
     expect(subtleRules(frame)).toBe(0);
     unmount();
   });

@@ -150,7 +150,11 @@ export function PendingInjects(props: PendingInjectsProps): React.ReactElement |
 
 export interface PendingAsksProps {
   /** `/ask` EM VOO (canal lateral read-only) ainda sem resposta. `{id, question}` — head curto. */
-  readonly items: readonly { readonly id: string; readonly question: string }[];
+  readonly items: readonly {
+    readonly id: string;
+    readonly question: string;
+    readonly concierge?: boolean;
+  }[];
 }
 
 /**
@@ -163,11 +167,16 @@ export interface PendingAsksProps {
 export function PendingAsks(props: PendingAsksProps): React.ReactElement | null {
   const { items } = props;
   if (items.length === 0) return null;
+  const concierge = items.every((a) => a.concierge === true);
   const shown = items.slice(0, VISIBLE_QUEUED);
   const hidden = items.length - shown.length;
   return (
     <Box flexDirection="column">
-      <Role name="depth">{`↗ ${items.length} /ask em paralelo · respondendo (canal lateral, sem parar o trabalho)`}</Role>
+      <Role name="depth">
+        {concierge
+          ? `Λluy · respondendo… (o trabalho segue)`
+          : `↗ ${items.length} /ask em paralelo · respondendo (canal lateral, sem parar o trabalho)`}
+      </Role>
       {shown.map((a) => (
         <Box key={a.id}>
           <Role name="fgDim">{`  ↗ ${elide(a.question)}`}</Role>

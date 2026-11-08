@@ -610,3 +610,41 @@ describe('EST-0944 · ToolRegistry', () => {
     expect(() => new ToolRegistry([readFileTool, readFileTool])).toThrow(/duplicada/);
   });
 });
+
+describe('unifiedDiff — diff de linhas real (LCS): contexto e remoções antes das adições', () => {
+  const OLD =
+    'def soma(a, b):\n    return a - b\n\ndef media(xs):\n    return sum(xs) / (len(xs) - 1)\n';
+  const NEW =
+    'def soma(a, b):\n    """Retorna a soma.\n\n    >>> soma(2, 3)\n    5\n    """\n    return a + b\n\ndef media(xs):\n    """Média aritmética."""\n    return sum(xs) / len(xs)\n';
+
+  it('calc.py: docstrings entram como adições, a linha em branco entre as funções é CONTEXTO', () => {
+    const d = unifiedDiff('calc.py', OLD, NEW, true).split('\n');
+    expect(d.slice(0, 2)).toEqual(['--- calc.py', '+++ calc.py']);
+    expect(d.slice(2)).toEqual([
+      ' def soma(a, b):',
+      '-    return a - b',
+      '+    """Retorna a soma.',
+      '+',
+      '+    >>> soma(2, 3)',
+      '+    5',
+      '+    """',
+      '+    return a + b',
+      ' ',
+      ' def media(xs):',
+      '-    return sum(xs) / (len(xs) - 1)',
+      '+    """Média aritmética."""',
+      '+    return sum(xs) / len(xs)',
+      ' ',
+    ]);
+  });
+
+  it('em cada trecho alterado todas as remoções vêm antes das adições', () => {
+    const body = unifiedDiff('x', 'a\nb\nc\nd\n', 'a\nB\nC\nd\n', true).split('\n').slice(2);
+    expect(body).toEqual([' a', '-b', '-c', '+B', '+C', ' d', ' ']);
+  });
+
+  it('inserção pura não desalinha o que vem depois (o bug do pareamento por índice)', () => {
+    const body = unifiedDiff('x', 'a\nb\nc\n', 'a\nNOVA\nb\nc\n', true).split('\n').slice(2);
+    expect(body).toEqual([' a', '+NOVA', ' b', ' c', ' ']);
+  });
+});
