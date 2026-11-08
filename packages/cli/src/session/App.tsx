@@ -125,7 +125,13 @@ import type { SessionState, SessionBlock } from './model.js';
 import { formatElapsed, queueAtRest } from './model.js';
 import { decideEscAction } from './esc-redirect.js';
 import { animTickEnabled, conciergeTaskAnimates, elapsedTickEnabled } from './tick-policy.js';
-import { splitBlocks } from './render-split.js';
+import {
+  heldReplyIndex,
+  isLiveBlock,
+  lastAluyIndex,
+  splitBlocks,
+  staticReplyIsCurrent,
+} from './render-split.js';
 import {
   aluyNeedsLeadingBlank,
   blockEndsWithBlankLine,
@@ -5702,7 +5708,14 @@ export function App(props: AppProps): React.ReactElement {
   // nem pelo `frame` do tick. Só a região VIVA (turno em streaming + tool running)
   // participa do render dinâmico. Isso mata o tremor: sem isto, o Ink redesenhava a
   // árvore inteira (incl. todo o histórico) a cada token E a cada frame.
-  const { done, live, liveStart } = splitBlocks(state.blocks);
+  const split0 = splitBlocks(state.blocks);
+  // RESPOSTA RETIDA: a última fala do Λluy fica na região viva (cor normal) até a próxima mensagem
+  // ou fala; no cockpit tudo é repintado (a cor vem de `lastAluyIndex`), então não há retenção.
+  const retida = heldReplyIndex(state.blocks, { rows, columns, enabled: !cockpitActive });
+  const liveStart = retida >= 0 ? Math.min(split0.liveStart, retida) : split0.liveStart;
+  const done = retida >= 0 ? state.blocks.slice(0, liveStart) : split0.done;
+  const live = retida >= 0 ? state.blocks.slice(liveStart) : split0.live;
+  const ultimaFalaIdx = lastAluyIndex(state.blocks);
   // RODAPÉ RESERVADO — a tool-line `processando N agentes` entra no quadro ANTES de o lote existir
   // (e do bloco de agentes do rodapé, 1+N linhas). Sem reserva a região viva crescia em dois
   // tempos (tool-line +1 acima do composer, depois o bloco +N+1 abaixo) e o composer fazia
@@ -6375,7 +6388,8 @@ export function App(props: AppProps): React.ReactElement {
   // F17 — nada vivo na coluna do chat (repouso): usado p/ enxugar o respiro em tela baixa.
   const regiaoVivaVazia =
     (state.phase === 'idle' || state.phase === 'done') &&
-    live.length === 0 &&
+    // (a resposta RETIDA é só histórico por ora: não conta como região viva)
+    !live.some(isLiveBlock) &&
     !haFilhoVivo &&
     // A linha de trabalho de fundo (tarefa rodando / aguardando aprovação) mantém o MESMO respiro
     // de baixo do turno: sem isso, ao fim da fala o composer subia 1 linha na passagem.
@@ -6394,7 +6408,9 @@ export function App(props: AppProps): React.ReactElement {
     state.blocks.length === 0
       ? 0
       : live.length > 0
-        ? previaDeFalaViva
+        ? // o último bloco vivo já fecha com a sua linha em branco (prévia da fala, ou a resposta
+          // RETIDA assentada): o respiro é dele, a linha não paga de novo.
+          previaDeFalaViva || blockEndsWithBlankLine(live[live.length - 1]!.kind)
           ? 0
           : 1
         : telaBaixa && !ultimoFechaEmBranco
@@ -6413,7 +6429,11 @@ export function App(props: AppProps): React.ReactElement {
             <BlockView
               key={liveStart + i}
               block={b}
-              isCurrent={liveStart + i === state.blocks.length - 1}
+              isCurrent={
+                b.kind === 'aluy'
+                  ? liveStart + i === ultimaFalaIdx
+                  : liveStart + i === state.blocks.length - 1
+              }
               frame={frame}
               maxLines={splitMaxLines}
               columns={splitLayout === 'side' ? splitRes.chatCols : columns}
@@ -6652,7 +6672,7 @@ export function App(props: AppProps): React.ReactElement {
                   (a fronteira Static×vivo é onde este repo já teve "buraco na tela"). */}
               <BlockView
                 block={block}
-                isCurrent={false}
+                isCurrent={block.kind === 'aluy' && staticReplyIsCurrent(state.blocks, blockIndex)}
                 frame={0}
                 columns={columns}
                 // `you` com divisória: o respiro após `inject` vai ACIMA da divisória (acima), não

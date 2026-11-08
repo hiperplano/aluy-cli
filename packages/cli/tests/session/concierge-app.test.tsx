@@ -7,6 +7,8 @@
 //   • sub-agentes (clássico) saem da conversa e moram no rodapé, com uma linha ao terminar;
 //   • modo clássico inalterado.
 
+import chalk from 'chalk';
+import { heldReplyIndex } from '../../src/session/render-split.js';
 import { parseFrases } from '../../src/session/frases-espera.js';
 import { resolveText } from '../../src/i18n/translate.js';
 import React from 'react';
@@ -1234,6 +1236,150 @@ describe('/classic e /concierge trocam o modo como /conversation', () => {
     await waitFor(() => s.frame().includes('modo concierge'));
     expect(mudou).toEqual(['concierge']);
     s.unmount();
+  });
+});
+
+describe('Resposta mais recente em cor normal; anteriores esmaecem só na próxima mensagem/fala', () => {
+  const sgrAntes = (raw: string, palavra: string): string => {
+    const i = raw.indexOf(palavra);
+    if (i < 0) return '';
+    const m = raw.slice(0, i).match(new RegExp(`(?:${String.fromCharCode(27)}\\[[0-9;]*m)+$`));
+    return m ? m[0] : '';
+  };
+  const cores = async (modo: 'concierge' | 'classic', fullscreen = false) => {
+    const old = chalk.level;
+    chalk.level = 3;
+    const s = build({
+      mode: modo,
+      ...(fullscreen ? { fullscreen: true } : {}),
+      concierge: (m) => text(/segunda/.test(m) ? 'RESPOSTA-DOIS.' : 'RESPOSTA-UM.'),
+      classicModel: {
+        async call() {
+          return { request_id: 'r', content: 'RESPOSTA-UM.', finish_reason: 'stop' };
+        },
+      },
+    });
+    await sleep(100);
+    return { s, restore: () => (chalk.level = old) };
+  };
+
+  for (const modo of ['concierge'] as const) {
+    it(`${modo} inline: a última resposta fica normal e RETIDA; a anterior, dim e no histórico`, async () => {
+      const { s, restore } = await cores(modo);
+      try {
+        await type(s, 'primeira');
+        await waitFor(() => (s.lastFrame() ?? '').includes('RESPOSTA-UM'));
+        await sleep(150);
+        const um = sgrAntes(s.lastFrame() ?? '', 'RESPOSTA-UM');
+        await type(s, 'segunda');
+        await waitFor(() => (s.lastFrame() ?? '').includes('RESPOSTA-DOIS'));
+        await sleep(150);
+        const raw = s.lastFrame() ?? '';
+        const dois = sgrAntes(raw, 'RESPOSTA-DOIS');
+        const umDepois = sgrAntes(raw, 'RESPOSTA-UM');
+        expect(dois).not.toBe('');
+        expect(um).toBe(dois); // enquanto era a última: a mesma cor normal
+        expect(umDepois).not.toBe(dois); // depois da 2ª: esmaecida
+      } finally {
+        restore();
+        s.unmount();
+      }
+    });
+  }
+
+  it('a descida ao <Static> é na MESMA renderização do novo `você` — o composer não reverte', async () => {
+    const s = build({
+      mode: 'concierge',
+      concierge: (m) => text(/segunda/.test(m) ? 'RESPOSTA-DOIS.' : 'RESPOSTA-UM.'),
+      wordGate: () => sleep(15),
+    });
+    await type(s, 'primeira');
+    await waitFor(
+      () =>
+        blocksOf(s.conversation, 'aluy').length === 1 &&
+        !(blocksOf(s.conversation, 'aluy')[0] as { streaming?: boolean }).streaming,
+    );
+    await sleep(150);
+    const antes = s.frames.length;
+    await type(s, 'segunda');
+    await waitFor(
+      () =>
+        blocksOf(s.conversation, 'aluy').length === 2 &&
+        !(blocksOf(s.conversation, 'aluy')[1] as { streaming?: boolean }).streaming,
+    );
+    await sleep(200);
+    const rows: number[] = [];
+    for (const f of s.frames.slice(antes)) {
+      const i = plain(f)
+        .split('\n')
+        .findIndex((l) => /^[┃|]\s*[❯>]/.test(l));
+      if (i >= 0 && rows[rows.length - 1] !== i) rows.push(i);
+    }
+    // só pode descer (mais conteúdo) até o fim do turno; nunca subir e voltar a descer
+    const sobe = rows.findIndex((r, k) => k > 0 && r < rows[k - 1]!);
+    if (sobe >= 0)
+      expect(
+        rows.slice(sobe).every((r, k, a) => k === 0 || r <= a[k - 1]!),
+        rows.join(','),
+      ).toBe(true);
+    // e a primeira resposta aparece UMA vez só (retida → Static, sem duplicar)
+    const f = plain(s.lastFrame() ?? '');
+    expect(f.split('RESPOSTA-UM').length - 1).toBe(1);
+    s.unmount();
+  });
+
+  it('resposta LONGA (mais da metade da tela) não é retida: desce ao Static já, sem região viva alta', async () => {
+    const longa = Array.from({ length: 60 }, (_, i) => `linha ${i} da resposta longa`).join('\n\n');
+    const s = build({ mode: 'concierge', concierge: () => text(longa) });
+    await type(s, 'longa');
+    await waitFor(
+      () =>
+        blocksOf(s.conversation, 'aluy').length === 1 &&
+        !(blocksOf(s.conversation, 'aluy')[0] as { streaming?: boolean }).streaming,
+    );
+    await sleep(200);
+    const idx = s.conversation.current.blocks.findIndex((b) => b.kind === 'aluy');
+    expect(heldReplyIndex(s.conversation.current.blocks, { rows: 24, columns: 100 })).toBe(-1);
+    expect(
+      heldReplyIndex(
+        [
+          { kind: 'you', text: 'a' },
+          { kind: 'aluy', text: 'curta', streaming: false },
+        ] as never,
+        { rows: 24, columns: 100 },
+      ),
+    ).toBe(1);
+    expect(idx).toBeGreaterThan(-1);
+    s.unmount();
+  });
+
+  it('saída: a resposta retida segue visível no último quadro (scrollback preservado)', async () => {
+    const s = build({ mode: 'concierge', concierge: () => text('RESPOSTA-FINAL.') });
+    await type(s, 'oi');
+    await waitFor(() => (s.lastFrame() ?? '').includes('RESPOSTA-FINAL'));
+    await sleep(150);
+    const ultimo = plain(s.lastFrame() ?? '');
+    s.unmount();
+    expect(ultimo).toContain('RESPOSTA-FINAL.');
+  });
+
+  it('cockpit: só a ÚLTIMA fala do Λluy em cor normal; as anteriores dim', async () => {
+    vi.stubEnv('ALUY_FULLSCREEN', '1');
+    const { s, restore } = await cores('concierge', true);
+    try {
+      await type(s, 'primeira');
+      await waitFor(() => (s.lastFrame() ?? '').includes('RESPOSTA-UM'));
+      await sleep(100);
+      await type(s, 'segunda');
+      await waitFor(() => (s.lastFrame() ?? '').includes('RESPOSTA-DOIS'));
+      await sleep(150);
+      const raw = s.lastFrame() ?? '';
+      expect(sgrAntes(raw, 'RESPOSTA-DOIS')).not.toBe(sgrAntes(raw, 'RESPOSTA-UM'));
+    } finally {
+      vi.unstubAllEnvs();
+      restore();
+      s.unmount();
+    }
   });
 });
 

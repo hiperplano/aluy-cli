@@ -34,6 +34,7 @@ import { abbreviateCount } from './model.js';
 import type { LogSection } from './activity-log.js';
 import type { CockpitLayout } from './cockpit-layout.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
+import { lastAluyIndex } from './render-split.js';
 import { elapsedTickEnabled } from './tick-policy.js';
 import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
 import { previousVisibleKind } from './block-rhythm.js';
@@ -336,7 +337,12 @@ function ConversaRegion(props: {
           <BlockView
             key={vp.start + i}
             block={b}
-            isCurrent={vp.start + i === blocks.length - 1}
+            // A ÚLTIMA fala do Λluy fica em cor normal; as anteriores esmaecem (histórico).
+            isCurrent={
+              b.kind === 'aluy'
+                ? vp.start + i === lastAluyIndex(blocks)
+                : vp.start + i === blocks.length - 1
+            }
             frame={props.frame}
             columns={props.columns}
             // F163 — altura do TERMINAL p/ a cauda viva de shell (tool/bang) usar o cap

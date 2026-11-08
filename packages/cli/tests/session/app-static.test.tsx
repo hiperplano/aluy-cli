@@ -211,7 +211,7 @@ describe('App — turnos concluídos vão p/ o <Static>, vivo fica dinâmico', (
     unmount();
   });
 
-  it('ao FECHAR o turno, a fala do aluy (agora imutável) também desce p/ o Static', async () => {
+  it('ao FECHAR o turno, a fala do aluy fica RETIDA na região viva; desce ao Static na próxima mensagem', async () => {
     staticItemsLog.length = 0;
     const controller = buildController('pronto, concluído.');
     const theme = resolveTheme({ env: ENV });
@@ -222,8 +222,13 @@ describe('App — turnos concluídos vão p/ o <Static>, vivo fica dinâmico', (
     );
     controller.dismissBoot();
     await controller.submit('faça');
-    // espera o turno FECHAR e o React RENDERIZAR o aluy imutável no Static — sem
-    // sleep fixo: poll na CONDIÇÃO rendida, não num relógio.
+    await waitFor(() => controller.current.phase === 'done');
+    await new Promise((r) => setTimeout(r, 50));
+    // retida: o último render do Static NÃO tem a fala assentada (ela está na região viva)
+    const aposTurno = asBlocks(staticItemsLog[staticItemsLog.length - 1] ?? []);
+    expect(aposTurno.some((b) => b.kind === 'aluy')).toBe(false);
+    // a próxima mensagem a leva ao Static (imutável)
+    await controller.submit('de novo');
     await waitFor(
       () =>
         controller.current.phase === 'done' &&
@@ -231,11 +236,6 @@ describe('App — turnos concluídos vão p/ o <Static>, vivo fica dinâmico', (
           (b) => b.kind === 'aluy' && !b.streaming,
         ),
     );
-
-    // o último render do Static (turno fechado) contém o aluy NÃO-streaming.
-    const finalStatic = asBlocks(staticItemsLog[staticItemsLog.length - 1] ?? []);
-    const aluyDone = finalStatic.some((b) => b.kind === 'aluy' && !b.streaming);
-    expect(aluyDone).toBe(true);
     expect(controller.current.phase).toBe('done');
     unmount();
   });
