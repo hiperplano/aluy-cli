@@ -94,7 +94,7 @@ describe('ControllerTaskEngine — estado da sessão vira evento do registro', (
     expect(registry.get('t2')!.status).toBe('running'); // só ela espera
     expect(engine.pendingApprovals().map((p) => p.taskId)).toEqual(['t1']);
     expect(engine.resolveApproval('t2', { kind: 'approve-once' })).toBeUndefined(); // t2 não pediu
-    expect(engine.resolveApproval(undefined, { kind: 'approve-once' })).toBe('t1');
+    expect(engine.resolveApproval(undefined, { kind: 'approve-once' })?.taskId).toBe('t1');
     expect(headless[0]!.resolved).toHaveLength(1);
     expect(headless[1]!.resolved).toHaveLength(0);
     expect(registry.get('t1')!.status).toBe('running');
@@ -283,5 +283,101 @@ describe('ConciergeRuntime.taskView — a tarefa na linha dos agentes', () => {
       stop: 'paused',
     });
     expect(rt.taskView(rt.registry.get('t3')!).status).toBe('cancelled');
+  });
+});
+
+describe('Aprovações: "sempre nesta tarefa", registro por linha e diff estruturado', () => {
+  const askOf = (name: string, exact: string, over: Record<string, unknown> = {}) =>
+    ({
+      request: {
+        call: { name, input: {} },
+        effect: { kind: name === 'edit_file' ? 'diff' : 'command', exact, path: 'calc.py' },
+        alwaysAsk: false,
+        ...over,
+      },
+    }) as unknown as SessionState['pendingAsk'];
+
+  function rig() {
+    const registry = new TaskRegistry();
+    const headless: (FakeSession & { allowAll?: number })[] = [];
+    const lines: string[] = [];
+    const sink = new FakeSession() as unknown as ConversationSink;
+    sink.pushConciergeEcho = () => {};
+    sink.pushConciergeLine = (l) => void lines.push(l);
+    sink.conciergeReplyStart = () => {};
+    sink.conciergeReplyEnd = () => {};
+    sink.cancelAllFlows = () => {};
+    const rt = new ConciergeRuntime({
+      sink,
+      model: { call: async () => ({ request_id: 'r', content: 'ok', finish_reason: 'stop' }) },
+      createHeadless: () => {
+        const h = new FakeSession() as FakeSession & {
+          allowAll?: number;
+          allowAllInTask?: () => boolean;
+        };
+        h.allowAll = 0;
+        h.allowAllInTask = () => {
+          h.allowAll = (h.allowAll ?? 0) + 1;
+          return true;
+        };
+        headless.push(h);
+        return h;
+      },
+    });
+    const t = rt.registry.create({ goal: 'g', kind: 'main' });
+    rt.engine.start(t);
+    return { rt, h: headless[0]!, lines };
+  }
+
+  it('/a! liga a flag SÓ da tarefa dona e registra a linha; sempre-ask é aprovado só uma vez', () => {
+    const { rt, h, lines } = rig();
+    h.set({ pendingAsk: askOf('run_command', '$ python3 -c "print(1)"'), phase: 'asking' });
+    expect(rt.approve('t1', 'always')).toBe('');
+    expect(h.allowAll).toBe(1);
+    expect(lines.at(-1)).toBe(
+      '✓ aprovado · sempre nesta tarefa · t1 · run_command python3 -c "print(1)"',
+    );
+    expect(rt.engine.isAllowAll('t1')).toBe(true);
+    expect(h.resolved.at(-1)).toEqual({ kind: 'approve-once' });
+
+    h.set({
+      pendingAsk: askOf('run_command', '$ curl https://x.io', { alwaysAsk: true }),
+      phase: 'asking',
+    });
+    rt.approve('t1', 'always');
+    expect(h.allowAll).toBe(1); // não ligou de novo
+    expect(lines.at(-1)).toContain('só desta vez (pedido sempre-pergunta)');
+  });
+
+  it('toda resposta deixa uma linha (aprovar e negar), inclusive as seguintes', () => {
+    const { rt, h, lines } = rig();
+    for (const cmd of ['ls', 'pwd']) {
+      h.set({ pendingAsk: askOf('run_command', `$ ${cmd}`), phase: 'asking' });
+      rt.approve(undefined);
+    }
+    h.set({ pendingAsk: askOf('edit_file', '--- a\n+++ a\n-x\n+y'), phase: 'asking' });
+    rt.deny(undefined);
+    expect(lines).toEqual([
+      '✓ aprovado · t1 · run_command ls',
+      '✓ aprovado · t1 · run_command pwd',
+      '✘ negado · t1 · edit_file calc.py',
+    ]);
+    expect(rt.approve(undefined)).toBe('nenhuma aprovação pendente');
+  });
+
+  it('pendingApprovals carrega o efeito multi-linha (diff) redigido', () => {
+    const { rt, h } = rig();
+    h.set({
+      pendingAsk: askOf('edit_file', '--- calc.py\n+++ calc.py\n- return a - b\n+ return a + b'),
+      phase: 'asking',
+    });
+    const p = rt.pendingApprovals()[0]!;
+    expect(p.effect).toMatchObject({ kind: 'diff', tool: 'edit_file', path: 'calc.py' });
+    expect(p.effect!.lines).toEqual([
+      '--- calc.py',
+      '+++ calc.py',
+      '- return a - b',
+      '+ return a + b',
+    ]);
   });
 });

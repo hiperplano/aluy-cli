@@ -16,6 +16,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Glyph, Role } from '../theme/index.js';
 import { truncateToWidth } from '../markdown/table-layout.js';
+import { DiffLine, diffLangOf } from './DiffView.js';
 import { ChildLine, type SubAgentChildView } from './SubAgents.js';
 import type { TaskRecord } from '@hiperplano/aluy-cli-core';
 
@@ -31,7 +32,17 @@ const MAX_EXPANDED_TASKS = 6;
 export interface ApprovalRow {
   readonly taskId: string;
   readonly summary: string;
+  /** Efeito EXATO estruturado (diff multi-linha etc.); ausente ⇒ cai no `summary` quebrado. */
+  readonly effect?: {
+    readonly kind: string;
+    readonly tool: string;
+    readonly path?: string;
+    readonly lines: readonly string[];
+  };
 }
+
+/** Linhas de diff visíveis na caixa de aprovação (o resto vira `… +N linhas`). */
+export const MAX_DIFF_ROWS = 10;
 
 export type PanelRow =
   | { readonly kind: 'summary'; readonly text: string }
@@ -39,6 +50,7 @@ export type PanelRow =
   | { readonly kind: 'task'; readonly view: SubAgentChildView; readonly selected: boolean }
   | { readonly kind: 'child'; readonly child: SubAgentChildView }
   | { readonly kind: 'approval'; readonly text: string }
+  | { readonly kind: 'diff'; readonly line: string; readonly lang?: string }
   | { readonly kind: 'text'; readonly text: string };
 
 export interface PanelInput {
@@ -57,6 +69,9 @@ export interface PanelInput {
   readonly now: number;
   /** Largura do terminal: a aprovação mostra o efeito EXATO, quebrado em linhas. */
   readonly columns?: number;
+  /** `/a show`: o diff/efeito INTEIRO (até `fullRows` linhas) em vez do recorte. */
+  readonly approvalFull?: boolean;
+  readonly fullRows?: number;
 }
 
 /** `3 tarefas · 2 rodando · ↓ ver`. */
@@ -139,10 +154,14 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
   }
   const width = Math.max(30, (i.columns ?? 100) - 8);
   i.approvals.slice(0, MAX_APPROVAL_ROWS).forEach((a) => {
+    if (a.effect?.kind === 'diff') {
+      pushDiffApproval(rows, a, i);
+      return;
+    }
     // 1ª linha: quem pede e como responder; abaixo, o efeito EXATO (até 4 linhas, quebrado).
     rows.push({
       kind: 'approval',
-      text: `⚠ ${a.taskId} pede aprovação  ·  /a aprova · /n nega`,
+      text: `⚠ ${a.taskId} pede aprovação  ·  /a aprova · /a! sempre na tarefa · /n nega`,
     });
     const chunks: string[] = [];
     for (let k = 0; k < a.summary.length; k += width) chunks.push(a.summary.slice(k, k + width));
@@ -160,6 +179,37 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
     });
   }
   return rows;
+}
+
+/** Diff multi-linha: cabeçalho com o arquivo, linhas -/+ (recorte) e `… +N linhas`. */
+function pushDiffApproval(rows: PanelRow[], a: ApprovalRow, i: PanelInput): void {
+  const eff = a.effect!;
+  const lines = [...eff.lines];
+  // O cabeçalho `--- x` / `+++ x` do unified diff vira o título (o arquivo já está nele).
+  if (lines[0]?.startsWith('--- ') && lines[1]?.startsWith('+++ ')) lines.splice(0, 2);
+  const path = eff.path ?? 'arquivo';
+  rows.push({
+    kind: 'approval',
+    text: `⚠ ${a.taskId} pede aprovação · ${eff.tool} ${path}  ·  /a aprova · /a! sempre na tarefa · /n nega`,
+  });
+  const cap = i.approvalFull === true ? Math.max(MAX_DIFF_ROWS, i.fullRows ?? 30) : MAX_DIFF_ROWS;
+  const lang = path.includes('.') ? path.split('.').pop() : undefined;
+  const w = Math.max(30, (i.columns ?? 100) - 10);
+  lines.slice(0, cap).forEach((line) =>
+    rows.push({
+      kind: 'diff',
+      line: line.length > w ? `${line.slice(0, w - 1)}…` : line,
+      ...(lang !== undefined ? { lang } : {}),
+    }),
+  );
+  if (lines.length > cap) {
+    rows.push({
+      kind: 'approval',
+      text: `   … +${lines.length - cap} linhas · /a show ver tudo`,
+    });
+  } else if (i.approvalFull === true && lines.length > MAX_DIFF_ROWS) {
+    rows.push({ kind: 'approval', text: '   (diff inteiro) · /a show recolhe' });
+  }
 }
 
 /** Linhas fixas da região viva fora a vista de detalhe e o painel (container, composer, status, hints). */
@@ -229,6 +279,12 @@ export function TaskPanel(props: TaskPanelProps): React.ReactElement | null {
             return (
               <Box key={idx}>
                 <Role name="accent">{truncateToWidth(r.text, width)}</Role>
+              </Box>
+            );
+          case 'diff':
+            return (
+              <Box key={idx} paddingLeft={3}>
+                <DiffLine line={r.line} lang={diffLangOf(r.lang ? `x.${r.lang}` : undefined)} />
               </Box>
             );
           case 'text':

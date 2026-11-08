@@ -142,3 +142,35 @@ describe('cockpit — o painel entra na soma == rows', () => {
     expect(cockpitRegionSum(l)).toBe(20);
   });
 });
+
+describe('aprovação com DIFF — multi-linha, recortada, com `… +N linhas`', () => {
+  const diff = (n: number): string[] => [
+    '--- calc.py',
+    '+++ calc.py',
+    ...Array.from({ length: n }, (_, k) => (k % 2 === 0 ? `- old ${k}` : `+ new ${k}`)),
+  ];
+  const ap = (n: number) => ({
+    taskId: 't1',
+    summary: 'edit_file: ...',
+    effect: { kind: 'diff', tool: 'edit_file', path: 'calc.py', lines: diff(n) },
+  });
+
+  it('cabeçalho com tool + arquivo e uma linha por linha do diff (sem --- / +++)', () => {
+    const rows = buildPanelRows(base([], { approvals: [ap(2)] }));
+    expect(rows.map((r) => r.kind)).toEqual(['approval', 'diff', 'diff']);
+    expect((rows[0] as { text: string }).text).toContain('edit_file calc.py');
+    expect((rows[0] as { text: string }).text).toContain('/a! sempre na tarefa');
+    expect(rows.slice(1).map((r) => (r as { line: string }).line)).toEqual(['- old 0', '+ new 1']);
+  });
+
+  it('diff grande: recorta em 10 e avisa `… +N linhas`; /a show (approvalFull) mostra tudo', () => {
+    const cut = buildPanelRows(base([], { approvals: [ap(40)] }));
+    expect(cut.filter((r) => r.kind === 'diff')).toHaveLength(10);
+    expect((cut.at(-1) as { text: string }).text).toContain('… +30 linhas');
+    const full = buildPanelRows(
+      base([], { approvals: [ap(40)], approvalFull: true, fullRows: 50 }),
+    );
+    expect(full.filter((r) => r.kind === 'diff')).toHaveLength(40);
+    expect((full.at(-1) as { text: string }).text).toContain('/a show recolhe');
+  });
+});

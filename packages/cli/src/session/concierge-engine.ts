@@ -13,7 +13,7 @@ import type {
   TaskRecord,
   TaskRegistry,
 } from '@hiperplano/aluy-cli-core';
-import { clip } from '@hiperplano/aluy-cli-core';
+import { clip, redactOutputSecrets } from '@hiperplano/aluy-cli-core';
 import type { HistoryItem } from '@hiperplano/aluy-cli-core';
 import type { SessionState } from './model.js';
 
@@ -35,6 +35,8 @@ export interface TaskSession {
   /** Derruba o turno E os sub-agentes da tarefa (cessar ≠ agir: só aborta). */
   cancelAllFlows?(origin: 'f8' | 'panel' | 'exit'): void;
   resolveAsk(r: AskResolution): void;
+  /** "Aprovar sempre NESTA tarefa" (liga a flag da engine DESTA sessão); `false` se não dá. */
+  allowAllInTask?(): boolean;
   /** Tokens do turno até agora (vivo); ausente em sessões falsas. */
   turnAccounting?(): { readonly tokens: number } | undefined;
   dispose?(): void;
@@ -52,6 +54,8 @@ interface Handle {
   readonly unsubs: (() => void)[];
   stopRequested: boolean;
   startBlocks: number;
+  /** O dono escolheu "aprovar sempre nesta tarefa" (morre com a tarefa). */
+  allowAll: boolean;
 }
 
 export class ControllerTaskEngine implements ConciergeEngine {
@@ -81,6 +85,7 @@ export class ControllerTaskEngine implements ConciergeEngine {
       headless,
       unsubs: [],
       stopRequested: false,
+      allowAll: false,
       startBlocks: session.current.blocks.length,
     };
     this.handles.set(task.id, h);
@@ -158,24 +163,53 @@ export class ControllerTaskEngine implements ConciergeEngine {
   }
 
   /** Aprovações pendentes na ordem das tarefas (a caixa de entrada). */
-  pendingApprovals(): readonly { taskId: string; summary: string }[] {
-    const out: { taskId: string; summary: string }[] = [];
+  pendingApprovals(): readonly PendingApproval[] {
+    const out: PendingApproval[] = [];
     for (const [taskId, h] of this.handles) {
       const t = this.d.registry.get(taskId);
       if (!t || t.endedAt !== undefined) continue;
       if (h.session.current.pendingAsk)
-        out.push({ taskId, summary: askSummary(h.session.current) });
+        out.push({
+          taskId,
+          summary: askSummary(h.session.current),
+          ...askEffect(h.session.current),
+        });
     }
     return out;
   }
 
-  /** Responde a aprovação da tarefa `taskId` (ou da mais antiga). `false` se não há. */
-  resolveApproval(taskId: string | undefined, r: AskResolution): string | undefined {
+  /** A tarefa está em "aprovar sempre nesta tarefa"? (p/ o rótulo do painel). */
+  isAllowAll(taskId: string): boolean {
+    return this.handles.get(taskId)?.allowAll === true;
+  }
+
+  /**
+   * Responde a aprovação da tarefa `taskId` (ou da mais antiga). `undefined` se não há.
+   * `alwaysInTask`: liga também "aprovar sempre nesta tarefa" — SÓ se o pedido NÃO é de uma
+   * categoria sempre-ask (essas perguntam toda vez); a flag vive na engine da sessão da
+   * tarefa e a decisão segue passando por `decide()`.
+   */
+  resolveApproval(
+    taskId: string | undefined,
+    r: AskResolution,
+    opts: { readonly alwaysInTask?: boolean } = {},
+  ): { taskId: string; alwaysInTask: boolean; alwaysRefused: boolean } | undefined {
     const pend = this.pendingApprovals();
     const target = taskId ? pend.find((p) => p.taskId === taskId) : pend[0];
     if (!target) return undefined;
-    this.handles.get(target.taskId)!.session.resolveAsk(r);
-    return target.taskId;
+    const h = this.handles.get(target.taskId)!;
+    let alwaysInTask = false;
+    let alwaysRefused = false;
+    if (opts.alwaysInTask === true && r.kind !== 'deny') {
+      const req = h.session.current.pendingAsk?.request;
+      if (req?.alwaysAsk === true || !h.session.allowAllInTask) alwaysRefused = true;
+      else if (h.session.allowAllInTask()) {
+        h.allowAll = true;
+        alwaysInTask = true;
+      } else alwaysRefused = true;
+    }
+    h.session.resolveAsk(r);
+    return { taskId: target.taskId, alwaysInTask, alwaysRefused };
   }
 
   dispose(): void {
@@ -244,6 +278,33 @@ export class ControllerTaskEngine implements ConciergeEngine {
   private cleanup(h: Handle): void {
     for (const u of h.unsubs.splice(0)) u();
   }
+}
+
+/** O pedido de aprovação de uma tarefa (a caixa de entrada do rodapé). */
+export interface PendingApproval {
+  readonly taskId: string;
+  /** Uma linha (redigida) — fallback e o que o Concierge lê. */
+  readonly summary: string;
+  /** O efeito EXATO estruturado (diff multi-linha, comando…), redigido linha a linha. */
+  readonly effect?: {
+    readonly kind: string;
+    readonly tool: string;
+    readonly path?: string;
+    readonly lines: readonly string[];
+  };
+}
+
+function askEffect(s: SessionState): { effect?: NonNullable<PendingApproval['effect']> } {
+  const r = s.pendingAsk?.request;
+  if (!r) return {};
+  return {
+    effect: {
+      kind: r.effect.kind,
+      tool: r.call.name,
+      ...(r.effect.path !== undefined ? { path: r.effect.path } : {}),
+      lines: redactOutputSecrets(r.effect.exact).split('\n'),
+    },
+  };
 }
 
 function askSummary(s: SessionState): string {

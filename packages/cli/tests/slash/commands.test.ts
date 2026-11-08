@@ -775,3 +775,13 @@ describe('ADR-0147 §2 — resolveAgentEffect (single-source de classificação 
     }
   });
 });
+
+describe('ADR 0006 — /a! = /approve always', () => {
+  it('roteia `/a!` e `/a! t2` para approve com o argumento `always`', () => {
+    const a = routeInput('/a!');
+    expect(a).toMatchObject({ kind: 'command', args: 'always' });
+    expect((a as { command: { id: string } }).command.id).toBe('approve');
+    expect(routeInput('/a! t2')).toMatchObject({ kind: 'command', args: 'always t2' });
+    expect(routeInput('/a t2')).toMatchObject({ kind: 'command', args: 't2' });
+  });
+});

@@ -672,7 +672,8 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
   {
     // ADR 0006 — aprova a aprovação pendente (a mais antiga, ou a da tarefa dada). Alias `/a`.
     name: 'approve',
-    summary: 'aprova a permissão pendente: /approve [tarefa] [s=sessão] (alias /a)',
+    summary:
+      'aprova a permissão pendente: /approve [tarefa] [s=sessão] [always=sempre nesta tarefa] [show=ver diff inteiro] (alias /a; /a! = always)',
     source: 'native',
     id: 'approve',
     section: 'sessão',
@@ -1479,8 +1480,10 @@ export function routeInput(line: string, userCommands: readonly SlashCommand[] =
   const rawName = (spaceIdx === -1 ? withoutSlash : withoutSlash.slice(0, spaceIdx)).toLowerCase();
   // EST-0990 — `/view` é ALIAS de `/split` (mesmo toggle do modo view avançado).
   // EST-1000 · ADR-0076 — `/cockpit` é ALIAS de `/fullscreen` (mesmo toggle do cockpit).
-  const name = COMMAND_ALIASES[rawName] ?? rawName;
-  const args = spaceIdx === -1 ? '' : withoutSlash.slice(spaceIdx + 1).trim();
+  // ADR 0006 — `/a!` = `/approve always` (aprovar sempre nesta tarefa).
+  const name = rawName === 'a!' ? 'approve' : (COMMAND_ALIASES[rawName] ?? rawName);
+  const rest = spaceIdx === -1 ? '' : withoutSlash.slice(spaceIdx + 1).trim();
+  const args = rawName === 'a!' ? `always ${rest}`.trim() : rest;
   const all = [...NATIVE_COMMANDS, ...userCommands];
   const command = all.find((c) => c.name === name);
   if (!command) {

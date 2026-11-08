@@ -7809,6 +7809,17 @@ export class SessionController {
     }
   }
 
+  /**
+   * ADR 0006 — "aprovar sempre NESTA tarefa": liga a flag na engine de permissão DESTA sessão
+   * (a headless da tarefa). Só a engine concreta a tem; a decisão segue em `decide()`.
+   */
+  allowAllInTask(): boolean {
+    const e = this.permissionEngine as { setTaskAllowAll?: (on: boolean) => void };
+    if (typeof e.setTaskAllowAll !== 'function') return false;
+    e.setTaskAllowAll(true);
+    return true;
+  }
+
   /** A UI chama p/ resolver o ask pendente (repassa à engine via resolver). */
   resolveAsk(resolution: import('@hiperplano/aluy-cli-core').AskResolution): void {
     const pending = this.tuiResolver?.pending;

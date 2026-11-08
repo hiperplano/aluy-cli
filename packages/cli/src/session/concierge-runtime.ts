@@ -22,7 +22,11 @@ import {
 import { abbreviateCount } from './model.js';
 import type { SubAgentChildView } from '../ui/components/SubAgents.js';
 import type { SessionBlock } from './model.js';
-import { ControllerTaskEngine, type TaskSession } from './concierge-engine.js';
+import {
+  ControllerTaskEngine,
+  type PendingApproval,
+  type TaskSession,
+} from './concierge-engine.js';
 
 /** O recorte da sessão da TUI que o runtime escreve na conversa. */
 export interface ConversationSink {
@@ -146,6 +150,7 @@ export class ConciergeRuntime {
     const live = this.engine.sessionOf(t.id)?.turnAccounting?.()?.tokens;
     parts.push(`${abbreviateCount(live ?? s?.meta?.tokens ?? 0)} tokens`);
     if (t.steps > 0) parts.push(`${t.steps} tools`);
+    if (!ended && this.engine.isAllowAll(t.id)) parts.push('aprova tudo na tarefa');
     if (ended) parts.push(formatElapsed((t.endedAt ?? 0) - t.startedAt));
     const status: SubAgentChildView['status'] =
       t.status === 'done'
@@ -326,19 +331,52 @@ export class ConciergeRuntime {
     return `${id} parada`;
   }
 
-  approve(taskId: string | undefined, kind: 'once' | 'session' = 'once'): string {
+  /**
+   * `/a [tN]` aprova uma vez · `/a s` sessão (grant exato da catraca) · `/a!` (`always`) aprova
+   * e liga "sempre nesta tarefa". Cada resposta deixa UMA linha compacta na conversa
+   * (`✓ aprovado · t1 · run_command python3 -c …`) — consecutivas ficam coladas (block-rhythm).
+   * Devolve só o aviso de "nada pendente" (o resto já foi escrito na conversa).
+   */
+  approve(taskId: string | undefined, kind: 'once' | 'session' | 'always' = 'once'): string {
     const r: AskResolution =
       kind === 'session' ? { kind: 'approve-session' } : { kind: 'approve-once' };
-    const id = this.engine.resolveApproval(taskId, r);
-    return id ? `aprovado em ${id}` : 'nenhuma aprovação pendente';
+    const what = this.pendingLabel(taskId);
+    const res = this.engine.resolveApproval(taskId, r, { alwaysInTask: kind === 'always' });
+    if (!res) return 'nenhuma aprovação pendente';
+    const tail = res.alwaysInTask
+      ? ' · sempre nesta tarefa'
+      : res.alwaysRefused
+        ? ' · só desta vez (pedido sempre-pergunta)'
+        : kind === 'session'
+          ? ' · nesta sessão'
+          : '';
+    this.d.sink.pushConciergeLine(`✓ aprovado${tail} · ${res.taskId} · ${what ?? ''}`.trimEnd());
+    return '';
   }
 
   deny(taskId: string | undefined): string {
-    const id = this.engine.resolveApproval(taskId, { kind: 'deny', reason: 'negado pelo dono' });
-    return id ? `negado em ${id}` : 'nenhuma aprovação pendente';
+    const what = this.pendingLabel(taskId);
+    const res = this.engine.resolveApproval(taskId, { kind: 'deny', reason: 'negado pelo dono' });
+    if (!res) return 'nenhuma aprovação pendente';
+    this.d.sink.pushConciergeLine(`✘ negado · ${res.taskId} · ${what ?? ''}`.trimEnd());
+    return '';
   }
 
-  pendingApprovals(): readonly { taskId: string; summary: string }[] {
+  /** `run_command python3 -c …` / `edit_file calc.py`: o que está pendente (uma linha). */
+  private pendingLabel(taskId: string | undefined): string | undefined {
+    const pend = this.engine.pendingApprovals();
+    const p = taskId ? pend.find((x) => x.taskId === taskId) : pend[0];
+    if (!p) return undefined;
+    const e = p.effect;
+    if (e === undefined) return clip(p.summary, 70);
+    const body =
+      e.kind === 'diff' || e.kind === 'path'
+        ? (e.path ?? '')
+        : (e.lines[0] ?? '').replace(/^\$\s*/, '');
+    return clip(`${e.tool} ${body}`, 70);
+  }
+
+  pendingApprovals(): readonly PendingApproval[] {
     return this.engine.pendingApprovals();
   }
 

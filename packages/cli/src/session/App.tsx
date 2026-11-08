@@ -67,6 +67,7 @@ import type { SubAgentChildView } from '../ui/components/SubAgents.js';
 import { useMcpPicker, type McpSearchPort, type McpInstallPort } from '../ui/hooks/useMcpPicker.js';
 import { McpPicker } from '../ui/components/McpPicker.js';
 import {
+  LIVE_OVERHEAD_ROWS,
   TaskPanel,
   buildPanelRows,
   panelLines,
@@ -1117,6 +1118,8 @@ export function App(props: AppProps): React.ReactElement {
   // Parar tarefa pede CONFIRMAÇÃO: o 1º ctrl+k arma (id da tarefa), o 2º confirma.
   const [taskStopArm, setTaskStopArm] = useState<string | null>(null);
   const [taskScroll, setTaskScroll] = useState(0);
+  // `/a show`: a caixa de aprovação mostra o diff INTEIRO em vez do recorte.
+  const [approvalFull, setApprovalFull] = useState(false);
   useEffect(() => {
     if (!conciergeRt) return;
     return conciergeRt.subscribe(() => bumpTasks());
@@ -1268,6 +1271,8 @@ export function App(props: AppProps): React.ReactElement {
           columns,
           expanded: taskExpanded,
           stopArm: taskStopArm,
+          approvalFull,
+          fullRows: Math.max(12, rows - LIVE_OVERHEAD_ROWS - 8),
           selected: taskSel,
           now: Date.now(),
         })
@@ -2345,12 +2350,20 @@ export function App(props: AppProps): React.ReactElement {
         controller.replaceNote('task', rt.describeTasks());
         return;
       }
-      // /approve [tarefa] [s]  ·  /deny [tarefa]
+      // /approve [tarefa] [s|always|show]  ·  /deny [tarefa]
       const taskArg = words.find((w) => /^t\d+$/i.test(w))?.toLowerCase();
-      const session = words.some((w) => w.toLowerCase() === 's');
-      controller.replaceNote(id === 'approve' ? 'aprovação' : 'negação', [
-        id === 'approve' ? rt.approve(taskArg, session ? 'session' : 'once') : rt.deny(taskArg),
-      ]);
+      const has = (w: string): boolean => words.some((x) => x.toLowerCase() === w);
+      if (id === 'approve' && has('show')) {
+        setApprovalFull((v) => !v);
+        return;
+      }
+      const msg =
+        id === 'approve'
+          ? rt.approve(taskArg, has('always') ? 'always' : has('s') ? 'session' : 'once')
+          : rt.deny(taskArg);
+      // O registro de cada resposta vai à conversa (uma linha); aqui só o "nada pendente".
+      if (msg !== '') controller.replaceNote(id === 'approve' ? 'aprovação' : 'negação', [msg]);
+      setApprovalFull(false);
     },
     [props.concierge, props.onConversationChange, controller, convMode],
   );
