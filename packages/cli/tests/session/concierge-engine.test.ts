@@ -32,7 +32,9 @@ class FakeSession implements TaskSession {
     this.toolObs.push(o);
     return () => {};
   }
-  submit(): Promise<void> {
+  submitted: string[] = [];
+  submit(goal?: string): Promise<void> {
+    if (goal !== undefined) this.submitted.push(goal);
     return new Promise((r) => (this.done = r));
   }
   injectInput(_n: string, i: string) {
@@ -455,5 +457,18 @@ describe('Linha viva da tarefa: atividade humana e tokens (reais ou estimados)',
     await new Promise((r) => setTimeout(r, 80));
     expect(lines).toContain('■ t1 parada');
     expect(calls).toEqual([]);
+  });
+});
+
+describe('Custo: o agente da tarefa recebe a orientação "faça você mesmo"', () => {
+  it('o objetivo enviado à sessão leva a orientação; o registro e o painel ficam com o objetivo puro', () => {
+    const { registry, headless, engine } = setup();
+    engine.start(registry.create({ goal: 'corrigir o bug do calc.py', kind: 'main' }));
+    const sent = headless[0]!.submitted[0]!;
+    expect(sent.startsWith('corrigir o bug do calc.py')).toBe(true);
+    expect(sent).toContain('FAÇA você mesmo');
+    expect(sent).toContain('sem spawn_agent');
+    expect(sent).toContain('Delegue a sub-agentes só se for amplo');
+    expect(registry.get('t1')!.goal).toBe('corrigir o bug do calc.py');
   });
 });

@@ -59,3 +59,23 @@ existia e continua.
 Anti-laço do relato: um turno automático pode iniciar tarefa só se o pedido original do dono previa
 o passo seguinte; as tarefas nascidas assim são relatadas SEM poder iniciar/enviar nada, e
 `task_stop` nunca vale num turno automático.
+
+## Terceira rodada (ritmo, buracos, custo)
+
+- **Buracos após fechar sobreposições (menu `/`, painel expandido, seletores, caixa de aprovação)**:
+  causa = a âncora do composer (`createFrameAnchor`, `synchronized-output.ts`) segurava a altura do
+  quadro vivo com linhas em branco no topo quando a tela estava cheia. Medido no tmux (inline, 30
+  linhas): menu aberto e fechado deixava **11 linhas em branco** entre a conversa e o composer.
+  Agora a âncora só segura encolhimentos de até `MAX_ANCHOR_PAD` (2) linhas (indicador
+  "processando", "↳ encaixando…"); encolhimento maior é solto na hora. Depois: 0 linhas de buraco.
+  No `/fullscreen` (cockpit) não houve buraco: o cockpit tem regiões de altura fixa e repinta.
+  Consequência assumida: com a tela cheia, o composer SOBE quando um overlay grande fecha (em vez de
+  ficar fixo com um vão acima dele).
+- **Ritmo**: 1 linha em branco entre `Λluy` e o próximo `você`, notas (`✓ aprovado`, `✔ tN
+concluída`) coladas e 1 em branco antes do bloco seguinte — conferido no tmux (inline e cockpit,
+  inclusive com mensagens durante o stream) e travado por teste. A corrida de 4 linhas em branco que
+  a revisão viu era o vão da âncora acima.
+- **Custo**: o agente de uma tarefa recebe junto do objetivo uma orientação ("pequeno ⇒ faça você
+  mesmo, sem spawn_agent; delegue só se for amplo e independente"). Só no Concierge; o clássico não
+  muda. Motivo: com um time de agentes configurado, o prompt de sistema manda delegar por padrão e
+  um conserto trivial custou ~72k tokens.

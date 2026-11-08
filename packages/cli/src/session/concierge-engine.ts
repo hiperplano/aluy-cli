@@ -13,7 +13,7 @@ import type {
   TaskRecord,
   TaskRegistry,
 } from '@hiperplano/aluy-cli-core';
-import { clip, redactOutputSecrets } from '@hiperplano/aluy-cli-core';
+import { clip, redactOutputSecrets, taskGoalForAgent } from '@hiperplano/aluy-cli-core';
 import type { HistoryItem } from '@hiperplano/aluy-cli-core';
 import type { SessionState } from './model.js';
 
@@ -110,13 +110,15 @@ export class ControllerTaskEngine implements ConciergeEngine {
         },
       }),
     );
-    session.submit(task.goal, [], { display: `▸ ${task.id}: ${clip(task.goal, 100)}` }).then(
-      () => this.finish(task.id, h),
-      (e: unknown) => {
-        this.cleanup(h);
-        this.d.registry.transition(task.id, 'failed', msg(e), { result: clip(msg(e), 600) });
-      },
-    );
+    session
+      .submit(taskGoalForAgent(task.goal), [], { display: `▸ ${task.id}: ${clip(task.goal, 100)}` })
+      .then(
+        () => this.finish(task.id, h),
+        (e: unknown) => {
+          this.cleanup(h);
+          this.d.registry.transition(task.id, 'failed', msg(e), { result: clip(msg(e), 600) });
+        },
+      );
   }
 
   send(task: TaskRecord, message: string): { delivered: boolean; note: string } {

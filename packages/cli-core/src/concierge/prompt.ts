@@ -38,3 +38,16 @@ export function buildConciergePrompt(args: {
   }
   return lines.join('\n');
 }
+
+/**
+ * Orientação de CUSTO acrescentada ao objetivo de cada tarefa (só no modo Concierge; o modo
+ * clássico não passa por aqui). Um conserto trivial de calc.py custou ~72k tokens porque o agente
+ * da tarefa delegou a sub-agentes. Delegar só compensa em trabalho amplo e dividido.
+ */
+export const TASK_COST_HINT =
+  '[Orientação do Concierge — custo] Se o trabalho é pequeno (poucos arquivos ou passos), FAÇA você mesmo, direto, sem spawn_agent: ler, editar e rodar os testes custa muito menos do que subir agentes. Delegue a sub-agentes só se for amplo e dividido em partes realmente independentes.';
+
+/** O objetivo como o agente da tarefa o recebe: o pedido + a orientação de custo. */
+export function taskGoalForAgent(goal: string): string {
+  return `${goal}\n\n${TASK_COST_HINT}`;
+}

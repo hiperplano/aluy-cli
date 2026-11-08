@@ -769,3 +769,45 @@ describe('Relato automático: o Concierge resume o resultado quando a tarefa ter
     s.unmount();
   });
 });
+
+describe('Ritmo vertical no Concierge: 1 linha entre blocos, notas coladas, sem corridas', () => {
+  it('você → Λluy → notas → Λluy (resumo) → você: exatamente 1 em branco entre blocos; notas sem vão', async () => {
+    const task = taskSession({ iters: () => 'feito.' });
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      concierge: (m) =>
+        /EVENTO AUTOMÁTICO/.test(m) ? text('Resumo: tudo certo.') : text('Iniciei.', startTask()),
+    });
+    await type(s, 'faça o trabalho');
+    await waitFor(() => s.frame().includes('Resumo: tudo certo.'));
+    await sleep(80);
+    await type(s, 'valeu');
+    await waitFor(() => s.conversation.current.blocks.filter((b) => b.kind === 'you').length === 2);
+    await waitFor(() => blocksOf(s.conversation, 'aluy').length === 3);
+    await sleep(120);
+    const lines = s.frame().split('\n');
+    const at = (needle: string): number => lines.findIndex((l) => l.includes(needle));
+    const blanksBetween = (a: number, b: number): number =>
+      lines.slice(a + 1, b).filter((l) => l.trim() === '').length;
+    const resumo = at('Resumo: tudo certo.');
+    const valeu = lines.findIndex((l, i) => i > resumo && l.includes('valeu'));
+    const voce2 = valeu - 1; // cabeçalho `você` logo acima do texto
+    expect(lines[voce2]).toContain('você');
+    // Λluy (resumo) → você: exatamente 1 linha em branco
+    expect(blanksBetween(resumo, voce2)).toBe(1);
+    // a conclusão (nota) vem colada, sem vão, e há 1 em branco antes do Λluy seguinte
+    const done = at('✔ t1 concluída');
+    expect(done).toBeGreaterThan(-1);
+    const head = lines.findIndex((l, i) => i > done && l.includes('Λluy'));
+    expect(blanksBetween(done, head)).toBe(1);
+    // nunca 2 linhas em branco seguidas entre o 1º bloco e o fim da conversa
+    const first = at('você');
+    const run = lines
+      .slice(first, valeu + 6)
+      .join('\n')
+      .match(/\n[ \t]*\n[ \t]*\n/);
+    expect(run).toBeNull();
+    s.unmount();
+  });
+});
