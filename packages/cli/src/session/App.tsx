@@ -184,7 +184,21 @@ import { isUnrecognizedEscapeTail } from './escape-leak.js';
 // F197 — sugestão de próximo prompt (ghost + Tab): blocos+i18n → texto do composer.
 import { resolveSuggestionText } from './suggest.js';
 import { buildTurnRecap } from './turn-recap.js';
-import { ROTULOS_GENERICOS, detalheDeEspera, rotuloExibido } from './verbos.js';
+import {
+  ROTULOS_GENERICOS,
+  detalheDeEspera,
+  formatSegundos,
+  rotuloExibido,
+  seedPadrao,
+  verbosSimples,
+} from './verbos.js';
+import {
+  ajustarLinhaTrabalho,
+  fraseDaEspera,
+  larguraReservadaDaFrase,
+  parseFrases,
+} from './frases-espera.js';
+import { resolveText } from '../i18n/translate.js';
 import { homedir } from 'node:os';
 import { buildSidecarChip } from '@hiperplano/aluy-cli-core';
 import {
@@ -1537,17 +1551,55 @@ export function App(props: AppProps): React.ReactElement {
 
   // VERBOS DE ESPERA — o rótulo genérico (`pensando`…) vira um gerúndio sorteado 1× por PASSO
   // (a identidade do passo é o `workingSince`). Rótulos funcionais ficam como estão.
-  const rotuloVivo = rotuloExibido({ label: state.workingLabel, verbo: state.workingVerb });
-  const indicadorTrabalho = workingIndicator({
+  // FRASES DE ESPERA — a linha de trabalho gira uma frase brincalhona a cada ~4s enquanto algo
+  // processa (turno, tool, tarefa do Concierge em segundo plano, pausa por cota sondando).
+  const frasesDaEspera = useMemo(() => parseFrases(resolveText('pt-BR', 'working.quips')), []);
+  const seedDasFrases = useMemo(() => seedPadrao(), []);
+  const frasesLigadas = !verbosSimples() && frasesDaEspera.length > 0;
+  const agoraMsDaLinha = (props.now ?? Date.now)();
+  // Tarefas do Concierge rodando (a conversa pode estar OCIOSA): a linha tem de existir mesmo assim.
+  const tarefasVivas = conciergeOn ? (conciergeRt?.registry.live() ?? []) : [];
+  const tarefasRodando = tarefasVivas.filter((t) => t.status === 'running');
+  const tarefaRodando = conciergeTaskAnimates(conciergeOn, tarefasVivas);
+  const turnoOcupado = mostraIndicadorTrabalho(state.phase, haFilhoVivo);
+  const soTarefas = !turnoOcupado && tarefaRodando && state.quotaPause === undefined;
+  const emPausa = state.quotaPause !== undefined;
+  // A linha existe: durante o turno OU com tarefa em segundo plano OU na pausa por cota.
+  const linhaDeTrabalhoViva = turnoOcupado || soTarefas || emPausa;
+  const inicioDaEspera = emPausa
+    ? state.quotaPause!.startedAt
+    : turnoOcupado
+      ? (state.workingSince ?? agoraMsDaLinha)
+      : Math.min(...tarefasRodando.map((t) => t.startedAt), agoraMsDaLinha);
+  const fraseViva =
+    frasesLigadas && linhaDeTrabalhoViva
+      ? fraseDaEspera({
+          frases: frasesDaEspera,
+          agoraMs: agoraMsDaLinha,
+          desde: inicioDaEspera,
+          seed: seedDasFrases,
+          girar: theme.animate,
+        })
+      : undefined;
+  // O rótulo funcional (tentando de novo…) segue como está; só o genérico vira frase.
+  const rotuloVivo = rotuloExibido({
+    label: state.workingLabel,
+    verbo: fraseViva ?? state.workingVerb,
+  });
+  const indicadorBruto = workingIndicator({
     count: state.detachedSubagents ?? 0,
     phase: state.phase,
     ...(rotuloVivo !== undefined ? { workingLabel: rotuloVivo } : {}),
   });
-  // PARÊNTESE DIM (estilo Claude Code): `(pensando · 1,2k tokens · 12s)` — a fase REAL, os
-  // tokens do turno até agora e os segundos desde o INÍCIO DO TURNO (a mesma fonte do relógio
-  // do rodapé: a contabilidade viva da raiz). Lido a cada render; o tick de 1s o atualiza.
-  // Tokens = GERADOS (saída) pelo pai no turno: `tokens_out` reportado + estimativa do que
-  // a chamada em voo streamou (`↓ 1,2k tokens`); 0 ⇒ o segmento some. Rótulo funcional já é a fase ⇒ sem palavra.
+  // Sem turno (só tarefa/pausa) o rótulo é a própria frase.
+  const indicadorTrabalho =
+    !turnoOcupado && fraseViva !== undefined ? { label: fraseViva } : indicadorBruto;
+  // A largura que o detalhe pode usar é medida contra a MAIOR frase (não a da vez): o detalhe
+  // não ganha/perde segmentos a cada troca de frase.
+  const larguraDoRotulo =
+    frasesLigadas && fraseViva !== undefined
+      ? Math.max(indicadorTrabalho.label.length, larguraReservadaDaFrase(frasesDaEspera, columns))
+      : indicadorTrabalho.label.length;
   const contaViva =
     state.phase === 'thinking' || state.phase === 'retrying' || state.phase === 'streaming'
       ? controller.turnAccounting()
@@ -1555,9 +1607,16 @@ export function App(props: AppProps): React.ReactElement {
   const msDoTurno =
     contaViva?.live === true
       ? contaViva.durationMs
-      : state.workingSince !== undefined
+      : state.workingSince !== undefined && turnoOcupado
         ? Math.max(0, (props.now ?? Date.now)() - state.workingSince)
         : undefined;
+  const larguraDoDetalhe =
+    columns -
+    (5 +
+      larguraDoRotulo +
+      2 +
+      (indicadorTrabalho.suffix !== undefined ? indicadorTrabalho.suffix.length + 1 : 0) +
+      2);
   const detalheEspera =
     msDoTurno !== undefined
       ? detalheDeEspera({
@@ -1571,19 +1630,22 @@ export function App(props: AppProps): React.ReactElement {
           tokens: contaViva !== undefined ? controller.turnOutputTokens() : undefined,
           entrada: contaViva !== undefined ? controller.turnInputTokens() : undefined,
           ms: msDoTurno,
-          // "Λluy " + rótulo + "… " + " " + sufixo dos sub-agentes: o que sobra da linha.
-          larguraMax:
-            columns -
-            (5 +
-              indicadorTrabalho.label.length +
-              2 +
-              (indicadorTrabalho.suffix !== undefined ? indicadorTrabalho.suffix.length + 1 : 0) +
-              2),
+          larguraMax: larguraDoDetalhe,
         })
-      : undefined;
+      : soTarefas || emPausa
+        ? `(${
+            soTarefas ? `${String(tarefasRodando.length)} em segundo plano · ` : 'cota · '
+          }${formatSegundos(agoraMsDaLinha - inicioDaEspera)})`
+        : undefined;
+  // UMA linha, sempre: nunca quebra (quebrar faz o composer pular).
+  const linhaAjustada = ajustarLinhaTrabalho({
+    columns,
+    label: indicadorTrabalho.label,
+    detalhe: detalheEspera,
+    suffix: indicadorTrabalho.suffix,
+  });
   // ADR 0006 — tarefa do Concierge rodando com o controller da TUI em repouso: sem este pulso a
   // tela ficava parada (brilho e tempo da linha da tarefa não andavam).
-  const tarefaRodando = conciergeTaskAnimates(conciergeOn, conciergeRt?.registry.live() ?? []);
   const phaseAnimates =
     (animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo || tarefaRodando }) &&
       state.quotaPause === undefined) ||
@@ -1598,7 +1660,8 @@ export function App(props: AppProps): React.ReactElement {
   // flicker (no máximo 1 redraw/seg + o flush do texto). `thinking`/`streaming`/
   // `retrying` são as fases ocupadas; idle/ask/budget/done/error não armam timer.
   const busy = elapsedTickEnabled(state.phase);
-  useTick({ enabled: busy, intervalMs: 1000 });
+  // Relógio + rotação das frases também com tarefa em segundo plano / pausa por cota.
+  useTick({ enabled: busy || soTarefas || emPausa, intervalMs: 1000 });
 
   useEffect(() => {
     const unsubscribe = controller.subscribe(setState);
@@ -5391,7 +5454,10 @@ export function App(props: AppProps): React.ReactElement {
   // desconto do teto da fala (anti-flicker).
   const taskDetailRoom = taskDetailRoomFor(rows, taskPanelRows);
   const conciergeTasksShown = taskPanelRows + (taskDetail !== null ? taskDetailRoom + 3 : 0);
-  const stagedLines = queueLines + pendingInjectLines + pendingAskLines + conciergeTasksShown;
+  // A linha de trabalho sem turno (tarefa em segundo plano / pausa por cota) custa respiro + linha.
+  const linhaSemTurno = soTarefas || emPausa ? 2 : 0;
+  const stagedLines =
+    queueLines + pendingInjectLines + pendingAskLines + conciergeTasksShown + linhaSemTurno;
   // EST-1015 (anti-flicker) — o <SlashMenu> mora ABAIXO do composer e PODE coexistir com o stream
   // (EST-0982). Sua altura (lista filtrada + cabeçalhos + ajuda + o `paddingTop={1}` do contêiner)
   // CONSOME altura do frame: desconta do teto da fala p/ `chrome + fala + menu` caber em `rows`
@@ -6046,16 +6112,14 @@ export function App(props: AppProps): React.ReactElement {
             inteiro: "depois que ele me responde ele para de mostrar o processando" — com
             os agentes ainda trabalhando. Redundante era mostrar os DOIS juntos, não
             mostrar este quando o outro não existe. */}
-      {mostraIndicadorTrabalho(state.phase, haFilhoVivo) && state.quotaPause === undefined && (
+      {linhaDeTrabalhoViva && (
         <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
           <Working
             glyph="aluy"
             glyphRole="accent"
-            label={indicadorTrabalho.label}
-            {...(detalheEspera !== undefined ? { detalhe: detalheEspera } : {})}
-            {...(indicadorTrabalho.suffix !== undefined
-              ? { suffix: indicadorTrabalho.suffix }
-              : {})}
+            label={linhaAjustada.label}
+            {...(linhaAjustada.detalhe !== undefined ? { detalhe: linhaAjustada.detalhe } : {})}
+            {...(linhaAjustada.suffix !== undefined ? { suffix: linhaAjustada.suffix } : {})}
             frame={frame}
           />
         </Box>
@@ -6097,7 +6161,7 @@ export function App(props: AppProps): React.ReactElement {
       )}
 
       {state.quotaPause !== undefined && (
-        <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
+        <Box>
           <QuotaPauseLine view={state.quotaPause} columns={columns} />
         </Box>
       )}

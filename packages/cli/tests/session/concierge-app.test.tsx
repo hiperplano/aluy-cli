@@ -7,6 +7,8 @@
 //   • sub-agentes (clássico) saem da conversa e moram no rodapé, com uma linha ao terminar;
 //   • modo clássico inalterado.
 
+import { parseFrases } from '../../src/session/frases-espera.js';
+import { resolveText } from '../../src/i18n/translate.js';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'ink-testing-library';
@@ -605,7 +607,9 @@ describe('Ordem do rodapé: composer → statusline → painel; sem linha em bra
       const topo = lines.findIndex((l, i) => i > resp && l.includes('┃')); // barra do composer
       const brancos = lines.slice(resp + 1, topo).filter((l) => l.trim() === '').length;
       expect(topo).toBeGreaterThan(resp);
-      expect(brancos).toBe(1);
+      // Com tarefa rodando a frase de espera ocupa a linha entre a resposta e o composer: um
+      // respiro de cada lado dela (2); sem tarefa, só o respiro de sempre (1).
+      expect(brancos).toBe(comTask ? 2 : 1);
       g.resolve();
       s.unmount();
     }
@@ -827,6 +831,27 @@ describe('Concierge: nenhuma linha `┃` órfã depois da resposta', () => {
     expect(aluy[0]!.text).toBe('Iniciei 3 tarefas.');
     const linhas = s.frame().split('\n');
     expect(linhas.filter((l) => /^\s*┃\s*$/.test(l)).length).toBeLessThanOrEqual(2); // só a moldura do composer
+    s.unmount();
+  });
+});
+
+describe('Frase de espera: a linha existe com a conversa ociosa e uma tarefa rodando', () => {
+  it('mostra uma frase da lista + `em segundo plano` acima do composer; some quando a tarefa acaba', async () => {
+    const g = defer();
+    const s = build({
+      mode: 'concierge',
+      tasks: [taskSession({ iters: () => 'ok', gates: () => g.promise })],
+      concierge: () => text('Iniciei.', startTask()),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    const frases = parseFrases(resolveText('pt-BR', 'working.quips'));
+    const linhas = s.frame().split('\n');
+    const i = linhas.findIndex((l) => l.includes('em segundo plano'));
+    expect(frases.some((f) => linhas[i]!.includes(`${f}…`))).toBe(true);
+    expect(i).toBeLessThan(linhas.findIndex((l) => l.includes('❯'))); // acima do composer
+    g.resolve();
+    await waitFor(() => !s.frame().includes('em segundo plano'));
     s.unmount();
   });
 });
