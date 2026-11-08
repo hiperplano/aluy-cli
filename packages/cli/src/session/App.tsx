@@ -2389,7 +2389,9 @@ export function App(props: AppProps): React.ReactElement {
       if (next && fits) {
         // ENTRA no alt-screen só quando cabe — senão degrada pro inline com aviso.
         props.cockpitScreen?.enter();
-        controller.replaceNote('cockpit', [t('cockpit.entered')]);
+        controller.replaceNote('cockpit', [
+          t(conciergeOn ? 'cockpit.enteredConcierge' : 'cockpit.entered'),
+        ]);
       } else if (next && !fits) {
         const reason = resolveCockpitLayout(rows, columns);
         const msg =

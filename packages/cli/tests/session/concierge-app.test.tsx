@@ -1197,6 +1197,18 @@ describe('Cockpit /fullscreen em modo Concierge', () => {
       s.unmount();
     });
   }
+  it('concierge: sem dicas de `tab` (não há LOG); clássico mantém', async () => {
+    const c = build({ mode: 'concierge', fullscreen: true, concierge: () => text('oi') });
+    await sleep(100);
+    expect(c.frame()).not.toContain('tab foca');
+    expect(c.frame()).not.toContain('conversa⇄log');
+    expect(c.frame()).toContain('pgup/pgdn rola');
+    c.unmount();
+    const k = build({ mode: 'classic', fullscreen: true, concierge: () => text('oi') });
+    await sleep(100);
+    expect(k.frame()).toContain('tab foca');
+    k.unmount();
+  });
   it('no clássico o LOG segue existindo', async () => {
     const s = build({ mode: 'classic', fullscreen: true, concierge: () => text('oi') });
     await sleep(100);

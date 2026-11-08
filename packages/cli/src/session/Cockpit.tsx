@@ -566,7 +566,7 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
             `null` (compact) ⇒ ao menos o atalho-base do cockpit (a região existe no grid). */}
           {props.hintState === null || props.hintState === 'idle' ? (
             <Role name="fgDim">
-              {t('hints.cockpit')}
+              {t(layout.logHidden ? 'hints.cockpitConcierge' : 'hints.cockpit')}
               <Text> · </Text>
               {abbreviateCount(tokens)} tok
             </Role>

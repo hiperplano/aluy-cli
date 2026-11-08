@@ -31,7 +31,7 @@ export function formatCapabilityInventory(
   const fora = new Set(excluir);
   const grupos = new Map<string, string[]>();
   for (const t of snap.tools) {
-    if (fora.has(t.name) || t.group === 'mcp') continue;
+    if (fora.has(t.name) || t.group === 'mcp' || t.group === 'assincrono') continue;
     const g = GRUPOS_PT[t.group] ?? 'outros';
     grupos.set(g, [...(grupos.get(g) ?? []), t.name]);
   }
@@ -139,6 +139,8 @@ export const TASK_EXCLUDED_TOOLS: readonly string[] = [
   'monitor',
   'monitor_cancel',
   'monitors',
+  // monitor de comando: os eventos chegam ENTRE turnos de quem acompanha; a tarefa headless não tem quem veja
+  'watch_command',
   'headroom_retrieve',
   // lista de tarefas do agente: ninguém a vê numa tarefa headless e cada chamada custa uma ida ao modelo
   'add_todo',

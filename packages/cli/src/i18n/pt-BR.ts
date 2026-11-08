@@ -39,6 +39,7 @@ export const ptBR: FullCatalog = {
   'hints.idleSubagents': 'enter envia · F8 para os sub-agentes · /help',
   'hints.ctrlcAgain': 'pressione ctrl-c de novo para sair',
   'hints.cockpit': 'tab foca · pgup/pgdn rola · ctrl-s exporta · /fullscreen sai · ctrl-c×2 sair',
+  'hints.cockpitConcierge': 'pgup/pgdn rola · ctrl-s exporta · /fullscreen sai · ctrl-c×2 sair',
   // F197 — sugestão de próximo prompt: Tab aceita o ghost no composer.
   'hints.suggest': 'tab aceita a sugestão',
 
@@ -73,6 +74,7 @@ export const ptBR: FullCatalog = {
   'cockpit.welcomeTitle': 'Λluy — cockpit',
   'cockpit.welcomeHint': 'digite um objetivo abaixo para começar · /help · /fullscreen sai',
   'cockpit.entered': 'tab alterna conversa⇄log · pgup/pgdn rola · ctrl-s exporta · /fullscreen sai',
+  'cockpit.enteredConcierge': 'pgup/pgdn rola · ctrl-s exporta · /fullscreen sai',
   'cockpit.left': 'modo inline restaurado (scrollback nativo).',
   'cockpit.renderFault':
     'falha ao desenhar a tela cheia; voltei para o modo inline (detalhes em ~/.aluy/logs/crash.log).',

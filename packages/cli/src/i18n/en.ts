@@ -38,6 +38,7 @@ export const en: PartialCatalog = {
   'hints.ctrlcAgain': 'press ctrl-c again to quit',
   'hints.cockpit':
     'tab focuses · pgup/pgdn scroll · ctrl-s export · /fullscreen exits · ctrl-c×2 quit',
+  'hints.cockpitConcierge': 'pgup/pgdn scroll · ctrl-s export · /fullscreen exits · ctrl-c×2 quit',
   // F197 — next-prompt suggestion: Tab accepts the ghost into the composer.
   'hints.suggest': 'tab accepts the suggestion',
 
@@ -60,6 +61,7 @@ export const en: PartialCatalog = {
   'cockpit.log': 'log',
   'cockpit.welcomeTitle': 'Λluy — cockpit',
   'cockpit.welcomeHint': 'type a goal below to get started · /help · /fullscreen exits',
+  'cockpit.enteredConcierge': 'pgup/pgdn scroll · ctrl-s export · /fullscreen exits',
   'cockpit.entered': 'tab switches chat⇄log · pgup/pgdn scroll · ctrl-s export · /fullscreen exits',
   'cockpit.left': 'inline mode restored (native scrollback).',
   'cockpit.renderFault':

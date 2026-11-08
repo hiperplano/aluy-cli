@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { TASK_COST_HINT, taskGoalForAgent } from '../../src/concierge/prompt.js';
+import {
+  TASK_COST_HINT,
+  TASK_EXCLUDED_TOOLS,
+  taskGoalForAgent,
+} from '../../src/concierge/prompt.js';
 import {
   Concierge,
   TaskRegistry,
@@ -646,6 +650,27 @@ describe('Concierge — fila de tarefas: nenhuma é perdida (regressão live: "t
     const r = await concierge.handle('mais quatro');
     expect(registry.list()).toHaveLength(16);
     expect(r.actions.filter((a) => !a.ok)).toHaveLength(2);
+  });
+});
+
+describe('inventário só lista o que a tarefa REALMENTE recebe', () => {
+  const snap = {
+    tools: [
+      { name: 'read_file', effect: 'read', group: 'arquivo' },
+      { name: 'watch_command', effect: 'exec', group: 'assincrono' },
+      { name: 'monitor', effect: 'exec', group: 'assincrono' },
+    ],
+    agents: [],
+    skills: [],
+    mcpServers: [],
+  } as never;
+  it('tools de monitor não entram (excluídas da tarefa e fora do grupo `monitores`)', () => {
+    expect(TASK_EXCLUDED_TOOLS).toContain('watch_command');
+    const inv = formatCapabilityInventory(snap, TASK_EXCLUDED_TOOLS)!;
+    expect(inv).toBe('arquivos: read_file');
+    expect(inv).not.toContain('watch_command');
+    // mesmo sem a lista de exclusão, o grupo assíncrono (monitores) nunca é anunciado
+    expect(formatCapabilityInventory(snap)).not.toContain('monitores');
   });
 });
 
