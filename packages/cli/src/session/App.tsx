@@ -42,6 +42,7 @@ import {
   ThemePicker,
   LangPicker,
   MenuPicker,
+  DirPicker,
   ProviderPicker,
   SecretPrompt,
   HistoryPicker,
@@ -91,6 +92,8 @@ import {
 import { useThemePicker } from '../ui/hooks/useThemePicker.js';
 import { useLangPicker } from '../ui/hooks/useLangPicker.js';
 import { useMenuPicker, type MenuPick } from '../ui/hooks/useMenuPicker.js';
+import { useDirPicker, type DirPick, type DirPickerPorts } from '../ui/hooks/useDirPicker.js';
+import { listSubdirs, resolveDir } from '../io/dir-listing.js';
 import { buildHelpLines } from '../slash/handlers.js';
 import { availableIn } from '../slash/command-meta.js';
 import { menuStepFor, type MenuCtx, type MenuDataPort } from '../slash/menu-pickers.js';
@@ -673,6 +676,16 @@ export interface AppProps {
    * ausente ⇒ aquele comando, sem argumento, segue como antes (nota/lista em texto).
    */
   readonly menuData?: MenuDataPort;
+  /**
+   * `/add-dir` sem argumento abre o seletor de pasta quando presente (raízes autorizadas hoje
+   * + home p/ exibir `~`). Ausente ⇒ o comando só lista as raízes, como antes. `ports` troca a
+   * leitura de disco (teste).
+   */
+  readonly addDirPicker?: {
+    readonly roots: () => readonly string[];
+    readonly home?: string;
+    readonly ports?: DirPickerPorts;
+  };
 }
 
 /** Stub no-op do picker quando o índice/leitor não foi injetado (teste antigo). */
@@ -1429,6 +1442,11 @@ export function App(props: AppProps): React.ReactElement {
   const langPicker = useLangPicker({ currentLang });
   // Seletor genérico dos comandos sem argumento (`/notify`, `/task`, `/memory`…).
   const menuPicker = useMenuPicker();
+  const dirPorts = useMemo<DirPickerPorts>(
+    () => props.addDirPicker?.ports ?? { list: listSubdirs, resolve: resolveDir },
+    [props.addDirPicker?.ports],
+  );
+  const dirPicker = useDirPicker(dirPorts);
 
   // EST-0962 (/provider) — seletor `/provider`: lista os providers CADASTRADOS no broker
   // (`GET /v1/providers`, ADR-0076), marca o ativo. O provider ATIVO é REATIVO: deriva de
@@ -2513,6 +2531,16 @@ export function App(props: AppProps): React.ReactElement {
       // Revisão de menus (§6.2): o comando SEM argumento abre um seletor (com o valor atual
       // marcado) quando há um para ele. Com argumento digitado nada muda — script e usuário
       // avançado seguem como hoje. `skipMenu` é o próprio seletor rodando o comando.
+      if (
+        !skipMenu &&
+        args.trim() === '' &&
+        command.source === 'native' &&
+        command.id === 'add-dir' &&
+        props.addDirPicker !== undefined
+      ) {
+        dirPicker.openFor(command, props.addDirPicker.roots(), props.addDirPicker.home);
+        return;
+      }
       if (!skipMenu && args.trim() === '' && command.source === 'native' && command.id) {
         const ctx: MenuCtx = {
           conversation: convMode,
@@ -2828,6 +2856,7 @@ export function App(props: AppProps): React.ReactElement {
       suggestionsOn,
       runSecretCommand,
       menuPicker,
+      dirPicker,
       convMode,
       conciergeOn,
       splitView,
@@ -3280,6 +3309,10 @@ export function App(props: AppProps): React.ReactElement {
         if (effortPicker.customOpen) effortPicker.appendCustom(text);
         return; // lista de níveis — sem campo, ignora.
       }
+      if (dirPicker.open) {
+        dirPicker.type(sanitizeFieldPaste(text));
+        return;
+      }
       if (
         permPanel.open ||
         mcpPicker.open ||
@@ -3389,6 +3422,7 @@ export function App(props: AppProps): React.ReactElement {
     themePicker.open ||
     langPicker.open ||
     menuPicker.open ||
+    dirPicker.open ||
     providerPicker.open ||
     historyPicker.open ||
     rewindPicker.open ||
@@ -3581,6 +3615,28 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       controller.dismissBoot();
+      return;
+    }
+
+    // ── seletor de pasta do `/add-dir` CAPTURA o foco (e o texto: filtra/digita caminho) ──
+    if (dirPicker.open) {
+      if (key.ctrl && char === 'c') {
+        dirPicker.close();
+        return;
+      }
+      if (key.escape) {
+        dirPicker.close();
+        return;
+      }
+      if (key.upArrow) dirPicker.move(-1);
+      else if (key.downArrow) dirPicker.move(1);
+      else if (key.leftArrow) dirPicker.left();
+      else if (key.rightArrow) dirPicker.right();
+      else if (key.backspace || key.delete) dirPicker.backspace();
+      else if (key.return) {
+        const pick: DirPick | null = dirPicker.enter();
+        if (pick !== null) runCommand(pick.command, pick.path, true);
+      } else if (char !== '' && !key.ctrl && !key.meta && !key.tab) dirPicker.type(char);
       return;
     }
 
@@ -5908,6 +5964,7 @@ export function App(props: AppProps): React.ReactElement {
     themePicker.open ||
     langPicker.open ||
     menuPicker.open ||
+    dirPicker.open ||
     providerPicker.open ||
     historyPicker.open ||
     rewindPicker.open ||
@@ -6132,6 +6189,15 @@ export function App(props: AppProps): React.ReactElement {
               langs={langPicker.langs}
               selected={langPicker.selected}
               currentLang={currentLang}
+            />
+          </Box>
+        )}
+        {dirPicker.open && dirPicker.state !== null && (
+          <Box flexDirection="column" {...box}>
+            <DirPicker
+              state={dirPicker.state}
+              columns={columns}
+              maxRows={Math.max(4, Math.min(14, slashMenuRowCap - 2))}
             />
           </Box>
         )}

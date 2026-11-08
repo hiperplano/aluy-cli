@@ -587,6 +587,8 @@ export interface BuiltSession {
   readonly conciergeModel: ConciergeModel;
   readonly egress: EgressAllowlist;
   readonly workspace: WorkspacePort;
+  /** Store de salas (leitura p/ o seletor de `/rooms`). */
+  readonly roomStore: RoomStore;
   readonly askResolver: TuiAskResolver;
   /** EST-1110 · ADR-0114 — resolver de PERGUNTA (`perguntar`) da TUI (controlador). */
   readonly questionResolver: TuiQuestionResolver;
@@ -1808,6 +1810,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     quotaClient,
     ports,
     memory,
+    roomStore,
     todoStore,
     hookRunner,
     hooksConfig,

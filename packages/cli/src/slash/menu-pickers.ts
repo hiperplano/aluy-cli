@@ -552,7 +552,12 @@ export function menuStepFor(id: string, ctx: MenuCtx): MenuStep | Promise<MenuSt
         (d) =>
           next(d.label, [
             { id: 'read', label: 'ler', outcome: run(`read ${d.id}`) },
-            { id: 'watch', label: 'acompanhar ao vivo', outcome: run(`watch ${d.id}`) },
+            {
+              id: 'watch',
+              label: 'observar',
+              hint: 'acompanhar ao vivo',
+              outcome: run(`watch ${d.id}`),
+            },
           ]),
         [{ id: 'new', label: 'nova sala', outcome: run('new') }],
       );

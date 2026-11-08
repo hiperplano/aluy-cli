@@ -75,12 +75,30 @@ valendo, para script e para quem já sabe os argumentos.
 | `/task`                                                                             | a tarefa → ver detalhe · parar (e "parar todas")                                      |
 | `/approve` · `/deny`                                                                | com 2 ou mais pedidos pendentes: o pedido → aprovar / aprovar para a sessão / negar   |
 | `/memory` · `/todo` · `/cron` · `/plugin` · `/workflows` · `/service` · `/subagent` | o item → a ação (nada de decorar id); remover/esquecer pede confirmação               |
-| `/rooms` · `/secret`                                                                | a sala → ler/acompanhar · os nomes salvos → remover (o valor nunca aparece)           |
+| `/rooms` · `/secret`                                                                | a sala → ler/observar · os nomes salvos → remover (o valor nunca aparece)             |
+| `/add-dir`                                                                          | um navegador de pastas (ver abaixo)                                                   |
 | `/telegram`                                                                         | status · liberar · bloquear · desconectar                                             |
 | `/cycle`                                                                            | com um ciclo ativo: status · pausar · retomar · editar · parar                        |
 
-Sem seletor por enquanto: `/rename` (a cor), `/add-dir` (escolher a pasta) e `/permissions` (o painel
-dele já troca o modo).
+Sem seletor por enquanto: `/rename` (a cor) e `/permissions` (o painel dele já troca o modo).
+
+**`/add-dir` sem argumento** abre um navegador de pastas (só pastas, em ordem alfabética, sem as
+ocultas). Ele começa na pasta-mãe da raiz do workspace, porque a raiz e o que há dentro dela já estão
+autorizados: quem roda `/add-dir` quase sempre quer uma pasta irmã. A raiz aparece marcada.
+
+| Tecla                                                         | O que faz                                                                |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `↑` `↓`                                                       | move a seleção                                                           |
+| `enter` ou `→`                                                | entra na pasta selecionada                                               |
+| `←` ou `backspace`                                            | sobe uma pasta (com texto no filtro, o backspace apaga o texto primeiro) |
+| primeira linha `✓ adicionar esta pasta (<caminho>)` + `enter` | roda `/add-dir <caminho>`                                                |
+| digitar                                                       | filtra a lista como a busca do menu `/`                                  |
+| `/srv/x`, `~`, `../y`                                         | caminho digitado: `enter` pula para ele se existir                       |
+| `esc`                                                         | fecha                                                                    |
+
+Pastas já autorizadas mostram `● já adicionada`; as sem permissão de leitura, `(sem permissão)`. A
+lista tem no máximo 500 pastas (`… +N` mostra o resto; filtre para achar). Escolher uma pasta roda
+exatamente o `/add-dir <caminho>` digitado: as mesmas validações e o mesmo confinamento valem.
 
 ### Conversa
 
