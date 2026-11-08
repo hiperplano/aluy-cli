@@ -125,6 +125,20 @@ describe('ControllerTaskEngine — estado da sessão vira evento do registro', (
     expect(registry.get('t1')!.current).toBeUndefined();
   });
 
+  it('o resultado guarda a fala INTEIRA da tarefa com as quebras de linha (resumo de 1 linha, resultado de até 6000)', async () => {
+    const a = setup();
+    a.engine.start(a.registry.create({ goal: 'a', kind: 'main' }));
+    const texto = Array.from({ length: 60 }, (_, i) => `- item ${i}: ${'z'.repeat(40)}`).join('\n');
+    a.headless[0]!.finish([{ kind: 'aluy', text: texto, streaming: false } as never]);
+    await new Promise((r) => setTimeout(r, 5));
+    const t = a.registry.get('t1')!;
+    expect(t.summary).not.toContain('\n'); // a nota `✔ t1 concluída — …` segue de uma linha, cortada
+    expect(t.summary!.length).toBeLessThanOrEqual(300);
+    expect(t.result!.split('\n').length).toBeGreaterThan(40);
+    expect(t.result!.length).toBeGreaterThan(1500); // antes: 1500 e achatado numa linha só
+    expect(t.result!.length).toBeLessThanOrEqual(6000);
+  });
+
   it('fim do turno ⇒ done com o resumo da última fala; erro ⇒ failed; parada ⇒ stopped', async () => {
     const a = setup();
     a.engine.start(a.registry.create({ goal: 'a', kind: 'main' }));

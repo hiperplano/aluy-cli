@@ -13,7 +13,13 @@ import type {
   TaskRecord,
   TaskRegistry,
 } from '@hiperplano/aluy-cli-core';
-import { clip, redactOutputSecrets, taskGoalForAgent } from '@hiperplano/aluy-cli-core';
+import {
+  RESULT_MAX_CHARS,
+  clip,
+  clipBlock,
+  redactOutputSecrets,
+  taskGoalForAgent,
+} from '@hiperplano/aluy-cli-core';
 import type { HistoryItem } from '@hiperplano/aluy-cli-core';
 import type { SessionState } from './model.js';
 
@@ -315,7 +321,7 @@ export class ControllerTaskEngine implements ConciergeEngine {
     const text = lastAluy?.kind === 'aluy' ? lastAluy.text : '';
     reg.transition(id, 'done', undefined, {
       summary: clip(text || 'sem resposta textual', 300),
-      result: clip(text || 'sem resposta textual', 1500),
+      result: clipBlock(text || 'sem resposta textual', RESULT_MAX_CHARS, id),
     });
   }
 

@@ -4,6 +4,7 @@ import {
   TaskRegistry,
   buildConciergePrompt,
   buildDigest,
+  clipBlock,
   type ConciergeEngine,
   type ConciergeModel,
   type TaskRecord,
@@ -471,5 +472,84 @@ describe('Concierge — nunca afirma uma tarefa que não existe (regressão live
     const r = await concierge.handle('como está?');
     expect(r.modelCalls).toBe(1);
     expect(r.notes).toEqual([]);
+  });
+});
+
+describe('Concierge — resultado da tarefa chega ÍNTEGRO ao relato (regressão live: "veio truncado")', () => {
+  const RELATO = Array.from(
+    { length: 40 },
+    (_, i) => `- item ${String(i + 1).padStart(2, '0')}: valor ${'x'.repeat(40)}`,
+  ).join('\n');
+
+  it('clipBlock mantém as quebras de linha, redige segredo e apara o fim', () => {
+    const out = clipBlock('linha 1\nlinha 2\napi_key=sk-abcdef1234567890abcdef\n\n\n', 1000);
+    expect(out.split('\n')).toHaveLength(3);
+    expect(out).not.toContain('sk-abcdef1234567890abcdef');
+    expect(out.endsWith('\n')).toBe(false);
+  });
+
+  it('acima do teto corta em FRONTEIRA DE LINHA, com UMA marca +N linhas e o caminho do relato completo', () => {
+    const out = clipBlock(RELATO, 600, 't3');
+    const linhas = out.split('\n');
+    expect(out.length).toBeLessThanOrEqual(600);
+    expect(linhas.at(-1)).toMatch(/^\[… \+\d+ linhas; o relato completo está em \/task show t3\]$/);
+    for (const l of linhas.slice(0, -1)) expect(l).toMatch(/^- item \d\d: valor x{40}$/); // nenhuma linha partida
+    const n = Number(/\+(\d+) linhas/.exec(out)![1]);
+    expect(linhas.length - 1 + n).toBe(40);
+    expect(out.match(/\[…/g)).toHaveLength(1);
+    expect(clipBlock(out, 600, 't3')).toBe(out); // idempotente
+  });
+
+  it('o relato automático leva as linhas do resultado separadas (e até ~6000 caracteres)', async () => {
+    const { registry, concierge, seen } = setup(() => result('Resumo.'));
+    registry.create({ goal: 'coletar infos da máquina', kind: 'main' });
+    registry.transition('t1', 'done', undefined, { summary: 'ok', result: RELATO });
+    await concierge.handleTaskResults(['t1']);
+    const enviado = String(seen[0]!.at(-1)!.content);
+    expect(enviado).toContain('- item 01: valor');
+    expect(enviado).toContain('- item 40: valor'); // ~2.2k chars: antes (1500) cortava no meio
+    expect(enviado).toContain('\n- item 02');
+    expect(enviado).not.toContain('[… +');
+  });
+
+  it('resultado enorme: marca explícita no relato; task_status devolve o resultado', async () => {
+    const enorme = Array.from({ length: 400 }, (_, i) => `linha ${i} ${'y'.repeat(30)}`).join('\n');
+    const { registry, concierge, seen } = setup((_m, n) =>
+      n === 0 ? result('', [call('task_status', { task_id: 't1' })]) : result('li o resto.'),
+    );
+    registry.create({ goal: 'x', kind: 'main' });
+    registry.transition('t1', 'done', undefined, { summary: 'ok', result: enorme });
+    await concierge.handleTaskResults(['t1']);
+    const evento = String(seen[0]!.at(-1)!.content);
+    expect(evento).toMatch(/\[… \+\d+ linhas; o relato completo está em \/task show t1\]/);
+    const segunda = JSON.stringify(seen[1]);
+    expect(segunda).toContain('resultado:\\nlinha 0 ');
+  });
+
+  it('o prompt manda usar task_status e NÃO reclamar de truncamento ao dono', () => {
+    const p = buildConciergePrompt({});
+    expect(p).toContain('task_status');
+    expect(p).toContain('NUNCA diga ao dono que a informação');
+  });
+});
+
+describe('Concierge — resposta vazia do modelo', () => {
+  it('vazia na 1ª chamada ⇒ tenta de novo e usa a resposta (sem o "não consegui formular")', async () => {
+    const { concierge } = setup((_m, n) => (n === 0 ? result('') : result('Oi, tudo certo.')));
+    const r = await concierge.handle('oi');
+    expect(r.reply).toBe('Oi, tudo certo.');
+    expect(r.modelCalls).toBe(2);
+  });
+  it('vazia nas duas ⇒ aí sim o aviso', async () => {
+    const { concierge } = setup(() => result(''));
+    const r = await concierge.handle('oi');
+    expect(r.reply).toContain('Não consegui formular');
+    expect(r.modelCalls).toBe(2);
+  });
+  it('só tool-call (sem texto) NÃO repete: 2ª chamada é a de falar, e o ack cobre o resto', async () => {
+    const { concierge } = setup(() => result('', [call('task_start', { goal: 'x' })]));
+    const r = await concierge.handle('faça x');
+    expect(r.reply).not.toContain('Não consegui formular');
+    expect(r.modelCalls).toBe(2);
   });
 });

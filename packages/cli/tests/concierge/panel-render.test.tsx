@@ -2,6 +2,7 @@
 // tools, tempo, atividade) e aninha os agentes sob a tarefa.
 import React from 'react';
 import { Box } from 'ink';
+import stringWidth from 'string-width';
 import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
 import chalk from 'chalk';
@@ -148,4 +149,41 @@ describe('rodapé de agentes (clássico) — uma linha por agente', () => {
     expect(plain(lastFrame()).split('\n').length).toBe(3); // cabeçalho + 2 agentes
     unmount();
   });
+});
+
+describe('painel de tarefas — nenhuma linha chega à borda do terminal (fantasma de quadro)', () => {
+  // Relato do dono: com 3 tarefas rodando e atividade `bash find "$HOME" … -printf '%s\t%p\n'` o
+  // topo do rodapé ficava para trás a cada tick. Uma linha que o terminal desenha mais larga que a
+  // conta do Ink quebra fisicamente; a folga à direita evita, e o tab/controle some do texto.
+  const longo: SubAgentChildView = {
+    label: 't2 Atividade rápida aleatória: listar os 10 maiores arquivos do disco',
+    status: 'running',
+    model: 'herdado (z-ai/glm-5.3-flash)',
+    summary: `bash find "$HOME" -xdev -type f -p‹redigido› '%s\t%p\\n' 2>/dev/null | sort -rn | head -10 · 9.6k tokens · 3 tools`,
+    startedAt: Date.now() - 15_000,
+  };
+  for (const largura of [80, 120, 200]) {
+    it(`3 tarefas rodando a ${largura} colunas: nenhuma linha passa de ${largura - 1} células e há 1 linha por linha lógica`, () => {
+      const r: PanelRow[] = [
+        { kind: 'header', total: 3, running: 3 },
+        ...[1, 2, 3].map((n) => ({
+          kind: 'task' as const,
+          view: { ...longo, label: `t${n} ${longo.label}` },
+          selected: false,
+        })),
+      ];
+      const { lastFrame, unmount } = render(
+        <ThemeProvider theme={theme}>
+          <Box width={largura}>
+            <TaskPanel rows={r} columns={largura} frame={0} />
+          </Box>
+        </ThemeProvider>,
+      );
+      const linhas = plain(lastFrame()).split('\n');
+      expect(linhas.length).toBe(r.length);
+      for (const l of linhas) expect(stringWidth(l)).toBeLessThanOrEqual(largura - 1);
+      expect(plain(lastFrame())).not.toContain('\t');
+      unmount();
+    });
+  }
 });

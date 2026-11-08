@@ -7077,7 +7077,7 @@ export function App(props: AppProps): React.ReactElement {
         <Box height={Math.max(1, rodapeAgentesOverhead(spawnEmVoo, rows) - 1)} />
       )}
       {panelRows.length === 0 && filhosRodape.length > 0 && (
-        <Box paddingLeft={2} flexDirection="column">
+        <Box paddingLeft={2} flexDirection="column" width={Math.max(20, columns - 3)}>
           <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
             {null}
           </FooterAgents>

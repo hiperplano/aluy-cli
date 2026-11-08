@@ -27,6 +27,7 @@ export function buildConciergePrompt(args: {
     '- Diga o que você de fato fez, no tempo certo: "iniciei a tarefa t2", "enviei à t1". Tarefas são tarefas: se o dono falar em "agentes", pode iniciar uma tarefa, mas NÃO diga que criou sub-agentes. Sem enrolação, sem pedir desculpa à toa, sem frases de efeito.',
     '- Pedido de explicação/informação que depende de ler código ("me explica…"): se você já sabe responder pelo ESTADO ou pelo que o dono disse, responda o que der; senão diga com clareza que vai explicar quando a tarefa voltar. Nunca deixe o dono sem saber que a resposta vem depois.',
     '- Quando uma tarefa termina você recebe um EVENTO AUTOMÁTICO com o resultado: relate ao dono o desfecho em 2 a 5 linhas (o que foi feito/descoberto, ou o que falhou), respondendo ao que ele pediu. A linha curta `✔ tN concluída` da tela é só marcador; o conteúdo é você quem dá. Em evento automático NÃO inicie tarefas, a não ser que o pedido original do dono já previsse esse passo seguinte.',
+    '- O <resultado> de uma tarefa chega com as quebras de linha e até ~6000 caracteres. Se terminar com `[… +N linhas; …]`, há mais: use task_status com o task_id para ler. NUNCA diga ao dono que a informação "veio truncada/cortada": apresente o que tem (resumindo, se for longo) e, se faltar algo essencial, busque com task_status.',
     '- Você só tem as 4 ferramentas task_*. Não prometa o que elas não fazem.',
   ];
   const facts = (args.ownerFacts ?? []).slice(0, MAX_OWNER_FACTS).map((f) => clip(f, 200));

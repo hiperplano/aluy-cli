@@ -942,6 +942,22 @@ describe('Composer estável durante a fala do Concierge (tela NÃO cheia)', () =
     s.unmount();
   });
 
+  it('`(preparando o relato · Ns)` anda: o contador não fica congelado em 0s', async () => {
+    const g = defer();
+    const s = build({
+      mode: 'concierge',
+      tasks: [taskSession({ iters: () => 'ok', gates: () => g.promise })],
+      reportSettleMs: 6000,
+      concierge: () => text('Iniciei.', startTask()),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    g.resolve();
+    await waitFor(() => s.frame().includes('preparando o relato'));
+    await waitFor(() => /preparando o relato · [1-9]\d*s\)/.test(s.frame()), 4000);
+    s.unmount();
+  });
+
   it('pensando logo depois do `você`: exatamente 1 linha em branco antes da linha de trabalho', async () => {
     const gate = defer();
     const s = build({

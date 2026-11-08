@@ -249,7 +249,12 @@ export function TaskPanel(props: TaskPanelProps): React.ReactElement | null {
   if (props.rows.length === 0) return null;
   const width = Math.max(30, props.columns - 4);
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    // MARGEM À DIREITA: a largura do painel é `columns - 3` (e não a tela inteira). A conta de largura
+    // do Ink (`string-width`) e a do terminal divergem em alguns glifos (ambíguos, emoji, tab); uma
+    // linha que o Ink acha caber em `columns` mas o terminal desenha 1–2 células mais larga QUEBRA
+    // fisicamente, o Ink apaga 1 linha a menos a cada quadro e o topo do rodapé fica para trás (a
+    // frase de trabalho repetida no histórico, uma por tick). Com folga, o erro não chega a quebrar.
+    <Box flexDirection="column" paddingLeft={2} width={Math.max(20, props.columns - 3)}>
       {props.rows.map((r, idx) => {
         switch (r.kind) {
           case 'summary':

@@ -82,7 +82,19 @@ export function ChildLine(props: {
   readonly frame?: number;
 }): React.ReactElement {
   const theme = useTheme();
-  const c = props.child;
+  // Texto livre (atividade da tool, objetivo) numa linha só: controle/tab/CR somem — o Ink conta
+  // `\t` como 0 coluna e o terminal como até 8, e a linha quebraria fisicamente (fantasma de quadro).
+  const limpo = (t: string): string =>
+    Array.from(t, (ch) => {
+      const n = ch.codePointAt(0) ?? 0;
+      return n < 0x20 || (n >= 0x7f && n <= 0x9f) ? ' ' : ch;
+    }).join('');
+  const c0 = props.child;
+  const c: SubAgentChildView = {
+    ...c0,
+    label: limpo(c0.label),
+    ...(c0.summary !== undefined ? { summary: limpo(c0.summary) } : {}),
+  };
   const word = statusWord(c, props.settled === true);
   const glyph =
     c.status === 'running' ? (
