@@ -39,7 +39,11 @@ import { readUpdateNote, refreshUpdateCheck } from '../io/update-check.js';
 import { readAutoUpdateNote, runAutoUpdate } from '../io/auto-update.js';
 import { PluginStore } from '../io/plugin-store.js';
 import { carregarAgentesDePlugins } from '../io/plugin-agents.js';
-import { linhasDaListaDePlugins, secretVault } from '@hiperplano/aluy-cli-core';
+import {
+  TASK_EXCLUDED_TOOLS,
+  linhasDaListaDePlugins,
+  secretVault,
+} from '@hiperplano/aluy-cli-core';
 import { ThemeRoot } from './ThemeRoot.js';
 import { SecretsService } from './secrets.js';
 import { buildSession, type BuildSessionOptions } from './wiring.js';
@@ -2387,9 +2391,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // Tarefas paralelas = sessões headless (histórico, fila de injeção, sub-agentes e
           // catraca PRÓPRIOS). Sem monitor de heap próprio (o da sessão principal cobre).
           createHeadless: (taskId) => {
-            const { memoryMonitor: _mm, ...rest } = buildArgs;
+            // Sem o catálogo de COMANDOS DA SESSÃO (~5,4k chars por chamada): a tarefa não tem a tool
+            // `session_command` (ver TASK_EXCLUDED_TOOLS), então o catálogo só gastaria contexto.
+            const { memoryMonitor: _mm, sessionCommands: _sc, ...rest } = buildArgs;
             void _mm;
-            return buildSession({ ...rest, sessionId: `${activeSession.id}-${taskId}` }).controller;
+            void _sc;
+            return buildSession({
+              ...rest,
+              sessionId: `${activeSession.id}-${taskId}`,
+              excludeTools: TASK_EXCLUDED_TOOLS,
+            }).controller;
           },
           // A memória do dono (ADR 0004) entra curta no prompt do Concierge: só fatos `usuario`.
           ownerFacts: async () =>

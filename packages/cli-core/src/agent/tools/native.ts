@@ -979,6 +979,73 @@ function clipDiffBytes(header: string[], body: string[]): string {
  * arquivo grande não pode exibir só o topo inalterado — e anexamos uma nota honesta.
  * Edit pequeno (≤ teto) ⇒ diff COMPLETO, inalterado.
  */
+/** Uma operação do diff de linhas: contexto (' '), remoção ('-') ou adição ('+'). */
+interface LineOp {
+  readonly t: ' ' | '-' | '+';
+  readonly l: string;
+}
+
+/** Teto de células da tabela LCS (n×m); acima disso o miolo vira bloco `-`…`+` (sem contexto). */
+const MAX_LCS_CELLS = 4_000_000;
+
+/**
+ * Diff de linhas por LCS (prefixo/sufixo comuns são aparados antes). Em cada trecho alterado as
+ * remoções saem ANTES das adições. PURO.
+ */
+export function lineDiffOps(a: readonly string[], b: readonly string[]): LineOp[] {
+  let lo = 0;
+  while (lo < a.length && lo < b.length && a[lo] === b[lo]) lo++;
+  let ea = a.length;
+  let eb = b.length;
+  while (ea > lo && eb > lo && a[ea - 1] === b[eb - 1]) {
+    ea--;
+    eb--;
+  }
+  const ops: LineOp[] = [];
+  for (let i = 0; i < lo; i++) ops.push({ t: ' ', l: a[i]! });
+  const n = ea - lo;
+  const m = eb - lo;
+  if (n * m > MAX_LCS_CELLS) {
+    for (let i = lo; i < ea; i++) ops.push({ t: '-', l: a[i]! });
+    for (let j = lo; j < eb; j++) ops.push({ t: '+', l: b[j]! });
+  } else {
+    // dp[i][j] = tamanho da LCS de a[lo+i..ea) e b[lo+j..eb)
+    const w = m + 1;
+    const dp = new Uint32Array((n + 1) * w);
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i * w + j] =
+          a[lo + i] === b[lo + j]
+            ? dp[(i + 1) * w + j + 1]! + 1
+            : Math.max(dp[(i + 1) * w + j]!, dp[i * w + j + 1]!);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < n || j < m) {
+      // Linha igual: casa, A NÃO SER que o mesmo casamento exista mais adiante (linhas em branco
+      // repetidas): então prefere a ocorrência de DEPOIS e a de agora vira adição — assim o
+      // branco dentro de uma docstring nova não "rouba" o branco entre as funções.
+      if (i < n && j < m && a[lo + i] === b[lo + j] && dp[i * w + j + 1] !== dp[i * w + j]) {
+        ops.push({ t: ' ', l: a[lo + i]! });
+        i++;
+        j++;
+      } else if (i < n && j < m && a[lo + i] === b[lo + j]) {
+        ops.push({ t: '+', l: b[lo + j]! });
+        j++;
+      } else if (j >= m || (i < n && dp[(i + 1) * w + j]! >= dp[i * w + j + 1]!)) {
+        ops.push({ t: '-', l: a[lo + i]! });
+        i++;
+      } else {
+        ops.push({ t: '+', l: b[lo + j]! });
+        j++;
+      }
+    }
+  }
+  for (let i = ea; i < a.length; i++) ops.push({ t: ' ', l: a[i]! });
+  return ops;
+}
+
 export function unifiedDiff(path: string, before: string, after: string, existed: boolean): string {
   if (!existed) {
     const lines = after.split('\n');
@@ -994,17 +1061,16 @@ export function unifiedDiff(path: string, before: string, after: string, existed
     shown.push(`… (diff truncado: ${MAX_DIFF_LINES} de ${lines.length} linhas)`);
     return clipDiffBytes(header, shown);
   }
-  const a = before.split('\n');
-  const b = after.split('\n');
   const header = [`--- ${path}`, `+++ ${path}`];
-  const max = Math.max(a.length, b.length);
-
-  // Linhas alinhadas por índice: localiza a JANELA de mudança (primeiro..último
-  // índice com `a[i] !== b[i]`). Tudo fora dela é contexto inalterado a elidir.
+  // DIFF DE LINHAS de verdade (LCS): contexto inalterado fica como contexto e, em cada trecho
+  // alterado, as remoções vêm ANTES das adições. (O alinhamento por índice, que havia aqui,
+  // intercalava `-`/`+` linha a linha e desalinhava tudo após uma inserção.)
+  const ops = lineDiffOps(before.split('\n'), after.split('\n'));
+  const max = ops.length;
   let firstChange = -1;
   let lastChange = -1;
   for (let i = 0; i < max; i++) {
-    if (a[i] !== b[i]) {
+    if (ops[i]!.t !== ' ') {
       if (firstChange === -1) firstChange = i;
       lastChange = i;
     }
@@ -1012,16 +1078,7 @@ export function unifiedDiff(path: string, before: string, after: string, existed
 
   const emit = (lo: number, hi: number): string[] => {
     const out: string[] = [];
-    for (let i = lo; i <= hi; i++) {
-      const la = a[i];
-      const lb = b[i];
-      if (la === lb) {
-        out.push(` ${la ?? ''}`);
-      } else {
-        if (la !== undefined) out.push(`-${la}`);
-        if (lb !== undefined) out.push(`+${lb}`);
-      }
-    }
+    for (let i = lo; i <= hi; i++) out.push(`${ops[i]!.t}${ops[i]!.l}`);
     return out;
   };
 

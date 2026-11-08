@@ -3983,6 +3983,8 @@ export function App(props: AppProps): React.ReactElement {
         if (key.escape) {
           setSlashOpen(false);
           setSlashSel(0);
+          // Só o gatilho `/` no composer: o Esc o LIMPA (como o Claude Code). `/mod…` fica.
+          if (input === '/') setText('');
           return;
         }
         // Tab COMPLETA a entrada selecionada NO COMPOSER (sem submeter nem executar
@@ -4897,6 +4899,8 @@ export function App(props: AppProps): React.ReactElement {
       if (key.escape) {
         setSlashOpen(false);
         setSlashSel(0);
+        // Só o gatilho `/` no composer: o Esc o LIMPA (como o Claude Code). `/mod…` fica.
+        if (input === '/') setText('');
         return;
       }
     }

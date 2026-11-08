@@ -798,6 +798,12 @@ export interface SessionControllerOptions {
    */
   readonly disableNativeTools?: boolean;
   /**
+   * ADR 0006 — nomes de tools que ESTA sessão não expõe (sessão de TAREFA do Concierge: tira do
+   * catálogo o que só pesa em tokens a cada chamada). Tool excluída vira "tool desconhecida";
+   * a catraca (`decide()`) e as demais tools seguem iguais. Ausente ⇒ toolset completo.
+   */
+  readonly excludeTools?: readonly string[];
+  /**
    * EST-1119 · ADR-0121 §5 — store de SALAS multi-agente (RoomStore).
    * Injetável p/ wiring selecionar o backend (memory/file/loopback/broker)
    * com base em `ALUY_ROOM_BACKEND` (env) e `rooms.backend` (config).
@@ -2195,8 +2201,9 @@ export class SessionController {
     // ao indicador o TETO efetivo p/ o %. O loop o re-arma por turno via `reset()`.
     this.budget = parentBudget ?? new SessionBudget(this.limits);
 
+    const excluded = new Set(opts.excludeTools ?? []);
     this.toolRegistry = new ToolRegistry<ToolPorts>(
-      allTools.map((t) => withToolReport(t, reporter)),
+      allTools.filter((t) => !excluded.has(t.name)).map((t) => withToolReport(t, reporter)),
     );
     // EST-BOOT-DECOUPLE — marca os servers MCP AINDA CONECTANDO (boot desacoplado, sem
     // esperar o handshake). Cada nome sai da lista quando `refreshMcpTools(tools,

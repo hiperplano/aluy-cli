@@ -79,3 +79,30 @@ concluída`) coladas e 1 em branco antes do bloco seguinte — conferido no tmux
   mesmo, sem spawn_agent; delegue só se for amplo e independente"). Só no Concierge; o clássico não
   muda. Motivo: com um time de agentes configurado, o prompt de sistema manda delegar por padrão e
   um conserto trivial custou ~72k tokens.
+
+## Quarta rodada (diff, custo por chamada, Esc no `/`)
+
+- **Diff da aprovação**: `unifiedDiff` alinhava as linhas por índice (uma inserção desalinhava tudo
+  e `-`/`+` saíam intercalados). Agora é um diff de linhas por LCS: contexto inalterado fica como
+  contexto, em cada trecho as remoções vêm antes das adições, e o branco entre funções é contexto.
+  Vale também para o diálogo clássico e para o transcrito (mesma função).
+- **Custo por chamada** (tarefa do Concierge, medido no stub, parent, caracteres por request):
+
+  | parte                       | antes  | depois |
+  | --------------------------- | ------ | ------ |
+  | prompt de sistema           | 12 655 | 6 956  |
+  | schemas das tools (31 → 21) | 29 103 | 20 073 |
+  | histórico (início do turno) | 342    | 342    |
+  | **total**                   | 42 100 | 27 371 |
+
+  ≈ 12k → 7,8k tokens por chamada (÷3,5). O custo de uma tarefa é (nº de chamadas × isso): os
+  ~73k tokens vistos ao vivo eram ~7 chamadas de ~10k, sem delegação. Cortes (só nas sessões de
+  tarefa; o clássico não muda): tools `perguntar` (a tarefa é headless: ninguém responde),
+  `session_command`, `capabilities`, `list_tools`, `room_*`, `monitor*`, `headroom_retrieve` e o
+  catálogo de COMANDOS DA SESSÃO (5,4k chars, só serve a `session_command`). A catraca e as tools de
+  trabalho (ler/editar/escrever/buscar/comando/testes/web/plano/memória/`spawn_agent`) ficam.
+  Ainda pesa: `spawn_agent` (5,5k chars) e o prompt-base (~7k); o medido aqui é um piso (sem o
+  bloco de memória/ALUY.md do dono).
+
+- **Esc no menu `/`**: se o composer tem só `/`, o Esc fecha o menu e limpa o gatilho; com `/mod…` o
+  texto fica.

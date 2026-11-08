@@ -6,6 +6,7 @@ import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { TASK_EXCLUDED_TOOLS } from '@hiperplano/aluy-cli-core';
 import { buildSession } from '../../src/session/wiring.js';
 import { ConciergeRuntime, type ConversationSink } from '../../src/session/concierge-runtime.js';
 
@@ -161,5 +162,55 @@ describe('"aprovar sempre nesta tarefa" na fiação real da sessão', () => {
     await waitFor(() => rt.pendingApprovals().length === 1);
     rt.approve('t1', 'always');
     await finishes(rt);
+  });
+
+  it('sessão de TAREFA não manda ao modelo as tools de UI/sala/monitor (menos tokens por chamada)', async () => {
+    const seen: string[][] = [];
+    const run1 = async (exclude: readonly string[] | undefined): Promise<string[]> => {
+      const names: string[] = [];
+      const b = buildSession({
+        workspaceRoot: ws,
+        store,
+        brokerFetch: (async (url: string, init?: { body?: string }) => {
+          if (!url.endsWith('/v1/chat'))
+            return { ...sse(''), body: undefined, json: async () => ({}) };
+          const body = JSON.parse(init?.body ?? '{}') as {
+            tools?: { function: { name: string } }[];
+          };
+          for (const t of body.tools ?? []) names.push(t.function.name);
+          return sse('pronto.');
+        }) as never,
+        mode: 'normal',
+        subAgents: { enabled: true, maxConcurrency: 1 },
+        ...(exclude !== undefined ? { excludeTools: exclude } : {}),
+        env: {
+          ALUY_MEM0_URL: 'http://127.0.0.1:1',
+          ALUY_BROKER_URL: 'https://broker.mock.local',
+          ALUY_IDENTITY_URL: 'https://id.mock.local',
+        },
+      });
+      await b.controller.submit('oi');
+      return names;
+    };
+    const full = await run1(undefined);
+    const task = await run1(TASK_EXCLUDED_TOOLS);
+    seen.push(full, task);
+    // (`headroom_retrieve` só existe com o proxy configurado; as demais vêm sempre)
+    for (const t of TASK_EXCLUDED_TOOLS) {
+      if (t !== 'headroom_retrieve') expect(full).toContain(t);
+      expect(task).not.toContain(t);
+    }
+    // o necessário para trabalhar continua lá
+    for (const t of [
+      'read_file',
+      'edit_file',
+      'write_file',
+      'run_command',
+      'run_tests',
+      'grep',
+      'spawn_agent',
+    ])
+      expect(task).toContain(t);
+    expect(task.length).toBeLessThan(full.length);
   });
 });

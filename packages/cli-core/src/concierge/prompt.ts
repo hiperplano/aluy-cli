@@ -51,3 +51,26 @@ export const TASK_COST_HINT =
 export function taskGoalForAgent(goal: string): string {
   return `${goal}\n\n${TASK_COST_HINT}`;
 }
+
+/**
+ * Tools que a sessão de uma TAREFA do Concierge não precisa — cada uma custa tokens de schema em
+ * TODA chamada ao modelo (medido: 31 tools ≈ 29k chars ≈ 8k tokens por request). Fora daqui ficam
+ * ler/editar/escrever/buscar/rodar comandos e testes, web, plano, memória e delegação
+ * (`spawn_agent`), isto é, o necessário para o trabalho; nenhuma regra de segurança depende de
+ * uma tool ausente (a catraca `decide()` é a mesma).
+ *  · `perguntar` — a tarefa é headless: não há quem responda (travaria);
+ *  · `session_command`, `capabilities`, `list_tools` — meta/UI da sessão interativa;
+ *  · `room_*`, `monitor*`, `headroom_retrieve` — salas, monitores e proxy auxiliar.
+ */
+export const TASK_EXCLUDED_TOOLS: readonly string[] = [
+  'perguntar',
+  'session_command',
+  'capabilities',
+  'list_tools',
+  'room_read',
+  'room_post',
+  'monitor',
+  'monitor_cancel',
+  'monitors',
+  'headroom_retrieve',
+];

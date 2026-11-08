@@ -244,6 +244,8 @@ export interface BuildSessionOptions {
    * VENCE o legado `unsafe` se ambos vierem (Plan/normal zeram o unsafe).
    */
   readonly mode?: SessionMode;
+  /** ADR 0006 — tools que a sessão NÃO expõe (sessão de tarefa do Concierge). */
+  readonly excludeTools?: readonly string[];
   /**
    * LEGADO — `--unsafe` como booleano. Equivale a `mode='unsafe'` se `mode`
    * ausente. ⚠ desliga CLI-SEC-3 — revisar com `seguranca`. Default false.
@@ -1653,6 +1655,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
     // degrade no 422 p/ toda a árvore). A pista `tools` reflete EXATAMENTE as tools
     // que o agente pode chamar (HG-2: catálogo, não credencial). Desligável por env.
     disableNativeTools: env.ALUY_NATIVE_TOOLS_OFF === '1' || env.ALUY_NATIVE_TOOLS_OFF === 'true',
+    ...(opts.excludeTools !== undefined ? { excludeTools: opts.excludeTools } : {}),
     // EST-0969 (watchdog de TRAVAMENTO) — o env da sessão alimenta os limiares/toggle
     // do watchdog (`ALUY_STUCK_*` / `ALUY_STUCK_OFF`). Ligado por default: quando o
     // agente gira sem avançar, a sessão PAUSA e PEDE DIREÇÃO (não morre no teto).

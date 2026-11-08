@@ -333,30 +333,24 @@ describe('App — SLASH-MENU durante o trabalho (EST-0982)', () => {
     // alcançável, só que exige esvaziar primeiro: apago o `/` (backspace) e, com o composer
     // vazio e sem pendência, o ESC volta a ser o freio (interrompe). (F8/Ctrl+C seguem stop
     // a qualquer momento — não exercitados aqui.)
-    const BACKSPACE = '\x7f';
     const s = await startStreaming();
     const interruptSpy = vi.spyOn(s.controller, 'interrupt');
 
     await tap(s, '/');
     await waitFor(() => plain(s.lastFrame()).includes(MENU_HEADER));
 
-    // (a) fechar o menu NÃO aborta o trabalho — e DEIXA o `/` no composer.
+    // (a) fechar o menu NÃO aborta o trabalho — e limpa o `/` solto do composer.
     await tap(s, ESC);
     await waitFor(() => !plain(s.lastFrame()).includes(MENU_HEADER));
     expect(plain(s.lastFrame())).not.toContain(MENU_HEADER);
     expect(interruptSpy).not.toHaveBeenCalled();
     expect(s.controller.current.phase).toBe('streaming');
-    // O `/` SOBROU no composer (pendência) ⇒ o composer NÃO está vazio.
-    expect(composerLine(s).trim()).toBe('/');
+    // O composer só tinha o gatilho `/` ⇒ o Esc o LIMPOU (como o Claude Code).
+    await waitFor(() => composerLine(s).trim() !== '/');
+    expect(interruptSpy).not.toHaveBeenCalled(); // até aqui NADA parou (só fechou o menu)
 
-    // (b) o freio AINDA é alcançável (NÃO trivial): com o `/` no composer, o ESC ACELERA
-    //     (não para). Esvazio o composer (apago o `/`) e SÓ então, com TUDO vazio (fila vazia,
-    //     sem injects, composer vazio), o ESC volta a ser o freio (interrompe).
-    await pressUntil(
-      () => s.stdin.write(BACKSPACE),
-      () => composerLine(s).trim() === '',
-    );
-    expect(interruptSpy).not.toHaveBeenCalled(); // até aqui NADA parou (só fechou o menu + editou)
+    // (b) o freio segue alcançável: com TUDO vazio (fila vazia, sem injects, composer vazio) o
+    //     ESC seguinte volta a ser o freio (interrompe).
     await pressUntil(
       () => s.stdin.write(ESC),
       () => interruptSpy.mock.calls.length > 0,
