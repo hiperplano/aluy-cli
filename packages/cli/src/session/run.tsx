@@ -17,6 +17,7 @@ import {
 } from './synchronized-output.js';
 import { enableBracketedPaste } from './bracketed-paste.js';
 import { disableAutowrap, noAutowrapEnabled } from './autowrap.js';
+import { installStdioGuard } from './stdio-guard.js';
 import { resolveTheme } from '../ui/theme/index.js';
 import { tableLines } from '../ui/table-lines.js';
 import type { RewindChoice } from '../ui/hooks/useRewindPicker.js';
@@ -2404,6 +2405,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               sessionId: `${activeSession.id}-${taskId}`,
               excludeTools: TASK_EXCLUDED_TOOLS,
               traceLabel: `task ${taskId}`,
+              // O aviso de yolo já saiu no boot/1º turno da sessão principal; uma por tarefa seria um
+              // `write` cru no TTY por tarefa (fantasma da linha de trabalho).
+              weakYoloWarn: () => undefined,
             }).controller;
           },
           // A memória do dono (ADR 0004) entra curta no prompt do Concierge: só fatos `usuario`.
@@ -4767,7 +4771,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // Ink (emoji ZWJ/tom de pele…) ⇒ nº de linhas físicas == nº que o Ink emitiu ⇒ o erase da
   // região viva nunca deixa a linha de trabalho/branco para trás. Ver `autowrap.ts`.
   const autowrap = disableAutowrap(baseStdout, noAutowrapEnabled(env));
+  // GUARDA DE STDIO: com a TUI de pé, `stderr`/`console.*`/stdout de texto puro por fora do Ink viram
+  // NOTA na transcrição (dedup) em vez de tocar o TTY — um `write` cru desloca a tela 1 linha, o erase
+  // relativo do Ink fica 1 curto e a frase de trabalho vira fantasma. Só com o wrapper do Ink ativo
+  // (é ele que marca as escritas do app); restaurada no unmount/exit.
+  const stdioGuard =
+    sync !== undefined && env.ALUY_STDIO_GUARD !== '0'
+      ? installStdioGuard({ onLine: (l) => built.controller.pushNote('aviso', [l]) })
+      : undefined;
   const disableBracketedPaste = (): void => {
+    stdioGuard?.restore();
     pasteMode.disable();
     autowrap.restore();
   };

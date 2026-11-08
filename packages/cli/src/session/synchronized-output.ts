@@ -44,6 +44,7 @@ export const BEGIN_SYNC = '\x1b[?2026h';
 export const END_SYNC = '\x1b[?2026l';
 
 import { debugFrameWrite, debugRenderEnabled } from './debug-render.js';
+import { appWrite } from './stdio-guard.js';
 import { displayWidth } from './visual-lines.js';
 
 const ESC = '\x1b[';
@@ -999,7 +1000,7 @@ export function wrapStdoutWithSync(
     if (cleanedUp) return;
     const out = parts.join('');
     try {
-      original.write(useSync ? `${BEGIN_SYNC}${out}${END_SYNC}` : out, () => {
+      appWrite(original, useSync ? `${BEGIN_SYNC}${out}${END_SYNC}` : out, () => {
         for (const cb of cbs) cb();
       });
     } catch {
@@ -1032,7 +1033,7 @@ export function wrapStdoutWithSync(
       if (h === '') return;
       const out = `${DISABLE_AUTOWRAP_SEQ}${h}`;
       try {
-        original.write(useSync ? `${BEGIN_SYNC}${out}${END_SYNC}` : out);
+        appWrite(original, useSync ? `${BEGIN_SYNC}${out}${END_SYNC}` : out);
       } catch {
         /* stream fechado */
       }
@@ -1055,7 +1056,12 @@ export function wrapStdoutWithSync(
       chunk === null ||
       (typeof chunk === 'string' ? chunk.length === 0 : chunk.byteLength === 0);
     if (isEmpty) {
-      return original.write(chunk as string, encoding as BufferEncoding, callback as () => void);
+      return appWrite(
+        original,
+        chunk as string,
+        encoding as BufferEncoding,
+        callback as () => void,
+      );
     }
 
     const body = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
@@ -1136,7 +1142,7 @@ export function wrapStdoutWithSync(
     const framed = useSync ? `${BEGIN_SYNC}${withClear}${END_SYNC}` : withClear;
     if (cockpitActive) scheduleHeal();
     // UM único write ao stream real: tudo concatenado e atômico.
-    return original.write(framed, callback as () => void);
+    return appWrite(original, framed, callback as () => void);
   }) as NodeJS.WriteStream['write'];
 
   // PROXY: delega tudo ao stream real; só `write` é o nosso. Mantém `this` ligado ao
@@ -1155,7 +1161,7 @@ export function wrapStdoutWithSync(
     // Auto-wrap SEMPRE religado ao sair (nunca deixa o shell do dono sem wrap), mesmo sem `?2026`.
     if (useNoWrap) {
       try {
-        original.write(ENABLE_AUTOWRAP_SEQ);
+        appWrite(original, ENABLE_AUTOWRAP_SEQ);
       } catch {
         /* saída já fechada */
       }
@@ -1166,7 +1172,7 @@ export function wrapStdoutWithSync(
     // ESU final CRU (não pelo proxy — senão re-transformaria). Best-effort.
     if (!useSync) return; // sem `?2026`, não há modo sync p/ desfazer.
     try {
-      original.write(END_SYNC);
+      appWrite(original, END_SYNC);
     } catch {
       // saída já fechada ⇒ nada a fazer; não derruba o exit.
     }
@@ -1181,7 +1187,7 @@ export function wrapStdoutWithSync(
     if (!pendingHardClear) return;
     pendingHardClear = false;
     const framed = useSync ? `${BEGIN_SYNC}${HARD_CLEAR}${END_SYNC}` : HARD_CLEAR;
-    original.write(framed);
+    appWrite(original, framed);
   };
 
   // BURACO-NO-MEIO-RESIZE — arma o clear p/ o PRÓXIMO write (ver doc em `SyncStdout`).

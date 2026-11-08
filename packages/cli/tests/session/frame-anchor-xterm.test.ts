@@ -2,6 +2,7 @@
 // (`<Static>`) nunca pode receber uma cópia velha da linha de trabalho (`Λ frase…`). Relato do dono:
 // com a tela cheia, ao subir a nota `✔ tN concluída` a frase de trabalho ficava repetida no histórico.
 import { describe, expect, it } from 'vitest';
+import { installStdioGuard } from '../../src/session/stdio-guard.js';
 import xterm from '@xterm/headless';
 import {
   BEGIN_SYNC,
@@ -241,5 +242,121 @@ describe('auto-wrap OFF em todo quadro do inline: linha larga demais não deixa 
     const w = wrapStdoutWithSync(stream);
     w.cleanup();
     expect(escritas.join('')).toContain('\x1b[?7h');
+  });
+});
+
+describe('escrita crua no TTY (stderr/console) enquanto a TUI está de pé — guarda de stdio', () => {
+  // Relato do dono (--yolo): cada tarefa/sub-agente imprimia o aviso de yolo direto no stderr, no meio
+  // da sessão. O texto cai no cursor, desloca a tela 1 linha, o erase relativo do Ink fica 1 curto e
+  // a frase de trabalho vira fantasma no histórico — um por escrita.
+  async function roda(comGuarda: boolean): Promise<{ linhas: string[]; notas: string[] }> {
+    const term = new Terminal({
+      rows: 12,
+      cols: 50,
+      allowProposedApi: true,
+      scrollback: 200,
+      convertEol: true,
+    });
+    const mk = () =>
+      ({
+        rows: 12,
+        columns: 50,
+        isTTY: true,
+        write: (d: unknown, a?: unknown, b?: unknown) => {
+          term.write(typeof d === 'string' ? d : String(d));
+          const cb = typeof a === 'function' ? a : b;
+          if (typeof cb === 'function') (cb as () => void)();
+          return true;
+        },
+      }) as unknown as NodeJS.WriteStream;
+    const out = mk();
+    const err = mk(); // mesmo TTY
+    const notas: string[] = [];
+    const guard = comGuarda
+      ? installStdioGuard({ stdout: out, stderr: err, onLine: (l) => notas.push(l) })
+      : undefined;
+    const w = wrapStdoutWithSync(out);
+    let prev = 0;
+    const erase = (n: number): string =>
+      n <= 0 ? '' : '\x1b[2K\x1b[1A'.repeat(n - 1) + '\x1b[2K\x1b[G';
+    const frame = (lines: string[]): void => {
+      w.stdout.write(erase(prev) + lines.join('\n') + '\n');
+      prev = lines.length + 1;
+    };
+    // a linha de trabalho é a PRIMEIRA do quadro
+    const viva = (f: string): string[] => [
+      `Λ ${f}… (1 em segundo plano)`,
+      '',
+      '┃❯ digite',
+      '  status',
+    ];
+    w.stdout.write('histórico 1\nhistórico 2\n');
+    frame(viva('a'));
+    frame(viva('b'));
+    // a tarefa nasce e o controller dela avisa no stderr cru (duas vezes, a 2ª idêntica)
+    err.write('aviso: yolo com tier fraco — conteúdo não confiável no contexto\n');
+    err.write('aviso: yolo com tier fraco — conteúdo não confiável no contexto\n');
+    frame(viva('c'));
+    frame(viva('d'));
+    w.stdout.write(erase(prev));
+    w.stdout.write('  ✔ t1 concluída — ok\n');
+    const idle = ['┃❯ digite', '  status'];
+    w.stdout.write(idle.join('\n') + '\n');
+    await Promise.resolve();
+    await new Promise<void>((r) => term.write('', r));
+    guard?.restore();
+    const b = term.buffer.active;
+    const linhas: string[] = [];
+    for (let i = 0; i < b.length; i++) linhas.push(b.getLine(i)?.translateToString(true) ?? '');
+    return { linhas, notas };
+  }
+
+  it('COM a guarda: nenhum fantasma `Λ ` e o aviso vira UMA nota (dedup)', async () => {
+    const { linhas, notas } = await roda(true);
+    expect(
+      linhas.filter((l) => /^Λ /.test(l)),
+      linhas.join('\n'),
+    ).toEqual([]);
+    expect(linhas.some((l) => l.includes('aviso: yolo'))).toBe(false); // nada cru no TTY
+    expect(notas).toEqual(['aviso: yolo com tier fraco — conteúdo não confiável no contexto']);
+  });
+
+  it('SEM a guarda (controle): o write cru deixa a frase de trabalho para trás — o teste não é vácuo', async () => {
+    const { linhas } = await roda(false);
+    expect(linhas.filter((l) => /^Λ /.test(l)).length).toBeGreaterThan(0);
+  });
+
+  it('escritas do PRÓPRIO render (wrapper do Ink) passam pela guarda, mesmo texto puro', () => {
+    const escritas: string[] = [];
+    const out = {
+      write: (d: unknown) => (escritas.push(String(d)), true),
+      rows: 10,
+      columns: 40,
+    } as unknown as NodeJS.WriteStream;
+    const err = { write: () => true } as unknown as NodeJS.WriteStream;
+    const notas: string[] = [];
+    const g = installStdioGuard({ stdout: out, stderr: err, onLine: (l) => notas.push(l) });
+    const w = wrapStdoutWithSync(out, { sync: false, overwrite: false, autowrap: false });
+    w.stdout.write('quadro do Ink em texto puro\n');
+    expect(escritas).toContain('quadro do Ink em texto puro\n');
+    expect(notas).toEqual([]);
+    g.restore();
+  });
+
+  it('restore() devolve os writes originais; sequências de controle no stdout passam', () => {
+    const escritas: string[] = [];
+    const out = {
+      write: (d: unknown) => (escritas.push(String(d)), true),
+    } as unknown as NodeJS.WriteStream;
+    const err = { write: () => true } as unknown as NodeJS.WriteStream;
+    const orig = out.write;
+    const notas: string[] = [];
+    const g = installStdioGuard({ stdout: out, stderr: err, onLine: (l) => notas.push(l) });
+    out.write('\x1b]0;título\x07'); // OSC do app: passa
+    out.write('console.log solto\n'); // texto puro: vira nota
+    expect(escritas).toEqual(['\x1b]0;título\x07']);
+    expect(notas).toEqual(['console.log solto']);
+    g.restore();
+    expect(out.write).toBe(orig);
   });
 });
