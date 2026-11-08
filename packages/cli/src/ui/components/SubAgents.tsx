@@ -89,10 +89,21 @@ function cortar(texto: string, max: number): string {
   return `${out.trimEnd()}…`;
 }
 
+/** Piso do objetivo (`[t1 …]`) antes de o resumo começar a ser cortado. */
+const OBJETIVO_MIN = 18;
+
 /**
- * Ajusta a linha do filho a `celulas` em TEXTO PLANO (antes de qualquer cor/brilho): a cauda perde
- * primeiro o resumo (cortado com `…`), depois o modelo e o tempo; se ainda não couber, corta o
- * rótulo. `glifo` = células fixas do glifo + espaços. Sem `celulas` devolve tudo intacto.
+ * Ajusta a linha do filho a `celulas` em TEXTO PLANO (antes de qualquer cor/brilho). Ordem do que
+ * PERDE, até caber:
+ *   1. `herdado (modelo)` — igual em todas as linhas e a statusline já mostra o modelo (um modelo
+ *      NÃO herdado é informação e fica);
+ *   2. o ` (97% cache)` do resumo;
+ *   3. o objetivo, até `OBJETIVO_MIN`;
+ *   4. o resumo (cortado com `…`);
+ *   5. o modelo não herdado;
+ *   6. o objetivo abaixo do piso;
+ *   7. o tempo — por último.
+ * `glifo` = células fixas do glifo + espaços. Sem `celulas` devolve tudo intacto.
  */
 export function ajustarLinhaDoFilho(a: {
   readonly rotulo: string;
@@ -104,43 +115,48 @@ export function ajustarLinhaDoFilho(a: {
   readonly glifo: number;
 }): { rotulo: string; model?: string; summary?: string; tempo?: string } {
   const sep = ' · ';
-  const base = { rotulo: a.rotulo } as {
-    rotulo: string;
-    model?: string;
-    summary?: string;
-    tempo?: string;
-  };
-  if (a.model !== undefined) base.model = a.model;
-  if (a.summary !== undefined) base.summary = a.summary;
-  if (a.tempo !== undefined) base.tempo = a.tempo;
-  if (a.celulas === undefined) return base;
-  const w = (t: string | undefined): number => (t === undefined ? 0 : stringWidth(sep + t));
-  const fixo = (r: string): number => stringWidth(r) + a.glifo + stringWidth(a.word);
+  const pack = (
+    rotulo: string,
+    model: string | undefined,
+    summary: string | undefined,
+    tempo: string | undefined,
+  ): { rotulo: string; model?: string; summary?: string; tempo?: string } => ({
+    rotulo,
+    ...(model !== undefined ? { model } : {}),
+    ...(summary !== undefined ? { summary } : {}),
+    ...(tempo !== undefined ? { tempo } : {}),
+  });
+  if (a.celulas === undefined) return pack(a.rotulo, a.model, a.summary, a.tempo);
+  const celulas = a.celulas;
   let rotulo = a.rotulo;
-  let sobra = a.celulas - fixo(rotulo);
-  if (sobra < 0) {
-    rotulo = cortar(rotulo, Math.max(6, stringWidth(rotulo) + sobra));
-    sobra = a.celulas - fixo(rotulo);
-  }
-  const out: { rotulo: string; model?: string; summary?: string; tempo?: string } = { rotulo };
   let model = a.model;
   let summary = a.summary;
   let tempo = a.tempo;
-  if (w(model) + w(summary) + w(tempo) > sobra) {
-    // 1º o resumo encolhe; se nem assim, perde modelo e tempo (nessa ordem).
-    const semResumo = w(model) + w(tempo);
-    if (summary !== undefined && sobra - semResumo > stringWidth(sep) + 3) {
-      summary = cortar(summary, sobra - semResumo - stringWidth(sep));
-    } else {
-      summary = undefined;
-      if (w(model) + w(tempo) > sobra) tempo = undefined;
-      if (w(model) > sobra) model = undefined;
-    }
+  const w = (t: string | undefined): number => (t === undefined ? 0 : stringWidth(sep + t));
+  const total = (): number =>
+    stringWidth(rotulo) + a.glifo + stringWidth(a.word) + w(model) + w(summary) + w(tempo);
+  const falta = (): number => total() - celulas;
+  if (falta() <= 0) return pack(rotulo, model, summary, tempo);
+  // 1. modelo herdado
+  if (model !== undefined && model.startsWith('herdado (')) model = undefined;
+  // 2. % de cache
+  if (falta() > 0 && summary !== undefined)
+    summary = summary.replace(/\s*\(\d+% cache\)/, '') || undefined;
+  // 3. objetivo até o piso
+  if (falta() > 0 && stringWidth(rotulo) > OBJETIVO_MIN)
+    rotulo = cortar(rotulo, Math.max(OBJETIVO_MIN, stringWidth(rotulo) - falta()));
+  // 4. resumo
+  if (falta() > 0 && summary !== undefined) {
+    const cabe = stringWidth(summary) - falta() - stringWidth(sep);
+    summary = cabe >= 4 ? cortar(summary, cabe) : undefined;
   }
-  if (model !== undefined) out.model = model;
-  if (summary !== undefined) out.summary = summary;
-  if (tempo !== undefined) out.tempo = tempo;
-  return out;
+  // 5. modelo não herdado
+  if (falta() > 0) model = undefined;
+  // 6. objetivo abaixo do piso
+  if (falta() > 0) rotulo = cortar(rotulo, Math.max(6, stringWidth(rotulo) - falta()));
+  // 7. tempo, por último
+  if (falta() > 0) tempo = undefined;
+  return pack(rotulo, model, summary, tempo);
 }
 
 /** UMA linha de filho: `  [rust] ◷ rodando` / `  [rust] ✓ pronto · 1.2k tokens · 3 tools`. */

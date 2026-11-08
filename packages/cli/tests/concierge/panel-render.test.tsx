@@ -239,27 +239,42 @@ describe('painel de tarefas — o texto visível não muda com o brilho (linha a
     }
   });
 
-  it('ajustarLinhaDoFilho: o resumo é cortado primeiro; o rótulo `tools` e o modelo só somem por inteiro', () => {
-    const f = (celulas: number) =>
+  it('ajustarLinhaDoFilho: a ordem do que se perde — herdado, % cache, objetivo (até o piso), resumo, modelo, tempo', () => {
+    const OBJ = '[t1 Nesta pasta, rode o arquivo calc.py e me diga o resultado]';
+    const f = (celulas: number, model = 'herdado (z-ai/glm-5.3-flash)') =>
       ajustarLinhaDoFilho({
-        rotulo: '[t3 x]',
+        rotulo: OBJ,
         word: 'rodando',
-        model: 'herdado (m)',
-        summary: 'bash ls · 18.8k tokens · 1 tools',
+        model,
+        summary: 'bash python3 calc.py · 18.8k tokens (97% cache) · 1 tools',
         tempo: '49s',
         celulas,
         glifo: 4,
       });
-    expect(f(200)).toEqual({
-      rotulo: '[t3 x]',
-      model: 'herdado (m)',
-      summary: 'bash ls · 18.8k tokens · 1 tools',
-      tempo: '49s',
-    });
-    const apertado = f(50);
-    expect(apertado.model).toBe('herdado (m)');
-    expect(apertado.summary!.endsWith('…')).toBe(true);
-    const minimo = f(24);
-    expect(minimo.summary).toBeUndefined();
+    // cabe tudo
+    expect(f(300).model).toBe('herdado (z-ai/glm-5.3-flash)');
+    // 1º some o `herdado (modelo)`; objetivo, cache e tempo ficam
+    const a = f(150);
+    expect(a.model).toBeUndefined();
+    expect(a.summary).toContain('(97% cache)');
+    expect(a.rotulo).toBe(OBJ);
+    // 2º encurta o `(97% cache)` — o objetivo ainda inteiro
+    const b = f(130);
+    expect(b.summary).not.toContain('cache');
+    expect(b.summary).toContain('18.8k tokens');
+    expect(b.rotulo).toBe(OBJ);
+    // 3º só então corta o objetivo (com `…`), mas o resumo e o tempo seguem
+    const c = f(110);
+    expect(c.rotulo.endsWith('…')).toBe(true);
+    expect(c.rotulo.length).toBeGreaterThanOrEqual(18);
+    expect(c.summary).toContain('1 tools');
+    expect(c.tempo).toBe('49s');
+    // o tempo é o ÚLTIMO a sair
+    const d = f(40);
+    expect(d.tempo).toBe('49s');
+    expect(f(14).tempo).toBeUndefined();
+    // modelo NÃO herdado é informação: fica até o resumo ceder
+    expect(f(200, 'gpt-5').model).toBe('gpt-5');
+    expect(f(110, 'gpt-5').model).toBe('gpt-5');
   });
 });
