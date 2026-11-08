@@ -298,7 +298,6 @@ describe('Aprovações: "sempre nesta tarefa", registro por linha e diff estrutu
     }) as unknown as SessionState['pendingAsk'];
 
   function rig() {
-    const registry = new TaskRegistry();
     const headless: (FakeSession & { allowAll?: number })[] = [];
     const lines: string[] = [];
     const sink = new FakeSession() as unknown as ConversationSink;

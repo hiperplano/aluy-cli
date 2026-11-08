@@ -27,8 +27,6 @@ uma linha `3 tarefas · 2 rodando · ↓ ver`. No clássico (sem tarefas) o roda
 - **Detalhe inline não é interativo**: é uma nota com o transcrito (redigido) no histórico. Uma vista
   que cresce deixa buraco ao fechar (o Ink só apaga linhas ainda na tela). O `/fullscreen` tem a vista
   rolável, mas um único bloco muito longo é cortado (`…(+N linhas)`), sem rolar dentro do bloco.
-- **Aprovação sem diff**: a caixa do rodapé mostra o efeito exato (comando/caminho, até 4 linhas), mas
-  não o diff de `edit_file` que o diálogo clássico mostra.
 - **Uma chamada ao modelo a mais por mensagem** (~1,5k tokens) e a fala do Concierge não vê o código.
 - **Menu `/` deixa buraco ao fechar** com a tela cheia — **pré-existente** (medido na `main`: maior
   corrida de brancos 5 → 14). Não corrigido aqui; é o mesmo mecanismo (região viva que cresce).
@@ -43,6 +41,21 @@ linha dos agentes (brilho, modelo, tokens, ferramentas, tempo), os agentes aninh
 conclusão vira uma linha; entre blocos agora há uma linha em branco (antes eram três, nos dois modos);
 digitar nunca aciona atalho; parar uma tarefa exige `ctrl+k` duas vezes.
 
-Ainda pior que o clássico: o detalhe inline é um despejo no histórico (não uma vista rolável), a
-aprovação não mostra diff, e cada mensagem custa uma chamada curta a mais. O buraco do menu `/` já
+Ainda pior que o clássico: o detalhe inline é um despejo no histórico (não uma vista rolável) e cada
+mensagem custa uma chamada curta a mais (mais uma por tarefa concluída, no relato automático). O buraco do menu `/` já
 existia e continua.
+
+## Segunda rodada (teste real no WezTerm)
+
+| #   | Problema                                                                 | Correção                                                                                                                                                                              |
+| --- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Tarefa rodando sem sinal de vida (`1 tarefa · 1 rodando · ↓ ver` parado) | com statusline `compact`/sem espaço o resumo ganha a linha viva de quem roda (brilho, atividade, tokens, tempo); o tick de animação liga com tarefa rodando; `hidden` segue só resumo |
+| 2   | Concierge não relatava o resultado (só a linha `✔ tN concluída — …`)     | fim de tarefa (done/failed) ⇒ turno automático com o resultado (dado, não instrução), em bloco `Λluy` em stream; espera o dono ficar ocioso; anti-laço (ver abaixo)                   |
+| 3   | Diff achatado numa linha na aprovação                                    | cabeçalho `tool arquivo`, linhas `-`/`+` coloridas (`DiffLine` do clássico), 10 linhas + `… +N linhas`; `/a show` mostra tudo                                                         |
+| 4   | Fadiga de aprovação                                                      | `/a!` (= `/approve always`): "aprovar sempre nesta tarefa" via `decide()`; só o `ask` por default de run_command/edit_file/write_file; sempre-ask, hooks e política seguem            |
+| 5   | Só a 1ª aprovação deixava registro                                       | cada aprovar/negar escreve 1 linha (`✓ aprovado · t1 · run_command …`), coladas entre si                                                                                              |
+| 6   | Resposta aparecia de uma vez                                             | verificado com caller real e cliente lento: o bloco cresce palavra a palavra (teste + tmux); era só resposta curta                                                                    |
+
+Anti-laço do relato: um turno automático pode iniciar tarefa só se o pedido original do dono previa
+o passo seguinte; as tarefas nascidas assim são relatadas SEM poder iniciar/enviar nada, e
+`task_stop` nunca vale num turno automático.

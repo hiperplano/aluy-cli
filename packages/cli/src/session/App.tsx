@@ -1265,7 +1265,7 @@ export function App(props: AppProps): React.ReactElement {
           approvals: conciergeRt.pendingApprovals(),
           childrenOf: (id) => conciergeRt.taskChildren(id),
           // O objetivo ganha a largura que a linha comporta (o resto da linha ocupa ~90 colunas).
-          viewOf: (t) => conciergeRt.taskView(t, Math.max(22, Math.min(70, columns - 90))),
+          viewOf: (t) => conciergeRt.taskView(t, Math.max(18, Math.min(60, columns - 110))),
           maxRows: linhasDoRodapeAgentes(rows),
           statusline: statuslineMode,
           columns,

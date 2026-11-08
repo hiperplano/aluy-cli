@@ -1481,7 +1481,7 @@ export function routeInput(line: string, userCommands: readonly SlashCommand[] =
   // EST-0990 — `/view` é ALIAS de `/split` (mesmo toggle do modo view avançado).
   // EST-1000 · ADR-0076 — `/cockpit` é ALIAS de `/fullscreen` (mesmo toggle do cockpit).
   // ADR 0006 — `/a!` = `/approve always` (aprovar sempre nesta tarefa).
-  const name = rawName === 'a!' ? 'approve' : (COMMAND_ALIASES[rawName] ?? rawName);
+  const name = COMMAND_ALIASES[rawName] ?? rawName;
   const rest = spaceIdx === -1 ? '' : withoutSlash.slice(spaceIdx + 1).trim();
   const args = rawName === 'a!' ? `always ${rest}`.trim() : rest;
   const all = [...NATIVE_COMMANDS, ...userCommands];
@@ -1515,6 +1515,7 @@ export const COMMAND_ALIASES: Readonly<Record<string, string>> = {
   view: 'split',
   cockpit: 'fullscreen',
   a: 'approve',
+  'a!': 'approve', // `/a!` = approve always (argumento acrescentado no routeInput)
   n: 'deny',
 };
 
@@ -1524,6 +1525,10 @@ export function isSlashMenuQuery(
 ): boolean {
   if (!line.startsWith('/')) return false;
   const q = line.slice(1);
+  // `/a!` é atalho COMPLETO (aprovar sempre na tarefa): sem menu, Enter roteia a linha crua
+  // (o menu executaria `/approve` e perderia o `always`).
+  if (/^a!(\s|$)/i.test(q)) return false;
+
   if (!/\s/.test(q)) return true; // ainda no nome do comando (regra antiga).
   // Há ≥1 espaço: separa o nome do comando do resto.
   const spaceIdx = q.search(/\s/);

@@ -785,3 +785,15 @@ describe('ADR 0006 — /a! = /approve always', () => {
     expect(routeInput('/a t2')).toMatchObject({ kind: 'command', args: 't2' });
   });
 });
+
+describe('ADR 0006 — menu "/" aceita /a! (sem "nenhum comando encontrado")', () => {
+  it('`/a!` não abre o menu (Enter roteia a linha crua e preserva o always)', () => {
+    expect(isSlashMenuQuery('/a!')).toBe(false);
+    expect(isSlashMenuQuery('/a')).toBe(true);
+  });
+  it('filterCommands("a!") devolve /approve primeiro', () => {
+    const r = filterCommands('a!');
+    expect(r.length).toBeGreaterThan(0);
+    expect(entryPath(r[0]!)).toBe('approve');
+  });
+});

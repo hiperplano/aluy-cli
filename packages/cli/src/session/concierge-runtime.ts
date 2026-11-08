@@ -150,7 +150,7 @@ export class ConciergeRuntime {
     const live = this.engine.sessionOf(t.id)?.turnAccounting?.()?.tokens;
     parts.push(`${abbreviateCount(live ?? s?.meta?.tokens ?? 0)} tokens`);
     if (t.steps > 0) parts.push(`${t.steps} tools`);
-    if (!ended && this.engine.isAllowAll(t.id)) parts.push('aprova tudo na tarefa');
+    if (!ended && this.engine.isAllowAll(t.id)) parts.push('aprova tudo');
     if (ended) parts.push(formatElapsed((t.endedAt ?? 0) - t.startedAt));
     const status: SubAgentChildView['status'] =
       t.status === 'done'
