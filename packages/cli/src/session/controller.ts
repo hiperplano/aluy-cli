@@ -7404,8 +7404,11 @@ export class SessionController {
                   : {}),
               }
             : undefined;
+        // Modelos emitem "\n" soltos depois do texto (antes/entre as tool-calls, uma por tarefa
+        // iniciada): sem aparar, cada um virava uma linha `┃` órfã no histórico.
         blocks[blocks.length - 1] = {
           ...last,
+          text: last.text.trimEnd(),
           streaming: false,
           ...(conta !== undefined ? { accounting: conta } : {}),
           ...(motivo === 'cancelled' ? { interrupted: true } : {}),

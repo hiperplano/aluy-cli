@@ -119,6 +119,7 @@ interface BuildOpts {
   classicModel?: ModelCaller;
   statusline?: 'full' | 'compact' | 'hidden';
   ownerBusy?: () => boolean;
+  reportSettleMs?: number;
 }
 
 function build(opts: BuildOpts) {
@@ -156,6 +157,7 @@ function build(opts: BuildOpts) {
     createHeadless: () => queue.shift() ?? null,
     ...(opts.ownerBusy ? { ownerBusy: opts.ownerBusy } : {}),
     reportRetryMs: 20,
+    ...(opts.reportSettleMs ? { reportSettleMs: opts.reportSettleMs } : {}),
   });
   const r = render(
     <ThemeProvider theme={resolveTheme({ env: ENV })}>
@@ -745,6 +747,33 @@ describe('Relato automático: o Concierge resume o resultado quando a tarefa ter
     s.unmount();
   });
 
+  it('várias tarefas que terminam juntas viram UM relato (janela de agrupamento)', async () => {
+    const t1 = taskSession({ iters: () => 'primeira.' });
+    // t2 termina ~150ms depois de t1: sem a janela de agrupamento sairiam DOIS relatos.
+    const t2 = taskSession({ iters: () => 'segunda.', gates: () => sleep(150) });
+    const seen: string[] = [];
+    const s = build({
+      mode: 'concierge',
+      tasks: [t1, t2],
+      reportSettleMs: 400,
+      concierge: (m) => {
+        seen.push(m);
+        return /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Resumo das duas.')
+          : text('Iniciei.', [
+              ...startTask(),
+              { id: '2', name: 'task_start', input: { goal: 'outra' } },
+            ]);
+      },
+    });
+    await type(s, 'faça o trabalho');
+    await waitFor(() => s.rt.registry.get('t2')?.status === 'done');
+    await waitFor(() => s.frame().includes('Resumo das duas.'));
+    await sleep(500);
+    expect(seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m))).toHaveLength(1);
+    s.unmount();
+  });
+
   it('anti-laço: o turno automático não inicia tarefa nova que gere outro relato com tarefas', async () => {
     const t1 = taskSession({ iters: () => 'primeira.' });
     const t2 = taskSession({ iters: () => 'segunda.' });
@@ -766,6 +795,38 @@ describe('Relato automático: o Concierge resume o resultado quando a tarefa ter
     // t1 (relato livre ⇒ abriu t2) e t2 (relato restrito ⇒ recusa): nada além de t2.
     expect(s.rt.registry.list().map((t) => t.id)).toEqual(['t1', 't2']);
     expect(seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m))).toHaveLength(2);
+    s.unmount();
+  });
+});
+
+describe('Concierge: nenhuma linha `┃` órfã depois da resposta', () => {
+  it('"\\n" soltos entre as tool-calls (uma por tarefa) não viram linhas vazias no histórico', async () => {
+    const gate = defer();
+    const s = build({
+      mode: 'concierge',
+      tasks: [
+        taskSession({ iters: () => 'a.' }),
+        taskSession({ iters: () => 'b.' }),
+        taskSession({ iters: () => 'c.' }),
+      ],
+      // o modelo emite quebras de linha depois do texto (antes de cada tool-call)
+      concierge: (m) =>
+        /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Resumo.')
+          : text('Iniciei 3 tarefas.\n\n\n', [
+              ...startTask('um'),
+              { id: '2', name: 'task_start', input: { goal: 'dois' } },
+              { id: '3', name: 'task_start', input: { goal: 'tres' } },
+            ]),
+    });
+    void gate;
+    await type(s, 'faça tudo');
+    await waitFor(() => s.rt.registry.get('t3')?.status === 'done');
+    await waitFor(() => s.frame().includes('Resumo.'));
+    const aluy = blocksOf(s.conversation, 'aluy') as { text: string }[];
+    expect(aluy[0]!.text).toBe('Iniciei 3 tarefas.');
+    const linhas = s.frame().split('\n');
+    expect(linhas.filter((l) => /^\s*┃\s*$/.test(l)).length).toBeLessThanOrEqual(2); // só a moldura do composer
     s.unmount();
   });
 });

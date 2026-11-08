@@ -1262,6 +1262,7 @@ export function App(props: AppProps): React.ReactElement {
     conciergeOn && conciergeRt !== undefined
       ? buildPanelRows({
           tasks: conciergeRt.visibleTasks(),
+          hiddenEnded: conciergeRt.hiddenEndedCount(),
           approvals: conciergeRt.pendingApprovals(),
           childrenOf: (id) => conciergeRt.taskChildren(id),
           // O objetivo ganha a largura que a linha comporta (o resto da linha ocupa ~90 colunas).

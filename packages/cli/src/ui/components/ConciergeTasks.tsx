@@ -72,18 +72,26 @@ export interface PanelInput {
   /** `/a show`: o diff/efeito INTEIRO (até `fullRows` linhas) em vez do recorte. */
   readonly approvalFull?: boolean;
   readonly fullRows?: number;
+  /** Encerradas recentes fora da lista (só contadas no resumo). */
+  readonly hiddenEnded?: number;
 }
 
 /** `3 tarefas · 2 rodando · ↓ ver`. */
-export function summaryText(tasks: readonly TaskRecord[], hint = true): string {
+export function summaryText(
+  tasks: readonly TaskRecord[],
+  hint = true,
+  /** Encerradas recentes que a lista não desenha (teto de linhas) mas que o resumo conta. */
+  hiddenEnded = 0,
+): string {
   const running = tasks.filter((t) => t.status === 'running').length;
   const waiting = tasks.filter((t) => t.status === 'waiting_approval').length;
-  const parts = [`${tasks.length} tarefa${tasks.length === 1 ? '' : 's'}`];
+  const total = tasks.length + hiddenEnded;
+  const parts = [`${total} tarefa${total === 1 ? '' : 's'}`];
   if (running > 0) parts.push(`${running} rodando`);
   if (waiting > 0) parts.push(`${waiting} aguardando aprovação`);
   const paused = tasks.filter((t) => t.status === 'paused_quota').length;
   if (paused > 0) parts.push(`${paused} pausada${paused > 1 ? 's' : ''} (cota)`);
-  const ended = tasks.filter((t) => t.endedAt !== undefined).length;
+  const ended = tasks.filter((t) => t.endedAt !== undefined).length + hiddenEnded;
   if (ended > 0) parts.push(`${ended} encerrada${ended > 1 ? 's' : ''}`);
   if (hint) parts.push('↓ ver');
   return parts.join(' · ');
@@ -101,7 +109,7 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
       const out: PanelRow[] = [
         {
           kind: 'header',
-          total: tasks.length,
+          total: tasks.length + (i.hiddenEnded ?? 0),
           running: tasks.filter((t) => t.status === 'running').length,
         },
       ];
@@ -129,7 +137,7 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
     if (!i.expanded && list.length > room) list = build(false);
     const collapse = !i.expanded && (!compactOk || list.length > room);
     if (collapse) {
-      rows.push({ kind: 'summary', text: summaryText(tasks) });
+      rows.push({ kind: 'summary', text: summaryText(tasks, true, i.hiddenEnded ?? 0) });
       // Sinal de vida: a linha-resumo é texto parado. Com `compact` (ou sem espaço) quem RODA
       // segue com a sua linha (brilho + atividade + tempo), no máximo MAX_COLLAPSED_LIVE.
       // `hidden` é o pedido explícito de silêncio: só o resumo.

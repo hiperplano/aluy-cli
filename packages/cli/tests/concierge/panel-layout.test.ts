@@ -67,6 +67,9 @@ describe('painel de tarefas — hierarquia por TAREFA, agentes aninhados', () =>
     expect(rows.map((r) => r.kind)).toEqual(['summary', 'task', 'task']);
     expect(rows[0]).toMatchObject({ kind: 'summary', text: '3 tarefas · 3 rodando · ↓ ver' });
     expect(summaryText([task('t1')], false)).toBe('1 tarefa · 1 rodando');
+    // 3 terminaram, a lista só desenha 2: o resumo ainda conta as 3 (não "2 tarefas · 2 encerradas").
+    const fim = (id: string) => task(id, { status: 'done', endedAt: 5 });
+    expect(summaryText([fim('t2'), fim('t3')], false, 1)).toBe('3 tarefas · 3 encerradas');
   });
 
   it('expandido: tarefas COM os agentes + dica de teclas; seleção marcada', () => {

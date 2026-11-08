@@ -53,6 +53,11 @@ export interface ConciergeRuntimeDeps {
   readonly ownerBusy?: () => boolean;
   /** Reavalia a fila de relatos automáticos a cada tanto (ms). Default 400. */
   readonly reportRetryMs?: number;
+  /**
+   * Janela de agrupamento (ms): ao terminar uma tarefa o relato espera esta folga por mais
+   * términos e sai UM só (cada novo término reinicia a espera, no máx. 4×). Default 0 (imediato).
+   */
+  readonly reportSettleMs?: number;
 }
 
 interface Persisted {
@@ -114,12 +119,18 @@ export class ConciergeRuntime {
   visibleTasks(): readonly TaskRecord[] {
     const all = this.registry.list();
     const live = all.filter((t) => !TERMINAL_STATUSES.has(t.status));
+    return [...this.recentEnded(all).slice(-2), ...live];
+  }
+
+  private recentEnded(all: readonly TaskRecord[]): TaskRecord[] {
     const now = this.clock();
     // Terminadas somem da lista 60s depois (o relato já foi para a conversa; `/task` mostra tudo).
-    const ended = all
-      .filter((t) => TERMINAL_STATUSES.has(t.status) && now - (t.endedAt ?? 0) < 60_000)
-      .slice(-2);
-    return [...ended, ...live];
+    return all.filter((t) => TERMINAL_STATUSES.has(t.status) && now - (t.endedAt ?? 0) < 60_000);
+  }
+
+  /** Encerradas recentes que `visibleTasks` não lista (teto de 2 linhas) — o resumo as conta. */
+  hiddenEndedCount(): number {
+    return Math.max(0, this.recentEnded(this.registry.list()).length - 2);
   }
 
   /** Sub-agentes da tarefa (último lote do bloco `subagents` da sessão dela), p/ o painel. */
@@ -221,9 +232,24 @@ export class ConciergeRuntime {
   private queueReport(taskId: string): void {
     if (this.disposed || this.reported.has(taskId)) return;
     this.reported.add(taskId);
+    const first = this.reportQueue.length === 0;
     this.reportQueue.push(taskId);
-    this.scheduleReports(0);
+    const settle = this.d.reportSettleMs ?? 0;
+    if (settle <= 0) {
+      this.scheduleReports(0);
+      return;
+    }
+    // Várias tarefas terminando juntas viram UM relato: reinicia a espera a cada término.
+    const now = Date.now();
+    if (first) this.reportFirstAt = now;
+    if (this.reportTimer !== null) {
+      clearTimeout(this.reportTimer);
+      this.reportTimer = null;
+    }
+    this.scheduleReports(Math.max(0, Math.min(settle, this.reportFirstAt + settle * 4 - now)));
   }
+
+  private reportFirstAt = 0;
 
   private scheduleReports(delay: number): void {
     if (this.disposed || this.reportTimer !== null || this.reportQueue.length === 0) return;

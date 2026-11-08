@@ -2378,6 +2378,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const conciergeRuntime: ConciergeRuntime | undefined =
     isTty && opts.anonymous !== true
       ? new ConciergeRuntime({
+          // Várias tarefas terminando juntas viram UM relato (janela de agrupamento).
+          reportSettleMs: 1500,
           sink: built.controller,
           model: built.conciergeModel,
           // As 4 tools do Concierge passam pelo MESMO ponto único (`decide()`): só `allow`
