@@ -407,3 +407,69 @@ describe('Concierge — turno automático ao fim da tarefa', () => {
     expect(start.engine.started).toEqual(['t2']);
   });
 });
+
+describe('Concierge — nunca afirma uma tarefa que não existe (regressão live)', () => {
+  const CLAIM = 'Iniciei a tarefa para o motor: analisar o calc.py. Te explico em seguida.';
+
+  it('disse "iniciei" sem task_start e a correção também não vem ⇒ aviso explícito, sem tarefa', async () => {
+    const quietFlags: (boolean | undefined)[] = [];
+    const registry = new TaskRegistry({ clock: () => 1000 });
+    const concierge = new Concierge({
+      registry,
+      engine: new FakeEngine(),
+      clock: () => 1000,
+      model: {
+        call: async (a) => {
+          quietFlags.push(a.quiet);
+          return result(CLAIM);
+        },
+      },
+    });
+    const r = await concierge.handle('o calc.py tem bugs, abre uma tarefa');
+    expect(registry.list()).toHaveLength(0);
+    expect(r.modelCalls).toBe(2); // resposta + 1 chamada corretiva
+    expect(quietFlags).toEqual([undefined, true]); // a corretiva não transmite texto à tela
+    expect(r.notes.join('\n')).toContain('Nenhuma tarefa foi iniciada');
+    expect(r.text).toContain('Nenhuma tarefa foi iniciada');
+  });
+
+  it('a chamada corretiva chama task_start ⇒ tarefa existe e não há aviso', async () => {
+    const { registry, engine, concierge } = setup((_m, n) =>
+      n === 0 ? result(CLAIM) : result('', [call('task_start', { goal: 'corrigir calc.py' })]),
+    );
+    const r = await concierge.handle('abre uma tarefa');
+    expect(registry.list().map((t) => t.id)).toEqual(['t1']);
+    expect(engine.started).toEqual(['t1']);
+    expect(r.notes.join('\n')).not.toContain('Nenhuma tarefa');
+  });
+
+  it('task_start recusado pela catraca com texto "iniciei" ⇒ o motivo aparece como nota', async () => {
+    const registry = new TaskRegistry({ clock: () => 1000 });
+    const engine = new FakeEngine();
+    const concierge = new Concierge({
+      registry,
+      engine,
+      clock: () => 1000,
+      gate: async () => ({ allow: false, reason: 'política pede ask' }),
+      model: { call: async () => result(CLAIM, [call('task_start', { goal: 'x' })]) },
+    });
+    const r = await concierge.handle('abre uma tarefa');
+    expect(registry.list()).toHaveLength(0);
+    expect(r.notes.join('\n')).toContain('task_start não foi feito');
+    expect(r.notes.join('\n')).toContain('política pede ask');
+  });
+
+  it('tool-call com nome desconhecido não some em silêncio', async () => {
+    const { concierge } = setup(() => result('ok', [call('task_launch', { goal: 'x' })]));
+    const r = await concierge.handle('faz');
+    expect(r.notes.join('\n')).toContain('task_launch');
+  });
+
+  it('fala de terceira pessoa sobre tarefa existente NÃO dispara a correção', async () => {
+    const { registry, concierge } = setup(() => result('A t1 foi iniciada há 2 minutos e segue.'));
+    registry.create({ goal: 'x', kind: 'main' });
+    const r = await concierge.handle('como está?');
+    expect(r.modelCalls).toBe(1);
+    expect(r.notes).toEqual([]);
+  });
+});

@@ -61,6 +61,10 @@ function defaultIsQuotaError(e: unknown): boolean {
   return /quota|cota|rate.?limit|429|insufficient|exceeded|402/i.test(s);
 }
 
+/** Fala em 1ª pessoa de quem iniciou/abriu trabalho (para conferir contra o task_start real). */
+const CLAIMS_STARTED =
+  /\b(inici(ei|ando)|abri|abrindo|criei|criando|dispar(ei|ando)|deleguei|delegando)\b[^.\n]{0,80}\b(tarefa|t\d+)\b/i;
+
 export class Concierge {
   private readonly o: ConciergeOptions;
   private readonly clock: () => number;
@@ -186,6 +190,11 @@ export class Concierge {
         (CONCIERGE_TOOL_NAMES as readonly string[]).includes(c.name),
       );
       reply = r1.content.trim();
+      // Tool-call que não é nossa (nome desconhecido) NÃO some em silêncio.
+      for (const c of r1.tool_calls ?? []) {
+        if (!(CONCIERGE_TOOL_NAMES as readonly string[]).includes(c.name))
+          notes.push(`⚠ ignorei a chamada "${clip(c.name, 30)}": não é uma ferramenta minha.`);
+      }
       if (calls.length > 0) {
         const results: ChatMessage[] = [];
         for (const c of calls.slice(0, MAX_TOOL_CALLS_PER_MESSAGE)) {
@@ -218,6 +227,45 @@ export class Concierge {
           }
           if (reply === '') reply = actions.map((a) => ackFor(a, this.o.registry)).join(' ');
         }
+      }
+      // O modelo DISSE que iniciou/abriu uma tarefa mas nenhum task_start aconteceu: uma
+      // chamada corretiva (1x) e, se ainda assim não vier, aviso explícito — a tela nunca
+      // fica afirmando uma tarefa que não existe.
+      const attemptedStart = actions.some((a) => a.tool === 'task_start');
+      if (args.allow.has('task_start') && !attemptedStart && CLAIMS_STARTED.test(reply)) {
+        let fixed = false;
+        try {
+          const r3 = await this.o.model.call({
+            messages: [
+              ...messages,
+              { role: 'assistant', content: reply },
+              {
+                role: 'user',
+                content:
+                  'AVISO DO SISTEMA: você disse que iniciou uma tarefa, mas NÃO chamou task_start, então nada foi iniciado. Chame task_start AGORA com o objetivo completo e autossuficiente. Se não era para iniciar nada, não chame ferramenta e responda só "ok".',
+              },
+            ],
+            idempotencyKey: `concierge-${randomUUID()}`,
+            quiet: true,
+            ...(signal ? { signal } : {}),
+          });
+          modelCalls++;
+          tokens += (r3.usage?.tokens_in ?? 0) + (r3.usage?.tokens_out ?? 0);
+          for (const c of (r3.tool_calls ?? [])
+            .filter((c) => c.name === 'task_start')
+            .slice(0, MAX_TOOL_CALLS_PER_MESSAGE)) {
+            const out = await this.runTool(c, args.allow);
+            actions.push(out.action);
+            if (out.note) notes.push(out.note);
+            if (out.action.ok) fixed = true;
+          }
+        } catch {
+          /* cai no aviso abaixo */
+        }
+        if (!fixed && !actions.some((a) => a.tool === 'task_start' && !a.ok))
+          notes.push(
+            '⚠ Nenhuma tarefa foi iniciada: o modelo disse que sim mas não chamou task_start. Peça de novo.',
+          );
       }
       if (reply === '') reply = 'Não consegui formular uma resposta; pode repetir?';
     } catch (e) {
@@ -261,6 +309,8 @@ export class Concierge {
     const name = call.name as ConciergeToolName;
     const fail = (why: string, taskId?: string) => ({
       result: `erro: ${why}`,
+      // Falha NUNCA é silenciosa: mesmo que o modelo já tenha dito "iniciei", o dono vê o motivo.
+      note: `⚠ ${name} não foi feito: ${clipPlain(why, 120)}`,
       action: { tool: name, ok: false, ...(taskId ? { taskId } : {}) },
     });
     if (!allow.has(name)) return fail('não permitido nesta resposta automática');

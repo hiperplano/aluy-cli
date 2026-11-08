@@ -367,13 +367,15 @@ export function SplashApp(props: {
     // resposta (Enter/s/y/n/l/Esc) só RESPONDEM se forem a PRIMEIRA tecla — isto é, enquanto
     // nada foi digitado. Qualquer outra tecla imprimível começa um rascunho; daí em diante
     // TUDO que é imprimível (inclusive s/n/l) é texto, Enter é ignorado, Backspace edita e
-    // Esc APAGA o rascunho (e só então as teclas voltam a responder). Assim digitar "nova
+    // Esc responde «nova»/não e MANTÉM o rascunho (vai ao composer); backspace o apaga. Assim digitar "nova
     // mensagem" no boot nunca responde "n" por acidente. Sem pergunta: o texto é guardado e
     // a tecla segue pulando o piso do splash.
     const asking = cur.resume !== undefined || cur.resolve !== null;
     const inList = cur.resume?.view === 'list';
     // (o Ink marca `meta` no Esc — por isso o Esc é tratado ANTES do filtro de meta/ctrl.)
-    if (!inList && cur.typed !== '' && key.escape) {
+    // Com pergunta aberta, Esc RESPONDE ("nova"/não) e MANTÉM o texto: ele segue para o composer
+    // da sessão (antes Esc apagava o que a pessoa já tinha digitado). Backspace edita/apaga.
+    if (!inList && !asking && cur.typed !== '' && key.escape) {
       props.store.set((s) => ({ ...s, typed: '' }));
       return;
     }
@@ -452,7 +454,10 @@ export function SplashApp(props: {
   const withDraft = (p: BootPrompt): BootPrompt =>
     state.typed === ''
       ? p
-      : { ...p, options: `digitando: «${state.typed}» · esc apaga e volta a responder` };
+      : {
+          ...p,
+          options: `digitando: «${state.typed}» · esc responde «nova» e mantém o texto · backspace apaga`,
+        };
   const richPrompt =
     state.resume?.view === 'offer'
       ? withDraft(buildResumeOfferPrompt(state.resume.info))

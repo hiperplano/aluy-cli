@@ -87,6 +87,8 @@ export interface ConciergeModel {
     readonly messages: readonly ChatMessage[];
     readonly idempotencyKey: string;
     readonly signal?: AbortSignal;
+    /** Chamada interna (ex.: corretiva): o texto NÃO deve ser transmitido à tela em stream. */
+    readonly quiet?: boolean;
   }): Promise<ModelCallResult>;
 }
 

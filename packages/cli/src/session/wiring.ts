@@ -88,7 +88,12 @@ import {
 import { AttachReader } from '../attach/index.js';
 import { TuiAskResolver } from '../ask/ask-resolver.js';
 import { TuiQuestionResolver } from '../ask/question-resolver.js';
-import { StreamingModelCaller, delegatingSink, type HeadroomNotice } from './streaming-caller.js';
+import {
+  StreamingModelCaller,
+  delegatingSink,
+  type HeadroomNotice,
+  type StreamSink,
+} from './streaming-caller.js';
 import { SessionController } from './controller.js';
 import { HooksConfigStore } from '../io/index.js';
 import { FileRoomStore } from './rooms/file-room-store.js';
@@ -1261,12 +1266,22 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   // (max_tokens baixo) e SÓ com as 4 tools `task_*` (plano de controle). Segue o tier/modelo
   // CORRENTE da sessão (sincronizado a cada chamada) salvo `conciergeModel` (slug Custom).
   // Mesmo broker/credencial (CLI-SEC-7). Tools não suportadas (422) degradam p/ texto puro.
+  // `quiet`: chamadas internas do Concierge (corretiva) não transmitem texto à tela.
+  let conciergeQuiet = false;
+  const conciergeBase = delegatingSink(() => controllerRef?.sink);
+  const conciergeSink: StreamSink = {
+    ...conciergeBase,
+    onDelta: (c) => {
+      if (!conciergeQuiet) conciergeBase.onDelta(c);
+    },
+    onReasoning: () => {},
+  };
   const conciergeStream = new StreamingModelCaller({
     client: liveClient,
     tier,
     maxTokens: 700,
     // Raciocínio do modelo NÃO aparece na resposta do Concierge (só a fala).
-    sink: { ...delegatingSink(() => controllerRef?.sink), onReasoning: () => {} },
+    sink: conciergeSink,
     nativeTools: new NativeToolsCapability({ tools: CONCIERGE_TOOLS }),
   });
   const conciergeCaller: ConciergeModel = {
@@ -1276,7 +1291,10 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
       else conciergeStream.setTier(caller.tier, caller.model);
       conciergeStream.setProvider(caller.provider);
       conciergeStream.setClient(caller.currentClient);
-      return conciergeStream.call(args);
+      conciergeQuiet = args.quiet === true;
+      return conciergeStream.call(args).finally(() => {
+        conciergeQuiet = false;
+      });
     },
   };
 
