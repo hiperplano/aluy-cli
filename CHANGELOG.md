@@ -14,16 +14,22 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.192] — 2026-11-08
+
 ### Adicionado
 
-- **Concierge** (ADR 0006): a conversa deixa de esperar o trabalho. Cada mensagem tem resposta
-  imediata por uma chamada curta ao modelo; o trabalho roda em tarefas (`task_start`/`task_send`/
-  `task_stop`/`task_status`), com lista compacta ao vivo, relatos de uma linha, caixa de entrada de
-  aprovações (`/a` `/n`), `/task`, `/conversation concierge|classic` (persistido), `--classic` e
-  reivindicação simples de arquivos entre tarefas. O Esc não para mais tarefas nesse modo.
-- A resposta do Concierge é o bloco `┃ Λluy` normal, em stream. Tarefas rodam em sessões próprias e
-  aparecem num painel no rodapé (recolhível, com vista de detalhe); a conclusão é uma linha dim.
-- Sub-agentes (clássico também) saem da conversa e vão para o rodapé, com uma linha ao terminar.
+- 🛎️ **Concierge: a conversa não espera mais o trabalho** ([ADR 0006](docs/decisions/0006-concierge-conversa-desacoplada.md)). Cada mensagem recebe resposta imediata no bloco `┃ Λluy`, em stream; o trabalho roda em tarefas (`t1`, `t2`…) em sessões próprias, e você pode continuar falando, pedir status, corrigir o rumo ou parar uma tarefa sem travar a conversa. `/conversation classic` (ou `--classic`) volta ao modo de antes.
+- 📋 **Tarefas e agentes no rodapé, como no Claude Code.** Composer → statusline → painel de tarefas, com os agentes aninhados mostrando brilho, o que estão fazendo (`lendo calc.py`, `editando…`), tokens com `% cache` e tempo. `↓ ver` abre o detalhe; `/task show|stop`.
+- 💬 **Ao terminar, o Λluy conta o resultado** numa resposta normal; tarefa parada por você deixa só `■ tN parada`.
+- ✅ **Aprovação no rodapé com diff de verdade.** `-`/`+` agrupados com contexto, até 10 linhas (`/a show` mostra tudo); `/a` aprova, `/n` nega e `/a!` aprova sempre nesta tarefa (inclusive os sub-agentes dela). O `/a!` nunca vale para rede, `sudo`, instalação ou uso de segredo, e não passa da tarefa. Cada decisão deixa uma linha no histórico.
+- 📊 `ALUY_DEBUG_USAGE=<arquivo>`: rastro opcional do custo por chamada ao modelo (só tamanhos e nomes, nunca conteúdo).
+
+### Corrigido
+
+- 🕳️ **Fechar o menu `/`, um seletor ou o detalhe de uma tarefa não deixa mais buraco** acima do composer.
+- ⎋ Esc no menu `/` com só a `/` digitada limpa a caixa; Esc na pergunta "retomar sessão" mantém o que você já tinha digitado.
+- 💸 **Tarefas mais baratas:** menos ferramentas e contexto por chamada (~35% menos), sem delegar nem planejar trabalho pequeno. Numa correção simples: 7 chamadas, 74% da entrada vinda do cache.
+- 🙊 O Λluy nunca afirma ter aberto uma tarefa que não abriu; falha de ferramenta vira um aviso visível.
 
 ## [1.0.0-rc.191] — 2026-11-07
 
