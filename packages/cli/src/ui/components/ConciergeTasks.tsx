@@ -271,7 +271,7 @@ export function TaskPanel(props: TaskPanelProps): React.ReactElement | null {
             );
           case 'task':
             return (
-              <Box key={idx}>
+              <Box key={idx} height={1} overflow="hidden">
                 {/* Mesma linha dos sub-agentes (brilho enquanto roda); o marcador só no expandido. */}
                 {r.selected && <Role name="accent">❯</Role>}
                 <ChildLine child={r.view} frame={props.frame} />
@@ -279,7 +279,7 @@ export function TaskPanel(props: TaskPanelProps): React.ReactElement | null {
             );
           case 'child':
             return (
-              <Box key={idx} paddingLeft={2}>
+              <Box key={idx} paddingLeft={2} height={1} overflow="hidden">
                 <ChildLine child={r.child} frame={props.frame} />
               </Box>
             );

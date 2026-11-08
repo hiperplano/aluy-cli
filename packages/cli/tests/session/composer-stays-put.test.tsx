@@ -127,6 +127,12 @@ describe('composer parado com a tela cheia', () => {
     await flush();
     expect(controller.current.phase).toBe('streaming');
     const streaming = rowsBelowComposer(r.lastFrame() ?? '');
+    // A linha de trabalho tem o respiro de 1 linha acima COM a prévia de fala viva também
+    // (antes sumia aqui e voltava na tool-line: 1 linha de oscilação a cada virada de fase).
+    const ls = plain(r.lastFrame() ?? '').split('\n');
+    const iw = ls.findIndex((l) => /^Λ (?!luy)/.test(l.trim()));
+    expect(iw, 'linha de trabalho não encontrada').toBeGreaterThan(0);
+    expect(ls[iw - 1]!.trim(), 'sem respiro acima da linha de trabalho').toBe('');
 
     release();
     await second;

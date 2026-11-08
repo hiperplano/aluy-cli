@@ -1,6 +1,7 @@
 // ADR 0006 — o painel de tarefas usa a MESMA linha dos sub-agentes (brilho, modelo, tokens,
 // tools, tempo, atividade) e aninha os agentes sob a tarefa.
 import React from 'react';
+import { Box } from 'ink';
 import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
 import chalk from 'chalk';
@@ -116,5 +117,35 @@ describe('painel de tarefas — mesma gramática de linha dos agentes', () => {
     } finally {
       chalk.level = old;
     }
+  });
+});
+
+describe('painel de tarefas — cada linha ocupa UMA linha do terminal (composer estável)', () => {
+  it('em terminal estreito as linhas da tarefa e dos agentes são cortadas, não quebradas', () => {
+    const kid: SubAgentChildView = { ...running, label: 'um agente com nome comprido' };
+    const r = rows(running, [kid, kid]);
+    const { lastFrame, unmount } = render(
+      <ThemeProvider theme={theme}>
+        <Box width={50}>
+          <TaskPanel rows={r} columns={50} frame={0} />
+        </Box>
+      </ThemeProvider>,
+    );
+    expect(plain(lastFrame()).split('\n').length).toBe(r.length);
+    unmount();
+  });
+});
+
+describe('rodapé de agentes (clássico) — uma linha por agente', () => {
+  it('a cópia fixa (flush) não quebra a linha do agente em terminal estreito', () => {
+    const { lastFrame, unmount } = render(
+      <ThemeProvider theme={theme}>
+        <Box width={50}>
+          <SubAgents childrenStatus={[running, running]} flush frame={0} />
+        </Box>
+      </ThemeProvider>,
+    );
+    expect(plain(lastFrame()).split('\n').length).toBe(3); // cabeçalho + 2 agentes
+    unmount();
   });
 });

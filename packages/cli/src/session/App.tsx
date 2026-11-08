@@ -6042,10 +6042,9 @@ export function App(props: AppProps): React.ReactElement {
   // (single/side/tabs) — o conteúdo é IDÊNTICO; só o CONTÊINER muda (1 col vs row vs
   // aba). O `maxLines` é o `splitMaxLines` (= `liveMaxLines` em single; orçado p/ as 2
   // colunas em side/tabs), mantendo a região viva em `rows-1` (anti-flicker).
-  // F3 — com a prévia de fala viva a linha de trabalho assume o lugar do cursor `●` (sem respiro
-  // extra acima); sem ela (tool-line, pensando) mantém o respiro de sempre.
-  const previaDeFalaViva =
-    state.phase === 'streaming' && live.some((b) => b.kind === 'aluy' && b.streaming);
+  // COMPOSER ESTÁVEL — a linha de trabalho tem SEMPRE o respiro de 1 linha acima (com ou sem prévia
+  // de fala viva). Antes ele sumia com a prévia e voltava com a tool-line: a região viva
+  // crescia/encolhia 1 linha a cada virada de fase e o composer dançava.
   const telaBaixa =
     stdout?.rows !== undefined && stdout.rows > 0 && stdout.rows <= STATUSLINE_SHORT_ROWS;
   // F17 — nada vivo na coluna do chat (repouso): usado p/ enxugar o respiro em tela baixa.
@@ -6113,7 +6112,7 @@ export function App(props: AppProps): React.ReactElement {
             os agentes ainda trabalhando. Redundante era mostrar os DOIS juntos, não
             mostrar este quando o outro não existe. */}
       {linhaDeTrabalhoViva && (
-        <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
+        <Box paddingTop={state.blocks.length > 0 ? 1 : 0}>
           <Working
             glyph="aluy"
             glyphRole="accent"

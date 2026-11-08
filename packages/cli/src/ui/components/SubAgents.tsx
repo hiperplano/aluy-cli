@@ -173,14 +173,25 @@ export function SubAgents(props: SubAgentsProps): React.ReactElement {
         </Role>
         {headTail !== '' && <Role name="fgDim">{headTail}</Role>}
       </Box>
-      {items.map((c, i) => (
-        <ChildLine
-          key={`${c.label}:${i}`}
-          child={c}
-          settled={props.settled === true}
-          {...(props.frame !== undefined ? { frame: props.frame } : {})}
-        />
-      ))}
+      {items.map((c, i) => {
+        const line = (
+          <ChildLine
+            key={`${c.label}:${i}`}
+            child={c}
+            settled={props.settled === true}
+            {...(props.frame !== undefined ? { frame: props.frame } : {})}
+          />
+        );
+        // Cópia FIXA do rodapé: UMA linha por agente (quebrar em terminal estreito mudava a
+        // altura do rodapé e o composer pulava).
+        return props.flush === true ? (
+          <Box key={`${c.label}:${i}`} height={1} overflow="hidden">
+            {line}
+          </Box>
+        ) : (
+          line
+        );
+      })}
     </Box>
   );
 }
