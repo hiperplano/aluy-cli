@@ -6,6 +6,7 @@
 // fase ocupada (idle/ask/etc.) o elapsed NÃO suja o footer.
 
 import React from 'react';
+import { Box } from 'ink';
 import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
@@ -115,5 +116,18 @@ describe('FooterHints — duplo Ctrl+C p/ sair (EST-1015)', () => {
     }
     // E o idle, hoje enxuto, de fato não fala mais de ctrl-c (é o que o dono pediu).
     expect(plain(wrap(<FooterHints state="idle" />).lastFrame())).not.toContain('ctrl-c');
+  });
+});
+
+describe('FooterHints — sempre UMA linha (composer estável)', () => {
+  it('em terminal estreito a dica é cortada, nunca quebrada em duas linhas', () => {
+    for (const state of ['idle', 'work-subagents', 'concierge-work', 'streaming'] as const) {
+      const { lastFrame } = wrap(
+        <Box width={30}>
+          <FooterHints state={state} elapsed="1:02" suggesting />
+        </Box>,
+      );
+      expect(plain(lastFrame()).split('\n').length, state).toBe(1);
+    }
   });
 });

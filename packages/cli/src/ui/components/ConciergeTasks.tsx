@@ -25,8 +25,14 @@ const MAX_EFFECT_LINES = 4;
 /** A partir de quantas tarefas a lista recolhe numa linha só. */
 export const COLLAPSE_AT = 3;
 const MAX_CHILD_ROWS = 3;
-/** Tarefas rodando que mantêm a linha viva mesmo com o painel recolhido. */
+/** Tarefas rodando que mantêm a linha viva mesmo com o painel recolhido (versão antiga; ver abaixo). */
 export const MAX_COLLAPSED_LIVE = 2;
+/**
+ * Quantas tarefas o painel do rodapé mostra ao mesmo tempo (pedido do dono: até 6). O que passa
+ * disso vira UMA linha `… +N tarefas ocultas · ↓ ver`. Em terminal baixo o teto cai (ver `room`):
+ * a altura do rodapé nunca passa do orçamento da região viva.
+ */
+export const MAX_PANEL_TASKS = 6;
 const MAX_EXPANDED_TASKS = 6;
 
 export interface ApprovalRow {
@@ -72,18 +78,26 @@ export interface PanelInput {
   /** `/a show`: o diff/efeito INTEIRO (até `fullRows` linhas) em vez do recorte. */
   readonly approvalFull?: boolean;
   readonly fullRows?: number;
+  /** Encerradas recentes fora da lista (só contadas no resumo). */
+  readonly hiddenEnded?: number;
 }
 
 /** `3 tarefas · 2 rodando · ↓ ver`. */
-export function summaryText(tasks: readonly TaskRecord[], hint = true): string {
+export function summaryText(
+  tasks: readonly TaskRecord[],
+  hint = true,
+  /** Encerradas recentes que a lista não desenha (teto de linhas) mas que o resumo conta. */
+  hiddenEnded = 0,
+): string {
   const running = tasks.filter((t) => t.status === 'running').length;
   const waiting = tasks.filter((t) => t.status === 'waiting_approval').length;
-  const parts = [`${tasks.length} tarefa${tasks.length === 1 ? '' : 's'}`];
+  const total = tasks.length + hiddenEnded;
+  const parts = [`${total} tarefa${total === 1 ? '' : 's'}`];
   if (running > 0) parts.push(`${running} rodando`);
   if (waiting > 0) parts.push(`${waiting} aguardando aprovação`);
   const paused = tasks.filter((t) => t.status === 'paused_quota').length;
   if (paused > 0) parts.push(`${paused} pausada${paused > 1 ? 's' : ''} (cota)`);
-  const ended = tasks.filter((t) => t.endedAt !== undefined).length;
+  const ended = tasks.filter((t) => t.endedAt !== undefined).length + hiddenEnded;
   if (ended > 0) parts.push(`${ended} encerrada${ended > 1 ? 's' : ''}`);
   if (hint) parts.push('↓ ver');
   return parts.join(' · ');
@@ -93,7 +107,22 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
   const rows: PanelRow[] = [];
   const tasks = i.tasks;
   if (tasks.length > 0) {
-    const shown = i.expanded ? tasks.slice(-MAX_EXPANDED_TASKS) : tasks;
+    // Prioridade na tela: esperando aprovação, depois rodando, depois na fila, depois as encerradas.
+    const rank = (t: TaskRecord): number =>
+      t.status === 'waiting_approval'
+        ? 0
+        : t.status === 'running' || t.status === 'paused_quota'
+          ? 1
+          : t.status === 'blocked'
+            ? 2
+            : 3;
+    const ordered = [...tasks].sort((x, y) => rank(x) - rank(y));
+    const room = i.maxRows ?? 8;
+    // Cabeçalho (1) + a linha `ocultas` (1) saem do espaço; em terminal baixo o teto cai.
+    const cap = Math.min(MAX_PANEL_TASKS, Math.max(1, room - 2));
+    const visiveis = ordered.slice(0, cap);
+    const ocultas = ordered.length - visiveis.length;
+    const shown = i.expanded ? tasks.slice(-MAX_EXPANDED_TASKS) : visiveis;
     const kidsOf = (t: TaskRecord): readonly SubAgentChildView[] =>
       t.endedAt === undefined ? i.childrenOf(t.id) : [];
     // Nível 1 = TAREFAS; nível 2 = os agentes da tarefa, na MESMA linha do clássico.
@@ -101,7 +130,7 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
       const out: PanelRow[] = [
         {
           kind: 'header',
-          total: tasks.length,
+          total: tasks.length + (i.hiddenEnded ?? 0),
           running: tasks.filter((t) => t.status === 'running').length,
         },
       ];
@@ -121,26 +150,26 @@ export function buildPanelRows(i: PanelInput): PanelRow[] {
       });
       return out;
     };
-    const room = i.maxRows ?? 8;
     const compactOk = i.statusline === 'full';
     let list = build(true);
-    // Falta espaço? Primeiro recolhe os AGENTES (a tarefa ganha `· N agentes`, com brilho);
-    // só se nem as tarefas couberem vira a linha-resumo.
+    // Falta espaço? Primeiro recolhe os AGENTES (a tarefa ganha `· N agentes`, com brilho).
     if (!i.expanded && list.length > room) list = build(false);
-    const collapse = !i.expanded && (!compactOk || list.length > room);
+    const linhaOcultas = (): PanelRow => ({
+      kind: 'summary',
+      text: `… +${ocultas} tarefa${ocultas > 1 ? 's' : ''} ${ocultas > 1 ? 'ocultas' : 'oculta'} · ↓ ver`,
+    });
+    // `compact`/`hidden`: o resumo vira linha de cabeçalho e as tarefas seguem com a sua linha viva
+    // (brilho + atividade + tempo), até o teto. `hidden` é o pedido de silêncio: só o resumo.
+    const collapse = !i.expanded && !compactOk;
     if (collapse) {
-      rows.push({ kind: 'summary', text: summaryText(tasks) });
-      // Sinal de vida: a linha-resumo é texto parado. Com `compact` (ou sem espaço) quem RODA
-      // segue com a sua linha (brilho + atividade + tempo), no máximo MAX_COLLAPSED_LIVE.
-      // `hidden` é o pedido explícito de silêncio: só o resumo.
+      rows.push({ kind: 'summary', text: summaryText(tasks, true, i.hiddenEnded ?? 0) });
       if (i.statusline !== 'hidden') {
-        tasks
-          .filter((t) => t.status === 'running')
-          .slice(0, MAX_COLLAPSED_LIVE)
-          .forEach((t) => rows.push({ kind: 'task', view: i.viewOf(t), selected: false }));
+        visiveis.forEach((t) => rows.push({ kind: 'task', view: i.viewOf(t), selected: false }));
+        if (ocultas > 0) rows.push(linhaOcultas());
       }
     } else {
       rows.push(...list);
+      if (!i.expanded && ocultas > 0) rows.push(linhaOcultas());
       if (i.expanded) {
         rows.push({
           kind: 'text',
@@ -241,7 +270,12 @@ export function TaskPanel(props: TaskPanelProps): React.ReactElement | null {
   if (props.rows.length === 0) return null;
   const width = Math.max(30, props.columns - 4);
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    // MARGEM À DIREITA: a largura do painel é `columns - 3` (e não a tela inteira). A conta de largura
+    // do Ink (`string-width`) e a do terminal divergem em alguns glifos (ambíguos, emoji, tab); uma
+    // linha que o Ink acha caber em `columns` mas o terminal desenha 1–2 células mais larga QUEBRA
+    // fisicamente, o Ink apaga 1 linha a menos a cada quadro e o topo do rodapé fica para trás (a
+    // frase de trabalho repetida no histórico, uma por tick). Com folga, o erro não chega a quebrar.
+    <Box flexDirection="column" paddingLeft={2} width={Math.max(20, props.columns - 3)}>
       {props.rows.map((r, idx) => {
         switch (r.kind) {
           case 'summary':
@@ -263,16 +297,24 @@ export function TaskPanel(props: TaskPanelProps): React.ReactElement | null {
             );
           case 'task':
             return (
-              <Box key={idx}>
+              <Box key={idx} height={1} overflow="hidden">
                 {/* Mesma linha dos sub-agentes (brilho enquanto roda); o marcador só no expandido. */}
                 {r.selected && <Role name="accent">❯</Role>}
-                <ChildLine child={r.view} frame={props.frame} />
+                <ChildLine
+                  child={r.view}
+                  frame={props.frame}
+                  maxWidth={Math.max(20, props.columns - 5 - (r.selected ? 1 : 0))}
+                />
               </Box>
             );
           case 'child':
             return (
-              <Box key={idx} paddingLeft={2}>
-                <ChildLine child={r.child} frame={props.frame} />
+              <Box key={idx} paddingLeft={2} height={1} overflow="hidden">
+                <ChildLine
+                  child={r.child}
+                  frame={props.frame}
+                  maxWidth={Math.max(20, props.columns - 7)}
+                />
               </Box>
             );
           case 'approval':

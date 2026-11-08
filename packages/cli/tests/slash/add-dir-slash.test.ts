@@ -9,12 +9,12 @@ import { buildSlashEffect, runAddDir, type AddDirWorkspace } from '../../src/sla
 const CTX = { usage: { tokens: 0, windowPct: 0, tier: 'aluy-flux' } };
 
 describe('EST-0982 · /add-dir — registro e roteamento', () => {
-  it('está registrado como comando nativo (seção workspace)', () => {
+  it('está registrado como comando nativo (seção trabalho)', () => {
     const cmd = NATIVE_COMMANDS.find((c) => c.id === 'add-dir');
     expect(cmd).toBeDefined();
     expect(cmd!.name).toBe('add-dir');
-    expect(cmd!.section).toBe('workspace');
-    expect(cmd!.summary).toMatch(/diretório|raiz/i);
+    expect(cmd!.section).toBe('trabalho');
+    expect(cmd!.summary).toMatch(/pasta|diretório|raiz/i);
   });
 
   it('routeInput roteia `/add-dir <path>` com os args', () => {

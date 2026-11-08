@@ -224,4 +224,5 @@ paths = [
   '''packages/cli-core/tests/agent/bang-feed\.test\.ts$''',
   '''packages/cli/tests/session/cauda-da-resposta\.test\.ts$''',
   '''packages/cli-core/tests/concierge/permission\.test\.ts$''',
+  '''packages/cli-core/tests/concierge/concierge\.test\.ts$''',
 ]

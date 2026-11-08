@@ -43,6 +43,8 @@ export const BEGIN_SYNC = '\x1b[?2026h';
 /** ESU — End Synchronized Update (DECRST 2026). Fecha/pinta o frame atômico. */
 export const END_SYNC = '\x1b[?2026l';
 
+import { debugFrameWrite, debugRenderEnabled } from './debug-render.js';
+import { appWrite } from './stdio-guard.js';
 import { displayWidth } from './visual-lines.js';
 
 const ESC = '\x1b[';
@@ -60,6 +62,7 @@ const ERASE_TO_EOS = `${ESC}J`;
  * o terminal ache larga demais é TRUNCADA, nunca quebrada — quebrar na última linha ROLA a tela
  * e dessincroniza o modelo CUP-absoluto do differ (composer duplicado). */
 const DISABLE_AUTOWRAP_SEQ = `${ESC}?7l`;
+const ENABLE_AUTOWRAP_SEQ = `${ESC}?7h`;
 
 // EST-0965 · ADR-0076 §5 — O FLICKER DO COCKPIT é por OUTRO byte que o inline. No
 // alt-screen o frame do cockpit ENCHE `rows` (invariante §3), então o Ink NÃO usa o
@@ -919,6 +922,11 @@ export interface WrapOptions {
    * desliga (o caller resolve a env).
    */
   readonly anchor?: boolean;
+  /**
+   * Auto-wrap OFF em todo quadro do inline (`?7l … ?7h`) e `?7h` no `cleanup()`. Default ON;
+   * `ALUY_AUTOWRAP=1` (o caller resolve a env) desliga.
+   */
+  readonly autowrap?: boolean;
 }
 
 /**
@@ -945,6 +953,7 @@ export function wrapStdoutWithSync(
   const useOverwrite = options.overwrite ?? true;
   const onOverflowRegimeExit = options.onOverflowRegimeExit;
   const useAnchor = options.anchor ?? true;
+  const useNoWrap = options.autowrap ?? true;
   const frameAnchor = createFrameAnchor(() => original.rows);
   // F198 — rastreia o regime clearTerminal (inline) pelos BYTES p/ sinalizar a borda de saída.
   const overflowRegime = createOverflowRegimeTracker();
@@ -975,6 +984,29 @@ export function wrapStdoutWithSync(
   // apagado. `pendingClearFallback` é a rede de segurança: se NENHUM write chegar a tempo
   // (ex.: o remonte do `<Static>` não gerou write algum, caso raro), descarrega o erase
   // sozinho — nunca fica pendurado indefinidamente.
+  // UM RENDER DO INK = UM BLOCO SYNC. Quando o `<Static>` muda, o Ink faz 3 `write` seguidos no
+  // mesmo tick: (1) o erase do quadro, (2) o histórico, (3) o quadro novo. Cada um saía em seu
+  // próprio `?2026`, e o terminal podia pintar entre eles (a nota já escrita e o quadro ainda
+  // apagado/duplicado: o "+1 linha por 3 ms" do `↳ encaixado`). Agora o erase PURO abre um lote e
+  // tudo até o fim do tick sai concatenado dentro de UM par BSU…ESU.
+  let batch: string[] | undefined;
+  let batchCallbacks: (() => void)[] = [];
+  const flushBatch = (): void => {
+    if (batch === undefined) return;
+    const parts = batch;
+    const cbs = batchCallbacks;
+    batch = undefined;
+    batchCallbacks = [];
+    if (cleanedUp) return;
+    const out = parts.join('');
+    try {
+      appWrite(original, useSync ? `${BEGIN_SYNC}${out}${END_SYNC}` : out, () => {
+        for (const cb of cbs) cb();
+      });
+    } catch {
+      /* stream fechado */
+    }
+  };
   let pendingHardClear = false;
   let pendingClearFallback: ReturnType<typeof setTimeout> | undefined;
   // Folga acima do debounce de 90ms do resize-effect da App (EST-1015) — cobre o caso comum
@@ -1001,7 +1033,7 @@ export function wrapStdoutWithSync(
       if (h === '') return;
       const out = `${DISABLE_AUTOWRAP_SEQ}${h}`;
       try {
-        original.write(useSync ? `${BEGIN_SYNC}${out}${END_SYNC}` : out);
+        appWrite(original, useSync ? `${BEGIN_SYNC}${out}${END_SYNC}` : out);
       } catch {
         /* stream fechado */
       }
@@ -1024,7 +1056,12 @@ export function wrapStdoutWithSync(
       chunk === null ||
       (typeof chunk === 'string' ? chunk.length === 0 : chunk.byteLength === 0);
     if (isEmpty) {
-      return original.write(chunk as string, encoding as BufferEncoding, callback as () => void);
+      return appWrite(
+        original,
+        chunk as string,
+        encoding as BufferEncoding,
+        callback as () => void,
+      );
     }
 
     const body = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
@@ -1050,6 +1087,19 @@ export function wrapStdoutWithSync(
     //  diff por-linha repinta SÓ o que mudou ⇒ zera o flicker em QUALQUER terminal.)
     // ÂNCORA DO COMPOSER — só no inline, ANTES do overwrite (que traduz o `eraseLines` já
     // ampliado pela reserva).
+    if (!cockpitActive && debugRenderEnabled()) {
+      const em = matchEraseLines(body);
+      debugFrameWrite(
+        em === undefined
+          ? 'sem-erase'
+          : body.length === em.bodyStart
+            ? 'erase-puro'
+            : 'erase+quadro',
+        em?.lines,
+        em === undefined ? body : body.slice(em.bodyStart),
+        original.columns,
+      );
+    }
     const inlineBody = !cockpitActive && useAnchor ? frameAnchor.transform(body) : body;
     const transformed = !useOverwrite
       ? inlineBody
@@ -1068,10 +1118,31 @@ export function wrapStdoutWithSync(
       clearPendingClearFallback();
       withClear = `${HARD_CLEAR}${transformed}`;
     }
+    // AUTO-WRAP OFF EM TODO QUADRO DO INLINE: o `eraseLines` do Ink sobe N-1 linhas RELATIVAS; se o
+    // terminal desenhar alguma linha mais larga que a conta do Ink (glifo ambíguo/emoji), ela quebra
+    // numa linha física a mais, o cursor para 1 linha curto e o topo do quadro anterior (a frase de
+    // trabalho) fica para trás — um fantasma por quadro. Sem auto-wrap a linha é CORTADA na borda e
+    // as linhas físicas == as do Ink. Por escrita (e não só uma vez na largada) para valer mesmo que
+    // algo religue o `?7` no meio (sair do cockpit, o próprio terminal).
+    if (!cockpitActive && useNoWrap)
+      withClear = `${DISABLE_AUTOWRAP_SEQ}${withClear}${ENABLE_AUTOWRAP_SEQ}`;
+    if (!cockpitActive) {
+      const em0 = matchEraseLines(body);
+      const erasePuro = em0 !== undefined && body.length === em0.bodyStart;
+      if (erasePuro && batch === undefined) {
+        batch = [];
+        queueMicrotask(flushBatch);
+      }
+      if (batch !== undefined) {
+        batch.push(withClear);
+        if (typeof callback === 'function') batchCallbacks.push(callback as () => void);
+        return true;
+      }
+    }
     const framed = useSync ? `${BEGIN_SYNC}${withClear}${END_SYNC}` : withClear;
     if (cockpitActive) scheduleHeal();
     // UM único write ao stream real: tudo concatenado e atômico.
-    return original.write(framed, callback as () => void);
+    return appWrite(original, framed, callback as () => void);
   }) as NodeJS.WriteStream['write'];
 
   // PROXY: delega tudo ao stream real; só `write` é o nosso. Mantém `this` ligado ao
@@ -1085,14 +1156,23 @@ export function wrapStdoutWithSync(
   }) as NodeJS.WriteStream;
 
   const cleanup = (): void => {
+    flushBatch();
     if (cleanedUp) return;
+    // Auto-wrap SEMPRE religado ao sair (nunca deixa o shell do dono sem wrap), mesmo sem `?2026`.
+    if (useNoWrap) {
+      try {
+        appWrite(original, ENABLE_AUTOWRAP_SEQ);
+      } catch {
+        /* saída já fechada */
+      }
+    }
     cleanedUp = true;
     if (healTimer !== undefined) clearTimeout(healTimer);
     clearPendingClearFallback(); // não deixa o timer da fallback pendurado no exit.
     // ESU final CRU (não pelo proxy — senão re-transformaria). Best-effort.
     if (!useSync) return; // sem `?2026`, não há modo sync p/ desfazer.
     try {
-      original.write(END_SYNC);
+      appWrite(original, END_SYNC);
     } catch {
       // saída já fechada ⇒ nada a fazer; não derruba o exit.
     }
@@ -1107,7 +1187,7 @@ export function wrapStdoutWithSync(
     if (!pendingHardClear) return;
     pendingHardClear = false;
     const framed = useSync ? `${BEGIN_SYNC}${HARD_CLEAR}${END_SYNC}` : HARD_CLEAR;
-    original.write(framed);
+    appWrite(original, framed);
   };
 
   // BURACO-NO-MEIO-RESIZE — arma o clear p/ o PRÓXIMO write (ver doc em `SyncStdout`).

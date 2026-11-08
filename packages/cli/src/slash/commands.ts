@@ -10,6 +10,14 @@ import { fuzzyScore } from '../attach/fuzzy.js';
 import { displayWidth } from '../session/visual-lines.js';
 import type { I18nKey, TFunction } from '../i18n/index.js';
 import type { AgentCommandEffect } from '@hiperplano/aluy-cli-core';
+import {
+  COMMAND_META,
+  SECTION_ORDER,
+  availableIn,
+  fold,
+  type CommandMeta,
+  type MenuContext,
+} from './command-meta.js';
 
 // ADR-0147 — re-exportado p/ quem consome `SlashCommand.agentEffect` sem importar
 // diretamente do core (conveniência; o TIPO ÚNICO segue vivendo no core).
@@ -71,7 +79,14 @@ export type NativeCommandId =
   | 'upgrade';
 
 /** Seção do menu (agrupamento visual §2.15). */
-export type SlashSection = 'conta' | 'sessão' | 'workspace' | 'usuário';
+export type SlashSection =
+  | 'conversa'
+  | 'interface'
+  | 'modelo'
+  | 'trabalho'
+  | 'extensões'
+  | 'conta'
+  | 'usuário';
 
 /**
  * EST-0974 — um SUBcomando declarado de um comando (ex.: `/mcp search`, `/mcp add`).
@@ -114,6 +129,12 @@ export interface SlashCommand {
    * segue com o pt-BR no `summary` p/ quem não localiza (não-TTY linear, testes).
    */
   readonly summaryKey?: I18nKey;
+  /** Palavras-chave PT-BR p/ a busca do menu (ver `command-meta.ts`). */
+  readonly keywords?: readonly string[];
+  /** Raro: fora da lista padrão do menu, mas buscável. */
+  readonly rare?: true;
+  /** Só vale em certo modo (ver `command-meta.ts`). */
+  readonly availability?: CommandMeta['availability'] | undefined;
   /** `native` = código; `user` = dado de ~/.aluy/commands/. */
   readonly source: 'native' | 'user';
   /** id do nativo (ausente p/ comandos do usuário). */
@@ -250,7 +271,7 @@ export function entryPath(entry: SlashMenuEntry): string {
 export function entrySection(entry: SlashMenuEntry): SlashSection {
   const cmd = entry.kind === 'command' ? entry.command : entry.parent;
   if (cmd.source === 'user') return 'usuário';
-  return cmd.section ?? 'sessão';
+  return cmd.section ?? 'conversa';
 }
 
 /** O summary exibido pela entrada. */
@@ -271,7 +292,7 @@ export function entrySummary(entry: SlashMenuEntry): string {
  * do `<SlashMenu>`: indent (2 normal / 4 sub) + `/path` + padding até ~18 + summary. Usada
  * p/ contar quantas LINHAS a entrada ocupa num terminal estreito (`ceil(w / columns)`).
  */
-const SLASH_HELP_WIDTH = 56; // aprox. da linha de ajuda ("/ para comandos · ↑↓ …").
+const SLASH_HELP_WIDTH = 73; // aprox. da linha de ajuda ("digite para buscar · ↑↓ …").
 function entryVisualLines(entry: SlashMenuEntry, columns: number): number {
   const path = entryPath(entry);
   const indent = entry.kind === 'subcommand' ? 4 : 2;
@@ -442,7 +463,7 @@ export function resolveAgentEffect(command: SlashCommand, args: string): AgentCo
 }
 
 /** Os comandos NATIVOS (spec §2.15). DADO listável, não hardcode espalhado. */
-export const NATIVE_COMMANDS: readonly SlashCommand[] = [
+const RAW_NATIVE_COMMANDS: readonly SlashCommand[] = [
   // EST-0989 (i18n) — os NATIVOS ganham `summaryKey`: o `summary` segue pt-BR (back-compat
   // de testes/não-TTY), e a TUI o LOCALIZA via `localizeCommands(t)` no idioma ativo.
   {
@@ -451,7 +472,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.help',
     source: 'native',
     id: 'help',
-    section: 'sessão',
     // EST-0982 — read-only puro (nota): roda JÁ mid-turn em vez de enfileirar.
     parallelWhileBusy: true,
     agentEffect: 'read-only', // ADR-0147
@@ -462,7 +482,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.login',
     source: 'native',
     id: 'login',
-    section: 'conta',
     // ADR-0147 — device-flow interativo no terminal do humano: sem sentido p/ o agente.
     agentEffect: 'human-only',
   },
@@ -472,7 +491,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.logout',
     source: 'native',
     id: 'logout',
-    section: 'conta',
     // ADR-0147 §4 — revoga+apaga a credencial: irreversível ⇒ destructive (always-ask).
     agentEffect: 'destructive',
   },
@@ -482,7 +500,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.whoami',
     source: 'native',
     id: 'whoami',
-    section: 'conta',
     // EST-0982 — read-only puro (nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
     agentEffect: 'read-only', // ADR-0147
@@ -496,9 +513,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'telegram',
     summary: 'conector Telegram · status/allow/deny/logout (setup na sessão)',
     summaryKey: 'cmd.telegram',
+    usage: '[status | allow|deny <chat-id> | logout]',
     source: 'native',
     id: 'telegram',
-    section: 'conta',
     // status/allow/deny são leves (config/keychain local) — rodam JÁ mid-turn como nota.
     parallelWhileBusy: true,
     // ADR-0147 — base session-effect (allow/deny mutam a allowlist); `status` é
@@ -515,7 +532,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.doctor',
     source: 'native',
     id: 'doctor',
-    section: 'conta',
     // EST-0982 — health-check read-only (ticks numa nota própria, fire-and-forget): roda
     // JÁ mid-turn. NB: `/doctor --deep` gasta modelo, mas num caller PRÓPRIO (não o turno).
     parallelWhileBusy: true,
@@ -527,7 +543,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.model',
     source: 'native',
     id: 'model',
-    section: 'sessão',
     // ADR-0147 — sem arg LÊ o tier atual, com arg TROCA (dual-mode como /effort); ambos
     // roteiam idêntico na catraca (allow direto), então uma classe só basta.
     agentEffect: 'session-effect',
@@ -542,7 +557,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.provider',
     source: 'native',
     id: 'provider',
-    section: 'sessão',
     agentEffect: 'session-effect', // ADR-0147 — espelha /model (dual-mode).
     // F-PROV-FIX — achado de dogfooding: a troca de provider vale só na sessão (por
     // desenho — você experimenta sem contaminar sessões futuras); faltava um jeito
@@ -566,7 +580,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summary: 'atualiza o aluy para a versão mais nova do canal (explícito)',
     source: 'native',
     id: 'upgrade',
-    section: 'sessão',
     agentEffect: 'human-only', // trocar o binário NÃO é algo que o agente decide
   },
   {
@@ -579,9 +592,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // /compact. Nasceu `/janela` e foi corrigido antes de qualquer release.
     name: 'window',
     summary: 'informa a janela de contexto do modelo ativo (ex.: /window 128k)',
+    usage: '[<tamanho>, ex.: 128k]',
     source: 'native',
     id: 'window',
-    section: 'sessão',
     agentEffect: 'session-effect',
   },
   {
@@ -593,7 +606,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.effort',
     source: 'native',
     id: 'effort',
-    section: 'sessão',
     // EST-0982 — DUAL-MODE: `/effort` (sem arg) só LÊ o valor ⇒ roda JÁ mid-turn; `/effort <v>`
     // MUTA o reasoning_effort do turno em curso ⇒ enfileira (não muta o turno vivo).
     parallelWhileBusyWith: effortIsReadOnly,
@@ -603,9 +615,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'theme',
     summary: 'trocar o tema (dark/light) · auto-detecta no boot',
     summaryKey: 'cmd.theme',
+    usage: '[<nome>]',
     source: 'native',
     id: 'theme',
-    section: 'sessão',
     // ADR-0147 — troca de tema é RENDER do terminal do humano: sem sentido p/ o agente.
     agentEffect: 'human-only',
   },
@@ -615,9 +627,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'lang',
     summary: 'trocar o idioma (pt-BR/en) · auto-detecta no boot',
     summaryKey: 'cmd.lang',
+    usage: '[pt-BR|en]',
     source: 'native',
     id: 'lang',
-    section: 'sessão',
     agentEffect: 'human-only', // ADR-0147 — espelha /theme (render da TUI do humano).
   },
   {
@@ -626,7 +638,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.usage',
     source: 'native',
     id: 'usage',
-    section: 'sessão',
     // EST-0982 — read-only puro (lê tokens/janela numa nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
     agentEffect: 'read-only', // ADR-0147
@@ -637,7 +648,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.rename',
     source: 'native',
     id: 'rename',
-    section: 'sessão',
     agentEffect: 'session-effect', // ADR-0147 — dado de UI local, reversível.
   },
   {
@@ -646,7 +656,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.history',
     source: 'native',
     id: 'history',
-    section: 'sessão',
     agentEffect: 'read-only', // ADR-0147 §4 — listagem; retomar sessão é fluxo interativo.
   },
   {
@@ -654,7 +663,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summary: 'pergunta PARALELA (read-only) sem parar o trabalho em curso',
     source: 'native',
     id: 'ask',
-    section: 'sessão',
     // EST-0982 · ADR-0080 — read-only + caller próprio ⇒ roda JÁ mid-turn (não enfileira).
     parallelWhileBusy: true,
     agentEffect: 'read-only', // ADR-0147
@@ -663,9 +671,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // ADR 0006 — Concierge: lista/para tarefas. Roda JÁ mid-turn (é o controle explícito).
     name: 'task',
     summary: 'tarefas do Concierge: /task · /task stop <id|all>',
+    usage: '[show <id> | stop <id|all>]',
     source: 'native',
     id: 'task',
-    section: 'sessão',
     parallelWhileBusy: true,
     agentEffect: 'human-only', // o agente não gerencia as próprias tarefas por aqui
   },
@@ -674,9 +682,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'approve',
     summary:
       'aprova a permissão pendente: /approve [tarefa] [s=sessão] [always=sempre nesta tarefa] [show=ver diff inteiro] (alias /a; /a! = always)',
+    usage: '[tarefa] [s | always | show]',
     source: 'native',
     id: 'approve',
-    section: 'sessão',
     parallelWhileBusy: true,
     agentEffect: 'human-only', // NUNCA o agente aprovando a si mesmo
   },
@@ -684,9 +692,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // ADR 0006 — nega a aprovação pendente. Alias `/n`.
     name: 'deny',
     summary: 'nega a permissão pendente: /deny [tarefa] (alias /n)',
+    usage: '[tarefa]',
     source: 'native',
     id: 'deny',
-    section: 'sessão',
     parallelWhileBusy: true,
     agentEffect: 'human-only',
   },
@@ -694,9 +702,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // ADR 0006 — modo de conversa. Persiste (config `conversation`).
     name: 'conversation',
     summary: 'modo de conversa: concierge (nunca trava) | classic',
+    usage: '[concierge|classic]',
     source: 'native',
     id: 'conversation',
-    section: 'sessão',
     parallelWhileBusy: true,
     agentEffect: 'human-only',
   },
@@ -704,9 +712,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'notify',
     summary: 'notificações: all | attention | off',
     summaryKey: 'cmd.notify',
+    usage: '[all|attention|off]',
     source: 'native',
     id: 'notify',
-    section: 'sessão',
     agentEffect: 'session-effect', // ADR-0147
   },
   {
@@ -714,9 +722,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // é alias (resolvido no routeInput). ≥100col lado-a-lado; 60–99 abas; <60 desabilita.
     name: 'split',
     summary: 'liga/desliga o painel de LOG ao lado do chat (Ctrl+L · /view)',
+    usage: '[on|off]',
     source: 'native',
     id: 'split',
-    section: 'sessão',
     // ADR-0147 — layout do terminal do humano: sem sentido p/ o agente.
     agentEffect: 'human-only',
   },
@@ -728,7 +736,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.fullscreen',
     source: 'native',
     id: 'fullscreen',
-    section: 'sessão',
     agentEffect: 'human-only', // ADR-0147 — espelha /split (render do terminal).
   },
   {
@@ -740,7 +747,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     usage: '[on|off]',
     source: 'native',
     id: 'suggest',
-    section: 'sessão',
     // ADR-0147 — ghost-text é DICA VISUAL pro humano digitar: sem sentido p/ o agente.
     agentEffect: 'human-only',
   },
@@ -752,7 +758,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     usage: '[full|compact|hidden]',
     source: 'native',
     id: 'statusline',
-    section: 'sessão',
     // ADR-0147 — layout do terminal do humano: sem sentido p/ o agente.
     agentEffect: 'human-only',
   },
@@ -765,7 +770,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.export',
     source: 'native',
     id: 'export',
-    section: 'sessão',
     // ADR-0147 — CRIA um arquivo novo (não apaga/sobrescreve nada existente).
     agentEffect: 'session-effect',
   },
@@ -775,7 +779,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.undo',
     source: 'native',
     id: 'undo',
-    section: 'workspace',
     // ADR-0147 §4 — undo/redo SÃO a própria rede de segurança (não-destrutivo).
     agentEffect: 'session-effect',
   },
@@ -785,7 +788,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.redo',
     source: 'native',
     id: 'redo',
-    section: 'workspace',
     agentEffect: 'session-effect', // ADR-0147 — espelha /undo.
   },
   {
@@ -794,7 +796,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.rewind',
     source: 'native',
     id: 'rewind',
-    section: 'workspace',
     // ADR-0147 (Q-3, ABERTA) — `destructive` PROVISORIAMENTE (condição 2 do parecer do
     // `seguranca`): REVERTE edições pós-ponto (perda de trabalho subsequente), então a
     // classe conservadora `destructive` (⇒ sempre-ask) é o default seguro ENQUANTO a Q-3
@@ -808,9 +809,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'clear',
     summary: 'limpa a sessão (contexto) · full também APAGA a memória do agente',
     summaryKey: 'cmd.clear',
+    usage: '[full | memory]',
     source: 'native',
     id: 'clear',
-    section: 'sessão',
     // ADR-0147 §4 — `/clear` puro (só sessão) é session-effect; `full`/`memory` (apagam
     // a memória IRREVERSIVELMENTE) são destructive — o CASO CRÍTICO do ADR.
     agentEffect: 'session-effect',
@@ -821,13 +822,13 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     subcommands: [
       {
         name: 'full',
-        summary: 'limpa a sessão E APAGA a memória (global+projeto) · confirma',
+        summary: 'limpar a conversa e apagar a memória (pede confirmação)',
         usage: 'full',
         terminal: true,
       },
       {
         name: 'memory',
-        summary: 'APAGA só a memória do agente (global+projeto) · confirma',
+        summary: 'apagar só a memória do agente (pede confirmação)',
         usage: 'memory',
         terminal: true,
       },
@@ -837,9 +838,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'compact',
     summary: 'compacta o contexto (resume a conversa e continua)',
     summaryKey: 'cmd.compact',
+    usage: '[list | forget|edit|pin|unpin <id>]',
     source: 'native',
     id: 'compact',
-    section: 'sessão',
     agentEffect: 'session-effect', // ADR-0147
   },
   {
@@ -848,7 +849,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.cycle',
     source: 'native',
     id: 'cycle',
-    section: 'sessão',
     usage: '<intervalo> "<tarefa>"',
     // ADR-0147 (Q-4, decisão do dono) — o agente PODE INICIAR `/cycle` sozinho, não só
     // controlar um já-rodando: os tetos DUROS do CycleEngine (CLI-SEC-14) + a catraca
@@ -865,25 +865,25 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     subcommands: [
       {
         name: 'pause',
-        summary: 'pausa o /cycle em execução (sem matar; Esc ainda para)',
+        summary: 'pausar o /cycle em execução (Esc ainda para)',
         usage: 'pause',
         terminal: true,
       },
-      { name: 'resume', summary: 'retoma um /cycle pausado', usage: 'resume', terminal: true },
+      { name: 'resume', summary: 'retomar um /cycle pausado', usage: 'resume', terminal: true },
       {
         name: 'edit',
-        summary: 'reconfigura o /cycle ativo · vale na próxima iteração',
+        summary: 'editar o /cycle ativo (vale na próxima volta)',
         usage: 'edit ["<tarefa>"] [<intervalo>] [--max-iter N]',
       },
       {
         name: 'status',
-        summary: 'mostra o /cycle ativo (config corrente · pausado?)',
+        summary: 'ver o /cycle ativo',
         usage: 'status',
         terminal: true,
       },
       {
         name: 'stop',
-        summary: 'para/encerra o /cycle em execução (= Esc)',
+        summary: 'parar o /cycle em execução (= Esc)',
         usage: 'stop',
         terminal: true,
       },
@@ -896,7 +896,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summary: 'agendamento PERSISTENTE · lista/gerencia os jobs (mesmo motor do aluy cron)',
     source: 'native',
     id: 'cron',
-    section: 'sessão',
     usage: 'list · add <quando> "<tarefa>" · edit/enable/disable/rm <id>',
     // ADR-0147 §4 — `list` é read-only; `rm` remove um job DE VEZ (destructive);
     // add/edit/enable/disable mutam mas são reversíveis (session-effect).
@@ -905,27 +904,27 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     subcommands: [
       {
         name: 'list',
-        summary: 'lista os jobs (id · on/off · schedule · tarefa)',
+        summary: 'listar os agendamentos (id · ligado · horário · tarefa)',
         usage: 'list',
         terminal: true,
       },
       {
         name: 'add',
-        summary: 'agenda um job novo (cron de 5 campos)',
+        summary: 'criar um agendamento (cron de 5 campos)',
         usage: 'add <quando> "<tarefa>" [--yolo]',
       },
       {
         name: 'edit',
-        summary: 'reconfigura um job (preserva id)',
+        summary: 'editar um agendamento (mantém o id)',
         usage: 'edit <id> [--quando "<cron>"] [--tarefa "<txt>"] [--yolo|--no-yolo]',
       },
-      { name: 'enable', summary: 'reativa um job desabilitado', usage: 'enable <id>' },
+      { name: 'enable', summary: 'reativar um agendamento desligado', usage: 'enable <id>' },
       {
         name: 'disable',
-        summary: 'desabilita SEM excluir (sai do agendador)',
+        summary: 'desligar um agendamento sem excluir',
         usage: 'disable <id>',
       },
-      { name: 'rm', summary: 'remove um job de vez', usage: 'rm <id>' },
+      { name: 'rm', summary: 'remover um agendamento de vez', usage: 'rm <id>' },
     ],
   },
   {
@@ -934,7 +933,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.permissions',
     source: 'native',
     id: 'permissions',
-    section: 'workspace',
     agentEffect: 'read-only', // ADR-0147 — painel, não muta nada.
   },
   {
@@ -945,7 +943,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.tools',
     source: 'native',
     id: 'tools',
-    section: 'workspace',
     // EST-0982 — read-only puro (nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
     agentEffect: 'read-only', // ADR-0147
@@ -957,9 +954,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'add-dir',
     summary: 'autoriza um diretório EXTRA p/ o agente (sessão) · sem args lista',
     summaryKey: 'cmd.addDir',
+    usage: '[<pasta>]',
     source: 'native',
     id: 'add-dir',
-    section: 'workspace',
     // ADR-0147 — DIVERGE da tabela ilustrativa do ADR (que agrupava /add-dir como
     // session-effect junto de /effort etc.): o comentário ACIMA já cravava a invariante
     // "o agente não tem como invocar, sem auto-ampliação, NEM EM --unsafe" — ampliar o
@@ -973,7 +970,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.init',
     source: 'native',
     id: 'init',
-    section: 'workspace',
     // ADR-0147 — a ESCRITA real (write_file) segue passando por `decide()` (CLI-SEC-9).
     agentEffect: 'session-effect',
   },
@@ -984,7 +980,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summary: 'entrega um segredo ao agente sem digitá-lo no chat (campo mascarado)',
     source: 'native',
     id: 'secret',
-    section: 'workspace',
     usage: '<NOME> [--save] [--force] · list · remove <NOME>',
     // Não toca o turno (só o cofre local) ⇒ roda JÁ mid-turn em vez de enfileirar — e uma
     // linha `/secret NOME valor` NUNCA pode ficar numa fila visível.
@@ -998,7 +993,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.memory',
     source: 'native',
     id: 'memory',
-    section: 'workspace',
     // ADR-0147 §4 — `/memory` puro e `list` LEEM; `forget <id>` APAGA um fato de vez
     // (destructive, espelha /clear memory); edit/pin/unpin mutam mas são reversíveis.
     agentEffect: 'read-only',
@@ -1012,11 +1006,11 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // EST-0974 — subcomandos de /memory (parseMemoryCommand). `/memory` puro LISTA;
     // os verbos mutam (negados em Plan, ADR-0055). Achatados no menu p/ descoberta.
     subcommands: [
-      { name: 'list', summary: 'lista a memória (global + projeto)', usage: 'list' },
-      { name: 'forget', summary: 'remove um fato pelo id', usage: 'forget <id>' },
-      { name: 'edit', summary: 'corrige o texto de um fato', usage: 'edit <id> <texto>' },
-      { name: 'pin', summary: 'fixa um fato (retenção)', usage: 'pin <id>' },
-      { name: 'unpin', summary: 'desfixa um fato', usage: 'unpin <id>' },
+      { name: 'list', summary: 'listar a memória (global e do projeto)', usage: 'list' },
+      { name: 'forget', summary: 'esquecer um fato pelo id', usage: 'forget <id>' },
+      { name: 'edit', summary: 'corrigir o texto de um fato', usage: 'edit <id> <texto>' },
+      { name: 'pin', summary: 'fixar um fato (não expira)', usage: 'pin <id>' },
+      { name: 'unpin', summary: 'desfixar um fato', usage: 'unpin <id>' },
     ],
   },
   {
@@ -1025,26 +1019,26 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'todo',
     summary: 'vê/gerencia o backlog de tarefas anotadas (done/clear)',
     summaryKey: 'cmd.todo',
+    usage: '[list | done <id> | clear]',
     source: 'native',
     id: 'todo',
-    section: 'workspace',
     // ADR-0147 — listar é read-only; done/clear mutam mas são de baixo risco (itens
     // concluídos, reversível editando/re-anotando).
     agentEffect: 'read-only',
     subcommandEffects: { list: 'read-only', done: 'session-effect', clear: 'session-effect' },
     subcommands: [
-      { name: 'list', summary: 'lista o backlog (pendentes + feitos)', usage: 'list' },
-      { name: 'done', summary: 'marca um item como concluído', usage: 'done <id>' },
-      { name: 'clear', summary: 'remove os itens já feitos', usage: 'clear', terminal: true },
+      { name: 'list', summary: 'listar os pedidos anotados (pendentes e feitos)', usage: 'list' },
+      { name: 'done', summary: 'marcar um item como concluído', usage: 'done <id>' },
+      { name: 'clear', summary: 'remover os itens já feitos', usage: 'clear', terminal: true },
     ],
   },
   {
     name: 'mcp',
     summary: 'lista/gerencia servers MCP (add/remove/disable/enable · search <termo>)',
     summaryKey: 'cmd.mcp',
+    usage: '[search <termo> | add | list | remove | disable | enable | reconnect | reload]',
     source: 'native',
     id: 'mcp',
-    section: 'workspace',
     // EST-0982 — DUAL-MODE: listagem/`list`/`search` só LEEM (nota) ⇒ rodam JÁ mid-turn;
     // add/remove/disable/enable (config) e reload/reconnect (troca tools do turno) ⇒ enfileiram.
     parallelWhileBusyWith: mcpIsReadOnly,
@@ -1066,28 +1060,32 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // parseMcpSlash): o ciclo completo sem ir ao shell. Achatados no menu p/ ficarem
     // descobríveis (digitar `/mcp s` filtra); selecionar completa `/mcp <sub> `.
     subcommands: [
-      { name: 'search', summary: 'busca no registro oficial aberto', usage: 'search <termo>' },
+      { name: 'search', summary: 'buscar no registro oficial', usage: 'search <termo>' },
       {
         name: 'add',
-        summary: 'adiciona um server local (stdio)',
+        summary: 'adicionar um servidor local (stdio)',
         usage: 'add <nome> -- <cmd> [args...]',
       },
-      { name: 'list', summary: 'lista os servers de todas as fontes', usage: 'list' },
-      { name: 'remove', summary: 'remove um server gerenciado pelo aluy', usage: 'remove <nome>' },
+      { name: 'list', summary: 'listar os servidores de todas as fontes', usage: 'list' },
+      {
+        name: 'remove',
+        summary: 'remover um servidor gerenciado pelo aluy',
+        usage: 'remove <nome>',
+      },
       {
         name: 'disable',
-        summary: 'desativa um server sem desinstalar',
+        summary: 'desativar um servidor sem desinstalar',
         usage: 'disable <nome>',
       },
-      { name: 'enable', summary: 'reativa um server desativado', usage: 'enable <nome>' },
+      { name: 'enable', summary: 'reativar um servidor desativado', usage: 'enable <nome>' },
       {
         name: 'reconnect',
-        summary: 're-sobe + re-handshake os servers (recupera "Not connected")',
+        summary: 'reconectar os servidores (resolve "Not connected")',
         usage: 'reconnect [all|<nome>]',
       },
       {
         name: 'reload',
-        summary: 're-lê o ~/.aluy/mcp.json + reconecta (aplica edições da config)',
+        summary: 'reler a configuração MCP e reconectar',
         usage: 'reload [all|<nome>]',
       },
     ],
@@ -1099,7 +1097,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summary: 'lista os agentes .md mapeados (global + projeto · válidos + rejeitados · refresh)',
     source: 'native',
     id: 'agents',
-    section: 'workspace',
     // EST-0982 — read-only puro (lista perfis numa nota): roda JÁ mid-turn. O `refresh`
     // também é seguro mid-turn: relê duas pastas e TROCA o registro (uma atribuição);
     // não toca histórico, catraca nem o turno vivo.
@@ -1114,7 +1111,7 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     subcommands: [
       {
         name: 'refresh',
-        summary: 'relê os .md de agentes (aplica os criados/editados na sessão)',
+        summary: 'reler os agentes (.md) criados ou editados',
         usage: 'refresh',
       },
     ],
@@ -1130,18 +1127,18 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // catraca com o caminho exato à vista; entra quando o comando de escrita for fiado.
     name: 'plugin',
     summary: 'lista os plugins instalados (bundles em ~/.aluy/plugins) · enable/disable',
+    usage: '[list | enable|disable <nome>]',
     source: 'native',
     id: 'plugin',
-    section: 'workspace',
     // Listar é ler uma nota; ligar/desligar é uma atribuição + uma escrita de config. Nada
     // toca histórico, catraca ou o turno vivo.
     parallelWhileBusy: true,
     agentEffect: 'read-only',
     subcommandEffects: { enable: 'session-effect', disable: 'session-effect' },
     subcommands: [
-      { name: 'list', summary: 'lista os plugins instalados e o que cada um traz', usage: 'list' },
-      { name: 'enable', summary: 'liga um plugin desligado', usage: 'enable <nome>' },
-      { name: 'disable', summary: 'desliga um plugin sem desinstalar', usage: 'disable <nome>' },
+      { name: 'list', summary: 'listar os plugins instalados', usage: 'list' },
+      { name: 'enable', summary: 'ligar um plugin', usage: 'enable <nome>' },
+      { name: 'disable', summary: 'desligar um plugin sem desinstalar', usage: 'disable <nome>' },
     ],
   },
   {
@@ -1151,7 +1148,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summary: 'lista as skills SKILL.md mapeadas (global + projeto · válidas + rejeitadas)',
     source: 'native',
     id: 'skills',
-    section: 'workspace',
     // EST-0982 — read-only puro (lista skills numa nota): roda JÁ mid-turn.
     parallelWhileBusy: true,
     agentEffect: 'read-only', // ADR-0147
@@ -1165,7 +1161,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
       'inventário do que foi carregado da .aluy/ (agentes·comandos·skills·workflows·memória + ALUY.md)',
     source: 'native',
     id: 'inventory',
-    section: 'workspace',
     parallelWhileBusy: true,
     agentEffect: 'read-only', // ADR-0147
   },
@@ -1175,9 +1170,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'workflows',
     summary: 'fluxos de atividades que coordenam o agente — lista, executa e ativa',
     summaryKey: 'cmd.workflows',
+    usage: '[run|use <nome>]',
     source: 'native',
     id: 'workflows',
-    section: 'workspace',
     // ADR-0147 — listar é read-only; `run`/`use` DIRIGEM o agente pelo fluxo (mutam a
     // sessão, mas os tool-calls internos seguem passando por `decide()` normal).
     agentEffect: 'read-only',
@@ -1185,12 +1180,12 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     subcommands: [
       {
         name: 'run',
-        summary: 'executa as atividades do workflow em sequência',
+        summary: 'executar o fluxo de trabalho',
         usage: 'run <nome>',
       },
       {
         name: 'use',
-        summary: 'ativa o modo de workflow — submissões seguem o fluxo',
+        summary: 'ativar o fluxo: os próximos pedidos seguem ele',
         usage: 'use <nome>',
       },
     ],
@@ -1209,9 +1204,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     name: 'service',
     summary: 'serviços plugáveis · list/status/create/start/stop/logs/attach',
     summaryKey: 'cmd.service',
+    usage: '[list | status|start|stop|attach <nome> | create]',
     source: 'native',
     id: 'service',
-    section: 'workspace',
     // Sem argumento ⇒ LISTA (read-only); `status`/`attach` também são read-only
     // (attach in-session é um SNAPSHOT — nunca escreve; a sessão VIVA/interativa é
     // o shell, `aluy service attach`). `start`/`stop` MUTAM (spawn/SIGTERM) — de
@@ -1225,41 +1220,38 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     subcommands: [
       {
         name: 'list',
-        summary: 'lista os serviços instalados (estado, próximo turno)',
+        summary: 'listar os serviços instalados',
         terminal: true,
       },
-      { name: 'status', summary: 'detalhe de um serviço + validação', usage: 'status <nome>' },
+      { name: 'status', summary: 'ver o detalhe de um serviço', usage: 'status <nome>' },
       {
         name: 'install',
-        summary:
-          'instala um diretório-manifesto local ou repo git (por ora, via `aluy service install` no shell)',
+        summary: 'instalar um serviço (por ora: `aluy service install` no shell)',
         usage: 'install <path|git-url>',
       },
       {
         name: 'uninstall',
-        summary: 'remove um serviço instalado (por ora, via `aluy service uninstall` no shell)',
+        summary: 'remover um serviço (por ora: `aluy service uninstall` no shell)',
         usage: 'uninstall <nome>',
       },
       {
         name: 'create',
-        summary:
-          'criação conversacional — descreva em prosa; o agente entrevista e escreve o rascunho',
+        summary: 'criar um serviço conversando com o agente',
         usage: 'create <descrição em prosa do serviço>',
       },
       {
         name: 'start',
-        summary: 'liga o serviço (spawn destacado, mostra manifesto visível + confirma)',
+        summary: 'iniciar o serviço (mostra o que ele faz e confirma)',
         usage: 'start <nome>',
       },
       {
         name: 'stop',
-        summary: 'para o serviço (SIGTERM/SIGKILL, derruba daemons próprios)',
+        summary: 'parar o serviço',
         usage: 'stop <nome>',
       },
       {
         name: 'attach',
-        summary:
-          'snapshot do estado+log de um serviço rodando — p/ sessão AO VIVO e interativa use `aluy service attach <nome>` no shell',
+        summary: 'ver o estado e o log de um serviço (ao vivo: `aluy service attach`)',
         usage: 'attach <nome>',
       },
     ],
@@ -1270,20 +1262,20 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // EST-ROOMS-3 · ADR-0081 — salas de conversa entre agentes (criar/listar/observar).
     name: 'rooms',
     summary: 'salas entre agentes — lista, cria, lê e OBSERVA AO VIVO a conversa da frota',
+    usage: '[list | new | read|watch <código>]',
     source: 'native',
     id: 'rooms',
-    section: 'workspace',
     // ADR-0147 — listar é read-only; new/read/watch mutam/observam a sessão (criam sala,
     // fazem snapshot, entram em modo de observação) mas não são destrutivos.
     agentEffect: 'session-effect',
     subcommandEffects: { list: 'read-only' },
     subcommands: [
-      { name: 'list', summary: 'lista as salas (código · msgs · atividade · quem)', usage: 'list' },
-      { name: 'new', summary: 'cria uma sala e mostra o código', usage: 'new' },
-      { name: 'read', summary: 'snapshot da conversa de uma sala', usage: 'read <código>' },
+      { name: 'list', summary: 'listar as salas', usage: 'list' },
+      { name: 'new', summary: 'criar uma sala e mostrar o código', usage: 'new' },
+      { name: 'read', summary: 'ler a conversa de uma sala', usage: 'read <código>' },
       {
         name: 'watch',
-        summary: 'observa a conversa AO VIVO (poll até 2min)',
+        summary: 'acompanhar a conversa ao vivo (até 2 min)',
         usage: 'watch <código>',
       },
     ],
@@ -1292,9 +1284,9 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     // ADR-0126(A) — foco 1:1: abre uma sub-sessão dedicada com um perfil .md.
     name: 'subagent',
     summary: 'fala 1:1 com um sub-agente (perfil .md) numa sub-sessão focada e contínua',
+    usage: '[<nome>]',
     source: 'native',
     id: 'subagent',
-    section: 'workspace',
     // ADR-0147 — redireciona o FOCO DO COMPOSER do humano (a que sub-sessão a digitação
     // dele vai) — não é um efeito que o AGENTE dispara sobre si mesmo (já tem
     // `spawn_agent` p/ delegar). Sem sentido pela via da tool ⇒ human-only.
@@ -1306,7 +1298,6 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summary: 'volta ao agente principal (sai do foco de /subagent)',
     source: 'native',
     id: 'back',
-    section: 'workspace',
     agentEffect: 'human-only', // ADR-0147 — espelha /subagent.
   },
   {
@@ -1315,11 +1306,34 @@ export const NATIVE_COMMANDS: readonly SlashCommand[] = [
     summaryKey: 'cmd.quit',
     source: 'native',
     id: 'quit',
-    section: 'sessão',
     // ADR-0147 §4 — encerra a TUI do humano: o agente não pode encerrar a sessão dele.
     agentEffect: 'human-only',
   },
 ];
+
+/** Aplica `COMMAND_META` (seção, descrição, palavras-chave, raro, modo) sobre o registro. */
+function applyMeta(c: SlashCommand): SlashCommand {
+  const meta = c.id !== undefined ? COMMAND_META[c.id] : undefined;
+  if (meta === undefined) return c;
+  return {
+    ...c,
+    section: meta.section,
+    summary: meta.summary,
+    keywords: meta.keywords,
+    ...(meta.rare === true ? { rare: true as const } : {}),
+    ...(meta.availability !== undefined ? { availability: meta.availability } : {}),
+  };
+}
+
+/** Os comandos NATIVOS, ordenados por seção (o menu agrupa por seção contígua). */
+export const NATIVE_COMMANDS: readonly SlashCommand[] = RAW_NATIVE_COMMANDS.map(applyMeta)
+  .map((c, i) => ({ c, i }))
+  .sort(
+    (a, b) =>
+      SECTION_ORDER.indexOf(a.c.section ?? 'conversa') -
+        SECTION_ORDER.indexOf(b.c.section ?? 'conversa') || a.i - b.i,
+  )
+  .map((x) => x.c);
 
 /**
  * EST-0989 (i18n) — LOCALIZA os comandos no idioma ATIVO: cada comando com `summaryKey`
@@ -1366,6 +1380,8 @@ export interface PaletteItem {
   readonly label: string;
   /** Descrição (o `summary` do comando ou a explicação da ação). */
   readonly description: string;
+  /** Palavras-chave PT-BR (só pontuam na busca; não aparecem na lista). */
+  readonly keywords?: readonly string[];
   /** A AÇÃO a executar quando confirmado (Enter). */
   readonly action:
     | { readonly kind: 'command'; readonly command: SlashCommand }
@@ -1404,6 +1420,7 @@ export function paletteItems(
     id: `cmd:${command.source}:${command.name}`,
     label: `/${command.name}`,
     description: command.summary,
+    keywords: command.keywords ?? [],
     action: { kind: 'command', command },
   }));
   return [...fromCommands, ...PALETTE_ACTIONS];
@@ -1426,9 +1443,20 @@ export function filterPalette(
   const q = query.trim();
   if (q === '') return items.map((it) => ({ ...it, score: 0, matched: [] }));
   const hits: PaletteHit[] = [];
+  const qFold = fold(q);
   for (const it of items) {
+    // Comando: o MESMO ranking do menu `/` (nome exato > prefixo > alias > substring > palavra-chave
+    // PT-BR > descrição) manda na ordem; o fuzzy só resolve o que o ranking não conhece e o realce.
+    if (it.action.kind === 'command') {
+      const rank = entryRank({ kind: 'command', command: it.action.command }, qFold);
+      if (rank !== undefined) {
+        const onLabel = fuzzyScore(q, it.label);
+        hits.push({ ...it, score: 1_000_000 - rank * 1_000, matched: onLabel ? onLabel.matched : [] });
+        continue;
+      }
+    }
     const onLabel = fuzzyScore(q, it.label);
-    const onDesc = fuzzyScore(q, it.description);
+    const onDesc = fuzzyScore(q, [it.description, ...(it.keywords ?? [])].join(' · '));
     if (!onLabel && !onDesc) continue;
     // Score = melhor das duas projeções; o realce só sai quando casou no label
     // (a descrição contribui recall/ranking, mas não tem onde realçar na lista).
@@ -1553,9 +1581,13 @@ export function menuEntries(
   // t)`) p/ o menu exibir os summaries no idioma ativo. Default = `NATIVE_COMMANDS`
   // (pt-BR; back-compat com callers/testes que não localizam).
   natives: readonly SlashCommand[] = NATIVE_COMMANDS,
+  // Contexto de modo: com ele, comandos que só valem em certo modo (task/approve/deny no
+  // concierge, back em foco de sub-agente) somem do menu. Ausente ⇒ lista tudo (legado).
+  ctx?: MenuContext,
 ): readonly SlashMenuEntry[] {
   const out: SlashMenuEntry[] = [];
   for (const command of [...natives, ...userCommands]) {
+    if (ctx !== undefined && !availableIn(command, ctx)) continue;
     out.push({ kind: 'command', command });
     for (const sub of command.subcommands ?? []) {
       out.push({ kind: 'subcommand', parent: command, sub });
@@ -1564,34 +1596,77 @@ export function menuEntries(
   return out;
 }
 
+/** Aliases (`view`, `a`, `n`…) que apontam p/ o comando `name`. `a!` é atalho de linha, fora. */
+export function aliasesOf(name: string): readonly string[] {
+  return Object.entries(COMMAND_ALIASES)
+    .filter(([alias, target]) => target === name && !alias.endsWith('!'))
+    .map(([alias]) => alias);
+}
+
 /**
- * Filtra as ENTRADAS do menu (comandos + subcomandos achatados) por prefixo/substring
- * incremental do CAMINHO (`mcp`, `mcp search`). Case-insensitive. O que casa o início
- * do caminho vem antes (prefixo), depois o que casa por substring (recall p/ descoberta);
- * a ordem natural (comando antes dos seus subs) é o desempate. Query vazia ⇒ tudo.
+ * Nota de relevância de uma entrada p/ a query (já normalizada com `fold`). Menor = melhor;
+ * `undefined` = não casa. Ordem: nome/alias exato · prefixo do nome · prefixo do alias ·
+ * substring do nome · palavra-chave (PT-BR) · substring da descrição. Palavra-chave e
+ * descrição só valem com ≥2 caracteres (1 letra casaria meio menu).
+ */
+function entryRank(entry: SlashMenuEntry, q: string): number | undefined {
+  const path = fold(entryPath(entry));
+  if (entry.kind === 'subcommand') {
+    if (path === q) return 0;
+    if (path.startsWith(q)) return 1;
+    if (path.includes(q)) return 3;
+    return q.length >= 2 && fold(entry.sub.summary).includes(q) ? 6 : undefined;
+  }
+  const cmd = entry.command;
+  const aliases = cmd.source === 'native' ? aliasesOf(cmd.name) : [];
+  if (path === q || aliases.includes(q)) return 0;
+  if (path.startsWith(q)) return 1;
+  if (aliases.some((a) => a.startsWith(q))) return 2;
+  if (path.includes(q)) return 3;
+  if (q.length < 2) return undefined;
+  const kws = (cmd.keywords ?? []).map(fold);
+  if (kws.some((k) => k === q)) return 4;
+  if (kws.some((k) => k.startsWith(q) || k.split(' ').some((w) => w.startsWith(q)))) return 5;
+  if (kws.some((k) => k.includes(q))) return 6;
+  if (fold(cmd.summary).includes(q)) return 7;
+  return undefined;
+}
+
+/**
+ * Filtra as ENTRADAS do menu (comandos + subcomandos achatados). Case/acento-insensitive.
+ * Casa o CAMINHO (`mcp`, `mcp search`), os ALIASES (`view`, `a`), as PALAVRAS-CHAVE PT-BR
+ * (`tema`→/theme, `sair`→/quit, `parar`→/task) e a DESCRIÇÃO; ranqueia nome exato, prefixo
+ * do nome, alias, substring, palavra-chave e descrição, nessa ordem (estável: empate fica na
+ * ordem do registro). O caminho normaliza o whitespace (`mcp  search` casa `mcp search`).
  *
- * O caminho normaliza o whitespace interno (`mcp  search` casa `mcp search`), então
- * digitar `/mcp s` (query `mcp s`) filtra exatamente `/mcp search`.
+ * Query vazia: com `ctx`, a lista PADRÃO — sem os raros e sem os subcomandos achatados (os
+ * raros e os subs continuam buscáveis); sem `ctx`, tudo (legado).
  */
 export function filterCommands(
   query: string,
   userCommands: readonly SlashCommand[] = [],
   // EST-0989 (i18n) — natives LOCALIZADOS (idioma ativo) passados pela App; default pt-BR.
   natives: readonly SlashCommand[] = NATIVE_COMMANDS,
+  ctx?: MenuContext,
 ): readonly SlashMenuEntry[] {
-  const q = query.trim().replace(/\s+/g, ' ').toLowerCase();
-  const all = menuEntries(userCommands, natives);
-  if (q === '') return all;
-  const pathOf = (e: SlashMenuEntry): string => entryPath(e).toLowerCase();
-  // Alias exato (`/a`, `/n`) vai PRIMEIRO: Enter no menu aberto escolhe o 1º item, e `/a` tem de
-  // ser `/approve`, não o primeiro comando que começa com "a".
-  const aliased = COMMAND_ALIASES[q.split(' ')[0] ?? ''];
-  const starts = all.filter((e) => pathOf(e).startsWith(q));
-  const contains = all.filter((e) => !pathOf(e).startsWith(q) && pathOf(e).includes(q));
-  const merged = [...starts, ...contains];
-  if (aliased === undefined || q.includes(' ')) return merged;
-  const pri = all.filter((e) => entryPath(e).toLowerCase() === aliased);
-  return [...pri, ...merged.filter((e) => !pri.includes(e))];
+  const q = fold(query.trim().replace(/\s+/g, ' '));
+  const all = menuEntries(userCommands, natives, ctx);
+  if (q === '') {
+    if (ctx === undefined) return all;
+    return all.filter((e) => e.kind === 'command' && e.command.rare !== true);
+  }
+  const ranked: { e: SlashMenuEntry; r: number; i: number }[] = [];
+  all.forEach((e, i) => {
+    const r = entryRank(e, q);
+    if (r !== undefined) ranked.push({ e, r, i });
+  });
+  ranked.sort((a, b) => a.r - b.r || a.i - b.i);
+  const out = ranked.map((x) => x.e);
+  // Atalho de linha (`a!` = aprovar sempre) não é alias pesquisável, mas aponta p/ o comando.
+  const aliased = q.includes(' ') ? undefined : COMMAND_ALIASES[q];
+  if (aliased === undefined) return out;
+  const pri = all.filter((e) => e.kind === 'command' && e.command.name === aliased);
+  return [...pri, ...out.filter((e) => !pri.includes(e))];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

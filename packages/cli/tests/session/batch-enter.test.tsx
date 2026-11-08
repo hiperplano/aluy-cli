@@ -12,7 +12,7 @@
 // linha até a quebra. Cobertura do DoD:
 //   (1) objetivo em lote (`"liste arquivos\r"` num write só) ⇒ controller.submit
 //       recebe `"liste arquivos"` (o `\r` NÃO virou texto);
-//   (2) slash em lote (`"/help\r"`) ⇒ executa o comando (onCommand recebe `help`);
+//   (2) slash em lote (`"/usage\r"`) ⇒ executa o comando (onCommand recebe `usage`);
 //   (3) boot: lote chegando DURANTE o splash ⇒ não perde texto+Enter (submete);
 //   (4) não-regressão: Enter LIMPO ainda submete; shift+enter ainda quebra linha;
 //       digitação char-a-char segue intacta.
@@ -194,7 +194,7 @@ describe('App — input em LOTE (xrdp/SSH/paste): Enter grudado SUBMETE (EST-094
     unmount();
   });
 
-  it('(2) "/help\\r" em LOTE ⇒ EXECUTA o comando (onCommand recebe `help`, não vira texto)', async () => {
+  it('(2) "/usage\\r" em LOTE ⇒ EXECUTA o comando (onCommand recebe `usage`, não vira texto)', async () => {
     const calls: { cmd: SlashCommand; args: string }[] = [];
     const { stdin, lastFrame, unmount } = mountApp({
       onCommand: (cmd, args) => calls.push({ cmd, args }),
@@ -202,12 +202,12 @@ describe('App — input em LOTE (xrdp/SSH/paste): Enter grudado SUBMETE (EST-094
     await waitFor(() => plain(lastFrame() ?? '').length > 0);
 
     await pressUntil(
-      () => stdin.write('/help\r'),
+      () => stdin.write('/usage\r'),
       () => calls.length > 0,
     );
 
     expect(calls.length).toBeGreaterThan(0);
-    expect(calls[0]?.cmd.name).toBe('help');
+    expect(calls[0]?.cmd.name).toBe('usage');
     unmount();
   });
 

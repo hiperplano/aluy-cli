@@ -130,3 +130,30 @@ cached_tokens, cache_write_tokens, completion_tokens, reasoning_tokens}` quando 
 - **Planejamento**: a orientação de custo da tarefa agora também diz para NÃO montar plano
   (`update_plan`) nem lista de afazeres em trabalho pequeno e para rodar o teste uma vez; as tools
   `add_todo`/`done_todo`/`list_todos` saíram das sessões de tarefa.
+
+## Sexta rodada (composer estável, frases de espera, ┃ órfãs)
+
+- **Linhas `┃` órfãs após a resposta** (1 por tarefa iniciada): o modelo emite `\n` soltos antes/entre as
+  tool-calls; o texto do bloco `Λluy` assentava com essas quebras no fim. Agora o texto assentado é aparado
+  (`finishAluyTurn`). Regressão: `concierge-app.test.tsx` (3 tarefas, `\n\n\n` no fim).
+- **Resumo do painel**: `2 tarefas · 2 encerradas` com 3 encerradas — a lista mostra no máx. 2 encerradas e o
+  resumo contava só as listadas; agora soma as ocultas (`hiddenEnded`).
+- **Relato único**: `reportSettleMs` (1500 ms em produção) agrupa tarefas que terminam juntas num só turno
+  automático; cada término reinicia a espera (teto 4×).
+- **Frase de espera** (`session/frases-espera.ts`, lista em `working.quips`, 56 frases): gira a cada 1 min na
+  linha de trabalho; existe também com tarefa em segundo plano (conversa ociosa) e na pausa por cota. Sem
+  rotação com `ALUY_NO_ANIM`; `ALUY_SPINNER_VERBS=plain` volta aos rótulos planos.
+- **Composer**: o respiro de 1 linha acima da linha de trabalho já era constante (o `paddingBottom` do bloco do
+  aluy com a prévia viva, o `paddingTop` da linha sem ela) — somar os dois dava 2 em branco; mantido o original.
+  Rodapé de agentes (clássico): as linhas do bloco são reservadas no MESMO quadro da tool-line `processando N
+agentes`. Dicas do rodapé, linhas das tarefas e dos
+  agentes cortam em vez de quebrar (antes quebravam em 60 colunas e o composer pulava).
+- **Limites conhecidos**: o 1º crescimento do rodapé (bloco de agentes) chega ~50 ms depois da tool-line
+  `processando N agentes` — um sobe/desce de 1 linha por instante, uma vez por lote; o menu `/` aberto sobre
+  rodapé alto continua empurrando a tela (o composer sobe ao fechar, já documentado acima).
+
+- **Medido ao vivo (tela não cheia, concierge)**: (1) `você` + pensando tinha 2 linhas em branco (o contêiner da
+  região viva e a linha de trabalho pagavam o respiro cada um) — agora um só dono paga; (2) ao fim da fala com
+  tarefa de fundo a linha passava do turno para a tarefa sem a linha em branco de baixo (composer −1): a região
+  viva não é mais "vazia" enquanto há tarefa de fundo; (3) tarefa aguardando aprovação continua "processando"
+  (`aguardando aprovação · Ns`), então a caixa de aprovação não faz a linha sumir e o composer subir 2.

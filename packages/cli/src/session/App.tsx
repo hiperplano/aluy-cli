@@ -41,6 +41,7 @@ import {
   EffortPicker,
   ThemePicker,
   LangPicker,
+  MenuPicker,
   ProviderPicker,
   SecretPrompt,
   HistoryPicker,
@@ -89,6 +90,10 @@ import {
 } from '../ui/hooks/usePermissionsPanel.js';
 import { useThemePicker } from '../ui/hooks/useThemePicker.js';
 import { useLangPicker } from '../ui/hooks/useLangPicker.js';
+import { useMenuPicker, type MenuPick } from '../ui/hooks/useMenuPicker.js';
+import { buildHelpLines } from '../slash/handlers.js';
+import { availableIn } from '../slash/command-meta.js';
+import { menuStepFor, type MenuCtx, type MenuDataPort } from '../slash/menu-pickers.js';
 import {
   useProviderPicker,
   ADD_CUSTOM_PROVIDER_SENTINEL,
@@ -109,7 +114,7 @@ import type {
   EffortChoice,
   LocalProviderEntry,
 } from '@hiperplano/aluy-cli-core';
-import { formatQuota, canRememberTool } from '@hiperplano/aluy-cli-core';
+import { formatQuota, canRememberTool, redactOutputSecrets } from '@hiperplano/aluy-cli-core';
 import { DEFAULT_TIER } from './wiring.js';
 import { tierDisplayName } from '../model/catalog.js';
 import type { SessionController } from './controller.js';
@@ -145,7 +150,7 @@ import {
 import { buildActivityLog, countActivityLines } from './activity-log.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
 import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
-import { linhasDoRodapeAgentes } from './footer-agents-layout.js';
+import { linhasDoRodapeAgentes, rodapeAgentesOverhead } from './footer-agents-layout.js';
 import { buildTranscript } from './export-transcript.js';
 import { clip, statusPt } from '@hiperplano/aluy-cli-core';
 import { truncateToWidth } from '../ui/markdown/table-layout.js';
@@ -184,7 +189,21 @@ import { isUnrecognizedEscapeTail } from './escape-leak.js';
 // F197 — sugestão de próximo prompt (ghost + Tab): blocos+i18n → texto do composer.
 import { resolveSuggestionText } from './suggest.js';
 import { buildTurnRecap } from './turn-recap.js';
-import { ROTULOS_GENERICOS, detalheDeEspera, rotuloExibido } from './verbos.js';
+import {
+  ROTULOS_GENERICOS,
+  detalheDeEspera,
+  formatSegundos,
+  rotuloExibido,
+  seedPadrao,
+  verbosSimples,
+} from './verbos.js';
+import {
+  ajustarLinhaTrabalho,
+  fraseDaEspera,
+  larguraReservadaDaFrase,
+  parseFrases,
+} from './frases-espera.js';
+import { resolveText } from '../i18n/translate.js';
 import { homedir } from 'node:os';
 import { buildSidecarChip } from '@hiperplano/aluy-cli-core';
 import {
@@ -647,6 +666,13 @@ export interface AppProps {
   readonly onExportTranscript?: (
     path?: string,
   ) => Promise<{ ok: boolean; path?: string; error?: string }>;
+  /** Modo de `/notify` em vigor (marca o valor atual no seletor). Ausente ⇒ sem marca. */
+  readonly currentNotify?: () => 'all' | 'attention' | 'off';
+  /**
+   * Leitores das listas dos seletores de comando (memória, agendamentos, plugins…). Cada um
+   * ausente ⇒ aquele comando, sem argumento, segue como antes (nota/lista em texto).
+   */
+  readonly menuData?: MenuDataPort;
 }
 
 /** Stub no-op do picker quando o índice/leitor não foi injetado (teste antigo). */
@@ -695,6 +721,13 @@ function safeDim(value: number | undefined, fallback: number): number {
 
 /** F21 — janela (ms) p/ a sugestão do modelo chegar antes de entrar a heurística. */
 const SUGGEST_MODEL_WINDOW_MS = 2500;
+
+/**
+ * Teto de linhas do `<SlashMenu>` inline. Era 8 (4 comandos úteis de 99); agora o menu usa o
+ * que a região viva deixa (`slashMenuRowCap`, ciente de altura) até este limite — o teto real
+ * continua sendo o orçamento, então telas baixas seguem janelando (↑N/↓N) sem estourar `rows`.
+ */
+export const SLASH_MENU_MAX_ROWS = 18;
 
 export function App(props: AppProps): React.ReactElement {
   const { controller } = props;
@@ -1262,10 +1295,12 @@ export function App(props: AppProps): React.ReactElement {
     conciergeOn && conciergeRt !== undefined
       ? buildPanelRows({
           tasks: conciergeRt.visibleTasks(),
+          hiddenEnded: conciergeRt.hiddenEndedCount(),
           approvals: conciergeRt.pendingApprovals(),
           childrenOf: (id) => conciergeRt.taskChildren(id),
           // O objetivo ganha a largura que a linha comporta (o resto da linha ocupa ~90 colunas).
-          viewOf: (t) => conciergeRt.taskView(t, Math.max(18, Math.min(60, columns - 110))),
+          // O objetivo vai quase inteiro; quem corta é a linha, em texto plano (`ajustarLinhaDoFilho`).
+          viewOf: (t) => conciergeRt.taskView(t, 60),
           maxRows: linhasDoRodapeAgentes(rows),
           statusline: statuslineMode,
           columns,
@@ -1392,6 +1427,8 @@ export function App(props: AppProps): React.ReactElement {
   // idioma ativo vem do contexto i18n (injetado pelo ThemeRoot). Espelha o /theme.
   const currentLang: Lang = props.currentLang ?? activeLang;
   const langPicker = useLangPicker({ currentLang });
+  // Seletor genérico dos comandos sem argumento (`/notify`, `/task`, `/memory`…).
+  const menuPicker = useMenuPicker();
 
   // EST-0962 (/provider) — seletor `/provider`: lista os providers CADASTRADOS no broker
   // (`GET /v1/providers`, ADR-0076), marca o ativo. O provider ATIVO é REATIVO: deriva de
@@ -1475,13 +1512,22 @@ export function App(props: AppProps): React.ReactElement {
     [rewindPicker.target, rewindSource],
   );
 
+  const paletteNatives = useMemo(
+    () =>
+      localizedNatives.filter((c) =>
+        availableIn(c, { concierge: conciergeOn, subagentFocused: state.meta.focus !== undefined }),
+      ),
+    [localizedNatives, conciergeOn, state.meta.focus],
+  );
   // EST-0961 — command palette (Ctrl+P): índice fuzzy de TODOS os comandos/ações.
   // Lê a FONTE ÚNICA (mesmos comandos do slash-menu, via filterPalette) + as ações
   // puras. Modal: captura o foco quando aberta (gated contra os outros overlays).
   const palette = useCommandPalette({
     ...(props.userCommands !== undefined ? { userCommands: props.userCommands } : {}),
-    // EST-0989 (i18n) — a palette mostra os summaries dos nativos no idioma ativo.
-    natives: localizedNatives,
+    // EST-0989 (i18n) — a palette mostra os summaries dos nativos no idioma ativo. Comandos de
+    // outro modo (task/approve/deny fora do concierge, /ask nele, /back sem foco) não entram:
+    // a palette é "busca por tudo", não "busca por tudo que não funciona aqui".
+    natives: paletteNatives,
   });
 
   // ── EST-0965 (FLICKER, causa-raiz medida no PTY) — DOIS ticks, não um ───────────
@@ -1536,17 +1582,71 @@ export function App(props: AppProps): React.ReactElement {
 
   // VERBOS DE ESPERA — o rótulo genérico (`pensando`…) vira um gerúndio sorteado 1× por PASSO
   // (a identidade do passo é o `workingSince`). Rótulos funcionais ficam como estão.
-  const rotuloVivo = rotuloExibido({ label: state.workingLabel, verbo: state.workingVerb });
-  const indicadorTrabalho = workingIndicator({
+  // FRASES DE ESPERA — a linha de trabalho gira uma frase brincalhona a cada minuto enquanto algo
+  // processa (turno, tool, tarefa do Concierge em segundo plano, pausa por cota sondando).
+  const frasesDaEspera = useMemo(() => parseFrases(resolveText('pt-BR', 'working.quips')), []);
+  const seedDasFrases = useMemo(() => seedPadrao(), []);
+  const frasesLigadas = !verbosSimples() && frasesDaEspera.length > 0;
+  const agoraMsDaLinha = (props.now ?? Date.now)();
+  // Tarefas do Concierge rodando (a conversa pode estar OCIOSA): a linha tem de existir mesmo assim.
+  const tarefasVivas = conciergeOn ? (conciergeRt?.registry.live() ?? []) : [];
+  const tarefasRodando = tarefasVivas.filter((t) => t.status === 'running');
+  // Tarefa esperando APROVAÇÃO continua "processando" aos olhos do dono: a linha de trabalho
+  // fica (com `aguardando aprovação`) — se sumisse, a caixa de aprovação subia o composer 2 linhas.
+  const tarefasAguardando = tarefasVivas.filter((t) => t.status === 'waiting_approval');
+  const tarefasNoPlano = [...tarefasRodando, ...tarefasAguardando];
+  const tarefaRodando = conciergeTaskAnimates(conciergeOn, tarefasVivas);
+  const turnoOcupado = mostraIndicadorTrabalho(state.phase, haFilhoVivo);
+  // Relato automático a caminho (janela de agrupamento / dono ocupado / resumo sendo preparado):
+  // a linha de trabalho fica até o resumo começar a sair — senão o composer sobe 1 e desce de novo.
+  const relatoACaminho = conciergeOn && conciergeRt?.reportPending() === true;
+  const relatoDesdeRef = useRef<number | undefined>(undefined);
+  if (relatoACaminho) relatoDesdeRef.current ??= agoraMsDaLinha;
+  else relatoDesdeRef.current = undefined;
+  const soTarefas =
+    !turnoOcupado &&
+    (tarefasNoPlano.length > 0 || relatoACaminho) &&
+    state.quotaPause === undefined;
+  const emPausa = state.quotaPause !== undefined;
+  // A linha existe: durante o turno OU com tarefa em segundo plano OU na pausa por cota.
+  const linhaDeTrabalhoViva = turnoOcupado || soTarefas || emPausa;
+  const inicioDaEspera = emPausa
+    ? state.quotaPause!.startedAt
+    : turnoOcupado
+      ? (state.workingSince ?? agoraMsDaLinha)
+      : tarefasNoPlano.length > 0
+        ? Math.min(...tarefasNoPlano.map((t) => t.startedAt), agoraMsDaLinha)
+        : (relatoDesdeRef.current ?? agoraMsDaLinha);
+  const fraseViva =
+    frasesLigadas && linhaDeTrabalhoViva
+      ? fraseDaEspera({
+          frases: frasesDaEspera,
+          agoraMs: agoraMsDaLinha,
+          desde: inicioDaEspera,
+          seed: seedDasFrases,
+          girar: theme.animate,
+        })
+      : undefined;
+  // O rótulo funcional (tentando de novo…) segue como está; só o genérico vira frase.
+  const rotuloVivo =
+    rotuloExibido({
+      label: state.workingLabel,
+      verbo: fraseViva ?? state.workingVerb,
+    }) ?? fraseViva;
+  const indicadorBruto = workingIndicator({
     count: state.detachedSubagents ?? 0,
     phase: state.phase,
     ...(rotuloVivo !== undefined ? { workingLabel: rotuloVivo } : {}),
   });
-  // PARÊNTESE DIM (estilo Claude Code): `(pensando · 1,2k tokens · 12s)` — a fase REAL, os
-  // tokens do turno até agora e os segundos desde o INÍCIO DO TURNO (a mesma fonte do relógio
-  // do rodapé: a contabilidade viva da raiz). Lido a cada render; o tick de 1s o atualiza.
-  // Tokens = GERADOS (saída) pelo pai no turno: `tokens_out` reportado + estimativa do que
-  // a chamada em voo streamou (`↓ 1,2k tokens`); 0 ⇒ o segmento some. Rótulo funcional já é a fase ⇒ sem palavra.
+  // Sem turno (só tarefa/pausa) o rótulo é a própria frase.
+  const indicadorTrabalho =
+    !turnoOcupado && fraseViva !== undefined ? { label: fraseViva } : indicadorBruto;
+  // A largura que o detalhe pode usar é medida contra a MAIOR frase (não a da vez): o detalhe
+  // não ganha/perde segmentos a cada troca de frase.
+  const larguraDoRotulo =
+    frasesLigadas && fraseViva !== undefined
+      ? Math.max(indicadorTrabalho.label.length, larguraReservadaDaFrase(frasesDaEspera, columns))
+      : indicadorTrabalho.label.length;
   const contaViva =
     state.phase === 'thinking' || state.phase === 'retrying' || state.phase === 'streaming'
       ? controller.turnAccounting()
@@ -1554,9 +1654,16 @@ export function App(props: AppProps): React.ReactElement {
   const msDoTurno =
     contaViva?.live === true
       ? contaViva.durationMs
-      : state.workingSince !== undefined
+      : state.workingSince !== undefined && turnoOcupado
         ? Math.max(0, (props.now ?? Date.now)() - state.workingSince)
         : undefined;
+  const larguraDoDetalhe =
+    columns -
+    (5 +
+      larguraDoRotulo +
+      2 +
+      (indicadorTrabalho.suffix !== undefined ? indicadorTrabalho.suffix.length + 1 : 0) +
+      2);
   const detalheEspera =
     msDoTurno !== undefined
       ? detalheDeEspera({
@@ -1570,19 +1677,28 @@ export function App(props: AppProps): React.ReactElement {
           tokens: contaViva !== undefined ? controller.turnOutputTokens() : undefined,
           entrada: contaViva !== undefined ? controller.turnInputTokens() : undefined,
           ms: msDoTurno,
-          // "Λluy " + rótulo + "… " + " " + sufixo dos sub-agentes: o que sobra da linha.
-          larguraMax:
-            columns -
-            (5 +
-              indicadorTrabalho.label.length +
-              2 +
-              (indicadorTrabalho.suffix !== undefined ? indicadorTrabalho.suffix.length + 1 : 0) +
-              2),
+          larguraMax: larguraDoDetalhe,
         })
-      : undefined;
+      : soTarefas || emPausa
+        ? `(${
+            soTarefas
+              ? tarefasNoPlano.length === 0
+                ? 'preparando o relato · '
+                : tarefasRodando.length === 0
+                  ? 'aguardando aprovação · '
+                  : `${String(tarefasNoPlano.length)} em segundo plano · `
+              : 'cota · '
+          }${formatSegundos(agoraMsDaLinha - inicioDaEspera)})`
+        : undefined;
+  // UMA linha, sempre: nunca quebra (quebrar faz o composer pular).
+  const linhaAjustada = ajustarLinhaTrabalho({
+    columns,
+    label: indicadorTrabalho.label,
+    detalhe: detalheEspera,
+    suffix: indicadorTrabalho.suffix,
+  });
   // ADR 0006 — tarefa do Concierge rodando com o controller da TUI em repouso: sem este pulso a
   // tela ficava parada (brilho e tempo da linha da tarefa não andavam).
-  const tarefaRodando = conciergeTaskAnimates(conciergeOn, conciergeRt?.registry.live() ?? []);
   const phaseAnimates =
     (animTickEnabled(state.phase, syncActive, { subagentsAlive: haFilhoVivo || tarefaRodando }) &&
       state.quotaPause === undefined) ||
@@ -1597,7 +1713,8 @@ export function App(props: AppProps): React.ReactElement {
   // flicker (no máximo 1 redraw/seg + o flush do texto). `thinking`/`streaming`/
   // `retrying` são as fases ocupadas; idle/ask/budget/done/error não armam timer.
   const busy = elapsedTickEnabled(state.phase);
-  useTick({ enabled: busy, intervalMs: 1000 });
+  // Relógio + rotação das frases também com tarefa em segundo plano / pausa por cota.
+  useTick({ enabled: busy || soTarefas || emPausa, intervalMs: 1000 });
 
   useEffect(() => {
     const unsubscribe = controller.subscribe(setState);
@@ -1771,7 +1888,21 @@ export function App(props: AppProps): React.ReactElement {
   const userCommands = props.userCommands ?? [];
   const slashQuery = input.startsWith('/') ? input.slice(1) : '';
   // EST-0989 (i18n) — o slash-menu lista os nativos LOCALIZADOS (summaries no idioma ativo).
-  const slashCommands = filterCommands(slashQuery, userCommands, localizedNatives);
+  // Revisão de menus: contexto de modo (task/approve/deny só no concierge; back só em foco de
+  // sub-agente) + lista padrão sem raros. Os raros seguem buscáveis e executáveis digitados.
+  const menuCtx = {
+    concierge: conciergeOn,
+    subagentFocused: state.meta.focus !== undefined,
+  };
+  const slashCommands = filterCommands(slashQuery, userCommands, localizedNatives, menuCtx);
+  // A dica "ctrl+p" só vale onde o atalho funciona: fora de turno ativo (no trabalho o ramo de
+  // teclas do menu é outro e a paleta não recebe as teclas).
+  const slashPaletteHint = !(
+    state.phase === 'thinking' ||
+    state.phase === 'streaming' ||
+    state.phase === 'retrying' ||
+    (conciergeOn && state.phase === 'asking')
+  );
 
   /**
    * EST-0948 (composer/sessão) — escreve o composer e o cursor de forma COERENTE: ao
@@ -1818,12 +1949,21 @@ export function App(props: AppProps): React.ReactElement {
         const ctl = new AbortController();
         suggestAbortRef.current = ctl;
         const ultimoObjetivo = [...state.blocks].reverse().find((b) => b.kind === 'you')?.text;
+        // A fala mais recente do agente (inclui o relato automático do Concierge): sem ela a
+        // sugestão ficava presa ao pedido original ("executa a tarefa" com a tarefa já feita).
+        const ultimaFala = redactOutputSecrets(
+          [...state.blocks].reverse().find((b) => b.kind === 'aluy')?.text ?? '',
+        )
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 400);
         void controller
           .suggestNext(
             {
               lang: activeLang,
               ...(turnRecap !== undefined ? { recap: turnRecap } : {}),
               ...(ultimoObjetivo !== undefined ? { lastGoal: ultimoObjetivo.slice(0, 200) } : {}),
+              ...(ultimaFala !== '' ? { lastReply: ultimaFala } : {}),
             },
             ctl.signal,
           )
@@ -2369,7 +2509,66 @@ export function App(props: AppProps): React.ReactElement {
   );
 
   const runCommand = useCallback(
-    (command: SlashCommand, args: string) => {
+    (command: SlashCommand, args: string, skipMenu = false) => {
+      // Revisão de menus (§6.2): o comando SEM argumento abre um seletor (com o valor atual
+      // marcado) quando há um para ele. Com argumento digitado nada muda — script e usuário
+      // avançado seguem como hoje. `skipMenu` é o próprio seletor rodando o comando.
+      if (!skipMenu && args.trim() === '' && command.source === 'native' && command.id) {
+        const ctx: MenuCtx = {
+          conversation: convMode,
+          conciergeAvailable: props.concierge !== undefined,
+          ...(props.currentNotify !== undefined ? { notify: props.currentNotify() } : {}),
+          statusline: statuslineModeRef.current,
+          suggestionsOn,
+          splitOn: splitView,
+          ...(conciergeOn && props.concierge !== undefined
+            ? {
+                tasks: props.concierge.tasks().map((t) => ({
+                  id: t.id,
+                  goal: t.goal,
+                  statusLabel: statusPt(t.status),
+                  live: t.endedAt === undefined,
+                })),
+                pending: props.concierge
+                  .pendingApprovals()
+                  .map((p) => ({ taskId: p.taskId, summary: p.summary })),
+              }
+            : {}),
+          cycleActive: state.cycleActive === true,
+          data: {
+            ...props.menuData,
+            ...(props.secrets !== undefined
+              ? {
+                  secrets: async () =>
+                    props.secrets!.list().map((x) => ({
+                      id: x.name,
+                      label: x.name,
+                      hint: x.saved ? 'salvo' : 'só nesta sessão',
+                    })),
+                }
+              : {}),
+          },
+        };
+        const step = menuStepFor(command.id, ctx);
+        if (step !== null) {
+          menuPicker.openFor(command, step);
+          return;
+        }
+      }
+      // `/help`: seções do menu, só os comandos do modo atual e os atalhos que valem NELE.
+      // `/help all` (ou `tudo`) inclui os raros. Roteado aqui porque só a App sabe o modo.
+      if (command.id === 'help') {
+        const want = args.trim().toLowerCase();
+        controller.replaceNote(
+          'comandos',
+          buildHelpLines({
+            concierge: conciergeOn,
+            subagentFocused: state.meta.focus !== undefined,
+            all: want === 'all' || want === 'tudo',
+          }),
+        );
+        return;
+      }
       // ADR 0005 — `/secret`: campo mascarado, roteado aqui (nunca vai ao `onCommand`).
       if (command.id === 'secret') {
         runSecretCommand(args);
@@ -2389,6 +2588,9 @@ export function App(props: AppProps): React.ReactElement {
       // (mesmo efeito do Ctrl+L). É UI pura — não toca o turno/contexto; não vai ao
       // onCommand (sem nota redundante do wiring).
       if (command.id === 'split') {
+        // `on`/`off` (o seletor usa) são idempotentes; sem arg continua alternando.
+        const want = args.trim().toLowerCase();
+        if ((want === 'on' && splitView) || (want === 'off' && !splitView)) return;
         toggleSplit();
         return;
       }
@@ -2625,6 +2827,11 @@ export function App(props: AppProps): React.ReactElement {
       // fechar sobre um valor velho (defensivo — este projeto não força exhaustive-deps).
       suggestionsOn,
       runSecretCommand,
+      menuPicker,
+      convMode,
+      conciergeOn,
+      splitView,
+      state.cycleActive,
     ],
   );
 
@@ -3078,6 +3285,7 @@ export function App(props: AppProps): React.ReactElement {
         mcpPicker.open ||
         themePicker.open ||
         langPicker.open ||
+        menuPicker.open ||
         historyPicker.open ||
         rewindPicker.open
       ) {
@@ -3112,6 +3320,7 @@ export function App(props: AppProps): React.ReactElement {
       permPanel,
       themePicker,
       langPicker,
+      menuPicker,
       historyPicker,
       rewindPicker,
       providerPicker,
@@ -3179,6 +3388,7 @@ export function App(props: AppProps): React.ReactElement {
     mcpPicker.open ||
     themePicker.open ||
     langPicker.open ||
+    menuPicker.open ||
     providerPicker.open ||
     historyPicker.open ||
     rewindPicker.open ||
@@ -3240,6 +3450,19 @@ export function App(props: AppProps): React.ReactElement {
     if (drained > 0) setQueue((q) => q.slice(drained));
     // `injectIfPlainText` é memoizado; `atRest`/`queue`/`phase` são os gatilhos reais.
   }, [atRest, queue, state.phase, injectIfPlainText]);
+
+  /** Aplica a escolha do seletor: o MESMO `runCommand` que digitar o comando faria. */
+  const runMenuPick = (pick: MenuPick): void => {
+    if (pick.kind === 'run') {
+      for (const a of pick.args) runCommand(pick.command, a, true);
+      return;
+    }
+    if (pick.kind === 'prefill') {
+      setText(pick.text);
+      setSlashOpen(false);
+      setSlashSel(0);
+    }
+  };
 
   useInput((char, key) => {
     // F5 — FONTE FRESCA: o closure do `useInput` pode estar VELHO quando várias teclas chegam
@@ -3361,6 +3584,34 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
+    // ── seletor genérico dos comandos CAPTURA o foco ───────────────────────────────
+    // Antes dos ramos de trabalho/idle: comandos paralelo-seguros (`/task`, `/cycle`…) abrem
+    // o seletor com a sessão ocupada, e as setas/Enter não podem ir ao type-ahead.
+    if (menuPicker.open) {
+      if (key.ctrl && char === 'c') {
+        menuPicker.close();
+        return;
+      }
+      if (key.upArrow) {
+        menuPicker.move(-1);
+        return;
+      }
+      if (key.downArrow) {
+        menuPicker.move(1);
+        return;
+      }
+      if (key.return || key.tab) {
+        const pick = menuPicker.confirm();
+        if (pick !== null) runMenuPick(pick);
+        return;
+      }
+      if (key.escape) {
+        menuPicker.back();
+        return;
+      }
+      return; // modal: o resto é ignorado
+    }
+
     // F-BG (21/09/2026) — Ctrl+B: SOLTA a tool de shell em execução para segundo plano.
     //
     // O par do ESC/F8, e o oposto deles: aqueles MATAM, este SOLTA. Nasceu do relato do
@@ -3403,6 +3654,18 @@ export function App(props: AppProps): React.ReactElement {
     // composer VAZIO (↓ e as letras são do texto quando há rascunho) e sem menu/picker aberto.
     if (conciergeOn && conciergeRt !== undefined && !slashOpen && !palette.open && !anyPickerOpen) {
       const vis = conciergeRt.visibleTasks();
+      // Ctrl+T (anunciado na dica de tarefas): abre/fecha o painel de tarefas. Sem isso a tecla
+      // do `/help` e do rodapé só existia no modo clássico (lá abre o painel de fluxos).
+      if (key.ctrl && char === 't' && taskDetail === null && vis.length > 0) {
+        if (taskExpanded) {
+          setTaskExpanded(false);
+          setTaskStopArm(null);
+        } else {
+          setTaskExpanded(true);
+          setTaskSel(Math.max(0, vis.length - 1));
+        }
+        return;
+      }
       if (taskDetail !== null) {
         if (key.escape) {
           setTaskDetail(null);
@@ -4834,6 +5097,18 @@ export function App(props: AppProps): React.ReactElement {
 
     // ── slash-menu navegação ───────────────────────────────────────────────────
     if (slashOpen) {
+      // Ctrl+P (anunciado na dica do menu): troca o menu pela paleta com a MESMA busca digitada
+      // — `/tema` + ctrl+p abre a paleta já filtrada por "tema". Sem isso o atalho só valia com o
+      // menu FECHADO (a guarda `!slashOpen` lá embaixo) e a dica mentiria.
+      if (key.ctrl && char === 'p') {
+        const q = slashQuery;
+        setSlashOpen(false);
+        setSlashSel(0);
+        setText('');
+        palette.openPalette();
+        if (q !== '') palette.setQuery(q);
+        return;
+      }
       if (key.upArrow) {
         setSlashSel((s) => Math.max(0, s - 1));
         return;
@@ -5329,6 +5604,7 @@ export function App(props: AppProps): React.ReactElement {
     palette.open,
     subAgentsRunning(rawState.blocks),
     conciergeOn,
+    conciergeOn && conciergeRt?.hasLiveTasks() === true,
   );
 
   // EST-0965 — INDICADOR DE ATIVIDADE (elapsed). Enquanto OCUPADO, o relógio do turno
@@ -5362,6 +5638,16 @@ export function App(props: AppProps): React.ReactElement {
   // participa do render dinâmico. Isso mata o tremor: sem isto, o Ink redesenhava a
   // árvore inteira (incl. todo o histórico) a cada token E a cada frame.
   const { done, live, liveStart } = splitBlocks(state.blocks);
+  // RODAPÉ RESERVADO — a tool-line `processando N agentes` entra no quadro ANTES de o lote existir
+  // (e do bloco de agentes do rodapé, 1+N linhas). Sem reserva a região viva crescia em dois
+  // tempos (tool-line +1 acima do composer, depois o bloco +N+1 abaixo) e o composer fazia
+  // desce/sobe. Reservamos as linhas do bloco no MESMO quadro da tool-line.
+  const spawnEmVoo = live.reduce((n, b) => {
+    if (b.kind !== 'tool' || b.status !== 'running') return n;
+    const m = /^(\d+) agentes?\b/.exec(b.target);
+    return m ? Math.max(n, Number(m[1])) : n;
+  }, 0);
+  const agentesNoRodapeOrcados = Math.max(filhosRodape.length, spawnEmVoo);
 
   // EST-0965 (anti-flicker) — TETO DINÂMICO da prévia de FALA. A região viva precisa
   // caber INTEIRA em `rows-1`, senão o Ink redesenha tudo (header+histórico+viva) a
@@ -5390,7 +5676,10 @@ export function App(props: AppProps): React.ReactElement {
   // desconto do teto da fala (anti-flicker).
   const taskDetailRoom = taskDetailRoomFor(rows, taskPanelRows);
   const conciergeTasksShown = taskPanelRows + (taskDetail !== null ? taskDetailRoom + 3 : 0);
-  const stagedLines = queueLines + pendingInjectLines + pendingAskLines + conciergeTasksShown;
+  // A linha de trabalho sem turno (tarefa em segundo plano / pausa por cota) custa respiro + linha.
+  const linhaSemTurno = soTarefas || emPausa ? 2 : 0;
+  const stagedLines =
+    queueLines + pendingInjectLines + pendingAskLines + conciergeTasksShown + linhaSemTurno;
   // EST-1015 (anti-flicker) — o <SlashMenu> mora ABAIXO do composer e PODE coexistir com o stream
   // (EST-0982). Sua altura (lista filtrada + cabeçalhos + ajuda + o `paddingTop={1}` do contêiner)
   // CONSOME altura do frame: desconta do teto da fala p/ `chrome + fala + menu` caber em `rows`
@@ -5411,7 +5700,7 @@ export function App(props: AppProps): React.ReactElement {
     ...(state.detachedSubagents !== undefined
       ? { detachedSubagents: state.detachedSubagents }
       : {}),
-    agentesNoRodape: filhosRodape.length,
+    agentesNoRodape: agentesNoRodapeOrcados,
     rows,
     live,
     phase: state.phase,
@@ -5431,7 +5720,7 @@ export function App(props: AppProps): React.ReactElement {
     ...(state.detachedSubagents !== undefined
       ? { detachedSubagents: state.detachedSubagents }
       : {}),
-    agentesNoRodape: filhosRodape.length,
+    agentesNoRodape: agentesNoRodapeOrcados,
     rows,
     live,
     phase: state.phase,
@@ -5473,7 +5762,7 @@ export function App(props: AppProps): React.ReactElement {
       ...(state.detachedSubagents !== undefined
         ? { detachedSubagents: state.detachedSubagents }
         : {}),
-      agentesNoRodape: filhosRodape.length,
+      agentesNoRodape: agentesNoRodapeOrcados,
       rows,
       live,
       phase: state.phase,
@@ -5618,6 +5907,7 @@ export function App(props: AppProps): React.ReactElement {
     mcpPicker.open ||
     themePicker.open ||
     langPicker.open ||
+    menuPicker.open ||
     providerPicker.open ||
     historyPicker.open ||
     rewindPicker.open ||
@@ -5743,8 +6033,9 @@ export function App(props: AppProps): React.ReactElement {
               commands={slashCommands}
               selected={slashSel}
               query={slashQuery}
-              maxRows={Math.min(8, slashMenuRowCap)}
+              maxRows={Math.min(SLASH_MENU_MAX_ROWS, slashMenuRowCap)}
               columns={columns}
+              paletteHint={slashPaletteHint}
             />
           </Box>
         )}
@@ -5841,6 +6132,16 @@ export function App(props: AppProps): React.ReactElement {
               langs={langPicker.langs}
               selected={langPicker.selected}
               currentLang={currentLang}
+            />
+          </Box>
+        )}
+        {menuPicker.open && menuPicker.step !== null && (
+          <Box flexDirection="column" {...box}>
+            <MenuPicker
+              step={menuPicker.step}
+              selected={menuPicker.selected}
+              nested={menuPicker.depth > 1}
+              maxRows={Math.max(4, Math.min(14, slashMenuRowCap - 2))}
             />
           </Box>
         )}
@@ -5975,8 +6276,9 @@ export function App(props: AppProps): React.ReactElement {
   // (single/side/tabs) — o conteúdo é IDÊNTICO; só o CONTÊINER muda (1 col vs row vs
   // aba). O `maxLines` é o `splitMaxLines` (= `liveMaxLines` em single; orçado p/ as 2
   // colunas em side/tabs), mantendo a região viva em `rows-1` (anti-flicker).
-  // F3 — com a prévia de fala viva a linha de trabalho assume o lugar do cursor `●` (sem respiro
-  // extra acima); sem ela (tool-line, pensando) mantém o respiro de sempre.
+  // A linha de trabalho tem SEMPRE 1 linha em branco acima: com a prévia de fala viva ela vem do
+  // `paddingBottom` do bloco do aluy (por isso aqui o padding é 0); sem a prévia (tool-line,
+  // pensando) vem do `paddingTop` da própria linha. Somar os dois dava 2 em branco.
   const previaDeFalaViva =
     state.phase === 'streaming' && live.some((b) => b.kind === 'aluy' && b.streaming);
   const telaBaixa =
@@ -5986,12 +6288,29 @@ export function App(props: AppProps): React.ReactElement {
     (state.phase === 'idle' || state.phase === 'done') &&
     live.length === 0 &&
     !haFilhoVivo &&
+    // A linha de trabalho de fundo (tarefa rodando / aguardando aprovação) mantém o MESMO respiro
+    // de baixo do turno: sem isso, ao fim da fala o composer subia 1 linha na passagem.
+    !soTarefas &&
     state.quotaPause === undefined;
   // REPOUSO (nada vivo): a resposta que acabou de assentar JÁ fecha com 1 linha em branco
   // (`paddingBottom` do bloco). O contêiner vivo somava mais 2 (topo + base) ⇒ 3 em branco
   // entre a resposta e o composer. Sem região viva ele não paga respiro nenhum: o gap é 1.
   const ultimoFechaEmBranco =
     done.length === 0 || blockEndsWithBlankLine(previousVisibleKind(done, done.length) ?? 'note');
+  // RESPIRO ACIMA DA LINHA DE TRABALHO — exatamente 1 linha em branco entre o que vem antes e ela,
+  // paga por UM só dono: com blocos vivos acima, pela linha (sem prévia) ou pelo bloco da prévia; sem
+  // blocos vivos (pensando logo após o `você`), pelo fim do histórico ou pelo contêiner da região
+  // viva (`paddingTop` abaixo) — a linha só paga se nenhum dos dois pagou (tela baixa).
+  const respiroDaLinhaDeTrabalho: 0 | 1 =
+    state.blocks.length === 0
+      ? 0
+      : live.length > 0
+        ? previaDeFalaViva
+          ? 0
+          : 1
+        : telaBaixa && !ultimoFechaEmBranco
+          ? 1
+          : 0;
   const liveChatColumn = (
     <>
       {/* F-SEM-SAUDACAO (decisão do dono: "eu não pedi essas msgs") — a tela de sessão
@@ -6045,16 +6364,14 @@ export function App(props: AppProps): React.ReactElement {
             inteiro: "depois que ele me responde ele para de mostrar o processando" — com
             os agentes ainda trabalhando. Redundante era mostrar os DOIS juntos, não
             mostrar este quando o outro não existe. */}
-      {mostraIndicadorTrabalho(state.phase, haFilhoVivo) && state.quotaPause === undefined && (
-        <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
+      {linhaDeTrabalhoViva && (
+        <Box paddingTop={respiroDaLinhaDeTrabalho}>
           <Working
             glyph="aluy"
             glyphRole="accent"
-            label={indicadorTrabalho.label}
-            {...(detalheEspera !== undefined ? { detalhe: detalheEspera } : {})}
-            {...(indicadorTrabalho.suffix !== undefined
-              ? { suffix: indicadorTrabalho.suffix }
-              : {})}
+            label={linhaAjustada.label}
+            {...(linhaAjustada.detalhe !== undefined ? { detalhe: linhaAjustada.detalhe } : {})}
+            {...(linhaAjustada.suffix !== undefined ? { suffix: linhaAjustada.suffix } : {})}
             frame={frame}
           />
         </Box>
@@ -6096,7 +6413,7 @@ export function App(props: AppProps): React.ReactElement {
       )}
 
       {state.quotaPause !== undefined && (
-        <Box paddingTop={state.blocks.length > 0 && !previaDeFalaViva ? 1 : 0}>
+        <Box>
           <QuotaPauseLine view={state.quotaPause} columns={columns} />
         </Box>
       )}
@@ -6362,17 +6679,8 @@ export function App(props: AppProps): React.ReactElement {
           incomodava). O menu cresce/encolhe PRA BAIXO. Ver o bloco "MENU/PICKERS
           DE `/` ABAIXO DO COMPOSER" depois do <Composer>. */}
 
-      {/* EST-0961 — command palette (Ctrl+P): índice fuzzy de comandos/ações. */}
-      {palette.open && (
-        <Box flexDirection="column" paddingBottom={1}>
-          <CommandPalette
-            hits={palette.hits}
-            selected={palette.selected}
-            query={palette.query}
-            maxRows={Math.min(8, slashMenuRowCap)}
-          />
-        </Box>
-      )}
+      {/* EST-0961 — a command palette (Ctrl+P) renderiza em `renderOverlays` (abaixo do composer);
+          esta cópia acima dele DUPLICAVA a paleta na tela. */}
 
       {/* EST-0974 — `/model` (ModelPicker) migrou p/ ABAIXO do composer (junto do
           <SlashMenu>). Ver o bloco depois do <Composer>. */}
@@ -6766,9 +7074,17 @@ export function App(props: AppProps): React.ReactElement {
           fica por ÚLTIMO e cresce para baixo; a statusline não se mexe. Sem linha em branco
           entre os dois. Aprovações pendentes entram nas linhas do painel (nunca somem). */}
       {panelRows.length > 0 && <TaskPanel rows={panelRows} columns={columns} frame={frame} />}
+      {panelRows.length === 0 && filhosRodape.length === 0 && spawnEmVoo > 0 && (
+        <Box height={Math.max(1, rodapeAgentesOverhead(spawnEmVoo, rows) - 1)} />
+      )}
       {panelRows.length === 0 && filhosRodape.length > 0 && (
-        <Box paddingLeft={2} flexDirection="column">
-          <FooterAgents filhos={filhosRodape} rows={rows} frame={frame}>
+        <Box paddingLeft={2} flexDirection="column" width={Math.max(20, columns - 3)}>
+          <FooterAgents
+            filhos={filhosRodape}
+            rows={rows}
+            frame={frame}
+            maxWidth={Math.max(20, columns - 5)}
+          >
             {null}
           </FooterAgents>
         </Box>
@@ -6998,7 +7314,10 @@ function InjectAck(props: { readonly text: string; readonly plain?: boolean }): 
   if (props.plain === true) {
     return (
       <Box paddingLeft={2}>
-        <Role name="fgDim">{echo.length > 140 ? `${echo.slice(0, 139)}…` : echo}</Role>
+        {/* UMA linha: cortada na largura do terminal (a nota `✔ tN concluída — …` quebrava em 2). */}
+        <Role name="fgDim" wrap="truncate-end">
+          {echo.replace(/\s+/g, ' ')}
+        </Role>
       </Box>
     );
   }
@@ -7061,6 +7380,7 @@ function hintStateOf(
   paletteOpen: boolean,
   subAgentsLive = false,
   conciergeOn = false,
+  conciergeTasksLive = false,
 ): HintState | null {
   // EST-0961 — a palette é modal: seu hint tem prioridade quando aberta.
   if (paletteOpen) return 'palette';
@@ -7074,6 +7394,10 @@ function hintStateOf(
   )
     return 'concierge-work';
   if (conciergeOn && state.phase === 'asking') return 'concierge-ask';
+  // Concierge em repouso mas com tarefas rodando: a dica de idle (`enter envia · / comandos`) não
+  // dizia como parar nem como ver as tarefas (#7 do relatório de UX).
+  if (conciergeOn && conciergeTasksLive && (state.phase === 'idle' || state.phase === 'done'))
+    return 'concierge-tasks';
   switch (state.phase) {
     // EST-0948 (auto-retry) — durante o backoff (`retrying`) o footer mostra o mesmo
     // hint do `thinking` ("esc para interromper"): esc cancela a re-tentativa.

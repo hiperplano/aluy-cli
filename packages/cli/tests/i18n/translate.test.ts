@@ -109,12 +109,12 @@ describe('i18n · tradutor LIGADO (i18n(lang).t)', () => {
   it('i18n() default é pt-BR', () => {
     const tr = i18n();
     expect(tr.lang).toBe('pt-BR');
-    expect(tr.t('cmd.help')).toBe('mostra esta lista');
+    expect(tr.t('cmd.help')).toBe('ver comandos e atalhos');
   });
 
   it('i18n("en").t resolve em en e expõe o lang ativo', () => {
     const tr = i18n('en');
     expect(tr.lang).toBe('en');
-    expect(tr.t('cmd.help')).toBe('show this list');
+    expect(tr.t('cmd.help')).toBe('see commands and shortcuts');
   });
 });

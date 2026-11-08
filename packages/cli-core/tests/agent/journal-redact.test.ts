@@ -425,3 +425,22 @@ describe('EST-0982 · CLI-SEC-6 — redação da SAÍDA do comando (redactOutput
     expect(redactOutputSecrets(benign)).toBe(benign);
   });
 });
+
+describe('flag curta -p<senha>: operadores do find NÃO são senha', () => {
+  it("`find … -printf '%s %p\\n'` e demais -print/-path/-perm/-prune ficam intactos", () => {
+    for (const cmd of [
+      `find "$HOME" -xdev -type f -printf '%s %p\\n' | sort -rn | head -10`,
+      'find . -print0 | xargs -0 ls',
+      'find . -print',
+      'find . -path ./node_modules -prune -o -perm 644 -print',
+    ]) {
+      expect(redactCommandSecrets(cmd), cmd).toBe(cmd);
+      expect(redactOutputSecrets(cmd), cmd).toBe(cmd);
+    }
+  });
+  it('`mysql -pSEGREDO` segue redigido (inclusive quando o segredo começa como um operador)', () => {
+    expect(redactCommandSecrets('mysql -uroot -pHunter2 prod')).not.toContain('Hunter2');
+    expect(redactCommandSecrets('mysql -ppath123 prod')).not.toContain('path123');
+    expect(redactCommandSecrets('mysql -pprintfXYZ prod')).not.toContain('printfXYZ');
+  });
+});

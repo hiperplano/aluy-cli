@@ -43,6 +43,7 @@ export interface Catalog {
   'hints.budget': string;
   'hints.error': string;
   'hints.conciergeWork': string;
+  'hints.conciergeTasks': string;
   'hints.conciergeAsk': string;
   'hints.workSubagents': string;
   'hints.quotaPause': string;
@@ -58,6 +59,8 @@ export interface Catalog {
 
   // ── Linha de trabalho: verbos brincalhões (separados por `|`) ──
   'working.verbs': string;
+  // Frases de espera que giram na linha de trabalho (separadas por `|`).
+  'working.quips': string;
 
   // ── F197 — sugestão de PRÓXIMO PROMPT (ghost + Tab). Cada chave é a FRASE que vira o
   //    texto do composer ao aceitar a sugestão (é um objetivo real, acionável). Uma por

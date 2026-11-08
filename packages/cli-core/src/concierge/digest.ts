@@ -46,9 +46,41 @@ export function clip(text: string, max: number): string {
 export function clipPlain(text: string, max: number): string {
   const one = redactOutputSecrets(text)
     .replace(/[*_`#>]+/g, '')
+    // Tabela markdown vira texto corrido: `| a | b |` / `|---|---|` não pode poluir a nota de 1 linha.
+    .replace(/\|/g, ' ')
+    .replace(/[-=─]{3,}/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   return cutAt(one, max);
+}
+
+/** Teto do resultado de uma tarefa que entra no relato automático (uma única chamada ao modelo). */
+export const RESULT_MAX_CHARS = 6000;
+
+/**
+ * Resultado de tarefa preservando as QUEBRAS DE LINHA (listas, relatórios): só redige segredo,
+ * normaliza CRLF e apara linhas em branco do fim. Acima de `max` corta numa FRONTEIRA DE LINHA e
+ * acrescenta UMA marca explícita `[… +N linhas; o relato completo está em /task show tN]` — o
+ * modelo vê que há mais e sabe onde está, em vez de achar que o dado "veio cortado". O total
+ * (marca incluída) nunca passa de `max`, então reaplicar é idempotente.
+ */
+export function clipBlock(text: string, max: number, taskId?: string): string {
+  const clean = redactOutputSecrets(text).replace(/\r\n?/g, '\n').replace(/\s+$/, '');
+  if (clean.length <= max) return clean;
+  const lines = clean.split('\n');
+  const marca = (n: number): string =>
+    `[… +${String(n)} linha${n === 1 ? '' : 's'}; o relato completo está em /task show ${taskId ?? 'tN'}]`;
+  const reserva = marca(lines.length).length + 1;
+  const kept: string[] = [];
+  let used = 0;
+  for (const l of lines) {
+    if (used + l.length + 1 > max - reserva) break;
+    kept.push(l);
+    used += l.length + 1;
+  }
+  if (kept.length === 0) kept.push((lines[0] ?? '').slice(0, Math.max(0, max - reserva - 1)));
+  const hidden = lines.length - kept.length;
+  return `${kept.join('\n')}\n${marca(Math.max(hidden, 1))}`;
 }
 
 function cutAt(one: string, max: number): string {
@@ -69,6 +101,7 @@ export function describeTask(t: TaskRecord, now: number): string {
   const parts = [STATUS_PT[t.status]];
   if (live && t.status === 'running') parts.push(PHASE_PT[t.phase] ?? t.phase);
   if (t.blockedBy) parts.push(`depois de ${t.blockedBy}`);
+  else if (t.queued === true && t.status === 'blocked') parts.push('na fila');
   parts.push(`${t.steps} passo${t.steps === 1 ? '' : 's'}`);
   parts.push(formatElapsed((t.endedAt ?? now) - t.startedAt));
   let line = `- ${t.id} [${parts.join(' · ')}] ${clip(t.goal, 120)}`;

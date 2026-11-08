@@ -53,6 +53,17 @@ export interface ConciergeRuntimeDeps {
   readonly ownerBusy?: () => boolean;
   /** Reavalia a fila de relatos automáticos a cada tanto (ms). Default 400. */
   readonly reportRetryMs?: number;
+  /**
+   * Janela de agrupamento (ms): ao terminar uma tarefa o relato espera esta folga por mais
+   * términos e sai UM só (cada novo término reinicia a espera, no máx. 4×). Default 0 (imediato).
+   */
+  readonly reportSettleMs?: number;
+  /**
+   * Lote: enquanto OUTRAS tarefas seguem vivas, os términos esperam e saem num relato só — quando o
+   * lote acaba ou passados `reportBatchMs` do 1º término (o que vier primeiro). Falha sai na hora.
+   * Default 0 (sem espera). Evita "7 placares" para 8 tarefas que terminam escalonadas.
+   */
+  readonly reportBatchMs?: number;
 }
 
 interface Persisted {
@@ -114,12 +125,23 @@ export class ConciergeRuntime {
   visibleTasks(): readonly TaskRecord[] {
     const all = this.registry.list();
     const live = all.filter((t) => !TERMINAL_STATUSES.has(t.status));
+    return [...this.recentEnded(all).slice(-2), ...live];
+  }
+
+  private recentEnded(all: readonly TaskRecord[]): TaskRecord[] {
     const now = this.clock();
     // Terminadas somem da lista 60s depois (o relato já foi para a conversa; `/task` mostra tudo).
-    const ended = all
-      .filter((t) => TERMINAL_STATUSES.has(t.status) && now - (t.endedAt ?? 0) < 60_000)
-      .slice(-2);
-    return [...ended, ...live];
+    return all.filter((t) => TERMINAL_STATUSES.has(t.status) && now - (t.endedAt ?? 0) < 60_000);
+  }
+
+  /**
+   * Encerradas que `visibleTasks` não lista (teto de 2 linhas e janela de 60s) — o resumo as conta
+   * TODAS: "1 tarefa · 1 encerrada" com 7 concluídas era a janela de 60s escondendo as mais antigas.
+   */
+  hiddenEndedCount(): number {
+    const todas = this.registry.list().filter((t) => TERMINAL_STATUSES.has(t.status)).length;
+    const listadas = this.visibleTasks().filter((t) => TERMINAL_STATUSES.has(t.status)).length;
+    return Math.max(0, todas - listadas);
   }
 
   /** Sub-agentes da tarefa (último lote do bloco `subagents` da sessão dela), p/ o painel. */
@@ -144,7 +166,9 @@ export class ConciergeRuntime {
       t.status === 'waiting_approval'
         ? 'aguardando aprovação'
         : t.status === 'blocked'
-          ? `espera ${t.blockedBy ?? 'outra tarefa'}`
+          ? t.queued === true
+            ? 'na fila'
+            : `espera ${t.blockedBy ?? 'outra tarefa'}`
           : undefined;
     if (word === undefined && t.current) parts.push(t.current);
     const lt = ended
@@ -221,8 +245,49 @@ export class ConciergeRuntime {
   private queueReport(taskId: string): void {
     if (this.disposed || this.reported.has(taskId)) return;
     this.reported.add(taskId);
+    const first = this.reportQueue.length === 0;
+    if (first) this.reportFirstAt = Date.now();
     this.reportQueue.push(taskId);
-    this.scheduleReports(0);
+    this.emitChange();
+    const settle = this.d.reportSettleMs ?? 0;
+    if (settle <= 0) {
+      this.scheduleReports(0);
+      return;
+    }
+    // Várias tarefas terminando juntas viram UM relato: reinicia a espera a cada término.
+    const now = Date.now();
+    if (this.reportTimer !== null) {
+      clearTimeout(this.reportTimer);
+      this.reportTimer = null;
+    }
+    this.scheduleReports(Math.max(0, Math.min(settle, this.reportFirstAt + settle * 4 - now)));
+  }
+
+  private reportFirstAt = 0;
+
+  /**
+   * Há relato automático a caminho (tarefa terminou e o resumo ainda não começou a sair)? Vale da
+   * hora em que a tarefa entra na fila (janela de agrupamento, dono ocupado) até o relato começar
+   * a fazer stream. A TUI mantém a linha de trabalho nesse intervalo: se ela sumisse, o composer
+   * subia 1 linha e descia de novo quando o resumo começava.
+   */
+  reportPending(): boolean {
+    if (this.reportQueue.length > 0 || this.reportRunning) return true;
+    // A tarefa acabou de terminar mas o relato ainda não entrou na fila (a ordem dos ouvintes do
+    // registro pode pintar o quadro antes): conta como a caminho, por poucos segundos.
+    const now = this.clock();
+    return this.registry
+      .list()
+      .some(
+        (t) =>
+          (t.status === 'done' || t.status === 'failed') &&
+          !this.reported.has(t.id) &&
+          now - (t.endedAt ?? 0) < 5000,
+      );
+  }
+
+  private emitChange(): void {
+    for (const l of [...this.listeners]) l();
   }
 
   private scheduleReports(delay: number): void {
@@ -241,6 +306,16 @@ export class ConciergeRuntime {
       this.scheduleReports(this.d.reportRetryMs ?? 400);
       return;
     }
+    // Lote: outras tarefas ainda vivas ⇒ segura o relato (até `reportBatchMs`), salvo falha.
+    const loteMs = this.d.reportBatchMs ?? 0;
+    if (loteMs > 0) {
+      const idade = Date.now() - this.reportFirstAt;
+      const falhou = this.reportQueue.some((id) => this.registry.get(id)?.status === 'failed');
+      if (this.registry.live().length > 0 && !falhou && idade < loteMs) {
+        this.scheduleReports(Math.min(1000, Math.max(50, loteMs - idade)));
+        return;
+      }
+    }
     // Tudo que terminou até agora vira UM relato; os de turno automático ficam separados.
     const batch = this.reportQueue.splice(0);
     const plain = batch.filter((id) => !this.autoSpawned.has(id));
@@ -250,8 +325,10 @@ export class ConciergeRuntime {
       if (plain.length > 0) await this.autoReply(plain, true);
       if (restricted.length > 0) await this.autoReply(restricted, false);
     };
+    this.emitChange();
     void run().finally(() => {
       this.reportRunning = false;
+      this.emitChange();
       this.scheduleReports(0);
     });
   }

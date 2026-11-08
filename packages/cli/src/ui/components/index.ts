@@ -82,6 +82,8 @@ export type { ThemePickerProps } from './ThemePicker.js';
 // EST-0989 (i18n) — seletor de idioma (/lang), espelha o <ThemePicker>.
 export { LangPicker } from './LangPicker.js';
 export type { LangPickerProps } from './LangPicker.js';
+export { MenuPicker } from './MenuPicker.js';
+export type { MenuPickerProps } from './MenuPicker.js';
 // EST-0962 (/provider) — seletor de provider do modo Custom, espelha o <ThemePicker>.
 export { SecretPrompt } from './SecretPrompt.js';
 export { ProviderPicker } from './ProviderPicker.js';

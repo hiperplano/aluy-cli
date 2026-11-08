@@ -29,7 +29,9 @@ export type HintState =
   | 'quota-pause'
   // ADR 0006 — modo concierge: o Esc NÃO para nada; parar é explícito.
   | 'concierge-work'
-  | 'concierge-ask';
+  | 'concierge-ask'
+  // Concierge em repouso com tarefas vivas: ensina F8, ctrl-t e /task (antes caía na dica de idle).
+  | 'concierge-tasks';
 
 // EST-0989 (i18n) — cada estado mapeia p/ uma CHAVE i18n; o texto vem do catálogo no
 // idioma ativo (`t()`), com fallback en→pt-BR. Os atalhos de tecla (`enter`, `esc`,
@@ -51,6 +53,7 @@ const HINT_KEYS: Readonly<Record<HintState, I18nKey>> = {
   'quota-pause': 'hints.quotaPause',
   'concierge-work': 'hints.conciergeWork',
   'concierge-ask': 'hints.conciergeAsk',
+  'concierge-tasks': 'hints.conciergeTasks',
 };
 
 /** Estados OCUPADOS — onde o relógio de elapsed faz sentido (EST-0965). */
@@ -105,7 +108,11 @@ export function FooterHints(props: FooterHintsProps): React.ReactElement {
       .replace('{up}', theme.unicode ? '↑' : 'up');
   // ARMADO p/ sair (1º Ctrl+C): a dica de confirmação VENCE a do estado, em destaque.
   if (props.armedExit === true) {
-    return <Role name="accent">{t('hints.ctrlcAgain')}</Role>;
+    return (
+      <Role name="accent" wrap="truncate-end">
+        {t('hints.ctrlcAgain')}
+      </Role>
+    );
   }
   const base = comGlifos(t(HINT_KEYS[props.state]));
   const showElapsed =
@@ -114,7 +121,16 @@ export function FooterHints(props: FooterHintsProps): React.ReactElement {
   // sugestão`). Só no idle (é lá que o ghost aparece) e nunca junto do elapsed (idle não
   // tem relógio) — sem conflito de sufixos.
   if (props.suggesting === true && props.state === 'idle') {
-    return <Role name="fgDim">{`${base} · ${t('hints.suggest')}`}</Role>;
+    return (
+      <Role name="fgDim" wrap="truncate-end">
+        {`${base} · ${t('hints.suggest')}`}
+      </Role>
+    );
   }
-  return <Role name="fgDim">{showElapsed ? `${base} · ${props.elapsed}` : base}</Role>;
+  // UMA linha sempre: quebrar a dica em duas empurrava o composer 1 linha a cada mudança de texto.
+  return (
+    <Role name="fgDim" wrap="truncate-end">
+      {showElapsed ? `${base} · ${props.elapsed}` : base}
+    </Role>
+  );
 }

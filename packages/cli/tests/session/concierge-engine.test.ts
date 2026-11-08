@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { TaskRegistry, type AskResolution, type ConciergeModel } from '@hiperplano/aluy-cli-core';
 import { ControllerTaskEngine, type TaskSession } from '../../src/session/concierge-engine.js';
 import { ConciergeRuntime, type ConversationSink } from '../../src/session/concierge-runtime.js';
+import { summaryText } from '../../src/ui/components/ConciergeTasks.js';
 import type { SessionState } from '../../src/session/model.js';
 
 class FakeSession implements TaskSession {
@@ -77,6 +78,34 @@ function setup() {
   return { registry, headless, engine };
 }
 
+describe('ConciergeRuntime — contagem do resumo do rodapé', () => {
+  it('7 tarefas concluídas em tempos diferentes (algumas há mais de 60s): o resumo conta as 7', () => {
+    let agora = 1_000_000;
+    const sk = new FakeSession() as unknown as ConversationSink;
+    sk.pushConciergeEcho = () => {};
+    sk.pushConciergeLine = () => {};
+    sk.conciergeReplyStart = () => {};
+    sk.conciergeReplyEnd = () => {};
+    sk.cancelAllFlows = () => {};
+    const rt = new ConciergeRuntime({
+      sink: sk,
+      model: { call: async () => ({ request_id: 'r', content: '', finish_reason: 'stop' }) },
+      clock: () => agora,
+    });
+    for (let i = 0; i < 7; i++) {
+      const t = rt.registry.create({ goal: `g${i}`, kind: 'detached' });
+      rt.registry.transition(t.id, 'done', undefined, { summary: 'ok' });
+      agora += 20_000; // as primeiras saem da janela de 60s
+    }
+    rt.registry.create({ goal: 'viva', kind: 'detached' });
+    const vis = rt.visibleTasks();
+    expect(vis.filter((t) => t.endedAt !== undefined).length).toBeLessThanOrEqual(2);
+    expect(summaryText(vis, false, rt.hiddenEndedCount())).toBe(
+      '8 tarefas · 1 rodando · 7 encerradas',
+    );
+  });
+});
+
 describe('ControllerTaskEngine — estado da sessão vira evento do registro', () => {
   it('TODA tarefa roda numa sessão própria (nada no controller da conversa)', () => {
     const { registry, headless, engine } = setup();
@@ -123,6 +152,20 @@ describe('ControllerTaskEngine — estado da sessão vira evento do registro', (
     expect(registry.get('t1')!.steps).toBe(1);
     expect(registry.get('t1')!.phase).toBe('idle');
     expect(registry.get('t1')!.current).toBeUndefined();
+  });
+
+  it('o resultado guarda a fala INTEIRA da tarefa com as quebras de linha (resumo de 1 linha, resultado de até 6000)', async () => {
+    const a = setup();
+    a.engine.start(a.registry.create({ goal: 'a', kind: 'main' }));
+    const texto = Array.from({ length: 60 }, (_, i) => `- item ${i}: ${'z'.repeat(40)}`).join('\n');
+    a.headless[0]!.finish([{ kind: 'aluy', text: texto, streaming: false } as never]);
+    await new Promise((r) => setTimeout(r, 5));
+    const t = a.registry.get('t1')!;
+    expect(t.summary).not.toContain('\n'); // a nota `✔ t1 concluída — …` segue de uma linha, cortada
+    expect(t.summary!.length).toBeLessThanOrEqual(300);
+    expect(t.result!.split('\n').length).toBeGreaterThan(40);
+    expect(t.result!.length).toBeGreaterThan(1500); // antes: 1500 e achatado numa linha só
+    expect(t.result!.length).toBeLessThanOrEqual(6000);
   });
 
   it('fim do turno ⇒ done com o resumo da última fala; erro ⇒ failed; parada ⇒ stopped', async () => {
@@ -468,7 +511,7 @@ describe('Custo: o agente da tarefa recebe a orientação "faça você mesmo"', 
     expect(sent.startsWith('corrigir o bug do calc.py')).toBe(true);
     expect(sent).toContain('FAÇA você mesmo');
     expect(sent).toContain('sem spawn_agent');
-    expect(sent).toContain('Delegue a sub-agentes só se for amplo');
+    expect(sent).toContain('Delegue a sub-agentes SÓ com 3 ou mais partes independentes E pesadas');
     expect(sent).toContain('NÃO monte plano (update_plan)');
     expect(sent).toContain('rodar o teste UMA vez');
     expect(registry.get('t1')!.goal).toBe('corrigir o bug do calc.py');

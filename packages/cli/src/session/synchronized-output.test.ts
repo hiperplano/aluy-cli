@@ -324,12 +324,16 @@ describe('wrapStdoutWithSync — composição das camadas no fio do stdout', () 
     const { stream, writes } = makeStub();
     const { cleanup } = wrapStdoutWithSync(stream, { sync: false, overwrite: true });
     cleanup();
-    expect(writes).toHaveLength(0);
+    expect(writes.filter((w) => w === END_SYNC)).toHaveLength(0); // sem ESU (só o ?7h do auto-wrap)
   });
 
   it('Static append (conteúdo puro, sem erase) ⇒ NÃO é transformado (passa cru dentro do envelope)', () => {
     const { stream, writes } = makeStub();
-    const { stdout } = wrapStdoutWithSync(stream, { sync: false, overwrite: true });
+    const { stdout } = wrapStdoutWithSync(stream, {
+      sync: false,
+      overwrite: true,
+      autowrap: false,
+    });
     const staticLine = '▌ aluy\n  resposta consolidada\n';
     stdout.write(staticLine);
     // sem prefixo de erase ⇒ overwriteInPlace devolve cru ⇒ conteúdo intacto.

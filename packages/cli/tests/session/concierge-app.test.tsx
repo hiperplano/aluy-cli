@@ -7,6 +7,8 @@
 //   • sub-agentes (clássico) saem da conversa e moram no rodapé, com uma linha ao terminar;
 //   • modo clássico inalterado.
 
+import { parseFrases } from '../../src/session/frases-espera.js';
+import { resolveText } from '../../src/i18n/translate.js';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'ink-testing-library';
@@ -119,6 +121,10 @@ interface BuildOpts {
   classicModel?: ModelCaller;
   statusline?: 'full' | 'compact' | 'hidden';
   ownerBusy?: () => boolean;
+  reportSettleMs?: number;
+  reportBatchMs?: number;
+  /** Segura o modelo ANTES do 1º token (o dono vê só `você` + a linha de trabalho). */
+  preGate?: Promise<void>;
 }
 
 function build(opts: BuildOpts) {
@@ -138,6 +144,7 @@ function build(opts: BuildOpts) {
       const msg = /Mensagem do dono: (.*)$/s.exec(last)?.[1] ?? last;
       conciergeCalls.push(msg);
       const out = opts.concierge(msg);
+      if (opts.preGate) await opts.preGate;
       const sink = conversation.sink;
       sink.onStart?.();
       const words = out.content.split(/(?<= )/);
@@ -156,6 +163,8 @@ function build(opts: BuildOpts) {
     createHeadless: () => queue.shift() ?? null,
     ...(opts.ownerBusy ? { ownerBusy: opts.ownerBusy } : {}),
     reportRetryMs: 20,
+    ...(opts.reportSettleMs ? { reportSettleMs: opts.reportSettleMs } : {}),
+    ...(opts.reportBatchMs ? { reportBatchMs: opts.reportBatchMs } : {}),
   });
   const r = render(
     <ThemeProvider theme={resolveTheme({ env: ENV })}>
@@ -603,7 +612,9 @@ describe('Ordem do rodapé: composer → statusline → painel; sem linha em bra
       const topo = lines.findIndex((l, i) => i > resp && l.includes('┃')); // barra do composer
       const brancos = lines.slice(resp + 1, topo).filter((l) => l.trim() === '').length;
       expect(topo).toBeGreaterThan(resp);
-      expect(brancos).toBe(1);
+      // Com tarefa rodando a frase de espera ocupa a linha entre a resposta e o composer: um
+      // respiro de cada lado dela (2); sem tarefa, só o respiro de sempre (1).
+      expect(brancos).toBe(comTask ? 2 : 1);
       g.resolve();
       s.unmount();
     }
@@ -745,6 +756,93 @@ describe('Relato automático: o Concierge resume o resultado quando a tarefa ter
     s.unmount();
   });
 
+  it('várias tarefas que terminam juntas viram UM relato (janela de agrupamento)', async () => {
+    const t1 = taskSession({ iters: () => 'primeira.' });
+    // t2 termina ~150ms depois de t1: sem a janela de agrupamento sairiam DOIS relatos.
+    const t2 = taskSession({ iters: () => 'segunda.', gates: () => sleep(150) });
+    const seen: string[] = [];
+    const s = build({
+      mode: 'concierge',
+      tasks: [t1, t2],
+      reportSettleMs: 400,
+      concierge: (m) => {
+        seen.push(m);
+        return /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Resumo das duas.')
+          : text('Iniciei.', [
+              ...startTask(),
+              { id: '2', name: 'task_start', input: { goal: 'outra' } },
+            ]);
+      },
+    });
+    await type(s, 'faça o trabalho');
+    await waitFor(() => s.rt.registry.get('t2')?.status === 'done');
+    await waitFor(() => s.frame().includes('Resumo das duas.'));
+    await sleep(500);
+    expect(seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m))).toHaveLength(1);
+    s.unmount();
+  });
+
+  it('lote: com outras tarefas vivas os términos esperam e saem num relato só, quando a última acaba', async () => {
+    const g3 = defer();
+    const t1 = taskSession({ iters: () => 'um' });
+    const t2 = taskSession({ iters: () => 'dois', gates: () => sleep(150) });
+    const t3 = taskSession({ iters: () => 'tres', gates: () => g3.promise });
+    const seen: string[] = [];
+    const s = build({
+      mode: 'concierge',
+      tasks: [t1, t2, t3],
+      reportBatchMs: 5000,
+      concierge: (m) => {
+        seen.push(m);
+        return /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Placar final.')
+          : text('Iniciei.', [
+              ...startTask('a'),
+              { id: '2', name: 'task_start', input: { goal: 'b' } },
+              { id: '3', name: 'task_start', input: { goal: 'c' } },
+            ]);
+      },
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.rt.registry.get('t2')?.status === 'done');
+    await sleep(500);
+    expect(seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m))).toHaveLength(0); // t3 viva ⇒ segura
+    g3.resolve();
+    await waitFor(() => s.frame().includes('Placar final.'), 6000);
+    const eventos = seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m));
+    expect(eventos).toHaveLength(1);
+    expect(eventos[0]).toContain('t1, t2, t3');
+    s.unmount();
+  });
+
+  it('lote: passado o prazo reporta o que já terminou, mesmo com outra tarefa viva', async () => {
+    const g = defer();
+    const seen: string[] = [];
+    const s = build({
+      mode: 'concierge',
+      tasks: [
+        taskSession({ iters: () => 'um' }),
+        taskSession({ iters: () => 'x', gates: () => g.promise }),
+      ],
+      reportBatchMs: 400,
+      concierge: (m) => {
+        seen.push(m);
+        return /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Parcial.')
+          : text('Iniciei.', [
+              ...startTask('a'),
+              { id: '2', name: 'task_start', input: { goal: 'b' } },
+            ]);
+      },
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('Parcial.'), 4000);
+    expect(seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m))).toHaveLength(1);
+    g.resolve();
+    s.unmount();
+  });
+
   it('anti-laço: o turno automático não inicia tarefa nova que gere outro relato com tarefas', async () => {
     const t1 = taskSession({ iters: () => 'primeira.' });
     const t2 = taskSession({ iters: () => 'segunda.' });
@@ -766,6 +864,277 @@ describe('Relato automático: o Concierge resume o resultado quando a tarefa ter
     // t1 (relato livre ⇒ abriu t2) e t2 (relato restrito ⇒ recusa): nada além de t2.
     expect(s.rt.registry.list().map((t) => t.id)).toEqual(['t1', 't2']);
     expect(seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m))).toHaveLength(2);
+    s.unmount();
+  });
+});
+
+describe('Concierge: nenhuma linha `┃` órfã depois da resposta', () => {
+  it('"\\n" soltos entre as tool-calls (uma por tarefa) não viram linhas vazias no histórico', async () => {
+    const gate = defer();
+    const s = build({
+      mode: 'concierge',
+      tasks: [
+        taskSession({ iters: () => 'a.' }),
+        taskSession({ iters: () => 'b.' }),
+        taskSession({ iters: () => 'c.' }),
+      ],
+      // o modelo emite quebras de linha depois do texto (antes de cada tool-call)
+      concierge: (m) =>
+        /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Resumo.')
+          : text('Iniciei 3 tarefas.\n\n\n', [
+              ...startTask('um'),
+              { id: '2', name: 'task_start', input: { goal: 'dois' } },
+              { id: '3', name: 'task_start', input: { goal: 'tres' } },
+            ]),
+    });
+    void gate;
+    await type(s, 'faça tudo');
+    await waitFor(() => s.rt.registry.get('t3')?.status === 'done');
+    await waitFor(() => s.frame().includes('Resumo.'));
+    const aluy = blocksOf(s.conversation, 'aluy') as { text: string }[];
+    expect(aluy[0]!.text).toBe('Iniciei 3 tarefas.');
+    const linhas = s.frame().split('\n');
+    expect(linhas.filter((l) => /^\s*┃\s*$/.test(l)).length).toBeLessThanOrEqual(2); // só a moldura do composer
+    s.unmount();
+  });
+});
+
+describe('Frase de espera: a linha existe com a conversa ociosa e uma tarefa rodando', () => {
+  it('mostra uma frase da lista + `em segundo plano` acima do composer; some quando a tarefa acaba', async () => {
+    const g = defer();
+    const s = build({
+      mode: 'concierge',
+      tasks: [taskSession({ iters: () => 'ok', gates: () => g.promise })],
+      concierge: () => text('Iniciei.', startTask()),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    const frases = parseFrases(resolveText('pt-BR', 'working.quips'));
+    const linhas = s.frame().split('\n');
+    const i = linhas.findIndex((l) => l.includes('em segundo plano'));
+    expect(frases.some((f) => linhas[i]!.includes(`${f}…`))).toBe(true);
+    expect(i).toBeLessThan(linhas.findIndex((l) => l.includes('❯'))); // acima do composer
+    g.resolve();
+    await waitFor(() => !s.frame().includes('em segundo plano'));
+    s.unmount();
+  });
+});
+
+describe('Composer estável durante a fala do Concierge (tela NÃO cheia)', () => {
+  const composerRows = (frames: readonly string[]): number[] => {
+    const rows: number[] = [];
+    for (const f of frames) {
+      const i = plain(f)
+        .split('\n')
+        .findIndex((l) => /^[┃|]\s*[❯>]/.test(l));
+      if (i >= 0 && rows[rows.length - 1] !== i) rows.push(i);
+    }
+    return rows;
+  };
+
+  for (const comTarefa of [false, true]) {
+    it(`${comTarefa ? 'com' : 'sem'} tarefa em segundo plano: o composer só desce durante o turno e nunca volta a mexer depois de subir`, async () => {
+      const g = defer();
+      const s = build({
+        mode: 'concierge',
+        tasks: comTarefa ? [taskSession({ iters: () => 'ok', gates: () => g.promise })] : [],
+        concierge: () =>
+          comTarefa
+            ? text('Iniciei a tarefa agora mesmo, com bastante cuidado e atenção.', startTask())
+            : text('Certo, já cuidei disso agora mesmo, com bastante cuidado e atenção.'),
+        wordGate: () => sleep(60),
+      });
+      const antes = s.frames.length;
+      await type(s, 'faça');
+      await waitFor(
+        () =>
+          !s.conversation.current.blocks.some(
+            (b) => b.kind === 'aluy' && (b as { streaming?: boolean }).streaming === true,
+          ) && blocksOf(s.conversation, 'aluy').length === 1,
+      );
+      await sleep(400);
+      const rows = composerRows(s.frames.slice(antes));
+      // Sem reversão: depois de descer (fim do turno) nada sobe de novo; com tarefa de fundo a linha
+      // de trabalho passa do turno para a tarefa no MESMO lugar, então nem desce.
+      const iDesce = rows.findIndex((r, i) => i > 0 && r < rows[i - 1]!);
+      if (comTarefa) expect(iDesce, `linhas do composer: ${rows.join(',')}`).toBe(-1);
+      else if (iDesce >= 0)
+        expect(iDesce, `linhas do composer: ${rows.join(',')}`).toBe(rows.length - 1);
+      g.resolve();
+      s.unmount();
+    });
+  }
+
+  it('fim da tarefa → relato: a linha de trabalho não some entre o término e o resumo (composer não sobe)', async () => {
+    const g = defer();
+    const s = build({
+      mode: 'concierge',
+      tasks: [taskSession({ iters: () => 'ok', gates: () => g.promise })],
+      reportSettleMs: 500,
+      concierge: (m) =>
+        /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Resumo da tarefa: tudo certo, nada a corrigir por aqui agora.')
+          : text('Iniciei.', startTask()),
+      wordGate: () => sleep(40),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    await sleep(200);
+    const antes = s.frames.length;
+    g.resolve();
+    await waitFor(() => s.frame().includes('Resumo da tarefa'));
+    await waitFor(
+      () =>
+        blocksOf(s.conversation, 'aluy').length === 2 &&
+        (blocksOf(s.conversation, 'aluy')[1] as { streaming?: boolean }).streaming === false,
+    );
+    await sleep(300);
+    // Em NENHUM quadro entre o término e o fim do resumo a linha de trabalho some e volta.
+    const tem: boolean[] = [];
+    for (const f of s.frames.slice(antes)) {
+      const t = plain(f)
+        .split('\n')
+        .some((l) => /^Λ (?!luy)/.test(l.trim()));
+      if (tem[tem.length - 1] !== t) tem.push(t);
+    }
+    const sumiuEVoltou = tem.findIndex((t, i) => i > 0 && t && !tem[i - 1]!);
+    expect(sumiuEVoltou, `presença da linha por quadro: ${tem.join(',')}`).toBe(-1);
+    expect(tem[0], 'a linha já não existia quando a tarefa terminou').toBe(true);
+    s.unmount();
+  });
+
+  it('`(preparando o relato · Ns)` anda: o contador não fica congelado em 0s', async () => {
+    const g = defer();
+    const s = build({
+      mode: 'concierge',
+      tasks: [taskSession({ iters: () => 'ok', gates: () => g.promise })],
+      reportSettleMs: 6000,
+      concierge: () => text('Iniciei.', startTask()),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    g.resolve();
+    await waitFor(() => s.frame().includes('preparando o relato'));
+    await waitFor(() => /preparando o relato · [1-9]\d*s\)/.test(s.frame()), 4000);
+    s.unmount();
+  });
+
+  it('a nota `✔ tN concluída — …` é UMA linha (cortada na largura), mesmo longa', async () => {
+    const s = build({ mode: 'concierge', concierge: () => text('ok') });
+    await type(s, 'oi');
+    await waitFor(() => s.frame().includes('ok'));
+    const longa = `✔ t9 concluída — ${'Arquivo Tamanho calc.py 1.2k '.repeat(12)}`;
+    s.conversation.pushConciergeLine(longa);
+    await waitFor(() => s.frame().includes('✔ t9 concluída'));
+    const ls = s.frame().split('\n');
+    const i = ls.findIndex((l) => l.includes('✔ t9 concluída'));
+    expect(ls[i]!.trimEnd().endsWith('…')).toBe(true);
+    expect(ls[i + 1]!.includes('Arquivo Tamanho')).toBe(false); // sem continuação na linha de baixo
+    s.unmount();
+  });
+
+  it('resposta com tabela cortada no meio e rabo de pipes/linhas vazias: nada de linhas em branco sobrando antes do composer', async () => {
+    const s = build({
+      mode: 'concierge',
+      concierge: () => text('Tabela:\n| N | Modelo |\n|---|---|\n| 3 | Argo\n|\n \n\n\n'),
+    });
+    await type(s, 'mostra a tabela');
+    await waitFor(() => blocksOf(s.conversation, 'aluy').length === 1);
+    await waitFor(
+      () => (blocksOf(s.conversation, 'aluy')[0] as { streaming?: boolean }).streaming === false,
+    );
+    await sleep(100);
+    const b = blocksOf(s.conversation, 'aluy')[0] as { text: string };
+    expect(b.text.endsWith('| 3 | Argo')).toBe(true);
+    const ls = s.frame().split('\n');
+    const i = ls.findIndex((l) => l.includes('Argo'));
+    const c = ls.findIndex((l, k) => k > i && /^[┃|]\s*[❯>]/.test(l));
+    expect(ls.slice(i + 1, c).filter((l) => l.trim() === '').length).toBeLessThanOrEqual(2); // respiro + borda do composer
+    s.unmount();
+  });
+
+  it('tarefas que delegam a sub-agentes (blocos aninhados que nascem e somem): nunca 2 linhas de trabalho nem linha mais larga que a tela', async () => {
+    const g = defer();
+    const tasks = [1, 2, 3].map(() => taskSession({ iters: () => 'ok', gates: () => g.promise }));
+    const s = build({
+      mode: 'concierge',
+      tasks,
+      statusline: 'compact',
+      concierge: () =>
+        text('Vou paralelizar.', [
+          ...startTask('um'),
+          { id: '2', name: 'task_start', input: { goal: 'dois' } },
+          { id: '3', name: 'task_start', input: { goal: 'tres' } },
+        ]),
+    });
+    await type(s, 'pesquise 3 coisas');
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    const filho = (label: string, status: 'running' | 'done') =>
+      ({
+        label,
+        status,
+        summary: 'bash find "$HOME" -xdev -type f -printf · 9.6k tokens',
+        model: 'herdado (z-ai/glm-5.3-flash)',
+      }) as never;
+    const patch = (c: SessionController, kids: unknown[]): void =>
+      (c as unknown as { patch(p: Record<string, unknown>): void }).patch({
+        blocks: kids.length ? [{ kind: 'subagents', children: kids }] : [],
+      });
+    const antes = s.frames.length;
+    // lotes nascendo e acabando em instantes diferentes
+    patch(tasks[0]!, [filho('a', 'running'), filho('b', 'running')]);
+    await sleep(60);
+    patch(tasks[1]!, [filho('c', 'running'), filho('d', 'running'), filho('e', 'running')]);
+    await sleep(60);
+    patch(tasks[0]!, [filho('a', 'done'), filho('b', 'done')]);
+    await sleep(60);
+    patch(tasks[1]!, []);
+    patch(tasks[2]!, [filho('f', 'running')]);
+    await sleep(120);
+    for (const f of s.frames.slice(antes)) {
+      const ls = plain(f).split('\n');
+      expect(ls.filter((l) => /^Λ (?!luy)/.test(l.trim())).length).toBeLessThanOrEqual(1);
+      for (const l of ls) expect(l.length).toBeLessThanOrEqual(99);
+    }
+    g.resolve();
+    s.unmount();
+  });
+
+  it('pensando logo depois do `você`: exatamente 1 linha em branco antes da linha de trabalho', async () => {
+    const gate = defer();
+    const s = build({
+      mode: 'concierge',
+      concierge: () => text('Oi.'),
+      preGate: gate.promise,
+    });
+    await type(s, 'oi');
+    await waitFor(() => /^Λ (?!luy)/m.test(s.frame()));
+    const ls = s.frame().split('\n');
+    const iw = ls.findIndex((l) => /^Λ (?!luy)/.test(l.trim()));
+    expect(ls[iw - 1]!.trim()).toBe('');
+    expect(ls[iw - 2]!.trim(), 'respiro duplicado').not.toBe('');
+    gate.resolve();
+    s.unmount();
+  });
+
+  it('tarefa aguardando aprovação mantém a linha de trabalho (o composer não sobe)', async () => {
+    const g = defer();
+    const s = build({
+      mode: 'concierge',
+      tasks: [taskSession({ iters: () => 'ok', gates: () => g.promise })],
+      concierge: () => text('Iniciei.', startTask()),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.rt.registry.get('t1') !== undefined);
+    await waitFor(() => s.frame().includes('em segundo plano'));
+    s.rt.registry.transition('t1', 'waiting_approval');
+    await waitFor(() => s.frame().includes('aguardando aprovação'));
+    const ls = s.frame().split('\n');
+    const iw = ls.findIndex((l) => /^Λ (?!luy)/.test(l.trim()));
+    expect(iw, 'a linha de trabalho sumiu com a tarefa aguardando aprovação').toBeGreaterThan(0);
+    expect(ls[iw]).toContain('aguardando aprovação');
+    g.resolve();
     s.unmount();
   });
 });
@@ -809,5 +1178,69 @@ describe('Ritmo vertical no Concierge: 1 linha entre blocos, notas coladas, sem 
       .match(/\n[ \t]*\n[ \t]*\n/);
     expect(run).toBeNull();
     s.unmount();
+  });
+});
+
+describe('Atalhos anunciados valem no modo em que aparecem (#7)', () => {
+  async function comTarefa() {
+    const g = defer();
+    const task = taskSession({ iters: () => 'ok', gates: () => g.promise });
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      concierge: () => text('Iniciei.', startTask('g')),
+    });
+    await type(s, 'faça');
+    await waitFor(() => s.frame().includes('1 tarefa:'));
+    await sleep(300);
+    return { s, g };
+  }
+
+  const notas = (c: SessionController): string =>
+    blocksOf(c, 'note')
+      .map((n) => (n as { lines: string[] }).lines.join('\n'))
+      .join('\n');
+
+  it('só com tarefas rodando (Concierge em repouso) o rodapé ensina F8, ctrl-t e /task', async () => {
+    const { s, g } = await comTarefa();
+    await waitFor(() => s.frame().includes('ctrl-t painel de tarefas'));
+    expect(s.frame()).toContain('F8 para tudo');
+    expect(s.frame()).toContain('/task');
+    expect(s.frame()).not.toContain('ctrl-b'); // não existe no concierge
+    g.resolve();
+    s.unmount();
+  });
+
+  it('ctrl-t (anunciado) abre e fecha o painel de tarefas no concierge', async () => {
+    const { s, g } = await comTarefa();
+    expect(s.frame()).not.toContain('enter detalhes');
+    s.stdin.write('\x14'); // ctrl+t
+    await waitFor(() => s.frame().includes('enter detalhes'));
+    await sleep(300);
+    s.stdin.write('\x14');
+    await waitFor(() => !s.frame().includes('enter detalhes'));
+    g.resolve();
+    s.unmount();
+  });
+
+  it('/help lista os atalhos do modo (concierge: ctrl-t e /task, sem ctrl-b; clássico: o inverso)', async () => {
+    const c = build({ mode: 'concierge', concierge: () => text('ok') });
+    await sleep(100);
+    await type(c, '/help');
+    await waitFor(() => notas(c.conversation).includes('── conversa'));
+    const noteC = notas(c.conversation);
+    expect(noteC).toContain('ctrl-t painel de tarefas');
+    expect(noteC).not.toContain('ctrl-b');
+    expect(noteC).toContain('/task');
+    c.unmount();
+
+    const k = build({ mode: 'classic', concierge: () => text('ok') });
+    await sleep(100);
+    await type(k, '/help');
+    await waitFor(() => notas(k.conversation).includes('── conversa'));
+    const noteK = notas(k.conversation);
+    expect(noteK).toContain('ctrl-b solta');
+    expect(noteK).not.toContain('/task ');
+    k.unmount();
   });
 });

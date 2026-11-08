@@ -4,11 +4,21 @@
 
 import { randomUUID } from 'node:crypto';
 import type { ChatMessage, NativeToolCall } from '../model/types.js';
-import { buildDigest, clip, clipPlain, describeTask, EMPTY_SNAPSHOT, statusPt } from './digest.js';
+import {
+  buildDigest,
+  clip,
+  clipBlock,
+  clipPlain,
+  describeTask,
+  EMPTY_SNAPSHOT,
+  RESULT_MAX_CHARS,
+  statusPt,
+} from './digest.js';
 import { buildConciergePrompt } from './prompt.js';
 import {
   TERMINAL_STATUSES,
   MAX_LIVE_TASKS,
+  MAX_QUEUED_TASKS,
   normalizeClaimPath,
   type TaskEvent,
   type TaskRecord,
@@ -24,7 +34,9 @@ import {
 
 /** Teto do texto que o Concierge repassa a uma tarefa (o mesmo do ADR 0002). */
 export const MAX_TASK_MESSAGE_CHARS = 1500;
-const MAX_TOOL_CALLS_PER_MESSAGE = 3;
+// Um pedido "rode 8 em paralelo" vira 8 task_start numa resposta só; com o teto antigo (3) as outras
+// 5 eram descartadas em silêncio ("t8 não chegou a abrir").
+const MAX_TOOL_CALLS_PER_MESSAGE = 12;
 const MAX_HISTORY_MESSAGES = 8;
 
 export interface ConciergeOptions {
@@ -138,7 +150,7 @@ export class Concierge {
       .map((id) => this.o.registry.get(id))
       .filter((t): t is TaskRecord => t !== undefined)
       .map((t) => {
-        const body = clip(t.result ?? t.summary ?? '(sem texto)', 1500);
+        const body = clipBlock(t.result ?? t.summary ?? '(sem texto)', RESULT_MAX_CHARS, t.id);
         return `<resultado tarefa="${t.id}" status="${statusPt(t.status)}" objetivo="${clip(t.goal, 120)}">\n${body}\n</resultado>`;
       });
     const rule = allowStart
@@ -179,13 +191,25 @@ export class Concierge {
     const notes: string[] = [];
     let reply = '';
     try {
-      const r1 = await this.o.model.call({
+      let r1 = await this.o.model.call({
         messages,
         idempotencyKey: `concierge-${randomUUID()}`,
         ...(signal ? { signal } : {}),
       });
       modelCalls++;
       tokens += (r1.usage?.tokens_in ?? 0) + (r1.usage?.tokens_out ?? 0);
+      // Resposta VAZIA (sem texto e sem tool-call: só raciocínio, ou stream cortado): tenta de novo
+      // UMA vez antes de cair no "não consegui formular" — o dono tinha de digitar "retente".
+      if (r1.content.trim() === '' && (r1.tool_calls ?? []).length === 0) {
+        r1 = await this.o.model.call({
+          messages,
+          idempotencyKey: `concierge-${randomUUID()}`,
+          ...(signal ? { signal } : {}),
+        });
+        modelCalls++;
+        tokens += (r1.usage?.tokens_in ?? 0) + (r1.usage?.tokens_out ?? 0);
+      }
+      let finish = r1.finish_reason;
       const calls = (r1.tool_calls ?? []).filter((c) =>
         (CONCIERGE_TOOL_NAMES as readonly string[]).includes(c.name),
       );
@@ -222,6 +246,7 @@ export class Concierge {
             modelCalls++;
             tokens += (r2.usage?.tokens_in ?? 0) + (r2.usage?.tokens_out ?? 0);
             reply = r2.content.trim();
+            finish = r2.finish_reason;
           } catch {
             /* o ack por template abaixo cobre */
           }
@@ -267,7 +292,16 @@ export class Concierge {
             '⚠ Nenhuma tarefa foi iniciada: o modelo disse que sim mas não chamou task_start. Peça de novo.',
           );
       }
-      if (reply === '') reply = 'Não consegui formular uma resposta; pode repetir?';
+      if (reply === '')
+        reply =
+          finish === 'length'
+            ? 'Minha resposta estourou o limite de tamanho antes de sair. Peça de novo mais curta, ou veja o resultado completo com /task show tN.'
+            : 'Não consegui formular uma resposta; pode repetir?';
+      // Cortada pelo limite de saída: NUNCA em silêncio (o dono via a resposta parar no meio da palavra).
+      else if (finish === 'length')
+        notes.push(
+          '⚠ resposta cortada pelo limite de tamanho — peça "continue" para ver o resto, ou /task show tN para o relato completo.',
+        );
     } catch (e) {
       const aborted = signal?.aborted === true;
       if (aborted) {
@@ -326,8 +360,13 @@ export class Concierge {
       case 'task_start': {
         const goal = str('goal');
         if (goal === '') return fail('objetivo vazio');
-        if (reg.live().length >= MAX_LIVE_TASKS)
-          return fail(`já há ${MAX_LIVE_TASKS} tarefas vivas; espere uma terminar ou pare uma`);
+        if (reg.live().length >= MAX_QUEUED_TASKS)
+          return fail(
+            `já há ${MAX_QUEUED_TASKS} tarefas vivas ou na fila; espere algumas terminarem`,
+          );
+        // Sem vaga (já há MAX_LIVE_TASKS rodando) a tarefa NASCE NA FILA e começa sozinha quando uma
+        // terminar — nenhuma é perdida (antes: recusa, e o dono ouvia "não cheguei a abrir").
+        const semVaga = reg.runningCount() >= MAX_LIVE_TASKS;
         const files = Array.isArray(inp['files'])
           ? (inp['files'] as unknown[])
               .filter((f): f is string => typeof f === 'string')
@@ -337,7 +376,15 @@ export class Concierge {
           goal,
           kind: reg.live().length === 0 ? 'main' : 'detached',
           files,
+          queued: semVaga,
         });
+        if (rec.status === 'blocked' && rec.blockedBy === undefined) {
+          return {
+            result: `tarefa ${rec.id} NA FILA (já há ${MAX_LIVE_TASKS} rodando); começa sozinha quando uma vaga abrir — diga ao dono que está na fila, não que falhou`,
+            note: `⏳ ${rec.id} na fila: começa quando uma das ${MAX_LIVE_TASKS} em andamento terminar.`,
+            action: { tool: name, ok: true, taskId: rec.id },
+          };
+        }
         if (rec.status === 'blocked') {
           return {
             result: `tarefa ${rec.id} criada mas ESPERA ${rec.blockedBy} (mexem nos mesmos arquivos); começa sozinha quando ${rec.blockedBy} terminar`,
@@ -396,7 +443,16 @@ export class Concierge {
         if (id !== '') {
           const t = reg.get(id);
           if (!t) return fail(`tarefa ${id} não existe`);
-          return { result: describeTask(t, now), action: { tool: name, ok: true, taskId: t.id } };
+          // Com task_id e a tarefa terminada, devolve também o RESULTADO (até o teto): é como o
+          // Concierge lê mais quando o relato do evento veio marcado como cortado.
+          const completo =
+            t.result !== undefined
+              ? `\nresultado:\n${clipBlock(t.result, RESULT_MAX_CHARS, t.id)}`
+              : '';
+          return {
+            result: `${describeTask(t, now)}${completo}`,
+            action: { tool: name, ok: true, taskId: t.id },
+          };
         }
         return { result: this.digest(), action: { tool: name, ok: true } };
       }
@@ -414,8 +470,13 @@ export class Concierge {
   }
 
   private releaseBlocked(): void {
-    for (const b of this.o.registry.releasable()) {
-      const started = this.o.registry.transition(b.id, 'running', 'arquivos liberados');
+    const vagas = Math.max(0, MAX_LIVE_TASKS - this.o.registry.runningCount());
+    for (const b of this.o.registry.releasable(vagas)) {
+      const started = this.o.registry.transition(
+        b.id,
+        'running',
+        b.queued === true ? 'vaga aberta' : 'arquivos liberados',
+      );
       if (started) this.o.engine.start(started);
     }
   }

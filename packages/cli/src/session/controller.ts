@@ -6274,7 +6274,12 @@ export class SessionController {
   }
 
   async suggestNext(
-    input: { readonly recap?: string; readonly lastGoal?: string; readonly lang: string },
+    input: {
+      readonly recap?: string;
+      readonly lastGoal?: string;
+      readonly lastReply?: string;
+      readonly lang: string;
+    },
     signal?: AbortSignal,
   ): Promise<string | undefined> {
     if (this.sideQueryModel === undefined) return undefined;
@@ -7404,8 +7409,13 @@ export class SessionController {
                   : {}),
               }
             : undefined;
+        // Modelos emitem "\n" soltos depois do texto (antes/entre as tool-calls, uma por tarefa
+        // iniciada): sem aparar, cada um virava uma linha `┃` órfã no histórico.
         blocks[blocks.length - 1] = {
           ...last,
+          // Também some o rabo de TABELA cortada (`|` sozinho, linha só de espaços/pipes): sobravam linhas
+          // em branco entre a resposta e o composer.
+          text: last.text.replace(/(?:\n[\s|]*)+$/, '').trimEnd(),
           streaming: false,
           ...(conta !== undefined ? { accounting: conta } : {}),
           ...(motivo === 'cancelled' ? { interrupted: true } : {}),

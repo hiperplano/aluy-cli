@@ -31,11 +31,10 @@ describe('CommandPalette — render da paleta de comandos', () => {
   it('lista os comandos (vazia ⇒ tudo, dentro da janela)', () => {
     const { lastFrame } = wrap(<CommandPalette hits={filterPalette('')} selected={0} />);
     const out = plain(lastFrame() ?? '');
-    expect(out).toContain('/model');
-    // Cravamos comandos do TOPO (seção "conta", dentro da janela): a lista CRESCE com o tempo
-    // (/effort, /telegram, /mcp…) e a paleta tem janela INTERNA — cravar um comando do FIM é
-    // brittle (cada comando novo empurra o último p/ fora). `/telegram` é alto na lista.
-    expect(out).toContain('/telegram');
+    // Cravamos comandos do TOPO (seção "conversa", dentro da janela): a lista CRESCE com o
+    // tempo e a paleta tem janela INTERNA — cravar um comando do FIM é brittle.
+    expect(out).toContain('/help');
+    expect(out).toContain('/rename');
   });
 
   it('expõe a AÇÃO "trocar modo" (não-slash) quando buscada', () => {

@@ -17,6 +17,7 @@ import {
 } from './synchronized-output.js';
 import { enableBracketedPaste } from './bracketed-paste.js';
 import { disableAutowrap, noAutowrapEnabled } from './autowrap.js';
+import { installStdioGuard } from './stdio-guard.js';
 import { resolveTheme } from '../ui/theme/index.js';
 import { tableLines } from '../ui/table-lines.js';
 import type { RewindChoice } from '../ui/hooks/useRewindPicker.js';
@@ -255,7 +256,7 @@ import { buildServiceCreateSystemPrompt, SERVICE_DRAFTS_DIRNAME } from '../slash
 import { parseMemoryCommand, runMemoryCommand } from '../slash/memory.js';
 import { parseTodoCommand, runTodoCommand } from '../slash/todo.js';
 import { onSemanticMemoryNotice } from '../maestro/semantic-memory-notice.js';
-import { runCron } from '../commands/cron.js';
+import { runCron, loadState as loadCronState } from '../commands/cron.js';
 import {
   parseClearCommand,
   runClearCommand,
@@ -2378,6 +2379,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   const conciergeRuntime: ConciergeRuntime | undefined =
     isTty && opts.anonymous !== true
       ? new ConciergeRuntime({
+          // Várias tarefas terminando juntas viram UM relato (janela de agrupamento).
+          reportSettleMs: 1500,
+          reportBatchMs: 20_000,
           sink: built.controller,
           model: built.conciergeModel,
           // As 4 tools do Concierge passam pelo MESMO ponto único (`decide()`): só `allow`
@@ -2401,6 +2405,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               sessionId: `${activeSession.id}-${taskId}`,
               excludeTools: TASK_EXCLUDED_TOOLS,
               traceLabel: `task ${taskId}`,
+              // O aviso de yolo já saiu no boot/1º turno da sessão principal; uma por tarefa seria um
+              // `write` cru no TTY por tarefa (fantasma da linha de trabalho).
+              weakYoloWarn: () => undefined,
             }).controller;
           },
           // A memória do dono (ADR 0004) entra curta no prompt do Concierge: só fatos `usuario`.
@@ -4722,6 +4729,9 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           // Âncora do composer (16/09): com a tela cheia, o quadro vivo não encolhe — o composer
           // para de subir e descer quando algo vivo some. `ALUY_COMPOSER_ANCHOR=0` desliga.
           anchor: env.ALUY_COMPOSER_ANCHOR !== '0',
+          // Auto-wrap OFF por quadro (`?7l … ?7h`): linha que o terminal mede mais larga é cortada, não
+          // quebrada ⇒ o erase relativo do Ink não fica 1 linha curto. `ALUY_AUTOWRAP=1` desliga.
+          autowrap: noAutowrapEnabled(env),
         })
       : undefined;
   const renderStdout = sync?.stdout ?? baseStdout;
@@ -4761,7 +4771,16 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // Ink (emoji ZWJ/tom de pele…) ⇒ nº de linhas físicas == nº que o Ink emitiu ⇒ o erase da
   // região viva nunca deixa a linha de trabalho/branco para trás. Ver `autowrap.ts`.
   const autowrap = disableAutowrap(baseStdout, noAutowrapEnabled(env));
+  // GUARDA DE STDIO: com a TUI de pé, `stderr`/`console.*`/stdout de texto puro por fora do Ink viram
+  // NOTA na transcrição (dedup) em vez de tocar o TTY — um `write` cru desloca a tela 1 linha, o erase
+  // relativo do Ink fica 1 curto e a frase de trabalho vira fantasma. Só com o wrapper do Ink ativo
+  // (é ele que marca as escritas do app); restaurada no unmount/exit.
+  const stdioGuard =
+    sync !== undefined && env.ALUY_STDIO_GUARD !== '0'
+      ? installStdioGuard({ onLine: (l) => built.controller.pushNote('aviso', [l]) })
+      : undefined;
   const disableBracketedPaste = (): void => {
+    stdioGuard?.restore();
     pasteMode.disable();
     autowrap.restore();
   };
@@ -5119,6 +5138,53 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           configStore.saveSuggestions(on);
         }}
         onExportTranscript={exportTranscript}
+        currentNotify={() => notifyPort.mode ?? (notifyPort.enabled ? 'all' : 'off')}
+        menuData={{
+          // Listas dos seletores de comando (`/memory`, `/todo`, `/cron`…). Só LEITURA: o efeito
+          // continua sendo o do comando digitado (o seletor roda `runCommand` com os mesmos args).
+          memory: async () =>
+            (await built.memory.list()).map((f) => ({
+              id: f.id,
+              label: f.text,
+              hint: `${f.scope}${f.pinned ? ' · fixado' : ''}`,
+              flag: f.pinned,
+            })),
+          todo: async () =>
+            (await built.todoStore.list()).map((t) => ({
+              id: t.id,
+              label: `${t.done ? '✓' : '○'} ${t.text}`,
+              flag: t.done,
+            })),
+          cron: async () =>
+            loadCronState().jobs.map((j) => ({
+              id: j.id,
+              label: `${j.schedule} · ${j.task}`,
+              hint: j.enabled === false ? 'desativado' : 'ativo',
+              flag: j.enabled !== false,
+            })),
+          plugins: async () =>
+            pluginsLidos.plugins.map((p) => ({
+              id: p.manifest.name,
+              label: p.manifest.name,
+              hint: p.ativo ? 'ligado' : 'desligado',
+              flag: p.ativo,
+            })),
+          workflows: async () =>
+            [
+              ...new UserWorkflowsLoader().load().workflows,
+              ...new ProjectWorkflowsLoader({ workspace: built.workspace }).load().workflows,
+            ].map((w) => ({ id: w.name, label: w.name })),
+          services: async () =>
+            new UserServicesStore().list().services.map((s) => ({ id: s.name, label: s.name })),
+          subagents: async () =>
+            [...globalAgents.profiles, ...projectAgents.profiles, ...pluginAgents.profiles].map(
+              (p) => ({
+                id: p.name,
+                label: p.name,
+                ...(p.description !== undefined ? { hint: p.description } : {}),
+              }),
+            ),
+        }}
         onSelectTier={(tier, model, opts) => {
           // EST-0962 — o seletor confirmou: troca o tier da sessão (caller → próxima
           // chamada) e registra uma nota NEUTRA (HG-2: só o tier/slug, nunca o provider).

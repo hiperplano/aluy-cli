@@ -28,6 +28,8 @@ export function useTheme(): Theme {
 export function Role(props: {
   readonly name: TermRole;
   readonly children: React.ReactNode;
+  /** `truncate-end` ⇒ nunca quebra em 2 linhas (linhas de rodapé de UMA linha). */
+  readonly wrap?: 'truncate-end';
 }): React.ReactElement {
   const theme = useTheme();
   const style = theme.role(props.name);
@@ -42,7 +44,11 @@ export function Role(props: {
   if (style.bold !== undefined) textProps.bold = style.bold;
   if (style.dimColor !== undefined) textProps.dimColor = style.dimColor;
   if (style.inverse !== undefined) textProps.inverse = style.inverse;
-  return <Text {...textProps}>{props.children}</Text>;
+  return (
+    <Text {...textProps} {...(props.wrap !== undefined ? { wrap: props.wrap } : {})}>
+      {props.children}
+    </Text>
+  );
 }
 
 /** Glifo resolvido (Unicode/ASCII), opcionalmente pintado por um papel. */

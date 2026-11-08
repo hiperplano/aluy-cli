@@ -67,7 +67,9 @@ const RULES: readonly SecretRule[] = [
   //   • `(?=\S)(?!=)` — exige ≥1 char não-branco colado (não casa `-p` solo, que o
   //     teste "nunca lança" cobre) e não casa a forma `-p=…` (cai na genérica).
   {
-    re: /(?<![\w-])(-p)(?=\S)(?!=)([^\s"'`]+)/g,
+    // `-print`/`-print0`/`-printf`/`-path`/`-perm`/`-prune` (find) são operadores, não senha colada:
+    // só ficam de fora quando a palavra é INTEIRA (`-printf '…'`); `-pprintfXYZ` segue redigido.
+    re: /(?<![\w-])(-p)(?=\S)(?!=)(?!(?:rint|rint0|rintf|ath|erm|rune)(?=\s|$))([^\s"'`]+)/g,
     replace: (m) => `${m[1]}${REDACTED}`,
   },
   // `-u user:senha` (curl HTTP basic): redige só a SENHA após o `:`, mantendo o

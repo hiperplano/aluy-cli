@@ -5,6 +5,7 @@ import {
   buildPanelRows,
   panelLines,
   summaryText,
+  MAX_PANEL_TASKS,
   type PanelInput,
 } from '../../src/ui/components/ConciergeTasks.js';
 import type { SubAgentChildView } from '../../src/ui/components/SubAgents.js';
@@ -54,7 +55,7 @@ describe('painel de tarefas — hierarquia por TAREFA, agentes aninhados', () =>
   it('falta espaço: os AGENTES recolhem para `· N agentes` na linha da tarefa (uma linha por tarefa)', () => {
     const ts = [task('t1'), task('t2'), task('t3')];
     const rows = buildPanelRows(
-      base(ts, { maxRows: 4, childrenOf: (id) => (id === 't1' ? [kid('a'), kid('b')] : []) }),
+      base(ts, { maxRows: 5, childrenOf: (id) => (id === 't1' ? [kid('a'), kid('b')] : []) }),
     );
     expect(rows.map((r) => r.kind)).toEqual(['header', 'task', 'task', 'task']);
     const t1 = rows[1] as { view: SubAgentChildView };
@@ -62,11 +63,82 @@ describe('painel de tarefas — hierarquia por TAREFA, agentes aninhados', () =>
     expect(t1.view.status).toBe('running'); // segue vivo (brilho)
   });
 
-  it('nem as tarefas cabem: linha-resumo `3 tarefas · 3 rodando · ↓ ver` + no máx. 2 linhas vivas', () => {
+  it('nem as tarefas cabem: mostra as que cabem (prioridade) e `… +N tarefas ocultas · ↓ ver`', () => {
     const rows = buildPanelRows(base([task('t1'), task('t2'), task('t3')], { maxRows: 2 }));
-    expect(rows.map((r) => r.kind)).toEqual(['summary', 'task', 'task']);
-    expect(rows[0]).toMatchObject({ kind: 'summary', text: '3 tarefas · 3 rodando · ↓ ver' });
+    expect(rows.map((r) => r.kind)).toEqual(['header', 'task', 'summary']);
+    expect(rows.at(-1)).toMatchObject({ kind: 'summary', text: '… +2 tarefas ocultas · ↓ ver' });
     expect(summaryText([task('t1')], false)).toBe('1 tarefa · 1 rodando');
+    // 3 terminaram, a lista só desenha 2: o resumo ainda conta as 3 (não "2 tarefas · 2 encerradas").
+    const fim = (id: string) => task(id, { status: 'done', endedAt: 5 });
+    expect(summaryText([fim('t2'), fim('t3')], false, 1)).toBe('3 tarefas · 3 encerradas');
+  });
+
+  describe('até MAX_PANEL_TASKS tarefas ao mesmo tempo', () => {
+    const muitas = (n: number): TaskRecord[] =>
+      Array.from({ length: n }, (_, k) => task(`t${k + 1}`));
+    it('8 tarefas (espaço de sobra): 6 linhas de tarefa + `… +2 tarefas ocultas · ↓ ver`', () => {
+      const rows = buildPanelRows(base(muitas(8), { maxRows: 14 }));
+      expect(rows.filter((r) => r.kind === 'task')).toHaveLength(MAX_PANEL_TASKS);
+      expect(MAX_PANEL_TASKS).toBe(6);
+      expect(rows.at(-1)).toMatchObject({ kind: 'summary', text: '… +2 tarefas ocultas · ↓ ver' });
+    });
+    it('exatamente 6: sem a linha de ocultas; 7: `+1 tarefa oculta`', () => {
+      expect(buildPanelRows(base(muitas(6), { maxRows: 14 })).map((r) => r.kind)).toEqual([
+        'header',
+        'task',
+        'task',
+        'task',
+        'task',
+        'task',
+        'task',
+      ]);
+      expect(buildPanelRows(base(muitas(7), { maxRows: 14 })).at(-1)).toMatchObject({
+        text: '… +1 tarefa oculta · ↓ ver',
+      });
+    });
+    it('statusline compact também mostra até 6 (resumo + tarefas + ocultas)', () => {
+      const rows = buildPanelRows(base(muitas(8), { maxRows: 14, statusline: 'compact' }));
+      expect(rows.map((r) => r.kind)).toEqual([
+        'summary',
+        'task',
+        'task',
+        'task',
+        'task',
+        'task',
+        'task',
+        'summary',
+      ]);
+    });
+    it('prioridade: aguardando aprovação, depois rodando, depois na fila, depois encerradas', () => {
+      const ts = [
+        task('t1', { status: 'done', endedAt: 5 }),
+        task('t2', { status: 'blocked', queued: true }),
+        task('t3'),
+        task('t4', { status: 'waiting_approval' }),
+      ];
+      const rows = buildPanelRows(base(ts, { maxRows: 14 }));
+      const ordem = rows
+        .filter((r) => r.kind === 'task')
+        .map((r) => (r as { view: SubAgentChildView }).view.label);
+      expect(ordem).toEqual(['t4', 't3', 't2', 't1']);
+      // com teto de 2 sobram as de maior prioridade
+      const so2 = buildPanelRows(base(ts, { maxRows: 4 }));
+      expect(
+        so2
+          .filter((r) => r.kind === 'task')
+          .map((r) => (r as { view: SubAgentChildView }).view.label),
+      ).toEqual(['t4', 't3']);
+    });
+    it('terminal baixo: o painel NUNCA passa de maxRows (cabeçalho + tarefas + ocultas), qualquer nº de tarefas', () => {
+      for (const statusline of ['full', 'compact'] as const)
+        for (let room = 3; room <= 14; room++)
+          for (const n of [1, 2, 3, 6, 7, 12]) {
+            const rows = buildPanelRows(base(muitas(n), { maxRows: room, statusline }));
+            expect(panelLines(rows), `${statusline} room=${room} n=${n}`).toBeLessThanOrEqual(
+              Math.max(room, 3),
+            );
+          }
+    });
   });
 
   it('expandido: tarefas COM os agentes + dica de teclas; seleção marcada', () => {

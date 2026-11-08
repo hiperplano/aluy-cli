@@ -7,6 +7,8 @@
 // de token força o re-render APÓS avançar o clock — prova que o valor lido é o vivo, que
 // é o que o tick de 1s faria na TUI real a cada segundo.)
 
+import { parseFrases } from '../../src/session/frases-espera.js';
+import { resolveText } from '../../src/i18n/translate.js';
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
@@ -132,7 +134,9 @@ describe('UX de saída', () => {
     const f1 = plain(r.lastFrame());
     const v1 = controller.current.workingVerb;
     expect(v1).toBeDefined();
-    expect(f1).toContain(`${v1}…`);
+    // A linha mostra uma FRASE de espera (gira a cada minuto), não mais o gerúndio do passo.
+    const frases = parseFrases(resolveText('pt-BR', 'working.quips'));
+    expect(frases.some((f) => f1.includes(`${f}…`))).toBe(true);
     // novo passo dentro do mesmo turno (model-call): mesmo verbo
     (controller as unknown as { patch(p: object): void }).patch({
       phase: 'thinking',

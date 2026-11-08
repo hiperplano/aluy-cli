@@ -127,6 +127,14 @@ describe('composer parado com a tela cheia', () => {
     await flush();
     expect(controller.current.phase).toBe('streaming');
     const streaming = rowsBelowComposer(r.lastFrame() ?? '');
+    // A linha de trabalho tem EXATAMENTE 1 linha em branco acima COM a prévia de fala viva (o
+    // `paddingBottom` do bloco do aluy) — e 1 sem ela (o `paddingTop` da linha). Somar os dois
+    // dava 2 e o composer descia 1 linha na virada prévia → tool-line.
+    const ls = plain(r.lastFrame() ?? '').split('\n');
+    const iw = ls.findIndex((l) => /^Λ (?!luy)/.test(l.trim()));
+    expect(iw, 'linha de trabalho não encontrada').toBeGreaterThan(1);
+    expect(ls[iw - 1]!.trim(), 'sem respiro acima da linha de trabalho').toBe('');
+    expect(ls[iw - 2]!.trim(), 'respiro duplicado acima da linha de trabalho').not.toBe('');
 
     release();
     await second;

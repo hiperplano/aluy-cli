@@ -478,6 +478,12 @@ export interface BuildSessionOptions {
    */
   readonly sessionCommands?: string;
   /**
+   * Sink do aviso de yolo+tier fraco do controller. Ausente ⇒ stderr. Sessões de TAREFA do Concierge
+   * (e qualquer sessão filha sob a TUI) passam um no-op: o aviso já saiu uma vez e um `write` cru no
+   * TTY, fora do Ink, desloca a tela e o erase relativo deixa a linha de trabalho para trás.
+   */
+  readonly weakYoloWarn?: (line: string) => void;
+  /**
    * EST-0970 · ADR-0058 · CLI-SEC-12 — tools de SERVERS MCP locais JÁ DESCOBERTAS
    * pelo startup (run.tsx → setupMcp: lê `~/.aluy/mcp.json` confinado, lança os
    * servers, handshake, lista). Como `buildSession` é síncrono (sem I/O de processo
@@ -1290,7 +1296,11 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
   const conciergeStream = new StreamingModelCaller({
     client: liveClient,
     tier,
-    maxTokens: 700,
+    // Teto de SAÍDA do Concierge. Era 700: cortava a resposta no meio da palavra quando o dono pedia
+    // uma tabela/lista do resultado de uma tarefa, e um modelo que raciocina gastava tudo pensando
+    // (`finish_reason: length` sem texto ⇒ "não consegui formular"). A brevidade vem do PROMPT; o
+    // teto só protege contra descontrole.
+    maxTokens: 4096,
     // Raciocínio do modelo NÃO aparece na resposta do Concierge (só a fala).
     sink: conciergeSink,
     ...(tracer ? { traceWith: (c: ModelClient) => tracer(c, () => 'concierge') } : {}),
@@ -1467,6 +1477,7 @@ export function buildSession(opts: BuildSessionOptions = {}): BuiltSession {
 
   const controller = new SessionController({
     model: caller,
+    ...(opts.weakYoloWarn ? { weakYoloWarn: opts.weakYoloWarn } : {}),
     ...(opts.onRememberTool ? { onRememberTool: opts.onRememberTool } : {}),
     compactionModel: compactionCaller,
     sideQueryModel: sideQueryCaller,

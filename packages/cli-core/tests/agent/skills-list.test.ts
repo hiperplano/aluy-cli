@@ -26,6 +26,8 @@ describe('EST-1112 · buildSkillsNote — formatador puro', () => {
     expect(note.title).toBe('skills');
     expect(note.lines.join('\n')).toMatch(/nenhuma skill mapeada/);
     expect(note.lines.join('\n')).toMatch(/~\/\.aluy\/skills\/<nome>\/SKILL\.md/);
+    // não cita um comando que não existe (`/skill <nome>` não está no menu)
+    expect(note.lines.join('\n')).not.toMatch(/\/skill </);
   });
 
   it('respeita o globalDir injetado na mensagem vazia', () => {
@@ -63,7 +65,8 @@ describe('EST-1112 · buildSkillsNote — formatador puro', () => {
     expect(txt).toContain('pdf');
     expect(txt).toContain('global');
     expect(txt).toContain('preenche pdf');
-    expect(txt).toMatch(/invoque por nome com \/skill/);
+    expect(txt).toMatch(/mapeadas/);
+    expect(txt).not.toMatch(/\/skill </);
   });
 
   it('rejeitadas (tabela) com o motivo + dica de conserto', () => {

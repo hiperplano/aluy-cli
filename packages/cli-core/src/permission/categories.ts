@@ -358,6 +358,11 @@ function looksOutsideWorkspace(path: string): boolean {
   if (path === '') return false;
   // sobe de diretório explicitamente
   if (/(?:^|\/)\.\.(?:\/|$)/.test(path)) return true;
+  // SUMIDOUROS padrão (`2>/dev/null`, `> /dev/stderr`, `/dev/fd/N`): redirecionar para eles não
+  // escreve em arquivo nenhum. Antes caíam em `/dev` abaixo e TODO comando com `2>/dev/null`
+  // virava `always-ask:outside-workspace` (inclusive sob `/a!`). Casamento EXATO — `/dev/sda`,
+  // `/dev/null/../x` (já pego pelo `..`) e demais caminhos de `/dev` seguem fora do workspace.
+  if (/^\/dev\/(?:null|stdout|stderr|stdin|fd\/\d+)$/.test(path)) return false;
   // home de outro usuário (~outro/...) OU a própria home via `~`/`~/...`
   // (`~/notes.txt`, `~/.config/foo`). Escrever na HOME é FORA do workspace por
   // padrão — o confinamento REAL (saber se o workspace está sob a home) é do

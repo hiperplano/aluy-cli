@@ -21,7 +21,9 @@ import type { ModelCallResult } from '../../src/model/types.js';
 
 function callerQueResponde(content: string): SuggestCaller {
   return {
-    call: vi.fn(async () => ({ request_id: 'r', content, finish_reason: 'stop' }) as ModelCallResult),
+    call: vi.fn(
+      async () => ({ request_id: 'r', content, finish_reason: 'stop' }) as ModelCallResult,
+    ),
   };
 }
 
@@ -51,7 +53,8 @@ describe('sanitizeSuggestion — o texto do modelo dobrado numa linha de compose
   });
 
   it('"NADA" (o combinado do prompt p/ sem próximo passo) ⇒ undefined, não a palavra', () => {
-    for (const v of ['NADA', 'nada', 'Nada.', 'NADA!']) expect(sanitizeSuggestion(v)).toBeUndefined();
+    for (const v of ['NADA', 'nada', 'Nada.', 'NADA!'])
+      expect(sanitizeSuggestion(v)).toBeUndefined();
   });
 
   it('vazio, só espaço ou undefined ⇒ undefined', () => {
@@ -73,6 +76,22 @@ describe('sanitizeSuggestion — o texto do modelo dobrado numa linha de compose
     );
     expect(r).toBe('Claro! Aqui está uma boa sugestão de próximo passo:');
     expect(r).not.toContain('\n');
+  });
+});
+
+describe('buildSuggestMessages — a fala mais recente do agente entra no contexto', () => {
+  it('leva o relato mais recente (tarefa já concluída) além do pedido original', () => {
+    const [sys, user] = buildSuggestMessages({
+      lang: 'pt-BR',
+      lastGoal: 'corrige os bugs do calc.py',
+      lastReply: 'A t1 concluiu: bugs corrigidos e testes passando.',
+    });
+    expect(user!.content).toContain('corrige os bugs do calc.py');
+    expect(user!.content).toContain('O agente disse por último: A t1 concluiu');
+    expect(String(sys!.content)).toContain('MAIS RECENTE');
+  });
+  it('só com a fala mais recente já há contexto', () => {
+    expect(buildSuggestMessages({ lang: 'pt-BR', lastReply: 'feito' })).toHaveLength(2);
   });
 });
 

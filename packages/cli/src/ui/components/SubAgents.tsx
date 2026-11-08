@@ -53,6 +53,8 @@ export interface SubAgentsProps {
   readonly frame?: number;
   /** Rodapé: sem o respiro de baixo (o painel fica colado ao que vem antes/depois). */
   readonly flush?: boolean;
+  /** Células disponíveis ao bloco (cada linha é ajustada em texto plano). Ausente ⇒ sem ajuste. */
+  readonly maxWidth?: number;
 }
 
 /** Palavra do estado (a11y): glifo NUNCA sozinho. `timeout`/`limit` ⇒ palavra honesta. */
@@ -75,15 +77,131 @@ function statusWord(child: SubAgentChildView, settled = false): string {
   }
 }
 
+/** Corta `texto` a `max` células (com `…` no fim). Texto PLANO — nunca passe aqui saída com ANSI. */
+function cortar(texto: string, max: number): string {
+  if (max <= 0) return '';
+  if (stringWidth(texto) <= max) return texto;
+  let out = '';
+  for (const ch of texto) {
+    if (stringWidth(out + ch) > max - 1) break;
+    out += ch;
+  }
+  return `${out.trimEnd()}…`;
+}
+
+/** Piso do objetivo (`[t1 …]`) antes de o resumo começar a ser cortado. */
+const OBJETIVO_MIN = 18;
+
+/**
+ * Ajusta a linha do filho a `celulas` em TEXTO PLANO (antes de qualquer cor/brilho). Ordem do que
+ * PERDE, até caber:
+ *   1. `herdado (modelo)` — igual em todas as linhas e a statusline já mostra o modelo (um modelo
+ *      NÃO herdado é informação e fica);
+ *   2. o ` (97% cache)` do resumo;
+ *   3. o objetivo, até `OBJETIVO_MIN`;
+ *   4. o resumo (cortado com `…`);
+ *   5. o modelo não herdado;
+ *   6. o objetivo abaixo do piso;
+ *   7. o tempo — por último.
+ * `glifo` = células fixas do glifo + espaços. Sem `celulas` devolve tudo intacto.
+ */
+export function ajustarLinhaDoFilho(a: {
+  readonly rotulo: string;
+  readonly word: string;
+  readonly model: string | undefined;
+  readonly summary: string | undefined;
+  readonly tempo: string | undefined;
+  readonly celulas: number | undefined;
+  readonly glifo: number;
+}): { rotulo: string; model?: string; summary?: string; tempo?: string } {
+  const sep = ' · ';
+  const pack = (
+    rotulo: string,
+    model: string | undefined,
+    summary: string | undefined,
+    tempo: string | undefined,
+  ): { rotulo: string; model?: string; summary?: string; tempo?: string } => ({
+    rotulo,
+    ...(model !== undefined ? { model } : {}),
+    ...(summary !== undefined ? { summary } : {}),
+    ...(tempo !== undefined ? { tempo } : {}),
+  });
+  if (a.celulas === undefined) return pack(a.rotulo, a.model, a.summary, a.tempo);
+  const celulas = a.celulas;
+  let rotulo = a.rotulo;
+  let model = a.model;
+  let summary = a.summary;
+  let tempo = a.tempo;
+  const w = (t: string | undefined): number => (t === undefined ? 0 : stringWidth(sep + t));
+  const total = (): number =>
+    stringWidth(rotulo) + a.glifo + stringWidth(a.word) + w(model) + w(summary) + w(tempo);
+  const falta = (): number => total() - celulas;
+  if (falta() <= 0) return pack(rotulo, model, summary, tempo);
+  // 1. modelo herdado
+  if (model !== undefined && model.startsWith('herdado (')) model = undefined;
+  // 2. % de cache
+  if (falta() > 0 && summary !== undefined)
+    summary = summary.replace(/\s*\(\d+% cache\)/, '') || undefined;
+  // 3. objetivo até o piso
+  if (falta() > 0 && stringWidth(rotulo) > OBJETIVO_MIN)
+    rotulo = cortar(rotulo, Math.max(OBJETIVO_MIN, stringWidth(rotulo) - falta()));
+  // 4. resumo
+  if (falta() > 0 && summary !== undefined) {
+    const cabe = stringWidth(summary) - falta() - stringWidth(sep);
+    summary = cabe >= 4 ? cortar(summary, cabe) : undefined;
+  }
+  // 5. modelo não herdado
+  if (falta() > 0) model = undefined;
+  // 6. objetivo abaixo do piso
+  if (falta() > 0) rotulo = cortar(rotulo, Math.max(6, stringWidth(rotulo) - falta()));
+  // 7. tempo, por último
+  if (falta() > 0) tempo = undefined;
+  return pack(rotulo, model, summary, tempo);
+}
+
 /** UMA linha de filho: `  [rust] ◷ rodando` / `  [rust] ✓ pronto · 1.2k tokens · 3 tools`. */
 export function ChildLine(props: {
   readonly child: SubAgentChildView;
   readonly settled?: boolean;
   readonly frame?: number;
+  /**
+   * Células disponíveis à linha INTEIRA (incluindo o recuo de 2 dela). Dado, a linha é ajustada em
+   * TEXTO PLANO antes de pintar (cauda cortada: resumo → modelo → tempo). Sem isto, o Ink encolhia
+   * cada pedaço da linha por conta própria e perdia letras/o modelo/o `tools` quando a linha não cabia.
+   */
+  readonly maxWidth?: number;
 }): React.ReactElement {
   const theme = useTheme();
-  const c = props.child;
+  // Texto livre (atividade da tool, objetivo) numa linha só: controle/tab/CR somem — o Ink conta
+  // `\t` como 0 coluna e o terminal como até 8, e a linha quebraria fisicamente (fantasma de quadro).
+  const limpo = (t: string): string =>
+    Array.from(t, (ch) => {
+      const n = ch.codePointAt(0) ?? 0;
+      return n < 0x20 || (n >= 0x7f && n <= 0x9f) ? ' ' : ch;
+    }).join('');
+  const c0 = props.child;
+  const c: SubAgentChildView = {
+    ...c0,
+    label: limpo(c0.label),
+    ...(c0.summary !== undefined ? { summary: limpo(c0.summary) } : {}),
+  };
   const word = statusWord(c, props.settled === true);
+  const tempo =
+    c.status === 'running' &&
+    c.word === undefined &&
+    props.settled !== true &&
+    c.startedAt !== undefined
+      ? formatSegundos(Date.now() - c.startedAt)
+      : undefined;
+  const ajuste = ajustarLinhaDoFilho({
+    rotulo: `[${c.label}]`,
+    word,
+    model: c.model,
+    summary: c.summary,
+    tempo,
+    celulas: props.maxWidth !== undefined ? props.maxWidth - 2 : undefined,
+    glifo: 4,
+  });
   const glyph =
     c.status === 'running' ? (
       <Glyph name="clock" role="depth" />
@@ -97,7 +215,7 @@ export function ChildLine(props: {
     );
   // Só quem está RODANDO brilha — `settled` (scrollback) é história, nunca repinta.
   const viva = c.status === 'running' && c.word === undefined && props.settled !== true;
-  const rotulo = `[${c.label}]`;
+  const rotulo = ajuste.rotulo;
   const total = rotulo.length + 1 + word.length;
   const wordRole = c.status === 'done' ? 'success' : c.status === 'fail' ? 'danger' : 'fgDim';
   // O `✔` mede DUAS colunas na conta do Ink (`string-width`) e UMA na nossa
@@ -142,16 +260,14 @@ export function ChildLine(props: {
       )}
       {/* ADR-0146 (D5) — tier/modelo RESOLVIDO: visível enquanto roda E mantido no
           resumo final (mesma linha, ao lado do status/summary). NUNCA credencial. */}
-      {c.model !== undefined && <Role name="fgDim"> · {c.model}</Role>}
+      {ajuste.model !== undefined && <Role name="fgDim"> · {ajuste.model}</Role>}
       {/* O resumo aparece TAMBÉM enquanto ele corre. Era escondido no `running` porque, na
           época, o número só existia no fim; desde que o uso do filho passou a subir a cada
           débito (`onChildProgress`), esconder o resumo é esconder justamente o que muda. */}
-      {c.summary !== undefined && <Role name="fgDim"> · {c.summary}</Role>}
+      {ajuste.summary !== undefined && <Role name="fgDim"> · {ajuste.summary}</Role>}
       {/* F13 — sem o relógio, um filho esperando a 1ª resposta do modelo ficava em "0 tokens"
           por segundos, indistinguível de travado. */}
-      {viva && c.startedAt !== undefined && (
-        <Role name="fgDim"> · {formatSegundos(Date.now() - c.startedAt)}</Role>
-      )}
+      {viva && ajuste.tempo !== undefined && <Role name="fgDim"> · {ajuste.tempo}</Role>}
     </Box>
   );
 }
@@ -173,14 +289,26 @@ export function SubAgents(props: SubAgentsProps): React.ReactElement {
         </Role>
         {headTail !== '' && <Role name="fgDim">{headTail}</Role>}
       </Box>
-      {items.map((c, i) => (
-        <ChildLine
-          key={`${c.label}:${i}`}
-          child={c}
-          settled={props.settled === true}
-          {...(props.frame !== undefined ? { frame: props.frame } : {})}
-        />
-      ))}
+      {items.map((c, i) => {
+        const line = (
+          <ChildLine
+            key={`${c.label}:${i}`}
+            child={c}
+            settled={props.settled === true}
+            {...(props.frame !== undefined ? { frame: props.frame } : {})}
+            {...(props.maxWidth !== undefined ? { maxWidth: props.maxWidth - 2 } : {})}
+          />
+        );
+        // Cópia FIXA do rodapé: UMA linha por agente (quebrar em terminal estreito mudava a
+        // altura do rodapé e o composer pulava).
+        return props.flush === true ? (
+          <Box key={`${c.label}:${i}`} height={1} overflow="hidden">
+            {line}
+          </Box>
+        ) : (
+          line
+        );
+      })}
     </Box>
   );
 }

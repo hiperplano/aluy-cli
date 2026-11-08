@@ -78,7 +78,7 @@ describe('syncOutputEnabled — toggle (EST-0965)', () => {
 describe('wrapStdoutWithSync — unidade: cada write vira BSU+chunk+ESU (EST-0965)', () => {
   it('envolve um chunk de frame num ÚNICO write real (não fatia em 3)', () => {
     const out = captureStream();
-    const { stdout } = wrapStdoutWithSync(out);
+    const { stdout } = wrapStdoutWithSync(out, { autowrap: false });
     stdout.write('FRAME-A');
     // UM write ao stream real, com BSU+conteúdo+ESU concatenados.
     expect(out.writes()).toEqual([`${BSU}FRAME-A${ESU}`]);
@@ -88,7 +88,7 @@ describe('wrapStdoutWithSync — unidade: cada write vira BSU+chunk+ESU (EST-096
 
   it('cada frame é um par BSU…ESU isolado (writes balanceados)', () => {
     const out = captureStream();
-    const { stdout } = wrapStdoutWithSync(out);
+    const { stdout } = wrapStdoutWithSync(out, { autowrap: false });
     stdout.write('F1');
     stdout.write('F2');
     expect(out.writes()).toEqual([`${BSU}F1${ESU}`, `${BSU}F2${ESU}`]);
@@ -100,7 +100,7 @@ describe('wrapStdoutWithSync — unidade: cada write vira BSU+chunk+ESU (EST-096
 
   it('chunk vazio ⇒ delega cru (não emite BSU/ESU em volta de nada)', () => {
     const out = captureStream();
-    const { stdout } = wrapStdoutWithSync(out);
+    const { stdout } = wrapStdoutWithSync(out, { autowrap: false });
     stdout.write('');
     expect(out.text()).toBe('');
   });
@@ -111,9 +111,13 @@ describe('wrapStdoutWithSync — unidade: cada write vira BSU+chunk+ESU (EST-096
     stdout.write('F');
     cleanup();
     cleanup(); // idempotente: não emite um 2º ESU.
-    expect(out.text()).toBe(`${BSU}F${ESU}${ESU}`);
+    // (o auto-wrap por quadro `?7l…?7h` e o `?7h` do cleanup ficam de fora desta conta)
+    expect(out.text().replaceAll('\x1b[?7l', '').replaceAll('\x1b[?7h', '')).toBe(
+      `${BSU}F${ESU}${ESU}`,
+    );
     // o ESU final NÃO vem envolto em BSU (não é um frame; é o reset do modo).
     expect(out.writes().at(-1)).toBe(ESU);
+    expect(out.text()).toContain('\x1b[?7h'); // o shell do dono não fica sem auto-wrap
   });
 
   it('delega isTTY/columns/rows ao stream original (Ink precisa p/ layout)', () => {

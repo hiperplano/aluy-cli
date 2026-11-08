@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { TASK_COST_HINT, taskGoalForAgent } from '../../src/concierge/prompt.js';
 import {
   Concierge,
   TaskRegistry,
   buildConciergePrompt,
   buildDigest,
+  clipBlock,
+  clipPlain,
   type ConciergeEngine,
   type ConciergeModel,
   type TaskRecord,
@@ -143,7 +146,7 @@ describe('Concierge — correção vai para a tarefa certa', () => {
 });
 
 describe('Concierge — tarefas paralelas e arquivos', () => {
-  it('duas tarefas paralelas sobem juntas; a quinta é recusada', async () => {
+  it('tarefas paralelas sobem juntas; a quinta com 4 rodando vai para a FILA (não é recusada)', async () => {
     const { engine, concierge } = setup(() =>
       result('ok', [
         call('task_start', { goal: 'um' }, 'a'),
@@ -156,8 +159,10 @@ describe('Concierge — tarefas paralelas e arquivos', () => {
     const again = setup(() => result('ok', [call('task_start', { goal: 'x' })]));
     for (let i = 0; i < 4; i++) again.registry.create({ goal: `g${i}`, kind: 'detached' });
     const r = await again.concierge.handle('mais um');
-    expect(r.actions[0]!.ok).toBe(false);
-    expect(again.engine.started).toHaveLength(0);
+    expect(r.actions[0]!.ok).toBe(true);
+    expect(again.registry.get('t5')!.status).toBe('blocked');
+    expect(again.registry.get('t5')!.queued).toBe(true);
+    expect(again.engine.started).toHaveLength(0); // sem vaga: só inicia quando uma terminar
   });
 
   it('mesmo arquivo: a segunda espera a primeira, avisa, e começa quando a primeira termina', async () => {
@@ -471,5 +476,187 @@ describe('Concierge — nunca afirma uma tarefa que não existe (regressão live
     const r = await concierge.handle('como está?');
     expect(r.modelCalls).toBe(1);
     expect(r.notes).toEqual([]);
+  });
+});
+
+describe('Concierge — resultado da tarefa chega ÍNTEGRO ao relato (regressão live: "veio truncado")', () => {
+  const RELATO = Array.from(
+    { length: 40 },
+    (_, i) => `- item ${String(i + 1).padStart(2, '0')}: valor ${'x'.repeat(40)}`,
+  ).join('\n');
+
+  it('clipBlock mantém as quebras de linha, redige segredo e apara o fim', () => {
+    const out = clipBlock('linha 1\nlinha 2\napi_key=sk-abcdef1234567890abcdef\n\n\n', 1000);
+    expect(out.split('\n')).toHaveLength(3);
+    expect(out).not.toContain('sk-abcdef1234567890abcdef');
+    expect(out.endsWith('\n')).toBe(false);
+  });
+
+  it('acima do teto corta em FRONTEIRA DE LINHA, com UMA marca +N linhas e o caminho do relato completo', () => {
+    const out = clipBlock(RELATO, 600, 't3');
+    const linhas = out.split('\n');
+    expect(out.length).toBeLessThanOrEqual(600);
+    expect(linhas.at(-1)).toMatch(/^\[… \+\d+ linhas; o relato completo está em \/task show t3\]$/);
+    for (const l of linhas.slice(0, -1)) expect(l).toMatch(/^- item \d\d: valor x{40}$/); // nenhuma linha partida
+    const n = Number(/\+(\d+) linhas/.exec(out)![1]);
+    expect(linhas.length - 1 + n).toBe(40);
+    expect(out.match(/\[…/g)).toHaveLength(1);
+    expect(clipBlock(out, 600, 't3')).toBe(out); // idempotente
+  });
+
+  it('o relato automático leva as linhas do resultado separadas (e até ~6000 caracteres)', async () => {
+    const { registry, concierge, seen } = setup(() => result('Resumo.'));
+    registry.create({ goal: 'coletar infos da máquina', kind: 'main' });
+    registry.transition('t1', 'done', undefined, { summary: 'ok', result: RELATO });
+    await concierge.handleTaskResults(['t1']);
+    const enviado = String(seen[0]!.at(-1)!.content);
+    expect(enviado).toContain('- item 01: valor');
+    expect(enviado).toContain('- item 40: valor'); // ~2.2k chars: antes (1500) cortava no meio
+    expect(enviado).toContain('\n- item 02');
+    expect(enviado).not.toContain('[… +');
+  });
+
+  it('resultado enorme: marca explícita no relato; task_status devolve o resultado', async () => {
+    const enorme = Array.from({ length: 400 }, (_, i) => `linha ${i} ${'y'.repeat(30)}`).join('\n');
+    const { registry, concierge, seen } = setup((_m, n) =>
+      n === 0 ? result('', [call('task_status', { task_id: 't1' })]) : result('li o resto.'),
+    );
+    registry.create({ goal: 'x', kind: 'main' });
+    registry.transition('t1', 'done', undefined, { summary: 'ok', result: enorme });
+    await concierge.handleTaskResults(['t1']);
+    const evento = String(seen[0]!.at(-1)!.content);
+    expect(evento).toMatch(/\[… \+\d+ linhas; o relato completo está em \/task show t1\]/);
+    const segunda = JSON.stringify(seen[1]);
+    expect(segunda).toContain('resultado:\\nlinha 0 ');
+  });
+
+  it('o prompt manda usar task_status e NÃO reclamar de truncamento ao dono', () => {
+    const p = buildConciergePrompt({});
+    expect(p).toContain('task_status');
+    expect(p).toContain('NUNCA diga ao dono que a informação');
+  });
+});
+
+describe('clipPlain — nota de 1 linha sem lixo de tabela markdown', () => {
+  it('pipes e traços de tabela somem; o texto das células fica', () => {
+    const out = clipPlain('| Arquivo | Tamanho |\n|---|---|\n| calc.py | 1.2k |\n', 200);
+    expect(out).toBe('Arquivo Tamanho calc.py 1.2k');
+    expect(out).not.toMatch(/[|]|-{3}/);
+  });
+  it('hífen de palavra e de flag continuam', () => {
+    expect(clipPlain('ls -la e well-known', 50)).toBe('ls -la e well-known');
+  });
+});
+
+describe('Concierge — resposta cortada pelo limite de saída (finish_reason: length)', () => {
+  const cortada = (content: string): ModelCallResult => ({
+    request_id: 'r',
+    content,
+    finish_reason: 'length',
+  });
+  it('texto cortado ⇒ a resposta sai e o dono é AVISADO (nada de parar no meio em silêncio)', async () => {
+    const { concierge } = setup(() => cortada('| 3 | Argo | Fiat'));
+    const r = await concierge.handle('mostra a tabela');
+    expect(r.reply).toBe('| 3 | Argo | Fiat');
+    expect(r.notes.join('\n')).toContain('cortada pelo limite de tamanho');
+    expect(r.notes.join('\n')).toContain('/task show');
+  });
+  it('só raciocínio gastou o teto (vazio + length, duas vezes) ⇒ mensagem honesta sobre o limite', async () => {
+    const { concierge } = setup(() => cortada(''));
+    const r = await concierge.handle('oi');
+    expect(r.reply).toContain('estourou o limite de tamanho');
+    expect(r.reply).not.toContain('Não consegui formular');
+  });
+  it('finish normal não ganha aviso', async () => {
+    const { concierge } = setup(() => result('ok'));
+    expect((await concierge.handle('oi')).notes).toEqual([]);
+  });
+  it('o prompt manda ser breve por padrão, mas mostrar completo o que o dono pedir', () => {
+    const p = buildConciergePrompt({});
+    expect(p).toContain('BREVE por padrão');
+    expect(p).toContain('mostre-o completo');
+  });
+});
+
+describe('Concierge — resposta vazia do modelo', () => {
+  it('vazia na 1ª chamada ⇒ tenta de novo e usa a resposta (sem o "não consegui formular")', async () => {
+    const { concierge } = setup((_m, n) => (n === 0 ? result('') : result('Oi, tudo certo.')));
+    const r = await concierge.handle('oi');
+    expect(r.reply).toBe('Oi, tudo certo.');
+    expect(r.modelCalls).toBe(2);
+  });
+  it('vazia nas duas ⇒ aí sim o aviso', async () => {
+    const { concierge } = setup(() => result(''));
+    const r = await concierge.handle('oi');
+    expect(r.reply).toContain('Não consegui formular');
+    expect(r.modelCalls).toBe(2);
+  });
+  it('só tool-call (sem texto) NÃO repete: 2ª chamada é a de falar, e o ack cobre o resto', async () => {
+    const { concierge } = setup(() => result('', [call('task_start', { goal: 'x' })]));
+    const r = await concierge.handle('faça x');
+    expect(r.reply).not.toContain('Não consegui formular');
+    expect(r.modelCalls).toBe(2);
+  });
+});
+
+describe('Concierge — fila de tarefas: nenhuma é perdida (regressão live: "t8 não chegou a abrir")', () => {
+  const oito = Array.from({ length: 8 }, (_, i) =>
+    call('task_start', { goal: `tarefa ${i + 1}` }, `c${i + 1}`),
+  );
+
+  it('8 task_start de uma vez: 4 rodam, 4 nascem NA FILA (nada de recusa) e o dono é avisado', async () => {
+    const { registry, engine, concierge } = setup((_m, n) =>
+      n === 0 ? result('', oito) : result('Disparei 8; 4 estão na fila.'),
+    );
+    const r = await concierge.handle('rode 8 tarefas em paralelo');
+    expect(registry.list()).toHaveLength(8);
+    expect(registry.list().filter((t) => t.status === 'running')).toHaveLength(4);
+    const fila = registry.list().filter((t) => t.status === 'blocked');
+    expect(fila.map((t) => t.id)).toEqual(['t5', 't6', 't7', 't8']);
+    expect(fila.every((t) => t.queued === true && t.blockedBy === undefined)).toBe(true);
+    expect(engine.started).toEqual(['t1', 't2', 't3', 't4']); // só as 4 com vaga foram iniciadas
+    expect(r.actions.every((a) => a.ok)).toBe(true);
+    expect(r.notes.join('\n')).toContain('na fila');
+  });
+
+  it('cada vaga que abre inicia a próxima da fila, na ordem — as 8 acabam iniciadas', async () => {
+    const { registry, engine, concierge } = setup((_m, n) =>
+      n === 0 ? result('', oito) : result('ok'),
+    );
+    await concierge.handle('rode 8');
+    registry.transition('t1', 'done');
+    expect(engine.started).toEqual(['t1', 't2', 't3', 't4', 't5']);
+    registry.transition('t2', 'done');
+    registry.transition('t3', 'failed');
+    expect(engine.started).toEqual(['t1', 't2', 't3', 't4', 't5', 't6', 't7']);
+    registry.transition('t4', 'stopped');
+    expect(engine.started).toContain('t8');
+    expect(registry.list().filter((t) => t.status === 'blocked')).toHaveLength(0);
+    expect(registry.list().find((t) => t.id === 't8')!.queued).toBeUndefined();
+  });
+
+  it('o teto de vivas+fila continua (16): as que passam do teto são recusadas, com motivo', async () => {
+    const quatro = Array.from({ length: 4 }, (_, i) =>
+      call('task_start', { goal: `n ${i}` }, `n${i}`),
+    );
+    const { registry, concierge } = setup((_m, n) => (n === 0 ? result('', quatro) : result('ok')));
+    for (let i = 0; i < 14; i++)
+      registry.create({ goal: `g${i}`, kind: 'detached', queued: i >= 4 });
+    const r = await concierge.handle('mais quatro');
+    expect(registry.list()).toHaveLength(16);
+    expect(r.actions.filter((a) => !a.ok)).toHaveLength(2);
+  });
+});
+
+describe('orientação de custo da tarefa — sem fan-out em pesquisa (regressão live: 953k tokens numa busca)', () => {
+  it('delegar exige 3+ partes independentes e pesadas; pesquisa nunca usa sub-agentes; sem fan-out de novo', () => {
+    expect(TASK_COST_HINT).toContain('3 ou mais partes independentes E pesadas');
+    expect(TASK_COST_HINT).toMatch(/PESQUISA.*NUNCA usam sub-agentes/);
+    expect(TASK_COST_HINT).toContain('não faz fan-out de novo');
+  });
+  it('a orientação acompanha o objetivo que o agente da tarefa recebe', () => {
+    const g = taskGoalForAgent('pesquise a assinatura do VW Nivus');
+    expect(g.startsWith('pesquise a assinatura do VW Nivus')).toBe(true);
+    expect(g).toContain('NUNCA usam sub-agentes');
   });
 });
