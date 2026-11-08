@@ -976,6 +976,29 @@ export function wrapStdoutWithSync(
   // apagado. `pendingClearFallback` é a rede de segurança: se NENHUM write chegar a tempo
   // (ex.: o remonte do `<Static>` não gerou write algum, caso raro), descarrega o erase
   // sozinho — nunca fica pendurado indefinidamente.
+  // UM RENDER DO INK = UM BLOCO SYNC. Quando o `<Static>` muda, o Ink faz 3 `write` seguidos no
+  // mesmo tick: (1) o erase do quadro, (2) o histórico, (3) o quadro novo. Cada um saía em seu
+  // próprio `?2026`, e o terminal podia pintar entre eles (a nota já escrita e o quadro ainda
+  // apagado/duplicado: o "+1 linha por 3 ms" do `↳ encaixado`). Agora o erase PURO abre um lote e
+  // tudo até o fim do tick sai concatenado dentro de UM par BSU…ESU.
+  let batch: string[] | undefined;
+  let batchCallbacks: (() => void)[] = [];
+  const flushBatch = (): void => {
+    if (batch === undefined) return;
+    const parts = batch;
+    const cbs = batchCallbacks;
+    batch = undefined;
+    batchCallbacks = [];
+    if (cleanedUp) return;
+    const out = parts.join('');
+    try {
+      original.write(useSync ? `${BEGIN_SYNC}${out}${END_SYNC}` : out, () => {
+        for (const cb of cbs) cb();
+      });
+    } catch {
+      /* stream fechado */
+    }
+  };
   let pendingHardClear = false;
   let pendingClearFallback: ReturnType<typeof setTimeout> | undefined;
   // Folga acima do debounce de 90ms do resize-effect da App (EST-1015) — cobre o caso comum
@@ -1082,6 +1105,19 @@ export function wrapStdoutWithSync(
       clearPendingClearFallback();
       withClear = `${HARD_CLEAR}${transformed}`;
     }
+    if (!cockpitActive) {
+      const em0 = matchEraseLines(body);
+      const erasePuro = em0 !== undefined && body.length === em0.bodyStart;
+      if (erasePuro && batch === undefined) {
+        batch = [];
+        queueMicrotask(flushBatch);
+      }
+      if (batch !== undefined) {
+        batch.push(withClear);
+        if (typeof callback === 'function') batchCallbacks.push(callback as () => void);
+        return true;
+      }
+    }
     const framed = useSync ? `${BEGIN_SYNC}${withClear}${END_SYNC}` : withClear;
     if (cockpitActive) scheduleHeal();
     // UM único write ao stream real: tudo concatenado e atômico.
@@ -1099,6 +1135,7 @@ export function wrapStdoutWithSync(
   }) as NodeJS.WriteStream;
 
   const cleanup = (): void => {
+    flushBatch();
     if (cleanedUp) return;
     cleanedUp = true;
     if (healTimer !== undefined) clearTimeout(healTimer);
