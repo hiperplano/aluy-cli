@@ -45,6 +45,10 @@ export interface ConciergeRuntimeDeps {
   readonly clock?: () => number;
   /** Rótulo do modelo herdado (o MESMO que os sub-agentes mostram: `herdado (<modelo>)`). */
   readonly modelLabel?: () => string | undefined;
+  /** O dono está no meio de um turno/pergunta (a fala automática espera). Default: nunca. */
+  readonly ownerBusy?: () => boolean;
+  /** Reavalia a fila de relatos automáticos a cada tanto (ms). Default 400. */
+  readonly reportRetryMs?: number;
 }
 
 interface Persisted {
@@ -82,6 +86,10 @@ export class ConciergeRuntime {
     });
     // Relatos: uma linha por evento que importa, na conversa (sem chamar o modelo).
     this.concierge.attachRelay((line) => d.sink.pushConciergeLine(line));
+    // Fim de tarefa (done/failed) ⇒ turno AUTOMÁTICO do Concierge com o resultado.
+    this.registry.subscribe((ev) => {
+      if (ev.kind === 'done' || ev.kind === 'failed') this.queueReport(ev.taskId);
+    });
     this.registry.subscribe(() => {
       this.persist();
       for (const l of [...this.listeners]) l();
@@ -185,9 +193,86 @@ export class ConciergeRuntime {
 
   private replyChain: Promise<void> = Promise.resolve();
 
+  // ── relato automático do resultado ─────────────────────────────────────────
+  private readonly reportQueue: string[] = [];
+  private readonly reported = new Set<string>();
+  /** Tarefas nascidas de um turno automático: o relato delas não pode iniciar mais nada. */
+  private readonly autoSpawned = new Set<string>();
+  private reportTimer: ReturnType<typeof setTimeout> | null = null;
+  private reportRunning = false;
+  private disposed = false;
+
+  private queueReport(taskId: string): void {
+    if (this.disposed || this.reported.has(taskId)) return;
+    this.reported.add(taskId);
+    this.reportQueue.push(taskId);
+    this.scheduleReports(0);
+  }
+
+  private scheduleReports(delay: number): void {
+    if (this.disposed || this.reportTimer !== null || this.reportQueue.length === 0) return;
+    this.reportTimer = setTimeout(() => {
+      this.reportTimer = null;
+      this.pumpReports();
+    }, delay);
+    this.reportTimer.unref?.();
+  }
+
+  private pumpReports(): void {
+    if (this.disposed || this.reportQueue.length === 0 || this.reportRunning) return;
+    // Fila: o dono no meio de um turno/aprovação, ou uma fala ainda correndo ⇒ espera ficar ocioso.
+    if (this.replyBusy > 0 || this.d.ownerBusy?.() === true) {
+      this.scheduleReports(this.d.reportRetryMs ?? 400);
+      return;
+    }
+    // Tudo que terminou até agora vira UM relato; os de turno automático ficam separados.
+    const batch = this.reportQueue.splice(0);
+    const plain = batch.filter((id) => !this.autoSpawned.has(id));
+    const restricted = batch.filter((id) => this.autoSpawned.has(id));
+    this.reportRunning = true;
+    const run = async (): Promise<void> => {
+      if (plain.length > 0) await this.autoReply(plain, true);
+      if (restricted.length > 0) await this.autoReply(restricted, false);
+    };
+    void run().finally(() => {
+      this.reportRunning = false;
+      this.scheduleReports(0);
+    });
+  }
+
+  private replyBusy = 0;
+
+  private async autoReply(ids: readonly string[], allowStart: boolean): Promise<void> {
+    const run = this.replyChain.then(async () => {
+      const ac = new AbortController();
+      this.inflight.add(ac);
+      this.replyBusy++;
+      this.d.sink.conciergeReplyStart();
+      try {
+        const r = await this.concierge.handleTaskResults(ids, ac.signal, { allowStart });
+        this.d.sink.conciergeReplyEnd(r.reply);
+        for (const n of r.notes) this.d.sink.pushConciergeLine(n);
+        if (allowStart)
+          for (const a of r.actions)
+            if (a.tool === 'task_start' && a.taskId) this.autoSpawned.add(a.taskId);
+        this.persist();
+      } catch (e) {
+        this.d.sink.conciergeReplyEnd(
+          `Não consegui relatar o resultado agora (${e instanceof Error ? e.message : String(e)}).`,
+        );
+      } finally {
+        this.replyBusy--;
+        this.inflight.delete(ac);
+      }
+    });
+    this.replyChain = run.catch(() => undefined);
+    return run;
+  }
+
   private async reply(text: string): Promise<void> {
     const ac = new AbortController();
     this.inflight.add(ac);
+    this.replyBusy++;
     this.d.sink.conciergeReplyStart();
     let fallback = '';
     try {
@@ -202,6 +287,7 @@ export class ConciergeRuntime {
         `Não consegui responder agora (${e instanceof Error ? e.message : String(e)}).`,
       );
     } finally {
+      this.replyBusy--;
       this.inflight.delete(ac);
     }
   }
@@ -267,6 +353,9 @@ export class ConciergeRuntime {
   }
 
   dispose(): void {
+    this.disposed = true;
+    if (this.reportTimer !== null) clearTimeout(this.reportTimer);
+    this.reportTimer = null;
     for (const ac of this.inflight) ac.abort();
     // Quem ainda corre ao sair fica `interrupted` (e não `done` por o abort resolver o submit).
     for (const t of this.registry.live())

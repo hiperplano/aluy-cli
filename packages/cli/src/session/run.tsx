@@ -2397,6 +2397,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               .filter((f) => f.provenance === 'usuario')
               .map((f) => f.text),
           projectSummary: () => projectInstructions?.slice(0, 600),
+          // Relato automático do resultado espera o dono sair de um turno/pergunta.
+          ownerBusy: () => built.controller.current.phase !== 'idle',
           modelLabel: () => {
             const m = built.controller.current.meta;
             return m.model ?? m.activeModel ?? m.tier;

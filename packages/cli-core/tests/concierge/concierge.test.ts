@@ -324,7 +324,8 @@ describe('Concierge — prompt pequeno e memória do dono', () => {
     const p = buildConciergePrompt({});
     expect(p).toContain('NÃO diga que criou sub-agentes');
     expect(p).toContain('Sem enrolação');
-    expect(p).toContain('a tela já mostra uma linha de conclusão');
+    expect(p).toContain('EVENTO AUTOMÁTICO');
+    expect(p).toContain('quando a tarefa voltar');
   });
 
   it('separa a fala (reply, que a TUI transmite) dos avisos do motor (notes)', async () => {
@@ -350,5 +351,59 @@ describe('Concierge — prompt pequeno e memória do dono', () => {
       { role: 'assistant', content: 'b' },
     ]);
     expect(concierge.getHistory()).toHaveLength(2);
+  });
+});
+
+describe('Concierge — turno automático ao fim da tarefa', () => {
+  const finish = (registry: TaskRegistry, id: string) =>
+    registry.transition(id, 'done', undefined, {
+      summary: 'curto',
+      result: 'Bug: usa subtração onde devia somar em calc.py',
+    });
+
+  it('o evento automático leva o RESULTADO (como dado) e pede o resumo ao dono', async () => {
+    const { registry, concierge, seen } = setup(() =>
+      result('Achei o bug: subtração no lugar de soma.'),
+    );
+    registry.create({ goal: 'explicar calc.py', kind: 'main' });
+    finish(registry, 't1');
+    const r = await concierge.handleTaskResults(['t1']);
+    expect(r.reply).toContain('bug');
+    const last = seen[0]![seen[0]!.length - 1]!.content as string;
+    expect(last).toContain('EVENTO AUTOMÁTICO');
+    expect(last).toContain('<resultado tarefa="t1"');
+    expect(last).toContain('subtração onde devia somar');
+    expect(last).toContain('DADO');
+  });
+
+  it('anti-laço: com allowStart=false task_start/task_stop são recusados', async () => {
+    const { registry, engine, concierge } = setup((_m, n) =>
+      n === 0 ? result('', [call('task_start', { goal: 'outra' })]) : result('só relatei'),
+    );
+    registry.create({ goal: 'x', kind: 'main' });
+    finish(registry, 't1');
+    const r = await concierge.handleTaskResults(['t1'], undefined, { allowStart: false });
+    expect(engine.started).toEqual([]);
+    expect(registry.list()).toHaveLength(1);
+    expect(r.actions[0]).toMatchObject({ tool: 'task_start', ok: false });
+  });
+
+  it('task_stop nunca é permitido no turno automático; task_start sim quando allowStart', async () => {
+    const stop = setup((_m, n) =>
+      n === 0 ? result('', [call('task_stop', { task_id: 't1' })]) : result('ok'),
+    );
+    stop.registry.create({ goal: 'x', kind: 'main' });
+    stop.registry.create({ goal: 'y', kind: 'detached' });
+    finish(stop.registry, 't1');
+    await stop.concierge.handleTaskResults(['t1']);
+    expect(stop.engine.stopped).toEqual([]);
+
+    const start = setup((_m, n) =>
+      n === 0 ? result('', [call('task_start', { goal: 'corrigir' })]) : result('abri t2'),
+    );
+    start.registry.create({ goal: 'x', kind: 'main' });
+    finish(start.registry, 't1');
+    await start.concierge.handleTaskResults(['t1']);
+    expect(start.engine.started).toEqual(['t2']);
   });
 });

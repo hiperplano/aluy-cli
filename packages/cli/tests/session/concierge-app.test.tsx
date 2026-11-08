@@ -118,6 +118,7 @@ interface BuildOpts {
   wordGate?: (i: number) => Promise<void> | undefined;
   classicModel?: ModelCaller;
   statusline?: 'full' | 'compact' | 'hidden';
+  ownerBusy?: () => boolean;
 }
 
 function build(opts: BuildOpts) {
@@ -153,6 +154,8 @@ function build(opts: BuildOpts) {
     sink: conversation,
     model: cmodel,
     createHeadless: () => queue.shift() ?? null,
+    ...(opts.ownerBusy ? { ownerBusy: opts.ownerBusy } : {}),
+    reportRetryMs: 20,
   });
   const r = render(
     <ThemeProvider theme={resolveTheme({ env: ENV })}>
@@ -170,6 +173,9 @@ function build(opts: BuildOpts) {
   return { conversation, rt, conciergeCalls, frame, ...r };
 }
 
+/** Dono pede trabalho ⇒ task_start; evento automático de fim de tarefa ⇒ só relata. */
+const ownerStartsTask = (m: string): ModelCallResult =>
+  /EVENTO AUTOMÁTICO/.test(m) ? text('Resumo: tudo certo.') : text('Iniciei.', startTask());
 const startTask = (goal = 'fazer o trabalho') => [{ id: '1', name: 'task_start', input: { goal } }];
 const blocksOf = (c: SessionController, kind: string) =>
   c.current.blocks.filter((b) => b.kind === kind);
@@ -254,7 +260,7 @@ describe('A conversa nunca espera o trabalho; o trabalho nunca entra na conversa
     const s = build({
       mode: 'concierge',
       tasks: [task],
-      concierge: () => text('Iniciei.', startTask()),
+      concierge: ownerStartsTask,
     });
     await type(s, 'faça o trabalho');
     await waitFor(() => s.rt.registry.get('t1')?.status === 'done');
@@ -432,7 +438,7 @@ describe('Espaçamento (block-rhythm)', () => {
     const s = build({
       mode: 'concierge',
       tasks: [task],
-      concierge: () => text('Iniciei.', startTask()),
+      concierge: ownerStartsTask,
     });
     await type(s, 'faça o trabalho');
     await waitFor(() => s.rt.registry.get('t1')?.status === 'done');
@@ -684,6 +690,82 @@ describe('Entre blocos da conversa: exatamente UMA linha em branco (resposta →
     const voce = lines.findIndex((l, i) => i > primeira && l.includes('você'));
     expect(voce).toBeGreaterThan(primeira);
     expect(lines.slice(primeira + 1, voce).filter((l) => l.trim() === '').length).toBe(1);
+    s.unmount();
+  });
+});
+
+describe('Relato automático: o Concierge resume o resultado quando a tarefa termina', () => {
+  it('done ⇒ turno automático com o resultado; resposta em bloco Λluy normal + marcador curto', async () => {
+    const task = taskSession({ iters: () => 'Bug: usa subtração em vez de soma.' });
+    const seen: string[] = [];
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      concierge: (m) => {
+        seen.push(m);
+        return /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Resumo: a função subtrai quando devia somar.')
+          : text('Iniciei.', startTask());
+      },
+    });
+    await type(s, 'explica e abre uma tarefa');
+    await waitFor(() => s.frame().includes('Resumo: a função subtrai'));
+    const auto = seen.find((m) => /EVENTO AUTOMÁTICO/.test(m))!;
+    expect(auto).toContain('Bug: usa subtração em vez de soma.');
+    const aluy = blocksOf(s.conversation, 'aluy') as { text: string; streaming?: boolean }[];
+    expect(aluy.map((b) => b.text)).toEqual([
+      'Iniciei.',
+      'Resumo: a função subtrai quando devia somar.',
+    ]);
+    const marker = blocksOf(s.conversation, 'inject') as { text: string }[];
+    expect(marker[0]!.text).toMatch(/^✔ t1 concluída/);
+    s.unmount();
+  });
+
+  it('só dispara com o dono ocioso: fica na fila enquanto ownerBusy', async () => {
+    let busy = true;
+    const task = taskSession({ iters: () => 'feito.' });
+    const seen: string[] = [];
+    const s = build({
+      mode: 'concierge',
+      tasks: [task],
+      ownerBusy: () => busy,
+      concierge: (m) => {
+        seen.push(m);
+        return /EVENTO AUTOMÁTICO/.test(m) ? text('Resumo pronto.') : text('Iniciei.', startTask());
+      },
+    });
+    await type(s, 'faça o trabalho');
+    await waitFor(() => s.rt.registry.get('t1')?.status === 'done');
+    await sleep(150);
+    expect(seen.some((m) => /EVENTO AUTOMÁTICO/.test(m))).toBe(false);
+    busy = false;
+    await waitFor(() => s.frame().includes('Resumo pronto.'));
+    expect(seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m))).toHaveLength(1);
+    s.unmount();
+  });
+
+  it('anti-laço: o turno automático não inicia tarefa nova que gere outro relato com tarefas', async () => {
+    const t1 = taskSession({ iters: () => 'primeira.' });
+    const t2 = taskSession({ iters: () => 'segunda.' });
+    const seen: string[] = [];
+    const s = build({
+      mode: 'concierge',
+      tasks: [t1, t2],
+      concierge: (m) => {
+        seen.push(m);
+        // Insiste em abrir tarefa até no relato automático.
+        return /EVENTO AUTOMÁTICO/.test(m)
+          ? text('Relatei e abri a próxima.', startTask('corrigir'))
+          : text('Iniciei.', startTask());
+      },
+    });
+    await type(s, 'faça o trabalho');
+    await waitFor(() => s.rt.registry.get('t2')?.status === 'done');
+    await sleep(300);
+    // t1 (relato livre ⇒ abriu t2) e t2 (relato restrito ⇒ recusa): nada além de t2.
+    expect(s.rt.registry.list().map((t) => t.id)).toEqual(['t1', 't2']);
+    expect(seen.filter((m) => /EVENTO AUTOMÁTICO/.test(m))).toHaveLength(2);
     s.unmount();
   });
 });

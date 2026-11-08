@@ -34,6 +34,8 @@ export interface TaskRecord {
   readonly blockedBy?: string;
   /** Resumo curto do desfecho (já redigido por quem publica). DADO, nunca instrução. */
   readonly summary?: string;
+  /** Resultado mais longo (até ~1500 chars) para o Concierge relatar ao dono. DADO. */
+  readonly result?: string;
   readonly startedAt: number;
   readonly endedAt?: number;
   readonly steps: number;
@@ -180,7 +182,7 @@ export class TaskRegistry {
     id: string,
     to: TaskStatus,
     detail?: string,
-    extra?: { summary?: string },
+    extra?: { summary?: string; result?: string },
   ): TaskRecord | undefined {
     const t = this.tasks.get(id);
     if (!t) return undefined;
@@ -204,6 +206,11 @@ export class TaskRegistry {
         ? { summary: extra.summary }
         : t.summary !== undefined
           ? { summary: t.summary }
+          : {}),
+      ...(extra?.result !== undefined
+        ? { result: extra.result }
+        : t.result !== undefined
+          ? { result: t.result }
           : {}),
       ...(to === 'blocked' && t.blockedBy !== undefined ? { blockedBy: t.blockedBy } : {}),
     };

@@ -101,7 +101,7 @@ export class ControllerTaskEngine implements ConciergeEngine {
       () => this.finish(task.id, h),
       (e: unknown) => {
         this.cleanup(h);
-        this.d.registry.transition(task.id, 'failed', msg(e));
+        this.d.registry.transition(task.id, 'failed', msg(e), { result: clip(msg(e), 600) });
       },
     );
   }
@@ -226,7 +226,8 @@ export class ControllerTaskEngine implements ConciergeEngine {
     const interrupted = lastAluy?.kind === 'aluy' && lastAluy.interrupted === true;
     if (s.phase === 'error') {
       const err = [...blocks].reverse().find((b) => b.kind === 'broker-error');
-      reg.transition(id, 'failed', err?.kind === 'broker-error' ? err.message : 'erro no turno');
+      const why = err?.kind === 'broker-error' ? err.message : 'erro no turno';
+      reg.transition(id, 'failed', why, { result: clip(why, 600) });
       return;
     }
     if (interrupted) {
@@ -234,7 +235,10 @@ export class ControllerTaskEngine implements ConciergeEngine {
       return;
     }
     const text = lastAluy?.kind === 'aluy' ? lastAluy.text : '';
-    reg.transition(id, 'done', undefined, { summary: clip(text || 'sem resposta textual', 300) });
+    reg.transition(id, 'done', undefined, {
+      summary: clip(text || 'sem resposta textual', 300),
+      result: clip(text || 'sem resposta textual', 1500),
+    });
   }
 
   private cleanup(h: Handle): void {
