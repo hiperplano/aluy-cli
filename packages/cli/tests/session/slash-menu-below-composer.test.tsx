@@ -6,7 +6,7 @@
 // ele "subia e descia". Agora o composer é o PONTO FIXO e o menu cresce PRA BAIXO.
 //
 // Este teste PROVA (FRUGAL, sem modelo — caller inerte, idle, char-a-char):
-//   • abrir `/`  ⇒ o menu (cabeçalho `/ para comandos`) aparece DEPOIS da linha do
+//   • abrir `/`  ⇒ o menu (cabeçalho `digite para buscar`) aparece DEPOIS da linha do
 //     composer no frame (ABAIXO), nunca antes;
 //   • a LINHA do composer NÃO MUDA de índice ao abrir o menu (ancorado) — o mesmo
 //     índice com o menu fechado e aberto;
@@ -31,7 +31,7 @@ import { SessionController } from '../../src/session/controller.js';
 import { TuiAskResolver } from '../../src/ask/ask-resolver.js';
 
 const ENV = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' };
-const MENU_HEADER = '/ para comandos';
+const MENU_HEADER = 'digite para buscar';
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(ESC + '\\[[0-9;]*[A-Za-z]', 'g');
 function plain(s: string): string {

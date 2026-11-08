@@ -29,7 +29,9 @@ export type HintState =
   | 'quota-pause'
   // ADR 0006 — modo concierge: o Esc NÃO para nada; parar é explícito.
   | 'concierge-work'
-  | 'concierge-ask';
+  | 'concierge-ask'
+  // Concierge em repouso com tarefas vivas: ensina F8, ctrl-t e /task (antes caía na dica de idle).
+  | 'concierge-tasks';
 
 // EST-0989 (i18n) — cada estado mapeia p/ uma CHAVE i18n; o texto vem do catálogo no
 // idioma ativo (`t()`), com fallback en→pt-BR. Os atalhos de tecla (`enter`, `esc`,
@@ -51,6 +53,7 @@ const HINT_KEYS: Readonly<Record<HintState, I18nKey>> = {
   'quota-pause': 'hints.quotaPause',
   'concierge-work': 'hints.conciergeWork',
   'concierge-ask': 'hints.conciergeAsk',
+  'concierge-tasks': 'hints.conciergeTasks',
 };
 
 /** Estados OCUPADOS — onde o relógio de elapsed faz sentido (EST-0965). */

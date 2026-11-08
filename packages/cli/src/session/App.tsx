@@ -41,6 +41,7 @@ import {
   EffortPicker,
   ThemePicker,
   LangPicker,
+  MenuPicker,
   ProviderPicker,
   SecretPrompt,
   HistoryPicker,
@@ -89,6 +90,10 @@ import {
 } from '../ui/hooks/usePermissionsPanel.js';
 import { useThemePicker } from '../ui/hooks/useThemePicker.js';
 import { useLangPicker } from '../ui/hooks/useLangPicker.js';
+import { useMenuPicker, type MenuPick } from '../ui/hooks/useMenuPicker.js';
+import { buildHelpLines } from '../slash/handlers.js';
+import { availableIn } from '../slash/command-meta.js';
+import { menuStepFor, type MenuCtx, type MenuDataPort } from '../slash/menu-pickers.js';
 import {
   useProviderPicker,
   ADD_CUSTOM_PROVIDER_SENTINEL,
@@ -661,6 +666,13 @@ export interface AppProps {
   readonly onExportTranscript?: (
     path?: string,
   ) => Promise<{ ok: boolean; path?: string; error?: string }>;
+  /** Modo de `/notify` em vigor (marca o valor atual no seletor). Ausente ⇒ sem marca. */
+  readonly currentNotify?: () => 'all' | 'attention' | 'off';
+  /**
+   * Leitores das listas dos seletores de comando (memória, agendamentos, plugins…). Cada um
+   * ausente ⇒ aquele comando, sem argumento, segue como antes (nota/lista em texto).
+   */
+  readonly menuData?: MenuDataPort;
 }
 
 /** Stub no-op do picker quando o índice/leitor não foi injetado (teste antigo). */
@@ -709,6 +721,13 @@ function safeDim(value: number | undefined, fallback: number): number {
 
 /** F21 — janela (ms) p/ a sugestão do modelo chegar antes de entrar a heurística. */
 const SUGGEST_MODEL_WINDOW_MS = 2500;
+
+/**
+ * Teto de linhas do `<SlashMenu>` inline. Era 8 (4 comandos úteis de 99); agora o menu usa o
+ * que a região viva deixa (`slashMenuRowCap`, ciente de altura) até este limite — o teto real
+ * continua sendo o orçamento, então telas baixas seguem janelando (↑N/↓N) sem estourar `rows`.
+ */
+export const SLASH_MENU_MAX_ROWS = 18;
 
 export function App(props: AppProps): React.ReactElement {
   const { controller } = props;
@@ -1407,6 +1426,8 @@ export function App(props: AppProps): React.ReactElement {
   // idioma ativo vem do contexto i18n (injetado pelo ThemeRoot). Espelha o /theme.
   const currentLang: Lang = props.currentLang ?? activeLang;
   const langPicker = useLangPicker({ currentLang });
+  // Seletor genérico dos comandos sem argumento (`/notify`, `/task`, `/memory`…).
+  const menuPicker = useMenuPicker();
 
   // EST-0962 (/provider) — seletor `/provider`: lista os providers CADASTRADOS no broker
   // (`GET /v1/providers`, ADR-0076), marca o ativo. O provider ATIVO é REATIVO: deriva de
@@ -1490,13 +1511,22 @@ export function App(props: AppProps): React.ReactElement {
     [rewindPicker.target, rewindSource],
   );
 
+  const paletteNatives = useMemo(
+    () =>
+      localizedNatives.filter((c) =>
+        availableIn(c, { concierge: conciergeOn, subagentFocused: state.meta.focus !== undefined }),
+      ),
+    [localizedNatives, conciergeOn, state.meta.focus],
+  );
   // EST-0961 — command palette (Ctrl+P): índice fuzzy de TODOS os comandos/ações.
   // Lê a FONTE ÚNICA (mesmos comandos do slash-menu, via filterPalette) + as ações
   // puras. Modal: captura o foco quando aberta (gated contra os outros overlays).
   const palette = useCommandPalette({
     ...(props.userCommands !== undefined ? { userCommands: props.userCommands } : {}),
-    // EST-0989 (i18n) — a palette mostra os summaries dos nativos no idioma ativo.
-    natives: localizedNatives,
+    // EST-0989 (i18n) — a palette mostra os summaries dos nativos no idioma ativo. Comandos de
+    // outro modo (task/approve/deny fora do concierge, /ask nele, /back sem foco) não entram:
+    // a palette é "busca por tudo", não "busca por tudo que não funciona aqui".
+    natives: paletteNatives,
   });
 
   // ── EST-0965 (FLICKER, causa-raiz medida no PTY) — DOIS ticks, não um ───────────
@@ -1835,7 +1865,21 @@ export function App(props: AppProps): React.ReactElement {
   const userCommands = props.userCommands ?? [];
   const slashQuery = input.startsWith('/') ? input.slice(1) : '';
   // EST-0989 (i18n) — o slash-menu lista os nativos LOCALIZADOS (summaries no idioma ativo).
-  const slashCommands = filterCommands(slashQuery, userCommands, localizedNatives);
+  // Revisão de menus: contexto de modo (task/approve/deny só no concierge; back só em foco de
+  // sub-agente) + lista padrão sem raros. Os raros seguem buscáveis e executáveis digitados.
+  const menuCtx = {
+    concierge: conciergeOn,
+    subagentFocused: state.meta.focus !== undefined,
+  };
+  const slashCommands = filterCommands(slashQuery, userCommands, localizedNatives, menuCtx);
+  // A dica "ctrl+p" só vale onde o atalho funciona: fora de turno ativo (no trabalho o ramo de
+  // teclas do menu é outro e a paleta não recebe as teclas).
+  const slashPaletteHint = !(
+    state.phase === 'thinking' ||
+    state.phase === 'streaming' ||
+    state.phase === 'retrying' ||
+    (conciergeOn && state.phase === 'asking')
+  );
 
   /**
    * EST-0948 (composer/sessão) — escreve o composer e o cursor de forma COERENTE: ao
@@ -2433,7 +2477,66 @@ export function App(props: AppProps): React.ReactElement {
   );
 
   const runCommand = useCallback(
-    (command: SlashCommand, args: string) => {
+    (command: SlashCommand, args: string, skipMenu = false) => {
+      // Revisão de menus (§6.2): o comando SEM argumento abre um seletor (com o valor atual
+      // marcado) quando há um para ele. Com argumento digitado nada muda — script e usuário
+      // avançado seguem como hoje. `skipMenu` é o próprio seletor rodando o comando.
+      if (!skipMenu && args.trim() === '' && command.source === 'native' && command.id) {
+        const ctx: MenuCtx = {
+          conversation: convMode,
+          conciergeAvailable: props.concierge !== undefined,
+          ...(props.currentNotify !== undefined ? { notify: props.currentNotify() } : {}),
+          statusline: statuslineModeRef.current,
+          suggestionsOn,
+          splitOn: splitView,
+          ...(conciergeOn && props.concierge !== undefined
+            ? {
+                tasks: props.concierge.tasks().map((t) => ({
+                  id: t.id,
+                  goal: t.goal,
+                  statusLabel: statusPt(t.status),
+                  live: t.endedAt === undefined,
+                })),
+                pending: props.concierge
+                  .pendingApprovals()
+                  .map((p) => ({ taskId: p.taskId, summary: p.summary })),
+              }
+            : {}),
+          cycleActive: state.cycleActive === true,
+          data: {
+            ...props.menuData,
+            ...(props.secrets !== undefined
+              ? {
+                  secrets: async () =>
+                    props.secrets!.list().map((x) => ({
+                      id: x.name,
+                      label: x.name,
+                      hint: x.saved ? 'salvo' : 'só nesta sessão',
+                    })),
+                }
+              : {}),
+          },
+        };
+        const step = menuStepFor(command.id, ctx);
+        if (step !== null) {
+          menuPicker.openFor(command, step);
+          return;
+        }
+      }
+      // `/help`: seções do menu, só os comandos do modo atual e os atalhos que valem NELE.
+      // `/help all` (ou `tudo`) inclui os raros. Roteado aqui porque só a App sabe o modo.
+      if (command.id === 'help') {
+        const want = args.trim().toLowerCase();
+        controller.replaceNote(
+          'comandos',
+          buildHelpLines({
+            concierge: conciergeOn,
+            subagentFocused: state.meta.focus !== undefined,
+            all: want === 'all' || want === 'tudo',
+          }),
+        );
+        return;
+      }
       // ADR 0005 — `/secret`: campo mascarado, roteado aqui (nunca vai ao `onCommand`).
       if (command.id === 'secret') {
         runSecretCommand(args);
@@ -2453,6 +2556,9 @@ export function App(props: AppProps): React.ReactElement {
       // (mesmo efeito do Ctrl+L). É UI pura — não toca o turno/contexto; não vai ao
       // onCommand (sem nota redundante do wiring).
       if (command.id === 'split') {
+        // `on`/`off` (o seletor usa) são idempotentes; sem arg continua alternando.
+        const want = args.trim().toLowerCase();
+        if ((want === 'on' && splitView) || (want === 'off' && !splitView)) return;
         toggleSplit();
         return;
       }
@@ -2689,6 +2795,11 @@ export function App(props: AppProps): React.ReactElement {
       // fechar sobre um valor velho (defensivo — este projeto não força exhaustive-deps).
       suggestionsOn,
       runSecretCommand,
+      menuPicker,
+      convMode,
+      conciergeOn,
+      splitView,
+      state.cycleActive,
     ],
   );
 
@@ -3142,6 +3253,7 @@ export function App(props: AppProps): React.ReactElement {
         mcpPicker.open ||
         themePicker.open ||
         langPicker.open ||
+        menuPicker.open ||
         historyPicker.open ||
         rewindPicker.open
       ) {
@@ -3176,6 +3288,7 @@ export function App(props: AppProps): React.ReactElement {
       permPanel,
       themePicker,
       langPicker,
+      menuPicker,
       historyPicker,
       rewindPicker,
       providerPicker,
@@ -3243,6 +3356,7 @@ export function App(props: AppProps): React.ReactElement {
     mcpPicker.open ||
     themePicker.open ||
     langPicker.open ||
+    menuPicker.open ||
     providerPicker.open ||
     historyPicker.open ||
     rewindPicker.open ||
@@ -3304,6 +3418,19 @@ export function App(props: AppProps): React.ReactElement {
     if (drained > 0) setQueue((q) => q.slice(drained));
     // `injectIfPlainText` é memoizado; `atRest`/`queue`/`phase` são os gatilhos reais.
   }, [atRest, queue, state.phase, injectIfPlainText]);
+
+  /** Aplica a escolha do seletor: o MESMO `runCommand` que digitar o comando faria. */
+  const runMenuPick = (pick: MenuPick): void => {
+    if (pick.kind === 'run') {
+      for (const a of pick.args) runCommand(pick.command, a, true);
+      return;
+    }
+    if (pick.kind === 'prefill') {
+      setText(pick.text);
+      setSlashOpen(false);
+      setSlashSel(0);
+    }
+  };
 
   useInput((char, key) => {
     // F5 — FONTE FRESCA: o closure do `useInput` pode estar VELHO quando várias teclas chegam
@@ -3425,6 +3552,34 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
+    // ── seletor genérico dos comandos CAPTURA o foco ───────────────────────────────
+    // Antes dos ramos de trabalho/idle: comandos paralelo-seguros (`/task`, `/cycle`…) abrem
+    // o seletor com a sessão ocupada, e as setas/Enter não podem ir ao type-ahead.
+    if (menuPicker.open) {
+      if (key.ctrl && char === 'c') {
+        menuPicker.close();
+        return;
+      }
+      if (key.upArrow) {
+        menuPicker.move(-1);
+        return;
+      }
+      if (key.downArrow) {
+        menuPicker.move(1);
+        return;
+      }
+      if (key.return || key.tab) {
+        const pick = menuPicker.confirm();
+        if (pick !== null) runMenuPick(pick);
+        return;
+      }
+      if (key.escape) {
+        menuPicker.back();
+        return;
+      }
+      return; // modal: o resto é ignorado
+    }
+
     // F-BG (21/09/2026) — Ctrl+B: SOLTA a tool de shell em execução para segundo plano.
     //
     // O par do ESC/F8, e o oposto deles: aqueles MATAM, este SOLTA. Nasceu do relato do
@@ -3467,6 +3622,18 @@ export function App(props: AppProps): React.ReactElement {
     // composer VAZIO (↓ e as letras são do texto quando há rascunho) e sem menu/picker aberto.
     if (conciergeOn && conciergeRt !== undefined && !slashOpen && !palette.open && !anyPickerOpen) {
       const vis = conciergeRt.visibleTasks();
+      // Ctrl+T (anunciado na dica de tarefas): abre/fecha o painel de tarefas. Sem isso a tecla
+      // do `/help` e do rodapé só existia no modo clássico (lá abre o painel de fluxos).
+      if (key.ctrl && char === 't' && taskDetail === null && vis.length > 0) {
+        if (taskExpanded) {
+          setTaskExpanded(false);
+          setTaskStopArm(null);
+        } else {
+          setTaskExpanded(true);
+          setTaskSel(Math.max(0, vis.length - 1));
+        }
+        return;
+      }
       if (taskDetail !== null) {
         if (key.escape) {
           setTaskDetail(null);
@@ -4898,6 +5065,18 @@ export function App(props: AppProps): React.ReactElement {
 
     // ── slash-menu navegação ───────────────────────────────────────────────────
     if (slashOpen) {
+      // Ctrl+P (anunciado na dica do menu): troca o menu pela paleta com a MESMA busca digitada
+      // — `/tema` + ctrl+p abre a paleta já filtrada por "tema". Sem isso o atalho só valia com o
+      // menu FECHADO (a guarda `!slashOpen` lá embaixo) e a dica mentiria.
+      if (key.ctrl && char === 'p') {
+        const q = slashQuery;
+        setSlashOpen(false);
+        setSlashSel(0);
+        setText('');
+        palette.openPalette();
+        if (q !== '') palette.setQuery(q);
+        return;
+      }
       if (key.upArrow) {
         setSlashSel((s) => Math.max(0, s - 1));
         return;
@@ -5393,6 +5572,7 @@ export function App(props: AppProps): React.ReactElement {
     palette.open,
     subAgentsRunning(rawState.blocks),
     conciergeOn,
+    conciergeOn && conciergeRt?.hasLiveTasks() === true,
   );
 
   // EST-0965 — INDICADOR DE ATIVIDADE (elapsed). Enquanto OCUPADO, o relógio do turno
@@ -5695,6 +5875,7 @@ export function App(props: AppProps): React.ReactElement {
     mcpPicker.open ||
     themePicker.open ||
     langPicker.open ||
+    menuPicker.open ||
     providerPicker.open ||
     historyPicker.open ||
     rewindPicker.open ||
@@ -5820,8 +6001,9 @@ export function App(props: AppProps): React.ReactElement {
               commands={slashCommands}
               selected={slashSel}
               query={slashQuery}
-              maxRows={Math.min(8, slashMenuRowCap)}
+              maxRows={Math.min(SLASH_MENU_MAX_ROWS, slashMenuRowCap)}
               columns={columns}
+              paletteHint={slashPaletteHint}
             />
           </Box>
         )}
@@ -5918,6 +6100,16 @@ export function App(props: AppProps): React.ReactElement {
               langs={langPicker.langs}
               selected={langPicker.selected}
               currentLang={currentLang}
+            />
+          </Box>
+        )}
+        {menuPicker.open && menuPicker.step !== null && (
+          <Box flexDirection="column" {...box}>
+            <MenuPicker
+              step={menuPicker.step}
+              selected={menuPicker.selected}
+              nested={menuPicker.depth > 1}
+              maxRows={Math.max(4, Math.min(14, slashMenuRowCap - 2))}
             />
           </Box>
         )}
@@ -6438,17 +6630,8 @@ export function App(props: AppProps): React.ReactElement {
           incomodava). O menu cresce/encolhe PRA BAIXO. Ver o bloco "MENU/PICKERS
           DE `/` ABAIXO DO COMPOSER" depois do <Composer>. */}
 
-      {/* EST-0961 — command palette (Ctrl+P): índice fuzzy de comandos/ações. */}
-      {palette.open && (
-        <Box flexDirection="column" paddingBottom={1}>
-          <CommandPalette
-            hits={palette.hits}
-            selected={palette.selected}
-            query={palette.query}
-            maxRows={Math.min(8, slashMenuRowCap)}
-          />
-        </Box>
-      )}
+      {/* EST-0961 — a command palette (Ctrl+P) renderiza em `renderOverlays` (abaixo do composer);
+          esta cópia acima dele DUPLICAVA a paleta na tela. */}
 
       {/* EST-0974 — `/model` (ModelPicker) migrou p/ ABAIXO do composer (junto do
           <SlashMenu>). Ver o bloco depois do <Composer>. */}
@@ -7140,6 +7323,7 @@ function hintStateOf(
   paletteOpen: boolean,
   subAgentsLive = false,
   conciergeOn = false,
+  conciergeTasksLive = false,
 ): HintState | null {
   // EST-0961 — a palette é modal: seu hint tem prioridade quando aberta.
   if (paletteOpen) return 'palette';
@@ -7153,6 +7337,10 @@ function hintStateOf(
   )
     return 'concierge-work';
   if (conciergeOn && state.phase === 'asking') return 'concierge-ask';
+  // Concierge em repouso mas com tarefas rodando: a dica de idle (`enter envia · / comandos`) não
+  // dizia como parar nem como ver as tarefas (#7 do relatório de UX).
+  if (conciergeOn && conciergeTasksLive && (state.phase === 'idle' || state.phase === 'done'))
+    return 'concierge-tasks';
   switch (state.phase) {
     // EST-0948 (auto-retry) — durante o backoff (`retrying`) o footer mostra o mesmo
     // hint do `thinking` ("esc para interromper"): esc cancela a re-tentativa.

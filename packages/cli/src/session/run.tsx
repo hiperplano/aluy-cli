@@ -255,7 +255,7 @@ import { buildServiceCreateSystemPrompt, SERVICE_DRAFTS_DIRNAME } from '../slash
 import { parseMemoryCommand, runMemoryCommand } from '../slash/memory.js';
 import { parseTodoCommand, runTodoCommand } from '../slash/todo.js';
 import { onSemanticMemoryNotice } from '../maestro/semantic-memory-notice.js';
-import { runCron } from '../commands/cron.js';
+import { runCron, loadState as loadCronState } from '../commands/cron.js';
 import {
   parseClearCommand,
   runClearCommand,
@@ -5121,6 +5121,53 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
           configStore.saveSuggestions(on);
         }}
         onExportTranscript={exportTranscript}
+        currentNotify={() => notifyPort.mode ?? (notifyPort.enabled ? 'all' : 'off')}
+        menuData={{
+          // Listas dos seletores de comando (`/memory`, `/todo`, `/cron`…). Só LEITURA: o efeito
+          // continua sendo o do comando digitado (o seletor roda `runCommand` com os mesmos args).
+          memory: async () =>
+            (await built.memory.list()).map((f) => ({
+              id: f.id,
+              label: f.text,
+              hint: `${f.scope}${f.pinned ? ' · fixado' : ''}`,
+              flag: f.pinned,
+            })),
+          todo: async () =>
+            (await built.todoStore.list()).map((t) => ({
+              id: t.id,
+              label: `${t.done ? '✓' : '○'} ${t.text}`,
+              flag: t.done,
+            })),
+          cron: async () =>
+            loadCronState().jobs.map((j) => ({
+              id: j.id,
+              label: `${j.schedule} · ${j.task}`,
+              hint: j.enabled === false ? 'desativado' : 'ativo',
+              flag: j.enabled !== false,
+            })),
+          plugins: async () =>
+            pluginsLidos.plugins.map((p) => ({
+              id: p.manifest.name,
+              label: p.manifest.name,
+              hint: p.ativo ? 'ligado' : 'desligado',
+              flag: p.ativo,
+            })),
+          workflows: async () =>
+            [
+              ...new UserWorkflowsLoader().load().workflows,
+              ...new ProjectWorkflowsLoader({ workspace: built.workspace }).load().workflows,
+            ].map((w) => ({ id: w.name, label: w.name })),
+          services: async () =>
+            new UserServicesStore().list().services.map((s) => ({ id: s.name, label: s.name })),
+          subagents: async () =>
+            [...globalAgents.profiles, ...projectAgents.profiles, ...pluginAgents.profiles].map(
+              (p) => ({
+                id: p.name,
+                label: p.name,
+                ...(p.description !== undefined ? { hint: p.description } : {}),
+              }),
+            ),
+        }}
         onSelectTier={(tier, model, opts) => {
           // EST-0962 — o seletor confirmou: troca o tier da sessão (caller → próxima
           // chamada) e registra uma nota NEUTRA (HG-2: só o tier/slug, nunca o provider).

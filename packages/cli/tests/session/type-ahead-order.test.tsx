@@ -225,8 +225,8 @@ describe('EST-0982 — type-ahead: ordem + clear/esc + paralelos read-only', () 
 
     // Enfileira /clear (mutador) e DEPOIS um !bang.
     await pressUntil(
-      () => s.stdin.write('/clear'),
-      () => plain(s.lastFrame()).includes('/clear'),
+      () => s.stdin.write('/clear full'),
+      () => plain(s.lastFrame()).includes('/clear full'),
     );
     s.stdin.write(CR);
     await waitFor(() => plain(s.lastFrame()).includes('na fila'));
@@ -349,12 +349,12 @@ describe('EST-0982 — type-ahead: ordem + clear/esc + paralelos read-only', () 
     );
     await pressUntil(
       () => s.stdin.write(CR),
-      () => onCommand.mock.calls.some((c) => (c[0] as SlashCommand).id === 'help'),
+      () => plain(s.lastFrame()).includes('── conversa'),
     );
 
-    // RODOU JÁ (paralelo): onCommand recebeu `help`. NÃO enfileirou, NÃO interrompeu,
-    // NÃO criou submit/turno novo — o trabalho segue em streaming.
-    expect(onCommand.mock.calls.some((c) => (c[0] as SlashCommand).id === 'help')).toBe(true);
+    // RODOU JÁ (paralelo): o `/help` é resolvido na App (precisa do modo) e escreve a nota das
+    // seções. NÃO enfileirou, NÃO interrompeu, NÃO criou submit/turno novo — segue em streaming.
+    expect(plain(s.lastFrame())).toContain('── conversa');
     expect(plain(s.lastFrame())).not.toContain('na fila');
     expect(s.controller.current.phase).toBe('streaming');
     expect(interruptSpy).not.toHaveBeenCalled();

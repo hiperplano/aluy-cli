@@ -203,6 +203,11 @@ describe('App — `/clear full|memory` SUBMETEM com Enter (subcomando terminal)'
     await waitFor(() => menuOpen(lastFrame));
     // o 1º item selecionado é o PAI `/clear` (comando-folha-com-subs); Enter no pai EXECUTA.
     await tap(stdin, ENTER);
+    // sem argumento o `/clear` abre o seletor; "só a conversa" (1º item) roda o MESMO `/clear`
+    await waitFor(() => plain(lastFrame() ?? '').includes('só a conversa'));
+    expect(calls).toHaveLength(0);
+    await sleep(120);
+    await tap(stdin, ENTER);
     await waitFor(() => calls.length === 1);
     expect(calls[0]!.cmd.id).toBe('clear');
     expect(calls[0]!.args).toBe('');

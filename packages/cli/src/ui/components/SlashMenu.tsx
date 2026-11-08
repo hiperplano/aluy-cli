@@ -43,6 +43,8 @@ export interface SlashMenuProps {
    * estouro de `rows` em cols < ~44. Ausente ⇒ janela por linha-fonte (largo, inalterado).
    */
   readonly columns?: number;
+  /** Anuncia `ctrl+p` na dica? Só onde o atalho funciona (fora de turno ativo). */
+  readonly paletteHint?: boolean;
 }
 
 /** Caminho (`mcp` ou `mcp search`) com o trecho que casa a query realçado em âmbar. */
@@ -70,6 +72,13 @@ function HighlightedPath(props: {
   );
 }
 
+/** Linha de dica do menu. `ctrl+p` só entra onde o atalho funciona. */
+export function slashMenuHelp(paletteHint: boolean): string {
+  return paletteHint
+    ? 'digite para buscar · ↑↓ navega · enter executa · esc fecha · ctrl+p tudo'
+    : 'digite para buscar · ↑↓ navega · enter executa · esc fecha';
+}
+
 export function SlashMenu(props: SlashMenuProps): React.ReactElement {
   const query = props.query ?? '';
   // EST-1015 (fix menu-fantasma) — JANELA a lista p/ caber em `maxRows` (centrada no selecionado).
@@ -86,7 +95,7 @@ export function SlashMenu(props: SlashMenuProps): React.ReactElement {
   return (
     <PickerFrame>
       <Box>
-        <Role name="fgDim">/ para comandos · ↑↓ navega · enter executa · esc fecha</Role>
+        <Role name="fgDim">{slashMenuHelp(props.paletteHint === true)}</Role>
       </Box>
       {/* F18 — `/xyz` sem match NÃO abre um popup vazio: diz o que aconteceu. */}
       {props.commands.length === 0 && (

@@ -43,6 +43,7 @@ export interface Catalog {
   'hints.budget': string;
   'hints.error': string;
   'hints.conciergeWork': string;
+  'hints.conciergeTasks': string;
   'hints.conciergeAsk': string;
   'hints.workSubagents': string;
   'hints.quotaPause': string;
