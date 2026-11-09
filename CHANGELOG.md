@@ -14,6 +14,14 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.195] — 2026-11-09
+
+- 🧭 **Concierge lembra de tudo.** `task_status` devolve o resultado ao Λluy (sem mais "Veja a lista de tarefas"); o resumo cobre todas as tarefas da sessão, não só as 5 últimas; o Λluy sabe quais ferramentas e servidores MCP as tarefas têm.
+- 🖥️ **`/fullscreen` no concierge:** linha de trabalho entre a pergunta e a resposta, sem o painel LOG, statusline depois do composer e dicas sem `tab`.
+- 🔀 `/classic` e `/concierge` no menu para trocar de modo.
+- 💡 A última resposta do Λluy fica em cor normal; as anteriores esmaecem quando chega a próxima.
+- 🧹 Tarefas em segundo plano não recebem mais `watch_command`.
+
 ## [1.0.0-rc.194] — 2026-11-08
 
 ### Adicionado
