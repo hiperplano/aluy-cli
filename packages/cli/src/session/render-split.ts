@@ -17,6 +17,7 @@
 // `<Static>` o anexa ao scrollback exatamente UMA vez (append-only do Ink).
 
 import type { SessionBlock } from './model.js';
+import { visualLines } from './visual-lines.js';
 
 /** `true` se o bloco ainda pode MUTAR (e portanto não pode ir p/ o `<Static>`). */
 export function isLiveBlock(block: SessionBlock): boolean {
@@ -173,4 +174,58 @@ export function splitBlocks(blocks: readonly SessionBlock[]): BlockSplit {
     live: blocks.slice(liveStart),
     liveStart,
   };
+}
+
+/**
+ * RESPOSTA RETIDA (inline). A ÚLTIMA fala `Λluy` assentada fica na região VIVA, em cor normal, até a
+ * próxima mensagem do dono ou a próxima fala do Λluy; só então desce ao `<Static>` (esmaecida).
+ * Devolve o índice do bloco a reter, ou -1. Não retém quando:
+ *  · não há fala assentada, ou ela é a passada de self-check;
+ *  · o dono já escreveu depois dela (`you` depois) ou há outra fala `aluy` depois (mesmo em stream);
+ *  · é LONGA (mais de ~metade da tela): desce já ao Static em cor normal — a região viva nunca
+ *    cresce a ponto de entrar no regime clearTerminal.
+ * PURO.
+ */
+export function heldReplyIndex(
+  blocks: readonly SessionBlock[],
+  opts: { readonly rows: number; readonly columns: number; readonly enabled?: boolean },
+): number {
+  if (opts.enabled === false) return -1;
+  const i = lastAluyIndex(blocks);
+  if (i < 0) return -1;
+  const b = blocks[i]!;
+  if (b.kind !== 'aluy' || b.streaming || b.selfCheck === true) return -1;
+  for (let k = i + 1; k < blocks.length; k++) if (blocks[k]!.kind === 'you') return -1;
+  if (replyIsLong(b.text, opts.rows, opts.columns)) return -1;
+  return i;
+}
+
+/** Índice da última fala `aluy` (ignora a passada de self-check, que é invisível). */
+export function lastAluyIndex(blocks: readonly SessionBlock[]): number {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i]!;
+    if (b.kind === 'aluy' && b.selfCheck !== true) return i;
+  }
+  return -1;
+}
+
+/** Limite de linhas visuais de uma resposta retida: ~metade da tela, mas sempre sobra o chrome. */
+export function heldReplyMaxLines(rows: number): number {
+  return Math.max(3, Math.min(Math.floor(rows / 2), rows - 16));
+}
+
+/** A resposta é longa demais para ficar retida na região viva? (cabeçalho + respiro = +2) */
+export function replyIsLong(text: string, rows: number, columns: number): boolean {
+  return visualLines(text, Math.max(10, columns - 4)) + 2 > heldReplyMaxLines(rows);
+}
+
+/**
+ * No `<Static>` a resposta sai em cor NORMAL só se ainda é a última fala e o dono não escreveu
+ * depois (a descida por tamanho, ou um flush); descendo por causa de uma mensagem/fala nova, sai
+ * esmaecida (histórico).
+ */
+export function staticReplyIsCurrent(blocks: readonly SessionBlock[], index: number): boolean {
+  if (index !== lastAluyIndex(blocks)) return false;
+  for (let k = index + 1; k < blocks.length; k++) if (blocks[k]!.kind === 'you') return false;
+  return true;
 }

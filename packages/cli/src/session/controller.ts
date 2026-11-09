@@ -1371,6 +1371,14 @@ export class SessionController {
   // depois que o aviso foi emitido UMA vez (sobrevive entre turnos; o loop também
   // tem seu one-shot por execução). Evita repetir o aviso a cada turno.
   private weakYoloWarned = false;
+  private capabilitiesSnapshotFn:
+    | (() => CapabilitiesSnapshot | Promise<CapabilitiesSnapshot>)
+    | undefined;
+
+  /** Menu vivo de capacidades (tools, MCP, agentes, skills) — o Concierge o resume ao dono. */
+  async capabilitiesSnapshot(): Promise<CapabilitiesSnapshot | undefined> {
+    return this.capabilitiesSnapshotFn?.();
+  }
   private abort: AbortController | null = null;
   // EST-0972 — semente de contexto de uma sessão retomada, consumida UMA vez no
   // próximo submit (prepended aos attachments). `null` quando não há (ou já usada).
@@ -2282,6 +2290,7 @@ export class SessionController {
         };
       },
     };
+    this.capabilitiesSnapshotFn = capabilitiesPort.snapshot;
     parentPorts = { ...parentPorts, capabilities: capabilitiesPort };
 
     // ADR-0147 — porta da tool `session_command`: reusa `this` (métodos do controller —

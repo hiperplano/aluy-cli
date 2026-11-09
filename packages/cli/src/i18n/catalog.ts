@@ -54,6 +54,8 @@ export interface Catalog {
   'hints.ctrlcAgain': string;
   // EST-1000 · ADR-0076 §3/§4 — atalhos do MODO COCKPIT (alt-screen, 6 regiões).
   'hints.cockpit': string;
+  // Cockpit no modo Concierge (sem painel LOG): sem as dicas de `tab`.
+  'hints.cockpitConcierge': string;
   // F197 — dica anexada ao footer idle quando há uma sugestão de próximo prompt pendente.
   'hints.suggest': string;
 
@@ -92,6 +94,7 @@ export interface Catalog {
   'cockpit.welcomeHint': string;
   /** Aviso ao ENTRAR no cockpit (alt-screen). */
   'cockpit.entered': string;
+  'cockpit.enteredConcierge': string;
   /** EST-1000 · ADR-0076 — nota de que o cockpit é EXPERIMENTAL (inline é o recomendado). */
   /** Aviso ao SAIR do cockpit (volta ao inline). */
   'cockpit.left': string;

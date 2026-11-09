@@ -34,6 +34,7 @@ import { abbreviateCount } from './model.js';
 import type { LogSection } from './activity-log.js';
 import type { CockpitLayout } from './cockpit-layout.js';
 import { partitionCockpitBlocks } from './cockpit-blocks.js';
+import { lastAluyIndex } from './render-split.js';
 import { elapsedTickEnabled } from './tick-policy.js';
 import { fitConversaWindow, streamPreviewMaxLines } from './cockpit-conversa.js';
 import { previousVisibleKind } from './block-rhythm.js';
@@ -102,6 +103,8 @@ export interface CockpitProps {
   readonly state: SessionState;
   /** O layout resolvido (regiões fixas + alturas) — `kind:'cockpit'` (a recusa não chega aqui). */
   readonly layout: Extract<CockpitLayout, { kind: 'cockpit' }>;
+  /** Linha de trabalho (a MESMA do inline); a região de 1 linha existe sempre, vazia quando ocioso. */
+  readonly workingLine?: React.ReactNode;
   /** Seções projetadas do LOG (`buildActivityLog`, já redigidas — RES-C-1). */
   readonly logSections: readonly LogSection[];
   /** Painel com FOCO de scroll (Tab alterna). */
@@ -334,7 +337,12 @@ function ConversaRegion(props: {
           <BlockView
             key={vp.start + i}
             block={b}
-            isCurrent={vp.start + i === blocks.length - 1}
+            // A ÚLTIMA fala do Λluy fica em cor normal; as anteriores esmaecem (histórico).
+            isCurrent={
+              b.kind === 'aluy'
+                ? vp.start + i === lastAluyIndex(blocks)
+                : vp.start + i === blocks.length - 1
+            }
             frame={props.frame}
             columns={props.columns}
             // F163 — altura do TERMINAL p/ a cauda viva de shell (tool/bang) usar o cap
@@ -368,6 +376,7 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
   // LOG (preenche a região barren) e deixa a CONVERSA limpa (boas-vindas até o 1º objetivo).
   const { startupNotes, conversation: rawConversation } = partitionCockpitBlocks(
     props.state.blocks,
+    { notesToLog: !layout.logHidden },
   );
   const conversation = rawConversation.map((b) => fitCockpitNoteToWidth(b, props.columns));
   const bootInfo = startupNotes.map((n) => ({ title: n.title, lines: n.lines }));
@@ -413,21 +422,57 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
           rotulada duplicava ("── log ──" + "LOG · …" na linha seguinte). */}
       <Rule columns={props.columns} />
 
-      {/* ── 3) LOG (FlowTree/ActivityLog — altura cheia, scroll próprio) ──────── */}
-      {/* overflow:hidden — CRAVA a região (a altura do log é ADAPTATIVA; um transiente não
+      {!layout.logHidden && (
+        <>
+          {/* ── 3) LOG (FlowTree/ActivityLog — altura cheia, scroll próprio) ──────── */}
+          {/* overflow:hidden — CRAVA a região (a altura do log é ADAPTATIVA; um transiente não
           pode empurrar as regiões de baixo / estourar `rows`). Ver o topo. */}
-      <Box height={clampH(layout.regions.logRows)} overflow="hidden" flexShrink={0}>
-        <ActivityLog
-          sections={props.logSections}
-          visibleRows={layout.regions.logRows}
-          scrollOffset={props.logScroll}
-          focused={props.focus === 'log'}
+          <Box height={clampH(layout.regions.logRows)} overflow="hidden" flexShrink={0}>
+            <ActivityLog
+              sections={props.logSections}
+              visibleRows={layout.regions.logRows}
+              scrollOffset={props.logScroll}
+              focused={props.focus === 'log'}
+              columns={props.columns}
+              frame={props.frame}
+              bootInfo={bootInfo}
+            />
+          </Box>
+          <Rule columns={props.columns} />
+        </>
+      )}
+
+      {/* LINHA DE TRABALHO — 1 linha RESERVADA acima do composer (a grade não pula quando ela
+          aparece/some): `Λ frase… (pensando · 3s)` do envio até a resposta, tarefa em segundo
+          plano, aprovação e `preparando o relato`, como no inline. */}
+      {layout.workRows > 0 && (
+        <Box height={clampH(layout.workRows)} overflow="hidden" flexShrink={0}>
+          {props.workingLine}
+        </Box>
+      )}
+
+      {/* ── 5) COMPOSER (fixo) ───────────────────────────────────────────────── */}
+      {/* overflow:hidden — o composer SELF-CLIPA em `composerRows`: se o input crescer/encolher
+          e um frame transiente tiver mais linhas visuais que a região, o excedente é CORTADO
+          AQUI (não empurra os hints nem estoura `rows`) ⇒ sem rolagem ⇒ sem fantasma no differ.
+          Em regime o windowComposerVisual já cabe; isto é a rede de segurança do invariante. */}
+      <Box height={clampH(layout.composerRows)} overflow="hidden" flexShrink={0}>
+        <Composer
+          value={props.input}
+          cursorPos={props.cursorPos}
+          active={props.composerActive}
+          showCursor={props.showCursor}
+          shellMode={props.input.startsWith('!')}
+          maxRows={layout.composerRows}
           columns={props.columns}
-          frame={props.frame}
-          bootInfo={bootInfo}
+          {...(props.state.meta.label !== undefined
+            ? { sessionLabel: props.state.meta.label }
+            : {})}
+          {...(props.state.meta.labelColor !== undefined
+            ? { sessionColor: props.state.meta.labelColor }
+            : {})}
         />
       </Box>
-      <Rule columns={props.columns} />
 
       {/* ── 4) STATUS (fixo, vivo) ───────────────────────────────────────────── */}
       {/* `hidden` ⇒ 0 linhas (não monta nada: `clampH` jamais devolve < 1). `compact` ⇒ a linha
@@ -494,29 +539,6 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
         </Box>
       )}
 
-      {/* ── 5) COMPOSER (fixo) ───────────────────────────────────────────────── */}
-      {/* overflow:hidden — o composer SELF-CLIPA em `composerRows`: se o input crescer/encolher
-          e um frame transiente tiver mais linhas visuais que a região, o excedente é CORTADO
-          AQUI (não empurra os hints nem estoura `rows`) ⇒ sem rolagem ⇒ sem fantasma no differ.
-          Em regime o windowComposerVisual já cabe; isto é a rede de segurança do invariante. */}
-      <Box height={clampH(layout.composerRows)} overflow="hidden" flexShrink={0}>
-        <Composer
-          value={props.input}
-          cursorPos={props.cursorPos}
-          active={props.composerActive}
-          showCursor={props.showCursor}
-          shellMode={props.input.startsWith('!')}
-          maxRows={layout.composerRows}
-          columns={props.columns}
-          {...(props.state.meta.label !== undefined
-            ? { sessionLabel: props.state.meta.label }
-            : {})}
-          {...(props.state.meta.labelColor !== undefined
-            ? { sessionColor: props.state.meta.labelColor }
-            : {})}
-        />
-      </Box>
-
       {/* ADR 0006 — PAINEL DE TAREFAS (altura cravada em `taskRows`, parte da soma == rows). */}
       {layout.taskRows > 0 && (
         <Box height={clampH(layout.taskRows)} overflow="hidden" flexShrink={0}>
@@ -544,7 +566,7 @@ export function Cockpit(props: CockpitProps): React.ReactElement {
             `null` (compact) ⇒ ao menos o atalho-base do cockpit (a região existe no grid). */}
           {props.hintState === null || props.hintState === 'idle' ? (
             <Role name="fgDim">
-              {t('hints.cockpit')}
+              {t(layout.logHidden ? 'hints.cockpitConcierge' : 'hints.cockpit')}
               <Text> · </Text>
               {abbreviateCount(tokens)} tok
             </Role>

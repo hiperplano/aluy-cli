@@ -9,6 +9,7 @@ import {
   clip,
   clipBlock,
   clipPlain,
+  describeAllTasks,
   describeTask,
   EMPTY_SNAPSHOT,
   RESULT_MAX_CHARS,
@@ -46,6 +47,8 @@ export interface ConciergeOptions {
   readonly gate?: ConciergeGate;
   readonly ownerFacts?: () => readonly string[];
   readonly projectSummary?: () => string | undefined;
+  /** Inventário de capacidades das tarefas (ver `formatCapabilityInventory`); na parte estável do prompt. */
+  readonly capabilities?: () => string | undefined;
   readonly clock?: () => number;
   /** O erro é de cota/limite do modelo do Concierge? Default: heurística por texto/código. */
   readonly isQuotaError?: (e: unknown) => boolean;
@@ -181,6 +184,7 @@ export class Concierge {
       content: buildConciergePrompt({
         ...(this.o.ownerFacts ? { ownerFacts: this.o.ownerFacts() } : {}),
         ...(this.o.projectSummary?.() ? { projectSummary: this.o.projectSummary()! } : {}),
+        ...(this.o.capabilities?.() ? { capabilities: this.o.capabilities()! } : {}),
       }),
     };
     const user: ChatMessage = {
@@ -227,30 +231,61 @@ export class Concierge {
           if (out.note) notes.push(out.note);
           results.push({ role: 'tool', tool_call_id: c.id, content: out.result });
         }
-        if (reply === '') {
-          // Sem texto junto da tool-call: 2ª (e última) chamada para o modelo falar.
+        // O resultado de task_status é DADO que o modelo precisa para responder: nunca o descartamos
+        // com um ack enlatado. Sem texto junto da tool-call, ou com task_status, até 2 rodadas extras.
+        const precisaResposta = (cs: readonly NativeToolCall[]): boolean =>
+          cs.some((c) => c.name === 'task_status');
+        let rodadaCalls = calls.slice(0, MAX_TOOL_CALLS_PER_MESSAGE);
+        let rodadaResults = results;
+        let textoAnterior = reply;
+        const convo: ChatMessage[] = [...messages];
+        for (
+          let rodada = 0;
+          rodada < 2 &&
+          (rodada === 0
+            ? reply === '' || precisaResposta(rodadaCalls)
+            : precisaResposta(rodadaCalls));
+          rodada++
+        ) {
           try {
+            convo.push(
+              { role: 'assistant', content: textoAnterior, tool_calls: rodadaCalls },
+              ...rodadaResults,
+            );
             const r2 = await this.o.model.call({
-              messages: [
-                ...messages,
-                {
-                  role: 'assistant',
-                  content: '',
-                  tool_calls: calls.slice(0, MAX_TOOL_CALLS_PER_MESSAGE),
-                },
-                ...results,
-              ],
+              messages: convo,
               idempotencyKey: `concierge-${randomUUID()}`,
               ...(signal ? { signal } : {}),
             });
             modelCalls++;
             tokens += (r2.usage?.tokens_in ?? 0) + (r2.usage?.tokens_out ?? 0);
-            reply = r2.content.trim();
             finish = r2.finish_reason;
+            const t2 = r2.content.trim();
+            if (t2 !== '') reply = t2;
+            const c2 = (r2.tool_calls ?? [])
+              .filter((c) => (CONCIERGE_TOOL_NAMES as readonly string[]).includes(c.name))
+              .slice(0, MAX_TOOL_CALLS_PER_MESSAGE);
+            if (c2.length === 0) break;
+            const res2: ChatMessage[] = [];
+            for (const c of c2) {
+              const out = await this.runTool(c, args.allow);
+              actions.push(out.action);
+              if (out.note) notes.push(out.note);
+              res2.push({ role: 'tool', tool_call_id: c.id, content: out.result });
+            }
+            rodadaCalls = c2;
+            rodadaResults = res2;
+            textoAnterior = t2;
           } catch {
-            /* o ack por template abaixo cobre */
+            break; // o ack por template abaixo cobre (só para ações)
           }
-          if (reply === '') reply = actions.map((a) => ackFor(a, this.o.registry)).join(' ');
+        }
+        if (reply === '') {
+          const acks = actions.filter((a) => a.tool !== 'task_status');
+          reply =
+            acks.length > 0
+              ? acks.map((a) => ackFor(a, this.o.registry)).join(' ')
+              : 'Não consegui montar a resposta com o estado das tarefas; pergunte de novo ou use /task.';
         }
       }
       // O modelo DISSE que iniciou/abriu uma tarefa mas nenhum task_start aconteceu: uma
@@ -454,7 +489,10 @@ export class Concierge {
             action: { tool: name, ok: true, taskId: t.id },
           };
         }
-        return { result: this.digest(), action: { tool: name, ok: true } };
+        return {
+          result: `${describeAllTasks(reg.list(), now)}\n\n${this.digest()}`,
+          action: { tool: name, ok: true },
+        };
       }
     }
   }
@@ -538,7 +576,7 @@ function ackFor(
     case 'task_stop':
       return `Parei ${id}.`;
     case 'task_status':
-      return 'Veja a lista de tarefas.';
+      return 'Consultei o estado das tarefas.';
   }
 }
 

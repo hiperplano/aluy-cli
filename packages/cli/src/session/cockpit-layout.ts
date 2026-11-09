@@ -70,6 +70,13 @@ export interface CockpitChromeOpts {
   readonly hintsRow?: boolean;
   /** ADR 0006 — linhas do PAINEL DE TAREFAS (abaixo do composer). Sai da área gerida. */
   readonly taskRows?: number;
+  /**
+   * Modo Concierge: as tarefas vivem no painel do rodapé, então o LOG fica vazio por desenho. Esconde a
+   * região (0 linhas e uma régua a menos) e devolve a altura à CONVERSA.
+   */
+  readonly hideLog?: boolean;
+  /** Reserva 1 linha FIXA acima do composer para a linha de trabalho (`Λ frase… (pensando · 3s)`). */
+  readonly workRow?: boolean;
 }
 
 /**
@@ -155,6 +162,10 @@ export type CockpitLayout =
       readonly hintsRows: number;
       /** ADR 0006 — painel de tarefas (0 = ausente). */
       readonly taskRows: number;
+      /** LOG escondido (modo Concierge): sem região e sem a régua dele. */
+      readonly logHidden: boolean;
+      /** Linha de trabalho reservada acima do composer (0 ou 1). */
+      readonly workRows: number;
       readonly regions: ManagedRegions;
     }
   | {
@@ -254,7 +265,9 @@ export function resolveCockpitLayout(
   const hintsRows =
     chrome.statusline === 'hidden' ? (chrome.hintsRow === true ? HINTS_ROWS : 0) : HINTS_ROWS;
   // O painel de tarefas nunca come a área gerida abaixo de 2 linhas (1 conversa + 1 log).
-  const rawBase = rows - (HEADER_ROWS + COMPOSER_ROWS + SEPARATOR_ROWS) - statusRows - hintsRows;
+  const workRows = chrome.workRow === true ? 1 : 0;
+  const rawBase =
+    rows - (HEADER_ROWS + COMPOSER_ROWS + SEPARATOR_ROWS) - statusRows - hintsRows - workRows;
   const taskRows = Math.max(0, Math.min(Math.floor(chrome.taskRows ?? 0), rawBase - 2));
   const baseManaged = rawBase - taskRows;
   const wantExtra = composerRowsForLines(composerLines) - COMPOSER_ROWS;
@@ -266,8 +279,10 @@ export function resolveCockpitLayout(
   //    (área gerida minúscula), aí cede p/ deixar ≥1 linha pra conversa;
   //  · nunca toma TUDO: a conversa (foco) mantém ≥1 linha (clamp superior).
   // O clamp final garante a soma EXATA == rows mesmo quando piso e razão brigam.
-  const logRows = resolveLogRows(managedTotal, logHint);
-  const conversaRows = managedTotal - logRows;
+  const logHidden = chrome.hideLog === true;
+  // LOG escondido: 0 linhas e UMA régua a menos (a dele) ⇒ essa linha vai para a conversa.
+  const logRows = logHidden ? 0 : resolveLogRows(managedTotal, logHint);
+  const conversaRows = managedTotal - logRows + (logHidden ? 1 : 0);
   return {
     kind: 'cockpit',
     rows,
@@ -277,6 +292,8 @@ export function resolveCockpitLayout(
     composerRows,
     hintsRows,
     taskRows,
+    logHidden,
+    workRows,
     regions: { conversaRows, logRows },
   };
 }
@@ -293,7 +310,8 @@ export function cockpitRegionSum(layout: Extract<CockpitLayout, { kind: 'cockpit
     layout.composerRows +
     layout.hintsRows +
     layout.taskRows +
-    SEPARATOR_ROWS +
+    layout.workRows +
+    (layout.logHidden ? SEPARATOR_ROWS - 1 : SEPARATOR_ROWS) +
     layout.regions.conversaRows +
     layout.regions.logRows
   );

@@ -42,6 +42,7 @@ import { PluginStore } from '../io/plugin-store.js';
 import { carregarAgentesDePlugins } from '../io/plugin-agents.js';
 import {
   TASK_EXCLUDED_TOOLS,
+  formatCapabilityInventory,
   linhasDaListaDePlugins,
   secretVault,
 } from '@hiperplano/aluy-cli-core';
@@ -2377,6 +2378,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // `conversation` (pref) > concierge. O runtime existe sempre que há TTY (assim o
   // `/conversation concierge` funciona mesmo abrindo em clássico); sem TTY/headless nada muda.
   const initialConversation = resolveConversationMode(opts.classic, savedConfig);
+  let capInventory: string | undefined;
+  let capAt = 0;
   const conciergeRuntime: ConciergeRuntime | undefined =
     isTty && opts.anonymous !== true
       ? new ConciergeRuntime({
@@ -2417,6 +2420,19 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
               .filter((f) => f.provenance === 'usuario')
               .map((f) => f.text),
           projectSummary: () => projectInstructions?.slice(0, 600),
+          // Inventário do que as TAREFAS fazem (tools do motor, MCP, perfis, skills), do snapshot vivo.
+          capabilities: () => {
+            if (Date.now() - capAt > 30_000) {
+              capAt = Date.now();
+              void built.controller
+                .capabilitiesSnapshot()
+                .then((snap) => {
+                  if (snap) capInventory = formatCapabilityInventory(snap, TASK_EXCLUDED_TOOLS);
+                })
+                .catch(() => undefined);
+            }
+            return capInventory;
+          },
           // Relato automático do resultado espera o dono sair de um turno/pergunta.
           ownerBusy: () => built.controller.current.phase !== 'idle',
           modelLabel: () => {

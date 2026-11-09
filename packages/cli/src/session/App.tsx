@@ -125,7 +125,13 @@ import type { SessionState, SessionBlock } from './model.js';
 import { formatElapsed, queueAtRest } from './model.js';
 import { decideEscAction } from './esc-redirect.js';
 import { animTickEnabled, conciergeTaskAnimates, elapsedTickEnabled } from './tick-policy.js';
-import { splitBlocks } from './render-split.js';
+import {
+  heldReplyIndex,
+  isLiveBlock,
+  lastAluyIndex,
+  splitBlocks,
+  staticReplyIsCurrent,
+} from './render-split.js';
 import {
   aluyNeedsLeadingBlank,
   blockEndsWithBlankLine,
@@ -1271,7 +1277,8 @@ export function App(props: AppProps): React.ReactElement {
   // o log RECOLHIA p/ 1 linha (hasActivity=false) e as notas relocadas ficavam
   // INVISÍVEIS (a feature morria). 1 linha por título + 1 por linha de nota (o mesmo
   // que o <ActivityLog> pinta no empty-state).
-  const cockpitBootNotes = fullscreen ? partitionCockpitBlocks(state.blocks).startupNotes : [];
+  const cockpitBootNotes =
+    fullscreen && !conciergeOn ? partitionCockpitBlocks(state.blocks).startupNotes : [];
   // +1 = a linha do rótulo `LOG · …` (o <ActivityLog> a pinta ANTES do conteúdo e ela
   // consome 1 das `visibleRows`); sem ela na conta, a última linha de nota vira `…`.
   const cockpitBootLines =
@@ -1330,6 +1337,10 @@ export function App(props: AppProps): React.ReactElement {
     taskRows: taskPanelRows,
     statusline: statuslineMode,
     hintsRow: state.mode === 'unsafe' || dicaOculto,
+    // Concierge: as tarefas moram no painel do rodapé; o LOG nunca teria o que mostrar.
+    hideLog: conciergeOn,
+    // 1 linha fixa acima do composer para a linha de trabalho (a grade não pula).
+    workRow: true,
   });
   // ATIVO = o usuário pediu fullscreen E o layout cabe (não recusou). Se recusou, a App
   // renderiza o INLINE (degrada) e mostra o aviso. O alt-screen real (entrar/sair) é
@@ -2378,7 +2389,9 @@ export function App(props: AppProps): React.ReactElement {
       if (next && fits) {
         // ENTRA no alt-screen só quando cabe — senão degrada pro inline com aviso.
         props.cockpitScreen?.enter();
-        controller.replaceNote('cockpit', [t('cockpit.entered')]);
+        controller.replaceNote('cockpit', [
+          t(conciergeOn ? 'cockpit.enteredConcierge' : 'cockpit.entered'),
+        ]);
       } else if (next && !fits) {
         const reason = resolveCockpitLayout(rows, columns);
         const msg =
@@ -2475,7 +2488,7 @@ export function App(props: AppProps): React.ReactElement {
           want === 'concierge'
             ? 'modo concierge: suas mensagens são respondidas na hora; o trabalho roda em tarefas.'
             : rt?.hasLiveTasks()
-              ? 'modo clássico. Atenção: há tarefas vivas; elas seguem até o fim (F8 para tudo).'
+              ? 'modo clássico. As tarefas em andamento seguem e terminam sozinhas (F8 para tudo).'
               : 'modo clássico.',
         ]);
         return;
@@ -2603,6 +2616,10 @@ export function App(props: AppProps): React.ReactElement {
         return;
       }
       // ADR 0006 — comandos do CONCIERGE (UI/runtime puros; não vão ao `onCommand`).
+      if (command.id === 'classic' || command.id === 'concierge') {
+        runConciergeCommand('conversation', command.id);
+        return;
+      }
       if (
         command.id === 'conversation' ||
         command.id === 'task' ||
@@ -5693,7 +5710,14 @@ export function App(props: AppProps): React.ReactElement {
   // nem pelo `frame` do tick. Só a região VIVA (turno em streaming + tool running)
   // participa do render dinâmico. Isso mata o tremor: sem isto, o Ink redesenhava a
   // árvore inteira (incl. todo o histórico) a cada token E a cada frame.
-  const { done, live, liveStart } = splitBlocks(state.blocks);
+  const split0 = splitBlocks(state.blocks);
+  // RESPOSTA RETIDA: a última fala do Λluy fica na região viva (cor normal) até a próxima mensagem
+  // ou fala; no cockpit tudo é repintado (a cor vem de `lastAluyIndex`), então não há retenção.
+  const retida = heldReplyIndex(state.blocks, { rows, columns, enabled: !cockpitActive });
+  const liveStart = retida >= 0 ? Math.min(split0.liveStart, retida) : split0.liveStart;
+  const done = retida >= 0 ? state.blocks.slice(0, liveStart) : split0.done;
+  const live = retida >= 0 ? state.blocks.slice(liveStart) : split0.live;
+  const ultimaFalaIdx = lastAluyIndex(state.blocks);
   // RODAPÉ RESERVADO — a tool-line `processando N agentes` entra no quadro ANTES de o lote existir
   // (e do bloco de agentes do rodapé, 1+N linhas). Sem reserva a região viva crescia em dois
   // tempos (tool-line +1 acima do composer, depois o bloco +N+1 abaixo) e o composer fazia
@@ -6311,6 +6335,20 @@ export function App(props: AppProps): React.ReactElement {
         {...(panelRows.length > 0
           ? { taskPanel: <TaskPanel rows={panelRows} columns={columns} frame={frame} /> }
           : {})}
+        workingLine={
+          state.quotaPause !== undefined ? (
+            <QuotaPauseLine view={state.quotaPause} columns={columns} />
+          ) : linhaDeTrabalhoViva ? (
+            <Working
+              glyph="aluy"
+              glyphRole="accent"
+              label={linhaAjustada.label}
+              {...(linhaAjustada.detalhe !== undefined ? { detalhe: linhaAjustada.detalhe } : {})}
+              {...(linhaAjustada.suffix !== undefined ? { suffix: linhaAjustada.suffix } : {})}
+              frame={frame}
+            />
+          ) : null
+        }
         {...(props.version !== undefined ? { version: props.version } : {})}
       />
     );
@@ -6352,7 +6390,8 @@ export function App(props: AppProps): React.ReactElement {
   // F17 — nada vivo na coluna do chat (repouso): usado p/ enxugar o respiro em tela baixa.
   const regiaoVivaVazia =
     (state.phase === 'idle' || state.phase === 'done') &&
-    live.length === 0 &&
+    // (a resposta RETIDA é só histórico por ora: não conta como região viva)
+    !live.some(isLiveBlock) &&
     !haFilhoVivo &&
     // A linha de trabalho de fundo (tarefa rodando / aguardando aprovação) mantém o MESMO respiro
     // de baixo do turno: sem isso, ao fim da fala o composer subia 1 linha na passagem.
@@ -6371,7 +6410,9 @@ export function App(props: AppProps): React.ReactElement {
     state.blocks.length === 0
       ? 0
       : live.length > 0
-        ? previaDeFalaViva
+        ? // o último bloco vivo já fecha com a sua linha em branco (prévia da fala, ou a resposta
+          // RETIDA assentada): o respiro é dele, a linha não paga de novo.
+          previaDeFalaViva || blockEndsWithBlankLine(live[live.length - 1]!.kind)
           ? 0
           : 1
         : telaBaixa && !ultimoFechaEmBranco
@@ -6390,7 +6431,11 @@ export function App(props: AppProps): React.ReactElement {
             <BlockView
               key={liveStart + i}
               block={b}
-              isCurrent={liveStart + i === state.blocks.length - 1}
+              isCurrent={
+                b.kind === 'aluy'
+                  ? liveStart + i === ultimaFalaIdx
+                  : liveStart + i === state.blocks.length - 1
+              }
               frame={frame}
               maxLines={splitMaxLines}
               columns={splitLayout === 'side' ? splitRes.chatCols : columns}
@@ -6629,7 +6674,7 @@ export function App(props: AppProps): React.ReactElement {
                   (a fronteira Static×vivo é onde este repo já teve "buraco na tela"). */}
               <BlockView
                 block={block}
-                isCurrent={false}
+                isCurrent={block.kind === 'aluy' && staticReplyIsCurrent(state.blocks, blockIndex)}
                 frame={0}
                 columns={columns}
                 // `you` com divisória: o respiro após `inject` vai ACIMA da divisória (acima), não

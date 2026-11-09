@@ -110,6 +110,23 @@ export function describeTask(t: TaskRecord, now: number): string {
   return line;
 }
 
+/** Teto de tarefas no digest do Concierge. */
+export const MAX_DIGEST_TASKS = 40;
+
+/** Encerrada, compacta: id, estado, objetivo e desfecho em UMA linha cada. */
+export function describeEnded(t: TaskRecord): string {
+  const out = clip(t.summary ?? t.result ?? '', 160);
+  return `- ${t.id} [${STATUS_PT[t.status]}] ${clip(t.goal, 100)}${out ? ` → ${out}` : ''}`;
+}
+
+/** `task_status` sem id: TODAS as tarefas (id, estado, objetivo, resultado curto). */
+export function describeAllTasks(tasks: readonly TaskRecord[], now: number): string {
+  if (tasks.length === 0) return 'tarefas: nenhuma';
+  return tasks
+    .map((t) => (t.endedAt === undefined ? describeTask(t, now) : describeEnded(t)))
+    .join('\n');
+}
+
 export function buildDigest(args: {
   tasks: readonly TaskRecord[];
   events: readonly TaskEvent[];
@@ -117,13 +134,19 @@ export function buildDigest(args: {
   now: number;
 }): string {
   const out: string[] = [];
-  // As terminais mais antigas saem do digest (as 5 mais recentes bastam).
+  // TODAS as tarefas da sessão, em forma compacta (o dono pergunta "desde a t1"); as vivas com
+  // detalhe completo. Teto de MAX_DIGEST_TASKS: as mais antigas viram `+N antigas (use task_status)`.
   const live = args.tasks.filter((t) => t.endedAt === undefined);
-  const ended = args.tasks.filter((t) => t.endedAt !== undefined).slice(-5);
+  const ended = args.tasks.filter((t) => t.endedAt !== undefined);
   if (live.length + ended.length === 0) out.push('tarefas: nenhuma');
   else {
     out.push('tarefas:');
-    for (const t of [...ended, ...live]) out.push(describeTask(t, args.now));
+    const room = Math.max(0, MAX_DIGEST_TASKS - live.length);
+    const shown = ended.slice(-room);
+    if (ended.length > shown.length)
+      out.push(`- +${ended.length - shown.length} antigas (use task_status para ver)`);
+    for (const t of shown) out.push(describeEnded(t));
+    for (const t of live) out.push(describeTask(t, args.now));
   }
   if (args.engine.approvals.length > 0) {
     out.push('aprovações pendentes (aguardam o dono):');

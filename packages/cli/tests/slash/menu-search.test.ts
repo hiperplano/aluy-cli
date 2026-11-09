@@ -198,3 +198,26 @@ describe('descrições (6.1, 6.4)', () => {
     expect(NATIVE_COMMANDS.find((c) => c.id === 'window')!.summary).toMatch(/^definir/);
   });
 });
+
+describe('/classic e /concierge — atalhos de modo no menu', () => {
+  it('/classic só aparece no concierge; /concierge só no clássico', () => {
+    expect(search('', CONCIERGE)).toContain('classic');
+    expect(search('', CONCIERGE)).not.toContain('concierge');
+    expect(search('', CLASSIC)).toContain('concierge');
+    expect(search('', CLASSIC)).not.toContain('classic');
+  });
+  it('descrições no infinitivo e seção conversa', () => {
+    expect(COMMAND_META.classic.summary).toBe('voltar ao modo clássico (um laço só, como antes)');
+    expect(COMMAND_META.concierge.summary).toBe(
+      'usar o concierge (a conversa nunca espera o trabalho)',
+    );
+    expect(COMMAND_META.classic.section).toBe('conversa');
+    expect(COMMAND_META.concierge.section).toBe('conversa');
+  });
+  it.each(['clássico', 'tradicional', 'antigo', 'normal'])('"%s" acha /classic', (q) => {
+    expect(search(q, CONCIERGE)).toContain('classic');
+  });
+  it.each(['tarefas', 'paralelo', 'concierge'])('"%s" acha /concierge', (q) => {
+    expect(search(q, CLASSIC)).toContain('concierge');
+  });
+});

@@ -74,6 +74,18 @@ export const COMMAND_META: Readonly<Record<NativeCommandId, CommandMeta>> = {
     summary: 'escolher o modo de conversa',
     keywords: ['conversa', 'modo', 'concierge', 'clássico', 'classic'],
   },
+  classic: {
+    section: 'conversa',
+    summary: 'voltar ao modo clássico (um laço só, como antes)',
+    keywords: ['clássico', 'classico', 'tradicional', 'antigo', 'normal', 'classic'],
+    availability: 'concierge',
+  },
+  concierge: {
+    section: 'conversa',
+    summary: 'usar o concierge (a conversa nunca espera o trabalho)',
+    keywords: ['concierge', 'tarefas', 'paralelo', 'paralelas', 'segundo plano'],
+    availability: 'not-concierge',
+  },
   history: {
     section: 'conversa',
     summary: 'retomar uma sessão anterior',

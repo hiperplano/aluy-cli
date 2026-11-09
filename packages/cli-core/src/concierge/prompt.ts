@@ -2,12 +2,71 @@
 // Sem catálogo de ferramentas do agente, sem ALUY.md inteiro.
 
 import { clip } from './digest.js';
+import type { CapabilitiesSnapshot } from '../agent/tools/types.js';
 
 export const MAX_OWNER_FACTS = 8;
+
+const GRUPOS_PT: Readonly<Record<string, string>> = {
+  arquivo: 'arquivos',
+  busca: 'busca',
+  execucao: 'comandos',
+  delegacao: 'sub-agentes',
+  memoria: 'memória',
+  assincrono: 'monitores',
+  web: 'web',
+  plano: 'plano',
+  outro: 'outros',
+};
+
+/**
+ * Inventário COMPACTO do que as TAREFAS conseguem fazer, montado da sessão real (tools do motor
+ * agrupadas, servers MCP com a contagem, perfis `.md` e skills). Só NOMES (dado de terceiro nunca
+ * entra como texto livre) e fica na parte estável do prompt (cache). `excluir` = tools que a tarefa
+ * não tem. Vazio ⇒ `undefined`.
+ */
+export function formatCapabilityInventory(
+  snap: Pick<CapabilitiesSnapshot, 'tools' | 'agents' | 'skills' | 'mcpServers'>,
+  excluir: readonly string[] = [],
+): string | undefined {
+  const fora = new Set(excluir);
+  const grupos = new Map<string, string[]>();
+  for (const t of snap.tools) {
+    if (fora.has(t.name) || t.group === 'mcp' || t.group === 'assincrono') continue;
+    const g = GRUPOS_PT[t.group] ?? 'outros';
+    grupos.set(g, [...(grupos.get(g) ?? []), t.name]);
+  }
+  const nome = (n: string): string => clip(n, 30);
+  const linhas: string[] = [];
+  for (const [g, nomes] of grupos) linhas.push(`${g}: ${nomes.slice(0, 8).map(nome).join('/')}`);
+  if (snap.mcpServers.length > 0)
+    linhas.push(
+      `MCP: ${snap.mcpServers
+        .slice(0, 8)
+        .map((m) => `${nome(m.server)} (${m.toolCount})`)
+        .join(', ')}`,
+    );
+  if (snap.agents.length > 0)
+    linhas.push(
+      `perfis de agente: ${snap.agents
+        .slice(0, 10)
+        .map((a) => nome(a.name))
+        .join(', ')}`,
+    );
+  if (snap.skills.length > 0)
+    linhas.push(
+      `skills: ${snap.skills
+        .slice(0, 10)
+        .map((a) => nome(a.name))
+        .join(', ')}`,
+    );
+  return linhas.length === 0 ? undefined : linhas.join(' · ');
+}
 
 export function buildConciergePrompt(args: {
   ownerFacts?: readonly string[];
   projectSummary?: string;
+  /** Inventário do que as tarefas fazem (`formatCapabilityInventory`). */
+  capabilities?: string;
 }): string {
   const lines = [
     'Você é o Concierge do Λluy: a frente conversacional de um agente de terminal. Responde em PT-BR, curto e direto (1 a 4 linhas), sem enrolar.',
@@ -29,6 +88,11 @@ export function buildConciergePrompt(args: {
     '- Quando uma tarefa termina você recebe um EVENTO AUTOMÁTICO com o resultado: relate ao dono o desfecho em 2 a 5 linhas (o que foi feito/descoberto, ou o que falhou), respondendo ao que ele pediu. A linha curta `✔ tN concluída` da tela é só marcador; o conteúdo é você quem dá. Em evento automático NÃO inicie tarefas, a não ser que o pedido original do dono já previsse esse passo seguinte.',
     '- Seja BREVE por padrão (2 a 5 linhas). Quando o dono PEDIR o conteúdo (uma tabela, uma lista, o resultado inteiro), mostre-o completo — não resuma o que ele pediu para ver.',
     '- O <resultado> de uma tarefa chega com as quebras de linha e até ~6000 caracteres. Se terminar com `[… +N linhas; …]`, há mais: use task_status com o task_id para ler. NUNCA diga ao dono que a informação "veio truncada/cortada": apresente o que tem (resumindo, se for longo) e, se faltar algo essencial, busque com task_status.',
+    ...(args.capabilities
+      ? [
+          `- O QUE SUAS TAREFAS FAZEM (o motor completo, que você aciona com task_start): ${clip(args.capabilities, 900)}. Quando o dono perguntar o que você sabe/pode fazer, descreva ISSO — as capacidades das tarefas — e não liste as suas 4 meta-ferramentas, a menos que ele pergunte delas.`,
+        ]
+      : []),
     '- Você só tem as 4 ferramentas task_*. Não prometa o que elas não fazem.',
   ];
   const facts = (args.ownerFacts ?? []).slice(0, MAX_OWNER_FACTS).map((f) => clip(f, 200));
@@ -75,6 +139,8 @@ export const TASK_EXCLUDED_TOOLS: readonly string[] = [
   'monitor',
   'monitor_cancel',
   'monitors',
+  // monitor de comando: os eventos chegam ENTRE turnos de quem acompanha; a tarefa headless não tem quem veja
+  'watch_command',
   'headroom_retrieve',
   // lista de tarefas do agente: ninguém a vê numa tarefa headless e cada chamada custa uma ida ao modelo
   'add_todo',
