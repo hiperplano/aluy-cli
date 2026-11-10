@@ -80,6 +80,18 @@ function defaultIsQuotaError(e: unknown): boolean {
 const CLAIMS_STARTED =
   /\b(inici(ei|ando)|abri|abrindo|criei|criando|dispar(ei|ando)|deleguei|delegando)\b[^.\n]{0,80}\b(tarefa|t\d+)\b/i;
 
+/**
+ * Narração de tarefas que JÁ existem: a resposta cita ids tN, todos presentes no registro, e
+ * nenhuma afirmação de início usa o substantivo genérico "tarefa" (trabalho novo sem id).
+ */
+function narratesExistingTasks(reply: string, exists: (id: string) => boolean): boolean {
+  const ids = reply.match(/\bt\d+\b/gi) ?? [];
+  if (ids.length === 0 || !ids.every((id) => exists(id.toLowerCase()))) return false;
+  const g = new RegExp(CLAIMS_STARTED.source, 'gi');
+  for (const m of reply.matchAll(g)) if (/^tarefa$/i.test(m[2] ?? '')) return false;
+  return true;
+}
+
 export class Concierge {
   private readonly o: ConciergeOptions;
   private readonly clock: () => number;
@@ -133,6 +145,7 @@ export class Concierge {
         user: `Mensagem do dono: ${text}`,
         history: text,
         allow: new Set<ConciergeToolName>(CONCIERGE_TOOL_NAMES),
+        checkStartClaims: true,
       },
       signal,
     );
@@ -166,13 +179,20 @@ export class Concierge {
         allow: new Set<ConciergeToolName>(
           allowStart ? ['task_start', 'task_send', 'task_status'] : ['task_status'],
         ),
+        // Relato automático só narra tarefas já iniciadas: nunca confere "iniciei" nem corrige.
+        checkStartClaims: false,
       },
       signal,
     );
   }
 
   private async converse(
-    args: { user: string; history: string; allow: ReadonlySet<ConciergeToolName> },
+    args: {
+      user: string;
+      history: string;
+      allow: ReadonlySet<ConciergeToolName>;
+      checkStartClaims: boolean;
+    },
     signal?: AbortSignal,
   ): Promise<ConciergeReply> {
     const text = args.history;
@@ -292,7 +312,13 @@ export class Concierge {
       // chamada corretiva (1x) e, se ainda assim não vier, aviso explícito — a tela nunca
       // fica afirmando uma tarefa que não existe.
       const attemptedStart = actions.some((a) => a.tool === 'task_start');
-      if (args.allow.has('task_start') && !attemptedStart && CLAIMS_STARTED.test(reply)) {
+      if (
+        args.checkStartClaims &&
+        args.allow.has('task_start') &&
+        !attemptedStart &&
+        CLAIMS_STARTED.test(reply) &&
+        !narratesExistingTasks(reply, (id) => this.o.registry.get(id) !== undefined)
+      ) {
         let fixed = false;
         try {
           const r3 = await this.o.model.call({
