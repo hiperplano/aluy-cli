@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.196] — 2026-11-10
+
+- 🤫 No fim das tarefas, o relato automático não fica mais parado em "escrevendo" nem mostra o aviso falso "Nenhuma tarefa foi iniciada"; citar uma tarefa que já existe (t1, t2…) também não dispara mais o aviso.
+
 ## [1.0.0-rc.195] — 2026-11-09
 
 - 🧭 **Concierge lembra de tudo.** `task_status` devolve o resultado ao Λluy (sem mais "Veja a lista de tarefas"); o resumo cobre todas as tarefas da sessão, não só as 5 últimas; o Λluy sabe quais ferramentas e servidores MCP as tarefas têm.
