@@ -253,6 +253,7 @@ export const ptBR: FullCatalog = {
   'cmd.fullscreen': 'alternar tela cheia (cockpit) (/cockpit)',
   'cmd.export': 'exportar a conversa (sem segredos) para um arquivo',
   'cmd.quit': 'sair do aluy',
+  'cmd.restart': 'reiniciar o aluy e retomar esta conversa',
   'cmd.workflows': 'executar fluxos de trabalho salvos',
   'cmd.service': 'gerenciar serviços em segundo plano',
   'cmd.tools': 'listar as ferramentas disponíveis',

@@ -542,6 +542,12 @@ export function buildSlashEffect(id: NativeCommandId, ctx: SlashContext): SlashE
     case 'whoami':
     case 'logout':
       return { kind: 'async', id };
+    case 'restart':
+      // Roteado ANTES em run.tsx (precisa desmontar a TUI e relançar o processo).
+      return {
+        kind: 'note',
+        note: { title: 'restart', lines: ['o reinício só roda na sessão interativa.'] },
+      };
     case 'upgrade':
       // Roteado ANTES em run.tsx (precisa de rede e do controller p/ as notas). Cair
       // aqui só sem esse roteamento (teste linear) ⇒ nota honesta, como o `/window`.
