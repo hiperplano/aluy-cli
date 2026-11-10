@@ -453,6 +453,33 @@ describe('Concierge — nunca afirma uma tarefa que não existe (regressão live
     expect(r.notes.join('\n')).not.toContain('Nenhuma tarefa');
   });
 
+  it('relato automático narrando tarefas já iniciadas ⇒ sem chamada corretiva e sem aviso falso', async () => {
+    const { registry, concierge } = setup(() =>
+      result('Foi assim: disparei tudo de uma vez, cada tarefa rodou independente.'),
+    );
+    registry.create({ goal: 'a', kind: 'detached' });
+    registry.transition('t1', 'done', undefined, { summary: 'curto', result: 'feito' });
+    const r = await concierge.handleTaskResults(['t1']);
+    expect(r.modelCalls).toBe(1);
+    expect(r.notes.join('\n')).not.toContain('Nenhuma tarefa');
+    expect(r.text).not.toContain('Nenhuma tarefa');
+  });
+
+  it('handle() narrando tarefa existente ("criei a t1 antes") ⇒ sem chamada corretiva', async () => {
+    const { registry, concierge } = setup(() => result('Como criei a t1 antes, ela ainda roda.'));
+    registry.create({ goal: 'a', kind: 'main' });
+    const r = await concierge.handle('como está?');
+    expect(r.modelCalls).toBe(1);
+    expect(r.notes.join('\n')).not.toContain('Nenhuma tarefa');
+  });
+
+  it('handle() "Iniciei uma tarefa para isso" sem task_start ⇒ chamada corretiva continua', async () => {
+    const { concierge } = setup(() => result('Iniciei uma tarefa para isso.'));
+    const r = await concierge.handle('corrige o bug');
+    expect(r.modelCalls).toBe(2);
+    expect(r.notes.join('\n')).toContain('Nenhuma tarefa foi iniciada');
+  });
+
   it('task_start recusado pela catraca com texto "iniciei" ⇒ o motivo aparece como nota', async () => {
     const registry = new TaskRegistry({ clock: () => 1000 });
     const engine = new FakeEngine();
