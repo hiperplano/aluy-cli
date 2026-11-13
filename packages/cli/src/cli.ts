@@ -785,7 +785,7 @@ const KNOWN_LONG_FLAGS: ReadonlySet<string> = new Set([
  * seguinte é o valor (slug/url/nº/prompt) — pode começar com `--` e NÃO é typo. Curtas de
  * prompt (`-p`) incluídas. A forma `--flag=valor` é o próprio token (sem valor separado).
  */
-const VALUE_TAKING_FLAGS: readonly string[] = [
+export const VALUE_TAKING_FLAGS: readonly string[] = [
   '-p',
   '--print',
   '--exec',
@@ -820,6 +820,7 @@ const VALUE_TAKING_FLAGS: readonly string[] = [
  */
 const SESSION_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   'rename',
+  'restart',
   'theme',
   'lang',
   'compact',

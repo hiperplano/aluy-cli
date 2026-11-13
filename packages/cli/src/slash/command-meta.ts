@@ -116,6 +116,11 @@ export const COMMAND_META: Readonly<Record<NativeCommandId, CommandMeta>> = {
     summary: 'sair do aluy',
     keywords: ['sair', 'fechar', 'encerrar', 'exit', 'terminar'],
   },
+  restart: {
+    section: 'conversa',
+    summary: 'reiniciar o aluy e retomar esta conversa',
+    keywords: ['reiniciar', 'atualizar', 'restart', 'nova versão', 'recarregar'],
+  },
 
   // ── interface ─────────────────────────────────────────────────────────────────
   theme: {

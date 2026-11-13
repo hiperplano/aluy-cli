@@ -36,6 +36,17 @@ import { routeRename, runRenameLinear } from './rename.js';
 import { setWindowTitle } from '../ui/window-title.js';
 import { resolveHeadroomUrl } from '../maestro/sidecar-urls.js';
 import { CLI_VERSION } from '../version.js';
+import {
+  decideRestart,
+  planRestart,
+  rewriteRestartArgv,
+  runRestart,
+  restartedNote,
+  takeRestartedFrom,
+  type RestartPlan,
+} from './restart.js';
+import { spawn as spawnProcess } from 'node:child_process';
+import { constants as osConstants } from 'node:os';
 import { readUpdateNote, refreshUpdateCheck } from '../io/update-check.js';
 import { readAutoUpdateNote, runAutoUpdate } from '../io/auto-update.js';
 import { PluginStore } from '../io/plugin-store.js';
@@ -3192,6 +3203,14 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     ]);
   }
 
+  // `/restart` — este processo nasceu de um reinício: avisa a troca de versão. O env é LIMPO
+  // aqui p/ não propagar a subprocessos/netos (um `/restart` seguinte seta de novo).
+  {
+    const from = takeRestartedFrom(process.env);
+    if (from !== undefined)
+      built.controller.pushNote('restart', [restartedNote(from, CLI_VERSION)]);
+  }
+
   // `--anonymous` — indicação SIMPLES de que a sessão está anônima (o usuário precisa
   // ver isto, não só saber que passou a flag): uma nota de boot, mesmo chrome das
   // demais notas de boot acima/abaixo.
@@ -3352,6 +3371,17 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // depois `/clear full` executaria `full` (mais amplo: zera a sessão também) com uma
   // confirmação que o usuário deu p/ `memory` — bypass de gate destrutivo.
   let pendingClearVerb: ClearArmedVerb;
+  // `/restart` — a confirmação (trabalho em andamento) vale só p/ a invocação IMEDIATAMENTE
+  // seguinte de `/restart` (mesma mecânica do `/clear full`): qualquer outro comando desarma.
+  let pendingRestartArmed = false;
+  // `/restart` pedido e aprovado: o plano de spawn é executado DEPOIS do teardown completo
+  // (unmount + salvar + restaurar terminal), no fim de `runSession`.
+  let restartPlan: RestartPlan | undefined;
+  // Estado VIVO dos modos de UI (o argv do boot pode estar defasado: `/conversation`,
+  // `/fullscreen` e `/split` mudam em sessão). O reinício reemite os modos a partir DAQUI.
+  let liveClassic = initialConversation === 'classic';
+  let liveFullscreen = initialFullscreen;
+  let liveSplit = initialSplitView;
 
   /**
    * EST-0970 — RECARREGA os servers MCP AO VIVO (p/ `/mcp reload` e
@@ -3407,6 +3437,8 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // imediatamente seguinte do MESMO destrutivo). O próprio `/clear` é tratado abaixo
     // (lê o `armed` ANTES de reavaliar); todo o resto cai aqui e desarma.
     if (command.id !== 'clear') pendingClearVerb = undefined;
+    const restartArmed = pendingRestartArmed;
+    pendingRestartArmed = false;
     if (command.source === 'user' || command.id === undefined) {
       // EST-0974 — COMANDO CUSTOMIZADO (`~/.aluy/commands/<nome>.md`): expande o
       // TEMPLATE com os args e SUBMETE como OBJETIVO do usuário. O resultado NÃO
@@ -4542,6 +4574,54 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
       return;
     }
 
+    if (command.id === 'restart') {
+      const busyPhases = new Set(['boot', 'idle', 'done', 'error']);
+      const running =
+        (conciergeRuntime?.registry.live().length ?? 0) +
+        (busyPhases.has(built.controller.current.phase) ? 0 : 1);
+      const gate = decideRestart({
+        anonymous: opts.anonymous === true,
+        running,
+        confirmed: restartArmed,
+      });
+      if (gate.kind !== 'proceed') {
+        pendingRestartArmed = gate.kind === 'confirm';
+        built.controller.pushNote('restart', [...gate.lines]);
+        return;
+      }
+      // Só há o que retomar se a sessão tem conteúdo (senão nada foi/será gravado).
+      const resumable = hasResumableContent(
+        built.controller.current.blocks,
+        built.controller.label,
+      );
+      const plan = planRestart({
+        execPath: process.execPath,
+        execArgv: process.execArgv,
+        script: process.argv[1],
+        args: [],
+        env: process.env,
+        cwd: process.cwd(),
+        currentVersion: CLI_VERSION,
+        exists: existsSync,
+      });
+      if (plan === undefined) {
+        built.controller.pushNote('restart', [
+          'não achei o executável do aluy para relançar — nada mudou.',
+        ]);
+        return;
+      }
+      restartPlan = {
+        ...plan,
+        args: rewriteRestartArgv({
+          args: process.argv.slice(2),
+          ...(resumable ? { sessionId: activeSession.id } : {}),
+          ui: { classic: liveClassic, fullscreen: liveFullscreen, split: liveSplit },
+        }),
+      };
+      instance.unmount();
+      return;
+    }
+
     if (command.id === 'upgrade') {
       // A atualização EXPLÍCITA. O dono recusou o upgrade silencioso — aqui ele vê o
       // que vai acontecer ANTES (nota de início) e o desfecho DEPOIS, inclusive nos
@@ -5081,6 +5161,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         onSplitViewChange={(on) => {
           // EST-0990 — persiste a preferência do split p/ a próxima sessão (best-effort;
           // QoL não-crítica, não bloqueia). É só UI (booleano) — jamais segredo (CLI-SEC-7).
+          liveSplit = on;
           configStore.saveSplitView(on);
         }}
         // EST-1000 · ADR-0076 §1/§2/§4 — MODO COCKPIT (tela cheia, alt-screen).
@@ -5089,6 +5170,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         {...(conciergeRuntime !== undefined ? { concierge: conciergeRuntime } : {})}
         initialConversation={initialConversation}
         onConversationChange={(mode) => {
+          liveClassic = mode === 'classic';
           configStore.saveConversation(mode);
         }}
         // EST-1001 · ADR-0076 §2 — o BOOT já entrou no alt-screen (acima, ANTES do render)?
@@ -5140,6 +5222,7 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
         onFullscreenChange={(on) => {
           // EST-1000 · ADR-0076 §1 — persiste a pref do cockpit p/ a próxima sessão
           // (best-effort). Só UI (booleano) — jamais segredo (CLI-SEC-7).
+          liveFullscreen = on;
           configStore.saveFullscreen(on);
         }}
         // F197 — SUGESTÃO DE PRÓXIMO PROMPT (ghost + Tab). Estado inicial + persistência.
@@ -5600,15 +5683,21 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // `unref` é o ponto todo: este timer NÃO segura o processo. Se o teardown funcionou,
     // o Node sai antes e isto nunca roda. Se algo insiste em segurar, dispara e encerra
     // com o código que já estava definido (não inventa sucesso nem falha).
-    const caoDeGuarda = setTimeout(() => {
-      process.exit(process.exitCode ?? 0);
-    }, TETO_SAIDA_FORCADA_MS);
-    caoDeGuarda.unref();
+    // `/restart`: o processo ainda precisa viver p/ relançar e esperar o filho — o cão de
+    // guarda mataria o pai aos 2s e deixaria o filho órfão. O pai sai sozinho (com o
+    // código do filho) ao fim de `runSession`.
+    if (restartPlan === undefined) {
+      const caoDeGuarda = setTimeout(() => {
+        process.exit(process.exitCode ?? 0);
+      }, TETO_SAIDA_FORCADA_MS);
+      caoDeGuarda.unref();
+    }
     // Ao SAIR, mostra o id da sessão + como retomá-la na linha de comando (como o Claude
     // Code). Só na saída INTERATIVA (TTY) e quando há conversa de fato — uma sessão vazia
     // (abriu e fechou) não imprime nada. O id é DADO (nome de arquivo em ~/.aluy/sessions/),
     // nunca credencial.
     if (
+      restartPlan === undefined &&
       process.stdout.isTTY &&
       hasResumableContent(built.controller.current.blocks, built.controller.label)
     ) {
@@ -5663,6 +5752,24 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
     // isto, listeners de SIGINT/SIGTERM vazam entre sessões. Idempotente (chamá-lo no
     // `finally` interno E externo é seguro — re-remoção é no-op).
     signalReset.dispose();
+  }
+  // `/restart` — terminal já restaurado e sessão salva (acima): relança e fica só repassando
+  // o exit code/sinais do filho. `process.exit` explícito: o pai não segue p/ lugar nenhum.
+  if (restartPlan !== undefined) {
+    const code = await runRestart(restartPlan, {
+      spawn: (cmd, args, o) => spawnProcess(cmd, [...args], o),
+      onSignal: (sig, fn) => process.on(sig as NodeJS.Signals, fn),
+      offSignal: (sig, fn) => process.off(sig as NodeJS.Signals, fn),
+      stdinIsTty: process.stdin.isTTY === true,
+      signalNumber: (sig) => (osConstants.signals as Record<string, number>)[sig],
+    });
+    if (code === undefined) {
+      process.stderr.write(
+        'aluy: não consegui relançar. Sessão salva — rode `aluy --continue` para retomar.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(code);
   }
 }
 

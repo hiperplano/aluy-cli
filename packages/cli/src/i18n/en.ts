@@ -233,6 +233,7 @@ export const en: PartialCatalog = {
   'cmd.fullscreen': 'toggle full screen (cockpit) (/cockpit)',
   'cmd.export': 'export the conversation (no secrets) to a file',
   'cmd.quit': 'quit aluy',
+  'cmd.restart': 'restart aluy and resume this conversation',
   'cmd.workflows': 'run saved workflows',
   'cmd.service': 'manage background services',
   'cmd.todo': 'see and complete noted requests (to-do list)',

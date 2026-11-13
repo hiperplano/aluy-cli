@@ -76,6 +76,7 @@ export type NativeCommandId =
   | 'export'
   | 'tools'
   | 'quit'
+  | 'restart'
   | 'todo'
   | 'window'
   | 'upgrade';
@@ -1327,6 +1328,16 @@ const RAW_NATIVE_COMMANDS: readonly SlashCommand[] = [
     source: 'native',
     id: 'quit',
     // ADR-0147 §4 — encerra a TUI do humano: o agente não pode encerrar a sessão dele.
+    agentEffect: 'human-only',
+  },
+  {
+    // Recarrega o aluy mantendo a conversa: pega a versão recém-instalada sem sair.
+    name: 'restart',
+    summary: 'reiniciar o aluy e retomar esta conversa',
+    summaryKey: 'cmd.restart',
+    source: 'native',
+    id: 'restart',
+    // Troca o processo do humano: o agente não reinicia a sessão dele.
     agentEffect: 'human-only',
   },
 ];

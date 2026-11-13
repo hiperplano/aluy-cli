@@ -333,6 +333,7 @@ export interface Catalog {
   /** F179 — `/export` (transcript redigido em ~/.aluy/exports/). */
   'cmd.export': string;
   'cmd.quit': string;
+  'cmd.restart': string;
   /** EST-1105 · ADR-workflows — `/workflows`: lista os workflows .md mapeados. */
   'cmd.workflows': string;
   /** ADR-0158 (aceito, APR-0148) — `/service`: SERVIÇOS plugáveis, canal principal (§10). */
