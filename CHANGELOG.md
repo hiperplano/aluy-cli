@@ -14,6 +14,10 @@ em **sincronia** (mesma versão em `@hiperplano/aluy-cli`, `@hiperplano/aluy-cli
 
 ## [Não lançado]
 
+## [1.0.0-rc.197] — 2026-11-13
+
+- ↻ **`/restart`**: reinicia o aluy e retoma a mesma conversa — use depois de `npm i -g` para pegar a versão nova sem sair. Mantém as flags (`--yolo`, idioma, modelo) e o modo atual (concierge/clássico, fullscreen); com tarefas rodando, avisa e pede para repetir `/restart`; sessão anônima não reinicia.
+
 ## [1.0.0-rc.196] — 2026-11-10
 
 - 🤫 No fim das tarefas, o relato automático não fica mais parado em "escrevendo" nem mostra o aviso falso "Nenhuma tarefa foi iniciada"; citar uma tarefa que já existe (t1, t2…) também não dispara mais o aviso.
