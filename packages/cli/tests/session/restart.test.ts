@@ -7,6 +7,7 @@ import {
   decideRestart,
   planRestart,
   restartedNote,
+  releaseStdinForChild,
   rewriteRestartArgv,
   runRestart,
   takeRestartedFrom,
@@ -268,4 +269,71 @@ describe('registro do comando', () => {
       expect(paths).toContain('restart');
     },
   );
+});
+
+describe('releaseStdinForChild + runRestart (Windows: pai solta o console antes do filho)', () => {
+  function fakeStdin(log: string[]) {
+    return {
+      removeAllListeners(ev?: string) {
+        log.push(`off:${ev}`);
+      },
+      setRawMode(m: boolean) {
+        log.push(`raw:${m}`);
+      },
+      pause() {
+        log.push('pause');
+      },
+      destroy() {
+        log.push('destroy');
+      },
+    };
+  }
+
+  it('ordem: listeners fora, raw off, pause, destroy — ANTES do spawn', async () => {
+    const log: string[] = [];
+    const f = fakePorts();
+    const origSpawn = f.ports.spawn;
+    const ports: RestartPorts = {
+      ...f.ports,
+      spawn: (...a) => {
+        log.push('spawn');
+        return origSpawn(...a);
+      },
+      beforeSpawn: () => releaseStdinForChild(fakeStdin(log)),
+    };
+    const p = runRestart(plan, ports);
+    expect(log).toEqual([
+      'off:data',
+      'off:keypress',
+      'off:readable',
+      'raw:false',
+      'pause',
+      'destroy',
+      'spawn',
+    ]);
+    f.child.emit('close', 0, null);
+    await p;
+  });
+
+  it('best-effort: um passo que lança não impede os seguintes nem o spawn', async () => {
+    const log: string[] = [];
+    const stdin = {
+      ...fakeStdin(log),
+      setRawMode() {
+        throw new Error('EBADF');
+      },
+    };
+    expect(() => releaseStdinForChild(stdin)).not.toThrow();
+    expect(log).toContain('destroy');
+    const f = fakePorts();
+    const p = runRestart(plan, {
+      ...f.ports,
+      beforeSpawn: () => {
+        throw new Error('x');
+      },
+    });
+    expect(f.spawned).toHaveLength(1);
+    f.child.emit('close', 0, null);
+    await p;
+  });
 });

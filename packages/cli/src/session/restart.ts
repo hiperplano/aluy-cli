@@ -165,6 +165,40 @@ export function planRestart(input: PlanInput): RestartPlan | undefined {
   };
 }
 
+/** O mínimo do stdin que o pai precisa soltar antes de o filho assumir o console. */
+export interface ReleasableStdin {
+  removeAllListeners(event?: string): unknown;
+  setRawMode?: (mode: boolean) => unknown;
+  pause?: () => unknown;
+  destroy?: () => unknown;
+}
+
+/**
+ * Solta POR COMPLETO o console de entrada antes de spawnar o filho do `/restart`.
+ *
+ * No Windows o modo do console é COMPARTILHADO por todos os processos nele, e o handle TTY
+ * do libuv do pai fica aberto (com leitura pendente) mesmo depois de `setRawMode(false)` +
+ * `pause()` — o pai disputava as teclas com o filho / re-aplicava o modo "cozido" (eco) e o
+ * teclado do filho morria (`sssss` ecoado). Ordem: tira os listeners (nada mais lê), raw
+ * off, pausa (readStop) e `destroy()` (fecha o handle, cancelando a leitura pendente).
+ * Cada passo é best-effort e independente. Só o caminho do `/restart` chama isto.
+ */
+export function releaseStdinForChild(stdin: ReleasableStdin): void {
+  const step = (fn: () => unknown): void => {
+    try {
+      fn();
+    } catch {
+      /* best-effort: um passo que falha não impede os seguintes */
+    }
+  };
+  step(() => {
+    for (const ev of ['data', 'keypress', 'readable']) stdin.removeAllListeners(ev);
+  });
+  step(() => stdin.setRawMode?.(false));
+  step(() => stdin.pause?.());
+  step(() => stdin.destroy?.());
+}
+
 /** Portas de processo p/ o pai que espera o filho. */
 export interface ChildLike {
   on(event: 'error', fn: (e: Error) => void): unknown;
@@ -183,6 +217,8 @@ export interface RestartPorts {
   readonly stdinIsTty: boolean;
   /** número do sinal (p/ 128+n). */
   signalNumber(sig: string): number | undefined;
+  /** Roda IMEDIATAMENTE antes do spawn (ex.: `releaseStdinForChild`). Best-effort. */
+  beforeSpawn?: () => void;
 }
 
 /**
@@ -194,6 +230,11 @@ export interface RestartPorts {
 export function runRestart(plan: RestartPlan, ports: RestartPorts): Promise<number | undefined> {
   return new Promise((resolve) => {
     let child: ChildLike;
+    try {
+      ports.beforeSpawn?.();
+    } catch {
+      /* soltar o stdin é best-effort: nunca impede o relançamento */
+    }
     try {
       child = ports.spawn(plan.execPath, [...plan.nodeArgs, plan.script, ...plan.args], {
         stdio: 'inherit',

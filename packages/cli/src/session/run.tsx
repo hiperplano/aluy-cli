@@ -40,6 +40,7 @@ import {
   decideRestart,
   planRestart,
   rewriteRestartArgv,
+  releaseStdinForChild,
   runRestart,
   restartedNote,
   takeRestartedFrom,
@@ -5756,7 +5757,12 @@ export async function runSession(opts: RunSessionOptions = {}): Promise<void> {
   // `/restart` — terminal já restaurado e sessão salva (acima): relança e fica só repassando
   // o exit code/sinais do filho. `process.exit` explícito: o pai não segue p/ lugar nenhum.
   if (restartPlan !== undefined) {
+    // Deixa o cleanup assíncrono do Ink (efeitos passivos do unmount) rodar ANTES de soltar o
+    // stdin — senão um `setRawMode(false)` tardio bateria num handle já destruído. Depois o
+    // pai SOLTA o console de entrada (Windows: modo compartilhado) e só então spawna o filho.
+    await new Promise<void>((r) => setImmediate(r));
     const code = await runRestart(restartPlan, {
+      beforeSpawn: () => releaseStdinForChild(process.stdin),
       spawn: (cmd, args, o) => spawnProcess(cmd, [...args], o),
       onSignal: (sig, fn) => process.on(sig as NodeJS.Signals, fn),
       offSignal: (sig, fn) => process.off(sig as NodeJS.Signals, fn),
